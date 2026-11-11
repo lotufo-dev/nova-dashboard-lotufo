@@ -123,7 +123,7 @@ export default function App() {
         <main className="principal" id="conteudo" tabIndex={-1}>
           {rota.tela === "inicio" && <div className="pagina"><Inicio usuario={usuario} ir={ir} /></div>}
           {rota.tela === "medicoes" && <MedicoesPagina usuario={usuario} />}
-          {rota.tela === "siga" && usuario.perfil !== "diretoria" && <SigaPagina busca={busca} />}
+          {rota.tela === "siga" && usuario.perfil !== "diretoria" && <SigaPagina busca={busca} podeEditar={usuario.perfil !== "diretoria"} />}
           {rota.tela === "ancoras-docusign" && usuario.perfil !== "diretoria" && <div className="pagina"><AncorasDocusign /></div>}
           {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}
           {rota.tela === "a-receber" && (

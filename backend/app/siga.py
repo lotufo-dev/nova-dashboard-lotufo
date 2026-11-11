@@ -28,8 +28,19 @@ LIGADO_A_OUTRO = "Este processo do SIGA já está ligado a outro protocolo ou a 
 LIGADO_A_OUTRA_MEDICAO = "Este processo do SIGA já está ligado a outra medição"
 # Processo avulso colado na tela SIGA (issue #339)
 JA_ACOMPANHADO = "Este processo do SIGA já está sendo acompanhado"
-NOME_OBRIGATORIO = "Dê um nome ao processo"
 OBRA_INEXISTENTE = "Obra não encontrada"
+# Categorias e nome montado pelo sistema (issue #663). "medicoes" e' automatica: todo processo ligado a medicao ou a
+# protocolo de medicao; as outras sao escolhidas por quem cadastra.
+CATEGORIAS = ("medicoes", "aditivos", "indenizatorios", "outros")
+SINGULAR = {"aditivos": "Aditivo", "indenizatorios": "Indenizatório", "outros": "Outro"}
+MAX_COMPLEMENTO = 100
+CATEGORIA_INVALIDA = "Escolha a categoria do processo"
+OBRA_OBRIGATORIA = "Escolha a obra do processo"
+MEDICAO_OBRIGATORIA = "Escolha a medição do processo"
+MEDICAO_INEXISTENTE = "Medição não encontrada nesta obra"
+MEDICAO_FORA_DA_CATEGORIA = "Medição só entra na categoria Medições"
+COMPLEMENTO_LONGO = f"Complemento com mais de {MAX_COMPLEMENTO} caracteres"
+LIGADO_A_PROTOCOLO = "Este processo está ligado a um protocolo enviado pelo sistema: a categoria dele é Medições"
 
 
 class JaAcompanhado(ValueError):
@@ -340,10 +351,10 @@ def _vincular(conn, processo_id: int) -> None:
                     not _so_da_planilha(conn, medicao_id, p["numero"], ocupantes):
                 return
             for o in ocupantes:
-                conn.execute("UPDATE siga_processos SET contrato_id=NULL, protocolo_id=NULL, medicao_id=NULL "
+                conn.execute("UPDATE siga_processos SET contrato_id=NULL, protocolo_id=NULL, medicao_id=NULL, categoria='outros' "
                              "WHERE id=?", (o["id"],))
             antes = {"processos_siga_da_planilha": [o["numero"] for o in ocupantes], "medicao_id": medicao_id}
-        conn.execute("UPDATE siga_processos SET contrato_id=?, protocolo_id=?, medicao_id=? "
+        conn.execute("UPDATE siga_processos SET contrato_id=?, protocolo_id=?, medicao_id=?, categoria='medicoes' "
                      "WHERE id=? AND protocolo_id IS NULL AND medicao_id IS NULL", (*achado, processo_id))
         entidade = ("medicao", medicao_id) if medicao_id is not None else ("protocolo", protocolo_id)
         auditoria.registrar(conn, None, "siga.vinculo", *entidade, antes,
@@ -441,10 +452,10 @@ def _ligar(conn, usuario_id, codigo: str, numero: str | None, nome: str, contrat
             raise ValueError(ligado_a_outro)
         if proprio is not None:
             antes = {"codigo": proprio["codigo"]}
-            conn.execute("UPDATE siga_processos SET contrato_id=NULL, protocolo_id=NULL, medicao_id=NULL "
+            conn.execute("UPDATE siga_processos SET contrato_id=NULL, protocolo_id=NULL, medicao_id=NULL, categoria='outros' "
                          "WHERE id=?", (proprio["id"],))
         alvo = _gravar_processo(conn, codigo, numero, nome)
-        conn.execute("UPDATE siga_processos SET contrato_id=?, protocolo_id=?, medicao_id=? WHERE id=?",
+        conn.execute("UPDATE siga_processos SET contrato_id=?, protocolo_id=?, medicao_id=?, categoria='medicoes' WHERE id=?",
                      (contrato_id, protocolo_id, medicao_id, alvo))
     auditoria.registrar(conn, usuario_id, "protocolo.siga", entidade, entidade_id, antes, depois)
 
@@ -479,26 +490,85 @@ def registrar_link_medicao(conn, usuario_id, medicao_id: int, codigo: str, numer
            m["contrato_id"], None, medicao_id, {medicao_id}, "medicao", medicao_id)
 
 
-def acompanhar_avulso(conn, usuario_id, link: str | None, numero: str | None, nome: str | None,
-                      contrato_id: int | None) -> int:
-    """Link colado na tela SIGA (issue #339): processo sem medição (aditivo, indenizatório, avulso). A pessoa da' o
-    nome, porque a pagina do SIGA nao mostra o titulo; a obra e' opcional. Codigo ja' acompanhado e' recusado
-    (`JaAcompanhado`, com o nome existente). Processo que o robo ja' mandou so' pelo numero igual ganha o codigo,
-    o nome e a obra. -> id do processo."""
+def o_que_e(categoria: str, complemento: str | None, medicao_titulo: str | None) -> str:
+    """A segunda parte do nome montado, "<obra> · <o que e'>" (#663): em Medicoes, o titulo da medicao; nas demais, a
+    categoria no singular seguida do complemento ("Aditivo de prazo"). Em Outros o complemento vale sozinho."""
+    if categoria == "medicoes":
+        return medicao_titulo or "Medição"
+    if categoria == "outros" and complemento:
+        return complemento
+    return " ".join(x for x in (SINGULAR[categoria], complemento) if x)
+
+
+def _categoria(p) -> str:
+    """Ligado a medicao ou a protocolo e' sempre Medicoes; "medicoes" gravado sem vinculo nenhum le como Outros."""
+    if p["medicao_id"] is not None or p["protocolo_id"] is not None:
+        return "medicoes"
+    return p["categoria"] if p["categoria"] != "medicoes" else "outros"
+
+
+def _titulo_das_medicoes(conn, medicao_id: int | None, protocolo_id: int | None) -> str | None:
+    """Titulo da medicao do processo; ligado so' ao protocolo (medicao e reajuste juntos), os titulos com " e "."""
+    if medicao_id is not None:
+        ms = conn.execute("SELECT numero, tipo FROM medicoes WHERE id=?", (medicao_id,)).fetchall()
+    elif protocolo_id is not None:
+        ms = conn.execute("SELECT m.numero, m.tipo FROM protocolo_medicoes pm JOIN medicoes m ON m.id=pm.medicao_id "
+                          "WHERE pm.protocolo_id=? ORDER BY m.tipo='reajuste', m.id", (protocolo_id,)).fetchall()
+    else:
+        return None
+    return " e ".join(medicoes.titulo(dict(m)) for m in ms) or None
+
+
+def _classificacao(conn, categoria: str | None, contrato_id: int | None, medicao_id: int | None,
+                   complemento: str | None) -> tuple[str, int | None, int | None, str | None]:
+    """Confere o que o formulario manda (#663): categoria fechada; obra obrigatoria, menos em Outros; medicao so' em
+    Medicoes, obrigatoria e da obra. -> (categoria, contrato, medicao, complemento sem espaco nas pontas ou None)."""
+    if categoria not in CATEGORIAS:
+        raise ValueError(CATEGORIA_INVALIDA)
+    complemento = _texto(complemento) or None
+    if complemento and len(complemento) > MAX_COMPLEMENTO:
+        raise ValueError(COMPLEMENTO_LONGO)
+    if contrato_id is None:
+        if categoria != "outros":
+            raise ValueError(OBRA_OBRIGATORIA)
+    elif conn.execute("SELECT 1 FROM contratos WHERE id=?", (contrato_id,)).fetchone() is None:
+        raise ValueError(OBRA_INEXISTENTE)
+    if categoria != "medicoes":
+        if medicao_id is not None:
+            raise ValueError(MEDICAO_FORA_DA_CATEGORIA)
+    elif medicao_id is None:
+        raise ValueError(MEDICAO_OBRIGATORIA)
+    elif conn.execute("SELECT 1 FROM medicoes WHERE id=? AND contrato_id=?", (medicao_id, contrato_id)).fetchone() is None:
+        raise ValueError(MEDICAO_INEXISTENTE)
+    return categoria, contrato_id, medicao_id, complemento
+
+
+def _nome_montado(conn, categoria: str, contrato_id: int | None, medicao_id: int | None,
+                  complemento: str | None) -> str | None:
+    """O nome gravado quando a pessoa cadastra (e' o que o robo recebe): "<obra> · <o que e'>"; sem obra, o
+    complemento."""
+    if contrato_id is None:
+        return complemento
+    return f"{_obra(conn, contrato_id)} · {o_que_e(categoria, complemento, _titulo_das_medicoes(conn, medicao_id, None))}"
+
+
+def acompanhar_avulso(conn, usuario_id, link: str | None, numero: str | None, categoria: str | None,
+                      contrato_id: int | None, medicao_id: int | None = None, complemento: str | None = None) -> int:
+    """Link colado na tela SIGA (issue #339), com categoria, obra, medicao e complemento (#663): ninguem digita o
+    nome, o sistema monta. Em Medicoes o processo nasce ligado a' medicao escolhida (sem protocolo). Codigo ja'
+    acompanhado e' recusado (`JaAcompanhado`, com o nome existente). Processo que o robo ja' mandou so' pelo numero
+    igual ganha o codigo e a classificacao. -> id do processo."""
     codigo = extrair_codigo(link)
     if not codigo:
         raise ValueError(LINK_INVALIDO)
-    nome = _texto(nome)
-    if not nome:
-        raise ValueError(NOME_OBRIGATORIO)
     numero = sem_espacos(numero) or None
-    if contrato_id is not None and conn.execute("SELECT 1 FROM contratos WHERE id=?", (contrato_id,)).fetchone() is None:
-        raise ValueError(OBRA_INEXISTENTE)
     with db.mutacao(conn):
+        categoria, contrato_id, medicao_id, complemento = _classificacao(conn, categoria, contrato_id, medicao_id,
+                                                                        complemento)
         existente = conn.execute("SELECT nome FROM siga_processos WHERE codigo=?", (codigo,)).fetchone()
         if existente is not None:
             raise JaAcompanhado(existente["nome"])
-        # Processo que o robo ja' mandou so' pelo numero: ganha o codigo, o nome e a obra se estiver livre; ligado a
+        # Processo que o robo ja' mandou so' pelo numero: ganha o codigo e a classificacao se estiver livre; ligado a
         # um protocolo ou a uma medicao, nao e' avulso e nao se reescreve por aqui.
         achado = _achar_processo(conn, codigo, numero)
         antes = None
@@ -506,13 +576,40 @@ def acompanhar_avulso(conn, usuario_id, link: str | None, numero: str | None, no
             if achado["protocolo_id"] is not None or achado["medicao_id"] is not None:
                 raise ValueError(LIGADO_A_OUTRO)
             antes = {"codigo": achado["codigo"], "numero": achado["numero"], "nome": achado["nome"],
-                     "contrato_id": achado["contrato_id"]}
-            contrato_id = achado["contrato_id"] if achado["contrato_id"] is not None else contrato_id
+                     "contrato_id": achado["contrato_id"], "categoria": achado["categoria"],
+                     "complemento": achado["complemento"]}
+            contrato_id = contrato_id if contrato_id is not None else achado["contrato_id"]
+        nome = _nome_montado(conn, categoria, contrato_id, medicao_id, complemento)
         pid = _gravar_processo(conn, codigo, numero, nome)
-        conn.execute("UPDATE siga_processos SET nome=?, contrato_id=? WHERE id=?", (nome, contrato_id, pid))
+        # sem nome montado (Outros sem obra nem complemento), fica o que o robo mandou
+        conn.execute("UPDATE siga_processos SET nome=COALESCE(?, nome), contrato_id=?, medicao_id=?, categoria=?, "
+                     "complemento=? WHERE id=?", (nome, contrato_id, medicao_id, categoria, complemento, pid))
         auditoria.registrar(conn, usuario_id, "protocolo.siga", "siga_processo", pid, antes,
-                            {"codigo": codigo, "numero": numero, "nome": nome, "contrato_id": contrato_id})
+                            {"codigo": codigo, "numero": numero, "nome": nome, "contrato_id": contrato_id,
+                             "medicao_id": medicao_id, "categoria": categoria, "complemento": complemento})
     return pid
+
+
+def classificar(conn, usuario_id, processo_id: int, categoria: str | None, contrato_id: int | None,
+                medicao_id: int | None, complemento: str | None) -> None:
+    """Correcao de categoria, obra e complemento na pagina do historico (#663). Passando a Medicoes, o processo fica
+    ligado a' medicao escolhida (e encerra quando ela for recebida); saindo de Medicoes, perde a medicao. O processo
+    ligado a um protocolo enviado pelo sistema nao muda por aqui. O nome que o robo mandou nao e' tocado. Cada
+    correcao vai para a auditoria."""
+    with db.mutacao(conn):
+        p = conn.execute("SELECT * FROM siga_processos WHERE id=?", (processo_id,)).fetchone()
+        if p is None:
+            raise LookupError(PROCESSO_INEXISTENTE)
+        if p["protocolo_id"] is not None:
+            raise ValueError(LIGADO_A_PROTOCOLO)
+        categoria, contrato_id, medicao_id, complemento = _classificacao(conn, categoria, contrato_id, medicao_id,
+                                                                        complemento)
+        campos = ("categoria", "contrato_id", "medicao_id", "complemento")
+        antes = {**{c: p[c] for c in campos}, "categoria": _categoria(p)}
+        depois = dict(zip(campos, (categoria, contrato_id, medicao_id, complemento)))
+        conn.execute("UPDATE siga_processos SET categoria=?, contrato_id=?, medicao_id=?, complemento=? WHERE id=?",
+                     (categoria, contrato_id, medicao_id, complemento, processo_id))
+        auditoria.registrar(conn, usuario_id, "siga.classificacao", "siga_processo", processo_id, antes, depois)
 
 
 def registrado_em(conn, entidade: str, ids: list[int]) -> dict[int, str]:
@@ -591,13 +688,16 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
                 derivado[campo] = tempo.iso_local(derivado[campo])
         if derivado["ultima"]:
             derivado["ultima"] = {**derivado["ultima"], "data": tempo.iso_local(derivado["ultima"]["data"])}
+        categoria = _categoria(p)
+        medicao_titulo = medicoes.titulo({"numero": p["m_numero"], "tipo": p["m_tipo"]}) if p["medicao_id"] \
+            else _titulo_das_medicoes(conn, None, p["protocolo_id"])
         saida.append({
             "id": p["id"], "codigo": p["codigo"], "link": link_do_processo(p["codigo"]), "numero": p["numero"], "nome": p["nome"],
             "contrato_id": p["contrato_id"],
             "obra": (p["nome_curto"] or p["numero_instrumento"]) if p["contrato_id"] else None,
-            "medicao_id": p["medicao_id"],
-            "medicao_titulo": medicoes.titulo({"numero": p["m_numero"], "tipo": p["m_tipo"]})
-            if p["medicao_id"] else None,
+            "medicao_id": p["medicao_id"], "medicao_titulo": medicao_titulo,
+            "categoria": categoria, "complemento": p["complemento"],
+            "o_que_e": o_que_e(categoria, p["complemento"], medicao_titulo),
             "protocolo_id": p["protocolo_id"], "situacao": situacao, "encerrado": encerrado,
             **derivado,
             "movimentacoes": movs,
