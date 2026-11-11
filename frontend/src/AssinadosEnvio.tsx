@@ -25,10 +25,31 @@ type Anexo = { nome: string; tamanho: number; sha256: string; origem: string };
 type Previa = { para: string[]; copia: string[]; assunto: string; corpo: string; anexos: Anexo[]; total: number;
   limite: number; pendencias: { codigo: string; mensagem: string }[]; reenvio: boolean; anteriores?: number };
 
-const MIN_MOTIVO = 10;
-const MB = 1024 * 1024;     // o servidor recusa menos que isso (assinados_envio.MIN_MOTIVO)
+const MIN_MOTIVO = 10;     // o servidor recusa menos que isso (assinados_envio.MIN_MOTIVO)
+const MB = 1024 * 1024;
 
 type Arquivos = { arquivo: File | null; reajuste: File | null; justificativa: File | null };
+/** Issue #637: no par com os dois atos disponiveis, o envio so' do reajuste vai pela medicao de reajuste. */
+export type SoReajuste = { medicaoId: number; s: SituacaoAssinados };
+
+/** O que vai no pedido: no envio so' do reajuste, o PDF dele e' o documento da medicao de reajuste. */
+function doPedido(a: Arquivos, so: boolean): Arquivos {
+  return so ? { arquivo: a.reajuste, reajuste: null, justificativa: a.justificativa } : a;
+}
+
+/** MB com uma casa, arredondado para cima: acima do limite nunca sai o mesmo numero dos dois lados (issue #637). */
+function mbAcima(bytes: number): string {
+  return String(Math.ceil(bytes / MB * 10) / 10).replace(".", ",");
+}
+
+function EscolhaSoReajuste({ so, setSo }: { so: boolean; setSo: (v: boolean) => void }) {
+  return (
+    <label className="campo--linha">
+      <input type="checkbox" checked={so} onChange={ev => setSo(ev.target.checked)} />
+      Só o PDF do reajuste
+    </label>
+  );
+}
 
 function Erro({ erro }: { erro?: string }) {
   return erro ? <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p> : null;
@@ -55,7 +76,7 @@ function acimaDoEmail(s: SituacaoAssinados, a: Arquivos): string | undefined {
   const limite = s.limite_email;
   if (!limite) return undefined;
   const soma = [a.arquivo, a.reajuste, a.justificativa].reduce((t, f) => t + (f?.size ?? 0), 0);
-  return soma > limite ? `Anexos somam ${Math.floor(soma / MB)} MB, acima do limite do e-mail (${Math.floor(limite / MB)} MB)` : undefined;
+  return soma > limite ? `Anexos somam ${mbAcima(soma)} MB, acima do limite do e-mail (${Math.floor(limite / MB)} MB)` : undefined;
 }
 
 function formDosArquivos(a: Arquivos): FormData {
@@ -66,14 +87,19 @@ function formDosArquivos(a: Arquivos): FormData {
   return fd;
 }
 
-function CamposArquivos({ prefixo, s, a, setA, erroArquivo }: {
-  prefixo: string; s: SituacaoAssinados; a: Arquivos; setA: (a: Arquivos) => void; erroArquivo?: string;
+function CamposArquivos({ prefixo, s, a, setA, erroArquivo, so = false }: {
+  prefixo: string; s: SituacaoAssinados; a: Arquivos; setA: (a: Arquivos) => void; erroArquivo?: string; so?: boolean;
 }) {
   return (
     <div className="form-inline">
-      <CampoArquivo id={`${prefixo}-arquivo`} rotulo="PDF assinado da medição" aceita="application/pdf,.pdf" arquivo={a.arquivo}
-        aoEscolher={f => setA({ ...a, arquivo: f })} erro={erroArquivo} />
-      {s.reajuste && (
+      {so ? (
+        <CampoArquivo id={`${prefixo}-reajuste`} rotulo="PDF assinado do reajuste" aceita="application/pdf,.pdf"
+          arquivo={a.reajuste} aoEscolher={f => setA({ ...a, reajuste: f })} erro={erroArquivo} />
+      ) : (
+        <CampoArquivo id={`${prefixo}-arquivo`} rotulo="PDF assinado da medição" aceita="application/pdf,.pdf" arquivo={a.arquivo}
+          aoEscolher={f => setA({ ...a, arquivo: f })} erro={erroArquivo} />
+      )}
+      {!so && s.reajuste && (
         <CampoArquivo id={`${prefixo}-reajuste`} rotulo="PDF assinado do reajuste (opcional)" aceita="application/pdf,.pdf"
           arquivo={a.reajuste} aoEscolher={f => setA({ ...a, reajuste: f })} />
       )}
@@ -88,11 +114,16 @@ function Reservado({ s, aoLiberar }: { s: SituacaoAssinados; aoLiberar: () => vo
 }
 
 /** "Enviar documentos assinados": os PDFs, a previa do e-mail (para, copia e assunto da planilha/carta) e o envio. */
-export function FormEnviarAssinados({ medicaoId, s, salvando, agir, aoFechar, erro, aoLiberar }: {
+export function FormEnviarAssinados({ medicaoId: idDoAto, s: sDoAto, salvando, agir, aoFechar, erro, aoLiberar, soReajuste }: {
   medicaoId: number; s: SituacaoAssinados; salvando: boolean; agir: Agir; aoFechar: () => void; erro?: string;
-  aoLiberar: () => void;
+  aoLiberar: () => void; soReajuste?: SoReajuste;
 }) {
-  const [a, setA] = useState<Arquivos>({ arquivo: null, reajuste: null, justificativa: null });
+  const [todos, setA] = useState<Arquivos>({ arquivo: null, reajuste: null, justificativa: null });
+  const [escolheuSo, setSo] = useState(false);
+  const so = !!soReajuste && escolheuSo;
+  const medicaoId = so ? soReajuste.medicaoId : idDoAto;
+  const s = so ? soReajuste.s : sDoAto;
+  const a = doPedido(todos, so);
   const [data, setData] = useState(hojeLocal());
   const [previa, setPrevia] = useState<Previa | null>(null);
   const [motivo, setMotivo] = useState("");
@@ -100,15 +131,15 @@ export function FormEnviarAssinados({ medicaoId, s, salvando, agir, aoFechar, er
   const [tentouMotivo, setTentouMotivo] = useState(false);
   const [erroPrevia, setErroPrevia] = useState("");
   const [abrindo, setAbrindo] = useState(false);
-  const falta = !a.arquivo ? "Anexe o PDF assinado da medição." : acimaDoLimite(s, a)
-    ?? acimaDoEmail(s, a);
+  const falta = !a.arquivo ? (so ? "Anexe o PDF assinado do reajuste." : "Anexe o PDF assinado da medição.")
+    : acimaDoLimite(s, a) ?? acimaDoEmail(s, a);
   const faltaMotivo = previa?.reenvio && [...motivo.trim()].length < MIN_MOTIVO
     ? `Escreva o motivo do reenvio, com pelo menos ${MIN_MOTIVO} caracteres.` : undefined;
 
   async function abrirPrevia(ev: React.FormEvent) {
     ev.preventDefault();
     setTentou(true); setErroPrevia("");
-    if (falta) { document.getElementById("assinados-arquivo")?.focus(); return; }
+    if (falta) { document.getElementById(so ? "assinados-reajuste" : "assinados-arquivo")?.focus(); return; }
     setAbrindo(true);
     try {
       setPrevia(await apiForm<Previa>(`/api/medicoes/${medicaoId}/assinados/previa`, formDosArquivos(a)));
@@ -130,8 +161,14 @@ export function FormEnviarAssinados({ medicaoId, s, salvando, agir, aoFechar, er
         // outro envio terminou depois da previa (revisao da PR #635): a previa abre de novo, agora com o motivo
         if (e instanceof ApiErro && e.status === 409 && e.corpo?.codigo === "ENVIO_CONCLUIDO_NO_MEIO") {
           setTentouMotivo(false);
-          try { setPrevia(await apiForm<Previa>(`/api/medicoes/${medicaoId}/assinados/previa`, formDosArquivos(a))); }
-          catch { setPrevia(null); }
+          let nova: Previa | null = null;
+          try { nova = await apiForm<Previa>(`/api/medicoes/${medicaoId}/assinados/previa`, formDosArquivos(a)); }
+          catch { /* sem a previa nova, vale a mensagem do servidor (abrir a previa de novo) */ }
+          setPrevia(nova);
+          // issue #637: a previa ja' esta' refeita na tela; a mensagem diz o que falta, nao manda abrir de novo
+          if (nova) throw new ApiErro(409, "Outro envio dos documentos assinados terminou depois da sua prévia. "
+            + (nova.reenvio ? "A prévia foi refeita: escreva o motivo do reenvio." : "A prévia foi refeita: confira e envie de novo."),
+            e.corpo);
         }
         throw e;
       }
@@ -146,7 +183,8 @@ export function FormEnviarAssinados({ medicaoId, s, salvando, agir, aoFechar, er
       <Reservado s={s} aoLiberar={aoLiberar} />
       {!previa ? (
         <form onSubmit={abrirPrevia} noValidate onKeyDown={ev => ev.key === "Escape" && aoFechar()}>
-          <CamposArquivos prefixo="assinados" s={s} a={a} setA={setA} erroArquivo={tentou ? falta : undefined} />
+          {soReajuste && <EscolhaSoReajuste so={so} setSo={setSo} />}
+          <CamposArquivos prefixo="assinados" s={s} a={todos} setA={setA} so={so} erroArquivo={tentou ? falta : undefined} />
           <div className="form-inline painel__rodape">
             <button type="submit" className="btn btn--primario" disabled={abrindo || salvando}>{abrindo ? "Abrindo…" : "Prévia do e-mail"}</button>
             <button type="button" className="btn" onClick={aoFechar}>Cancelar</button>
@@ -190,24 +228,29 @@ export function FormEnviarAssinados({ medicaoId, s, salvando, agir, aoFechar, er
 }
 
 /** "Registrar envio dos assinados por fora": a data, o PDF assinado, os opcionais e o .eml. */
-export function FormAssinadosPorFora({ medicaoId, s, salvando, agir, aoFechar, erro, aoLiberar }: {
+export function FormAssinadosPorFora({ medicaoId: idDoAto, s: sDoAto, salvando, agir, aoFechar, erro, aoLiberar, soReajuste }: {
   medicaoId: number; s: SituacaoAssinados; salvando: boolean; agir: Agir; aoFechar: () => void; erro?: string;
-  aoLiberar: () => void;
+  aoLiberar: () => void; soReajuste?: SoReajuste;
 }) {
-  const [a, setA] = useState<Arquivos>({ arquivo: null, reajuste: null, justificativa: null });
+  const [todos, setA] = useState<Arquivos>({ arquivo: null, reajuste: null, justificativa: null });
+  const [escolheuSo, setSo] = useState(false);
+  const so = !!soReajuste && escolheuSo;
+  const medicaoId = so ? soReajuste.medicaoId : idDoAto;
+  const s = so ? soReajuste.s : sDoAto;
+  const a = doPedido(todos, so);
   const [data, setData] = useState(hojeLocal());
   const [eml, setEml] = useState<File | null>(null);
   const [tentou, setTentou] = useState(false);
   const hoje = hojeLocal();
   const faltaData = !data ? "Informe a data do envio." : data > hoje ? "A data do envio não pode ser futura." : undefined;
-  const falta = !a.arquivo ? "Anexe o PDF assinado da medição." : acimaDoLimite(s, a)
-    ?? acimaDoTeto(s, [a.arquivo, a.reajuste, a.justificativa, eml]);
+  const falta = !a.arquivo ? (so ? "Anexe o PDF assinado do reajuste." : "Anexe o PDF assinado da medição.")
+    : acimaDoLimite(s, a) ?? acimaDoTeto(s, [a.arquivo, a.reajuste, a.justificativa, eml]);
 
   async function registrar(ev: React.FormEvent) {
     ev.preventDefault();
     setTentou(true);
     if (faltaData) { document.getElementById("assinados-fora-data")?.focus(); return; }
-    if (falta) { document.getElementById("assinados-fora-arquivo")?.focus(); return; }
+    if (falta) { document.getElementById(so ? "assinados-fora-reajuste" : "assinados-fora-arquivo")?.focus(); return; }
     const fd = formDosArquivos(a);
     fd.append("enviado_em", data);
     if (eml) fd.append("eml", eml);
@@ -239,7 +282,8 @@ export function FormAssinadosPorFora({ medicaoId, s, salvando, agir, aoFechar, e
           </label>
         </div>
       </div>
-      <CamposArquivos prefixo="assinados-fora" s={s} a={a} setA={setA} erroArquivo={tentou ? falta : undefined} />
+      {soReajuste && <EscolhaSoReajuste so={so} setSo={setSo} />}
+      <CamposArquivos prefixo="assinados-fora" s={s} a={todos} setA={setA} so={so} erroArquivo={tentou ? falta : undefined} />
       <div className="form-inline painel__rodape">
         <button type="submit" className="btn btn--primario" disabled={salvando}>{salvando ? "Registrando…" : "Registrar envio"}</button>
         <button type="button" className="btn" onClick={aoFechar}>Cancelar</button>

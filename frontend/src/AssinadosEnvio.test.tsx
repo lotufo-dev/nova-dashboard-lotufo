@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiErro } from "./api";
+import { ApiErro, mensagemDeErro } from "./api";
 import type { Agir } from "./MedicaoAtos";
 import { ACIMA_DO_TETO, FormAssinadosPorFora, FormEnviarAssinados, type SituacaoAssinados } from "./AssinadosEnvio";
 
@@ -103,7 +103,10 @@ describe("Enviar documentos assinados", () => {
       throw new ApiErro(409, "Outro envio dos documentos assinados terminou depois da sua prévia",
         { codigo: "ENVIO_CONCLUIDO_NO_MEIO", mensagem: "Outro envio dos documentos assinados terminou depois da sua prévia" });
     });
-    const agir = vi.fn(async (fn: () => Promise<unknown>) => { try { await fn(); return true; } catch { return false; } });
+    const erros: string[] = [];
+    const agir = vi.fn(async (fn: () => Promise<unknown>) => {
+      try { await fn(); return true; } catch (e) { erros.push(mensagemDeErro(e)); return false; }
+    });
     render(<FormEnviarAssinados medicaoId={5} s={S} salvando={false} agir={agir} aoFechar={() => {}} aoLiberar={() => {}} />);
     anexar("PDF assinado da medição", pdf("Medicao.pdf"));
     fireEvent.click(screen.getByRole("button", { name: "Prévia do e-mail" }));
@@ -112,6 +115,9 @@ describe("Enviar documentos assinados", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
     expect(await screen.findByLabelText("Motivo do reenvio")).toBeTruthy();
     expect(previas).toBe(2);
+    // issue #637: a previa ja' foi refeita; a mensagem nao manda abrir de novo, pede o motivo
+    await vi.waitFor(() => expect(erros).toEqual([
+      "Outro envio dos documentos assinados terminou depois da sua prévia. A prévia foi refeita: escreva o motivo do reenvio."]));
   });
 
   it("anexos acima do limite do e-mail são recusados antes da prévia, sem falar de .eml", () => {
@@ -121,6 +127,48 @@ describe("Enviar documentos assinados", () => {
     fireEvent.click(screen.getByRole("button", { name: "Prévia do e-mail" }));
     expect(screen.getByText("Anexos somam 40 MB, acima do limite do e-mail (25 MB)")).toBeTruthy();
     expect(apiForm).not.toHaveBeenCalled();
+  });
+
+  it("25,4 MB contra o limite de 25 MB não mostra o mesmo número dos dois lados (issue #637)", () => {
+    montar();
+    anexar("PDF assinado da medição", pdf("Medicao.pdf", 20 * MB));
+    anexar("PDF assinado do reajuste (opcional)", pdf("Reajuste.pdf", 5.4 * MB));
+    fireEvent.click(screen.getByRole("button", { name: "Prévia do e-mail" }));
+    expect(screen.getByText("Anexos somam 25,4 MB, acima do limite do e-mail (25 MB)")).toBeTruthy();
+    cleanup();
+    // um byte acima: a soma arredonda para cima, nunca "25 MB acima de 25 MB"
+    montar({ ...S, limite: 30 * MB });
+    anexar("PDF assinado da medição", pdf("Medicao.pdf", 25 * MB + 1));
+    fireEvent.click(screen.getByRole("button", { name: "Prévia do e-mail" }));
+    expect(screen.getByText("Anexos somam 25,1 MB, acima do limite do e-mail (25 MB)")).toBeTruthy();
+  });
+
+  it("só o PDF do reajuste: a prévia e o envio vão para o reajuste, com o PDF dele como o da medição (issue #637)", async () => {
+    apiForm.mockImplementation(async (url: string) => (url.endsWith("/previa") ? PREVIA : { envio_id: 1 }));
+    const agir = vi.fn(async (fn: () => Promise<unknown>) => { await fn(); return true; });
+    render(<FormEnviarAssinados medicaoId={5} s={S} salvando={false} agir={agir} aoFechar={() => {}} aoLiberar={() => {}}
+      soReajuste={{ medicaoId: 6, s: { ...S, reajuste: null } }} />);
+    fireEvent.click(screen.getByLabelText("Só o PDF do reajuste"));
+    expect(screen.queryByLabelText("PDF assinado da medição")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Prévia do e-mail" }));
+    expect(screen.getByText("Anexe o PDF assinado do reajuste.")).toBeTruthy();
+    expect(apiForm).not.toHaveBeenCalled();
+    anexar("PDF assinado do reajuste", pdf("Reajuste.pdf"));
+    fireEvent.click(screen.getByRole("button", { name: "Prévia do e-mail" }));
+    await screen.findByLabelText("Assunto");
+    expect(apiForm.mock.calls[0][0]).toBe("/api/medicoes/6/assinados/previa");
+    const fd = apiForm.mock.calls[0][1] as FormData;
+    expect([...fd.keys()]).toEqual(["arquivo"]);
+    expect((fd.get("arquivo") as File).name).toBe("Reajuste.pdf");
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+    await vi.waitFor(() => expect(apiForm).toHaveBeenCalledTimes(2));
+    expect(apiForm.mock.calls[1][0]).toBe("/api/medicoes/6/assinados/enviar");
+    expect(((apiForm.mock.calls[1][1] as FormData).get("arquivo") as File).name).toBe("Reajuste.pdf");
+  });
+
+  it("sem a escolha oferecida pela página, não há “Só o PDF do reajuste”", () => {
+    montar();
+    expect(screen.queryByLabelText("Só o PDF do reajuste")).toBeNull();
   });
 
   it("sem reajuste com boletim, o campo do PDF do reajuste não aparece", () => {
@@ -155,6 +203,24 @@ describe("Registrar envio dos assinados por fora", () => {
     fireEvent.click(screen.getByRole("button", { name: "Registrar envio" }));
     expect(screen.getByText(ACIMA_DO_TETO)).toBeTruthy();
     expect(agir).not.toHaveBeenCalled();
+  });
+
+  it("só o PDF do reajuste por fora: o registro vai para o reajuste (issue #637)", async () => {
+    apiForm.mockResolvedValue({ id: 1 });
+    const agir = vi.fn(async (fn: () => Promise<unknown>) => { await fn(); return true; });
+    render(<FormAssinadosPorFora medicaoId={5} s={S} salvando={false} agir={agir} aoFechar={() => {}} aoLiberar={() => {}}
+      soReajuste={{ medicaoId: 6, s: { ...S, reajuste: null } }} />);
+    fireEvent.click(screen.getByLabelText("Só o PDF do reajuste"));
+    fireEvent.click(screen.getByRole("button", { name: "Registrar envio" }));
+    expect(screen.getByText("Anexe o PDF assinado do reajuste.")).toBeTruthy();
+    expect(agir).not.toHaveBeenCalled();
+    anexar("PDF assinado do reajuste", pdf("Reajuste.pdf"));
+    fireEvent.click(screen.getByRole("button", { name: "Registrar envio" }));
+    await vi.waitFor(() => expect(apiForm).toHaveBeenCalled());
+    const [url, fd] = apiForm.mock.calls[0] as [string, FormData];
+    expect(url).toBe("/api/medicoes/6/assinados/envio-externo");
+    expect((fd.get("arquivo") as File).name).toBe("Reajuste.pdf");
+    expect(fd.get("arquivo_reajuste")).toBeNull();
   });
 
   it("sem o PDF assinado não registra", () => {
