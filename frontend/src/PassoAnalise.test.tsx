@@ -139,4 +139,35 @@ describe("Respostas do órgão por e-mail (issue #644)", () => {
     act(() => { window.dispatchEvent(new Event("respostas-orgao-lidas")); });
     expect(await screen.findByText("Recebido.")).toBeTruthy();
   });
+
+  it("issue #667: a resposta que trouxe o protocolo do SIGA vem marcada e mostra o processo e a posição dele", async () => {
+    const PROC = { id: 3, codigo: "AbCdEf1234", link: "https://siga.exemplo.com.br/acompanhar?n=AbCdEf1234",
+      numero: "ORGAO-PRO-2026/00077", medicao_id: 5, setor: "COFIN", com_quem: "Fulano", desde: "2026-10-22 09:00:00",
+      dias_uteis: 4, movimentacoes: [] };
+    api.mockImplementation(async (caminho: string) => caminho === "/api/medicoes/5/respostas-orgao"
+      ? [{ ...R(2, "2026-11-11T13:00:00Z", "Segue o protocolo."), siga_processo_id: 3 },
+         { ...R(1, "2026-11-10T14:00:00Z", "Recebido."), siga_processo_id: null }] : { processos: [PROC] });
+    abrir({ ...M, estado: "planilha_enviada" });
+    const itens = within(await screen.findByRole("list", { name: "Respostas do órgão por e-mail" })).getAllByRole("listitem");
+    expect(await within(itens[0]).findByText("Protocolo do SIGA")).toBeTruthy();
+    expect(itens[0].textContent).toContain("ORGAO-PRO-2026/00077");
+    expect(itens[0].textContent).toContain("COFIN");
+    expect(within(itens[0]).getByRole("link", { name: /Abrir no SIGA/ }).getAttribute("href")).toBe(PROC.link);
+    expect(within(itens[1]).queryByText("Protocolo do SIGA")).toBeNull();
+    // o passo mostra a posicao do processo criado
+    expect(within(screen.getByRole("region", { name: "Onde está o processo" })).getByText("COFIN")).toBeTruthy();
+  });
+
+  it("issue #667: a leitura que registra a resposta com o protocolo relê a tela SIGA, e o processo criado aparece", async () => {
+    abrir({ ...M, estado: "planilha_enviada" });
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/siga"));
+    expect(screen.queryByText("COFIN")).toBeNull();
+    api.mockImplementation(async (caminho: string) => caminho === "/api/medicoes/5/respostas-orgao"
+      ? [{ ...R(1, "2026-11-10T14:00:00Z", "Segue o protocolo."), siga_processo_id: 3 }]
+      : { processos: [{ id: 3, codigo: "AbCdEf1234", link: null, numero: null, medicao_id: 5, setor: "COFIN", com_quem: "",
+          desde: null, dias_uteis: null, movimentacoes: [] }] });
+    act(() => { window.dispatchEvent(new Event("respostas-orgao-lidas")); });
+    expect(await screen.findByText("Protocolo do SIGA")).toBeTruthy();
+    expect((await screen.findAllByText("COFIN")).length).toBeGreaterThan(0);
+  });
 });

@@ -15,7 +15,7 @@ import re
 import subprocess
 import unicodedata
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from app import auditoria, db, medicoes, tempo
 from app import avisos as registro_avisos
@@ -412,6 +412,27 @@ def extrair_codigo(texto: str | None) -> str | None:
             or not _CODIGO.fullmatch(valores[0]):
         raise ValueError(LINK_INVALIDO)
     return valores[0]
+
+
+def link_no_texto(texto: str | None) -> str | None:
+    """O primeiro link de acompanhamento do SIGA escrito num texto livre (issue #667: o corpo da resposta do orgao), ou
+    None. Candidato e' so' o que comeca no dominio do modelo de link; quem valida e' `extrair_codigo` (codigo solto no
+    texto nao conta, nem link de outro dominio). Procura tambem no texto decodificado: a protecao de links do correio
+    reescreve o link e leva o original codificado num parametro."""
+    modelo = link_do_processo("x" * 6)
+    host = urlsplit(modelo).hostname if modelo else None
+    if not host or not texto:
+        return None
+    padrao = re.compile(r"(?<![\w.@/-])(?:https?://)?" + re.escape(host) + r"[^\s<>\"']*", re.IGNORECASE)
+    for fonte in (texto, unquote(texto)):
+        for achado in padrao.finditer(fonte):
+            candidato = achado.group(0).rstrip(".,;:!)]}")
+            try:
+                if extrair_codigo(candidato):
+                    return candidato
+            except ValueError:
+                continue
+    return None
 
 
 def _ligar(conn, usuario_id, codigo: str, numero: str | None, nome: str, contrato_id: int,

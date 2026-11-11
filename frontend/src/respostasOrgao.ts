@@ -7,6 +7,8 @@ import { api } from "./api";
 export type RespostaOrgao = {
   id: number; medicao_id: number; remetente: string; remetente_nome: string | null; recebida_em: string;
   assunto: string; trecho: string; anexos: string[];
+  // #667: o processo do SIGA que esta resposta trouxe (o link de acompanhamento estava no corpo); null = resposta comum
+  siga_processo_id?: number | null;
 };
 
 /** Disparado na janela quando uma leitura registrou resposta nova: a tela aberta rele a lista dela. */

@@ -866,3 +866,86 @@ def test_nao_vistas_da_mais_nova_para_a_mais_antiga_entre_medicoes(api, tmp_path
     _resposta_simulada(tmp_path, c2, recebida_em="2026-11-10T14:00:00Z")
     cl.post("/api/correio/respostas/ler")
     assert [x["medicao_id"] for x in cl.get("/api/correio/respostas/nao-vistas").json()] == [m1, m2]
+
+
+# --- protocolo do SIGA achado na resposta do orgao (issue #667) ----------------------------------------------
+
+MODELO_SIGA = "https://siga.exemplo.com.br/acompanhar?n={codigo}"
+LINK_SIGA = "https://siga.exemplo.com.br/acompanhar?n=AbCdEf1234"
+
+
+@pytest.fixture
+def com_siga(monkeypatch):
+    monkeypatch.setenv("DASH_SIGA_LINK_MODELO", MODELO_SIGA)
+
+
+def _processos(cl):
+    return cl.get("/api/siga").json()["processos"]
+
+
+def test_resposta_com_o_link_do_siga_cria_o_processo_ligado_a_medicao(api, tmp_path, com_siga):
+    cl, cid, _ = api
+    mid, _, conversa = _enviada(cl, cid)
+    # o link vem DEPOIS dos 500 caracteres do trecho: a busca e' no corpo inteiro, que nao e' gravado
+    _resposta_simulada(tmp_path, conversa, texto="Prezados, " + "a" * 700 + f"\nAcompanhe em: {LINK_SIGA}.\nAtt.")
+    (nova,) = cl.post("/api/correio/respostas/ler").json()["novas"]
+    (p,) = _processos(cl)
+    assert (p["codigo"], p["link"], p["categoria"], p["contrato_id"], p["medicao_id"], p["protocolo_id"]) == \
+        ("AbCdEf1234", LINK_SIGA, "medicoes", cid, mid, None)
+    assert nova["siga_processo_id"] == p["id"]
+    (x,) = cl.get(f"/api/medicoes/{mid}/respostas-orgao").json()
+    assert x["siga_processo_id"] == p["id"] and LINK_SIGA not in x["trecho"] and len(x["trecho"]) == 500
+    # a mesma resposta lida de novo nao cria outro processo
+    assert cl.post("/api/correio/respostas/ler").json() == {"novas": []}
+    assert len(_processos(cl)) == 1
+
+
+def test_resposta_sem_link_do_siga_nao_cria_processo(api, tmp_path, com_siga):
+    cl, cid, _ = api
+    mid, _, conversa = _enviada(cl, cid)
+    _resposta_simulada(tmp_path, conversa, texto="Veja https://outro.exemplo.com.br/acompanhar?n=AbCdEf1234 e o "
+                       "código AbCdEf1234; https://siga.exemplo.com.br/acompanhar sem o código.")
+    assert len(cl.post("/api/correio/respostas/ler").json()["novas"]) == 1
+    assert _processos(cl) == []
+    assert cl.get(f"/api/medicoes/{mid}/respostas-orgao").json()[0]["siga_processo_id"] is None
+
+
+def test_link_de_processo_ligado_a_outra_medicao_nao_cria_e_a_resposta_entra(api, tmp_path, com_siga):
+    cl, cid, _ = api
+    outra, _, _ = _enviada(cl, cid, numero=1)
+    assert cl.post(f"/api/siga/medicoes/{outra}/link", json={"link": LINK_SIGA}).status_code == 200
+    mid, _, conversa = _enviada(cl, cid, numero=2)
+    _resposta_simulada(tmp_path, conversa, texto=f"Protocolo: {LINK_SIGA}")
+    assert len(cl.post("/api/correio/respostas/ler").json()["novas"]) == 1
+    (p,) = _processos(cl)
+    assert p["medicao_id"] == outra
+    assert cl.get(f"/api/medicoes/{mid}/respostas-orgao").json()[0]["siga_processo_id"] is None
+
+
+def test_processo_ja_acompanhado_sem_medicao_e_ligado_sem_duplicar(api, tmp_path, com_siga):
+    cl, cid, _ = api
+    r = cl.post("/api/siga/processos-avulsos", json={"link": LINK_SIGA, "categoria": "outros", "complemento": "Avulso"})
+    assert r.status_code in (200, 201), r.text
+    mid, _, conversa = _enviada(cl, cid)
+    _resposta_simulada(tmp_path, conversa, texto=f"Protocolo: {LINK_SIGA}")
+    cl.post("/api/correio/respostas/ler")
+    (p,) = _processos(cl)
+    assert (p["medicao_id"], p["categoria"]) == (mid, "medicoes")
+    assert cl.get(f"/api/medicoes/{mid}/respostas-orgao").json()[0]["siga_processo_id"] == p["id"]
+
+
+def test_link_repetido_em_outra_resposta_nao_marca_de_novo_nem_troca_o_processo_da_medicao(api, tmp_path, com_siga):
+    cl, cid, _ = api
+    mid, _, conversa = _enviada(cl, cid)
+    _resposta_simulada(tmp_path, conversa, texto=f"Protocolo: {LINK_SIGA}", assunto="primeira")
+    cl.post("/api/correio/respostas/ler")
+    # a pessoa corrige o processo da medicao por outro link; a resposta seguinte cita o texto antigo, com o 1o link
+    outro = LINK_SIGA.replace("AbCdEf1234", "ZyXw987654")
+    assert cl.post(f"/api/siga/medicoes/{mid}/link", json={"link": outro}).status_code == 200
+    _resposta_simulada(tmp_path, conversa, nome="002", recebida_em="2026-11-11T09:00:00Z", assunto="segunda",
+                       texto=f"Ciente.\n> Protocolo: {LINK_SIGA}")
+    assert len(cl.post("/api/correio/respostas/ler").json()["novas"]) == 1
+    ligado = [p["codigo"] for p in _processos(cl) if p["medicao_id"] == mid]
+    assert ligado == ["ZyXw987654"]                             # o que a pessoa gravou continua valendo
+    segunda, primeira = cl.get(f"/api/medicoes/{mid}/respostas-orgao").json()
+    assert primeira["siga_processo_id"] is not None and segunda["siga_processo_id"] is None

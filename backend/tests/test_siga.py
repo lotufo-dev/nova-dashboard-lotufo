@@ -547,6 +547,29 @@ def test_acompanhar_avulso_normaliza_o_numero_e_le_o_codigo_do_link(conn, monkey
         siga.acompanhar_avulso(conn, None, "XyZ98765", None, "", None)
 
 
+def test_link_no_texto_acha_so_o_link_de_acompanhamento_do_siga(monkeypatch):
+    # issue #667: o link e' procurado no corpo da resposta do orgao; so' vale o formato que extrair_codigo aceita
+    link = "https://siga.exemplo.com.br/acompanhar?n=AbCdEf1234"
+    monkeypatch.setenv("DASH_SIGA_LINK_MODELO", "https://siga.exemplo.com.br/acompanhar?n={codigo}")
+    assert siga.link_no_texto(f"Prezados,\nsegue o protocolo ({link}). Att.") == link
+    assert siga.link_no_texto(f"Acompanhe <{link}>") == link
+    assert siga.link_no_texto("sem esquema: siga.exemplo.com.br/acompanhar?n=AbCdEf1234;") == \
+        "siga.exemplo.com.br/acompanhar?n=AbCdEf1234"
+    # o primeiro link invalido nao esconde o valido que vem depois
+    assert siga.link_no_texto(f"https://siga.exemplo.com.br/ajuda e {link}") == link
+    # o link reescrito pela protecao do correio (o original vai codificado num parametro) tambem e' achado
+    assert siga.extrair_codigo(siga.link_no_texto(
+        "https://protecao.exemplo.com.br/?url=https%3A%2F%2Fsiga.exemplo.com.br%2Facompanhar%3Fn%3DAbCdEf1234&data=05"
+    )) == "AbCdEf1234"
+    for texto in ("", None, "código AbCdEf1234 sem link", "https://outro.exemplo.com.br/acompanhar?n=AbCdEf1234",
+                  "https://falsosiga.exemplo.com.br/acompanhar?n=AbCdEf1234",
+                  "https://siga.exemplo.com.br.outro.exemplo/acompanhar?n=AbCdEf1234",
+                  "https://siga.exemplo.com.br/acompanhar?n=abc", "contato@siga.exemplo.com.br/acompanhar?n=AbCdEf1234"):
+        assert siga.link_no_texto(texto) is None, texto
+    monkeypatch.delenv("DASH_SIGA_LINK_MODELO")
+    assert siga.link_no_texto(link) is None                 # sem o modelo nao ha' dominio a reconhecer
+
+
 # --- categorias e nome montado (issue #663) ------------------------------------------------------------------
 
 def test_o_que_e_por_categoria():
