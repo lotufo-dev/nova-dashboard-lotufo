@@ -533,17 +533,86 @@ def test_painel_marca_o_tipo_de_cada_movimentacao(conn):
 
 
 def test_acompanhar_avulso_normaliza_o_numero_e_le_o_codigo_do_link(conn, monkeypatch):
-    # issue #339: o mesmo extrair_codigo da etapa 4; numero gravado sem espacos
+    # issue #339: o mesmo extrair_codigo da etapa 4; numero gravado sem espacos. #663: sem nome digitado
     monkeypatch.setenv("DASH_SIGA_LINK_MODELO", "https://siga.exemplo.com.br/acompanhar?n={codigo}")
     pid = siga.acompanhar_avulso(conn, None, "https://siga.exemplo.com.br/acompanhar?n=AbCdEf1234",
-                                 " ORGAO-PRO-2026/ 00009 ", "  Aditivo  ", None)
-    p = conn.execute("SELECT codigo, numero, nome, contrato_id FROM siga_processos WHERE id=?", (pid,)).fetchone()
-    assert tuple(p) == ("AbCdEf1234", "ORGAO-PRO-2026/00009", "Aditivo", None)
+                                 " ORGAO-PRO-2026/ 00009 ", "outros", None, complemento="  Licença  ")
+    p = conn.execute("SELECT codigo, numero, nome, contrato_id, categoria, complemento FROM siga_processos WHERE id=?",
+                     (pid,)).fetchone()
+    assert tuple(p) == ("AbCdEf1234", "ORGAO-PRO-2026/00009", "Licença", None, "outros", "Licença")
     with pytest.raises(siga.JaAcompanhado) as e:
-        siga.acompanhar_avulso(conn, None, "AbCdEf1234", None, "Outro", None)
-    assert e.value.nome == "Aditivo"
-    with pytest.raises(ValueError, match="Dê um nome"):
+        siga.acompanhar_avulso(conn, None, "AbCdEf1234", None, "outros", None)
+    assert e.value.nome == "Licença"
+    with pytest.raises(ValueError, match="Escolha a categoria"):
         siga.acompanhar_avulso(conn, None, "XyZ98765", None, "", None)
+
+
+# --- categorias e nome montado (issue #663) ------------------------------------------------------------------
+
+def test_o_que_e_por_categoria():
+    assert siga.o_que_e("medicoes", "ignorado", "7ª Medição") == "7ª Medição"
+    assert siga.o_que_e("aditivos", "de prazo", None) == "Aditivo de prazo"
+    assert siga.o_que_e("aditivos", None, None) == "Aditivo"
+    assert siga.o_que_e("indenizatorios", "2025", None) == "Indenizatório 2025"
+    # em Outros o complemento vale sozinho; sem ele, "Outro"
+    assert siga.o_que_e("outros", "Licença ambiental", None) == "Licença ambiental"
+    assert siga.o_que_e("outros", None, None) == "Outro"
+
+
+def _categorias(conn):
+    return [tuple(r) for r in conn.execute("SELECT numero, categoria FROM siga_processos ORDER BY id")]
+
+
+def test_processo_que_o_robo_liga_a_medicao_entra_em_medicoes_e_os_demais_em_outros(conn):
+    _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura(numero="SINFRA-PRO-2026/00001"))
+    assert _categorias(conn) == [("SINFRA-PRO-2026/00001", "medicoes"), ("ORGAO-PRO-2026/00011", "outros")]
+    alfa, beta = siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"]
+    assert (alfa["categoria"], alfa["o_que_e"], alfa["obra"]) == ("medicoes", "3ª Medição", "Obra Alfa")
+    assert (beta["categoria"], beta["o_que_e"], beta["obra"], beta["nome"]) == ("outros", "Outro", None, "Processo Beta")
+
+
+def test_protocolo_com_medicao_e_reajuste_e_medicoes_com_os_dois_titulos(conn):
+    pid = _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+    conn.execute("INSERT INTO medicoes (id, contrato_id, numero, tipo, competencia, estado) "
+                 "VALUES (30, 7, 3, 'reajuste', '2026-09', 'protocolada')")
+    conn.execute("INSERT INTO protocolo_medicoes (protocolo_id, medicao_id) VALUES (?, 30)", (pid,))
+    conn.commit()
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura(numero="SINFRA-PRO-2026/00001")[:1])
+    (p,) = siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"]
+    assert (p["categoria"], p["medicao_id"], p["o_que_e"]) == ("medicoes", None, "3ª Medição e Reajuste da 3ª Medição")
+
+
+def test_processo_que_perde_o_vinculo_para_o_da_nota_volta_a_outros(conn):
+    _planilha_por_fora(conn)
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 9), _leitura_unica("SINFRA-PRO-2026/00111", "PLA111"))
+    assert _categorias(conn) == [("SINFRA-PRO-2026/00111", "medicoes")]
+    conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem) "
+                 "VALUES (31, '2026-09-15', 'SINFRA-PRO-2026/00222', 'manual')")
+    conn.commit()
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), _leitura_unica("SINFRA-PRO-2026/00222", "NOT222"))
+    assert _categorias(conn) == [("SINFRA-PRO-2026/00111", "outros"), ("SINFRA-PRO-2026/00222", "medicoes")]
+
+
+def test_classificar_troca_categoria_obra_e_complemento_sem_tocar_no_nome_do_robo(conn):
+    _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura()[1:])
+    pid = conn.execute("SELECT id FROM siga_processos").fetchone()[0]
+    siga.classificar(conn, None, pid, "indenizatorios", 7, None, " 2025 ")
+    p = conn.execute("SELECT nome, categoria, contrato_id, medicao_id, complemento FROM siga_processos").fetchone()
+    assert tuple(p) == ("Processo Beta", "indenizatorios", 7, None, "2025")
+    siga.classificar(conn, None, pid, "medicoes", 7, 31, None)
+    assert tuple(conn.execute("SELECT categoria, contrato_id, medicao_id, protocolo_id FROM siga_processos"
+                              ).fetchone()) == ("medicoes", 7, 31, None)
+    # sai de Medicoes: perde a medicao; Outros pode ficar sem obra
+    siga.classificar(conn, None, pid, "outros", None, None, None)
+    assert tuple(conn.execute("SELECT categoria, contrato_id, medicao_id, complemento FROM siga_processos"
+                              ).fetchone()) == ("outros", None, None, None)
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='siga.classificacao'").fetchone()[0] == 3
+    with pytest.raises(ValueError, match="Medição não encontrada nesta obra"):
+        siga.classificar(conn, None, pid, "medicoes", 7, 999, None)
+    with pytest.raises(LookupError, match="Processo do SIGA não encontrado"):
+        siga.classificar(conn, None, 999, "outros", None, None, None)
 
 
 # --- pedidos de leitura e rodadas do robo (issue #342) -------------------------------------------------------

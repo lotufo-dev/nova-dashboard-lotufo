@@ -4,7 +4,8 @@ Duas rotas de SERVICO, para o robo: `POST /api/siga/leituras` e `GET /api/siga/p
 CSRF; exigem `Authorization: Bearer <token>`, com o token lido do arquivo apontado por `DASH_SIGA_TOKEN_ARQUIVO`
 (fora do repositorio; lido a cada pedido, entao trocar o token nao pede reinicio). Sem a variavel, 503.
 Uma rota para as telas: `GET /api/siga`, com sessao e `ver_paineis`. E uma de escrita, `POST /api/siga/processos-avulsos`
-(issue #339): link colado na tela SIGA, com sessao, CSRF e `editar_cadastros`.
+(issue #339): link colado na tela SIGA, com sessao, CSRF e `editar_cadastros`. Issue #663: o formulario manda
+categoria, obra, medicao e complemento (sem nome), e `POST /api/siga/processos/{id}/classificacao` corrige os tres.
 Issue #342: `POST /api/siga/atualizar` (sessao, CSRF e `ver_paineis`) grava o pedido de leitura e manda o Windows
 iniciar o robo; o robo conversa pelas rotas de servico `POST /api/siga/rodadas` ("comecei"),
 `POST /api/siga/rodadas/{id}/fim` ("terminei") e `POST /api/siga/rodadas/{id}/falha` ("cai"), com o mesmo token.
@@ -99,21 +100,47 @@ def painel(conn: sqlite3.Connection = Depends(conexao), _usuario: dict = Depends
 
 class AvulsoIn(BaseModel):
     link: str = Field(max_length=500)                 # link inteiro ou so' o codigo (siga.extrair_codigo)
-    nome: str = Field(max_length=200)
+    categoria: str = Field(max_length=20)             # uma das quatro (siga.CATEGORIAS confere, em portugues)
     numero: str | None = Field(default=None, max_length=100)
     contrato_id: int | None = Field(default=None, ge=1, le=MAX_INT64)
+    medicao_id: int | None = Field(default=None, ge=1, le=MAX_INT64)       # so' na categoria Medicoes
+    complemento: str | None = Field(default=None, max_length=siga.MAX_COMPLEMENTO)
 
 
 @router.post("/api/siga/processos-avulsos")
 def acompanhar_avulso(dados: AvulsoIn, usuario: dict = Depends(exigir("editar_cadastros")),
                       conn: sqlite3.Connection = Depends(conexao)):
     try:
-        pid = siga.acompanhar_avulso(conn, usuario["id"], dados.link, dados.numero, dados.nome, dados.contrato_id)
+        pid = siga.acompanhar_avulso(conn, usuario["id"], dados.link, dados.numero, dados.categoria,
+                                     dados.contrato_id, dados.medicao_id, dados.complemento)
     except siga.JaAcompanhado as e:
         raise HTTPException(409, str(e)) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return {"id": pid}
+
+
+class ClassificacaoIn(BaseModel):
+    categoria: str = Field(max_length=20)
+    contrato_id: int | None = Field(default=None, ge=1, le=MAX_INT64)
+    medicao_id: int | None = Field(default=None, ge=1, le=MAX_INT64)
+    complemento: str | None = Field(default=None, max_length=siga.MAX_COMPLEMENTO)
+
+
+@router.post("/api/siga/processos/{processo_id}/classificacao")
+def classificar(processo_id: int, dados: ClassificacaoIn, usuario: dict = Depends(exigir("editar_cadastros")),
+                conn: sqlite3.Connection = Depends(conexao)):
+    """Corrigir categoria, obra e complemento na pagina do historico (issue #663)."""
+    if not 1 <= processo_id <= MAX_INT64:
+        raise HTTPException(404, siga.PROCESSO_INEXISTENTE)
+    try:
+        siga.classificar(conn, usuario["id"], processo_id, dados.categoria, dados.contrato_id, dados.medicao_id,
+                         dados.complemento)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    return {"id": processo_id}
 
 
 # --- pedido de leitura pela tela e rodadas do robo (issue #342) --------------------------------------------
