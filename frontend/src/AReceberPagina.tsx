@@ -185,7 +185,8 @@ export default function AReceberPagina() {
         </div>
         <Grafico meses={passados} escolhido={indiceMes} escolher={setEscolhido} />
         <p className="ar-detalhe" role="status"><Detalhe m={passados[indiceMes]} /></p>
-        <table className="sr-only">
+        {/* `sr-only` no div, nao na <table>: tabela ignora largura e overflow e alargava a pagina no celular (PR #676) */}
+        <div className="sr-only"><table>
           <caption>Recebido por mês, na cota</caption>
           <thead><tr><th scope="col">Mês</th><th scope="col">Recebido</th></tr></thead>
           <tbody>
@@ -193,7 +194,7 @@ export default function AReceberPagina() {
               <tr key={m.competencia}><th scope="row">{fmtCompetencia(m.competencia)}</th><td>{valor(recebido(m))}</td></tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </section>
 
       <section className="cartao" aria-labelledby="t-obras">

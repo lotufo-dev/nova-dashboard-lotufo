@@ -214,7 +214,7 @@ export function competenciasRegularidade(hoje: string): { competencia: string; a
   });
 }
 
-/** "sem" = nao cobrada (#651): anterior ao primeiro PDF da empresa, ou empresa que nunca anexou e o mes nao e' o pedido. */
+/** "sem" = nao cobrada (#651, #699): anterior ao primeiro PDF da empresa, ou mes que nao e' o que o proximo protocolo pede. */
 export type EstadoCompetencia = { competencia: string; estado: "anexada" | "faltando" | "aguardando" | "sem"; id?: number };
 
 /** Empresas com folha: as que a regularidade e' exigida ou ja' tem PDF anexado. */
@@ -228,12 +228,12 @@ function primeiraAnexada(e: EmpresaDoc): string | null {
   return (e.regularidades_anexadas ?? []).map(x => x.competencia).sort()[0] ?? null;
 }
 
-/** O estado de UMA competencia sem PDF (#651). Antes do primeiro PDF da empresa nada e' cobrado; a competencia que o
- *  proximo protocolo pede (`esperada`, do servidor) falta; quem nunca anexou so' deve a esperada. */
+/** O estado de UMA competencia sem PDF (#651, #699). So' falta a competencia que o proximo protocolo pede (`esperada`,
+ *  do servidor), a mesma que o contador da aba conta; antes do primeiro PDF da empresa nada e' cobrado, nem ela. */
 function estadoSemPdf(e: EmpresaDoc, competencia: string, aguardando: boolean): EstadoCompetencia["estado"] {
   if (aguardando) return "aguardando";
   const primeira = primeiraAnexada(e);
-  if (primeira !== null) return competencia < primeira ? "sem" : "faltando";
+  if (primeira !== null && competencia < primeira) return "sem";
   return competencia === e.regularidade?.esperada ? "faltando" : "sem";
 }
 

@@ -1,3 +1,6 @@
+/// <reference types="node" />
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Prazos from "./Prazos";
@@ -130,5 +133,14 @@ describe("Prazos", () => {
     render(<Prazos contratoId={1} podeEditar={false} />);
     expect(await screen.findByText("31/12/2026")).toBeTruthy();
     expect(screen.queryByText(/Pedido de valor/)).toBeNull();
+  });
+  it("#699: o selo da grade do resumo quebra em duas linhas em vez de cortar o texto", () => {
+    // a 1440 px a coluna da grade e' mais estreita que "Endosso não registrado" e "Sem instrumento há N dias": o texto
+    // passava da caixa do selo e era cortado. O jsdom nao mede layout: aqui a presenca da regra (o vitest entrega CSS vazio).
+    const css = readFileSync(join(process.cwd(), "src", "tokens.css"), "utf8");
+    const regra = /\.resumo-grade \.dado > \.selo \.selo__texto\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(regra).toMatch(/white-space:\s*normal/);
+    expect(regra).toMatch(/overflow:\s*visible/);
+    expect(regra).not.toMatch(/ellipsis/);
   });
 });

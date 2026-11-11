@@ -1297,8 +1297,20 @@ def _dia(valor: str | None) -> datetime.date | None:
         return None
 
 
-def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> dict:
-    """Pagina Medicoes (abas): contagem por situacao, as medicoes em andamento e as obras ativas.
+def _obras_com_contratante(conn) -> dict[int, dict]:
+    """Todo contrato com o nome da obra, o estado e o contratante (sigla e sub-orgao de `contratante`)."""
+    obras = {r["id"]: dict(r) for r in conn.execute(
+        "SELECT c.id, c.estado, COALESCE(c.nome_curto, c.numero_instrumento) AS obra, c.orgao AS orgao_texto, "
+        "c.encerramento_iniciado_em, o.familia, o.chave, o.nome FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id")}
+    for o in obras.values():
+        o["contratante"], o["orgao_sub"] = contratante(o["familia"], o["chave"], o["nome"], o["orgao_texto"])
+    return obras
+
+
+def linhas_em_andamento(conn, hoje: datetime.date | None = None, obras: dict[int, dict] | None = None,
+                        andamento: list[dict] | None = None) -> list[dict]:
+    """As medicoes em andamento, uma linha por medicao (ou por par medicao + reajuste), na ordem das situacoes.
+    `obras` e `andamento` sao os de `_obras_com_contratante` e `em_andamento`, para quem ja' os leu.
 
     "Parada ha'" conta do marco da SITUACAO ATUAL, nunca do criado_em (lancar a medicao nao e' marco de nada):
     enviar ao faturamento = o espelho vigente gerado; aguardando nota = o e-mail ao faturamento; enviar nota = a
@@ -1308,12 +1320,8 @@ def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> d
     Reajuste") com o valor somado e o marco mais antigo dos dois; o resto (projeto, reajuste em outra situacao)
     fica em linha propria, com o titulo de sempre."""
     hoje = hoje or tempo.hoje_local()
-    mes = mes or hoje.strftime("%Y-%m")   # o mes de "Iniciar medicao" (#507): as obras sem medicao NESTA competencia
-    obras = {r["id"]: dict(r) for r in conn.execute(
-        "SELECT c.id, c.estado, COALESCE(c.nome_curto, c.numero_instrumento) AS obra, c.orgao AS orgao_texto, "
-        "c.encerramento_iniciado_em, o.familia, o.chave, o.nome FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id")}
-    for o in obras.values():
-        o["contratante"], o["orgao_sub"] = contratante(o["familia"], o["chave"], o["nome"], o["orgao_texto"])
+    obras = _obras_com_contratante(conn) if obras is None else obras
+    andamento = em_andamento(conn) if andamento is None else andamento
     # marcos que a tabela medicoes nao guarda: o espelho VIGENTE (o substituido nao conta) e o e-mail do envio
     espelho_de = dict(conn.execute(
         "SELECT em.medicao_id, MAX(e.criado_em) FROM espelho_medicoes em JOIN espelhos e ON e.id=em.espelho_id "
@@ -1341,7 +1349,6 @@ def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> d
         return _dia(m["protocolado_em"])
 
     grupos: dict[tuple, list[dict]] = {}
-    andamento = em_andamento(conn)
     for m in andamento:
         grupos.setdefault((m["contrato_id"], m["numero"], m["competencia"], SITUACAO[m["estado"]]), []).append(m)
     linhas = []
@@ -1370,6 +1377,18 @@ def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> d
                 "marco": d.isoformat() if d else None, "dias": (hoje - d).days if d else None})
     linhas.sort(key=lambda x: (ORDEM_SITUACAO.index(x["situacao"]), _chave_nome(x["obra"]), x["contrato_id"],
                                -x["numero"], x["titulo"]))
+    return linhas
+
+
+def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> dict:
+    """Pagina Medicoes: as obras ativas (com o que a janela "Iniciar" precisa), o quadro do mes e as medicoes abertas
+    de competencias anteriores. Issue #699: `contagens` e `linhas` sairam da resposta (nenhuma tela as lia); as linhas
+    de "em andamento" seguem em `linhas_em_andamento`, de onde saem os meses anteriores."""
+    hoje = hoje or tempo.hoje_local()
+    mes = mes or hoje.strftime("%Y-%m")   # o mes de "Iniciar medicao" (#507): as obras sem medicao NESTA competencia
+    obras = _obras_com_contratante(conn)
+    andamento = em_andamento(conn)
+    linhas = linhas_em_andamento(conn, hoje, obras, andamento)
 
     abertas = {x["contrato_id"] for x in linhas}
     # #151 (15/10/2026): a janela "Iniciar processo" mostra a medicao aberta (id, numero e passo), a prevista (numero e
@@ -1472,17 +1491,7 @@ def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> d
                     "prevista": prevista_dados.get(o["id"]),
                     "proxima": proxima(o["id"])[0], "proxima_tipo": proxima(o["id"])[1]}
                    for o in ativas]
-    contagens = {"sem-medicao": sum(1 for o in lista_obras if not o["aberta"]),
-                 # menu do redesenho (#507): obras ativas sem medicao no mes, e as medicoes iniciadas e nao recebidas
-                 # (uma por linha da lista "Em andamento": medicao + reajuste do mesmo numero e' uma so')
-                 "iniciar": sum(1 for o in lista_obras if o["sem_no_mes"]), "em-andamento": len(linhas)}
-    for s in ORDEM_SITUACAO:
-        contagens[s] = sum(1 for x in linhas if x["situacao"] == s)
-    # N-01 (10/10/2026): a aba abre a tabela de notas enviadas (`notas_envio.aguardando_pagamento`, uma linha por
-    # medicao protocolada); contar as linhas daqui (o par medicao + reajuste vira uma) dava outro numero
-    contagens["aguardando-pagamento"] = conn.execute(
-        "SELECT COUNT(*) FROM medicoes WHERE estado='protocolada'").fetchone()[0]
-    return {"hoje": hoje.isoformat(), "mes": mes, "contagens": contagens, "linhas": linhas, "obras": lista_obras,
+    return {"hoje": hoje.isoformat(), "mes": mes, "obras": lista_obras,
             "quadro": _quadro_do_mes(conn, mes, obras, sem_fluxo_medicao, hoje),
             "anteriores": _meses_anteriores(mes, linhas)}
 

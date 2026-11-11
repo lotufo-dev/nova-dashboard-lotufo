@@ -85,8 +85,10 @@ test("aba Regularidade: só quem tem folha, seis meses com o estado de cada um",
   // #651: antes do primeiro PDF da empresa (06/2026) o mes nao e' cobrado: "—", sem cor
   const chips = l.getAllByRole("img");
   expect(chips.map(i => i.getAttribute("aria-label") ?? i.textContent)).toEqual([
-    "03/2026: sem registro", "04/2026: sem registro", "05/2026: sem registro", "06/2026: anexada", "07/2026: faltando", "08/2026: faltando",
+    "03/2026: sem registro", "04/2026: sem registro", "05/2026: sem registro", "06/2026: anexada", "07/2026: faltando", "08/2026: sem registro",
   ]);
+  // #699: so' a competencia esperada (07/2026) aparece "faltando"; a outra sem PDF fica "—"
+  expect(chips[5].textContent).toBe("—");
   expect(chips[0].textContent).toBe("—");
   expect(chips[0].closest(".doc-chip")!.className).toContain("doc-chip--neutro");
   expect(chips[4].closest(".doc-chip")!.className).toContain("doc-chip--breve");

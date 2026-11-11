@@ -2113,8 +2113,8 @@ def test_total_do_aguardando_pagamento_bate_com_o_resumo_das_medicoes(svc):
     _protocolar(c, ids["sinfra_reaj"], 33333)                          # par medicao + reajuste: uma linha no resumo
     _protocolar(c, ids["vg_exec"], 1000001, origem="espelho")          # pedido do espelho, sem aprovado
     total = sum(x["valor_centavos"] for x in notas_envio.aguardando_pagamento(c))
-    resumo = medicoes.resumo(c, HOJE)
-    assert total == sum(x["valor_centavos"] for x in resumo["linhas"] if x["situacao"] == "aguardando-pagamento")
+    linhas = medicoes.linhas_em_andamento(c, HOJE)
+    assert total == sum(x["valor_centavos"] for x in linhas if x["situacao"] == "aguardando-pagamento")
     assert total == 1200001 + 1111111 + 33333 + 1000001
 
 

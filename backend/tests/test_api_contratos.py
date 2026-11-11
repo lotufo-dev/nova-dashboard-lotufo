@@ -218,11 +218,17 @@ def test_ficha_traz_ultima_medicao_em_andamento_e_vencimentos(client_admin, monk
     assert f["ultima_medicao"]["valor_centavos"] == 787_288_979
     assert f["ultima_medicao"]["recebida_em"] == "2026-10-16" and f["ultima_medicao"]["dias_apos_nota"] == 14
     assert f["em_andamento"]["titulo"] == "16ª Medição" and f["em_andamento"]["valor_centavos"] == 990_529_648
-    assert f["em_andamento"]["etapa"] == "análise do órgão"
+    # #699: a etapa e' o nome do passo da vez (os seis de `medicoes.PASSOS`), nao uma palavra propria da ficha
+    assert f["em_andamento"]["etapa"] == "Pagamento"
     v = {x["chave"]: x for x in f["vencimentos"]}
     assert v["execucao"]["data"] == "2026-11-18" and v["execucao"]["dias"] == 12 and v["execucao"]["nivel"] == "critico"
     assert v["vigencia"]["data"] == "2027-02-16" and v["vigencia"]["nivel"] == "normal"
     assert f["contrato"]["original_igual"] is True and f["contrato"]["tas"] == 0
+    conn = db.get_conn()
+    conn.execute("UPDATE medicoes SET estado='espelho_enviado' WHERE id=?", (b,))
+    conn.commit()
+    conn.close()
+    assert client_admin.get(f"/api/contratos/{cid}/ficha").json()["em_andamento"]["etapa"] == "Notas"
 
 
 def test_ficha_e_cabecalho_sem_prazo_de_execucao_conhecido_mostram_so_a_data(client_admin, monkeypatch):

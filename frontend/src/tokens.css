@@ -1840,6 +1840,10 @@ a.contagem:hover .dado__valor { color: var(--acento-forte); text-decoration: und
 .reajuste-competencias__citada { color: var(--texto-2); }
 /* selo logo abaixo do valor ou da nota na grade do resumo (Situacao do prazo) */
 .resumo-grade .dado > .selo { margin-top: 4px; }
+/* #699: a 1440 px a coluna da grade (4 colunas ao lado da lateral) e' mais estreita que "Endosso não registrado" e
+   "Sem instrumento há N dias". O selo fica na largura da coluna e o texto quebra em duas linhas, inteiro, sem
+   reticencias. */
+.resumo-grade .dado > .selo .selo__texto { white-space: normal; overflow: visible; }
 
 /* F-72: o valor do instrumento pesa como o estado dele. Cancelado: riscado, com o traco em --texto-fraco
    (unico uso permitido dessa cor no texto) e o texto legivel em --texto-2. Em andamento: --texto-2.

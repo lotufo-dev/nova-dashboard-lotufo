@@ -201,6 +201,10 @@ describe("Página da obra: o desenho novo", () => {
     // texto na tela (26/10/2026): quantos dias restam nao se escreve; em dia, nenhum selo
     expect(within(cartao).queryByText(/restantes|vencida/)).toBeNull();
     const antes = (cartao.querySelector(".lt__marca") as HTMLElement).style.left;
+    // #699: o cartao aparece fora de um `act` (resposta da API), e o efeito que liga o relogio de `useHoje` pode ainda
+    // nao ter rodado quando o `findByRole` devolve. Sem relogio ligado, avancar o tempo nao dispara nada e o "Hoje"
+    // ficava no dia 16 (falha de 1 a cada ~50 rodadas). O `act` vazio descarrega os efeitos pendentes antes de avancar.
+    await act(async () => {});
     await act(async () => { vi.advanceTimersByTime(24 * 3600 * 1000); });
     expect(within(cartao).getAllByText("Hoje 17/10/2026")).toHaveLength(2);
     expect((cartao.querySelector(".lt__marca") as HTMLElement).style.left).not.toBe(antes);

@@ -17,9 +17,6 @@ import "./inicio.css";
 // #666: a caixa "Avisos importantes" le GET /api/inicio, a MESMA fila da tela Avisos (com o recorte do perfil), e usa a
 // mesma regra de secao (`avisos.ts`): a contagem dela e' a soma de Vencido, Esta semana e Este mes daquela tela.
 
-type Certidao = { tipo: string; entidade: string; validade: string | null; dias: number | null; vencida: boolean };
-type Reajuste = { contrato_id: number; obra: string; data_base_mes: string; aniversario: string; dias: number };
-type Prazo = { contrato_id: number; obra: string; contratante: string; tipo: "execucao" | "vigencia" | "data_base"; data: string; dias: number };
 type ChaveEtapa = "em_analise" | "boletim" | "nota" | "protocolado" | "recebido_mes";
 // #642: uma etapa da faixa do ciclo, na cota da Lotufo; `mais_antigo_dias` nulo = etapa vazia ou sem idade (recebido)
 type EtapaCiclo = { etapa: ChaveEtapa; valor_centavos: number; quantidade: number; mais_antigo_dias: number | null };
@@ -33,15 +30,9 @@ type CelulaMatriz = { etapa: EtapaMatriz; medicao_id: number } | null;
 type ObraMatriz = { contrato_id: number; obra: string; celulas: CelulaMatriz[] };
 export type PainelInicio = {
   hoje: string;
-  notas_a_enviar: number;
-  certidoes: { vencidas: number; vencendo: number; itens: Certidao[] };
-  reajustes: Reajuste[];
   protocoladas: { obras_protocoladas: number; obras_ativas: number; ultima: string | null };
   medido: { competencia: string; valor_centavos: number; quantidade: number; ultimo_lancamento: string | null };
-  recebido_ano: { valor_centavos: number | null; mes_centavos: number; sem_data: number; real_centavos?: number };
   a_receber: { liberado: boolean; valor_centavos: number | null; mais_60_centavos: number | null };
-  prazos: Prazo[];
-  espelhos: EspelhoAConferir[];
   ciclo: EtapaCiclo[];
   recebido_12m: MesRecebido[];
   // #652: `depois` = data esperada alem do proximo mes
@@ -49,9 +40,6 @@ export type PainelInicio = {
   matriz: { competencias: string[]; grupos: { contratante: string; obras: ObraMatriz[] }[] };
   notas_mes: { mes: string; valor_centavos: number; notas: number; obras: number };
 };
-// #359: o aprovado mudou depois do espelho (ou o espelho antigo nao se confere): a mesma fonte do aviso
-type EspelhoAConferir = { espelho_id: number; contrato_id: number; medicao_id: number; obra: string | null; titulo: string;
-  situacao: "aprovado_mudou" | "nota_emitida" | "nao_conferido" };
 
 /** "Bom dia" / "Boa tarde" / "Boa noite" pela hora de Cuiaba. */
 export function saudacao(agora: Date = new Date()): string {

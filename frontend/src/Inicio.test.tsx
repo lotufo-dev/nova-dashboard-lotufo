@@ -20,15 +20,9 @@ const celulas = (ultimas: Celula[]): Celula[] => [...Array<Celula>(12 - ultimas.
 
 const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   hoje: "2026-10-09",
-  notas_a_enviar: 3,
-  certidoes: { vencidas: 1, vencendo: 1, itens: [] },
-  reajustes: [],
   protocoladas: { obras_protocoladas: 2, obras_ativas: 18, ultima: "2026-09-30" },
   medido: { competencia: "2026-09", valor_centavos: 1_827_715_696, quantidade: 2, ultimo_lancamento: "2026-10-08" },
-  recebido_ano: { valor_centavos: null, mes_centavos: 0, sem_data: 12, real_centavos: 18_785_640_866 },
   a_receber: { liberado: true, valor_centavos: 1_720_000_000, mais_60_centavos: 210_000_000 },
-  prazos: [],
-  espelhos: [{ espelho_id: 1, contrato_id: 7, medicao_id: 9, obra: "Obra A", titulo: "1ª Medição", situacao: "aprovado_mudou" }],
   ciclo: [
     { etapa: "em_analise", valor_centavos: 300_100, quantidade: 2, mais_antigo_dias: 20 },
     { etapa: "boletim", valor_centavos: 1_200_300, quantidade: 3, mais_antigo_dias: 1 },

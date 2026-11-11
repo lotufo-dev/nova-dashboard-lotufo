@@ -81,6 +81,16 @@ describe("A receber", () => {
     expect(screen.queryByRole("button", { name: /^dezembro de 2026/ })).toBeNull();
   });
 
+  it("#699: a tabela equivalente do grafico fica dentro de um div sr-only (a classe na table alargava a pagina no celular)", async () => {
+    api.mockResolvedValue(RESPOSTA);
+    const { container } = render(<AReceberPagina />);
+    const tabela = await screen.findByRole("table", { name: "Recebido por mês, na cota" });
+    expect(tabela.className).toBe("");
+    expect(tabela.parentElement?.tagName).toBe("DIV");
+    expect(tabela.parentElement?.className).toBe("sr-only");
+    expect(container.querySelector("table.sr-only")).toBeNull();
+  });
+
   it("servidor antigo (sem o recebido real) cai no recebido das medicoes e nao mostra o do ano", async () => {
     const { recebido_ano_centavos: _ano, ...sem } = RESPOSTA;
     api.mockResolvedValue({ ...sem, mes: { ...MESES[5], recebido_real_centavos: undefined },
