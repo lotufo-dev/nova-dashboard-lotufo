@@ -116,8 +116,9 @@ def tipo_da_movimentacao(evento: str | None) -> str:
 
 
 def _sigla(lotacao: str | None) -> str:
-    """'COFIN/ORGAO' -> 'COFIN': a sigla antes da barra, comparada por igualdade (GAB nao e' GABIN)."""
-    return (lotacao or "").split("/")[0].strip().upper()
+    """'COFIN/ORGAO' -> 'COFIN': a sigla antes da barra, em maiusculas e sem espaco nenhum (o SIGA escreve o mesmo
+    setor como 'SETOR I' e 'SETORI'), comparada por igualdade (GAB nao e' GABIN)."""
+    return re.sub(r"\s+", "", (lotacao or "").split("/")[0]).upper()
 
 
 def _entrada_no_setor(validas: list[dict], setor: str) -> dict | None:
@@ -128,7 +129,7 @@ def _entrada_no_setor(validas: list[dict], setor: str) -> dict | None:
     for m in reversed(validas):
         if tipo_da_movimentacao(m["evento"]) not in ("transferencia", "recebimento") or not _sigla(m["at_lotacao"]):
             continue
-        if _sigla(m["at_lotacao"]) != setor.upper():
+        if _sigla(m["at_lotacao"]) != _sigla(setor):
             break
         entrada = m
     return entrada
@@ -157,7 +158,7 @@ def derivar(situacao: str | None, movimentacoes: list[dict], hoje: datetime.date
         desde = entrada["data"] if entrada else (transferencias or validas or [{"data": None}])[-1]["data"]
     else:
         recebimentos = [m for m in validas if "recebimento" in (m["evento"] or "").lower()
-                        and setor and _sigla(m["at_lotacao"]) == setor.upper()]
+                        and setor and _sigla(m["at_lotacao"]) == _sigla(setor)]
         recebimento = recebimentos[-1] if recebimentos else None
         desde = entrada["data"] if entrada else (validas[0]["data"] if validas else None)
     hoje_iso = hoje.isoformat()

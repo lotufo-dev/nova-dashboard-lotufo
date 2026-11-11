@@ -133,6 +133,27 @@ def test_processo_que_saiu_e_voltou_ao_setor_conta_da_volta():
     assert siga.derivar(SITUACAO_GABIN, movs, datetime.date(2026, 10, 28))["desde"] == "2026-10-21 09:00:00"
 
 
+def test_sigla_do_setor_escrita_sem_espaco_nao_quebra_a_permanencia():
+    # o SIGA escreve o mesmo setor com e sem espaco ("ALFA I" e "ALFAI"); "ALFA II" e' outro setor
+    situacao = "1º Volume - Aguardando Andamento [ALFA I, [X]]"
+    movs = [_mov("2026-10-01 08:00:00", "Cadastro", at_lotacao="PROTOC/ORGAO"),
+            _mov("2026-10-05 09:00:00", "Transferência", at_lotacao="ALFA I/ORGAO"),
+            _mov("2026-10-06 09:00:00", "Recebimento", at_lotacao="ALFA I/ORGAO", at_pessoa="Fulano"),
+            _mov("2026-10-13 09:00:00", "Transferência", at_lotacao="ALFA I/ORGAO", cad_lotacao="ALFA I/ORGAO"),
+            _mov("2026-10-14 09:00:00", "Recebimento", at_lotacao="ALFA I/ORGAO", at_pessoa="Beltrano"),
+            _mov("2026-10-19 09:00:00", "Transferência", at_lotacao="ALFAI/ORGAO", cad_lotacao="ALFA I/ORGAO"),
+            _mov("2026-10-20 09:00:00", "Recebimento", at_lotacao="alfai/ORGAO", at_pessoa="Sicrana")]
+    d = siga.derivar(situacao, movs, datetime.date(2026, 10, 28))
+    assert d["desde"] == "2026-10-05 09:00:00" and d["dias_uteis"] == 16
+    assert d["com_quem"] == "Sicrana"            # o recebimento escrito sem espaco tambem e' do setor
+    # "ALFA II" continua sendo outro setor: a ida para la' encerra a permanencia
+    movs += [_mov("2026-10-21 09:00:00", "Transferência", at_lotacao="ALFA II/ORGAO"),
+             _mov("2026-10-23 09:00:00", "Transferência", at_lotacao="ALFA I/ORGAO"),
+             _mov("2026-10-26 09:00:00", "Recebimento", at_lotacao="ALFAI/ORGAO", at_pessoa="Fulano")]
+    d = siga.derivar(situacao, movs, datetime.date(2026, 10, 28))
+    assert (d["desde"], d["dias_uteis"], d["com_quem"]) == ("2026-10-23 09:00:00", 3, "Fulano")
+
+
 def test_caixa_de_entrada_com_duas_transferencias_ao_setor_conta_da_primeira():
     movs = [_mov("2026-10-01 08:00:00", "Cadastro", at_lotacao="PROTOC/ORGAO"),
             _mov("2026-10-19 08:00:00", "Transferência", at_lotacao="GABIN/ORGAO"),
