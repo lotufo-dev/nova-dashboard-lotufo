@@ -7,10 +7,11 @@ import { IconeAlerta } from "./icones";
 // Janela modal para o teclado: o foco abre no Cancelar (um Enter a mais nao envia), Escape cancela, o Tab da' a volta
 // dentro dela e, ao fechar, o foco volta ao botao que a abriu.
 // Issue #230: o registro do envio feito por fora usa o mesmo aviso, com a pergunta e o botao do registro.
+// Issue #628: a conferencia do PDF assinado traz a propria chamada (nem todo item e' "falta": a capa de outra medicao).
 export default function ConfirmarFaltas({ itens, mudou = false, aoCancelar, aoContinuar,
-  pergunta = "Deseja continuar com o envio?", rotuloContinuar = "Continuar com o envio" }: {
+  pergunta = "Deseja continuar com o envio?", rotuloContinuar = "Continuar com o envio", chamada }: {
   itens: string[]; mudou?: boolean; aoCancelar: () => void; aoContinuar: () => void;
-  pergunta?: string; rotuloContinuar?: string;
+  pergunta?: string; rotuloContinuar?: string; chamada?: string;
 }) {
   const caixa = useRef<HTMLDivElement>(null);
   const [antes] = useState(() => document.activeElement as HTMLElement | null);
@@ -41,7 +42,7 @@ export default function ConfirmarFaltas({ itens, mudou = false, aoCancelar, aoCo
           <IconeAlerta className="icone icone--p" />ATENÇÃO
         </h2>
         <div id="confirmar-faltas-texto">
-          <p>{mudou ? "O que falta mudou desde a sua confirmação. Agora falta:"
+          <p>{chamada ? chamada : mudou ? "O que falta mudou desde a sua confirmação. Agora falta:"
             : um ? "Falta neste envio:" : `Faltam ${itens.length} itens neste envio:`}</p>
           <ul className="confirmar-faltas__lista">{itens.map((x, i) => <li key={i}>{x}</li>)}</ul>
           <p className="confirmar-faltas__pergunta">{pergunta}</p>

@@ -5,13 +5,14 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from app import arquivos, assinados_envio, envio_reserva, graph, medicoes, pdfs
+from app import arquivos, assinados_envio, envio_reserva, graph, medicoes, pdfs, protocolo
 from app.api_auth import conexao
 from app.api_espelhos import _emails
 from app.api_medicoes import ID, _medicao_existe
 from app.api_planilha_envio import AnexoConferido
+from app.api_protocolos import Confirmadas
 from app.permissoes import exigir
 
 router = APIRouter()
@@ -28,6 +29,8 @@ class EnvioIn(BaseModel):
     anexos_previa: list[AnexoConferido] = Field(max_length=10)
     # os envios concluidos que a previa mostrou (revisao da PR #635): outro envio terminado no meio recusa
     anteriores: int | None = Field(default=None, ge=0, le=10_000)
+    # issue #628: o que a conferencia do pacote apontou, como a pessoa viu e confirmou no aviso "ATENÇÃO"
+    confirmadas: Confirmadas = None
 
 
 def _ler(arquivo: UploadFile | None) -> tuple[str, bytes] | None:
@@ -78,10 +81,14 @@ def enviar(mid: ID, dados: str = Form(..., max_length=100_000), arquivo: UploadF
         eid = assinados_envio.enviar(
             conn, {"id": usuario["id"], "email": usuario["email"]}, mid, docs, _emails(d.para), _emails(d.copia),
             d.assunto.strip(), d.corpo, [a.model_dump() for a in d.anexos_previa], d.motivo,
-            d.assinado_em.isoformat() if d.assinado_em else None, cco=_emails(d.cco), anteriores_vistos=d.anteriores)
+            d.assinado_em.isoformat() if d.assinado_em else None, cco=_emails(d.cco), anteriores_vistos=d.anteriores,
+            confirmadas=d.confirmadas)
     except envio_reserva.EnvioEmAndamento as e:
         conn.rollback()
         raise HTTPException(409, detail=e.detalhe()) from None
+    except protocolo.ConfirmarPendencias as e:
+        conn.rollback()
+        raise HTTPException(422, detail=e.detalhe()) from None
     except assinados_envio.AnexosMudaram as e:
         conn.rollback()
         raise HTTPException(422, detail={"codigo": e.codigo, "mensagem": str(e)}) from None
@@ -94,14 +101,25 @@ def enviar(mid: ID, dados: str = Form(..., max_length=100_000), arquivo: UploadF
 @router.post("/api/medicoes/{mid}/assinados/envio-externo", status_code=201)
 def envio_externo(mid: ID, enviado_em: str = Form(..., max_length=10), arquivo: UploadFile | None = File(None),
                   arquivo_reajuste: UploadFile | None = File(None), justificativa: UploadFile | None = File(None),
-                  eml: UploadFile | None = File(None), usuario: dict = Depends(exigir("editar_cadastros")),
+                  eml: UploadFile | None = File(None),
+                  # issue #628: o que a conferencia do pacote apontou, confirmado no aviso (um campo por item)
+                  confirmadas: list[str] = Form(default=[]),
+                  usuario: dict = Depends(exigir("editar_cadastros")),
                   conn: sqlite3.Connection = Depends(conexao)):
     from app import notas_envio
+    try:            # os mesmos limites do `Confirmadas` das rotas JSON (api_protocolos)
+        TypeAdapter(Confirmadas).validate_python(confirmadas)
+    except ValidationError:
+        raise HTTPException(422, "Lista do que falta grande demais: abra o registro de novo") from None
     _medicao_existe(conn, mid)
     docs = _docs(conn, mid, arquivo, arquivo_reajuste, justificativa)
     msg = (eml.filename, eml.file.read(notas_envio.TETO_EML + 1)) if eml is not None and eml.filename else None
     try:
-        rid = assinados_envio.registrar_por_fora(conn, usuario["id"], mid, docs, enviado_em, msg)
+        rid = assinados_envio.registrar_por_fora(conn, usuario["id"], mid, docs, enviado_em, msg,
+                                                 confirmadas=confirmadas or None)
+    except protocolo.ConfirmarPendencias as e:
+        conn.rollback()
+        raise HTTPException(422, detail=e.detalhe()) from None
     except ValueError as e:
         conn.rollback()
         raise HTTPException(422, str(e)) from None

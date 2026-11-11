@@ -13,7 +13,8 @@ sha256 de cada anexo, e o envio recusa se o que chegou nao for o que a pessoa co
 import datetime
 import hashlib
 
-from app import arquivos, auditoria, carta, correio, db, envio_reserva, medicoes, pleitos, tempo
+from app import (arquivos, auditoria, carta, correio, db, envio_reserva, leitura_pdf, leitura_smo, medicoes, pleitos,
+                 tempo)
 from app.planilha_envio import AnexosMudaram, _conferir_anexos, _contexto, _medicao
 
 TABELA = "medicao_assinados_envios"
@@ -172,6 +173,79 @@ def _anexos(docs: dict) -> list[tuple[str, bytes, str]]:
     return out
 
 
+# --- conferencia do pacote contra o checklist do orgao (issue #628) -------------------------------------
+
+# Aviso, nunca recusa: o envio sai com a lista confirmada por quem clicou, como as pendencias do protocolo (#213).
+# Os titulos moram no cadastro do orgao (`pacote_assinado: {medicao: [...], reajuste: [...]}`); sem a chave, o PDF
+# nem e' lido. So' pelo texto (pypdf), sem OCR.
+TETO_PAGINAS_PACOTE = 2000
+SEM_TEXTO = "PDF{de} sem texto: não foi possível conferir o conteúdo"
+NAO_LIDO = "Não foi possível ler o PDF{de} para conferir o conteúdo"
+
+
+def _chave_de_busca(texto: str) -> str:
+    """Sem acento, em minusculas e com espacos e quebras de linha reduzidos a um espaco: o SMO imprime o boletim em
+    maiusculas e o pypdf quebra o titulo longo em duas linhas."""
+    return leitura_smo._plano(texto).lower().strip()
+
+
+def titulos_que_faltam(texto: str, titulos: list[str]) -> list[str]:
+    """Os titulos (como estao no cadastro) que o texto do PDF nao traz, na ordem do cadastro."""
+    plano = _chave_de_busca(texto)
+    return [t for t in titulos if _chave_de_busca(t) not in plano]
+
+
+def conferir_pacote(pdf: bytes, titulos: list[str], m: dict, do_reajuste: bool = False) -> list[dict]:
+    """O que o PDF assinado de `m` deixa de trazer: um item por relatorio que falta e a capa de outra medicao (ou nao
+    aprovada). PDF sem texto, ou que nao se deixa ler, da' um aviso so'. `do_reajuste`: o PDF do reajuste que vai
+    junto com o da execucao, para as mensagens dizerem de qual dos dois falam."""
+    de = " do reajuste" if do_reajuste else ""
+    try:
+        paginas = leitura_pdf.textos_por_pagina_com_limite(pdf, TETO_PAGINAS_PACOTE)
+    except ValueError:                  # TextoInadequado (guarda, fila, prazo) ou PDF que o pypdf nao abre
+        return [{"codigo": "pacote_nao_lido", "mensagem": NAO_LIDO.format(de=de)}]
+    if not any(p.strip() for p in paginas):
+        return [{"codigo": "pacote_sem_texto", "mensagem": SEM_TEXTO.format(de=de)}]
+    out = [{"codigo": "pacote_falta", "mensagem": f"Falta no PDF assinado{de}: {t}"}
+           for t in titulos_que_faltam("\n".join(paginas), titulos)]
+    capa = leitura_smo._ler_paginas(paginas, ocr=False)["campos"]
+    esperado = m.get("numero_orgao") or m["numero"]
+    if capa.get("numero") and capa["numero"] != esperado:
+        out.append({"codigo": "pacote_capa", "mensagem": f"A capa dentro do PDF{de} é da {capa['numero']}ª medição"})
+    elif capa.get("situacao") and capa["situacao"] != "APROVADA":
+        out.append({"codigo": "pacote_capa", "mensagem": f"A capa dentro do PDF{de} não está aprovada (situação: "
+                                                         f"{capa['situacao']})"})
+    return out
+
+
+def pendencias_do_pacote(regras: dict, m: dict, p: dict | None, docs: dict) -> list[dict]:
+    """A conferencia de cada PDF contra a lista da natureza dele: no envio pela execucao, o da medicao contra
+    `medicao` e o do reajuste (quando vai junto) contra `reajuste`; no envio pelo reajuste (#637), o PDF dele contra
+    `reajuste`. Orgao sem `pacote_assinado` (ou sem a lista da natureza): nada."""
+    listas = regras.get("pacote_assinado") or {}
+    out = []
+    titulos = listas.get("reajuste" if m["tipo"] == "reajuste" else "medicao")
+    if titulos and docs.get("medicao"):
+        out += conferir_pacote(docs["medicao"][1], titulos, m)
+    if p and docs.get("reajuste") and listas.get("reajuste"):
+        out += conferir_pacote(docs["reajuste"][1], listas["reajuste"], p, do_reajuste=True)
+    return out
+
+
+def _conferir_confirmacao(pend: list[dict], confirmadas: list[str] | None, acao: str) -> list[str]:
+    """A lista confirmada no aviso tem de ser a de agora (os mesmos itens, em qualquer ordem); sem nada a confirmar,
+    passa. Devolve o que foi confirmado, para a auditoria."""
+    from app import protocolo        # import local: protocolo importa medicoes
+    agora = [x["mensagem"] for x in pend]
+    if not agora or sorted(confirmadas or []) == sorted(agora):
+        return agora
+    if not confirmadas:
+        raise protocolo.ConfirmarPendencias("ATENÇÃO: confira o PDF assinado (" + "; ".join(agora) + "). Confirme "
+                                            f"para continuar com {acao}", pend)
+    raise protocolo.ConfirmarPendencias("A conferência do PDF assinado mudou depois da sua confirmação: confira e "
+                                        "confirme de novo", pend)
+
+
 # --- previa ----------------------------------------------------------------------------------------
 
 def _ids_da_planilha(conn, m: dict) -> list[int]:
@@ -236,6 +310,7 @@ def previa(conn, medicao_id: int, docs: dict, remetente: str | None = None,
     if total > correio.MAX_TOTAL:
         pend.append({"codigo": "tamanho", "mensagem": f"Anexos somam {total // MB} MB, acima do limite do e-mail "
                                                       f"({correio.MAX_TOTAL // MB} MB)"})
+    pend += pendencias_do_pacote(regras, m, p, docs)
     anteriores = _concluidos(conn, _ids(m, p, docs))
     return {"medicao_id": medicao_id, "para": para, "copia": copia, "assunto": _assunto(conn, c, m),
             "corpo": CORPO_COM_JUSTIFICATIVA if docs.get("justificativa") else CORPO,
@@ -315,9 +390,12 @@ def _sem_reserva_ativa(conn, ids: list[int]) -> None:
 
 def enviar(conn, usuario: dict, medicao_id: int, docs: dict, para: list[str], copia: list[str], assunto: str,
            corpo: str, anexos_previa: list[dict], motivo: str | None = None, assinado_em: str | None = None,
-           cco: list[str] | None = None, hoje: datetime.date | None = None, anteriores_vistos: int | None = None) -> int:
+           cco: list[str] | None = None, hoje: datetime.date | None = None, anteriores_vistos: int | None = None,
+           confirmadas: list[str] | None = None) -> int:
     """`anexos_previa` (nome, tamanho e sha256) e' obrigatorio: o e-mail leva o que a pessoa conferiu na previa.
-    `anteriores_vistos`: os envios concluidos que a previa mostrou; outro envio concluido desde entao recusa (409)."""
+    `anteriores_vistos`: os envios concluidos que a previa mostrou; outro envio concluido desde entao recusa (409).
+    `confirmadas` (issue #628): o que a conferencia do pacote apontou, como a pessoa viu e confirmou; sem ela ou
+    diferente -> protocolo.ConfirmarPendencias."""
     hoje = hoje or tempo.hoje_local()
     # Tudo o que recusa vem ANTES do e-mail (que nao se desfaz).
     pv = previa(conn, medicao_id, docs, hoje=hoje)
@@ -333,6 +411,8 @@ def enviar(conn, usuario: dict, medicao_id: int, docs: dict, para: list[str], co
     data = _data(conn, ids, assinado_em, hoje)
     _conferir_anteriores(conn, ids, anteriores_vistos)
     _conferir_motivo(conn, ids, motivo)
+    faltas = _conferir_confirmacao([x for x in pv["pendencias"] if x["codigo"].startswith("pacote_")], confirmadas,
+                                   "o envio")
     gravados = _gravar_pdfs(docs)
     anexos = [(n, b) for n, b, _ in _anexos(docs)]
     # Reserva atomica antes do e-mail: dois cliques simultaneos mandam um e-mail so'. Tudo sob o mesmo BEGIN IMMEDIATE:
@@ -364,7 +444,8 @@ def enviar(conn, usuario: dict, medicao_id: int, docs: dict, para: list[str], co
         auditoria.registrar(conn, usuario["id"], "medicao.assinados_envio", "medicao", medicao_id, None,
                             {"envio_id": envio_id, "assinados_envio_id": rid, "origem": "sistema", "assinado_em": data,
                              "motivo": motivo, "anteriores": anteriores,
-                             "anexos": [a["nome"] for a in pv["anexos"]]})
+                             "anexos": [a["nome"] for a in pv["anexos"]],
+                             **({"faltas_confirmadas": faltas} if faltas else {})})
     return envio_id
 
 
@@ -378,11 +459,13 @@ def _data_do_envio(conn, ids: list[int], enviado_em: str) -> str:
 
 
 def registrar_por_fora(conn, usuario_id: int, medicao_id: int, docs: dict, enviado_em: str,
-                       eml: tuple[str, bytes] | None = None, motivo: str | None = None) -> int:
+                       eml: tuple[str, bytes] | None = None, motivo: str | None = None,
+                       confirmadas: list[str] | None = None) -> int:
     """"Registrar envio dos assinados por fora": data (nao futura, nao anterior ao boletim), o PDF assinado, os
-    opcionais e o .eml (com a mesma conferencia do envio por fora da planilha/carta). Sem e-mail."""
+    opcionais e o .eml (com a mesma conferencia do envio por fora da planilha/carta). Sem e-mail. `confirmadas` (issue
+    #628): o que a conferencia do pacote apontou, confirmado no aviso; sem ela ou diferente -> ConfirmarPendencias."""
     from app import notas_envio       # import local: notas_envio importa protocolo, que importa medicoes
-    m, _, _, p = conferir(conn, medicao_id, docs)
+    m, _, regras, p = conferir(conn, medicao_id, docs)
     data = _data_do_envio(conn, _ids(m, p, docs), enviado_em)
     if eml:
         if len(eml[1]) > notas_envio.TETO_EML:
@@ -390,6 +473,7 @@ def registrar_por_fora(conn, usuario_id: int, medicao_id: int, docs: dict, envia
         if not notas_envio._e_email(eml[1]):
             raise ValueError(notas_envio.NAO_E_EML)
     motivo = (motivo or "").strip() or None
+    faltas = _conferir_confirmacao(pendencias_do_pacote(regras, m, p, docs), confirmadas, "o registro do envio")
     gravados = _gravar_pdfs(docs)
     rel_eml = arquivos.gravar_bytes("evidencias", eml[1], "eml")[0] if eml else None
     with db.mutacao(conn):
@@ -410,5 +494,6 @@ def registrar_por_fora(conn, usuario_id: int, medicao_id: int, docs: dict, envia
         auditoria.registrar(conn, usuario_id, "medicao.assinados_envio", "medicao", medicao_id, None,
                             {"assinados_envio_id": rid, "origem": "externo", "enviado_em": data, "eml": rel_eml,
                              "motivo": motivo, "anteriores": anteriores,
-                             "anexos": [g["nome"] for g in gravados.values()]})
+                             "anexos": [g["nome"] for g in gravados.values()],
+                             **({"faltas_confirmadas": faltas} if faltas else {})})
     return rid

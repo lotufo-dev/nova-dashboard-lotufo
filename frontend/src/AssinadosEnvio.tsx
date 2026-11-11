@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ApiErro, apiForm, mensagemDeErro } from "./api";
 import ComporEmail, { type Mensagem } from "./ComporEmail";
+import ConfirmarFaltas from "./ConfirmarFaltas";
 import ErroCampo from "./ErroCampo";
 import { IconeAlerta } from "./icones";
 import LiberarEnvio from "./LiberarEnvio";
@@ -23,7 +24,16 @@ export type SituacaoAssinados = {
 };
 type Anexo = { nome: string; tamanho: number; sha256: string; origem: string };
 type Previa = { para: string[]; copia: string[]; assunto: string; corpo: string; anexos: Anexo[]; total: number;
-  limite: number; pendencias: { codigo: string; mensagem: string }[]; reenvio: boolean; anteriores?: number };
+  limite: number; pendencias: Pendencia[]; reenvio: boolean; anteriores?: number };
+
+// Issue #628: o que a conferencia do PDF contra o checklist do orgao apontou (codigos `pacote_*`). E' aviso: o
+// envio sai com a lista confirmada no aviso "ATENÇÃO", que o servidor confere de novo.
+type Pendencia = { codigo: string; mensagem: string };
+const doPacote = (ps: Pendencia[]) => ps.filter(p => p.codigo.startsWith("pacote_"));
+const pedeConfirmacao = (e: unknown): e is ApiErro =>
+  e instanceof ApiErro && e.status === 422 && e.corpo?.codigo === "CONFIRMAR_PENDENCIAS";
+const chamadaDoPacote = (mudou: boolean) =>
+  mudou ? "A conferência do PDF assinado mudou desde a sua confirmação:" : "Confira o PDF assinado:";
 
 const MIN_MOTIVO = 10;     // o servidor recusa menos que isso (assinados_envio.MIN_MOTIVO)
 const MB = 1024 * 1024;
@@ -131,6 +141,7 @@ export function FormEnviarAssinados({ medicaoId: idDoAto, s: sDoAto, salvando, a
   const [tentouMotivo, setTentouMotivo] = useState(false);
   const [erroPrevia, setErroPrevia] = useState("");
   const [abrindo, setAbrindo] = useState(false);
+  const [confirmar, setConfirmar] = useState<{ m: Mensagem; itens: string[]; mudou: boolean } | null>(null);
   const falta = !a.arquivo ? (so ? "Anexe o PDF assinado do reajuste." : "Anexe o PDF assinado da medição.")
     : acimaDoLimite(s, a) ?? acimaDoEmail(s, a);
   const faltaMotivo = previa?.reenvio && [...motivo.trim()].length < MIN_MOTIVO
@@ -148,16 +159,24 @@ export function FormEnviarAssinados({ medicaoId: idDoAto, s: sDoAto, salvando, a
     } finally { setAbrindo(false); }
   }
 
-  async function enviar(m: Mensagem) {
+  async function enviar(m: Mensagem, confirmadas: string[]) {
     if (!previa) return;
+    setConfirmar(null);
     const fd = formDosArquivos(a);
     fd.append("dados", JSON.stringify({ para: m.para, copia: m.copia, cco: m.cco, assunto: m.assunto, corpo: m.corpo,
       motivo: motivo.trim() || null, assinado_em: data || null, anteriores: previa.anteriores ?? null,
+      confirmadas: confirmadas.length > 0 ? confirmadas : null,
       anexos_previa: previa.anexos.map(x => ({ nome: x.nome, tamanho: x.tamanho, sha256: x.sha256 })) }));
     const ok = await agir(async () => {
       try {
         return await apiForm(`/api/medicoes/${medicaoId}/assinados/enviar`, fd);
       } catch (e) {
+        // a conferencia do PDF mudou depois do aviso: o servidor manda a lista de agora e o aviso abre de novo com ela
+        if (pedeConfirmacao(e)) {
+          const itens: Pendencia[] = e.corpo.itens ?? [];
+          setPrevia({ ...previa, pendencias: [...previa.pendencias.filter(p => !p.codigo.startsWith("pacote_")), ...itens] });
+          setConfirmar({ m, itens: e.corpo.pendencias ?? [], mudou: confirmadas.length > 0 });
+        }
         // outro envio terminou depois da previa (revisao da PR #635): a previa abre de novo, agora com o motivo
         if (e instanceof ApiErro && e.status === 409 && e.corpo?.codigo === "ENVIO_CONCLUIDO_NO_MEIO") {
           setTentouMotivo(false);
@@ -220,7 +239,14 @@ export function FormEnviarAssinados({ medicaoId: idDoAto, s: sDoAto, salvando, a
                 )}
               </div>
             }
-            aoEnviar={m => void enviar(m)} aoDescartar={() => setPrevia(null)} />
+            aoEnviar={m => {
+              const itens = doPacote(previa.pendencias).map(p => p.mensagem);
+              if (itens.length > 0) setConfirmar({ m, itens, mudou: false });
+              else void enviar(m, []);
+            }}
+            aoDescartar={() => setPrevia(null)} />
+          {confirmar && <ConfirmarFaltas itens={confirmar.itens} chamada={chamadaDoPacote(confirmar.mudou)}
+            aoCancelar={() => setConfirmar(null)} aoContinuar={() => void enviar(confirmar.m, confirmar.itens)} />}
         </div>
       )}
     </div>
@@ -241,26 +267,43 @@ export function FormAssinadosPorFora({ medicaoId: idDoAto, s: sDoAto, salvando, 
   const [data, setData] = useState(hojeLocal());
   const [eml, setEml] = useState<File | null>(null);
   const [tentou, setTentou] = useState(false);
+  const [confirmar, setConfirmar] = useState<{ itens: string[]; mudou: boolean } | null>(null);
   const hoje = hojeLocal();
   const faltaData = !data ? "Informe a data do envio." : data > hoje ? "A data do envio não pode ser futura." : undefined;
   const falta = !a.arquivo ? (so ? "Anexe o PDF assinado do reajuste." : "Anexe o PDF assinado da medição.")
     : acimaDoLimite(s, a) ?? acimaDoTeto(s, [a.arquivo, a.reajuste, a.justificativa, eml]);
 
-  async function registrar(ev: React.FormEvent) {
+  function registrar(ev: React.FormEvent) {
     ev.preventDefault();
+    void executar([]);
+  }
+
+  async function executar(confirmadas: string[]) {
+    setConfirmar(null);
     setTentou(true);
     if (faltaData) { document.getElementById("assinados-fora-data")?.focus(); return; }
     if (falta) { document.getElementById(so ? "assinados-fora-reajuste" : "assinados-fora-arquivo")?.focus(); return; }
     const fd = formDosArquivos(a);
     fd.append("enviado_em", data);
     if (eml) fd.append("eml", eml);
-    const ok = await agir(() => apiForm(`/api/medicoes/${medicaoId}/assinados/envio-externo`, fd),
-      "Envio dos documentos assinados registrado.");
+    for (const c of confirmadas) fd.append("confirmadas", c);
+    const ok = await agir(async () => {
+      try {
+        return await apiForm(`/api/medicoes/${medicaoId}/assinados/envio-externo`, fd);
+      } catch (e) {
+        // issue #628: o PDF nao traz o que o orgao pede; o aviso pede a confirmacao e o registro vai de novo com ela
+        if (pedeConfirmacao(e)) setConfirmar({ itens: e.corpo.pendencias ?? [], mudou: confirmadas.length > 0 });
+        throw e;
+      }
+    }, "Envio dos documentos assinados registrado.");
     if (ok) aoFechar();
   }
 
   return (
     <form onSubmit={registrar} noValidate onKeyDown={ev => ev.key === "Escape" && aoFechar()}>
+      {confirmar && <ConfirmarFaltas itens={confirmar.itens} chamada={chamadaDoPacote(confirmar.mudou)}
+        pergunta="Deseja continuar com o registro?" rotuloContinuar="Continuar com o registro"
+        aoCancelar={() => setConfirmar(null)} aoContinuar={() => void executar(confirmar.itens)} />}
       <p className="painel__titulo">Registrar envio dos assinados por fora</p>
       <Erro erro={erro} />
       <Reservado s={s} aoLiberar={aoLiberar} />

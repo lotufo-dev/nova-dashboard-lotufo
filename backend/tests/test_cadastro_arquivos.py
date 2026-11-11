@@ -1207,3 +1207,33 @@ def test_prazo_boletim_dias_do_orgao_inteiro_positivo(tmp_path):
     for i, ruim in enumerate((0, -3, "15", 1.5, True, None)):
         erros = _erros(_escrever(tmp_path / f"r{i}", orgaos=[{**ORGAO, "prazo_boletim_dias": ruim}]))
         assert "orgaos.yaml[0]: prazo_boletim_dias: use um inteiro maior que zero" in erros
+
+
+# --- issue #628: checklist do pacote assinado no orgao ---------------------------------------------
+
+def test_pacote_assinado_do_orgao_lista_de_titulos_por_natureza(tmp_path):
+    pacote = {"medicao": ["Relatório de Capa da Medição", "Boletim de Desempenho"],
+              "reajuste": ["Relatório de Cálculo de Medição Reajustada"]}
+    cad = ca.preparar(_escrever(tmp_path / "a", orgaos=[{**ORGAO, "pacote_assinado": pacote}]))
+    assert cad["orgaos"][0]["regras"]["pacote_assinado"] == pacote
+    so_medicao = ca.preparar(_escrever(tmp_path / "m", orgaos=[{**ORGAO, "pacote_assinado": {"medicao": ["Capa"]}}]))
+    assert so_medicao["orgaos"][0]["regras"]["pacote_assinado"] == {"medicao": ["Capa"]}
+    assert "pacote_assinado" not in ca.preparar(_escrever(tmp_path / "b"))["orgaos"][0]["regras"]   # opcional
+    lista = "orgaos.yaml[0]: pacote_assinado.medicao: use uma lista, não vazia, de títulos de relatório"
+    for i, (ruim, erro) in enumerate((
+            ({"medicao": []}, lista), ({"medicao": ["Capa", " "]}, lista), ({"medicao": "Capa"}, lista),
+            ({"medicao": [1]}, lista), ({"medicao": None}, lista),
+            ({"execucao": ["Capa"]}, "orgaos.yaml[0]: pacote_assinado.execucao: chave desconhecida (use medicao ou "
+                                     "reajuste)"),
+            ({}, "orgaos.yaml[0]: pacote_assinado: use medicao e/ou reajuste, cada um com a lista de títulos"),
+            (["Capa"], "orgaos.yaml[0]: pacote_assinado: use medicao e/ou reajuste, cada um com a lista de títulos"),
+            (None, "orgaos.yaml[0]: pacote_assinado: use medicao e/ou reajuste, cada um com a lista de títulos"))):
+        erros = _erros(_escrever(tmp_path / f"r{i}", orgaos=[{**ORGAO, "pacote_assinado": ruim}]))
+        assert erro in erros, (ruim, erros)
+
+
+def test_cadastro_exemplo_traz_o_pacote_assinado_na_familia_sinfra():
+    from tests.conftest import CADASTRO_EXEMPLO
+    orgao = next(o for o in ca.preparar(CADASTRO_EXEMPLO)["orgaos"] if o["familia"] == "sinfra")
+    assert "Relatório de Cronograma Físico-Financeiro de Evolução Mensal" in orgao["regras"]["pacote_assinado"]["medicao"]
+    assert "Relatório de Cálculo de Medição Reajustada" in orgao["regras"]["pacote_assinado"]["reajuste"]
