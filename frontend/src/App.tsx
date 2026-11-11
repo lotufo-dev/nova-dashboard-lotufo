@@ -21,6 +21,7 @@ import Diretoria from "./Diretoria";
 import { entradaDe, itemDe, menuDe, subitemMedicoesDe, tituloDaSecao, tituloDe } from "./navegacao";
 import SigaPagina from "./SigaPagina";
 import AncorasDocusign from "./AncorasDocusign";
+import { useLeituraDasRespostas } from "./respostasOrgao";
 import { buscaDosAvisosEmObras, caminhoDe, ehDetalhe, useRolarAteSecao, useRota } from "./rota";
 
 // Menu e entrada por perfil moram em navegacao.ts (NAVEGACAO.md › Perfis e tela de entrada); o trilho e a barra
@@ -103,6 +104,9 @@ export default function App() {
       .catch(() => {});
     return () => { vivo = false; };
   }, [temMedicoes, caminhoAtual]);
+
+  // #644: quem envia e-mail le as respostas do orgao ao entrar e a cada 5 minutos; quem so' consulta nao dispara leitura.
+  useLeituraDasRespostas(!!usuario && usuario.perfil !== "diretoria");
 
   // A ancora (#emp-3) leva a secao quando a tela terminar de montar.
   useRolarAteSecao(usuario ? secao : "", caminhoDe(rota));
