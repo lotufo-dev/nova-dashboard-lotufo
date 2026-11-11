@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, mensagemDeErro } from "./api";
-import type { EmpresaDoc, ObraDoc } from "./matriz";
+import type { EmpresaDoc, ObraDoc, RenovarDoc } from "./matriz";
 
 /* Dados e ganchos comuns das duas telas de Documentos (#161); as pecas de tela ficam em documentosComum.tsx. */
 
-export type Painel = { hoje: string; empresas: EmpresaDoc[]; contratos?: ObraDoc[] };
+export type Painel = { hoje: string; empresas: EmpresaDoc[]; contratos?: ObraDoc[]; renovar_agora?: RenovarDoc[] };
 export type Lida = {
   tipo: string; tipo_nome: string; natureza: string; entidade_id: number; entidade: string;
   emissao: string; validade: string; numero: string | null; validade_calculada: boolean; ocr?: boolean;

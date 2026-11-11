@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  certidoesOrdenadas, chipValidadeGarantia, colunas, empresasComCertidaoExigida, estadosRegularidade, garantiasAConferir,
+  certidoesOrdenadas, certidoesVencendo, chipCertidao, chipValidadeGarantia, colunas, empresasComCertidaoExigida, estadosRegularidade, garantiasAConferir,
   matriz, obrasPorOrgao, pendenciaMaisUrgente, pendenciasDa, regularidadesFaltando, resumoEmpresa,
   situacaoCertidao, situacaoGarantia, type EmpresaDoc, type LinhaCertidao, type ObraDoc,
 } from "./matriz";
@@ -159,5 +159,30 @@ describe("garantia como pendência da empresa (#161)", () => {
     const lista = [ok(4), ok(2), ok(3)];
     expect(matriz(lista, false, obras).map(x => x.entidade_id)).toEqual([3, 2, 4]);
     expect(matriz(lista, true, obras).map(x => x.entidade_id)).toEqual([3, 2]);
+  });
+});
+
+describe("âmbar pelo próximo protocolo (#658)", () => {
+  const cert = { id: 1, emissao: "2026-08-01", validade: "2026-10-05", natureza: "negativa" };
+  const c = (dias: number | null, situacao: LinhaCertidao["situacao"], renovar?: boolean): LinhaCertidao => ({
+    ...l("fgts", situacao, dias), certidao: situacao === "faltando" ? null : cert, renovar });
+
+  it("o chip fica âmbar quando o servidor diz que a certidão vence antes do próximo protocolo, mesmo longe dos 7 dias", () => {
+    expect(chipCertidao(c(20, "ok", true), "05/10/2026")).toEqual({ cor: "breve", valor: "20 d", data: "05/10/2026", contaNoAviso: true });
+  });
+
+  it("vence depois do próximo protocolo: não fica âmbar, mesmo a menos de 7 dias", () => {
+    expect(chipCertidao(c(3, "vencendo", false), "26/09/2026")).toEqual({ cor: "feito", valor: "3 d", data: "26/09/2026", contaNoAviso: false });
+  });
+
+  it("vencida e sem registro seguem vermelhas; sem a marca do servidor vale o limite de 7 dias", () => {
+    expect(chipCertidao(c(null, "vencida", true), "x").cor).toBe("critico");
+    expect(chipCertidao(c(null, "faltando", true), "").cor).toBe("critico");
+    expect(chipCertidao(c(7, "ok"), "x").cor).toBe("breve");
+    expect(chipCertidao(c(8, "ok"), "x").cor).toBe("feito");
+  });
+
+  it("o contador conta o que está a renovar", () => {
+    expect(certidoesVencendo([e(1, [c(20, "ok", true), c(3, "vencendo", false), c(null, "vencida", true)])])).toBe(2);
   });
 });

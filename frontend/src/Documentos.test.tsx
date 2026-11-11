@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { apiForm } from "./api";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { api, apiForm } from "./api";
 import Documentos from "./Documentos";
 import { competenciaDoNome } from "./documentosDados";
 import { chipCertidao, competenciasRegularidade } from "./matriz";
@@ -20,11 +22,11 @@ const usuario = { id: 1, nome: "U", email: "u@lotufo.com", perfil: "engenharia" 
 
 const linhaDe = (nome: string) => screen.getByRole("link", { name: nome }).closest("li")!;
 
-test("três abas com contador: certidões vencendo, regularidade faltando e garantias a conferir", async () => {
+test("três abas com contador: certidões a renovar, regularidade faltando e garantias a conferir", async () => {
   render(<Documentos usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   const abas = screen.getAllByRole("tab").map(t => t.textContent);
-  expect(abas).toEqual(["Certidões · 2 vencendo", "Regularidade mensal · 1 faltando", "Garantias · 1 a conferir"]);
+  expect(abas).toEqual(["Certidões · 2 a renovar", "Regularidade mensal · 1 faltando", "Garantias · 1 a conferir"]);
   expect(screen.getByRole("button", { name: /Anexar PDF/ })).toBeTruthy();
 });
 
@@ -263,4 +265,71 @@ test("link salvo da tela antiga (?empresa=N) abre a página da empresa, trocando
   await waitFor(() => expect(window.location.pathname).toBe("/documentos/3"));
   expect(window.location.search).toBe("");
   expect(window.location.hash).toBe("");
+});
+
+/* ---------------------------------------------------------------- Renovar agora (#658) */
+
+const bloco = () => within(screen.getByRole("region", { name: "Renovar agora" }));
+
+test("Renovar agora: uma linha por certidão, com a validade, Emitir e Anexar", async () => {
+  render(<Documentos usuario={usuario} />);
+  await screen.findByRole("link", { name: "Lotufo" });
+  const linhas = bloco().getAllByRole("listitem");
+  expect(linhas.map(x => x.querySelector(".doc-renovar__certidao")!.textContent)).toEqual(["Municipal", "FGTS"]);
+  // a vencida em vermelho, a que vence antes do proximo protocolo em ambar
+  expect(linhas[0].querySelector(".doc-chip")!.className).toContain("doc-chip--critico");
+  expect(linhas[0].textContent).toContain("20/09/2026");
+  expect(linhas[1].querySelector(".doc-chip")!.className).toContain("doc-chip--breve");
+  expect(linhas[1].textContent).toContain("27/09/2026");
+  expect(linhas[1].querySelector(".doc-linha__nome")!.textContent).toBe("Lotufo");
+  expect(within(linhas[1]).getByRole("link", { name: /Emitir FGTS de Lotufo/ }).getAttribute("href")).toBe("https://emissao.exemplo.com.br/fgts");
+  within(linhas[1]).getByRole("button", { name: "Anexar FGTS de Lotufo" });
+  // o bloco e' da aba Certidoes
+  cleanup();
+  render(<Documentos usuario={usuario} busca={{ aba: "garantias" }} />);
+  await screen.findByText("Obra Alfa");
+  expect(screen.queryByRole("region", { name: "Renovar agora" })).toBeNull();
+});
+
+test("Renovar agora: diretoria vê as linhas, sem Emitir nem Anexar", async () => {
+  render(<Documentos usuario={{ ...usuario, perfil: "diretoria" }} />);
+  await screen.findByRole("link", { name: "Lotufo" });
+  expect(bloco().getAllByRole("listitem")).toHaveLength(2);
+  expect(bloco().queryByRole("link", { name: /Emitir/ })).toBeNull();
+  expect(bloco().queryByRole("button", { name: /Anexar/ })).toBeNull();
+});
+
+test("sem nada a renovar o bloco não aparece, o contador some e o chip que vence depois do protocolo não fica âmbar", async () => {
+  const { PAINEL } = await import("./documentosTeste");
+  const lotufo = PAINEL.empresas.find(x => x.entidade_id === 1)!;
+  vi.mocked(api).mockResolvedValueOnce({
+    ...PAINEL, renovar_agora: [],
+    empresas: [{ ...lotufo, certidoes: lotufo.certidoes.filter(x => x.chave === "fgts").map(x => ({ ...x, renovar: false, proximo_protocolo: null })) }],
+  });
+  render(<Documentos usuario={usuario} />);
+  await screen.findByRole("link", { name: "Lotufo" });
+  expect(screen.queryByRole("region", { name: "Renovar agora" })).toBeNull();
+  expect(screen.getByRole("tab", { name: /Certidões/ }).textContent).toBe("Certidões");
+  const chip = within(linhaDe("Lotufo")).getByText("FGTS", { selector: ".doc-chip__rotulo" }).closest(".doc-chip")!;
+  expect(chip.textContent).toContain("4 d");
+  expect(chip.className).toContain("doc-chip--feito");
+});
+
+test("a legenda das certidões fala do próximo protocolo, não dos 7 dias", async () => {
+  render(<Documentos usuario={usuario} />);
+  await screen.findByRole("link", { name: "Lotufo" });
+  const legenda = within(screen.getByRole("list", { name: "Legenda das cores" }));
+  legenda.getByText("vence antes do próximo protocolo");
+  expect(legenda.queryByText(/7 dias/)).toBeNull();
+});
+
+test("aba Garantias: os quatro chips em quatro colunas, no cabeçalho e nas linhas", async () => {
+  render(<Documentos usuario={usuario} busca={{ aba: "garantias" }} />);
+  await screen.findByText("Obra Alfa");
+  const grupo = screen.getByRole("region", { name: "Garantias de SINFRA" });
+  const grades = [...grupo.querySelectorAll(".doc-chips")];
+  expect(grades).toHaveLength(3);                                   // o cabecalho e as duas obras
+  for (const g of grades) { expect(g.className).toContain("doc-chips--4"); expect(g.children).toHaveLength(4); }
+  const css = readFileSync(join(process.cwd(), "src", "documentos.css"), "utf8");
+  expect(css).toContain(".doc-chips--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }");
 });
