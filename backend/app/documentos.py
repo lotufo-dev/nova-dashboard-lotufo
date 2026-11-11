@@ -8,6 +8,7 @@ INSS), anexado uma vez e usado em todos os protocolos do mes.
 O que e' EXIGIDO vem do cadastro: lista do orgao por natureza (medicao/projeto ou reajuste),
 excecao do contrato, e em obra de consorcio as certidoes do consorcio e de cada consorciada.
 """
+import calendar
 import datetime
 import io
 import json
@@ -143,6 +144,79 @@ def situacao(conn: sqlite3.Connection, entidade_id: int, tipo: dict, hoje: datet
         return {"situacao": "nao_se_aplica", "dias": None, "certidao": None}
     ultima = certidoes.ultima_emissao(conn, entidade_id, tipo["id"], hoje.isoformat())
     return {"situacao": "vencida" if ultima else "faltando", "dias": None, "certidao": ultima}
+
+
+# --- proximo protocolo e "Renovar agora" (#658) -------------------------------------------------
+
+def _um_mes_depois(d: datetime.date) -> datetime.date:
+    ano, mes = (d.year + 1, 1) if d.month == 12 else (d.year, d.month + 1)
+    return datetime.date(ano, mes, min(d.day, calendar.monthrange(ano, mes)[1]))
+
+
+def proximos_protocolos(conn: sqlite3.Connection, hoje: datetime.date | None = None) -> dict[int, datetime.date | None]:
+    """{contrato ativo: data prevista do proximo protocolo de nota}. Um mes depois do ultimo protocolo de nota da obra
+    (medicao cancelada ou desistida nao conta); com nota emitida esperando protocolo, hoje; previsto que ja' passou
+    tambem e' hoje (o protocolo atrasado pode sair a qualquer dia). None = obra sem protocolo anterior."""
+    hoje = hoje or tempo.hoje_local()
+    out: dict[int, datetime.date | None] = {}
+    for r in conn.execute(
+            "SELECT c.id, "
+            "(SELECT MAX(mp.data) FROM medicao_protocolos mp JOIN medicoes m ON m.id=mp.medicao_id "
+            " WHERE m.contrato_id=c.id AND mp.etapa='nota' AND m.estado NOT IN ('cancelada','desistida')) AS ultimo, "
+            "EXISTS (SELECT 1 FROM medicoes m WHERE m.contrato_id=c.id AND m.estado='nota_emitida') AS esperando "
+            "FROM contratos c WHERE c.estado='ativo' ORDER BY c.id").fetchall():
+        if r["esperando"]:
+            out[r["id"]] = hoje
+        elif r["ultimo"]:
+            out[r["id"]] = max(hoje, _um_mes_depois(_d(r["ultimo"][:10])))
+        else:
+            out[r["id"]] = None
+    return out
+
+
+def renovar_agora(conn: sqlite3.Connection, hoje: datetime.date | None = None) -> list[dict]:
+    """As certidoes a renovar para nao travar o proximo protocolo, uma linha por (empresa, certidao): a vencida, a que
+    nunca foi anexada e a que vence ate' o dia do proximo protocolo previsto de alguma obra ativa que a exige. Para a
+    obra sem protocolo anterior vale o limite de `LIMIAR_CURTA` dias. `proximo_protocolo` e' o primeiro protocolo
+    previsto que a certidao trava (None quando so' o limite de dias a trouxe). Primeiro o que ja' trava (vencida,
+    faltando), depois por validade. Nao muda `situacao` (avisos, checklist e Inicio leem de la')."""
+    hoje = hoje or tempo.hoje_local()
+    previstos = proximos_protocolos(conn, hoje)
+    exigencias: dict[tuple[int, int], tuple[dict, list[datetime.date | None]]] = {}
+    for cid, previsto in previstos.items():
+        vistos = set()
+        for natureza in ("execucao", "reajuste"):
+            ex = exigidos(conn, cid, natureza)
+            for e in ex["entidades"]:
+                for t in ex["tipos"]:
+                    if (e, t["id"]) not in vistos:
+                        vistos.add((e, t["id"]))
+                        exigencias.setdefault((e, t["id"]), (t, []))[1].append(previsto)
+    ordem_papel = {"lotufo": 0, "consorcio": 1, "consorciada": 2}
+    ents = {e["id"]: e for e in entidades.listar(conn) if e["ativo"]}
+    out = []
+    for (eid, _), (t, datas_obras) in exigencias.items():
+        if eid not in ents:
+            continue
+        s = situacao(conn, eid, t, hoje)
+        if s["situacao"] == "nao_se_aplica":
+            continue
+        datas = sorted(d for d in datas_obras if d is not None)
+        validade = s["certidao"]["validade"][:10] if s["certidao"] else None
+        if s["situacao"] in ("vencida", "faltando"):
+            trava = datas[:1]
+        else:
+            trava = [d for d in datas if _d(validade) <= d][:1]
+            if not trava and not (None in datas_obras and s["dias"] <= LIMIAR_CURTA):
+                continue
+        out.append({"entidade_id": eid, "entidade": _nome(ents[eid]), "tipo_id": t["id"], "chave": t["chave"],
+                    "tipo": t["nome"], "link_emissao": t["link_emissao"], "situacao": s["situacao"], "dias": s["dias"],
+                    "validade": validade, "certidao_id": s["certidao"]["id"] if s["certidao"] else None,
+                    "proximo_protocolo": trava[0].isoformat() if trava else None})
+    out.sort(key=lambda x: (0 if x["situacao"] in ("vencida", "faltando") else 1, x["validade"] or "9999",
+                            ordem_papel.get(ents[x["entidade_id"]]["papel"], 9), x["entidade"],
+                            TIPOS.index(x["chave"]) if x["chave"] in TIPOS else 99))
+    return out
 
 
 # --- regularidade mensal ----------------------------------------------------------------------
@@ -391,13 +465,18 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
     for r in conn.execute("SELECT consorcio_id, consorciada_id FROM entidade_consorciadas ORDER BY consorciada_id"):
         consorciadas.setdefault(r[0], []).append(r[1])
         consorcios.setdefault(r[1], []).append(r[0])
+    # #658: o que renovar para nao travar o proximo protocolo; cada certidao leva a marca e a data que ela trava
+    renovar = renovar_agora(conn, hoje)
+    a_renovar = {(x["entidade_id"], x["tipo_id"]): x for x in renovar}
     empresas = []
     for e in ents:
         linhas = []
         for t in tipos:
             s = situacao(conn, e["id"], t, hoje)
+            r = a_renovar.get((e["id"], t["id"]))
             linhas.append({"tipo_id": t["id"], "chave": t["chave"], "tipo": t["nome"], "link_emissao": t["link_emissao"],
-                           "exigida": t["id"] in cert.get(e["id"], {}), **s})
+                           "exigida": t["id"] in cert.get(e["id"], {}), **s,
+                           "renovar": r is not None, "proximo_protocolo": r["proximo_protocolo"] if r else None})
         tem_reg = e["id"] in regs or regularidade_vigente(conn, e["id"]) is not None
         # A7 (mapa de 2026-09-28): as obras ativas que exigem a empresa, para saber de quem e' a certidao.
         obras = sorted(({"contrato_id": cid, "obra": nomes[cid]} for cid in obras_de.get(e["id"], [])),
@@ -422,7 +501,7 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
                       "tipo_contratante": json.loads(r["regras"] or "{}").get("tipo_contratante") or "PÚBLICO",
                       "garantia": g, "cobre_execucao": _cobre_execucao(conn, r["id"], g),
                       "art": (r["art"] or "").strip() or None, "cno": (r["cno"] or "").strip() or None})
-    return {"hoje": hoje.isoformat(), "empresas": empresas, "contratos": obras}
+    return {"hoje": hoje.isoformat(), "empresas": empresas, "contratos": obras, "renovar_agora": renovar}
 
 
 def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
