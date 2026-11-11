@@ -214,6 +214,31 @@ def test_seguranca_negada_a_engenharia_e_diretoria(client_admin):
         assert c.get("/api/admin/saude").status_code == 403
 
 
+def test_pendencias_de_cadastro_so_do_admin(client_admin):
+    # issue #649: a garantia cujo ultimo registro venceu sai dos avisos de todo perfil e vai para a lista do admin;
+    # engenharia e diretoria recebem 403 na rota
+    conn = db.get_conn()
+    conn.execute("INSERT INTO contratos (orgao, numero_instrumento, nome_curto, objeto, valor_original_centavos, "
+                 "garantia_apolice, garantia_vigencia_fim) VALUES ('SINFRA', 'IC 1/2026', 'Obra A', 'obra', 100, "
+                 "'AP-1', '2020-03-05')")
+    cid = conn.execute("SELECT MAX(id) FROM contratos").fetchone()[0]
+    conn.commit(); conn.close()
+    r = client_admin.get("/api/admin/pendencias-cadastro")
+    assert r.status_code == 200, r.text
+    assert r.json() == [{"contrato_id": cid, "obra": "Obra A", "falta": "Último registro da garantia venceu em 05/03/2020",
+                         "desde": "2020-03-05", "aba": "prazos"}]
+    assert not [a for a in client_admin.get("/api/inicio").json()["avisos"] if a["tipo"] == "garantia_vencendo"]
+    for perfil in ("engenharia", "diretoria"):
+        client_admin.post("/api/admin/usuarios", json={"nome": perfil, "email": f"{perfil}@lotufo.com",
+                                                       "senha": "senha-forte-123", "perfil": perfil})
+        c = TestClient(client_admin.app)
+        r = c.post("/api/auth/login", json={"email": f"{perfil}@lotufo.com", "senha": "senha-forte-123"})
+        c.cookies.set("sessao", r.cookies["sessao"])
+        assert c.get("/api/admin/pendencias-cadastro").status_code == 403
+        assert not [a for a in c.get("/api/inicio").json()["avisos"] if a["tipo"] == "garantia_vencendo"]
+    assert TestClient(client_admin.app).get("/api/admin/pendencias-cadastro").status_code == 401
+
+
 def _novo(client, nome, email, perfil):
     r = client.post("/api/admin/usuarios", json={"nome": nome, "email": email, "senha": "senha-forte-123", "perfil": perfil})
     assert r.status_code == 201, r.text

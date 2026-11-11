@@ -1061,7 +1061,7 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
             continue
         aplica = {k["data_base_mes"]: k.get("aplica_a") for k in ks}
         out += _avisos_dos_ciclos(conn, c["id"], hoje, nome, destino, aplica)
-        out += _avisos_das_competencias(conn, dict(c), nome, destino, aplica)
+        out += _avisos_das_competencias(conn, dict(c), nome, destino)
     return out
 
 
@@ -1143,50 +1143,51 @@ def _avisos_do_ciclo(mes: str, ciclo: int, pleito: dict, aditivo: dict | None, b
     return out
 
 
-def _avisos_das_competencias(conn, c: dict, nome: str, destino: dict, aplica: dict | None = None) -> list[dict]:
+def _termo_ausente(comps: list[str]) -> str:
+    """O que se sabe da competencia aprovada ou faturada sem termo (issue #649): o termo nao esta' no cadastro."""
+    quais = f"da competência {_mes(comps[0])}" if len(comps) == 1 else f"das competências {_lista_meses(comps)}"
+    return f"Termo de apostilamento {quais} não está no cadastro"
+
+
+def _avisos_das_competencias(conn, c: dict, nome: str, destino: dict) -> list[dict]:
     """Issue #274 (spec 2026-10-20 §2.2), os avisos das competencias do contrato, pelas marcas da aba Reajuste
     (`competencias_por_ciclo`, `avisos_da_competencia`): cada um some quando a marca some.
 
-    - `reajuste_fora_da_previsao`: um por competencia; some com a reapresentacao (pedido a ate' R$ 1,00 do previsto
-      vigente) ou com a justificativa (`justificar`). Operacao.
+    Issue #649 (decisao do dono de 10/11/2026): os dois so' dizem que o termo nao foi achado no cadastro, entao sao de
+    natureza "ausencia": saem da fila de avisos e viram pendencia de cadastro do admin (`avisos.pendencias_cadastro`),
+    uma linha por competencia (`pendencias`). O pedido fora da previsao deixou de ser aviso (o apostilamento e'
+    previsao); a marca `fora_da_previsao` continua na aba Reajuste.
+
     - `reajuste_sem_apostilamento`: um por data-base e ciclo (decisao do Leo de 08/11/2026), com as competencias
       aprovadas ou faturadas que nenhum termo cobre e a soma do valor ja' medido delas (`medido_centavos` de `competencias_por_ciclo`, medicao a medicao) na cota da Lotufo
       (arredondamento unico, sobre a soma). Operacao; diretoria quando a soma passa de R$ 100 mil. Some com o
       apostilamento carregado.
     - `reajuste_nota_antes_do_apostilamento`: um por competencia, critico. Operacao. Some com o apostilamento."""
     out = []
+
+    def faltas(comps: list[str]) -> list[dict]:
+        return [{"falta": _termo_ausente([comp]), "desde": comp} for comp in comps]
+
     for g in competencias_por_ciclo(conn, c["id"]):
-        base = _rotulo_base(g["data_base_mes"], (aplica or {}).get(g["data_base_mes"]))   # D7, como nos do ciclo
         marca = {"data_base_mes": g["data_base_mes"], "ciclo": g["ciclo"]}
         sem_termo = []
         for x in g["competencias"]:
             comp = x["competencia"]
-            if "fora_da_previsao" in x["avisos"]:
-                previsto = vigente_da_competencia(x)
-                rotulo = "apostilado" if x["apostilado_centavos"] is not None else "previsto"
-                out.append({**_av.aviso("reajuste_fora_da_previsao", "atencao",
-                                        f"reajuste de {_mes(comp)} (data-base {base}): pedido "
-                                        f"{dinheiro.format_brl(x['pedido_centavos'])}, {rotulo} "
-                                        f"{dinheiro.format_brl(previsto)}; reajuste fora da previsão",
-                                        c["id"], nome, valor_centavos=x["pedido_centavos"], destino=destino),
-                            **marca, "competencia": comp})
             if "nota_antes_do_apostilamento" in x["avisos"]:
-                out.append({**_av.aviso("reajuste_nota_antes_do_apostilamento", "critico",
-                                        f"nota de reajuste de {_mes(comp)} (data-base {base}) emitida antes do "
-                                        f"apostilamento", c["id"], nome, valor_centavos=x["faturado_centavos"],
-                                        destino=destino),
-                            **marca, "competencia": comp})
+                out.append({**_av.aviso("reajuste_nota_antes_do_apostilamento", "critico", _termo_ausente([comp]),
+                                        c["id"], nome, valor_centavos=x["faturado_centavos"], destino=destino,
+                                        natureza="ausencia"),
+                            **marca, "competencia": comp, "pendencias": faltas([comp])})
             if "sem_apostilamento" in x["avisos"]:
                 sem_termo.append(x)
         if sem_termo:
             valor = contratos.cota(sum(x["medido_centavos"] or 0 for x in sem_termo), c["percentual_direito_bp"]) or 0
             publico = ("operacao", "diretoria") if valor > DIRETORIA_SEM_APOSTILAMENTO_CENTAVOS else ("operacao",)
-            ciclo = f", ciclo de {g['ciclo']}" if g["ciclo"] is not None else ""
-            out.append({**_av.aviso("reajuste_sem_apostilamento", "atencao",
-                                    f"data-base {base}{ciclo}: reajuste de "
-                                    f"{_lista_meses([x['competencia'] for x in sem_termo])} sem apostilamento",
-                                    c["id"], nome, valor_centavos=valor, publico=publico, destino=destino),
-                        **marca, "competencias": [x["competencia"] for x in sem_termo]})
+            comps = [x["competencia"] for x in sem_termo]
+            out.append({**_av.aviso("reajuste_sem_apostilamento", "atencao", _termo_ausente(comps),
+                                    c["id"], nome, valor_centavos=valor, publico=publico, destino=destino,
+                                    natureza="ausencia"),
+                        **marca, "competencias": comps, "pendencias": faltas(comps)})
     return out
 
 
