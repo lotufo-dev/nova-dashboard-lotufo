@@ -8,6 +8,7 @@ import type { Medicao } from "./Medicoes";
 import { IconeCheck } from "./NotasAEnviar";
 import { diaMes } from "./Passos";
 import { type DetalhePlanilha, NumeroSiga, Revisao } from "./PlanilhaCarta";
+import { EVENTO_RESPOSTAS_LIDAS, type RespostaOrgao } from "./respostasOrgao";
 import { quemDaMovimentacao, sigla, tituloDoEvento, type PainelSiga, type ProcessoSiga } from "./siga";
 import { fmtDataPura, fmtHora } from "./tempo";
 import "./passos.css";
@@ -50,6 +51,16 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
     api<PainelSiga>("/api/siga").then(p => { if (vivo) setSiga(p); }).catch(() => {});
     return () => { vivo = false; };
   }, [m.id, numero]);
+  // #644: as respostas do orgao lidas da conversa do e-mail enviado; relidas quando uma leitura registra resposta nova
+  const [respostas, setRespostas] = useState<RespostaOrgao[]>([]);
+  useEffect(() => {
+    let vivo = true;
+    const ler = () => api<RespostaOrgao[]>(`/api/medicoes/${m.id}/respostas-orgao`)
+      .then(r => { if (vivo) setRespostas(Array.isArray(r) ? r : []); }).catch(() => {});
+    ler();
+    window.addEventListener(EVENTO_RESPOSTAS_LIDAS, ler);
+    return () => { vivo = false; window.removeEventListener(EVENTO_RESPOSTAS_LIDAS, ler); };
+  }, [m.id]);
 
   const proc = siga ? processoDa(siga.processos ?? [], m.id, numero) : null;
   const movs = proc ? [...proc.movimentacoes].sort((a, b) => Date.parse(b.data) - Date.parse(a.data)).slice(0, 3) : [];
@@ -158,6 +169,23 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
           )}
         </section>
       </div>
+
+      {respostas.length > 0 && (
+        <section className="cartao med-painel" aria-labelledby="orgao-emails">
+          <h3 className="med-painel__titulo" id="orgao-emails">Respostas do órgão por e-mail</h3>
+          <ol className="orgao-emails" aria-labelledby="orgao-emails">
+            {respostas.map(r => (
+              <li key={r.id}>
+                <p className="orgao-emails__de">
+                  <span>{r.remetente_nome || r.remetente}</span>
+                  <time dateTime={r.recebida_em}>{diaMes(r.recebida_em)} {fmtHora(r.recebida_em)}</time>
+                </p>
+                <p>{r.trecho}</p>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
     </div>
   );
 }

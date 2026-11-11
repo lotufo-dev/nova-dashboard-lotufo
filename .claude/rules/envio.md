@@ -34,5 +34,11 @@ paths:
   e To ou Subject.
 - Cobrança de certidão por e-mail: vencendo (<15 dias) 1×/dia às 08:00; vencida a cada 2 h, 08h–18h Cuiabá;
   por enquanto só para o e-mail do Leo.
+- **Leitura: só a conversa que o sistema enviou** (decisão de 10/11/2026, issue #644). A resposta do órgão à
+  planilha/carta é lida pela conversa gravada no envio (`envios.conversa_id`), com a conta Microsoft de quem enviou
+  e só com essa pessoa logada (a tela chama ao entrar e a cada 5 minutos; sem job, nada é lido para quem só
+  consulta). A única consulta que lista mensagem é `correio.consulta_da_conversa`; nunca listar a caixa de entrada
+  nem buscar por texto. Grava remetente, data, assunto, trecho (até 500 caracteres) e nomes dos anexos; corpo
+  inteiro e anexo não se gravam. O simulador serve a leitura por `<pasta>/respostas/<conversa>/*.json`.
 - Dev nunca manda e-mail de verdade: usar o simulador (`DASH_GRAPH_SIMULADOR=dados/correio-simulado`).
 - Teste obrigatório para qualquer mudança aqui: dois POST simultâneos resultam em 1×200 e 1×409.

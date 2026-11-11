@@ -440,3 +440,87 @@ def test_redirecionamento_ligado_e_ilegivel_recusa_o_envio(conn, tmp_path, monke
         correio.enviar_e_registrar(conn, {"id": 1, "email": "quem.envia@l.com"}, "teste", ["orgao@exemplo.com.br"], [],
                                    "Assunto", "<p/>", [])
     assert _simulado(tmp_path) == [] and conn.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+
+
+# --- leitura das respostas: so' a conversa de um envio registrado (issue #644) -------------------------------
+
+def test_consulta_de_leitura_filtra_pela_conversa_e_nao_lista_a_caixa():
+    import urllib.parse
+    caminho, _, consulta = correio.consulta_da_conversa("AAQk-conversa_1=").partition("?")
+    q = urllib.parse.parse_qs(consulta)
+    assert caminho == "/me/messages"
+    assert q["$filter"] == ["conversationId eq 'AAQk-conversa_1='"]
+    assert set(q) == {"$filter", "$select", "$top"}            # sem busca, sem pasta, sem ordenacao
+    # aspas no identificador nao abrem o filtro: viram aspas dobradas, dentro do literal
+    q = urllib.parse.parse_qs(correio.consulta_da_conversa("x' or '1' eq '1").partition("?")[2])
+    assert q["$filter"] == ["conversationId eq 'x'' or ''1'' eq ''1'"]
+
+
+@pytest.mark.parametrize("vazia", ["", "   ", None])
+def test_consulta_de_leitura_sem_conversa_recusa(vazia):
+    with pytest.raises(graph.ErroGraph):
+        correio.consulta_da_conversa(vazia)
+
+
+class _TokenFixo:
+    def acesso(self):
+        return "token-de-quem-enviou"
+
+
+def test_leitura_pelo_graph_so_chama_a_consulta_da_conversa_e_descarta_o_que_vier_de_fora(monkeypatch):
+    chamadas = []
+
+    def falso_http(metodo, url, corpo=None, headers=None, bearer=None):
+        chamadas.append((metodo, url, bearer))
+        if "/attachments" in url:
+            return {"value": [{"name": "parecer.pdf", "isInline": False}, {"name": "logo.png", "isInline": True}]}
+        return {"value": [
+            {"id": "g1", "internetMessageId": "<r1@orgao>", "conversationId": "conv-1", "hasAttachments": True,
+             "from": {"emailAddress": {"address": "Fiscal@Orgao-A.exemplo.com.br", "name": "Fiscal do contrato"}},
+             "receivedDateTime": "2026-11-10T14:00:00Z", "subject": "RES: medição",
+             "body": {"contentType": "text", "content": "Recebido.\r\n\r\nSegue o parecer."}},
+            {"id": "g2", "internetMessageId": "<r2@orgao>", "conversationId": "outra-conversa",
+             "from": {"emailAddress": {"address": "alguem@exemplo.com.br"}},
+             "receivedDateTime": "2026-11-10T15:00:00Z", "subject": "outro assunto", "body": {"content": "x"}},
+            {"id": "g3", "internetMessageId": "<r3@orgao>", "conversationId": "conv-1", "isDraft": True,
+             "from": {"emailAddress": {"address": "maria@l.com"}}, "body": {"content": "rascunho"}}]}
+
+    monkeypatch.setattr(correio, "_http", falso_http)
+    c = correio.ClienteCorreio(_TokenFixo())
+    msgs = c.mensagens_da_conversa("conv-1")
+    assert [(m["id"], m["de"], m["nome"], m["recebida_em"], m["assunto"], m["texto"]) for m in msgs] == [
+        ("<r1@orgao>", "fiscal@orgao-a.exemplo.com.br", "Fiscal do contrato", "2026-11-10T14:00:00Z", "RES: medição",
+         "Recebido.\r\n\r\nSegue o parecer.")]
+    assert c.anexos_da_mensagem(msgs[0]) == ["parecer.pdf"]
+    assert chamadas == [
+        ("GET", graph.GRAPH + correio.consulta_da_conversa("conv-1"), "token-de-quem-enviou"),
+        ("GET", graph.GRAPH + "/me/messages/g1/attachments?%24select=name%2CisInline", "token-de-quem-enviou")]
+
+
+def test_envio_pelo_graph_guarda_a_conversa_do_rascunho(monkeypatch):
+    def falso_http(metodo, url, corpo=None, headers=None, bearer=None):
+        if metodo == "POST" and url.endswith("/me/messages"):
+            return {"id": "g1", "internetMessageId": "<m1@l>", "conversationId": "conv-do-envio"}
+        return {}
+
+    monkeypatch.setattr(correio, "_http", falso_http)
+    c = correio.ClienteCorreio(_TokenFixo())
+    assert c.enviar(["protocolo@orgao-a.exemplo.com.br"], [], "assunto", "<p>corpo</p>", []) == "<m1@l>"
+    assert c.conversa_do_ultimo_envio == "conv-do-envio"
+
+
+def test_simulador_le_so_a_pasta_da_conversa_pedida(tmp_path):
+    sim = correio.CorreioSimulado(tmp_path, "maria@l.com")
+    sim.enviar(["protocolo@orgao-a.exemplo.com.br"], [], "assunto", "<p>corpo</p>", [])
+    conversa = sim.conversa_do_ultimo_envio
+    gravado = json.loads(next((tmp_path / "enviados").glob("*.json")).read_text("utf-8"))
+    assert conversa and gravado["conversa"] == conversa
+    for pasta, de in ((conversa, "fiscal@orgao-a.exemplo.com.br"), ("outra-conversa", "alguem@exemplo.com.br")):
+        (tmp_path / "respostas" / pasta).mkdir(parents=True)
+        (tmp_path / "respostas" / pasta / "001.json").write_text(json.dumps({
+            "de": de, "recebida_em": "2026-11-10T14:00:00Z", "assunto": "RES: assunto", "texto": "Recebido.",
+            "anexos": ["parecer.pdf"]}), encoding="utf-8")
+    msgs = sim.mensagens_da_conversa(conversa)
+    assert [m["de"] for m in msgs] == ["fiscal@orgao-a.exemplo.com.br"]
+    assert sim.anexos_da_mensagem(msgs[0]) == ["parecer.pdf"]
+    assert sim.mensagens_da_conversa("../enviados") == [] and sim.mensagens_da_conversa("sem-resposta") == []

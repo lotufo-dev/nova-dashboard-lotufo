@@ -690,3 +690,89 @@ def test_orgao_que_vira_ses_entre_a_previa_e_a_reserva_nao_manda_o_email(api, mo
     assert _linha("SELECT estado FROM medicoes WHERE id=?", mid) == {"estado": "planilha_gerada"}
     assert _linha(f"SELECT COUNT(*) n FROM {planilha_envio.TABELA} WHERE medicao_id=? "
                   "AND envio_reservado_em IS NOT NULL", mid) == {"n": 0}
+
+
+# --- respostas do orgao lidas da conversa do envio (issue #644) ----------------------------------------------
+
+def _enviada(cl, cid, **kw):
+    mid, pv = _pronta(cl, cid, **kw)
+    r = cl.post(f"/api/medicoes/{mid}/envio-planilha", json=_corpo(pv))
+    assert r.status_code == 200, r.text
+    eid = r.json()["envio_id"]
+    return mid, eid, _linha("SELECT conversa_id FROM envios WHERE id=?", eid)["conversa_id"]
+
+
+def _resposta_simulada(tmp_path, conversa, nome="001", **campos):
+    pasta = tmp_path / "sim" / "respostas" / conversa
+    pasta.mkdir(parents=True, exist_ok=True)
+    (pasta / f"{nome}.json").write_text(json.dumps({
+        "de": "fiscal@orgao-a.exemplo.com.br", "nome": "Fiscal do contrato", "recebida_em": "2026-11-10T14:00:00Z",
+        "assunto": "RES: medição", "texto": "Recebido. Segue em análise.", "anexos": [], **campos}), encoding="utf-8")
+
+
+def test_envio_pelo_simulador_grava_a_conversa(api):
+    cl, cid, _ = api
+    _, _, conversa = _enviada(cl, cid)
+    assert conversa.startswith("conversa-")
+
+
+def test_resposta_simulada_e_registrada_uma_vez_e_aparece_na_medicao(api, tmp_path):
+    cl, cid, _ = api
+    mid, eid, conversa = _enviada(cl, cid)
+    _resposta_simulada(tmp_path, conversa, texto="Recebido.\n\n" + "x" * 600, anexos=["parecer.pdf"])
+    _resposta_simulada(tmp_path, conversa, nome="002", de="ADMIN@lotufo.com", texto="minha tréplica")   # de quem enviou
+    _resposta_simulada(tmp_path, "outra-conversa", texto="de outra conversa")
+    r = cl.post("/api/correio/respostas/ler")
+    assert r.status_code == 200, r.text
+    assert [(x["medicao_id"], x["remetente"]) for x in r.json()["novas"]] == [(mid, "fiscal@orgao-a.exemplo.com.br")]
+    assert cl.post("/api/correio/respostas/ler").json() == {"novas": []}            # de novo: nada duplica
+    lista = cl.get(f"/api/medicoes/{mid}/respostas-orgao").json()
+    assert len(lista) == 1
+    x = lista[0]
+    assert (x["remetente"], x["remetente_nome"], x["recebida_em"], x["assunto"], x["anexos"]) == \
+        ("fiscal@orgao-a.exemplo.com.br", "Fiscal do contrato", "2026-11-10T14:00:00Z", "RES: medição", ["parecer.pdf"])
+    assert len(x["trecho"]) == 500 and x["trecho"].startswith("Recebido. xxx")      # so' o trecho inicial
+    assert _linha("SELECT COUNT(*) AS n FROM medicao_respostas_orgao")["n"] == 1    # a outra conversa nao entrou
+    assert _linha("SELECT COUNT(*) AS n FROM audit_log WHERE acao='medicao.resposta_orgao' AND entidade_id=?",
+                  str(mid))["n"] == 1
+
+
+def test_respostas_vem_da_mais_nova_para_a_mais_antiga(api, tmp_path):
+    cl, cid, _ = api
+    mid, _, conversa = _enviada(cl, cid)
+    _resposta_simulada(tmp_path, conversa, nome="001", recebida_em="2026-11-10T14:00:00Z", assunto="primeira")
+    _resposta_simulada(tmp_path, conversa, nome="002", recebida_em="2026-11-11T09:00:00Z", assunto="segunda")
+    assert len(cl.post("/api/correio/respostas/ler").json()["novas"]) == 2
+    assert [x["assunto"] for x in cl.get(f"/api/medicoes/{mid}/respostas-orgao").json()] == ["segunda", "primeira"]
+
+
+def test_graph_fora_do_ar_na_leitura_responde_vazio_e_nao_insiste(api, tmp_path, monkeypatch):
+    cl, cid, _ = api
+    _enviada(cl, cid)
+    _enviada(cl, cid, numero=2)
+    tentativas = []
+
+    def sem_rede(self, conversa_id):
+        tentativas.append(conversa_id)
+        raise correio.graph.ErroGraph("Graph inacessível (TimeoutError)")
+    monkeypatch.setattr(correio.CorreioSimulado, "mensagens_da_conversa", sem_rede)
+    r = cl.post("/api/correio/respostas/ler")
+    assert r.status_code == 200 and r.json() == {"novas": []}
+    assert len(tentativas) == 1
+
+
+def test_medicao_fechada_ou_envio_de_outra_pessoa_nao_e_lido(api, tmp_path):
+    from app import auth
+    cl, cid, _ = api
+    mid, eid, conversa = _enviada(cl, cid)
+    _resposta_simulada(tmp_path, conversa)
+    c = db.get_conn()
+    c.execute("UPDATE medicoes SET estado='cancelada' WHERE id=?", (mid,)); c.commit()
+    assert cl.post("/api/correio/respostas/ler").json() == {"novas": []}
+    # medicao aberta de novo, mas o envio e' de outra pessoa: quem esta' logado nao le a conversa dela
+    outra = auth.criar_usuario(c, "Engenheira da obra", "engenheira@lotufo.com", "senha-forte-123", "engenharia")
+    c.execute("UPDATE medicoes SET estado='planilha_enviada' WHERE id=?", (mid,))
+    c.execute("UPDATE envios SET usuario_id=? WHERE id=?", (outra, eid))
+    c.commit(); c.close()
+    assert cl.post("/api/correio/respostas/ler").json() == {"novas": []}
+    assert _linha("SELECT COUNT(*) AS n FROM medicao_respostas_orgao")["n"] == 0
