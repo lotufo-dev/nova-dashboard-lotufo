@@ -1979,7 +1979,7 @@ td.col-num .campo__nota { font-family: var(--fonte); }
 @media (max-width: 1280px) {
   .obra-grade { display: flex; flex-direction: column; align-items: stretch; gap: 20px; }
   .obra-grade__principal, .obra-grade__lateral { display: contents; }
-  #curva-resumo { order: 1; } #avisos-obra { order: 2; } #execucao { order: 3; } #secoes { order: 4; } #curva { order: 5; }
+  #ritmo { order: 1; } #secoes { order: 2; } #avisos-obra { order: 3; } #execucao { order: 4; }
 }
 
 /* Curva S */
