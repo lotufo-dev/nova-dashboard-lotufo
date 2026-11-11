@@ -158,7 +158,7 @@ _CAMPOS_CONTRATO = ("nome_curto", "orgao", "orgao_id", "entidade_id", "objeto", 
                     "copia_extras",
                     "estado", "documentos", "objeto_completo", "cno_arquivo", "folga_vigencia_dias",
                     "centros_custo_anteriores_rm", "objeto_carta", "garantia_apolice", "garantia_vigencia_fim",
-                    "garantia_arquivo", "indice_reajuste", "pecas_no_oficio")
+                    "garantia_arquivo", "indice_reajuste", "pecas_no_oficio", "passos_medicao")
 _CAMPOS_FISCAL = ("cargo", "tratamento", "portaria")
 
 
@@ -266,7 +266,9 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             if c.get("garantia_caminho") else None,
             "indice_reajuste": _indice_das_bases(c["datas_base"]),
             # issue #462: a lista vazia e' gravada ('[]': nenhuma vai no oficio); ausente, NULL (segue o orgao)
-            "pecas_no_oficio": None if c.get("pecas_no_oficio") is None else _json(c["pecas_no_oficio"])}
+            "pecas_no_oficio": None if c.get("pecas_no_oficio") is None else _json(c["pecas_no_oficio"]),
+            # issue #660: como acima; '[]' e' a obra sem fluxo de medicao, NULL segue a familia do orgao
+            "passos_medicao": None if c.get("passos_medicao") is None else _json(c["passos_medicao"])}
     mudou = False
     if ja is None:
         colunas = ["numero_instrumento", *_CAMPOS_CONTRATO]

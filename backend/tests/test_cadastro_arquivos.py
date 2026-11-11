@@ -205,6 +205,26 @@ def test_copia_extras_do_contrato_normalizada_e_validada(tmp_path):
     assert any("copia_extras" in e and "inválido" in e for e in erros)
 
 
+def test_passos_medicao_do_contrato(tmp_path):
+    # issue #660: a lista dos passos que a obra tem; sem a chave vale a regra da familia do orgao (None)
+    def com(valor, pasta):
+        return _escrever(tmp_path / pasta, contratos=[{**CONTRATO, "passos_medicao": valor}])
+    assert ca.preparar(_escrever(tmp_path / "a"))["contratos"][0]["passos_medicao"] is None
+    cad = ca.preparar(com(["pagamento", "espelhos", "notas"], "b"))
+    assert cad["contratos"][0]["passos_medicao"] == ["espelhos", "notas", "pagamento"]      # na ordem do fluxo
+    assert ca.preparar(com([], "c"))["contratos"][0]["passos_medicao"] == []                # o fluxo nao e' da empresa
+    onde = "contratos/mt-402.yaml: passos_medicao:"
+    assert _erros(com(["espelhos", "boletim", "pagamento"], "d")) == [
+        f"{onde} passo desconhecido: boletim (use planilha, analise, espelhos, notas, envio_nota, pagamento)"]
+    assert _erros(com(["espelhos", "notas"], "e")) == [
+        f"{onde} a lista precisa ter pagamento (ou ficar vazia, para a obra sem fluxo de medição)"]
+    assert _erros(com(["analise", "espelhos", "pagamento"], "f")) == [f"{onde} analise só existe com planilha"]
+    assert _erros(com(["notas", "notas", "pagamento"], "g")) == [f"{onde} passo repetido: notas"]
+    for i, ruim in enumerate(("pagamento", {"pagamento": True}, False, "", [3, "pagamento"])):
+        erros = _erros(com(ruim, f"h{i}"))
+        assert len(erros) == 1 and erros[0].startswith(onde), ruim
+
+
 def test_orgao_com_cnpj_valido_normaliza_e_invalido_e_erro(tmp_path):
     cad = ca.preparar(_escrever(tmp_path, orgaos=[{**ORGAO, "cnpj": "31.300.101/0001-01"}]))
     assert cad["orgaos"][0]["cnpj"] == "31300101000101"

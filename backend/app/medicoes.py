@@ -1225,9 +1225,9 @@ def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None
         args.append(estado)
     out = []
     linhas = conn.execute(sql + " ORDER BY c.nome_curto, c.id, m.numero DESC, m.tipo", args).fetchall()
-    com_planilha = _com_planilha(conn, {r["contrato_id"]: {"familia": r["familia"]} for r in linhas})
+    passos_de = passos_das_medicoes(conn)
     for r in linhas:
-        passo = passo_do_estado(r["estado"], com_planilha(r))
+        passo = passo_do_estado(r["estado"], passos_de(r))
         # dia de Cuiaba (`_dia`) nos marcos e no criado_em: carimbo UTC das 20h as 24h cairia no dia seguinte
         brutos = [r["espelho_em"], r["nota_emitida_em"], r["protocolado_em"]]
         # marcos do motor so' no estado deles: atesto/glosa posterior numa medicao adiante nao rebaixa o "desde"
@@ -1452,6 +1452,7 @@ def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> d
         """Dias desde o FIM da competencia; competencia ainda em curso: 0 ("hoje"), como no prototipo."""
         ano, mes = int(competencia[:4]), int(competencia[5:7])
         return max(0, (hoje - datetime.date(ano, mes, calendar.monthrange(ano, mes)[1])).days)
+    sem_fluxo_medicao = sem_fluxo(conn)
     ativas = sorted((o for o in obras.values() if o["estado"] == "ativo"), key=lambda o: _chave_nome(o["obra"]))
     lista_obras = [{"contrato_id": o["id"], "obra": o["obra"], "contratante": o["contratante"],
                     "orgao_sub": o["orgao_sub"], "aberta": o["id"] in abertas,
@@ -1464,7 +1465,9 @@ def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> d
                     "encerramento": bool(o["encerramento_iniciado_em"]),
                     "ultima": ultima_de.get(o["id"]), "ultima_medicao": ultima_info.get(o["id"]),
                     # A-21: a obra em encerramento nao e' ativa (o bloco `encerramento` acima): fica fora de "Iniciar medicao"
-                    "sem_no_mes": not o["encerramento_iniciado_em"] and (o["id"], proxima(o["id"])[1]) not in com_medicao_no_mes,
+                    # #660: a obra sem fluxo de medicao no cadastro (`passos_medicao: []`) tambem
+                    "sem_no_mes": not o["encerramento_iniciado_em"] and o["id"] not in sem_fluxo_medicao
+                    and (o["id"], proxima(o["id"])[1]) not in com_medicao_no_mes,
                     "ha_dias": ha_dias(ultima_de[o["id"]]["competencia"]) if o["id"] in ultima_de else None,
                     "prevista": prevista_dados.get(o["id"]),
                     "proxima": proxima(o["id"])[0], "proxima_tipo": proxima(o["id"])[1]}
@@ -1479,9 +1482,8 @@ def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> d
     # medicao protocolada); contar as linhas daqui (o par medicao + reajuste vira uma) dava outro numero
     contagens["aguardando-pagamento"] = conn.execute(
         "SELECT COUNT(*) FROM medicoes WHERE estado='protocolada'").fetchone()[0]
-    com_planilha = _com_planilha(conn, obras)
     return {"hoje": hoje.isoformat(), "mes": mes, "contagens": contagens, "linhas": linhas, "obras": lista_obras,
-            "quadro": _quadro_do_mes(conn, mes, obras, com_planilha),
+            "quadro": _quadro_do_mes(conn, mes, obras, sem_fluxo_medicao),
             "anteriores": _meses_anteriores(mes, linhas)}
 
 
@@ -1494,27 +1496,69 @@ _ORDEM_SITUACAO_PASSO = ("futuro", "atual", "feito")     # do menos ao mais adia
 _ORDEM_TIPO = ("execucao", "projeto", "reajuste")
 
 
-def passo_do_estado(estado: str, com_planilha: bool) -> int:
-    """O passo da vez pelo estado (o `passoDe` de Passos.tsx). `com_planilha`: a medicao tem os passos 1 e 2."""
-    if estado in ("prevista", "planilha_gerada"):
-        return 1 if com_planilha else 3
-    if estado == "planilha_enviada":
-        return 2 if com_planilha else 3
-    return _PASSO_DO_ESTADO.get(estado, 0)
+# Issue #660: os nomes dos passos na chave `passos_medicao` do contrato no cadastro, na ordem de `PASSOS` (o passo N
+# e' o de indice N-1).
+CHAVES_PASSO = ("planilha", "analise", "espelhos", "notas", "envio_nota", "pagamento")
 
 
-def _com_planilha(conn, obras: dict[int, dict]):
-    """Devolve a funcao que diz se a medicao tem "Planilha e carta" e "Análise do órgão" (#508): execucao ou projeto,
-    em orgao que recebe a planilha/carta, com a regra de espelho ativa ou a medicao ja' nascida da planilha."""
+def passo_do_estado(estado: str, passos) -> int:
+    """O passo da vez pelo estado (o `passoDe` de Passos.tsx), entre os `passos` que a medicao tem (numeros, em
+    ordem): o estado que cairia num passo ausente esta' no proximo que ela tem. 7 = recebida; 0 = encerrada."""
+    n = 1 if estado in ("prevista", "planilha_gerada") else 2 if estado == "planilha_enviada" \
+        else _PASSO_DO_ESTADO.get(estado, 0)
+    if not 1 <= n <= 6:
+        return n
+    return next((p for p in passos if p >= n), passos[-1])
+
+
+def passos_do_cadastro(conn) -> dict[int, tuple[int, ...]]:
+    """Issue #660: contrato -> os passos (numeros) da chave `passos_medicao` do cadastro. O contrato sem a chave nao
+    entra (vale a familia do orgao); a tupla vazia e' a obra cujo fluxo da medicao nao e' feito pela empresa."""
+    out = {}
+    for r in conn.execute("SELECT id, passos_medicao FROM contratos WHERE passos_medicao IS NOT NULL"):
+        try:
+            nomes = json.loads(r[1])
+        except ValueError:
+            continue
+        if isinstance(nomes, list):
+            out[r[0]] = tuple(i + 1 for i, k in enumerate(CHAVES_PASSO) if k in nomes)
+    return out
+
+
+def sem_fluxo(conn) -> set[int]:
+    """Issue #660: as obras com `passos_medicao: []` no cadastro: fora do quadro do mes e sem "Iniciar"."""
+    return {cid for cid, passos in passos_do_cadastro(conn).items() if not passos}
+
+
+def passos_das_medicoes(conn):
+    """Devolve a funcao que diz os passos (numeros de `PASSOS`, em ordem) que a medicao tem. E' a UNICA decisao do
+    servidor sobre isso (quadro do mes, proximo passo, pagina da medicao e da obra).
+
+    Pela familia do orgao (#508): "Planilha e carta" e "Análise do órgão" so' na execucao ou no projeto, em orgao que
+    recebe a planilha/carta, com a regra de espelho ativa ou a medicao ja' nascida da planilha. A chave
+    `passos_medicao` do contrato (#660) tira dai' os passos que a obra nao tem; nao da' a' obra o passo que a familia
+    nao tem. Com a lista vazia (obra sem fluxo) a medicao que ja' existe segue com os passos da familia."""
     from app import planilha_envio      # import local: planilha_envio importa este modulo
     regra_ativa = {r[0] for r in conn.execute("SELECT contrato_id FROM espelho_regras WHERE situacao='ativa'")}
+    familia_de = {r[0]: r[1] for r in conn.execute(
+        "SELECT c.id, o.familia FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id")}
+    do_cadastro = passos_do_cadastro(conn)
 
-    def com_planilha(m: dict) -> bool:
-        familia = obras.get(m["contrato_id"], {}).get("familia")
-        return (m["tipo"] in ("execucao", "projeto") and familia not in planilha_envio.FAMILIAS_SEM_ENVIO
-                and (m["contrato_id"] in regra_ativa or m["estado"] in ESTADOS_PLANILHA
-                     or bool(m["planilha_enviada_em"])))
-    return com_planilha
+    def passos(m) -> tuple[int, ...]:
+        com_planilha = (m["tipo"] in ("execucao", "projeto")
+                        and familia_de.get(m["contrato_id"]) not in planilha_envio.FAMILIAS_SEM_ENVIO
+                        and (m["contrato_id"] in regra_ativa or m["estado"] in ESTADOS_PLANILHA
+                             or bool(m["planilha_enviada_em"])))
+        da_familia = tuple(range(1 if com_planilha else 3, 7))
+        lista = do_cadastro.get(m["contrato_id"])
+        return tuple(n for n in da_familia if n in lista) or da_familia if lista else da_familia
+    return passos
+
+
+def passos_da_obra(conn, contrato_id: int) -> tuple[int, ...]:
+    """Os passos da medicao que a obra inicia agora (a prevista de execucao): a barra da pagina da medicao nova."""
+    return passos_das_medicoes(conn)({"contrato_id": contrato_id, "tipo": "execucao", "estado": "prevista",
+                                      "planilha_enviada_em": None})
 
 
 def _datas_dos_passos(conn, m: dict) -> dict[int, datetime.date | None]:
@@ -1536,11 +1580,13 @@ def _datas_dos_passos(conn, m: dict) -> dict[int, datetime.date | None]:
             4: _dia(m["nota_emitida_em"]), 5: _dia(m["protocolado_em"]), 6: _dia(m["recebida_em"])}
 
 
-def _quadro_do_mes(conn, mes: str, obras: dict[int, dict], com_planilha) -> list[dict]:
+def _quadro_do_mes(conn, mes: str, obras: dict[int, dict], sem_fluxo_medicao: set[int]) -> list[dict]:
     """Uma linha por obra ativa (e por obra, ativa ou nao, com medicao na competencia): cada passo com a situacao
     (feito, atual, futuro), o dia em que foi feito e a medicao que o passo da vez abre. Com mais de uma medicao na
     competencia (execucao e reajuste), cada passo mostra a menos adiantada; o passo feito leva o dia da ultima a
-    fechar. A prevista, a cancelada e a desistida nao contam: a obra so' com elas esta' sem medicao (`iniciar`)."""
+    fechar. A prevista, a cancelada e a desistida nao contam: a obra so' com elas esta' sem medicao (`iniciar`).
+    A obra sem fluxo de medicao no cadastro (`passos_medicao: []`, #660) fica fora do quadro."""
+    passos_de = passos_das_medicoes(conn)
     do_mes: dict[int, list[dict]] = {}
     for r in conn.execute(
             "SELECT m.*, (SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') "
@@ -1551,12 +1597,12 @@ def _quadro_do_mes(conn, mes: str, obras: dict[int, dict], com_planilha) -> list
     for o in sorted(obras.values(), key=lambda o: (_chave_nome(o["obra"]), o["id"])):
         ms = sorted(do_mes.get(o["id"], []), key=lambda m: (_ORDEM_TIPO.index(m["tipo"]), m["numero"], m["id"]))
         # A-21: a obra em encerramento nao e' ativa; sem medicao na competencia ela nao tem o que mostrar nem iniciar
-        if not ms and (o["estado"] != "ativo" or o["encerramento_iniciado_em"]):
+        if o["id"] in sem_fluxo_medicao or (not ms and (o["estado"] != "ativo" or o["encerramento_iniciado_em"])):
             continue
         partes = []     # por medicao: (medicao, passos que ela tem, passo da vez, dia de cada passo)
         for m in ms:
-            tem = com_planilha(m)
-            partes.append((m, range(1 if tem else 3, 7), passo_do_estado(m["estado"], tem), _datas_dos_passos(conn, m)))
+            tem = passos_de(m)
+            partes.append((m, tem, passo_do_estado(m["estado"], tem), _datas_dos_passos(conn, m)))
         passos = []
         for n in range(1, 7):
             nesse = [(m, atual, datas) for m, tem, atual, datas in partes if n in tem]

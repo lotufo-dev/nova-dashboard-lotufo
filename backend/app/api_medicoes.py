@@ -182,12 +182,15 @@ def listar(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
         familia = conn.execute("SELECT o.familia FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id WHERE c.id=?",
                                (contrato_id,)).fetchone()["familia"]
         com_envio = familia not in planilha_envio.FAMILIAS_SEM_ENVIO
+        # issue #660: os passos que a medicao tem (a familia do orgao e a chave `passos_medicao` do cadastro), que a
+        # barra de passos da pagina desenha sem decidir nada
+        passos_de = medicoes.passos_das_medicoes(conn)
         edicoes =medicoes.edicoes_valor(conn, [m["id"] for m in lista])   # B-02 (10/10/2026): a pagina da medicao le daqui
         sigas = siga.registrado_em(conn, "medicao", [m["id"] for m in lista])    # issue #328: link do SIGA do envio por fora
         # issue #290: os boletins do orgao, que a pagina da medicao le daqui (achado do gate Sol na PR #358)
         return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"]),
                  "boletins": medicoes.boletins(conn, m["id"]), **_envio_ao_orgao(conn, m),
-                 "com_envio_planilha": com_envio} for m in lista]
+                 "com_envio_planilha": com_envio, "passos": list(passos_de(m))} for m in lista]
 
 
 @router.post("/api/contratos/{contrato_id}/medicoes", status_code=201)

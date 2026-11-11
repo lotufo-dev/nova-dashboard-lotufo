@@ -672,6 +672,34 @@ def test_pagina_da_obra_sabe_se_a_obra_tem_os_passos_da_planilha(api):
     assert [m["com_envio_planilha"] for m in cl.get(f"/api/contratos/{cid_mtpar}/medicoes").json()] == [False]
 
 
+def test_pagina_da_medicao_recebe_os_passos_da_obra_pelo_cadastro(api):
+    """Issue #660: `passos_medicao` do contrato diz os passos que a obra tem; sem a chave vale a familia do orgao."""
+    cl, cid_sinfra, cid_mtpar = api
+    _planilha(cl, cid_sinfra)
+    _planilha(cl, cid_mtpar)
+
+    def passos(cid):
+        return [m["passos"] for m in cl.get(f"/api/contratos/{cid}/medicoes").json()]
+
+    def cab(cid):
+        d = cl.get(f"/api/contratos/{cid}/cabecalho").json()
+        return d["passos_medicao"], d["sem_fluxo_medicao"]
+
+    def gravar(cid, lista):
+        c = db.get_conn()
+        c.execute("UPDATE contratos SET passos_medicao=? WHERE id=?", (lista, cid))
+        c.commit()
+        c.close()
+    assert passos(cid_sinfra) == [[1, 2, 3, 4, 5, 6]] and passos(cid_mtpar) == [[3, 4, 5, 6]]
+    # o cabecalho diz os passos da medicao que a obra inicia: sem regra de espelho ativa, comeca em Espelhos
+    assert cab(cid_sinfra) == ([3, 4, 5, 6], False) and cab(cid_mtpar) == ([3, 4, 5, 6], False)
+    gravar(cid_sinfra, '["espelhos", "notas", "pagamento"]')
+    assert passos(cid_sinfra) == [[3, 4, 6]] and cab(cid_sinfra) == ([3, 4, 6], False)
+    # lista vazia: a obra nao inicia medicao; a que ja' existe abre com os passos da familia do orgao
+    gravar(cid_sinfra, "[]")
+    assert passos(cid_sinfra) == [[1, 2, 3, 4, 5, 6]] and cab(cid_sinfra) == ([], True)
+
+
 def test_orgao_que_vira_ses_entre_a_previa_e_a_reserva_nao_manda_o_email(api, monkeypatch):
     """Gate Sol (#463): a familia e' relida depois da reserva; cadastro aplicado no intervalo recusa e destrava."""
     cl, cid, _ = api
