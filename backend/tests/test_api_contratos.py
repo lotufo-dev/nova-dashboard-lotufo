@@ -9,19 +9,6 @@ def test_listar(client_admin):
     lista = client_admin.get("/api/contratos").json()
     assert any(c["id"] == cid and c["valor_vigente_centavos"] == 100_000_000 for c in lista)
 
-def test_listar_traz_o_a_receber_so_com_o_total_liberado(client_admin):
-    """Lista de Obras (#509): `a_receber_centavos` e' nulo ate' o total ser liberado; liberado, e' o cheio da obra."""
-    import json
-    from app import db
-    cid = novo_contrato(NOVO)
-    lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
-    assert lista[cid]["a_receber_centavos"] is None
-    conn = db.get_conn()
-    conn.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', ?)", (json.dumps({"total_a_receber_liberado": True}),))
-    conn.commit(); conn.close()
-    lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
-    assert lista[cid]["a_receber_centavos"] == 0
-
 def test_sem_login_nega(client):
     assert client.get("/api/contratos").status_code == 401
 
@@ -328,3 +315,40 @@ def test_ficha_original_igual_compara_com_o_vigente_de_execucao(client_admin):
     f = client_admin.get(f"/api/contratos/{cid}/ficha").json()
     assert f["contrato"]["original_igual"] is True
     assert f["topo"]["vigente_centavos"] == 100_000_000 and f["topo"]["reajuste_centavos"] == 500
+
+
+def test_listar_traz_a_posicao_na_cota_igual_ao_topo_da_pagina_da_obra(client_admin):
+    """#645: a lista de Obras le `posicao` (vigente, medido e saldo de execucao, na cota da Lotufo), a mesma conta do
+    topo da pagina da obra, obra a obra; os campos cheios de antes continuam para as outras telas."""
+    consorcio = _obra_com_reajuste_e_medicoes(bp=4900)
+    propria = _obra_com_reajuste_e_medicoes()
+    lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
+    p = lista[consorcio]["posicao"]
+    assert p["vigente_centavos"] == 588_000_00            # 49% de 1.200.000,01, sem o aditivo de reajuste
+    assert p["medido_centavos"] == 196_000_16             # 49% de 400.000,33
+    assert p["saldo_centavos"] == 391_999_84 == p["vigente_centavos"] - p["medido_centavos"]
+    assert lista[consorcio]["medido_execucao_centavos"] == 400_000_33     # o cheio de antes nao mudou
+    assert lista[propria]["posicao"]["vigente_centavos"] == 1_200_000_01
+    for cid in (consorcio, propria):
+        topo = client_admin.get(f"/api/contratos/{cid}/ficha").json()["topo"]
+        for campo in ("vigente_centavos", "medido_centavos", "saldo_centavos"):
+            assert lista[cid]["posicao"][campo] == topo[campo]
+
+
+def test_listar_traz_o_a_receber_na_cota_so_com_o_total_liberado(client_admin):
+    """#645: o a receber da lista vai na cota, cobranca a cobranca (a conta da tela A receber); nulo ate' liberar."""
+    import json
+    from app import db, diretoria
+    cid = _obra_com_reajuste_e_medicoes(bp=4900)          # protocoladas: 300.000,33 e 100.000,00
+    outro = novo_contrato({**NOVO, "numero_instrumento": "IC 084/2025"})
+    lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
+    assert lista[cid]["posicao"]["a_receber_centavos"] is None
+    conn = db.get_conn()
+    conn.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', ?)", (json.dumps({"total_a_receber_liberado": True}),))
+    conn.commit()
+    tela = {o["contrato_id"]: o["valor_centavos"] for o in diretoria.a_receber(conn)["por_obra"]}
+    conn.close()
+    lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
+    assert lista[cid]["posicao"]["a_receber_centavos"] == 147_000_16 + 49_000_00 == tela[cid]   # 147.000,1617 e 49.000,00
+    assert "a_receber_centavos" not in lista[cid]                         # o cheio saiu da lista
+    assert lista[outro]["posicao"]["a_receber_centavos"] == 0

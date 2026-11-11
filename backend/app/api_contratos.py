@@ -33,8 +33,10 @@ def listar(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
     orgaos = {r["id"]: r for r in conn.execute(
         "SELECT c.id, c.orgao AS orgao_texto, o.familia, o.chave, o.nome FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id")}
     medido = paineis.medido_execucao_por_contrato(conn)       # uma consulta so', nao uma por obra
-    # o a receber (cheio) de cada obra; sem o total liberado, nulo (a tela mostra "—")
-    a_receber = diretoria.a_receber_por_obra(conn)
+    # #645: a lista de Obras le `posicao`, na cota da Lotufo: vigente, medido e saldo pela conta do topo da pagina da
+    # obra (`paineis.posicao_na_cota`) e o a receber cobranca a cobranca, como a tela A receber; sem o total
+    # liberado, nulo (a tela mostra "—"). O a receber cheio saiu da lista (so' ela o lia).
+    a_receber = diretoria.a_receber_por_obra(conn, na_cota=True)
     saida = []
     for c in contratos.listar(conn):
         o = orgaos[c["id"]]
@@ -42,7 +44,8 @@ def listar(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
         feito = medido.get(c["id"], 0)
         saida.append({**c, **prazos.resumo(conn, c["id"], hoje), "contratante": contratante, "orgao_sub": orgao_sub,
                       "medido_execucao_centavos": feito, "saldo_centavos": c["valor_vigente_execucao_centavos"] - feito,
-                      "a_receber_centavos": None if a_receber is None else a_receber.get(c["id"], 0)})
+                      "posicao": {**paineis.posicao_na_cota(c["valor_vigente_execucao_centavos"], feito, c["percentual_direito_bp"]),
+                                  "a_receber_centavos": None if a_receber is None else a_receber.get(c["id"], 0)}})
     return saida
 
 

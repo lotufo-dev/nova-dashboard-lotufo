@@ -7,17 +7,23 @@ import { useRota } from "./rota";
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
 
-// Dados sintéticos: dois contratantes (SINFRA com duas superintendências, MTPAR) e uma obra encerrada.
-const obra = (id: number, nome: string, extra: Partial<ObraLista & { percentual_direito_bp: number; a_receber_centavos: number | null }> = {}): ObraLista => ({
+// Dados sintéticos: dois contratantes (SINFRA com duas superintendências, MTPAR) e uma obra encerrada. `posicao` é o que
+// a lista mostra (na cota da Lotufo, do servidor); os valores cheios ao lado são outros de propósito.
+const posicao = (vigente: number, medido: number, aReceber: number | null) =>
+  ({ vigente_centavos: vigente, medido_centavos: medido, saldo_centavos: vigente - medido, a_receber_centavos: aReceber });
+const obra = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => ({
   id, orgao: "SINFRA - SUEF II", contratante: "SINFRA", orgao_sub: "SUEF II", numero_instrumento: `IC ${id}/2026`, nome_curto: nome,
-  estado: "ativo", entidade_id: 1, valor_vigente_centavos: 1000_00, medido_execucao_centavos: 250_00, saldo_centavos: 750_00, percentual_direito_bp: 10000, a_receber_centavos: 100_00,
+  estado: "ativo", entidade_id: 1, valor_vigente_centavos: 1000_00, medido_execucao_centavos: 250_00, saldo_centavos: 750_00, percentual_direito_bp: 10000,
+  posicao: posicao(1000_00, 250_00, 100_00),
   execucao_fim_vigente: "2027-03-31", vigencia_fim_vigente: "2027-06-30", dias_execucao: 100, dias_vigencia: 200, ...extra });
 
 const OBRAS: ObraLista[] = [
   obra(1, "Estações BRT"),
-  obra(2, "MT-388", { orgao: "SINFRA - SUPU", orgao_sub: "SUPU", percentual_direito_bp: 4900, a_receber_centavos: 0, valor_vigente_centavos: 3000_00, medido_execucao_centavos: 1500_00, saldo_centavos: 1500_00 }),
+  // consórcio a 49%: cheio 3.000,01 / 1.500,00; na cota 1.470,00 / 735,00
+  obra(2, "MT-388", { orgao: "SINFRA - SUPU", orgao_sub: "SUPU", percentual_direito_bp: 4900, valor_vigente_centavos: 3000_01, medido_execucao_centavos: 1500_00, saldo_centavos: 1500_01,
+    posicao: posicao(1470_00, 735_00, 49_01) }),
   obra(3, "Granito", { orgao: "MTPAR", contratante: "MTPAR", orgao_sub: null, valor_vigente_centavos: 2000_00, medido_execucao_centavos: 500_00,
-    saldo_centavos: 1500_00, estado: "suspenso", execucao_fim_vigente: "2026-12-31" }),
+    saldo_centavos: 1500_00, posicao: posicao(2000_00, 500_00, 100_00), estado: "suspenso", execucao_fim_vigente: "2026-12-31" }),
   obra(4, "Deciolândia", { orgao: "MTPAR", contratante: "MTPAR", orgao_sub: null, estado: "encerrado", execucao_fim_vigente: "2025-12-31" }),
 ];
 
@@ -40,7 +46,7 @@ function abrir(url: string) {
   return render(<Pagina />);
 }
 
-describe("Obras: posição financeira", () => {
+describe("Obras: posição financeira na cota da Lotufo, por contratante", () => {
   beforeEach(() => {
     api.mockImplementation(async (caminho: string) => {
       if (caminho === "/api/contratos") return OBRAS;
@@ -51,64 +57,97 @@ describe("Obras: posição financeira", () => {
   });
   afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
 
-  const totais = () => screen.getByLabelText("Totais").textContent!.replace(/\u00a0/g, " ");
+  const limpo = (s: string | null | undefined) => (s ?? "").replace(/ /g, " ");
+  const totais = () => limpo(screen.getByLabelText("Totais").textContent);
   const rodape = () => document.querySelector(".obras-rodape span")!.textContent;
-  const nomes = () => within(screen.getByRole("table")).getAllByRole("row").slice(1).map(l => within(l).getAllByRole("cell")[0].textContent);
+  const linhasDeObra = () => [...document.querySelectorAll<HTMLTableRowElement>("tr.linha--obra")];
+  const nomes = () => linhasDeObra().map(l => within(l).getAllByRole("cell")[0].textContent);
+  const grupos = () => [...document.querySelectorAll<HTMLTableRowElement>("tr.obras-grupo")];
+  const campoBusca = () => screen.getByRole("searchbox", { name: "Buscar obra" }) as HTMLInputElement;
 
-  it("é uma tabela só, sem nível por contratante, com chips e as colunas aprovadas", async () => {
+  it("o cabeçalho diz uma vez 'cota da Lotufo', sem chips de contratante e com as colunas de antes", async () => {
     abrir("/obras");
     await screen.findByRole("table");
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("posição financeira");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("cota da Lotufo");
+    expect(document.body.textContent!.match(/cota/gi)).toHaveLength(1);         // nenhuma legenda sob número nem na linha
+    expect(screen.queryByRole("navigation", { name: "Contratante" })).toBeNull();
+    expect(document.querySelector(".chip")).toBeNull();
     const cabecalho = screen.getAllByRole("columnheader").map(c => c.textContent);
     expect(cabecalho).toEqual(["Obra", "Valor vigente", "Medido", "Saldo a executar", "Executado", "A receber"]);
-    expect(screen.queryByRole("heading", { name: "Contratantes" })).toBeNull();
-    // 3 em andamento; a encerrada só com "Ver todas"
-    expect(nomes()).toEqual(["Estações BRTSINFRA", "GranitoMTPAR", "MT-388SINFRA · cota 49%"]);
+  });
+
+  it("as obras aparecem em grupos por contratante, cada grupo com o nome e o subtotal", async () => {
+    abrir("/obras");
+    await screen.findByRole("table");
+    expect(grupos().map(g => g.querySelector("th")!.textContent)).toEqual(["MTPAR", "SINFRA"]);
+    // 3 em andamento; a encerrada só com "Ver todas". Dentro do grupo, na ordem do nome
+    expect(nomes()).toEqual(["GranitoIC 3/2026", "Estações BRTIC 1/2026", "MT-388IC 2/2026"]);
     expect(rodape()).toBe("Mostrando 3 de 4 obras");
-    // o valor cheio e o a receber de cada obra; o % em verde
+    const sinfra = grupos()[1];
+    expect(sinfra.closest("tbody")!.querySelectorAll("tr.linha--obra")).toHaveLength(2);
+    const subtotal = within(sinfra).getAllByRole("cell").map(c => limpo(c.textContent));
+    expect(subtotal[0]).toBe("R$ 2.470,00");     // 1.000,00 + 1.470,00
+    expect(subtotal[1]).toBe("R$ 985,00");
+    expect(subtotal[2]).toBe("R$ 1.485,00");
+    expect(subtotal[4]).toBe("R$ 149,01");
+  });
+
+  it("obra em consórcio aparece com vigente, medido, saldo e a receber na cota, não no cheio", async () => {
+    abrir("/obras");
+    await screen.findByRole("table");
+    const linha = limpo(screen.getByRole("link", { name: "MT-388" }).closest("tr")!.textContent);
+    expect(linha).toContain("R$ 1.470,00");
+    expect(linha).toContain("R$ 735,00");
+    expect(linha).toContain("R$ 49,01");
+    expect(linha).toContain("50%");
+    expect(linha).not.toContain("3.000,01");
+    expect(linha).not.toContain("1.500,0");
     const brt = screen.getByRole("link", { name: "Estações BRT" }).closest("tr")!;
-    expect(brt.textContent).toMatch(/R\$\s*1\.000,00/);
-    expect(brt.textContent).toMatch(/R\$\s*250,00/);
-    expect(brt.textContent).toMatch(/R\$\s*750,00/);
-    expect(brt.textContent).toMatch(/R\$\s*100,00/);
+    expect(limpo(brt.textContent)).toContain("R$ 750,00");
     expect(brt.textContent).toContain("25%");
     expect(brt.querySelector(".progresso--feito")).toBeTruthy();
   });
 
-  it("os chips têm um item por contratante com a contagem e filtram, e os totais acompanham o filtro", async () => {
-    abrir("/obras");
-    await screen.findByRole("table");
-    const chips = within(screen.getByRole("navigation", { name: "Contratante" })).getAllByRole("link");
-    expect(chips.map(c => c.textContent)).toEqual(["Todas4", "MTPAR2", "SINFRA2"]);
-    expect(totais()).toMatch(/Contratado R\$ 0,0 mi/);   // valores de teste são de centavos: tudo arredonda a 0,0 mi
-    fireEvent.click(chips[2]);
-    expect(window.location.search).toBe("?c=SINFRA");
-    await screen.findByRole("table");
-    expect(nomes()).toEqual(["Estações BRTSINFRA", "MT-388SINFRA · cota 49%"]);
-    expect(rodape()).toBe("Mostrando 2 de 2 obras");
-    expect(chips[2].getAttribute("aria-current")).toBe("true");
-  });
-
-  it("os totais somam as linhas mostradas (contratado, medido, saldo e a receber)", async () => {
-    const { totaisDe } = await import("./listaObras");
-    const t = totaisDe(OBRAS.filter(o => o.estado !== "encerrado") as never);
-    expect(t).toMatchObject({ contratado: 6000_00, medido: 2250_00, saldo: 3750_00, aReceber: 200_00, temReceber: true });
-    expect(totaisDe([{ ...OBRAS[0], a_receber_centavos: null }] as never).temReceber).toBe(false);
-  });
-
-  it("o a receber aparece em milhões nos totais e vira traço sem o total liberado", async () => {
+  it("os totais do topo somam as linhas na cota e o a receber vira traço sem o total liberado", async () => {
+    const mi = 1_000_000_00;
     api.mockImplementation(async (caminho: string) => {
-      if (caminho === "/api/contratos") return OBRAS.map(o => ({ ...o, valor_vigente_centavos: 100_000_000_00, medido_execucao_centavos: 40_000_000_00, a_receber_centavos: null }));
+      if (caminho === "/api/contratos") return OBRAS.map(o => ({ ...o, valor_vigente_centavos: 400 * mi, medido_execucao_centavos: 160 * mi, posicao: posicao(100 * mi, 40 * mi, null) }));
       if (caminho === "/api/entidades") return [];
       return { avisos: [] };
     });
-    abrir("/obras?c=SINFRA");
+    abrir("/obras");
     await screen.findByRole("table");
-    expect(totais()).toContain("Contratado R$ 200,0 mi");
-    expect(totais()).toContain("Medido R$ 80,0 mi");
-    expect(totais()).toContain("Saldo R$ 120,0 mi");
+    expect(totais()).toContain("Contratado R$ 300,0 mi");
+    expect(totais()).toContain("Medido R$ 120,0 mi");
+    expect(totais()).toContain("Saldo R$ 180,0 mi");
     expect(totais()).toContain("A receber —");
-    expect(screen.getAllByRole("row")[1].textContent).toContain("—");
+    expect(within(grupos()[0]).getAllByRole("cell")[4].textContent).toBe("—");
+    expect(within(linhasDeObra()[0]).getAllByRole("cell")[5].textContent).toBe("—");
+  });
+
+  it("digitar parte do nome ou do número do contrato filtra a lista e os totais; limpar volta tudo", async () => {
+    abrir("/obras");
+    await screen.findByRole("table");
+    fireEvent.change(campoBusca(), { target: { value: "grani" } });
+    expect(nomes()).toEqual(["GranitoIC 3/2026"]);
+    expect(grupos().map(g => g.querySelector("th")!.textContent)).toEqual(["MTPAR"]);
+    expect(window.location.search).toBe("?q=grani");
+    expect(rodape()).toBe("Mostrando 1 de 4 obras");
+    fireEvent.change(campoBusca(), { target: { value: "ic 2/" } });
+    expect(nomes()).toEqual(["MT-388IC 2/2026"]);
+    fireEvent.change(campoBusca(), { target: { value: "nada disso" } });
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByText("Nenhuma obra.")).toBeTruthy();
+    fireEvent.change(campoBusca(), { target: { value: "" } });
+    expect(nomes()).toHaveLength(3);
+    expect(window.location.search).toBe("");
+  });
+
+  it("a busca vem da URL (?q=) ao abrir", async () => {
+    abrir("/obras?q=brt");
+    await screen.findByRole("table");
+    expect(campoBusca().value).toBe("brt");
+    expect(nomes()).toEqual(["Estações BRTIC 1/2026"]);
   });
 
   it("clicar na linha ou no nome abre a página da obra", async () => {
@@ -119,24 +158,31 @@ describe("Obras: posição financeira", () => {
     expect(window.location.pathname).toBe("/obras/3");
   });
 
-  it("consórcio mostra a cota em cinza e obra sem consórcio não", async () => {
-    abrir("/obras");
-    await screen.findByRole("table");
-    const cota = document.querySelector(".obras-posicao__cota")!;
-    expect(cota.textContent).toContain("cota 49%");
-    expect(document.querySelectorAll(".obras-posicao__cota")).toHaveLength(1);
-  });
-
-  it("'Ver todas' traz as encerradas e os totais as incluem", async () => {
+  it("'Ver todas' traz as encerradas, mesmo com a busca filtrando", async () => {
     abrir("/obras?c=MTPAR");
     await screen.findByRole("table");
-    expect(nomes()).toEqual(["GranitoMTPAR"]);
+    expect(nomes()).toEqual(["GranitoIC 3/2026"]);
     fireEvent.click(screen.getByRole("link", { name: "Ver todas" }));
     expect(window.location.search).toBe("?c=MTPAR&situacao=todas");
     await screen.findByText("Só em andamento");
     expect(rodape()).toBe("Mostrando 2 de 2 obras");
-    expect(nomes()).toEqual(["DeciolândiaMTPAR", "GranitoMTPAR"]);
+    expect(nomes()).toEqual(["DeciolândiaIC 4/2026", "GranitoIC 3/2026"]);
     expect(screen.queryByRole("link", { name: "Ver todas" })).toBeNull();
+    cleanup();
+    abrir("/obras?q=granito");
+    await screen.findByRole("table");
+    expect(screen.getByRole("link", { name: "Ver todas" })).toBeTruthy();
+  });
+
+  it("o link de antes com contratante (?c=) mostra só o grupo dele e oferece 'Todas as obras'", async () => {
+    abrir("/obras?c=SINFRA");
+    await screen.findByRole("table");
+    expect(grupos().map(g => g.querySelector("th")!.textContent)).toEqual(["SINFRA"]);
+    expect(rodape()).toBe("Mostrando 2 de 2 obras");
+    fireEvent.click(screen.getByRole("link", { name: "Todas as obras" }));
+    expect(window.location.search).toBe("");
+    expect(grupos()).toHaveLength(2);
+    expect(screen.queryByRole("link", { name: "Todas as obras" })).toBeNull();
   });
 
   it("a lista não tem mais a coluna nem o botão de avisos", async () => {
@@ -166,7 +212,7 @@ describe("Obras: posição financeira", () => {
   it("?orgao= vira ?c= na URL e o nome inteiro do órgão continua filtrando", async () => {
     abrir("/obras?orgao=SINFRA%20-%20SUPU");
     await screen.findByRole("table");
-    expect(nomes()).toEqual(["MT-388SINFRA · cota 49%"]);
+    expect(nomes()).toEqual(["MT-388IC 2/2026"]);
     cleanup();
     abrir("/obras?orgao=MTPAR");
     await screen.findByRole("table");
