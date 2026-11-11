@@ -12,13 +12,14 @@ hora, assunto, trecho inicial (ate' 500 caracteres) e nomes dos anexos. O corpo 
 import json
 import logging
 
-from app import auditoria, correio, db, graph
+from app import auditoria, correio, db, graph, siga
 
 log = logging.getLogger("app.respostas_orgao")
 
 TRECHO_MAX = 500
 ESTADOS_FECHADOS = ("recebida", "cancelada", "desistida")
-_CAMPOS = "id, medicao_id, envio_id, remetente, remetente_nome, recebida_em, assunto, trecho, anexos, criado_em"
+_CAMPOS = ("id, medicao_id, envio_id, remetente, remetente_nome, recebida_em, assunto, trecho, anexos, criado_em, "
+           "siga_processo_id")
 
 
 def _linha(r) -> dict:
@@ -83,6 +84,26 @@ def _pode_ler(usuario_id: int) -> bool:
     return bool(cfg["simulador"]) or bool(cfg["client_id"] and correio.conectado(usuario_id))
 
 
+def _protocolo_siga(conn, medicao_id: int, texto: str) -> int | None:
+    """Issue #667: o link de acompanhamento do SIGA no corpo da resposta cria (ou liga) o processo da medicao, pelo
+    caminho do link colado no passo de analise (`siga.acompanhar_link_da_medicao`, sem usuario: ninguem colou). -> id
+    do processo, ou None quando a resposta nao e' o protocolo: sem link valido, codigo ligado a outra medicao, ou a
+    medicao ja' tem OUTRO processo com codigo (o que foi gravado antes nao e' trocado por um e-mail: a resposta que
+    cita um texto antigo traria o link antigo de volta). Nunca levanta: a resposta entra de qualquer jeito."""
+    try:
+        link = siga.link_no_texto(texto)
+        if not link:
+            return None
+        codigo = siga.extrair_codigo(link)
+        if conn.execute("SELECT 1 FROM siga_processos WHERE medicao_id=? AND protocolo_id IS NULL "
+                        "AND codigo IS NOT NULL AND codigo<>?", (medicao_id, codigo)).fetchone():
+            return None
+        return siga.acompanhar_link_da_medicao(conn, None, medicao_id, link)
+    except (ValueError, LookupError) as e:
+        log.info("link do SIGA na resposta da medicao %s nao virou processo: %s", medicao_id, e)
+        return None
+
+
 def ler(conn, usuario: dict) -> list[dict]:
     """Le as conversas de `conversas_a_ler` e registra as respostas novas; devolve as registradas agora. Sem conta
     Microsoft conectada, sem envio a ler ou com o Graph fora do ar: lista vazia, sem erro (a tela chama sozinha)."""
@@ -133,6 +154,13 @@ def ler(conn, usuario: dict) -> list[dict]:
                                            "recebida_em": msg["recebida_em"], "assunto": msg["assunto"][:300],
                                            "anexos": anexos})
                 rid = cur.lastrowid
+                # issue #667: o link e' procurado no corpo INTEIRO (pode vir depois do trecho), que nao e' gravado.
+                # So' a primeira resposta com o processo leva a marca (a que cita o mesmo link depois, nao)
+                pid = _protocolo_siga(conn, envio["medicao_id"], msg["texto"])
+                if pid is not None and not conn.execute(
+                        "SELECT 1 FROM medicao_respostas_orgao WHERE medicao_id=? AND siga_processo_id=?",
+                        (envio["medicao_id"], pid)).fetchone():
+                    conn.execute("UPDATE medicao_respostas_orgao SET siga_processo_id=? WHERE id=?", (pid, rid))
             novas.append(_linha(conn.execute(f"SELECT {_CAMPOS} FROM medicao_respostas_orgao WHERE id=?",
                                              (rid,)).fetchone()))
     return novas

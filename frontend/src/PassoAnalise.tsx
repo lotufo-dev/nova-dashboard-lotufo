@@ -96,9 +96,11 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
     let vivo = true;
     const ler = () => api<RespostaOrgao[]>(`/api/medicoes/${m.id}/respostas-orgao`)
       .then(r => { if (vivo) setRespostas(Array.isArray(r) ? r : []); }).catch(() => {});
+    // #667: a resposta nova pode ter trazido o protocolo do SIGA (o processo nasce na leitura): a tela SIGA e' relida
+    const reler = () => { ler(); setRelido(n => n + 1); };
     ler();
-    window.addEventListener(EVENTO_RESPOSTAS_LIDAS, ler);
-    return () => { vivo = false; window.removeEventListener(EVENTO_RESPOSTAS_LIDAS, ler); };
+    window.addEventListener(EVENTO_RESPOSTAS_LIDAS, reler);
+    return () => { vivo = false; window.removeEventListener(EVENTO_RESPOSTAS_LIDAS, reler); };
   }, [m.id]);
 
   const proc = siga ? processoDa(siga.processos ?? [], m.id, numero) : null;
@@ -216,15 +218,29 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
         <section className="cartao med-painel" aria-labelledby="orgao-emails">
           <h3 className="med-painel__titulo" id="orgao-emails">Respostas do órgão por e-mail</h3>
           <ol className="orgao-emails" aria-labelledby="orgao-emails">
-            {respostas.map(r => (
-              <li key={r.id}>
-                <p className="orgao-emails__de">
-                  <span>{r.remetente_nome || r.remetente}</span>
-                  <time dateTime={r.recebida_em}>{diaMes(r.recebida_em)} {fmtHora(r.recebida_em)}</time>
-                </p>
-                <p>{r.trecho}</p>
-              </li>
-            ))}
+            {respostas.map(r => {
+              // #667: a resposta que trouxe o link de acompanhamento; o processo vem da tela SIGA (sem ela, so' a marca)
+              const protocolo = r.siga_processo_id ? siga?.processos?.find(p => p.id === r.siga_processo_id) ?? null : null;
+              return (
+                <li key={r.id}>
+                  <p className="orgao-emails__de">
+                    <span>{r.remetente_nome || r.remetente}</span>
+                    <time dateTime={r.recebida_em}>{diaMes(r.recebida_em)} {fmtHora(r.recebida_em)}</time>
+                  </p>
+                  {r.siga_processo_id ? (
+                    <p className="orgao-emails__siga">
+                      <span className="selo selo--ok"><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">Protocolo do SIGA</span></span>
+                      {protocolo && <span>{[`Processo ${protocolo.numero ?? protocolo.codigo ?? ""}`.trim(), protocolo.setor].filter(Boolean).join(" · ")}</span>}
+                      {protocolo?.link && (
+                        <a className="link" href={protocolo.link} target="_blank" rel="noreferrer">
+                          Abrir no SIGA <IconeLinkExterno className="icone icone--p" /></a>
+                      )}
+                    </p>
+                  ) : null}
+                  <p>{r.trecho}</p>
+                </li>
+              );
+            })}
           </ol>
         </section>
       )}
