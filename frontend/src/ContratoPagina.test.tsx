@@ -1,4 +1,7 @@
+/// <reference types="node" />
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ContratoPagina from "./ContratoPagina";
 import type { Usuario } from "./Login";
@@ -23,6 +26,7 @@ const LISTA = { familia: "ses", etapas: [{ chave: "unico", rotulo: "Protocolo", 
 const FICHA = { topo: { vigente_centavos: 100000, medido_centavos: 45000, saldo_centavos: 55000, reajuste_centavos: 0 },
   contrato: { original_centavos: 100000, original_igual: true, tas: 0, data_base: null },
   ultima_medicao: null, em_andamento: null,
+  ritmo: { ritmo_centavos: 11000, saldo_centavos: 55000, conclusao: "2027-03-15", execucao_fim: "2026-12-31", situacao: "atrasa", dias_alem: 74 },
   vencimentos: [{ chave: "execucao", rotulo: "Fim da execução", data: null, dias: null, nivel: "normal" },
     { chave: "vigencia", rotulo: "Fim da vigência", data: null, dias: null, nivel: "normal" }] };
 
@@ -31,7 +35,6 @@ const leituras = (caminho: string) => api.mock.calls.filter(c => c[0] === caminh
 function responder() {
   api.mockImplementation(async (url: string, opcoes?: { method?: string }) => {
     if (url.endsWith("/cabecalho")) return CABECALHO;
-    if (url.endsWith("/curva")) return { saldo: { vigente_centavos: 0, atestado_execucao_centavos: 0, saldo_centavos: 0, formula: "" } };
     if (url.endsWith("/ficha")) return FICHA;
     if (url === "/api/inicio") return { avisos: [] };
     if (url.endsWith("/protocolos")) return opcoes?.method === "POST" ? {} : LISTA;
@@ -42,22 +45,15 @@ function responder() {
   });
 }
 
-// redesenho de 16/10/2026 (#160) e pagina unica (#646): resumo da ficha, curva S, secoes em abas, avisos e execucao do contrato
+// redesenho de 16/10/2026 (#160) e pagina unica (#646): resumo da ficha, ritmo e prazo (#655), secoes em abas, avisos e execucao do contrato
 describe("Página da obra: o desenho novo", () => {
   const CABECALHO_COMPLETO = { ...CABECALHO, execucao_inicio: "2026-01-01", execucao_fim: "2026-12-31", dias_execucao: 76,
     vigencia_inicio: "2025-12-01", vigencia_fim: "2027-01-31", dias_vigencia: 106, faturado_centavos: 40000, a_receber_centavos: 15000 };
-  const CURVA = { curva: [
-    { competencia: "2026-08", previsto_centavos: 30000, medido_execucao_centavos: 20000, atestado_pendente: false },
-    { competencia: "2026-09", previsto_centavos: 30000, medido_execucao_centavos: 25000, atestado_pendente: true },
-    { competencia: "2026-10", previsto_centavos: 40000, medido_execucao_centavos: 0, atestado_pendente: false }],
-  saldo: { vigente_centavos: 100000, atestado_execucao_centavos: 45000, saldo_centavos: 55000, formula: "x" } };
-
   function responderCompleto() {
     responder();
     const base = api.getMockImplementation()!;
     api.mockImplementation(async (url: string, opcoes?: { method?: string }) => {
       if (url.endsWith("/cabecalho")) return CABECALHO_COMPLETO;
-      if (url.endsWith("/curva")) return CURVA;
       return base(url, opcoes);
     });
   }
@@ -76,7 +72,7 @@ describe("Página da obra: o desenho novo", () => {
     expect(within(execucao).getByText(/450,00/)).toBeTruthy();
     expect(within(execucao).getByText(/550,00/)).toBeTruthy();
     expect(within(execucao).getByText("45%")).toBeTruthy();
-    for (const nome of ["Prazo", "Última medição", "Medição em andamento", "Próximos vencimentos", "Previsto × medido acumulado"]) {
+    for (const nome of ["Prazo", "Última medição", "Medição em andamento", "Próximos vencimentos", "Ritmo e prazo"]) {
       expect(screen.getByRole("region", { name: nome })).toBeTruthy();
     }
     // as abas, na mesma pagina; sem aba na URL, a primeira (Medições)
@@ -150,16 +146,33 @@ describe("Página da obra: o desenho novo", () => {
     expect(screen.getByRole("navigation", { name: "Seções da obra" })).toBeTruthy();
   });
 
-  it("a curva S alterna entre acumulado e por mês", async () => {
+  it("não há curva S nem previsto × medido; no lugar, o cartão Ritmo e prazo acima das abas (#655)", async () => {
     responderCompleto();
-    render(<ContratoPagina contratoId={1} usuario={usuario} aba="prazos" origem={null} busca={{}} />);
-    const curva = (await screen.findByRole("heading", { name: "Curva S" })).closest("section")!;
-    await waitFor(() => expect(within(curva).getByRole("img")).toBeTruthy());
-    expect(within(curva).getByRole("button", { name: "acumulado" }).getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(within(curva).getByRole("button", { name: "por mês" }));
-    expect(within(curva).getByRole("button", { name: "por mês" }).getAttribute("aria-pressed")).toBe("true");
-    // o rodape que repetia os numeros do grafico saiu (CurvaS, texto na tela 26/10/2026)
-    expect(within(curva).queryByText(/Por competência: previsto|Até 09\/2026/)).toBeNull();
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    const ritmo = await screen.findByRole("region", { name: "Ritmo e prazo" });
+    await waitFor(() => expect(within(ritmo).getByText(/110,00/)).toBeTruthy());
+    expect(within(ritmo).getByText("15/03/2027")).toBeTruthy();
+    expect(ritmo.querySelector(".selo--acao")!.textContent).toBe("74\u00a0dias além do prazo");
+    // o cartao vem antes das abas, na coluna principal
+    const secoes = screen.getByRole("region", { name: "Seções da obra" });
+    expect(ritmo.compareDocumentPosition(secoes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Curva S" })).toBeNull();
+    expect(screen.queryByRole("img", { name: /Curva S/ })).toBeNull();
+    expect(document.body.textContent).not.toMatch(/previsto/i);
+    expect(document.getElementById("curva")).toBeNull();
+    expect(document.getElementById("curva-resumo")).toBeNull();
+    // a pagina nao le mais a curva da obra
+    expect(leituras("/api/contratos/1/curva")).toHaveLength(0);
+  });
+
+  it("abaixo de 1280 px a ordem é resumo, Ritmo e prazo, abas e só depois avisos e linha do tempo (#655)", () => {
+    const css = readFileSync(join(process.cwd(), "src", "tokens.css"), "utf8");
+    const i = css.indexOf(".obra-grade { display: flex;");
+    const bloco = css.slice(css.lastIndexOf("@media", i), css.indexOf("\n}", i));
+    expect(bloco).toContain("@media (max-width: 1280px)");
+    const ordem = (id: string) => Number(new RegExp(`#${id} \\{ order: (\\d+); \\}`).exec(bloco)![1]);
+    expect([ordem("ritmo"), ordem("secoes"), ordem("avisos-obra"), ordem("execucao")]).toEqual([1, 2, 3, 4]);
+    expect(css).not.toMatch(/#curva\b|#curva-resumo/);
   });
 
   it("o hoje das linhas do tempo vem da data do dia e anda sozinho com os dias", async () => {
@@ -243,15 +256,6 @@ describe("Página da obra: o desenho novo", () => {
     const cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
     expect(within(cartao).getByText("31/12")).toBeTruthy();
     expect(cartao.textContent).not.toContain("NaN");
-  });
-
-  it("o marcador 'Hoje' da curva aparece também na segunda metade do último mês", async () => {
-    fixarDia("2026-10-25T15:00:00Z");   // curva vai de ago a out/2026
-    responderCompleto();
-    render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
-    const curva = (await screen.findByRole("heading", { name: "Curva S" })).closest("section")!;
-    await waitFor(() => expect(within(curva).getByRole("img")).toBeTruthy());
-    expect(curva.querySelector(".c-hoje")).not.toBeNull();
   });
 
   it("os avisos da obra ficam num cartão ao lado da página", async () => {
