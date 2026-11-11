@@ -478,9 +478,9 @@ def test_rodadas_escolhe_o_que_ler(client_admin, com_token, schtasks, relogio_mo
     r = _rodada(client_admin)                      # pedido "todos": todos, do tipo pedido
     assert r["tipo"] == "pedido" and len(r["processos"]) == 2
     _fim(client_admin, r["rodada_id"])
-    relogio_movel(13, 59)
+    relogio_movel(58, 59)
     assert _rodada(client_admin)["rodada_id"] is None
-    relogio_movel(0, 1)                            # 14 minutos depois da ultima completa: todos, automatica
+    relogio_movel(0, 1)                            # 59 minutos depois da ultima completa: todos, automatica (#657)
     r = _rodada(client_admin)
     assert r["tipo"] == "automatica" and len(r["processos"]) == 2
 
@@ -512,11 +512,16 @@ def test_comecei_repetido_devolve_a_rodada_aberta_sem_gravar_outra(client_admin,
 
 def test_fim_com_nao_lidos_e_falha_aparecem_no_painel(client_admin, com_token, schtasks, relogio_movel):
     alfa, beta = _com_processos(client_admin)
+    nao_lido = [{"codigo": None, "numero": "ORGAO-PRO-2026/00011", "motivo": "Processo sem código"}]
     r = _rodada(client_admin)
-    assert _fim(client_admin, r["rodada_id"], [{"codigo": None, "numero": "ORGAO-PRO-2026/00011",
-                                                 "motivo": "Processo sem código"}]).status_code == 200
+    assert _fim(client_admin, r["rodada_id"], nao_lido).status_code == 200
+    # issue #657: lido ha' 1 hora (a leitura do CORPO e' das 11h), o processo ainda nao mostra "nao lido"
+    assert _robo_painel(client_admin)["avisos"] == []
+    relogio_movel(61)                              # 13h01: mais de 2 horas uteis sem leitura que deu certo
+    r = _rodada(client_admin)
+    assert _fim(client_admin, r["rodada_id"], nao_lido).status_code == 200
     assert _robo_painel(client_admin)["avisos"] == [
-        {"tipo": "nao_lido", "processo_id": beta, "texto": "não lido às 12:00: Processo sem código"},
+        {"tipo": "nao_lido", "processo_id": beta, "texto": "não lido às 13:01: Processo sem código"},
         {"tipo": "nao_lidos", "processo_id": None, "texto": "1 de 2 processos não foram lidos"}]
     relogio_movel(1)
     client_admin.post("/api/siga/atualizar", json={"processo_id": alfa})
@@ -525,7 +530,7 @@ def test_fim_com_nao_lidos_e_falha_aparecem_no_painel(client_admin, com_token, s
                           headers=_robo())
     assert f.status_code == 200, f.text
     assert _robo_painel(client_admin)["avisos"] == [
-        {"tipo": "falha", "processo_id": None, "texto": "A rodada das 12:01 falhou: O SIGA não abriu"}]
+        {"tipo": "falha", "processo_id": None, "texto": "A rodada das 13:02 falhou: O SIGA não abriu"}]
 
 
 def test_rodada_sem_fim_e_pedido_parado_avisam_no_painel(client_admin, com_token, schtasks, relogio_movel):
@@ -574,3 +579,38 @@ def test_atualizar_recusa_sem_login_e_aceita_a_diretoria(api, com_token, schtask
     assert _robo_painel(cl)["pedidos"][0]["usuario"] == "Diretoria"
     del cl.headers["X-CSRF-Token"]
     assert cl.post("/api/siga/atualizar", json={}).status_code == 403
+
+
+# --- processo encerrado (issue #657) ----------------------------------------------------------------------
+
+def _medicao_ligada_ao_alfa(estado):
+    """Contrato, medicao e protocolo enviado com o numero do Processo Alfa do CORPO (o robo liga pelo numero igual)."""
+    conn = db.get_conn()
+    uid = auth.criar_usuario(conn, "Engenharia", "engenharia@exemplo.com.br", "senha-forte-123", "engenharia")
+    conn.execute("INSERT INTO contratos (id, orgao, numero_instrumento, objeto, valor_original_centavos, nome_curto) "
+                 "VALUES (7, 'SINFRA', 'IC 1/2026', 'Obra', 100, 'Obra Alfa')")
+    conn.execute("INSERT INTO medicoes (id, contrato_id, numero, tipo, competencia, estado) "
+                 "VALUES (31, 7, 3, 'execucao', '2026-09', ?)", (estado,))
+    pid = conn.execute("INSERT INTO protocolos (contrato_id, etapa, natureza, usuario_id, situacao, numero_orgao) "
+                       "VALUES (7, 'unico', 'execucao', ?, 'enviado', 'SINFRA-PRO-2026/00001')", (uid,)).lastrowid
+    conn.execute("INSERT INTO protocolo_medicoes (protocolo_id, medicao_id) VALUES (?, 31)", (pid,))
+    conn.commit(); conn.close()
+
+
+def test_processo_de_medicao_recebida_sai_da_lista_e_da_rodada_do_robo(client_admin, com_token, schtasks):
+    _medicao_ligada_ao_alfa("recebida")
+    _com_processos(client_admin)
+    alfa, beta = client_admin.get("/api/siga").json()["processos"]
+    assert (alfa["medicao_id"], alfa["encerrado"], beta["encerrado"]) == (31, "recebida", None)
+    so_o_beta = [{"codigo": None, "numero": "ORGAO-PRO-2026/00011", "nome": "Processo Beta"}]
+    assert client_admin.get("/api/siga/processos", headers=_robo()).json() == so_o_beta
+    r = _rodada(client_admin)
+    assert r["tipo"] == "automatica" and r["processos"] == so_o_beta
+
+
+def test_processo_arquivado_sai_da_lista_do_robo(client_admin, com_token):
+    corpo = {**CORPO, "processos": [{**CORPO["processos"][0], "situacao": "2º Volume - Aguardando Andamento [ARQUIVO, [X]]"},
+                                    CORPO["processos"][1]]}
+    assert client_admin.post("/api/siga/leituras", json=corpo, headers=_robo()).status_code == 200
+    assert [p["encerrado"] for p in client_admin.get("/api/siga").json()["processos"]] == ["arquivado", None]
+    assert [p["nome"] for p in client_admin.get("/api/siga/processos", headers=_robo()).json()] == ["Processo Beta"]

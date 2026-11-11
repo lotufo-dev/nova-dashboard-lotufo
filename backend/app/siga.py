@@ -58,7 +58,7 @@ MAX_MOTIVO = 300
 EM_ANDAMENTO = datetime.timedelta(minutes=12)          # na tela, "lendo" ate' aqui; depois, "nao terminou"
 ROBO_VIVO = datetime.timedelta(minutes=10)             # o Windows encerra o robo aos 10: depois disso, dispara
 SEM_INICIO = datetime.timedelta(minutes=2)
-COMPLETA_A_CADA = datetime.timedelta(minutes=14)       # a tarefa agendada roda de 15 em 15 minutos
+COMPLETA_A_CADA = datetime.timedelta(minutes=59)       # rodada completa no maximo de hora em hora (#657)
 log = logging.getLogger("app.siga")
 
 
@@ -173,6 +173,63 @@ def derivar(situacao: str | None, movimentacoes: list[dict], hoje: datetime.date
         "ultima": andamentos[-1] if andamentos else None,
         "protocolado_em": validas[0]["data"] if validas else None,
     }
+
+
+def _sem_acento(texto: str | None) -> str:
+    return unicodedata.normalize("NFD", texto or "").encode("ascii", "ignore").decode().lower()
+
+
+def arquivado(situacao: str | None, movimentacoes: list[dict]) -> bool:
+    """Processo arquivado no SIGA (#657), sem diferenca de acento e maiuscula: o setor do ultimo volume contem
+    "arquivo", o estado do ultimo volume comeca por "arquiv" ('1º Volume - Arquivado [...]'), ou a movimentacao mais
+    recente (fora Marcacao e Anotacao) comeca por "arquiv" e nao foi cancelada. Desarquivamento, transferencia ou
+    qualquer outro andamento depois do arquivamento passa a ser a mais recente, e o processo volta."""
+    ultimo_volume = (situacao or "").split(" | ")[-1]
+    estado = _sem_acento(ultimo_volume.split("[")[0]).split(" - ", 1)[-1].strip()
+    if "arquivo" in _sem_acento(_setor(situacao)) or estado.startswith("arquiv"):
+        return True
+    andamentos = [m for m in movimentacoes if not _marcacao_ou_anotacao(m["evento"])]
+    if not andamentos:
+        return False
+    evento = _sem_acento(max(andamentos, key=lambda m: m["data"])["evento"]).strip()
+    return evento.startswith("arquiv") and "cancelad" not in evento
+
+
+def _encerramento(estado_da_medicao: str | None, situacao: str | None, movimentacoes: list[dict]) -> str | None:
+    """Por que o processo esta' encerrado (#657): `recebida` (ligado a medicao recebida), `arquivado` ou None (vivo).
+    Derivado a cada leitura, nunca gravado: a medicao que deixa de estar recebida devolve o processo."""
+    if estado_da_medicao == "recebida":
+        return "recebida"
+    return "arquivado" if arquivado(situacao, movimentacoes) else None
+
+
+def encerrados(conn) -> dict[int, str]:
+    """{id do processo: motivo} dos processos encerrados (`_encerramento`)."""
+    out = {}
+    for p in conn.execute("SELECT sp.id, m.estado FROM siga_processos sp LEFT JOIN medicoes m ON m.id=sp.medicao_id "
+                          "ORDER BY sp.id").fetchall():
+        leitura = conn.execute("SELECT situacao FROM siga_leituras WHERE processo_id=? ORDER BY lido_em DESC, id DESC "
+                               "LIMIT 1", (p["id"],)).fetchone()
+        movs = [] if p["estado"] == "recebida" else conn.execute(
+            "SELECT data, evento FROM siga_movimentacoes WHERE processo_id=?", (p["id"],)).fetchall()
+        motivo = _encerramento(p["estado"], leitura["situacao"] if leitura else None, movs)
+        if motivo:
+            out[p["id"]] = motivo
+    return out
+
+
+def _ultimas_leituras(conn) -> dict[int, str]:
+    return dict(conn.execute("SELECT processo_id, MAX(lido_em) FROM siga_leituras GROUP BY processo_id").fetchall())
+
+
+def _leitura_dos_vivos(conn, fora: dict[int, str]) -> str | None:
+    """A leitura mais recente entre os processos vivos (UTC do banco): o encerrado nao e' mais lido, e a leitura
+    antiga dele nao acusa atraso nem a nova o esconde."""
+    return max((lido for pid, lido in _ultimas_leituras(conn).items() if pid not in fora), default=None)
+
+
+def _ha_vivo(conn, fora: dict[int, str]) -> bool:
+    return any(r[0] not in fora for r in conn.execute("SELECT id FROM siga_processos"))
 
 
 def atrasado(lido_em: str | None, agora: datetime.datetime) -> bool:
@@ -494,7 +551,10 @@ def do_protocolo(conn, protocolo_id: int, hoje: datetime.date | None = None) -> 
 # --- leitura -----------------------------------------------------------------------------------------------
 
 def processos_para_o_robo(conn) -> list[dict]:
-    return [dict(r) for r in conn.execute("SELECT codigo, numero, nome FROM siga_processos ORDER BY id")]
+    """O que o robo acompanha: os processos vivos. O encerrado (#657) sai da lista."""
+    fora = encerrados(conn)
+    return [{k: r[k] for k in ("codigo", "numero", "nome")}
+            for r in conn.execute("SELECT id, codigo, numero, nome FROM siga_processos ORDER BY id") if r["id"] not in fora]
 
 
 def link_do_processo(codigo: str | None) -> str | None:
@@ -512,7 +572,8 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
     lido_em = conn.execute("SELECT MAX(lido_em) FROM siga_leituras").fetchone()[0]
     saida = []
     for p in conn.execute(
-            "SELECT sp.*, c.nome_curto, c.numero_instrumento, m.numero AS m_numero, m.tipo AS m_tipo "
+            "SELECT sp.*, c.nome_curto, c.numero_instrumento, m.numero AS m_numero, m.tipo AS m_tipo, "
+            "m.estado AS m_estado "
             "FROM siga_processos sp LEFT JOIN contratos c ON c.id=sp.contrato_id "
             "LEFT JOIN medicoes m ON m.id=sp.medicao_id ORDER BY sp.id").fetchall():
         leitura = conn.execute("SELECT situacao FROM siga_leituras WHERE processo_id=? ORDER BY lido_em DESC, id DESC "
@@ -522,6 +583,7 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
             "SELECT data, evento, cad_lotacao, cad_pessoa, at_lotacao, at_pessoa FROM siga_movimentacoes "
             "WHERE processo_id=? ORDER BY data DESC, id DESC", (p["id"],))]
         derivado = derivar(situacao, movs, hoje)
+        encerrado = _encerramento(p["m_estado"], situacao, movs)
         # Na resposta, todo instante com o fuso explicito: as datas do SIGA sao de Cuiaba, o lido_em e' UTC
         movs = [{**m, "data": tempo.iso_local(m["data"]), "tipo": tipo_da_movimentacao(m["evento"])} for m in movs]
         for campo in ("desde", "protocolado_em"):
@@ -536,12 +598,14 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
             "medicao_id": p["medicao_id"],
             "medicao_titulo": medicoes.titulo({"numero": p["m_numero"], "tipo": p["m_tipo"]})
             if p["medicao_id"] else None,
-            "protocolo_id": p["protocolo_id"], "situacao": situacao,
+            "protocolo_id": p["protocolo_id"], "situacao": situacao, "encerrado": encerrado,
             **derivado,
             "movimentacoes": movs,
         })
-    return {"lido_em": tempo.iso_utc(lido_em) if lido_em else None, "atrasado": atrasado(lido_em, agora),
-            "processos": saida, "pode_atualizar": bool(tarefa_do_robo()), "robo": situacao_robo(conn, agora)}
+    fora = {p["id"]: p["encerrado"] for p in saida if p["encerrado"]}
+    return {"lido_em": tempo.iso_utc(lido_em) if lido_em else None,
+            "atrasado": atrasado(_leitura_dos_vivos(conn, fora), agora),
+            "processos": saida, "pode_atualizar": bool(tarefa_do_robo()), "robo": situacao_robo(conn, agora, fora)}
 
 
 # --- pedidos de leitura e rodadas do robo (issue #342) -----------------------------------------------------
@@ -636,9 +700,10 @@ def pedir_leitura(conn, usuario_id: int, processo_id: int | None, tarefa: str,
 
 
 def iniciar_rodada(conn, agora: datetime.datetime | None = None, so_pedidos: bool = False) -> dict:
-    """"Comecei" do robo: o servidor decide o que ler. Completa (todos os processos acompanhados) com pedido "todos"
-    em aberto, ou quando a ultima rodada completa terminada comecou ha' 14 minutos ou mais (ou nunca houve): e' a
-    rodada automatica de 15 em 15 minutos. Senao, so' os processos dos pedidos em aberto. Os pedidos em aberto ficam
+    """"Comecei" do robo: o servidor decide o que ler. Completa (todos os processos vivos; o encerrado so' entra
+    com pedido da pessoa para ele, #657) com pedido "todos" em aberto, ou quando a ultima rodada completa terminada
+    comecou ha' 59 minutos ou mais (ou nunca houve): e' a rodada automatica, no maximo uma por hora. Senao, so' os
+    processos dos pedidos em aberto. Os pedidos em aberto ficam
     ligados a' rodada. Sem nada a ler nao grava nada: e' o que o robo recebe quando pergunta, antes de encerrar, se
     chegou pedido novo. Com rodada aberta ha' menos de 10 minutos (o robo dela pode estar vivo: so' ele chama aqui,
     porque o Windows nao roda a tarefa duas vezes), devolve a mesma: e' o robo repetindo o "comecei".
@@ -657,7 +722,8 @@ def iniciar_rodada(conn, agora: datetime.datetime | None = None, so_pedidos: boo
                                   "AND terminada_em IS NOT NULL").fetchone()[0]
             por_tempo = not so_pedidos and (ultima is None or agora - _instante(ultima) >= COMPLETA_A_CADA)
             completa = por_tempo or None in pedidos
-            processos = [p for p in todos if completa or p["id"] in pedidos]
+            fora = encerrados(conn) if completa else {}
+            processos = [p for p in todos if (completa and p["id"] not in fora) or p["id"] in pedidos]
             if not processos:
                 return {"rodada_id": None, "tipo": None, "processos": []}
             tipo = "automatica" if por_tempo else "pedido"
@@ -718,11 +784,13 @@ def _aviso_robo(tipo: str, texto: str, processo_id: int | None = None) -> dict:
     return {"tipo": tipo, "processo_id": processo_id, "texto": texto}
 
 
-def situacao_robo(conn, agora: datetime.datetime | None = None) -> dict:
+def situacao_robo(conn, agora: datetime.datetime | None = None, fora: dict[int, str] | None = None) -> dict:
     """Bloco `robo` da tela SIGA. `estado`: `lendo` (rodada em andamento), `na_fila` (pedido em aberto sem rodada) ou
     `parado`. Os avisos de rodada valem ate' a proxima rodada terminar sem aquele problema (a falha e os nao lidos
     sao os da ultima rodada terminada; a rodada sem fim avisa ate' uma seguinte terminar); o do disparo, ate' o
-    proximo disparo aceito."""
+    proximo disparo aceito. O "nao lido" de um processo (e o resumo deles) so' aparece com o processo vivo ha' mais
+    de 2 horas uteis sem leitura que deu certo (#657), pela regra de `atrasado`; o que nunca foi lido avisa logo.
+    `fora`: os encerrados, quando quem chama ja' os tem."""
     agora = agora or tempo.agora_utc()
     rodada = _rodada_em_andamento(conn, agora)
     abertos = conn.execute("SELECT p.id, p.processo_id, p.pedido_em, p.disparado_em, p.erro_disparo, u.nome "
@@ -756,7 +824,12 @@ def situacao_robo(conn, agora: datetime.datetime | None = None) -> dict:
     if ultima is not None and ultima["falha"] is not None:
         avisos.append(_aviso_robo("falha", f"A rodada das {_hora(ultima['iniciada_em'])} falhou: {ultima['falha']}"))
     elif ultima is not None and ultima["nao_lidos"]:
-        nao_lidos = json.loads(ultima["nao_lidos"])
+        fora = encerrados(conn) if fora is None else fora
+        lidos = _ultimas_leituras(conn)
+        # o processo que a dashboard nao conhece (sem id) nao tem leitura para medir: avisa como antes
+        nao_lidos = [n for n in json.loads(ultima["nao_lidos"]) if n["processo_id"] is None or (
+            n["processo_id"] not in fora
+            and (n["processo_id"] not in lidos or atrasado(lidos[n["processo_id"]], agora)))]
         hora = _hora(ultima["iniciada_em"])
         # o processo que a dashboard nao conhece vai identificado no texto, porque nao ha' linha da tela para ele
         avisos += [_aviso_robo("nao_lido", ("" if n["processo_id"] is not None else
@@ -788,7 +861,7 @@ def saude(conn) -> dict:
     """Administracao > Saude (issue #330): a ultima leitura do monitor e quantos processos ele acompanha."""
     lido_em = conn.execute("SELECT MAX(lido_em) FROM siga_leituras").fetchone()[0]
     return {"ultima_leitura": tempo.iso_utc(lido_em) if lido_em else None,
-            "atrasado": atrasado(lido_em, tempo.agora_utc()),
+            "atrasado": atrasado(_leitura_dos_vivos(conn, encerrados(conn)), tempo.agora_utc()),
             "processos": conn.execute("SELECT COUNT(*) FROM siga_processos").fetchone()[0]}
 
 
@@ -797,7 +870,7 @@ def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) ->
     mais parado: os dias sao os do "No setor ha'" da tela (`derivar`, desde a entrada no setor atual, #650), e o nivel
     segue `DIAS_ATENCAO` e `DIAS_ACAO`. Um so' por medicao: o do processo do protocolo mais recente (sem protocolo
     vale menos que com; empate, o processo mais novo), porque o antigo fica arquivado no SIGA depois de uma
-    devolucao. `siga_sem_leitura`: um so', quando o robo passou do atraso e ha' processo acompanhado. Processo sem
+    devolucao; o arquivado (#657) nao avisa. `siga_sem_leitura`: um so', quando o robo passou do atraso nos processos vivos. Processo sem
     medicao (Outros processos) nao avisa: nao ha' obra nem ato da dashboard que o faca sumir."""
     agora = agora or tempo.agora_utc()
     out = []
@@ -813,7 +886,7 @@ def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) ->
         movs = [dict(r) for r in conn.execute(
             "SELECT data, evento, at_lotacao, at_pessoa FROM siga_movimentacoes WHERE processo_id=?", (p["id"],))]
         d = derivar(leitura["situacao"] if leitura else None, movs, hoje)
-        if d["desde"] is None:
+        if d["desde"] is None or arquivado(leitura["situacao"] if leitura else None, movs):
             continue
         parado_desde, dias = d["desde"][:10], d["dias_uteis"]
         if dias < DIAS_ATENCAO:
@@ -825,8 +898,8 @@ def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) ->
             registro_avisos.obra(conn, p["contrato_id"]), dias=dias,
             destino={"tela": "siga", "processo": p["id"]}, data=parado_desde, sentido="desde"),
             "medicao_id": p["medicao_id"]})
-    lido_em = conn.execute("SELECT MAX(lido_em) FROM siga_leituras").fetchone()[0]
-    if atrasado(lido_em, agora) and conn.execute("SELECT 1 FROM siga_processos LIMIT 1").fetchone():
+    lido_em = _leitura_dos_vivos(conn, encerrados(conn))
+    if atrasado(lido_em, agora):
         local = tempo.para_local(datetime.datetime.fromisoformat(lido_em))
         out.append(registro_avisos.aviso(
             "siga_sem_leitura", "acao", f"monitor do SIGA sem leitura desde {local:%d/%m %H:%M}",
