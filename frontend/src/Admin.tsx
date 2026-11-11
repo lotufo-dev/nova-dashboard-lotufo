@@ -5,7 +5,7 @@ import { rotuloPerfil } from "./navegacao";
 import CaixaAviso from "./CaixaAviso";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import {
-  ABAS_ADMIN, type PendenciaCadastro, campoDoErroDeUsuario, CATEGORIAS_REC, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, pessoaDoEvento,
+  ABAS_ADMIN, type PendenciasCadastro, campoDoErroDeUsuario, CATEGORIAS_REC, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, pessoaDoEvento,
   quantidadeRec,
   reconciliacaoDaObra, rotaDoObjeto, rotuloAcao, rotuloObjeto, rotuloRec, urlPaginaRec,
   type CategoriaRec, type Evento, type Reconciliacao,
@@ -1104,14 +1104,16 @@ function Auditoria({ busca }: { busca: Busca }) {
 
 /* ---------------------------------------------------- pendencias de cadastro */
 
-/** Issue #649: a lista de conferencia do admin, com o documento que nao foi achado no cadastro de cada obra. */
+/** Issue #649: a lista de conferencia do admin, com o documento que nao foi achado no cadastro de cada obra. Issue
+ *  #656: o grupo "Sem data", a parte, com o aviso de fato sem data (que a agenda da tela Avisos nao mostra). */
 function PendenciasCadastro() {
-  const [lista, setLista] = useState<PendenciaCadastro[] | null>(null);
+  const [dados, setDados] = useState<PendenciasCadastro | null>(null);
   const [erro, setErro] = useState("");
   useEffect(() => {
-    api<PendenciaCadastro[]>("/api/admin/pendencias-cadastro").then(setLista).catch(e => setErro(falhaDeCarga(e)));
+    api<PendenciasCadastro>("/api/admin/pendencias-cadastro").then(setDados).catch(e => setErro(falhaDeCarga(e)));
   }, []);
   // `desde` e' o dia (garantia) ou a competencia (termo de apostilamento)
+  const lista = dados?.documentos, semData = dados?.sem_data ?? [];
   const desde = (d: string | null) => (!d ? "—" : d.length === 7 ? fmtCompetencia(d) : fmtDataPura(d));
   return (
     <section className="cartao" aria-labelledby="titulo-pendencias">
@@ -1120,7 +1122,7 @@ function PendenciasCadastro() {
       </div>
       {erro && <Erro texto={erro} />}
       {!lista && !erro && <div className="vazio"><p>Carregando…</p></div>}
-      {lista && lista.length === 0 && (
+      {lista && lista.length === 0 && semData.length === 0 && (
         <div className="vazio vazio--curto"><p className="vazio__titulo">Nenhuma pendência de cadastro.</p></div>
       )}
       {lista && lista.length > 0 && (
@@ -1141,6 +1143,28 @@ function PendenciasCadastro() {
             </tbody>
           </table>
         </Rolagem>
+      )}
+      {semData.length > 0 && (
+        <>
+          <div className="cartao__cabeca"><h3 className="cartao__titulo" id="titulo-sem-data">Sem data</h3></div>
+          <Rolagem rotulo="Avisos sem data" alta>
+            <table className="tabela">
+              <caption className="sr-only">Avisos sem data, por obra</caption>
+              <thead>
+                <tr><th scope="col">Obra</th><th scope="col">Aviso</th></tr>
+              </thead>
+              <tbody>
+                {semData.map((p, i) => (
+                  <tr key={`${p.contrato_id}-${p.aviso}-${i}`} className={`linha${i % 2 === 1 ? " par" : ""}`}>
+                    <td>{p.contrato_id === null ? "—"
+                      : <Link className="nome-link" para={{ tela: "obra", id: p.contrato_id, aba: "ficha" }}>{p.obra ?? `Obra ${p.contrato_id}`}</Link>}</td>
+                    <td>{p.aviso}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Rolagem>
+        </>
       )}
     </section>
   );

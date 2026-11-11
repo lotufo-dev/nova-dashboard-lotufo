@@ -39,7 +39,7 @@ def test_termo_que_nao_esta_no_cadastro_nao_chega_ao_inicio_e_vai_para_o_admin(c
     assert not tipos & {"reajuste_nota_antes_do_apostilamento", "reajuste_sem_apostilamento", "reajuste_fora_da_previsao"}
     reaj = client_admin.get("/api/inicio/painel").json()["avisos_importantes"]["reajustes"]
     assert {x["tipo"] for x in reaj["itens"]} == {"reajuste_pleito"} and reaj["total"] == 1
-    assert client_admin.get("/api/admin/pendencias-cadastro").json() == [
+    assert client_admin.get("/api/admin/pendencias-cadastro").json()["documentos"] == [
         {"contrato_id": cid, "obra": "Obra R", "falta": "Termo de apostilamento da competência 09/2025 não está no cadastro",
          "desde": "2025-09", "aba": "reajuste"}]
 

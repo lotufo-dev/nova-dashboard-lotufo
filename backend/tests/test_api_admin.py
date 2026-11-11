@@ -204,6 +204,16 @@ def test_seguranca_nao_avisa_quem_nao_e_administrador_nem_login_falho(client_adm
         "Administrador Admin entrou de uma origem nova (testclient)"]
 
 
+def test_pendencias_de_cadastro_trazem_o_grupo_sem_data(client_admin, monkeypatch):
+    # issue #656: o aviso de fato sem data sai da agenda da tela Avisos e aparece para o admin, no grupo "Sem data"
+    from app import avisos
+    monkeypatch.setattr(avisos, "FONTES", [lambda conn, hoje: [
+        avisos.aviso("nota_divergente", "critico", "nota 10 diverge do espelho"),
+        avisos.aviso("execucao_vencendo", "acao", "execução termina", data="2030-01-10", sentido="prazo")]])
+    assert client_admin.get("/api/admin/pendencias-cadastro").json() == {
+        "documentos": [], "sem_data": [{"contrato_id": None, "obra": None, "aviso": "nota 10 diverge do espelho"}]}
+
+
 def test_seguranca_negada_a_engenharia_e_diretoria(client_admin):
     for perfil in ("engenharia", "diretoria"):
         client_admin.post("/api/admin/usuarios", json={"nome": perfil, "email": f"{perfil}@lotufo.com",
@@ -225,8 +235,10 @@ def test_pendencias_de_cadastro_so_do_admin(client_admin):
     conn.commit(); conn.close()
     r = client_admin.get("/api/admin/pendencias-cadastro")
     assert r.status_code == 200, r.text
-    assert r.json() == [{"contrato_id": cid, "obra": "Obra A", "falta": "Último registro da garantia venceu em 05/03/2020",
-                         "desde": "2020-03-05", "aba": "prazos"}]
+    assert set(r.json()) == {"documentos", "sem_data"}
+    assert r.json()["documentos"] == [{"contrato_id": cid, "obra": "Obra A",
+                                       "falta": "Último registro da garantia venceu em 05/03/2020",
+                                       "desde": "2020-03-05", "aba": "prazos"}]
     assert not [a for a in client_admin.get("/api/inicio").json()["avisos"] if a["tipo"] == "garantia_vencendo"]
     for perfil in ("engenharia", "diretoria"):
         client_admin.post("/api/admin/usuarios", json={"nome": perfil, "email": f"{perfil}@lotufo.com",

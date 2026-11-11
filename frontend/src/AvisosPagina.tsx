@@ -1,18 +1,15 @@
-import { useState } from "react";
 import { destinoDoAviso, semEmpresa, semObra, type Aviso } from "./Alertas";
-import { FAMILIAS, familiaDaBusca, filtrarAvisos, porSecao, diasAteOAviso, semRSOrfao, type Secao } from "./avisos";
+import { FAMILIAS, familiaDaBusca, daAgenda, filtrarAvisos, porSecao, diasAteOAviso, semRSOrfao, type Secao } from "./avisos";
 import { IconeAlerta } from "./icones";
 import LegendaCor from "./LegendaCor";
 import { trocarBusca, type Busca } from "./rota";
 import { Link } from "./Link";
 
 // Avisos (redesenho #511, aprovado em 06/11/2026): "o que vence quando". Quatro secoes exclusivas pelo tempo
-// (Vencido · Esta semana · Este mes · Depois) e, no fim, "Sem data". Uma linha por aviso: a data do fato, a obra (ou
-// a empresa), o que e' e os dias. A fonte e' a fila consolidada do servidor, com o recorte do perfil. Filtros na URL:
-// ?familia= (reajustes, prazos, certidoes ou o id da familia) e ?obra=.
-
-/** Quantos vencidos aparecem antes do "… e mais N". */
-const VENCIDOS_VISIVEIS = 6;
+// (Vencido · Esta semana · Este mes · Depois). Agenda (#656): so' o aviso com data, do que ja' venceu (todos, sem
+// limite de idade) ate' 90 dias a frente; o aviso sem data e' do admin (Administracao > Pendencias de cadastro). Uma
+// linha por aviso: a data do fato, a obra (ou a empresa), o que e' e os dias. A fonte e' a fila consolidada do
+// servidor, com o recorte do perfil. Filtros na URL: ?familia= (reajustes, prazos, certidoes ou o id da familia) e ?obra=.
 
 const dataBR = (iso: string | null | undefined) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? "");
@@ -45,22 +42,16 @@ function LinhaAviso({ a, secao }: { a: Aviso; secao: Secao }) {
 }
 
 function SecaoAvisos({ id, rotulo, itens }: { id: Secao; rotulo: string; itens: Aviso[] }) {
-  const [tudo, setTudo] = useState(false);
-  const corta = id === "vencido" && !tudo && itens.length > VENCIDOS_VISIVEIS;
-  const visiveis = corta ? itens.slice(0, VENCIDOS_VISIVEIS) : itens;
   const titulo = `secao-avisos-${id}`;
   return (
     <section className="aviso-secao" aria-labelledby={titulo}>
       <h3 className={`aviso-secao__cabeca aviso-secao__cabeca--${id}`} id={titulo}>
         {rotulo.toUpperCase()}<span aria-hidden="true"> · </span><span className="aviso-secao__n">{itens.length}</span>
       </h3>
-      {visiveis.length > 0 && (
+      {itens.length > 0 && (
         <ul className="aviso-secao__lista">
-          {visiveis.map((a, i) => <LinhaAviso key={`${a.tipo}-${a.contrato_id}-${a.entidade_id ?? ""}-${a.medicao_id ?? ""}-${i}`} a={a} secao={id} />)}
+          {itens.map((a, i) => <LinhaAviso key={`${a.tipo}-${a.contrato_id}-${a.entidade_id ?? ""}-${a.medicao_id ?? ""}-${i}`} a={a} secao={id} />)}
         </ul>
-      )}
-      {corta && (
-        <button type="button" className="aviso-secao__mais" onClick={() => setTudo(true)}>… e mais {itens.length - VENCIDOS_VISIVEIS}</button>
       )}
     </section>
   );
@@ -74,9 +65,10 @@ export default function AvisosPagina({ busca, avisos, escopo = null, nome, onFec
 }) {
   const familia = familiaDaBusca(busca.familia);
   const obra = /^[1-9][0-9]*$/.test(busca.obra ?? "") ? Number(busca.obra) : null;
-  const lista = (avisos ?? []).filter(a => escopo === null || (a.contrato_id !== null && escopo.has(a.contrato_id)));
+  // so' a agenda: o filtro por tipo e por obra tambem so' oferece o que ela tem
+  const lista = daAgenda(avisos ?? []).filter(a => escopo === null || (a.contrato_id !== null && escopo.has(a.contrato_id)));
   const filtrados = filtrarAvisos(lista, { familia, obra });
-  const secoes = porSecao(filtrados).filter(s => s.id !== "sem-data" || s.itens.length > 0);
+  const secoes = porSecao(filtrados);
   const obras = [...new Map(lista.filter(a => a.contrato_id !== null).map(a => [a.contrato_id!, a.obra ?? `Obra ${a.contrato_id}`])).entries()]
     .sort((x, y) => x[1].localeCompare(y[1], "pt-BR"));
   // a obra da URL pode nao ter mais aviso (resolvido, ou link guardado): o select mostra o filtro em vigor

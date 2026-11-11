@@ -1307,3 +1307,41 @@ def test_valor_aditivo_com_tres_aditivos_no_consorcio_tem_folga_de_um_centavo(mo
     _bol_capa(c, u, mid, 10_000_01, "b", _capa(valor_contrato_centavos=200, valor_aditivo_centavos=300_10))  # 150,05
     [a] = _capa_avisos(c, "todos")
     assert (a["tipo"], a["valor_centavos"]) == ("capa_instrumento_ausente", 2)
+
+
+# ---- issue #656: a agenda dos proximos 90 dias (so' o que tem data) ----
+
+def _fontes_de_teste(monkeypatch, itens):
+    monkeypatch.setattr(avisos, "FONTES", [lambda conn, hoje: [avisos.aviso(**i) for i in itens]])
+
+
+def test_aviso_com_data_e_sem_dias_ganha_os_dias_pela_data(cenario, monkeypatch):
+    # certidao vencida e regularidade do mes vem com `data` e sem `dias`: os dias saem da data, no sentido do aviso
+    c, ids = cenario
+    _fontes_de_teste(monkeypatch, [
+        dict(tipo="vencida", nivel="critico", mensagem="certidão vencida", data="2026-09-10", sentido="prazo"),
+        dict(tipo="a_vencer", nivel="acao", mensagem="certidão a vencer", data="2026-09-25", sentido="prazo"),
+        dict(tipo="parado", nivel="acao", mensagem="parado", data="2026-09-10", sentido="desde"),
+        dict(tipo="sem_sentido", nivel="acao", mensagem="data sem sentido", data="2026-09-10"),
+        dict(tipo="com_dias", nivel="acao", mensagem="já tem dias", dias=3, data="2026-09-30", sentido="prazo"),
+        dict(tipo="sem_data", nivel="acao", mensagem="sem data")])
+    dias = {a["tipo"]: a["dias"] for a in avisos.listar(c, D(2026, 9, 20))}
+    assert dias == {"vencida": -10, "a_vencer": 5, "parado": 10, "sem_sentido": -10, "com_dias": 3, "sem_data": None}
+
+
+def test_aviso_de_fato_sem_data_vai_para_o_grupo_sem_data_do_admin(cenario, monkeypatch):
+    # so' o aviso de fato sem data entra no grupo; o que tem data fica na agenda e a ausencia segue na lista dela
+    c, ids = cenario
+    cid = ids["contrato"]
+    _fontes_de_teste(monkeypatch, [
+        dict(tipo="espelho_desatualizado", nivel="acao", mensagem="Obra A: 2ª medição: o aprovado mudou", contrato_id=cid,
+             obra="Obra A", publico=("operacao", "diretoria")),
+        dict(tipo="sem_obra", nivel="atencao", mensagem="aviso sem obra"),
+        dict(tipo="com_data", nivel="acao", mensagem="Obra A: com data", contrato_id=cid, obra="Obra A",
+             data="2026-09-25", sentido="prazo"),
+        dict(tipo="reajuste_sem_termo", nivel="acao", mensagem="Termo não está no cadastro", contrato_id=cid,
+             obra="Obra A", natureza="ausencia")])
+    assert avisos.sem_data(c, D(2026, 9, 20)) == [
+        {"contrato_id": None, "obra": None, "aviso": "aviso sem obra"},
+        {"contrato_id": cid, "obra": "Obra A", "aviso": "2ª medição: o aprovado mudou"}]
+    assert [p["falta"] for p in avisos.pendencias_cadastro(c, D(2026, 9, 20))] == ["Termo não está no cadastro"]
