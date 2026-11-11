@@ -1,55 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, apiForm, mensagemDeErro } from "./api";
 import CampoValor from "./CampoValor";
 import ErroCampo from "./ErroCampo";
-import { brl, fmtTamanho } from "./formato";
+import { fmtTamanho } from "./formato";
 import { IconeAlerta, IconeEnviarNuvem } from "./icones";
 import { centavosDoTexto, mesCivil, type Registrada } from "./PlanilhaCarta";
-import { filtrarObras, porContratante, type ObraResumo } from "./resumoMedicoes";
+import type { ObraResumo } from "./resumoMedicoes";
 import { ir } from "./rota";
-import { fmtCompetencia } from "./tempo";
 import "./iniciarMedicao.css";
 
-// "Iniciar medição" (redesenho 2026-11, #507; tela aprovada em 06/11/2026, três painéis com busca): o painel do meio
-// lista as obras ativas SEM medição no mês escolhido, com busca e chips por contratante; o da direita é o formulário da
-// obra escolhida. Criar a medição é a rota de sempre: planilha/carta (POST /api/contratos/{id}/planilhas, com a carta
-// assinada e a planilha) na obra que gera a medição por ela, e a medição lançada à mão (POST .../medicoes) na que não
-// tem planilha e carta (MTPAR). Criada, abre a página da medição.
-
-const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
-
-/** "2026-10" -> "outubro de 2026". */
-function mesPorExtenso(aaaaMm: string): string {
-  const m = /^(\d{4})-(\d{2})$/.exec(aaaaMm);
-  const nome = m ? MESES[Number(m[2]) - 1] : undefined;
-  return m && nome ? `${nome} de ${m[1]}` : fmtCompetencia(aaaaMm);
-}
-
-/** "2026-12" + 1 -> "2027-01"; -1 volta o mês. */
-function somarMes(aaaaMm: string, n: number): string {
-  const m = /^(\d{4})-(\d{2})$/.exec(aaaaMm);
-  if (!m) return aaaaMm;
-  const total = Number(m[1]) * 12 + (Number(m[2]) - 1) + n;
-  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, "0")}`;
-}
-
-// A letra sem acento, uma por uma: o texto normalizado tem o mesmo tamanho do original (o trecho achado vale nos dois).
-const base = (c: string) => c.normalize("NFD").charAt(0).toLocaleLowerCase("pt-BR");
-const semAcento = (t: string) => Array.from(t).map(base).join("");
-
-/** O nome da obra com o trecho buscado em destaque (sem acento nem caixa). */
-function Destacado({ texto, termo }: { texto: string; termo: string }) {
-  const t = semAcento(termo.trim());
-  const i = t ? semAcento(texto).indexOf(t) : -1;
-  if (i < 0) return <>{texto}</>;
-  return <>{texto.slice(0, i)}<mark className="iniciar-med__achado">{texto.slice(i, i + t.length)}</mark>{texto.slice(i + t.length)}</>;
-}
-
-const ROTULO_ESTADO: Record<string, string> = {
-  planilha_gerada: "planilha/carta gerada", planilha_enviada: "planilha/carta enviada", boletim_recebido: "boletim recebido",
-  espelho_gerado: "espelho gerado", espelho_enviado: "espelho enviado", nota_emitida: "nota emitida", protocolada: "protocolada",
-  nf_emitida: "lançada no RM", recebida: "recebida",
-};
+// O formulário de iniciar a medição de uma obra numa competência (#507). Desde a #643 ele abre pelo botão "Iniciar" do
+// quadro do mês (MedicoesPagina.tsx), já na competência do quadro. Criar a medição é a rota de sempre: planilha/carta
+// (POST /api/contratos/{id}/planilhas, com a carta assinada e a planilha) na obra que gera a medição por ela, e a medição
+// lançada à mão (POST .../medicoes) na que não tem planilha e carta (MTPAR). Criada, abre a página da medição.
 
 /** Área de soltar o arquivo: arrastar ou clicar. */
 function Soltar({ id, titulo, aceita, arquivo, aoEscolher, erro }: {
@@ -79,7 +42,7 @@ function Soltar({ id, titulo, aceita, arquivo, aoEscolher, erro }: {
 type Sugestao = { numero: number; numero_orgao: number | null; competencia: string; periodo_inicio: string; periodo_fim: string };
 
 /** O formulário da obra escolhida. `key` na obra e no mês: trocar de um ou de outro recomeça o formulário. */
-function Formulario({ obra, mes, aoCancelar }: { obra: ObraResumo; mes: string; aoCancelar: () => void }) {
+export default function IniciarMedicao({ obra, mes, aoCancelar }: { obra: ObraResumo; mes: string; aoCancelar: () => void }) {
   const tipo = obra.proxima_tipo;
   const [regraAtiva, setRegraAtiva] = useState<boolean | null>(null);
   const [erroRegra, setErroRegra] = useState("");
@@ -192,89 +155,3 @@ function Formulario({ obra, mes, aoCancelar }: { obra: ObraResumo; mes: string; 
   );
 }
 
-export default function IniciarMedicao({ obras, mes, aoTrocarMes, podeIniciar, carregando }: {
-  obras: ObraResumo[]; mes: string; aoTrocarMes: (m: string) => void; podeIniciar: boolean; carregando: boolean;
-}) {
-  const [termo, setTermo] = useState("");
-  const [chip, setChip] = useState("");
-  const [escolhida, setEscolhida] = useState<number | null>(null);
-
-  const doMes = useMemo(() => obras.filter(o => o.sem_no_mes), [obras]);
-  const contratantes = useMemo(() => porContratante(doMes).map(g => g.contratante), [doMes]);
-  // o chip de um contratante que sumiu da lista (outro mes) volta a "Todas"
-  const chipVale = chip !== "" && contratantes.includes(chip) ? chip : "";
-  const noChip = useMemo(() => doMes.filter(o => chipVale === "" || o.contratante === chipVale), [doMes, chipVale]);
-  const achadas = useMemo(() => filtrarObras(noChip, termo), [noChip, termo]);
-  const idsAchadas = new Set(achadas.map(o => o.contrato_id));
-  const outras = termo.trim() ? noChip.filter(o => !idsAchadas.has(o.contrato_id)) : [];
-  const obra = doMes.find(o => o.contrato_id === escolhida) ?? null;
-  const ultima = obra?.ultima_medicao ?? null;
-
-  // chamada como funcao (nao como componente): um componente declarado aqui seria outro a cada digito da busca
-  function linha(o: ObraResumo, apagada?: boolean) {
-    return (
-      <li key={o.contrato_id}>
-        <button type="button" className={`iniciar-med__obra${apagada ? " iniciar-med__obra--apagada" : ""}`}
-          aria-pressed={escolhida === o.contrato_id} onClick={() => setEscolhida(o.contrato_id)}>
-          <span className="iniciar-med__obra-texto">
-            <span className="iniciar-med__obra-nome">{apagada ? o.obra : <Destacado texto={o.obra} termo={termo} />}</span>
-            <span className="iniciar-med__obra-sub">{o.contratante}{o.orgao_sub ? ` · ${o.orgao_sub}` : ""}</span>
-          </span>
-          <span className="iniciar-med__obra-num num">{o.proxima}ª</span>
-        </button>
-      </li>
-    );
-  }
-
-  return (
-    <div className="iniciar-med">
-      <section className="iniciar-med__lista" aria-labelledby="iniciar-med-titulo">
-        <h2 id="iniciar-med-titulo" className="iniciar-med__titulo">Iniciar medição</h2>
-        <div className="iniciar-med__mes">
-          <button type="button" className="iniciar-med__mes-seta" aria-label="Mês anterior" onClick={() => aoTrocarMes(somarMes(mes, -1))}>‹</button>
-          <span className="iniciar-med__mes-nome" aria-live="polite">{mesPorExtenso(mes)}</span>
-          <button type="button" className="iniciar-med__mes-seta" aria-label="Mês seguinte" onClick={() => aoTrocarMes(somarMes(mes, 1))}>›</button>
-        </div>
-        <input type="search" className="iniciar-med__busca" placeholder="Buscar obra…" aria-label="Buscar obra" autoComplete="off"
-          value={termo} onChange={ev => setTermo(ev.target.value)} />
-        <div className="iniciar-med__chips" role="group" aria-label="Contratante">
-          {["", ...contratantes].map(c => (
-            <button key={c || "todas"} type="button" className="iniciar-med__chip" aria-pressed={chipVale === c} onClick={() => setChip(c)}>
-              {c || "Todas"}
-            </button>
-          ))}
-        </div>
-        <p className="iniciar-med__contagem" role="status">{carregando ? "Carregando…" : `${achadas.length} de ${noChip.length} obras`}</p>
-        {achadas.length > 0 && <ul className="iniciar-med__itens" aria-label="Obras sem medição no mês">{achadas.map(o => linha(o))}</ul>}
-        {outras.length > 0 && (
-          <>
-            <h3 className="iniciar-med__outras">Outras obras sem medição</h3>
-            <ul className="iniciar-med__itens">{outras.map(o => linha(o, true))}</ul>
-          </>
-        )}
-      </section>
-
-      <section className="iniciar-med__painel" aria-label="Obra escolhida">
-        {obra ? (
-          <>
-            <header className="iniciar-med__cabeca">
-              <h2>{obra.obra}</h2>
-              <p>Iniciar a {obra.proxima}ª medição{obra.proxima_tipo === "projeto" ? " de Projeto" : ""} · {mesPorExtenso(mes)} · {obra.contratante}</p>
-            </header>
-            {podeIniciar && !carregando && <Formulario key={`${obra.contrato_id}-${mes}`} obra={obra} mes={mes} aoCancelar={() => setEscolhida(null)} />}
-            {ultima && (
-              <section className="cartao iniciar-med__cartao" aria-label="Última medição">
-                <h2 className="iniciar-med__cartao-titulo">Última medição</h2>
-                <p className="iniciar-med__ultima">
-                  {ultima.numero}ª{ultima.tipo === "projeto" ? " de Projeto" : ""} · {mesPorExtenso(ultima.competencia)}
-                  {ultima.valor_centavos !== null && ` · ${brl(ultima.valor_centavos)}`}
-                  {ROTULO_ESTADO[ultima.estado] && ` · ${ROTULO_ESTADO[ultima.estado]}`}
-                </p>
-              </section>
-            )}
-          </>
-        ) : <p className="iniciar-med__vazio">Escolha uma obra.</p>}
-      </section>
-    </div>
-  );
-}

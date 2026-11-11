@@ -267,3 +267,27 @@ describe("App: o menu lateral no celular (375 px)", () => {
     expect(within(nav).getByRole("link", { name: "SIGA" }).getAttribute("title")).toBe("SIGA");
   });
 });
+
+describe("App: Medições é o quadro do mês (#643)", () => {
+  beforeEach(() => {
+    try { localStorage.removeItem("menu-lateral"); } catch { /* sem armazenamento */ }
+    api.mockImplementation(async (caminho: string) => {
+      if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa da Engenharia", email: "eng@lotufo.com", perfil: "engenharia", csrf: "x" };
+      if (caminho.startsWith("/api/medicoes/resumo")) return { hoje: "2026-11-07", mes: caminho.split("mes=")[1], contagens: {}, linhas: [], obras: [], quadro: [], anteriores: [] };
+      return [];
+    });
+  });
+  afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
+
+  it.each(["/medicoes/em-andamento", "/medicoes/iniciar", "/notas"])("o endereço antigo %s leva ao quadro e o menu tem só o item Medições", async (antigo) => {
+    window.history.replaceState(null, "", antigo);
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Quadro do mês" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/medicoes");
+    const nav = within(screen.getByRole("navigation", { name: "Navegação principal" }));
+    expect(nav.getByRole("link", { name: "Medições" }).getAttribute("aria-current")).toBe("page");
+    expect(nav.queryByRole("link", { name: /Iniciar medição/ })).toBeNull();
+    expect(nav.queryByRole("link", { name: /Em andamento/ })).toBeNull();
+    expect(document.title).toBe("Medições · grupolotufo");
+  });
+});
