@@ -101,9 +101,8 @@ def da_obra(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | No
     # e' a diferenca dos dois, para a conta da tela fechar ao centavo. O reajuste contratado vai a parte.
     bp = v["percentual_direito_bp"]
     s = paineis.saldo(conn, contrato_id)
-    vigente = contratos.cota(s["vigente_execucao_centavos"], bp)
-    medido = contratos.cota(s["atestado_execucao_centavos"], bp)
-    return {"topo": {"vigente_centavos": vigente, "medido_centavos": medido, "saldo_centavos": vigente - medido,
+    posicao = paineis.posicao_na_cota(s["vigente_execucao_centavos"], s["atestado_execucao_centavos"], bp)   # a da lista (#645)
+    return {"topo": {**posicao,
                      "reajuste_centavos": contratos.cota(s["reajuste_contratado_centavos"], bp)},
             "contrato": {"original_centavos": contratos.cota(v["valor_original_centavos"], bp),
                          "original_igual": v["valor_original_centavos"] == v["valor_vigente_execucao_centavos"],

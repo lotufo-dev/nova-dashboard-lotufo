@@ -1,15 +1,10 @@
-/* "Iniciar medição" (redesenho 2026-11, #507): dois painéis ao lado do menu (lista com busca e formulário da obra).
-   Cores só dos tokens (tokens.css). Largura mínima de uma coluna de 320px; abaixo de 900px os painéis empilham. */
-
-.iniciar-med { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); align-items: start; gap: 24px; padding: 24px 32px 40px; width: 100%; max-width: var(--conteudo); }
-
-.iniciar-med__lista { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.iniciar-med__titulo { margin: 0; font-size: 22px; line-height: 30px; }
+/* Formulário de iniciar a medição (#507; desde a #643 abre numa janela, pelo "Iniciar" do quadro do mês) e o seletor de
+   mês do quadro. Cores só dos tokens (tokens.css). */
 
 /* seletor de mês */
 .iniciar-med__mes { display: flex; align-items: center; gap: 8px; }
 .iniciar-med__mes-nome {
-  flex: 1; display: flex; align-items: center; justify-content: center; height: 40px;
+  min-width: 180px; padding: 0 12px; display: flex; align-items: center; justify-content: center; height: 40px;
   border: 1px solid var(--linha-campo); border-radius: var(--raio-ctrl); background: var(--superficie); font-weight: 600;
 }
 .iniciar-med__mes-seta {
@@ -18,42 +13,10 @@
 }
 .iniciar-med__mes-seta:hover { background: var(--hover); }
 
-.iniciar-med__busca { height: 44px; width: 100%; padding: 0 14px; border: 2px solid var(--acento); border-radius: var(--raio-ctrl); background: var(--superficie); }
-
-.iniciar-med__chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.iniciar-med__chip {
-  height: 34px; padding: 0 14px; border: 0; border-radius: var(--raio-pilula); background: var(--neutro-fundo); color: var(--texto-menu);
-  font-weight: 500; cursor: pointer;
-}
-.iniciar-med__chip:hover { background: var(--pressionado); }
-.iniciar-med__chip[aria-pressed="true"] { background: var(--acento); color: #fff; }
-
-.iniciar-med__contagem { margin: 0; color: var(--texto-2); }
-.iniciar-med__itens { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.iniciar-med__obra {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 56px; padding: 8px 14px;
-  border: 0; border-left: 4px solid transparent; border-bottom: 1px solid var(--linha-suave); background: none; color: var(--texto);
-  text-align: left; cursor: pointer;
-}
-.iniciar-med__obra:hover { background: var(--superficie-2); }
-.iniciar-med__obra[aria-pressed="true"] { background: var(--acento-fundo); border-left-color: var(--acento); }
-.iniciar-med__obra-texto { display: flex; flex-direction: column; min-width: 0; }
-.iniciar-med__obra-nome { font-weight: 600; overflow-wrap: anywhere; }
-.iniciar-med__obra-sub { font-size: 13px; line-height: 18px; color: var(--texto-2); }
-.iniciar-med__obra-num { flex: none; color: var(--texto-menu); }
-.iniciar-med__obra--apagada .iniciar-med__obra-nome { color: var(--texto-2); font-weight: 500; }
-.iniciar-med__achado { background: none; color: var(--acento); }
-.iniciar-med__outras { margin: 12px 0 0; font-size: 15px; line-height: 22px; font-weight: 500; color: var(--texto-2); }
-
-/* painel da obra */
-.iniciar-med__painel { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.iniciar-med__cabeca h2 { margin: 0; font-size: 24px; line-height: 32px; }
-.iniciar-med__cabeca p { margin: 4px 0 0; color: var(--texto-2); }
-.iniciar-med__vazio { margin: 0; padding: 32px 0; color: var(--texto-2); }
+/* formulário */
 .iniciar-med__carregando { margin: 0; color: var(--texto-2); }
 .iniciar-med__cartao { display: flex; flex-direction: column; gap: 16px; padding: 20px 24px; }
 .iniciar-med__cartao-titulo { margin: 0; font-size: 18px; line-height: 26px; }
-.iniciar-med__ultima { margin: 0; color: var(--texto-menu); }
 
 .iniciar-med__corpo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
 .iniciar-med__corpo--so-campos { grid-template-columns: minmax(0, 320px); }
@@ -79,9 +42,6 @@
 .iniciar-med__botoes { display: flex; justify-content: flex-end; gap: 10px; }
 .iniciar-med__botoes .btn--primario { height: 44px; padding: 0 22px; font-weight: 600; }
 
-@media (max-width: 899px) {
-  .iniciar-med { grid-template-columns: minmax(0, 1fr); padding: 16px 16px 32px; }
-}
 @media (max-width: 599px) {
   .iniciar-med__corpo, .iniciar-med__corpo--so-campos { grid-template-columns: minmax(0, 1fr); }
   .iniciar-med__cartao { padding: 16px; }

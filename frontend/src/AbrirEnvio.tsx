@@ -21,7 +21,7 @@ export default function AbrirEnvio({ protocoloId }: { protocoloId: number }) {
       {erro ? (
         <div className="pilha">
           <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível abrir o envio: {erro}</p>
-          <p><Link className="link" para={{ tela: "medicoes", aba: "em-andamento" }}>Ver as medições em andamento</Link></p>
+          <p><Link className="link" para={{ tela: "medicoes" }}>Ver as medições</Link></p>
         </div>
       ) : <p className="campo__nota" role="status">Abrindo o envio da nota da medição…</p>}
     </div>

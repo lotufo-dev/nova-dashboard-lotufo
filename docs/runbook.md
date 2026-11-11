@@ -908,10 +908,23 @@ venv pelo `requirements.lock`) → `cadastro aplicar --ensaio` e real (9 órgão
 
 ## Monitor do SIGA (issue #327)
 
-O robô do SIGA (fora deste repositório) manda a cada 15 minutos o que leu para `POST /api/siga/leituras` e pergunta
+O robô do SIGA (fora deste repositório) manda a cada rodada o que leu para `POST /api/siga/leituras` e pergunta
 o que acompanhar em `GET /api/siga/processos`, as duas com `Authorization: Bearer <token>`. As telas leem
 `GET /api/siga` (sessão). Nada se apaga: leitura repetida não cria linha. Cada pedido tem o teto geral de 2 MB:
 rodada maior vai em mais de um POST com o mesmo `lido_em` (cada um grava só o que traz).
+
+**Frequência e processos encerrados (issue #657).** A rodada completa acontece no máximo uma vez por hora: o
+servidor só abre outra quando a última completa terminada começou há 59 minutos ou mais (`COMPLETA_A_CADA` em
+`app/siga.py`), e a tela SIGA relê de hora em hora. A tarefa agendada do robô, fora do repositório, pode passar a
+rodar de hora em hora; enquanto ela rodar de 15 em 15 minutos, as chamadas do intervalo recebem "nada a ler"
+(`rodada_id: null`), a não ser que haja pedido feito na tela. O servidor deixa de mandar ao robô o processo
+**encerrado**, tanto em `GET /api/siga/processos` quanto no início da rodada: o ligado a medição recebida (baixa do
+RM) e o arquivado no SIGA (setor do último volume com "Arquivo", estado do último volume começando por "Arquiv", ou a
+movimentação mais recente, fora Marcação e Anotação, começando por "Arquiv" e não cancelada). Nada é gravado nem
+apagado: o encerramento é derivado a cada leitura, e a medição que deixa de estar recebida devolve o processo à
+lista. O processo arquivado deixa de ser lido, então um desarquivamento só chega com "Pedir leitura" no histórico
+dele (o pedido feito para o processo é atendido mesmo com ele encerrado). Na tela, os encerrados ficam na seção
+"Encerrados", recolhida, no fim da página, sem cor de atraso.
 
 1. **Token em arquivo**: `C:\DashboardLotufo\segredos\siga-token.txt` (uma linha, UTF-8, ao menos 32 caracteres
    aleatórios). Gerar e gravar sem BOM (o `>` do PowerShell 5.1 grava UTF-16 e o arquivo é recusado):
@@ -978,9 +991,9 @@ ainda em aberto não cria outro pedido, mas dispara de novo.
    desconectado do servidor).
 3. **Conversa com o robô** (rotas de serviço, com o mesmo token das leituras). No início, `POST /api/siga/rodadas`
    ("comecei"): o servidor responde `rodada_id`, `tipo` e `processos` (o mesmo formato de `GET /api/siga/processos`).
-   A rodada é completa com pedido "todos" em aberto ou quando a última rodada completa terminada começou há 14
-   minutos ou mais (`tipo: automatica` quando é completa por tempo, que é a da tarefa de 15 em 15 minutos; `pedido`
-   nos demais casos); senão, só os processos pedidos. Fora do horário, o robô manda `{"so_pedidos": true}` (issue
+   A rodada é completa (todos os processos vivos) com pedido "todos" em aberto ou quando a última rodada completa
+   terminada começou há 59 minutos ou mais (`tipo: automatica` quando é completa por tempo, no máximo uma por hora;
+   `pedido` nos demais casos); senão, só os processos pedidos. Fora do horário, o robô manda `{"so_pedidos": true}` (issue
    #347): o servidor não abre rodada completa por tempo e só atende os pedidos em aberto, que valem a qualquer hora.
    `rodada_id: null` quer dizer nada a ler. As leituras continuam
    por `POST /api/siga/leituras`. No fim, `POST /api/siga/rodadas/<id>/fim` com
@@ -991,7 +1004,9 @@ ainda em aberto não cria outro pedido, mas dispara de novo.
 4. **O que a tela mostra** (bloco `robo` de `GET /api/siga`): `lendo` (rodada iniciada há no máximo 12 minutos e
    sem fim), `na_fila` (pedido em aberto) ou `parado`; os pedidos em aberto, com quem pediu e quando; e os avisos:
    o Windows recusou o último disparo, pedido parado há mais de 2 minutos sem rodada, a última rodada terminada
-   falhou ou deixou processos sem ler ("não lido às HH:MM: …" por processo e "N de M processos não foram lidos"), e
+   falhou ou deixou processos sem ler ("não lido às HH:MM: …" por processo e "N de M processos não foram lidos";
+   só para o processo vivo há mais de 2 horas úteis sem leitura que deu certo, pela mesma regra de horário do "O
+   monitor do SIGA não lê desde …", ou que nunca foi lido), e
    rodada iniciada há mais de 12 minutos sem fim (só a mais recente; o Windows encerra o robô aos 10). Cada aviso de rodada vale até
    a próxima rodada terminar sem aquele problema; o do disparo, até o próximo disparo aceito.
 

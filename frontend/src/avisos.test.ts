@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Aviso } from "./Alertas";
-import { FAMILIAS, familiaDaBusca, familiaDoAviso, filtrarAvisos, porFamilia, porObra, porSecao, quandoDoAviso, secaoDoAviso } from "./avisos";
+import { FAMILIAS, familiaDaBusca, familiaDoAviso, filtrarAvisos, porFamilia, porObra, porSecao, quandoDoAviso, secaoDoAviso, daAgenda, diasAteOAviso } from "./avisos";
 
 const av = (tipo: string, nivel: Aviso["nivel"], contrato_id: number | null, aba: string | null, data: string | null = null): Aviso => ({
   tipo, nivel, publico: ["operacao"], contrato_id, obra: contrato_id ? `Obra ${contrato_id}` : null, dias: null,
@@ -62,21 +62,36 @@ describe("avisos", () => {
 describe("avisos pelo tempo (#511)", () => {
   const com = (dias: number | null, sentido: Aviso["sentido"] = "prazo"): Aviso => ({ ...av("x", "atencao", 1, "prazos"), dias, sentido });
 
-  it("classifica a seção pelos dias e pelo sentido", () => {
+  it("classifica a seção pelos dias e pelo sentido; sem data ou além de 90 dias fica fora da agenda (#656)", () => {
     expect(secaoDoAviso(com(-3))).toBe("vencido");
     expect(secaoDoAviso(com(130, "desde"))).toBe("vencido");
+    expect(secaoDoAviso(com(-900))).toBe("vencido");
     expect(secaoDoAviso(com(0))).toBe("semana");
     expect(secaoDoAviso(com(5))).toBe("semana");
     expect(secaoDoAviso(com(20))).toBe("mes");
     expect(secaoDoAviso(com(60))).toBe("depois");
-    expect(secaoDoAviso(com(null))).toBe("sem-data");
+    expect(secaoDoAviso(com(90))).toBe("depois");
+    expect(secaoDoAviso(com(91))).toBeNull();
+    expect(secaoDoAviso(com(null))).toBeNull();
   });
 
-  it("ordena: vencido do mais antigo, a vencer do mais próximo; sem data por último", () => {
-    const g = porSecao([com(-3), com(-40), com(30), com(10), com(null)]);
-    expect(g.map(s => s.id)).toEqual(["vencido", "semana", "mes", "depois", "sem-data"]);
+  it("aviso com data e sem dias é posicionado pela data (#656)", () => {
+    const naData = (data: string): Aviso => ({ ...av("documento_vencido", "critico", null, "documentos", data), sentido: "prazo" });
+    expect(diasAteOAviso(naData("2026-11-01"), "2026-11-11")).toBe(-10);
+    expect(secaoDoAviso(naData("2026-11-01"), "2026-11-11")).toBe("vencido");
+    expect(secaoDoAviso(naData("2026-11-30"), "2026-11-11")).toBe("mes");
+    expect(secaoDoAviso(naData("2027-02-09"), "2026-11-11")).toBe("depois");      // 90 dias
+    expect(secaoDoAviso(naData("2027-02-10"), "2026-11-11")).toBeNull();          // 91 dias
+  });
+
+  it("ordena: vencido do mais antigo, a vencer do mais próximo; sem data e além de 90 dias não entram", () => {
+    const lista = [com(-3), com(-40), com(30), com(10), com(null), com(120)];
+    const g = porSecao(lista);
+    expect(g.map(s => s.id)).toEqual(["vencido", "semana", "mes", "depois"]);
     expect(g[0].itens.map(a => a.dias)).toEqual([-40, -3]);
     expect(g[2].itens.map(a => a.dias)).toEqual([10, 30]);
+    expect(g.flatMap(s => s.itens)).toHaveLength(4);
+    expect(daAgenda(lista).map(a => a.dias)).toEqual([-3, -40, 30, 10]);
   });
 
   it("a categoria da rota aceita o plural do Início e o id da família", () => {

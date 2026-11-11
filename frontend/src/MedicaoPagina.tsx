@@ -252,7 +252,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     <header className="topbar topbar--detalhe">
       <div className="topbar__trilha">
         <VoltarOrigem origem={origem} alemDe={["obras", "medicoes"]} />
-        <Migalhas origem={origem} itens={[{ rotulo: "Medições", para: { tela: "medicoes", aba: "em-andamento" } },
+        <Migalhas origem={origem} itens={[{ rotulo: "Medições", para: { tela: "medicoes" } },
           { rotulo: obra, para: { tela: "obra", id: contratoId, aba: "ficha" } }, { rotulo: titulo }]} />
       </div>
     </header>

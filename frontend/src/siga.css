@@ -22,6 +22,7 @@
 .sg__tabela td.num { white-space: nowrap; overflow-wrap: normal; }
 .sg__c-proc { width: 22%; } .sg__c-onde { width: 16%; } .sg__c-quem { width: 12%; } .sg__c-setor { width: 14%; }
 .sg__c-ultima { width: 17%; } .sg__c-prot { width: 16%; } .sg__c-seta { width: 3%; }
+.sg__c-proc-enc { width: 26%; } .sg__c-onde-enc { width: 18%; } .sg__c-sit { width: 18%; } .sg__c-ultima-enc { width: 19%; }
 .sg__seta { text-align: right; color: var(--texto-2); }
 .sg__seta .icone { width: 18px; height: 18px; }
 
@@ -78,6 +79,13 @@
 .sg__vivo:empty { display: contents; }   /* vazio, nao ocupa o gap do topo */
 .sg__avisos { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .sg__acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+
+/* encerrados (#657): recolhidos no fim da pagina, sem cor de atraso */
+.sg__encerrados > summary { width: fit-content; padding: 8px 4px; color: var(--texto-2); font-size: 15px; font-weight: 600; cursor: pointer; }
+.sg__encerrados > summary:hover { color: var(--texto); }
+.sg__encerrados > summary:focus-visible { outline: 2px solid var(--foco); outline-offset: 2px; border-radius: var(--raio); }
+.sg__encerrados > summary .num { font-weight: 500; }
+.sg__encerrados[open] > summary { margin-bottom: 8px; }
 
 .sg__vazio { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 16px; text-align: center; color: var(--texto-menu); }
 .sg__vazio .icone { width: 32px; height: 32px; color: var(--texto-2); stroke-width: 1.5; }

@@ -19,6 +19,7 @@ export const ROTULO: Record<ItemMenu, string> = {
 // Ordem do trilho.
 const ORDEM: readonly ItemMenu[] = ["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "a-receber", "carteira", "ancoras-docusign", "admin"];
 
+// Medicoes (#643): um item so' no menu, que abre o quadro do mes.
 // Decisao 3 do mapa: a diretoria sem Medicoes no menu (a rota continua abrindo), e a engenharia com A receber.
 // O Inicio voltou (decisao do Leonardo, 08/10/2026): e' a entrada de todos os perfis, no alto do menu.
 const DO_PERFIL: Record<Perfil, readonly ItemMenu[]> = {
@@ -58,17 +59,6 @@ export function itemDe(r: Rota, busca: Record<string, string> = {}): ItemMenu | 
     case "documentos-empresa": return "documentos";
     case "medicao": case "nova-medicao": case "notas-envio": return "medicoes";
     default: return r.tela;
-  }
-}
-
-/** Subitem de Medições que fica marcado (#507): "Iniciar medição" na própria tela e em "Nova medição"; "Em andamento" na
- *  lista, na página da medicação e no envio da nota (a medição já foi iniciada). Fora de Medições, nenhum. */
-export function subitemMedicoesDe(r: Rota): "iniciar" | "em-andamento" | null {
-  switch (r.tela) {
-    case "medicoes": return r.aba === "em-andamento" ? "em-andamento" : "iniciar";
-    case "nova-medicao": return "iniciar";
-    case "medicao": case "notas-envio": return "em-andamento";
-    default: return null;
   }
 }
 

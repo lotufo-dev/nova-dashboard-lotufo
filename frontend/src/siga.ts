@@ -11,6 +11,8 @@ export type ProcessoSiga = {
   id: number; codigo: string | null; link: string | null; numero: string | null; nome: string | null;
   contrato_id: number | null; obra: string | null; medicao_id: number | null; medicao_titulo: string | null;
   protocolo_id: number | null; situacao: string | null; setor: string; caixa_entrada: boolean; com_quem: string;
+  // #657: medicao recebida ou processo arquivado; derivado pelo servidor a cada leitura. null = vivo
+  encerrado: "recebida" | "arquivado" | null;
   desde: string | null; dias_uteis: number | null; hoje: number; ultima: Movimentacao | null;
   protocolado_em: string | null; movimentacoes: Movimentacao[];
 };
@@ -65,6 +67,8 @@ export function ordenar(processos: ProcessoSiga[]): ProcessoSiga[] {
       || instante(a.desde, Infinity) - instante(b.desde, Infinity) || a.id - b.id;
   });
 }
+
+export const ROTULO_ENCERRADO = { recebida: "Medição recebida", arquivado: "Arquivado" } as const;
 
 /** "N dias uteis" a partir de um dia util; antes disso, minutos ou horas; passado um dia corrido sem dia util
  *  completo (fim de semana, feriado), "menos de 1 dia util". */

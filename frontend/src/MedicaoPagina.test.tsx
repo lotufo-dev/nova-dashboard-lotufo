@@ -118,7 +118,7 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     pagina();
     const caminho = await screen.findByRole("navigation", { name: "Você está em" });
     await waitFor(() => expect(within(caminho).getByRole("link", { name: "Hospital" })).toBeTruthy());
-    expect(within(caminho).getByRole("link", { name: "Medições" }).getAttribute("href")).toBe("/medicoes/em-andamento");
+    expect(within(caminho).getByRole("link", { name: "Medições" }).getAttribute("href")).toBe("/medicoes");
     expect(within(caminho).getByRole("link", { name: "Hospital" }).getAttribute("href")).toBe("/obras/1");
   });
 

@@ -1,6 +1,7 @@
 // Regras de APRESENTACAO da tela de Avisos (NAVEGACAO.md › Avisos): funcoes puras sobre o aviso que o servidor
 // manda pronto (`app/avisos.py`). Nada aqui decide nivel, prazo ou atraso: so' agrupa, filtra e ordena.
 import { porAtraso, type Aviso, type Nivel } from "./Alertas";
+import { hojeLocal } from "./tempo";
 
 export type Familia = "prazo" | "reajuste" | "nota" | "siga" | "documentos" | "outros";
 
@@ -72,36 +73,50 @@ export const semRSOrfao = (t: string) => t.replace(/R\$ /g, "R$\u00a0");
 
 // ---- Avisos pelo tempo (#511): Vencido \u00b7 Esta semana \u00b7 Este m\u00eas \u00b7 Depois, e "Sem data" ----
 
-export type Secao = "vencido" | "semana" | "mes" | "depois" | "sem-data";
+// Agenda (#656): so' o aviso com data entra, do que ja' venceu ate' HORIZONTE_DIAS a frente; a secao "Sem data" saiu.
+export type Secao = "vencido" | "semana" | "mes" | "depois";
 
 export const SECOES: { id: Secao; rotulo: string }[] = [
   { id: "vencido", rotulo: "Vencido" }, { id: "semana", rotulo: "Esta semana" }, { id: "mes", rotulo: "Este m\u00eas" },
-  { id: "depois", rotulo: "Depois" }, { id: "sem-data", rotulo: "Sem data" },
+  { id: "depois", rotulo: "Depois" },
 ];
 
+/** Ate' onde a agenda olha: o que vence depois disso nao aparece (#656). O vencido nao tem limite de idade. */
+export const HORIZONTE_DIAS = 90;
+
+const diaUTC = (iso: string) => Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10)));
+
 /** Dias ate' o fato, com sinal: negativo = ja' passou. O fato parado "desde" N dias (sentido do servidor) e' passado;
- *  o prazo ("prazo") vem com o sinal certo; sem sentido, o sinal dos dias manda. `null` = sem data. */
-export function diasAteOAviso(a: Aviso): number | null {
-  if (a.dias === null || a.dias === undefined) return null;
+ *  o prazo ("prazo") vem com o sinal certo; sem sentido, o sinal dos dias manda. Aviso com `data` e sem `dias` (#656)
+ *  e' posicionado pela data, contra `hoje` (AAAA-MM-DD, o dia de Cuiaba). `null` = sem data: fora da agenda. */
+export function diasAteOAviso(a: Aviso, hoje: string = hojeLocal()): number | null {
+  if (a.dias === null || a.dias === undefined) {
+    return a.data && /^\d{4}-\d{2}-\d{2}/.test(a.data) ? Math.round((diaUTC(a.data) - diaUTC(hoje)) / 86_400_000) : null;
+  }
   return a.sentido === "desde" ? -Math.abs(a.dias) : a.dias;
 }
 
 /** A secao do aviso pelos dias e pelo sentido: passado = Vencido; 0 a 7 dias = Esta semana; 8 a 30 = Este mes;
- *  depois disso, Depois; sem dias, Sem data. Cada aviso cai em uma secao so'. */
-export function secaoDoAviso(a: Aviso): Secao {
-  const d = diasAteOAviso(a);
-  if (d === null) return "sem-data";
+ *  31 a 90, Depois. `null` = fora da agenda: sem data, ou alem de 90 dias. Cada aviso cai em uma secao so'. */
+export function secaoDoAviso(a: Aviso, hoje?: string): Secao | null {
+  const d = diasAteOAviso(a, hoje);
+  if (d === null || d > HORIZONTE_DIAS) return null;
   if (d < 0) return "vencido";
   if (d <= 7) return "semana";
   if (d <= 30) return "mes";
   return "depois";
 }
 
+/** So' os avisos da agenda: com data, do que ja' venceu ate' 90 dias a frente. */
+export function daAgenda(avisos: Aviso[], hoje?: string): Aviso[] {
+  return avisos.filter(a => secaoDoAviso(a, hoje) !== null);
+}
+
 /** As secoes na ordem da tela: vencido = o mais antigo primeiro; a vencer = o mais proximo primeiro. */
-export function porSecao(avisos: Aviso[]): { id: Secao; rotulo: string; itens: Aviso[] }[] {
-  const ordem = (x: Aviso, y: Aviso) => (diasAteOAviso(x) ?? 0) - (diasAteOAviso(y) ?? 0)
+export function porSecao(avisos: Aviso[], hoje?: string): { id: Secao; rotulo: string; itens: Aviso[] }[] {
+  const ordem = (x: Aviso, y: Aviso) => (diasAteOAviso(x, hoje) ?? 0) - (diasAteOAviso(y, hoje) ?? 0)
     || (x.data ?? "").localeCompare(y.data ?? "");
-  return SECOES.map(s => ({ ...s, itens: avisos.filter(a => secaoDoAviso(a) === s.id).sort(ordem) }));
+  return SECOES.map(s => ({ ...s, itens: avisos.filter(a => secaoDoAviso(a, hoje) === s.id).sort(ordem) }));
 }
 
 /** O filtro por categoria da rota (?familia=reajustes|prazos|certidoes, do "Ver todos" do Inicio); os ids das

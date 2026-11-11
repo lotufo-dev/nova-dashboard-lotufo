@@ -779,10 +779,10 @@ test("Saúde: sem ler a Saúde, o bloco Segurança diz que não deu para ler, nu
 // Issue #649: o documento que nao foi achado no cadastro sai dos avisos e vira lista de conferencia do admin
 test("Pendências de cadastro: a aba lista a obra, o que falta e desde quando, com o link para a obra", async () => {
   api.mockImplementation(async (url: string) => {
-    if (url === "/api/admin/pendencias-cadastro") return [
+    if (url === "/api/admin/pendencias-cadastro") return { sem_data: [], documentos: [
       { contrato_id: 7, obra: "Obra Alfa", falta: "Termo de apostilamento da competência 09/2026 não está no cadastro", desde: "2026-09", aba: "reajuste" },
       { contrato_id: 8, obra: "Obra Beta", falta: "Último registro da garantia venceu em 14/10/2026", desde: "2026-10-14", aba: "prazos" },
-      { contrato_id: 9, obra: "Obra Gama", falta: "Documento sem aba conhecida", desde: null, aba: null }];
+      { contrato_id: 9, obra: "Obra Gama", falta: "Documento sem aba conhecida", desde: null, aba: null }] };
     return {};
   });
   render(<Admin aba="pendencias" eu={1} />);
@@ -796,10 +796,35 @@ test("Pendências de cadastro: a aba lista a obra, o que falta e desde quando, c
   expect(within(linhas[1]).getByRole("link", { name: "Obra Beta" }).getAttribute("href")).toBe("/obras/8/prazos");
   expect(within(linhas[2]).getByRole("link", { name: "Obra Gama" }).getAttribute("href")).toBe("/obras/9");
   expect(api).toHaveBeenCalledWith("/api/admin/pendencias-cadastro");
+  expect(screen.queryByRole("heading", { name: "Sem data" })).toBeNull();
+});
+
+// Issue #656: o aviso de fato sem data sai da tela Avisos e vira um grupo à parte na lista do admin
+test("Pendências de cadastro: o grupo Sem data lista a obra e o aviso, à parte dos documentos", async () => {
+  api.mockResolvedValueOnce({
+    documentos: [{ contrato_id: 7, obra: "Obra Alfa", falta: "Termo de apostilamento da competência 09/2026 não está no cadastro", desde: "2026-09", aba: "reajuste" }],
+    sem_data: [{ contrato_id: null, obra: null, aviso: "Construtora Alfa: FGTS sem certidão" },
+      { contrato_id: 8, obra: "Obra Beta", aviso: "nota 10 diverge do espelho" }] });
+  render(<Admin aba="pendencias" eu={1} />);
+  expect(within(await screen.findByRole("table", { name: /Pendências de cadastro/ })).getAllByRole("row")).toHaveLength(2);
+  expect(screen.getByRole("heading", { name: "Sem data" })).toBeTruthy();
+  const linhas = within(screen.getByRole("table", { name: /Avisos sem data/ })).getAllByRole("row").slice(1);
+  expect(linhas.map(l => within(l).getAllByRole("cell").map(c => c.textContent))).toEqual([
+    ["—", "Construtora Alfa: FGTS sem certidão"], ["Obra Beta", "nota 10 diverge do espelho"]]);
+  expect(within(linhas[1]).getByRole("link", { name: "Obra Beta" }).getAttribute("href")).toBe("/obras/8");
+  expect(within(linhas[0]).queryByRole("link")).toBeNull();
+});
+
+test("Pendências de cadastro: só com aviso sem data, a tabela dos documentos não aparece", async () => {
+  api.mockResolvedValueOnce({ documentos: [], sem_data: [{ contrato_id: 8, obra: "Obra Beta", aviso: "nota 10 diverge do espelho" }] });
+  render(<Admin aba="pendencias" eu={1} />);
+  await screen.findByRole("table", { name: /Avisos sem data/ });
+  expect(screen.getAllByRole("table")).toHaveLength(1);
+  expect(screen.queryByText("Nenhuma pendência de cadastro.")).toBeNull();
 });
 
 test("Pendências de cadastro: sem pendência, uma linha curta; falha de carga aparece", async () => {
-  api.mockResolvedValueOnce([]);
+  api.mockResolvedValueOnce({ documentos: [], sem_data: [] });
   render(<Admin aba="pendencias" eu={1} />);
   await screen.findByText("Nenhuma pendência de cadastro.");
   expect(screen.queryByRole("table")).toBeNull();
