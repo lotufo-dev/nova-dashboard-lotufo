@@ -133,7 +133,7 @@ def test_painel_do_inicio(client_admin):
     assert r.status_code == 200
     assert set(r.json()) == {"hoje", "notas_a_enviar", "certidoes", "reajustes", "protocoladas", "medido",
                              "recebido_ano", "a_receber", "prazos", "espelhos", "ciclo", "notas_mes",
-                             "recebido_12m", "previsao",
+                             "recebido_12m", "previsao", "matriz",
                              "avisos_importantes"}
     assert [e["etapa"] for e in r.json()["ciclo"]] == ["em_analise", "boletim", "nota", "protocolado", "recebido_mes"]
     assert r.json()["protocoladas"]["obras_ativas"] == 1
