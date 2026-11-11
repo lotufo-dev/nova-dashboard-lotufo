@@ -407,14 +407,19 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
                          "regularidade": situacao_regularidade(conn, e["id"], hoje) if tem_reg else None,
                          "obras": obras, "consorciadas": consorciadas.get(e["id"], []),
                          "consorcios": consorcios.get(e["id"], []),
-                         "regularidades_anexadas": _regularidades_anexadas(conn, e["id"])})
+                         "regularidades_anexadas": _regularidades_anexadas(conn, e["id"]),
+                         # #651: mes anterior ao primeiro PDF da empresa nao e' cobrado (a lista acima tem teto)
+                         "primeira_regularidade": conn.execute(
+                             "SELECT MIN(competencia) FROM regularidades WHERE entidade_id=?", (e["id"],)).fetchone()[0]})
     # Issue #65: garantia (com validade) por contrato ativo, junto das certidoes.
     obras = []
-    for r in conn.execute("SELECT c.id, c.entidade_id, c.orgao, c.cno, c.art, o.familia FROM contratos c "
+    for r in conn.execute("SELECT c.id, c.entidade_id, c.orgao, c.cno, c.art, o.familia, o.regras FROM contratos c "
                           "LEFT JOIN orgaos o ON o.id=c.orgao_id WHERE c.estado='ativo' ORDER BY c.nome_curto, c.id"):
         g = garantias.garantia(conn, r["id"], hoje)
         obras.append({"contrato_id": r["id"], "obra": nomes[r["id"]], "entidade_id": contratos.entidade_de(r),
                       "orgao": FAMILIAS.get(r["familia"]) or (r["orgao"] or "").strip() or "Sem órgão",
+                      # #651: o mesmo padrao do QDOP (sem a chave no cadastro, publico)
+                      "tipo_contratante": json.loads(r["regras"] or "{}").get("tipo_contratante") or "PÚBLICO",
                       "garantia": g, "cobre_execucao": _cobre_execucao(conn, r["id"], g),
                       "art": (r["art"] or "").strip() or None, "cno": (r["cno"] or "").strip() or None})
     return {"hoje": hoje.isoformat(), "empresas": empresas, "contratos": obras}

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  certidoesOrdenadas, colunas, matriz, pendenciaMaisUrgente, pendenciasDa, resumoEmpresa,
-  situacaoCertidao, situacaoGarantia, type EmpresaDoc, type LinhaCertidao,
+  certidoesOrdenadas, chipValidadeGarantia, colunas, empresasComCertidaoExigida, estadosRegularidade, garantiasAConferir,
+  matriz, obrasPorOrgao, pendenciaMaisUrgente, pendenciasDa, regularidadesFaltando, resumoEmpresa,
+  situacaoCertidao, situacaoGarantia, type EmpresaDoc, type LinhaCertidao, type ObraDoc,
 } from "./matriz";
 
 const l = (chave: string, situacao: LinhaCertidao["situacao"], dias: number | null, exigida = true): LinhaCertidao => ({
@@ -75,6 +76,71 @@ describe("redesenho de Documentos (#161)", () => {
     expect(situacaoGarantia(g(-3, "vencida"), "01/12/2026")).toMatchObject({ texto: "vencida", nivel: "acao", forte: true });
     expect(situacaoGarantia(g(-3, "vencida"), "01/12/2026").nota).toBe("venceu em 01/12/2026 · apólice AP-1");
     expect(situacaoGarantia(g(300, "baixada"), "01/12/2026").nivel).toBe("neutro");
+  });
+});
+
+describe("Documentos só cobra o que é exigido (#651)", () => {
+  it("a aba Certidões lista só a empresa com alguma certidão exigida", () => {
+    const lista = [e(1, [l("federal", "ok", 90)]), e(2, [l("federal", "faltando", null, false)]), e(3, [])];
+    expect(empresasComCertidaoExigida(lista).map(x => x.entidade_id)).toEqual([1]);
+  });
+
+  const comReg = (id: number, anexadas: string[], esperada: string, primeira?: string | null): EmpresaDoc => ({
+    ...e(id, [], { situacao: "atrasada", competencia: anexadas[0] ?? null, esperada }),
+    regularidades_anexadas: anexadas.map((competencia, i) => ({ id: 10 + i, competencia, anexada_em: "2026-07-08" })),
+    primeira_regularidade: primeira,
+  });
+  const estados = (emp: EmpresaDoc, hoje: string) => estadosRegularidade(emp, hoje).map(x => x.estado);
+
+  it("mês anterior ao primeiro PDF da empresa fica sem cobrança; depois dele, o que não foi anexado falta", () => {
+    // hoje 23/09: os chips vao de 03 a 08/2026; o proximo protocolo pede 07/2026
+    expect(estados(comReg(1, ["2026-06"], "2026-07", "2026-06"), "2026-09-23"))
+      .toEqual(["sem", "sem", "sem", "anexada", "faltando", "faltando"]);
+    // a primeira anexada vem do servidor (a lista das anexadas tem teto); sem o campo, vale a mais antiga da lista
+    expect(estados(comReg(1, ["2026-06"], "2026-07", "2026-04"), "2026-09-23"))
+      .toEqual(["sem", "faltando", "faltando", "anexada", "faltando", "faltando"]);
+    expect(estados(comReg(1, ["2026-06"], "2026-07"), "2026-09-23")[2]).toBe("sem");
+    // antes do dia 10 o ultimo mes aguarda o DP, como antes
+    expect(estados(comReg(1, ["2026-06"], "2026-06", "2026-06"), "2026-09-07")[5]).toBe("aguardando");
+  });
+
+  it("empresa sem nenhum PDF: só a competência esperada falta", () => {
+    expect(estados(comReg(1, [], "2026-07", null), "2026-09-23")).toEqual(["sem", "sem", "sem", "sem", "faltando", "sem"]);
+  });
+
+  it("o contador da aba conta só a competência esperada, e nunca a anterior ao primeiro PDF", () => {
+    const lista = [
+      comReg(1, ["2026-06"], "2026-07", "2026-04"),      // 04, 05 e 08 em aberto, mas so' 07 e' pedida: 1
+      comReg(2, ["2026-07"], "2026-07", "2026-07"),      // a esperada esta' anexada: 0
+      comReg(3, ["2026-08"], "2026-07", "2026-08"),      // a esperada e' anterior ao primeiro PDF: 0
+      comReg(4, [], "2026-07", null),                    // exigida e nunca anexada: 1
+      e(5, [l("federal", "ok", 90)]),                    // sem folha: fora
+    ];
+    expect(regularidadesFaltando(lista)).toBe(2);
+  });
+
+  const g = (dias: number, situacao: "ok" | "vencendo" | "vencida" | "baixada") =>
+    ({ apolice: "AP-1", vigencia_fim: "2026-12-01", dias, origem: "contrato" as const, situacao });
+
+  it("garantia cujo último documento venceu diz 'Último registro', sem vermelho", () => {
+    expect(chipValidadeGarantia(g(-3, "vencida"), "01/12/2026")).toEqual({ cor: "neutro", valor: "Último registro: 01/12/2026" });
+    expect(chipValidadeGarantia(g(200, "ok"), "01/12/2026")).toEqual({ cor: "feito", valor: "01/12/2026" });
+    expect(chipValidadeGarantia(g(20, "vencendo"), "01/12/2026")).toEqual({ cor: "breve", valor: "01/12/2026" });
+    expect(chipValidadeGarantia(g(10, "vencendo"), "01/12/2026").cor).toBe("critico");
+    expect(chipValidadeGarantia(null, "")).toEqual({ cor: "critico", valor: "sem registro" });
+  });
+
+  const obra = (id: number, orgao: string, tipo?: string, garantia: ObraDoc["garantia"] = null): ObraDoc => ({
+    contrato_id: id, obra: `O${id}`, orgao, tipo_contratante: tipo, garantia });
+
+  it("o contador de garantias conta as que têm o último documento vencido", () => {
+    expect(garantiasAConferir([obra(1, "SES", "PÚBLICO", g(-3, "vencida")), obra(2, "SES", "PÚBLICO", g(20, "vencendo")), obra(3, "SES")])).toBe(1);
+  });
+
+  it("contrato de contratante privado vai para o grupo Privados", () => {
+    const grupos = obrasPorOrgao([obra(1, "Prefeituras", "PÚBLICO"), obra(2, "Prefeituras", "PRIVADO"), obra(3, "Prefeituras"),
+      obra(4, "Empresa X", "PRIVADO")]);
+    expect(grupos.map(x => [x.orgao, x.obras.map(o => o.contrato_id)])).toEqual([["Prefeituras", [1, 3]], ["Privados", [2, 4]]]);
   });
 });
 

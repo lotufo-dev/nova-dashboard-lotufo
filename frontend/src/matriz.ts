@@ -12,13 +12,15 @@ export type RegularidadeDoc = { situacao: "ok" | "atrasada" | "faltando"; compet
 export type Garantia = { apolice: string | null; vigencia_fim: string; dias: number; origem: "contrato" | "endosso";
   situacao: "ok" | "vencendo" | "vencida" | "baixada" };
 export type ObraDoc = { contrato_id: number; obra: string; entidade_id?: number; garantia: Garantia | null;
-  orgao?: string; cobre_execucao?: { cobre: boolean | null; ate: string | null }; art?: string | null; cno?: string | null };
+  orgao?: string; tipo_contratante?: string;      // #651: "PRIVADO" vai para o grupo "Privados"
+  cobre_execucao?: { cobre: boolean | null; ate: string | null }; art?: string | null; cno?: string | null };
 export type EmpresaDoc = {
   entidade_id: number; entidade: string; cnpj: string; papel: string; certidoes: LinhaCertidao[];
   regularidade_exigida: boolean; regularidade: RegularidadeDoc | null;
   obras?: { contrato_id: number; obra: string }[];      // A7: as obras ativas que exigem a empresa
   consorciadas?: number[]; consorcios?: number[];       // #161: quem compoe o consorcio / de quais consorcios participa
   regularidades_anexadas?: { id: number; competencia: string; anexada_em: string }[];   // #161: a mais recente primeiro
+  primeira_regularidade?: string | null;                // #651: a competencia mais antiga ja' anexada
 };
 
 // Decisao 5 do mapa: "antes do proximo protocolo" vira "vence em ate' 30 dias".
@@ -177,6 +179,11 @@ export function chipCertidao(l: LinhaCertidao | undefined, validade: string):
   return { cor: breve ? "breve" : "feito", valor: `${l.dias} d`, data: validade, contaNoAviso: breve };
 }
 
+/** As empresas da aba Certidoes (#651): so' quem tem ao menos uma certidao exigida por obra ativa. */
+export function empresasComCertidaoExigida(empresas: EmpresaDoc[]): EmpresaDoc[] {
+  return empresas.filter(e => e.certidoes.some(l => l.exigida));
+}
+
 export function certidoesVencendo(empresas: EmpresaDoc[]): number {
   return empresas.reduce((n, e) => n + e.certidoes.filter(l => chipCertidao(l, "").contaNoAviso).length, 0);
 }
@@ -196,11 +203,27 @@ export function competenciasRegularidade(hoje: string): { competencia: string; a
   });
 }
 
-export type EstadoCompetencia = { competencia: string; estado: "anexada" | "faltando" | "aguardando"; id?: number };
+/** "sem" = nao cobrada (#651): anterior ao primeiro PDF da empresa, ou empresa que nunca anexou e o mes nao e' o pedido. */
+export type EstadoCompetencia = { competencia: string; estado: "anexada" | "faltando" | "aguardando" | "sem"; id?: number };
 
 /** Empresas com folha: as que a regularidade e' exigida ou ja' tem PDF anexado. */
 export function empresasComFolha(empresas: EmpresaDoc[]): EmpresaDoc[] {
   return empresas.filter(e => e.regularidade !== null || (e.regularidades_anexadas ?? []).length > 0);
+}
+
+/** A competencia mais antiga ja' anexada: a do servidor; sem o campo, a mais antiga da lista. */
+function primeiraAnexada(e: EmpresaDoc): string | null {
+  if (e.primeira_regularidade !== undefined) return e.primeira_regularidade;
+  return (e.regularidades_anexadas ?? []).map(x => x.competencia).sort()[0] ?? null;
+}
+
+/** O estado de UMA competencia sem PDF (#651). Antes do primeiro PDF da empresa nada e' cobrado; a competencia que o
+ *  proximo protocolo pede (`esperada`, do servidor) falta; quem nunca anexou so' deve a esperada. */
+function estadoSemPdf(e: EmpresaDoc, competencia: string, aguardando: boolean): EstadoCompetencia["estado"] {
+  if (aguardando) return "aguardando";
+  const primeira = primeiraAnexada(e);
+  if (primeira !== null) return competencia < primeira ? "sem" : "faltando";
+  return competencia === e.regularidade?.esperada ? "faltando" : "sem";
 }
 
 export function estadosRegularidade(e: EmpresaDoc, hoje: string): EstadoCompetencia[] {
@@ -208,22 +231,41 @@ export function estadosRegularidade(e: EmpresaDoc, hoje: string): EstadoCompeten
   return competenciasRegularidade(hoje).map(({ competencia, aguardando }) => {
     const a = anexadas.find(x => x.competencia === competencia);
     return a ? { competencia, estado: "anexada" as const, id: a.id }
-      : { competencia, estado: aguardando ? "aguardando" as const : "faltando" as const };
+      : { competencia, estado: estadoSemPdf(e, competencia, aguardando) };
   });
 }
 
-export function regularidadesFaltando(empresas: EmpresaDoc[], hoje: string): number {
-  return empresasComFolha(empresas).reduce((n, e) => n + estadosRegularidade(e, hoje).filter(x => x.estado === "faltando").length, 0);
+/** O contador da aba (#651): as empresas com folha que devem a competencia que o proximo protocolo pede. */
+export function regularidadesFaltando(empresas: EmpresaDoc[]): number {
+  return empresasComFolha(empresas).filter(e => {
+    const esperada = e.regularidade?.esperada;
+    if (!esperada || (e.regularidades_anexadas ?? []).some(x => x.competencia === esperada)) return false;
+    return estadoSemPdf(e, esperada, false) === "faltando";
+  }).length;
 }
 
-export function garantiasVencidas(obras: ObraDoc[]): number {
+/** As garantias cujo ultimo documento venceu (#651): a tela nao afirma "vencida", pede para conferir. */
+export function garantiasAConferir(obras: ObraDoc[]): number {
   return obras.filter(o => o.garantia?.situacao === "vencida").length;
 }
 
-/** As obras por orgao, o maior grupo primeiro (empate: ordem alfabetica do orgao). */
+/** O chip "Válida até" da aba Garantias (#651). Do ultimo documento vencido so' se sabe a data dele: "Último registro",
+ *  sem vermelho. `ate` ja' vem em dd/mm/aaaa. */
+export function chipValidadeGarantia(g: Garantia | null, ate: string): { cor: CorChip; valor: string } {
+  if (!g) return { cor: "critico", valor: "sem registro" };
+  if (g.situacao === "vencida") return { cor: "neutro", valor: `Último registro: ${ate}` };
+  const nivel = situacaoGarantia(g, ate).nivel;
+  return { cor: nivel === "acao" ? "critico" : nivel === "atencao" ? "breve" : nivel === "ok" ? "feito" : "neutro", valor: ate };
+}
+
+/** As obras por orgao, o maior grupo primeiro (empate: ordem alfabetica do orgao). Contratante privado (#651) tem
+ *  grupo proprio, "Privados". */
 export function obrasPorOrgao(obras: ObraDoc[]): { orgao: string; obras: ObraDoc[] }[] {
   const m = new Map<string, ObraDoc[]>();
-  for (const o of obras) m.set(o.orgao ?? "Sem órgão", [...(m.get(o.orgao ?? "Sem órgão") ?? []), o]);
+  for (const o of obras) {
+    const grupo = o.tipo_contratante === "PRIVADO" ? "Privados" : o.orgao ?? "Sem órgão";
+    m.set(grupo, [...(m.get(grupo) ?? []), o]);
+  }
   return [...m].map(([orgao, lista]) => ({ orgao, obras: lista }))
     .sort((a, b) => b.obras.length - a.obras.length || a.orgao.localeCompare(b.orgao, "pt-BR"));
 }

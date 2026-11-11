@@ -32,7 +32,7 @@ export const PAINEL = {
       regularidade: { situacao: "atrasada", competencia: "2026-06", esperada: "2026-07" },
       consorciadas: [], consorcios: [2],
       obras: [{ contrato_id: 5, obra: "Obra Alfa" }, { contrato_id: 6, obra: "Obra Beta" }],
-      regularidades_anexadas: [{ id: 9, competencia: "2026-06", anexada_em: "2026-07-08" }],
+      regularidades_anexadas: [{ id: 9, competencia: "2026-06", anexada_em: "2026-07-08" }], primeira_regularidade: "2026-06",
       certidoes: [
         base("fgts", "CRF/FGTS", { tipo_id: 2, situacao: "vencendo", dias: 4,
           certidao: { id: 7, emissao: "2026-08-29", validade: "2026-09-27", natureza: "negativa", leitura: "manual" } }),
