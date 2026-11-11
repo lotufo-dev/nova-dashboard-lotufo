@@ -37,7 +37,8 @@ MAX_COMPLEMENTO = 100
 CATEGORIA_INVALIDA = "Escolha a categoria do processo"
 OBRA_OBRIGATORIA = "Escolha a obra do processo"
 MEDICAO_OBRIGATORIA = "Escolha a medição do processo"
-MEDICAO_INEXISTENTE = "Medição não encontrada nesta obra"
+MEDICAO_NAO_ENCONTRADA = "Medição não encontrada"
+MEDICAO_INEXISTENTE ="Medição não encontrada nesta obra"
 MEDICAO_FORA_DA_CATEGORIA = "Medição só entra na categoria Medições"
 COMPLEMENTO_LONGO = f"Complemento com mais de {MAX_COMPLEMENTO} caracteres"
 LIGADO_A_PROTOCOLO = "Este processo está ligado a um protocolo enviado pelo sistema: a categoria dele é Medições"
@@ -488,6 +489,24 @@ def registrar_link_medicao(conn, usuario_id, medicao_id: int, codigo: str, numer
     m = conn.execute("SELECT id, numero, tipo, contrato_id FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
     _ligar(conn, usuario_id, codigo, numero, f"{medicoes.titulo(dict(m))} - {_obra(conn, m['contrato_id'])}",
            m["contrato_id"], None, medicao_id, {medicao_id}, "medicao", medicao_id)
+
+
+def acompanhar_link_da_medicao(conn, usuario_id, medicao_id: int, link: str | None) -> int:
+    """Link de acompanhamento colado no passo de analise da medicao (issue #668): cria (ou liga) o processo do codigo
+    a' medicao, na categoria Medicoes, pelo caminho do link colado no protocolo da nota (`registrar_link_medicao`),
+    com o nº do SIGA digitado na medicao (etapa 'planilha'), se houver. Abre a propria transacao (reentrante): serve
+    tambem a quem acha o link sozinho, sem usuario (`usuario_id` None). Link invalido e codigo ligado a outra
+    medicao: ValueError; medicao que nao existe: LookupError. -> id do processo."""
+    codigo = extrair_codigo(link)
+    if not codigo:
+        raise ValueError(LINK_INVALIDO)
+    with db.mutacao(conn):
+        if conn.execute("SELECT 1 FROM medicoes WHERE id=?", (medicao_id,)).fetchone() is None:
+            raise LookupError(MEDICAO_NAO_ENCONTRADA)
+        linha = conn.execute("SELECT numero_processo FROM medicao_protocolos WHERE medicao_id=? AND etapa='planilha' "
+                             "ORDER BY id LIMIT 1", (medicao_id,)).fetchone()
+        registrar_link_medicao(conn, usuario_id, medicao_id, codigo, linha["numero_processo"] if linha else None)
+        return conn.execute("SELECT id FROM siga_processos WHERE codigo=?", (codigo,)).fetchone()["id"]
 
 
 def o_que_e(categoria: str, complemento: str | None, medicao_titulo: str | None) -> str:

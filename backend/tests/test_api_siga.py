@@ -699,3 +699,95 @@ def test_processo_arquivado_sai_da_lista_do_robo(client_admin, com_token):
     assert client_admin.post("/api/siga/leituras", json=corpo, headers=_robo()).status_code == 200
     assert [p["encerrado"] for p in client_admin.get("/api/siga").json()["processos"]] == ["arquivado", None]
     assert [p["nome"] for p in client_admin.get("/api/siga/processos", headers=_robo()).json()] == ["Processo Beta"]
+
+
+# --- link de acompanhamento colado no passo de analise da medicao (issue #668) -----------------------------
+
+def _com_numero_da_planilha(mid, numero="ORGAO-PRO-2026/00077"):
+    """A medicao com a planilha/carta enviada e o nº do SIGA digitado no passo de analise (etapa 'planilha')."""
+    c = db.get_conn()
+    c.execute("UPDATE medicoes SET estado='planilha_enviada', planilha_enviada_em='2026-10-20' WHERE id=?", (mid,))
+    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem, etapa) "
+              "VALUES (?,'2026-10-20',?,'manual','planilha')", (mid, numero))
+    c.commit(); c.close()
+
+
+def _link_da_medicao(cl, mid, link=LINK_SIGA):
+    return cl.post(f"/api/siga/medicoes/{mid}/link", json={"link": link})
+
+
+def test_link_no_passo_de_analise_cria_o_processo_ligado_a_medicao_em_medicoes(api, com_token):
+    cl, cid, mid = api
+    _com_numero_da_planilha(mid)
+    assert cl.get("/api/siga").json()["processos"] == []      # o numero digitado sozinho nao cria processo
+    r = _link_da_medicao(cl, mid)
+    assert r.status_code == 200, r.text
+    (p,) = cl.get("/api/siga").json()["processos"]
+    assert r.json() == {"id": p["id"]}
+    assert (p["codigo"], p["numero"], p["link"]) == ("AbCdEf1234", "ORGAO-PRO-2026/00077", LINK_SIGA)
+    assert (p["categoria"], p["contrato_id"], p["medicao_id"], p["protocolo_id"]) == ("medicoes", cid, mid, None)
+    # o robo passa a ler o processo, e a leitura dele da' o setor e o tempo no setor do passo
+    assert cl.get("/api/siga/processos", headers=_robo()).json() == [
+        {"codigo": "AbCdEf1234", "numero": "ORGAO-PRO-2026/00077", "nome": "23ª Medição - Obra MTPAR"}]
+    leitura = {**CORPO, "processos": [{**CORPO["processos"][0], "codigo": "AbCdEf1234", "numero": "ORGAO-PRO-2026/00077"}]}
+    assert cl.post("/api/siga/leituras", json=leitura, headers=_robo()).status_code == 200
+    (p,) = cl.get("/api/siga").json()["processos"]
+    assert (p["medicao_id"], p["setor"], p["com_quem"]) == (mid, "COFIN", "Fulano")
+    assert p["desde"] and p["dias_uteis"] is not None
+    c = db.get_conn()
+    reg = c.execute("SELECT entidade, entidade_id, usuario_id, depois FROM audit_log WHERE acao='protocolo.siga' "
+                    "ORDER BY id DESC LIMIT 1").fetchone()
+    c.close()
+    assert (reg["entidade"], int(reg["entidade_id"])) == ("medicao", mid)
+    assert reg["usuario_id"] is not None and "AbCdEf1234" in reg["depois"]
+
+
+def test_link_da_medicao_aceita_so_o_codigo_e_serve_sem_numero_digitado(api, com_token):
+    # a funcao do servidor nao exige o numero: a #667 a chama quando a resposta do orgao traz o link
+    cl, _cid, mid = api
+    r = _link_da_medicao(cl, mid, " AbCdEf1234 ")
+    assert r.status_code == 200, r.text
+    (p,) = cl.get("/api/siga").json()["processos"]
+    assert (p["codigo"], p["numero"], p["categoria"], p["medicao_id"]) == ("AbCdEf1234", None, "medicoes", mid)
+
+
+@pytest.mark.parametrize("link", ["", "   ", "https://siga.exemplo.com.br.evil.example/acompanhar?n=AbCdEf1234",
+                                  "https://siga.exemplo.com.br/acompanhar", "abc"])
+def test_link_invalido_na_medicao_e_422_em_portugues_e_nada_grava(api, com_token, link):
+    cl, _cid, mid = api
+    _com_numero_da_planilha(mid)
+    r = _link_da_medicao(cl, mid, link)
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Link do SIGA inválido: cole o link que o órgão mandou"
+    assert cl.get("/api/siga").json()["processos"] == []
+
+
+def test_codigo_ja_acompanhado_em_outra_medicao_e_recusado_com_a_mensagem_existente(api, com_token):
+    cl, cid, mid = api
+    c = db.get_conn()
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+              "VALUES (?, 24, 'execucao', '2026-10', 'planilha_enviada', 1000000)", (cid,))
+    outra = c.execute("SELECT MAX(id) FROM medicoes").fetchone()[0]
+    c.commit(); c.close()
+    assert _link_da_medicao(cl, outra).status_code == 200
+    _com_numero_da_planilha(mid)
+    r = _link_da_medicao(cl, mid)
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Este processo do SIGA já está ligado a outra medição"
+    (p,) = cl.get("/api/siga").json()["processos"]
+    assert p["medicao_id"] == outra
+
+
+def test_link_em_medicao_que_nao_existe_e_404(api, com_token):
+    cl, _cid, _mid = api
+    r = _link_da_medicao(cl, 9999)
+    assert r.status_code == 404 and r.json()["detail"] == "Medição não encontrada"
+    assert cl.get("/api/siga").json()["processos"] == []
+
+
+def test_diretoria_nao_cola_o_link_na_medicao(api, com_token):
+    cl, _cid, mid = api
+    _com_numero_da_planilha(mid)
+    _diretoria(cl)
+    assert _link_da_medicao(cl, mid).status_code == 403
+    assert cl.get("/api/siga").json()["processos"] == []

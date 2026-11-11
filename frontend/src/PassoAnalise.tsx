@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { api, apiForm } from "./api";
+import { api, apiForm, mensagemDeErro } from "./api";
 import { AceiteDiferenca, FormBoletim } from "./Boletim";
 import { brl } from "./formato";
-import { IconeLinkExterno } from "./icones";
+import { IconeAlerta, IconeLinkExterno } from "./icones";
 import type { Agir } from "./MedicaoAtos";
 import type { Medicao } from "./Medicoes";
 import { IconeCheck } from "./NotasAEnviar";
@@ -35,6 +35,44 @@ export function processoDa(processos: ProcessoSiga[], medicaoId: number, numero:
 
 type Resposta = "aprovou" | "revisao" | null;
 
+/** Issue #668: o link de acompanhamento que o orgao manda poe o processo da medicao em acompanhamento (o nº sozinho
+ *  nao cria processo: o robo so' abre o que tem o codigo do link). O erro do servidor (link invalido, codigo ligado a
+ *  outra medicao) fica no campo. */
+function LinkSiga({ medicaoId, aoGravar }: { medicaoId: number; aoGravar: () => void }) {
+  const [aberto, setAberto] = useState(false);
+  const [link, setLink] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const [erro, setErro] = useState("");
+  async function gravar(ev: React.FormEvent) {
+    ev.preventDefault();
+    setOcupado(true); setErro("");
+    try {
+      await api(`/api/siga/medicoes/${medicaoId}/link`, { method: "POST", body: JSON.stringify({ link: link.trim() }) });
+      setAberto(false); setLink("");
+      aoGravar();
+    } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
+  }
+  if (!aberto) {
+    return <p><button type="button" className="btn btn--pequeno" onClick={() => setAberto(true)}>Colar o link de acompanhamento</button></p>;
+  }
+  const idErro = `link-siga-erro-${medicaoId}`;
+  return (
+    <div className="pilha">
+      <form className="form-inline" onSubmit={gravar} aria-label="Link de acompanhamento">
+        <div className="campo">
+          <label className="campo__rotulo" htmlFor={`link-siga-${medicaoId}`}>Link de acompanhamento</label>
+          <input id={`link-siga-${medicaoId}`} name="link_siga_processo" autoComplete="off" spellCheck={false} required
+            className="entrada--larga" maxLength={500} placeholder="Cole o link que o órgão mandou…" value={link} aria-invalid={erro ? true : undefined}
+            aria-describedby={erro ? idErro : undefined} onChange={e => { setLink(e.target.value); setErro(""); }} />
+        </div>
+        <button type="submit" className="btn" disabled={ocupado || !link.trim()}>{ocupado ? "Gravando…" : "Gravar"}</button>
+        <button type="button" className="btn" onClick={() => { setAberto(false); setLink(""); setErro(""); }}>Voltar</button>
+      </form>
+      {erro && <p className="erro" role="alert" id={idErro}><IconeAlerta className="icone icone--p" />{erro}</p>}
+    </div>
+  );
+}
+
 /** `aoRevisar`: a revisao foi gravada; a pagina descarta a conferencia antiga e espera o detalhe novo (gate Sol, PR
  *  #553): ate' la' nem outra revisao nem o espelho sem o boletim se oferecem. */
 export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, aoMudarSiga, aoRevisar }: {
@@ -44,13 +82,14 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
   const [siga, setSiga] = useState<PainelSiga | null>(null);
   const [aberta, setAberta] = useState<Resposta>(null);
   const numero = planilha?.planilha_siga?.numero ?? null;
+  const [relido, setRelido] = useState(0);     // #668: o link gravado cria o processo; a tela SIGA e' relida
   useEffect(() => {
     let vivo = true;
     // a tela SIGA e' a fonte (relida quando o nº do SIGA muda); sem ela (falha, sem processo), o passo mostra o que a
     // medicao tem
     api<PainelSiga>("/api/siga").then(p => { if (vivo) setSiga(p); }).catch(() => {});
     return () => { vivo = false; };
-  }, [m.id, numero]);
+  }, [m.id, numero, relido]);
   // #644: as respostas do orgao lidas da conversa do e-mail enviado; relidas quando uma leitura registra resposta nova
   const [respostas, setRespostas] = useState<RespostaOrgao[]>([]);
   useEffect(() => {
@@ -63,6 +102,8 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
   }, [m.id]);
 
   const proc = siga ? processoDa(siga.processos ?? [], m.id, numero) : null;
+  // #668: com o nº digitado e sem processo ligado a' medicao (o avulso de mesmo nº nao conta), oferece o link
+  const ofereceLink = podeEditar && siga !== null && numero !== null && proc?.medicao_id !== m.id;
   const movs = proc ? [...proc.movimentacoes].sort((a, b) => Date.parse(b.data) - Date.parse(a.data)).slice(0, 3) : [];
   const esperando = m.estado === "planilha_enviada";
   const podeResponder = podeEditar && esperando;
@@ -115,6 +156,7 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
           ) : (
             enviadaEm ? <NumeroSiga medicaoId={m.id} atual={numero} podeEditar={podeEditar && esperando} aoGravar={aoMudarSiga} /> : <p>—</p>
           )}
+          {ofereceLink && <LinkSiga medicaoId={m.id} aoGravar={() => setRelido(n => n + 1)} />}
         </section>
 
         <section className="cartao med-painel" aria-labelledby="orgao-resposta">

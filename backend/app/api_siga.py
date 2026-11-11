@@ -142,6 +142,24 @@ def classificar(processo_id: ID, dados: ClassificacaoIn, usuario: dict = Depends
     return {"id": processo_id}
 
 
+class LinkDaMedicaoIn(BaseModel):
+    link: str = Field(max_length=500)                 # link inteiro ou so' o codigo (siga.extrair_codigo)
+
+
+@router.post("/api/siga/medicoes/{medicao_id}/link")
+def acompanhar_link_da_medicao(medicao_id: ID, dados: LinkDaMedicaoIn,
+                               usuario: dict = Depends(exigir("editar_cadastros")),
+                               conn: sqlite3.Connection = Depends(conexao)):
+    """Link de acompanhamento colado no passo de analise da medicao (issue #668)."""
+    try:
+        pid = siga.acompanhar_link_da_medicao(conn, usuario["id"], medicao_id, dados.link)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    return {"id": pid}
+
+
 # --- pedido de leitura pela tela e rodadas do robo (issue #342) --------------------------------------------
 
 class AtualizarIn(BaseModel):
