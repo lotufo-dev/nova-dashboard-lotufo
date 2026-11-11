@@ -776,3 +776,65 @@ def test_medicao_fechada_ou_envio_de_outra_pessoa_nao_e_lido(api, tmp_path):
     c.commit(); c.close()
     assert cl.post("/api/correio/respostas/ler").json() == {"novas": []}
     assert _linha("SELECT COUNT(*) AS n FROM medicao_respostas_orgao")["n"] == 0
+
+
+# --- aviso de resposta nao vista por quem enviou (issue #654) -------------------------------------------------
+
+def _entrar(cl, email, senha="senha-forte-123"):
+    r = cl.post("/api/auth/login", json={"email": email, "senha": senha})
+    assert r.status_code == 200, r.text
+    cl.cookies.set("sessao", r.cookies.get("sessao") or cl.cookies.get("sessao"))
+    cl.headers["X-CSRF-Token"] = r.json()["csrf"]
+
+
+def test_resposta_fica_nao_vista_para_quem_enviou_ate_ela_marcar(api, tmp_path):
+    cl, cid, _ = api
+    mid, _, conversa = _enviada(cl, cid)
+    assert cl.get("/api/correio/respostas/nao-vistas").json() == []
+    _resposta_simulada(tmp_path, conversa, nome="001", recebida_em="2026-11-10T14:00:00Z")
+    _resposta_simulada(tmp_path, conversa, nome="002", recebida_em="2026-11-11T09:00:00Z")
+    assert len(cl.post("/api/correio/respostas/ler").json()["novas"]) == 2
+    ids = [r["id"] for r in db.get_conn().execute("SELECT id FROM medicao_respostas_orgao ORDER BY id")]
+    # uma linha por medicao (duas respostas da mesma conversa nao viram dois avisos), com o que o aviso escreve
+    esperado = [{"medicao_id": mid, "contrato_id": cid, "orgao": "SINFRA", "obra": "Obra SINFRA", "numero": 1,
+                 "tipo": "execucao", "respostas": 2, "ate": ids[1], "recebida_em": "2026-11-11T09:00:00Z"}]
+    assert cl.get("/api/correio/respostas/nao-vistas").json() == esperado
+    # a leitura seguinte nao traz nada novo, e a resposta continua nao vista (o aviso nao depende de `novas`)
+    assert cl.post("/api/correio/respostas/ler").json() == {"novas": []}
+    assert cl.get("/api/correio/respostas/nao-vistas").json() == esperado
+    # `ate`: so' o que a tela mostrou e' marcado; a resposta que chegou depois continua avisando
+    r = cl.post(f"/api/correio/respostas/vistas/{mid}", json={"ate": ids[0]})
+    assert r.status_code == 200 and r.json() == {"marcadas": 1}
+    assert [(x["respostas"], x["ate"]) for x in cl.get("/api/correio/respostas/nao-vistas").json()] == [(1, ids[1])]
+    assert cl.post(f"/api/correio/respostas/vistas/{mid}", json={"ate": ids[1]}).json() == {"marcadas": 1}
+    assert cl.get("/api/correio/respostas/nao-vistas").json() == []
+    assert cl.post(f"/api/correio/respostas/vistas/{mid}", json={"ate": ids[1]}).json() == {"marcadas": 0}
+    assert len(cl.get(f"/api/medicoes/{mid}/respostas-orgao").json()) == 2      # a pagina da medicao continua mostrando
+
+
+def test_outra_pessoa_nao_ve_o_aviso_nem_marca_o_de_quem_enviou(api, tmp_path):
+    from app import auth
+    cl, cid, _ = api
+    mid, _, conversa = _enviada(cl, cid)
+    _resposta_simulada(tmp_path, conversa)
+    assert len(cl.post("/api/correio/respostas/ler").json()["novas"]) == 1
+    ate = _linha("SELECT MAX(id) AS n FROM medicao_respostas_orgao")["n"]
+    c = db.get_conn()
+    auth.criar_usuario(c, "Engenheira da obra", "engenheira@lotufo.com", "senha-forte-123", "engenharia")
+    c.close()
+    _entrar(cl, "engenheira@lotufo.com")
+    assert cl.get("/api/correio/respostas/nao-vistas").json() == []
+    assert cl.post(f"/api/correio/respostas/vistas/{mid}", json={"ate": ate}).json() == {"marcadas": 0}
+    assert len(cl.get(f"/api/medicoes/{mid}/respostas-orgao").json()) == 1      # ela ve a resposta na pagina da medicao
+    _entrar(cl, "admin@lotufo.com")
+    assert [x["medicao_id"] for x in cl.get("/api/correio/respostas/nao-vistas").json()] == [mid]
+
+
+def test_nao_vistas_da_mais_nova_para_a_mais_antiga_entre_medicoes(api, tmp_path):
+    cl, cid, _ = api
+    m1, _, c1 = _enviada(cl, cid)
+    m2, _, c2 = _enviada(cl, cid, numero=2)
+    _resposta_simulada(tmp_path, c1, recebida_em="2026-11-11T09:00:00Z")
+    _resposta_simulada(tmp_path, c2, recebida_em="2026-11-10T14:00:00Z")
+    cl.post("/api/correio/respostas/ler")
+    assert [x["medicao_id"] for x in cl.get("/api/correio/respostas/nao-vistas").json()] == [m1, m2]
