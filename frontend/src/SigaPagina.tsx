@@ -7,7 +7,7 @@ import type { ObraLista } from "./listaObras";
 import { ir, trocarBusca, type Busca } from "./rota";
 import {
   contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, nivelDias, nomeDoProcesso, ordenar, periodoDe,
-  DIAS_ACAO, DIAS_ATENCAO, roboAtivo, setorPessoa, situacaoDoBotao, tempoNoSetor, tituloDoEvento, TIPOS, volumeDe, type Movimentacao, type PainelSiga,
+  DIAS_ACAO, DIAS_ATENCAO, roboAtivo, ROTULO_ENCERRADO, setorPessoa, situacaoDoBotao, tempoNoSetor, tituloDoEvento, TIPOS, volumeDe, type Movimentacao, type PainelSiga,
   type ProcessoSiga, type Robo, type TipoMovimentacao,
 } from "./siga";
 import { fmtData, fmtDataHora, fmtHora } from "./tempo";
@@ -17,7 +17,7 @@ import "./siga.css";
 // posicao atual de cada processo, do mais parado ao menos; clicar na linha abre o historico completo do processo
 // (a mesma rota, com ?processo=<id>). Tudo vem de GET /api/siga; aqui so' se desenha.
 
-const RELER_A_CADA_MS = 15 * 60_000;
+const RELER_A_CADA_MS = 60 * 60_000;   // o robo le de hora em hora (#657)
 const RELER_COM_ROBO_MS = 5_000;   // pedido na fila ou rodada em andamento (#343): a tela acompanha o robo
 const dataOuTraco = (iso: string | null) => (iso ? fmtData(iso) : "—");
 
@@ -34,7 +34,8 @@ function Linha({ p, agora, robo }: { p: ProcessoSiga; agora: Date; robo: Robo })
   const volume = volumeDe(p.situacao);
   const ultima = p.ultima;
   const lendo = robo.rodada?.processos.includes(p.id) ?? false;
-  const avisos = robo.avisos.filter(a => a.processo_id === p.id);
+  // encerrado (#657): sem "nao lido" e sem cor de atraso; no lugar de "Com quem" e "No setor ha'", a situacao
+  const avisos = p.encerrado ? [] : robo.avisos.filter(a => a.processo_id === p.id);
   return (
     <tr className="sg__linha" tabIndex={0} aria-label={nomeDoProcesso(p)}
       onClick={() => abrirHistorico(p.id)}
@@ -59,8 +60,12 @@ function Linha({ p, agora, robo }: { p: ProcessoSiga; agora: Date; robo: Robo })
         {p.caixa_entrada && <span className="sg__fraco">caixa de entrada</span>}
         {volume && <span className="sg__fraco">{volume}</span>}
       </td>
-      <td data-rotulo="Com quem">{p.com_quem || <span className="sg__traco">—</span>}</td>
-      <td data-rotulo="No setor há"><NoSetor p={p} agora={agora} /></td>
+      {p.encerrado ? <td data-rotulo="Situação">{ROTULO_ENCERRADO[p.encerrado]}</td> : (
+        <>
+          <td data-rotulo="Com quem">{p.com_quem || <span className="sg__traco">—</span>}</td>
+          <td data-rotulo="No setor há"><NoSetor p={p} agora={agora} /></td>
+        </>
+      )}
       <td data-rotulo="Última movimentação">
         {ultima ? (
           <>
@@ -275,7 +280,7 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
     try { setDados(await api<PainelSiga>("/api/siga")); setErro(""); } catch (e) { setErro(mensagemDeErro(e)); }
   }, []);
   useEffect(() => { void carregar(); }, [carregar]);
-  // O robo le a cada 15 minutos: com a aba aberta a tela rele no mesmo ritmo. Com pedido na fila ou rodada em
+  // O robo le de hora em hora (#657): com a aba aberta a tela rele no mesmo ritmo. Com pedido na fila ou rodada em
   // andamento, a cada 5 segundos, ate' a leitura nova chegar (pedido travado nao conta).
   const comRobo = dados !== null && roboAtivo(dados.robo);
   useEffect(() => {
@@ -307,7 +312,10 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
   if (aberto) return <Historico key={aberto.id} p={aberto} dados={dados} aoPedir={carregar} />;
 
   const robo = dados.robo;
-  const n = processos.length;
+  // #657: a tabela principal so' tem os vivos; os encerrados ficam recolhidos no fim da pagina
+  const vivos = processos.filter(p => p.encerrado === null);
+  const encerrados = processos.filter(p => p.encerrado !== null);
+  const n = vivos.length;
   const topo = (
     <div className="sg__topo">
       <div className="sg__vivo" aria-live="polite">{robo.estado !== "parado" && <RoboAgora robo={robo} />}</div>
@@ -337,36 +345,51 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
       </ul>
     </header>
   );
-  if (n === 0) {
-    return (
-      <div className="pagina siga">
-        {cabeca}
-        {topo}
-        <section className="sg__quadro"><div className="sg__vazio"><IconeSiga className="icone" /><p>Nenhum processo acompanhado.</p></div></section>
-      </div>
-    );
-  }
-
   const agoraDe = agora ?? new Date();
+  const vazio = processos.length === 0 ? "Nenhum processo acompanhado." : "Nenhum processo em andamento.";
   return (
     <div className="pagina siga">
       {cabeca}
       {topo}
-      <section className="sg__quadro" aria-label="Processos no SIGA">
-        <table className="sg__tabela" role="grid">
-          <caption className="sr-only">Processos acompanhados no SIGA, do mais parado ao menos. Escolha um para ver o histórico.</caption>
-          <colgroup><col className="sg__c-proc" /><col className="sg__c-onde" /><col className="sg__c-quem" /><col className="sg__c-setor" /><col className="sg__c-ultima" /><col className="sg__c-prot" /><col className="sg__c-seta" /></colgroup>
-          <thead>
-            <tr>
-              <th scope="col">Processo</th><th scope="col">Onde está</th><th scope="col">Com quem</th><th scope="col">No setor há</th>
-              <th scope="col">Última movimentação</th><th scope="col">Protocolado em</th><th scope="col"><span className="sr-only">Abrir</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {processos.map(p => <Linha key={p.id} p={p} agora={agoraDe} robo={robo} />)}
-          </tbody>
-        </table>
-      </section>
+      {n === 0 ? (
+        <section className="sg__quadro"><div className="sg__vazio"><IconeSiga className="icone" /><p>{vazio}</p></div></section>
+      ) : (
+        <section className="sg__quadro" aria-label="Processos no SIGA">
+          <table className="sg__tabela" role="grid">
+            <caption className="sr-only">Processos acompanhados no SIGA, do mais parado ao menos. Escolha um para ver o histórico.</caption>
+            <colgroup><col className="sg__c-proc" /><col className="sg__c-onde" /><col className="sg__c-quem" /><col className="sg__c-setor" /><col className="sg__c-ultima" /><col className="sg__c-prot" /><col className="sg__c-seta" /></colgroup>
+            <thead>
+              <tr>
+                <th scope="col">Processo</th><th scope="col">Onde está</th><th scope="col">Com quem</th><th scope="col">No setor há</th>
+                <th scope="col">Última movimentação</th><th scope="col">Protocolado em</th><th scope="col"><span className="sr-only">Abrir</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {vivos.map(p => <Linha key={p.id} p={p} agora={agoraDe} robo={robo} />)}
+            </tbody>
+          </table>
+        </section>
+      )}
+      {encerrados.length > 0 && (
+        <details className="sg__encerrados" aria-label="Encerrados">
+          <summary>Encerrados <span className="num">{encerrados.length}</span></summary>
+          <section className="sg__quadro">
+            <table className="sg__tabela">
+              <caption className="sr-only">Processos encerrados: medição recebida ou processo arquivado. Escolha um para ver o histórico.</caption>
+              <colgroup><col className="sg__c-proc-enc" /><col className="sg__c-onde-enc" /><col className="sg__c-sit" /><col className="sg__c-ultima-enc" /><col className="sg__c-prot" /><col className="sg__c-seta" /></colgroup>
+              <thead>
+                <tr>
+                  <th scope="col">Processo</th><th scope="col">Onde está</th><th scope="col">Situação</th>
+                  <th scope="col">Última movimentação</th><th scope="col">Protocolado em</th><th scope="col"><span className="sr-only">Abrir</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {encerrados.map(p => <Linha key={p.id} p={p} agora={agoraDe} robo={robo} />)}
+              </tbody>
+            </table>
+          </section>
+        </details>
+      )}
     </div>
   );
 }

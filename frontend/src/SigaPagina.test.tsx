@@ -20,7 +20,7 @@ const mov = (data: string, evento: string, extra: Partial<Movimentacao> = {}): M
   data, evento, tipo: tipoDe(evento), cad_lotacao: "PROTOC/ORGAO", cad_pessoa: "Beltrano", at_lotacao: "COFIN/ORGAO", at_pessoa: "Fulano", ...extra });
 const processo = (extra: Partial<ProcessoSiga>): ProcessoSiga => ({
   id: 1, codigo: null, link: null, numero: null, nome: null, contrato_id: null, obra: null, medicao_id: null,
-  medicao_titulo: null, protocolo_id: null, situacao: "1º Volume - Aguardando Andamento [COFIN, [X]]", setor: "COFIN",
+  medicao_titulo: null, protocolo_id: null, situacao: "1º Volume - Aguardando Andamento [COFIN, [X]]", encerrado: null, setor: "COFIN",
   caixa_entrada: false, com_quem: "Fulano", desde: "2026-10-20T10:00:00-04:00", dias_uteis: 6, hoje: 0,
   ultima: mov("2026-10-20T10:00:00-04:00", "Recebimento"), protocolado_em: "2026-10-01T08:00:00-04:00",
   movimentacoes: [mov("2026-10-20T10:00:00-04:00", "Recebimento")], ...extra });
@@ -185,7 +185,7 @@ describe("SigaPagina", () => {
     expect(screen.queryByText(/O monitor do SIGA não lê/)).toBeNull();
   });
 
-  it("rele a cada 15 minutos; o aviso de atraso aparece quando a resposta nova o traz; ao sair, para", async () => {
+  it("rele de hora em hora (#657); o aviso de atraso aparece quando a resposta nova o traz; ao sair, para", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mostrar(painel([ALFA, BETA]));
@@ -193,11 +193,13 @@ describe("SigaPagina", () => {
       expect(api).toHaveBeenCalledTimes(1);
       expect(screen.queryByText(/O monitor do SIGA não lê/)).toBeNull();
       api.mockResolvedValue(painel([ALFA, BETA], { atrasado: true, lido_em: "2026-10-28T12:00:00+00:00" }));
+      await vi.advanceTimersByTimeAsync(45 * 60_000);
+      expect(api).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(15 * 60_000);
       expect(api).toHaveBeenCalledTimes(2);
       expect(await screen.findByText("O monitor do SIGA não lê desde 28/10 08:00.")).toBeTruthy();
       cleanup();
-      await vi.advanceTimersByTimeAsync(30 * 60_000);
+      await vi.advanceTimersByTimeAsync(120 * 60_000);
       expect(api).toHaveBeenCalledTimes(2);
     } finally { vi.useRealTimers(); }
   });
@@ -500,7 +502,7 @@ describe("SigaPagina", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("com o robô ativo relê a cada 5 segundos; ao terminar mostra a leitura nova e volta aos 15 minutos", async () => {
+  it("com o robô ativo relê a cada 5 segundos; ao terminar mostra a leitura nova e volta a reler de hora em hora", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mostrar(painel([ALFA], { robo: RODADA("pedido", [ALFA.id]) }));
@@ -514,8 +516,63 @@ describe("SigaPagina", () => {
       const depois = api.mock.calls.length;
       await vi.advanceTimersByTimeAsync(60_000);
       expect(api).toHaveBeenCalledTimes(depois);
-      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
       expect(api.mock.calls.length).toBeGreaterThan(depois);
     } finally { vi.useRealTimers(); }
+  });
+
+  // issue #657: processo encerrado (medição recebida ou arquivado) sai da tabela principal
+  const RECEBIDO = processo({
+    id: 7, nome: "Processo Zeta", contrato_id: 10, obra: "Obra Zeta", medicao_id: 34, medicao_titulo: "5ª Medição",
+    dias_uteis: 40, encerrado: "recebida" });
+  const ARQUIVADO = processo({
+    id: 8, nome: "Processo Eta", setor: "ARQUIVO", dias_uteis: 12, hoje: 1, encerrado: "arquivado",
+    ultima: mov("2026-10-28T09:00:00-04:00", "Arquivamento") });
+  const encerrados = () => screen.getByRole("group", { name: "Encerrados" }) as HTMLDetailsElement;
+
+  it("encerrados: fora da tabela principal e do contador, na seção 'Encerrados', recolhida, no fim da página", async () => {
+    const { container } = mostrar(painel([RECEBIDO, GAMA, ARQUIVADO, DELTA]));
+    const grade = await screen.findByRole("grid");
+    expect(within(grade).getAllByRole("row").slice(1).map(l => l.getAttribute("aria-label"))).toEqual(["Processo Gama", "Obra Delta · 4ª Medição"]);
+    expect(screen.getByText("2 processos · última leitura 11:00")).toBeTruthy();
+    const secao = encerrados();
+    expect(secao.open).toBe(false);
+    expect(secao.querySelector("summary")?.textContent).toBe("Encerrados 2");
+    expect(within(secao).getAllByRole("row").slice(1).map(l => l.getAttribute("aria-label"))).toEqual(["Obra Zeta · 5ª Medição", "Processo Eta"]);
+    expect(within(secao).getAllByRole("columnheader").map(c => c.textContent)).toEqual(
+      ["Processo", "Onde está", "Situação", "Última movimentação", "Protocolado em", "Abrir"]);
+    expect(within(within(secao).getByRole("row", { name: /Obra Zeta/ })).getByText("Medição recebida")).toBeTruthy();
+    expect(within(within(secao).getByRole("row", { name: "Processo Eta" })).getByText("Arquivado")).toBeTruthy();
+    // no fim da página: depois da tabela principal
+    expect(grade.compareDocumentPosition(secao) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelector(".pagina")?.lastElementChild).toBe(secao);
+  });
+
+  it("encerrado nunca fica vermelho, âmbar nem verde, e não mostra 'não lido'", async () => {
+    const avisos = [{ tipo: "nao_lido", processo_id: ARQUIVADO.id, texto: "não lido às 11:00: página não abriu" }];
+    mostrar(painel([RECEBIDO, ARQUIVADO, GAMA], { robo: { ...PARADO, avisos } }));
+    await screen.findByRole("grid");
+    const secao = encerrados();
+    expect(secao.querySelector(".sg__dias, .sg__nao-lido, [class*='--acao'], [class*='--atencao'], [class*='--hoje']")).toBeNull();
+    expect(within(secao).queryByText(/não lido|dias úteis|hoje/)).toBeNull();
+  });
+
+  it("só encerrados: 'Nenhum processo em andamento.' no lugar da tabela, e a seção Encerrados", async () => {
+    mostrar(painel([RECEBIDO]));
+    expect(await screen.findByText("Nenhum processo em andamento.")).toBeTruthy();
+    expect(screen.queryByRole("grid")).toBeNull();
+    expect(screen.getByText("0 processos · última leitura 11:00")).toBeTruthy();
+    expect(within(encerrados()).getByRole("row", { name: /Obra Zeta/ })).toBeTruthy();
+  });
+
+  it("sem encerrado não há seção Encerrados; a linha do encerrado abre o histórico dele", async () => {
+    const { unmount } = mostrar(painel([GAMA]));
+    await screen.findByRole("grid");
+    expect(screen.queryByRole("group", { name: "Encerrados" })).toBeNull();
+    unmount();
+    mostrar(painel([GAMA, ARQUIVADO]));
+    await screen.findByRole("grid");
+    fireEvent.click(within(encerrados()).getByRole("row", { name: "Processo Eta" }));
+    expect(window.location.search).toBe("?processo=8");
   });
 });
