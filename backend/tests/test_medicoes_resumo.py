@@ -263,7 +263,7 @@ def test_prevista_da_aba_desempata_por_competencia_tipo_numero_e_id(conn):
 def test_rota_do_resumo(client_admin):
     r = client_admin.get("/api/medicoes/resumo")
     assert r.status_code == 200, r.text
-    assert set(r.json()) == {"hoje", "mes", "contagens", "linhas", "obras"}
+    assert set(r.json()) == {"hoje", "mes", "contagens", "linhas", "obras", "quadro", "anteriores"}
     # a rota fixa nao cai em /api/medicoes/{medicao_id}
     assert client_admin.get("/api/medicoes/999").status_code == 404
 
@@ -323,3 +323,118 @@ def test_resumo_prevista_de_reajuste_nao_e_a_da_serie_de_execucao(conn):
     o = medicoes.resumo(conn, HOJE)["obras"][0]
     assert o["execucao"]["prevista_id"] is None and o["execucao"]["prevista_numero"] is None
     assert o["prevista_id"] is None and o["projeto"] is None
+
+
+# --- quadro do mes (#643): uma linha por obra, uma coluna por passo, na competencia pedida ---------------------
+
+def _passos(linha):
+    return {p["numero"]: (p["situacao"], p["data"], p["medicao_id"]) for p in linha["passos"]}
+
+
+def test_quadro_tem_uma_linha_por_obra_ativa_e_iniciar_na_obra_sem_medicao(conn, cenario):
+    ids = cenario
+    quadro = {x["obra"]: x for x in medicoes.resumo(conn, HOJE, mes="2026-09")["quadro"]}
+    # a suspensa sem medicao na competencia fica fora; a D so' tem prevista: sem medicao, com o Iniciar
+    assert list(quadro) == ["Obra A", "Obra B", "Obra C", "Obra D", "Obra F"]
+    d = quadro["Obra D"]
+    assert d["iniciar"] is True and d["passos"] == [] and d["medicoes"] == []
+    assert d["pedido_centavos"] is None and d["aprovado_centavos"] is None and d["contrato_id"] == ids["d"]
+    assert d["contratante"] == "Pref. Várzea Grande"
+    c = quadro["Obra C"]
+    assert c["iniciar"] is False and c["medicoes"] == [{"id": ids["c3"], "titulo": "3ª Medição"}]
+    # sem planilha/carta na medicao, a linha comeca em Espelhos (passo 3); o da vez leva a medicao
+    assert _passos(c) == {3: ("atual", None, ids["c3"]), 4: ("futuro", None, None), 5: ("futuro", None, None),
+                          6: ("futuro", None, None)}
+    assert [p["nome"] for p in c["passos"]] == ["Espelhos", "Notas", "Envio da nota", "Pagamento"]
+    # outra competencia: ninguem mediu, todas as ativas com o Iniciar
+    outubro = medicoes.resumo(conn, HOJE, mes="2026-10")["quadro"]
+    assert [x["obra"] for x in outubro] == ["Obra A", "Obra B", "Obra C", "Obra D", "Obra F"]
+    assert all(x["iniciar"] and x["passos"] == [] for x in outubro)
+
+
+def test_quadro_datas_por_passo_pedido_e_aprovado(conn, cenario):
+    """As datas dos passos feitos saem do servidor (dia de Cuiaba): ultimo envio da planilha/carta, boletim, e-mail
+    do espelho vigente, nota, protocolo. Pedido e aprovado em colunas proprias (centavo impar)."""
+    c, ids = conn, cenario
+    g = _obra(c, "Obra G", c.execute("SELECT orgao_id FROM contratos WHERE id=?", (ids["a"],)).fetchone()[0])
+    mid = _medicao(c, g, 7, "execucao", "protocolada", 100001, planilha_enviada_em="2026-10-01",
+                   atestado_em="2026-10-03", valor_atestado_centavos=99999, nota_emitida_em="2026-10-06")
+    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) VALUES (?, '2026-10-07', 'manual')", (mid,))
+    uid = c.execute("SELECT id FROM usuarios").fetchone()[0]
+    # 02:00 UTC do dia 5 = dia 4 em Cuiaba
+    envio = c.execute("INSERT INTO envios (tipo, usuario_id, remetente, para, copia, assunto, enviado_em) "
+                      "VALUES ('espelho', ?, 'a@l.com', '[]', '[]', 'Espelho', '2026-10-05 02:00:00')", (uid,)).lastrowid
+    eid = c.execute("INSERT INTO espelhos (contrato_id, numero, competencia, versao, situacao, entradas, saidas, "
+                    "regra_sha256, criado_por, envio_id) VALUES (?,7,'2026-09',1,'vigente','{}','[]','x',?,?)",
+                    (g, uid, envio)).lastrowid
+    c.execute("INSERT INTO espelho_medicoes (espelho_id, medicao_id) VALUES (?,?)", (eid, mid))
+    c.commit()
+    linha = next(x for x in medicoes.resumo(conn, HOJE, mes="2026-09")["quadro"] if x["obra"] == "Obra G")
+    assert _passos(linha) == {
+        1: ("feito", "2026-10-01", None), 2: ("feito", "2026-10-03", None), 3: ("feito", "2026-10-04", None),
+        4: ("feito", "2026-10-06", None), 5: ("feito", "2026-10-07", None), 6: ("atual", None, mid)}
+    assert [p["nome"] for p in linha["passos"]][:2] == ["Planilha e carta", "Análise do órgão"]
+    assert linha["pedido_centavos"] == 100001 and linha["aprovado_centavos"] == 99999
+    # recebida: tudo feito, com a data do pagamento, e nenhum passo da vez
+    c.execute("UPDATE medicoes SET estado='recebida', recebida_em='2026-10-08' WHERE id=?", (mid,))
+    c.commit()
+    linha = next(x for x in medicoes.resumo(conn, HOJE, mes="2026-09")["quadro"] if x["obra"] == "Obra G")
+    assert _passos(linha)[6] == ("feito", "2026-10-08", None)
+    assert {p["situacao"] for p in linha["passos"]} == {"feito"}
+
+
+def test_quadro_execucao_e_reajuste_mostram_o_menos_adiantado(conn, cenario):
+    ids = cenario
+    quadro = {x["obra"]: x for x in medicoes.resumo(conn, HOJE, mes="2026-09")["quadro"]}
+    # B: a execucao espera o pagamento (passo 6) e o reajuste ainda espera a nota (passo 4): a linha esta' no passo 4
+    b = quadro["Obra B"]
+    assert [m["id"] for m in b["medicoes"]] == [ids["b15"], ids["b15r"]]
+    assert _passos(b) == {3: ("feito", None, None), 4: ("atual", None, ids["b15r"]),
+                          5: ("futuro", None, None), 6: ("futuro", None, None)}
+    assert b["pedido_centavos"] == 304000 and b["aprovado_centavos"] is None
+    # A: as tres no envio da nota; o passo feito leva a data da ultima a fechar e o da vez abre a execucao
+    a = quadro["Obra A"]
+    assert _passos(a) == {3: ("feito", None, None), 4: ("feito", "2026-10-08", None),
+                          5: ("atual", None, ids["a24"]), 6: ("futuro", None, None)}
+    assert a["pedido_centavos"] == 109500
+
+
+def test_quadro_obra_nao_ativa_so_aparece_com_medicao_na_competencia(conn, cenario):
+    c, ids = conn, cenario
+    mid = _medicao(c, ids["e"], 4, "execucao", "espelho_gerado", 100)     # a suspensa
+    h = _obra(c, "Obra H", None)
+    c.execute("UPDATE contratos SET encerramento_iniciado_em='2026-10-01' WHERE id=?", (h,))
+    _medicao(c, ids["a"], 50, "execucao", "cancelada", 1)                 # cancelada nao conta
+    c.commit()
+    quadro = {x["obra"]: x for x in medicoes.resumo(conn, HOJE, mes="2026-09")["quadro"]}
+    assert _passos(quadro["Obra E"])[3] == ("atual", None, mid) and quadro["Obra E"]["iniciar"] is False
+    assert "Obra H" not in quadro      # em encerramento e sem medicao na competencia: nem linha nem Iniciar
+    assert len(quadro["Obra A"]["medicoes"]) == 3
+
+
+def test_meses_anteriores_trazem_as_medicoes_abertas_de_competencias_passadas(conn, cenario):
+    c, ids = conn, cenario
+    _medicao(c, ids["c"], 2, "execucao", "recebida", 10)
+    _medicao(c, ids["c"], 1, "execucao", "cancelada", 10)
+    antiga = c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, planilha_enviada_em) "
+                       "VALUES (?, 9, 'execucao', '2026-07', 'planilha_enviada', '2026-08-02')", (ids["c"],)).lastrowid
+    c.commit()
+    r = medicoes.resumo(conn, HOJE, mes="2026-10")
+    assert [(x["obra"], x["titulo"], x["competencia"], x["passo"]["numero"], x["passo"]["nome"]) for x in r["anteriores"]] == [
+        ("Obra C", "9ª Medição", "2026-07", 2, "Análise do órgão"),
+        ("Obra A", "24ª Medição + Reajuste", "2026-09", 5, "Envio da nota"),
+        ("Obra A", "1ª Medição de Projeto", "2026-09", 5, "Envio da nota"),
+        ("Obra B", "15ª Medição", "2026-09", 6, "Pagamento"),
+        ("Obra B", "Reajuste da 15ª Medição", "2026-09", 4, "Notas"),
+        ("Obra C", "3ª Medição", "2026-09", 3, "Espelhos"),
+        ("Obra F", "1ª Medição", "2026-09", 4, "Notas"),
+    ]
+    assert r["anteriores"][0]["medicao_id"] == antiga and r["anteriores"][0]["contrato_id"] == ids["c"]
+    # a competencia do quadro nao e' "anterior": em setembro so' sobra a de julho
+    assert [x["titulo"] for x in medicoes.resumo(conn, HOJE, mes="2026-09")["anteriores"]] == ["9ª Medição"]
+
+
+def test_rota_do_resumo_traz_o_quadro_da_competencia_pedida(client_admin):
+    r = client_admin.get("/api/medicoes/resumo?mes=2026-09")
+    assert r.status_code == 200, r.text
+    assert r.json()["mes"] == "2026-09" and r.json()["quadro"] == [] and r.json()["anteriores"] == []
