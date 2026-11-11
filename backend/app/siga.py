@@ -1,6 +1,6 @@
 """Leituras do monitor do SIGA (issue #327) e pedidos de leitura pela tela, com as rodadas do robo (issue #342).
 
-O robo do SIGA (Playwright local, fora do repositorio) le a cada 15 minutos a situacao e as movimentacoes de cada
+O robo do SIGA (Playwright local, fora do repositorio) le de hora em hora (#657) a situacao e as movimentacoes de cada
 processo protocolado e manda para `POST /api/siga/leituras`. Aqui: gravar sem apagar nem sobrescrever, ligar o
 processo ao protocolo pelo numero IGUAL, devolver ao robo a lista do que acompanhar e montar a leitura das telas.
 
