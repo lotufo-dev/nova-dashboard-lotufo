@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import CaixaAviso from "./CaixaAviso";
 import { api, mensagemDeErro } from "./api";
 import Cronograma from "./Cronograma";
 import { IconeAlerta } from "./icones";
@@ -9,10 +8,9 @@ import { Link } from "./Link";
 // Validade e' DATA PURA do papel que o orgao emitiu, nao carimbo de instante: fmtData a leria como UTC e a
 // traduziria para Cuiaba (UTC-4), deslocando um dia, exatamente na tela que diz se da' para protocolar hoje.
 import { fmtCompetencia as mesBR, fmtDataPura } from "./tempo";
-import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 
-// Abas da pagina da obra (bloco 6; spec §10.3; NAVEGACAO.md › Obra): Documentos exigidos e Contrato, so' leitura
+// Abas da pagina da obra (bloco 6; spec §10.3; NAVEGACAO.md › Obra): Documentos (o veredito do protocolo) e Contrato, so' leitura
 // (o cadastro e' versionado em `cadastro/*.yaml`). As notas moram na pagina de cada medicao. Reajuste e Prazos,
 // com o fluxo do oficio, moram em Reajuste.tsx e Prazos.tsx.
 
@@ -53,17 +51,17 @@ function Cartao({ id, titulo, children }: { id: string; titulo: string; children
 
 /* ---------------------------------------------------------------- documentos */
 
-// 'vencendo' NAO trava o protocolo (certidao valida hoje e' certidao valida hoje) e 'nao_se_aplica' nao pesa
-// no veredito. Quem decide isso e' o servidor, em `app/checklist.py`: esta tela desenha o que ele respondeu,
+// #661: a obra responde "pode protocolar hoje?", para a medicao e para o reajuste, e diz o que falta; a certidao
+// de cada empresa, uma a uma (validade, emitir, anexar), mora em Documentos. Quem decide o veredito e' o servidor,
+// em `app/checklist.py` ('vencendo' nao trava, 'nao_se_aplica' nao pesa): esta tela desenha o que ele respondeu,
 // sem recalcular a regra (duas verdades divergiriam no primeiro ajuste).
 type Situacao = "ok" | "vencendo" | "pendente" | "nao_se_aplica";
 
-// Bloco 4: um item por EMPRESA x documento exigido (obra de consorcio cobra o consorcio e cada consorciada)
-// e, onde o orgao pede, a regularidade mensal do DP (`chave: "regularidade"`).
+// Um item por EMPRESA x documento exigido (obra de consorcio cobra o consorcio e cada consorciada) e, onde o
+// orgao pede, a regularidade mensal do DP (`chave: "regularidade"`).
 type ItemChecklist = {
   entidade_id: number; entidade: string | null; tipo_id: number | null; tipo: string; chave: string | null;
-  jurisdicao: string | null; situacao: Situacao; validade: string | null; dias: number | null;
-  certidao_id: number | null; link_emissao: string | null; competencia?: string | null; esperada?: string;
+  jurisdicao: string | null; situacao: Situacao; esperada?: string;
 };
 type Checklist = { contrato_id: number; entidade_id: number; entidade: string | null; itens: ItemChecklist[]; pronto: boolean };
 
@@ -71,76 +69,32 @@ const JURISDICOES: Record<string, string> = {
   federal: "Federal", estadual: "Estadual", municipal: "Municipal", trabalhista: "Trabalhista",
 };
 
-// Situacao -> modificador do chip. 'nao_se_aplica' cai no `.selo` nu (neutro).
-const NIVEL: Record<Situacao, string> = { ok: "selo--ok", vencendo: "selo--atencao", pendente: "selo--acao", nao_se_aplica: "" };
-
-function rotuloSituacao(i: ItemChecklist): string {
-  switch (i.situacao) {
-    case "ok": return "Em dia";
-    case "vencendo":
-      // `dias` so' e' null quando nao ha certidao, e ai a situacao nunca e' 'vencendo'; o ramo existe para a
-      // tela nao escrever "Vence em null dias" se isso mudar.
-      if (i.dias === null) return "A vencer";
-      if (i.dias <= 0) return "Vence hoje";
-      if (i.dias === 1) return "Vence amanhã";
-      return `Vence em ${i.dias} dias`;
-    case "pendente": return "Pendente";
-    default: return "Não se aplica";
-  }
+function oQueFalta(i: ItemChecklist): string {
+  if (i.chave === "regularidade") return i.esperada ? `${i.tipo} de ${mesBR(i.esperada)}` : i.tipo;
+  return `${i.tipo}${i.entidade === null && i.jurisdicao ? ` (${JURISDICOES[i.jurisdicao] ?? i.jurisdicao})` : ""}`;
 }
 
-function explicacao(i: ItemChecklist): string {
-  if (i.chave === "regularidade") {
-    return i.situacao === "ok" ? `Regularidade do DP de ${mesBR(i.competencia)} anexada`
-      : `Regularidade do DP de ${mesBR(i.esperada)} ainda não anexada — anexe em Documentos`;
-  }
-  // 'ok'/'vencendo' sempre tem validade (sao derivadas de uma certidao vigente); o ramo sem data existe para
-  // a frase nunca terminar em "válida até " se isso mudar.
-  const ate = i.validade === null ? "válida hoje" : `válida até ${fmtDataPura(i.validade)}`;
-  switch (i.situacao) {
-    case "ok": return `Certidão ${ate}`;
-    case "vencendo": return `Certidão ${ate} — vale hoje e o órgão aceita, mas renove antes do próximo protocolo`;
-    case "pendente":
-      return "Nenhuma certidão válida hoje — vencida, revogada ou nunca cadastrada. Enquanto estiver assim, o protocolo fica travado.";
-    default:
-      return "Alguém declarou que esta entidade não está sujeita a este tipo de certidão — por isso não pesa no veredito.";
-  }
-}
+const NATUREZA = { execucao: "Medição", reajuste: "Reajuste" };
 
-// o ato de cada natureza: a medicao se protocola; o reajuste se pede no pleito
-const NATUREZA = {
-  execucao: { titulo: "Medição", onde: "no protocolo da medição", pronto: "Pronto para protocolar" },
-  reajuste: { titulo: "Reajuste", onde: "no pleito de reajuste", pronto: "Pronto para enviar o pleito" },
-};
-
-/** Um quadro por natureza: o veredito de hoje e os documentos de cada empresa (a empresa e' a linha-titulo do
- *  grupo, com o caminho para ela em Documentos, onde a certidao e' anexada), com "Emitir" onde vence ou falta. */
+/** Um quadro por natureza: o veredito de hoje e, quando falta, uma linha por documento com o caminho para a
+ *  empresa em Documentos, onde ele e' anexado. */
 function QuadroExigidos({ contratoId, natureza }: { contratoId: number; natureza: keyof typeof NATUREZA }) {
-  const n = NATUREZA[natureza];
   const { dados, erro } = useDados<Checklist>(
     `/api/contratos/${contratoId}/checklist-protocolo${natureza === "execucao" ? "" : `?natureza=${natureza}`}`);
   const id = `titulo-exigidos-${natureza}`;
   const itens = dados?.itens ?? [];
-  const pendentes = itens.filter(i => i.situacao === "pendente").length;
+  const faltam = itens.filter(i => i.situacao === "pendente");
   // Lista VAZIA nao e' "Pronto": o servidor devolve `pronto: true`, mas o motivo real e' cadastro faltando.
   const temVeredito = dados !== null && itens.length > 0;
-  const emitir = (i: ItemChecklist) => (i.situacao === "pendente" || i.situacao === "vencendo") && !!i.link_emissao;
-  const comEmitir = itens.some(emitir);
-  // habilitacao e' por CNPJ: a obra de consorcio se habilita com as certidoes dele e de cada consorciada
-  const quem = new Set(itens.map(i => i.entidade_id)).size > 1 ? `${dados?.entidade ?? "Consórcio"} e consorciadas`
-    : dados?.entidade ?? "esta entidade";
-  // as empresas na ordem em que o servidor as manda (o consorcio, depois cada consorciada)
-  const empresas = [...new Map(itens.map(i => [i.entidade_id, i.entidade] as const)).entries()];
-  const colunas = comEmitir ? 4 : 3;
 
   return (
     <section className="cartao" aria-labelledby={id}>
       <div className="cartao__cabeca">
-        <h2 className="cartao__titulo" id={id}>{n.titulo}</h2>
+        <h2 className="cartao__titulo" id={id}>{NATUREZA[natureza]}</h2>
         {/* veredito nunca e' so' cor: o chip carrega a palavra */}
         {temVeredito && (
           <Selo classe={dados.pronto ? "selo--ok" : "selo--acao"}>
-            {dados.pronto ? n.pronto : pendentes === 1 ? "1 pendência" : `${pendentes} pendências`}
+            {dados.pronto ? "Pronto para protocolar" : "Falta documento para protocolar"}
           </Selo>
         )}
       </div>
@@ -153,64 +107,19 @@ function QuadroExigidos({ contratoId, natureza }: { contratoId: number; natureza
         </div>
       )}
 
-      {temVeredito && (
-        <>
-          {/* so' o que trava: o veredito "Pronto" ja' esta' no selo do cabecalho */}
-          {!dados.pronto && (
-            <div className="cartao__corpo">
-              <CaixaAviso nivel="critico">{quem}: {pendentes === 1 ? "1 documento sem validade hoje" : `${pendentes} documentos sem validade hoje`}.{" "}
-                <Link className="link" para={{ tela: "documentos" }}>Anexar em Documentos</Link></CaixaAviso>
-            </div>
-          )}
-
-          <Rolagem rotulo={`Documentos exigidos: ${n.titulo}`}>
-            <table className="tabela tabela--grade tabela--docs">
-              {/* mesma grade nas tabelas de cada nucleo (F-47) */}
-              <colgroup>
-                <col /><col className="c-situacao" /><col className="c-data" />{comEmitir && <col className="c-acao" />}
-              </colgroup>
-              <caption className="sr-only">Situação hoje de cada documento exigido das empresas deste contrato {n.onde}</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Documento</th><th scope="col">Situação</th><th scope="col">Validade</th>
-                  {comEmitir && <th scope="col"><span className="sr-only">Emitir</span></th>}
-                </tr>
-              </thead>
-              {empresas.map(([eid, nome]) => (
-              <tbody key={eid}>
-                <tr className="grupo">
-                  <th scope="rowgroup" colSpan={colunas}>
-                    {nome ? <Link para={{ tela: "documentos-empresa", id: eid }}>{nome}</Link> : "—"}
-                  </th>
-                </tr>
-                {itens.filter(i => i.entidade_id === eid).map((i, k) => (
-                  <tr key={`${i.entidade_id}-${i.chave ?? i.tipo_id}`} className={`linha${k % 2 === 1 ? " par" : ""}`}>
-                    <td className="forte">{i.tipo}{i.entidade === null && i.jurisdicao ? ` (${JURISDICOES[i.jurisdicao] ?? i.jurisdicao})` : ""}</td>
-                    {/* a explicacao entra so' como texto sr-only DENTRO do chip, para o leitor de tela */}
-                    <td>
-                      {/* D15 (F-102): "Em dia" e' ponto e palavra, sem fundo; o selo fica para Atencao e Critico */}
-                      {i.situacao === "ok" ? (
-                        <span className="estado estado--ok">
-                          <span className="estado__ponto" aria-hidden="true" />{rotuloSituacao(i)}
-                          <span className="sr-only"> — {explicacao(i)}</span>
-                        </span>
-                      ) : (
-                        <Selo classe={NIVEL[i.situacao]} sufixo={<span className="sr-only"> — {explicacao(i)}</span>}>
-                          {rotuloSituacao(i)}
-                        </Selo>
-                      )}
-                    </td>
-                    <td className="num">{i.chave === "regularidade" ? mesBR(i.competencia) : data(i.validade)}</td>
-                    {comEmitir && <td>{emitir(i) && (
-                      <a href={i.link_emissao!} target="_blank" rel="noreferrer">Emitir<span className="sr-only"> {i.tipo} (abre o site do órgão)</span></a>
-                    )}</td>}
-                  </tr>
-                ))}
-              </tbody>
-              ))}
-            </table>
-          </Rolagem>
-        </>
+      {temVeredito && faltam.length > 0 && (
+        <ul className="docs-falta" aria-label={`O que falta: ${NATUREZA[natureza]}`}>
+          {faltam.map(i => (
+            <li key={`${i.entidade_id}-${i.chave ?? i.tipo_id}`}>
+              <span className="docs-falta__item">{oQueFalta(i)}</span>
+              <Link className="link"
+                para={i.chave === "regularidade" ? { tela: "documentos-empresa", id: i.entidade_id, aba: "regularidade" }
+                  : { tela: "documentos-empresa", id: i.entidade_id }}>
+                {i.entidade ?? "Abrir em Documentos"}
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );
