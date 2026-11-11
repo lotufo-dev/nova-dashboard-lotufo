@@ -5,23 +5,51 @@ from tests.test_medicoes_resumo import HOJE, _medicao, cenario, conn  # noqa: F4
 
 
 def test_em_andamento_traz_o_passo_e_com_quem_esta(conn, cenario):
-    """Cada linha diz o passo da barra de passos (numero e nome) e se a medicao esta com a Lotufo ou com o orgao."""
+    """#653: cada linha diz o passo da barra de passos da pagina da medicao (os seis nomes de `PASSOS`, numero e nome)
+    e se a medicao esta com a Lotufo ou com o orgao. Os nomes das cinco etapas antigas nao saem mais do servidor."""
     ids = cenario
     _medicao(conn, ids["a"], 30, "execucao", "boletim_recebido", 1000)
-    _medicao(conn, ids["d"], 32, "execucao", "planilha_gerada", 3000)
-    _medicao(conn, ids["d"], 33, "execucao", "planilha_enviada", 3000, planilha_enviada_em="2026-10-07")
+    _medicao(conn, ids["c"], 32, "execucao", "planilha_gerada", 3000)
+    _medicao(conn, ids["c"], 33, "execucao", "planilha_enviada", 3000, planilha_enviada_em="2026-10-07")
     conn.commit()
-    por = {x["situacao"]: x for x in medicoes.resumo(conn, HOJE)["linhas"]}
-    # os mesmos numeros e nomes das ETAPAS da pagina da medicao (Etapas.tsx): 5 etapas, nao 6
-    assert [por[s]["passo"] for s in ("planilha-gerada", "planilha-enviada", "boletim-recebido", "faturamento", "aguardando-nota",
-                                      "enviar-nota", "aguardando-pagamento") if s in por] == [
-        {"numero": 1, "nome": "Espelho"}, {"numero": 1, "nome": "Espelho"}, {"numero": 1, "nome": "Espelho"},
-        {"numero": 2, "nome": "Faturamento"}, {"numero": 3, "nome": "Nota fiscal"}, {"numero": 4, "nome": "Envio ao órgão"},
-        {"numero": 5, "nome": "Pagamento"}]
+    linhas = medicoes.resumo(conn, HOJE)["linhas"]
+    por = {x["situacao"]: x for x in linhas}
+    assert [por[s]["passo"] for s in medicoes.ORDEM_SITUACAO] == [
+        {"numero": 1, "nome": "Planilha e carta"}, {"numero": 2, "nome": "Análise do órgão"}, {"numero": 3, "nome": "Espelhos"},
+        {"numero": 3, "nome": "Espelhos"}, {"numero": 4, "nome": "Notas"}, {"numero": 5, "nome": "Envio da nota"},
+        {"numero": 6, "nome": "Pagamento"}]
+    # o proximo passo diz o nome do passo, o mesmo do selo
+    assert [por[s]["proximo_passo"] for s in medicoes.ORDEM_SITUACAO] == [
+        "Planilha e carta", "Análise do órgão", "Espelhos", "Espelhos", "Notas", "Envio da nota", "Pagamento"]
+    assert {x["passo"]["nome"] for x in linhas} <= set(medicoes.PASSOS)
+    assert not {"Faturamento", "Envio ao órgão", "Nota fiscal", "Espelho"} & {x["passo"]["nome"] for x in linhas}
     assert (por["planilha-gerada"]["com_quem"], por["planilha-enviada"]["com_quem"]) == ("Lotufo", "Órgão")
     assert (por["enviar-nota"]["com_quem"], por["aguardando-pagamento"]["com_quem"]) == ("Lotufo", "Órgão")
-    # toda situacao do ciclo tem passo (a tela nunca fica sem selo)
-    assert set(medicoes.PASSO_DA_SITUACAO) == set(medicoes.ORDEM_SITUACAO)
+    # todo estado de "em andamento" tem passo com um dos seis nomes (a tela nunca fica sem selo)
+    assert set(medicoes.PROXIMO_PASSO.values()) <= set(medicoes.PASSOS)
+
+
+def test_obra_sem_planilha_e_carta_comeca_em_espelhos(conn, cenario):
+    """#653: a obra que nao manda planilha/carta ao orgao (MTPAR) nao tem os passos 1 e 2: a medicao dela nos estados
+    do motor esta' em "Espelhos", como na barra da pagina da medicao; o reajuste tambem nao tem esses passos."""
+    ids = cenario
+    b = _medicao(conn, ids["b"], 31, "execucao", "planilha_gerada", 2000)
+    r = _medicao(conn, ids["a"], 31, "reajuste", "planilha_enviada", 100, planilha_enviada_em="2026-10-07")
+    a = _medicao(conn, ids["a"], 32, "execucao", "planilha_enviada", 100, planilha_enviada_em="2026-10-07")
+    conn.commit()
+    por = {m["id"]: m for m in medicoes.em_andamento(conn)}
+    assert por[b]["proximo_passo"] == "Espelhos" and por[b]["passo"] == {"numero": 3, "nome": "Espelhos"}
+    assert por[r]["proximo_passo"] == "Espelhos"
+    assert por[a]["proximo_passo"] == "Análise do órgão" and por[a]["passo"] == {"numero": 2, "nome": "Análise do órgão"}
+
+
+def test_meses_anteriores_trazem_o_mesmo_passo_da_linha(conn, cenario):
+    """#653: o passo de "Meses anteriores" e' o do selo da linha, com o numero que a tela usa na ancora da medicao."""
+    r = medicoes.resumo(conn, HOJE, mes="2026-10")
+    passo_da_linha = {x["medicao_id"]: x["passo"] for x in r["linhas"]}
+    assert r["anteriores"] and all(x["passo"] == passo_da_linha[x["medicao_id"]] for x in r["anteriores"])
+    assert {x["titulo"]: x["passo"]["numero"] for x in r["anteriores"] if x["obra"] == "Obra A"} == {
+        "24ª Medição + Reajuste": 5, "1ª Medição de Projeto": 5}
 
 
 def test_contagens_do_menu_iniciar_e_em_andamento(conn, cenario):

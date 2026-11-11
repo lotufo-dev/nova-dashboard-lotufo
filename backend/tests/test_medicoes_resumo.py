@@ -94,7 +94,7 @@ def test_estados_novos_do_motor_entram_na_lista_antes_do_espelho(conn, cenario):
     assert [x["situacao"] for x in r["linhas"]][:3] == ["planilha-gerada", "planilha-enviada", "boletim-recebido"]
     assert r["contagens"]["planilha-gerada"] == r["contagens"]["planilha-enviada"] == r["contagens"]["boletim-recebido"] == 1
     env = next(x for x in r["linhas"] if x["situacao"] == "planilha-enviada")
-    assert env["dias"] == 2 and env["proximo_passo"] == "registrar o boletim"
+    assert env["dias"] == 2 and env["proximo_passo"] == "Espelhos"   # a obra B (MTPAR) nao tem planilha e carta: comeca em Espelhos
     assert [x["estado"] for x in medicoes.em_andamento(conn, estado="boletim_recebido")] == ["boletim_recebido"]
     # "desde" usa os marcos novos (nao o criado_em); a planilha gerada conta da 1a versao
     assert {m["estado"]: m["desde"] for m in medicoes.em_andamento(conn)}["planilha_enviada"] == "2026-10-07"
@@ -135,7 +135,7 @@ def test_resumo_linhas_marcos_e_contagens(conn, cenario):
     par = r["linhas"][3]
     assert par["medicao_id"] == ids["a24"] and par["medicao_ids"] == [ids["a24"], ids["a24r"]]
     assert par["contratante"] == "SINFRA" and par["orgao_sub"] == "SUEF II" and par["marco"] == "2026-10-01"
-    assert par["proximo_passo"] == "protocolar"
+    assert par["proximo_passo"] == "Envio da nota" and par["passo"] == {"numero": 5, "nome": "Envio da nota"}
     assert {x["competencia"] for x in r["linhas"]} == {"2026-09"}   # #155: a competencia da medicao (AAAA-MM)
     assert r["contagens"] == {"sem-medicao": 1, "planilha-gerada": 0, "planilha-enviada": 0, "boletim-recebido": 0,
                               "faturamento": 1, "aguardando-nota": 2, "enviar-nota": 2, "aguardando-pagamento": 1,
@@ -279,9 +279,9 @@ def test_resumo_obras_trazem_a_medicao_aberta_a_prevista_e_a_ultima(conn, cenari
     obras = {o["obra"]: o for o in medicoes.resumo(conn, HOJE)["obras"]}
     # A: 24 (execucao + reajuste) aberta; o reajuste nao conta como serie; Projeto 1 aberto
     a = obras["Obra A"]
-    assert a["execucao"]["aberta_id"] == ids["a24"] and a["execucao"]["aberta_numero"] == 24 and a["execucao"]["aberta_passo"] == "protocolar"
+    assert a["execucao"]["aberta_id"] == ids["a24"] and a["execucao"]["aberta_numero"] == 24 and a["execucao"]["aberta_passo"] == "Envio da nota"
     assert a["execucao"]["ultima"] == {"numero": 24, "competencia": "2026-09"}
-    assert a["projeto"] == {"aberta_id": ids["a1p"], "aberta_numero": 1, "aberta_passo": "protocolar",
+    assert a["projeto"] == {"aberta_id": ids["a1p"], "aberta_numero": 1, "aberta_passo": "Envio da nota",
                             "ultima": {"numero": 1, "competencia": "2026-09"},
                             "prevista_id": None, "prevista_numero": None, "prevista_competencia": None}
     # D: so' prevista (a mais antiga, 1); a prevista nao e' "ultima"; sem Projeto
