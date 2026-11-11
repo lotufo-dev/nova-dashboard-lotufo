@@ -444,7 +444,10 @@ def _ler_referencia(ref) -> tuple:
         if "idmov" in chaves and chaves != {"idmov"}:
             raise ValueError(f"nota {ref!r} inválida: diga idmov ou numero + serie, não os dois ({forma})")
         if "idmov" in chaves:
-            return _inteiro(ref, "idmov"), None, None
+            idmov = _inteiro(ref, "idmov")
+            if idmov is None:           # `{idmov: }` no YAML e' nulo: sem isto seguiria pelo caminho do numero
+                raise ValueError(f"nota {ref!r} inválida: falta o idmov")
+            return idmov, None, None
         nf, serie = _texto(ref, "numero"), _texto(ref, "serie")
         if nf is None:
             raise ValueError(f"nota {ref!r} inválida: falta o numero")
@@ -452,6 +455,12 @@ def _ler_referencia(ref) -> tuple:
     if isinstance(ref, (str, int)) and not isinstance(ref, bool):
         return None, str(ref).strip(), None
     raise ValueError(f"nota {ref!r} inválida: use o número, {{idmov: N}} ou {{numero: N, serie: S}}")
+
+
+def _desconsiderada(n) -> bool:
+    """A nota tem a marca da #638. O ensaio nao migra: no banco de antes da migracao 081 a coluna nao existe, nenhuma
+    nota esta' desconsiderada e o `ligar_nf` responde como sempre respondeu."""
+    return "desconsiderada_em" in n.keys() and n["desconsiderada_em"] is not None
 
 
 def _nota_da_referencia(conn, coligada: int, ref):
@@ -464,7 +473,7 @@ def _nota_da_referencia(conn, coligada: int, ref):
         todas = conn.execute("SELECT * FROM notas_fiscais WHERE coligada=? AND idmov=?", (coligada, idmov)).fetchall()
         achadas = [n for n in todas if n["situacao"] == "ativa"]
         if not achadas:
-            if any(n["desconsiderada_em"] is not None for n in todas):
+            if any(_desconsiderada(n) for n in todas):
                 raise ValueError(f"NF idmov {idmov} {recusa}")
             raise ValueError(f"NF idmov {idmov} não encontrada (ativa) na coligada {coligada}")
         return achadas[0]
@@ -473,7 +482,7 @@ def _nota_da_referencia(conn, coligada: int, ref):
     achadas = [n for n in todas if n["situacao"] == "ativa"]
     rotulo = f"NF {nf}" + (f" série {serie}" if serie is not None else "")
     if not achadas:
-        if any(n["desconsiderada_em"] is not None for n in todas):
+        if any(_desconsiderada(n) for n in todas):
             raise ValueError(f"{rotulo} {recusa}")
         raise ValueError(f"{rotulo} não encontrada (ativa) na coligada {coligada}")
     if len(achadas) > 1:
@@ -681,6 +690,10 @@ EXECUTORES_DE_NOTA = {"desconsiderar_nf": _desconsiderar_nf, "reconsiderar_nf": 
 
 
 def _aplicar_nota(conn, uid: int, op: dict, item: dict, nome: str, fonte: str) -> None:
+    # o ensaio nao migra (`cli._corrigir_medicoes`): na copia do banco de antes do deploy a marca ainda nao existe
+    if not any(r[1] == "desconsiderada_em" for r in conn.execute("PRAGMA table_info(notas_fiscais)")):
+        raise ValueError("este banco ainda não tem a migração da nota desconsiderada (081) e o ensaio não migra: "
+                         "rode num banco já migrado")
     nota = _nota_da_operacao(conn, op)
     item["alvo"] = f"{_fmt_nf(nota)}, coligada {nota['coligada']}"
     item["antes"] = _situacao_da_nota(nota)

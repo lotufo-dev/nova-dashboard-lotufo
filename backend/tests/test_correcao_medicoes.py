@@ -691,6 +691,59 @@ def test_ligar_nf_em_nota_desconsiderada_e_recusado(cenario):
         sincronizacao_rm.alocar(c, uid, nid, mid, "manual", None, "manual")
 
 
+def test_referencia_com_idmov_vazio_e_erro_da_operacao_nas_tres(cenario):
+    """`nf: {idmov: }` (o YAML le nulo) e' erro da operacao, em portugues; o relatorio das outras continua."""
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 1)
+    _nota(c, 601)
+    vazio = yaml.safe_load("{idmov: }")
+    assert vazio == {"idmov": None}
+    rel = _rodar(c, uid, [
+        {"operacao": "ligar_nf", "medicao_id": mid, "nfs": [vazio], "fonte": "NF"},
+        {"operacao": "desconsiderar_nf", "nf": vazio, "coligada": 1, "motivo": "x", "fonte": "y"},
+        {"operacao": "reconsiderar_nf", "nf": vazio, "fonte": "y"},
+        {"operacao": "desconsiderar_nf", "nf": 601, "motivo": "x", "fonte": "y"}])
+    assert rel["erros"] == 3 and rel["itens"][3]["situacao"] == "feito"
+    for item in rel["itens"][:3]:
+        assert "inválida: falta o idmov" in item["erro"]
+    assert _ativas(c, mid) == [] and c.execute("SELECT COUNT(*) FROM notas_fiscais WHERE desconsiderada_em IS NOT NULL"
+                                               ).fetchone()[0] == 0
+
+
+def test_ensaio_em_banco_sem_a_migracao_081_e_erro_da_operacao(cenario, tmp_path, capsys):
+    """O ensaio nao migra, e a copia da producao pode ser de antes do deploy: as operacoes de nota dizem que falta a
+    migracao (sem traceback, saida 1, nada gravado) e o `ligar_nf` responde como antes."""
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 1)
+    _nota(c, 601)
+    c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, numero_int, emissao, valor_centavos, situacao, status_rm) "
+              "VALUES (1, 1604, '604', 604, '2025-07-01', 100001, 'cancelada', 'C')")
+    c.execute("ALTER TABLE notas_fiscais DROP COLUMN desconsiderada_em")          # o banco de antes da 081
+    c.execute("DELETE FROM schema_migrations WHERE nome='081_nota_desconsiderada.sql'")
+    c.commit()
+    rel = _rodar(c, uid, [DESCONSIDERAR, {"operacao": "reconsiderar_nf", "nf": 601, "fonte": "y"},
+                          {"operacao": "ligar_nf", "medicao_id": mid, "nfs": [604], "fonte": "NF"},
+                          {"operacao": "ligar_nf", "medicao_id": mid, "nfs": [{"idmov": 1604}], "fonte": "NF"},
+                          {"operacao": "ligar_nf", "medicao_id": mid, "nfs": [601], "fonte": "NF"}], ensaio=True)
+    erros = [i.get("erro") for i in rel["itens"]]
+    for e in erros[:2]:
+        assert "ainda não tem a migração da nota desconsiderada" in e and "o ensaio não migra" in e
+    assert erros[2] == "NF 604 não encontrada (ativa) na coligada 1"
+    assert erros[3] == "NF idmov 1604 não encontrada (ativa) na coligada 1"
+    assert erros[4] is None and rel["itens"][4]["situacao"] == "feito"
+    arq = tmp_path / "correcoes.yaml"
+    arq.write_text(yaml.safe_dump([DESCONSIDERAR], allow_unicode=True), "utf-8")
+    assert cli.main(["cadastro", "corrigir-medicoes", str(arq), "--ensaio", "--usuario", "leo@l.com"]) == 1
+    saida = capsys.readouterr().out
+    assert "ENSAIO (nada foi gravado)" in saida and "ainda não tem a migração da nota desconsiderada" in saida
+    assert "desconsiderada_em" not in [r[1] for r in c.execute("PRAGMA table_info(notas_fiscais)")]   # o ensaio nao migrou
+    assert c.execute("SELECT situacao FROM notas_fiscais WHERE numero='601'").fetchone()[0] == "ativa"
+    assert _ativas(c, mid) == []
+    # a gravacao migra antes e aplica
+    assert cli.main(["cadastro", "corrigir-medicoes", str(arq), "--usuario", "leo@l.com"]) == 0
+    assert _nota_db(c, c.execute("SELECT id FROM notas_fiscais WHERE numero='601'").fetchone()[0])["desconsiderada_em"]
+
+
 def test_cli_desconsiderar_nf_ensaio_e_gravacao(cenario, tmp_path, capsys):
     c, cid, uid = cenario
     nid = _nota(c, 601)
