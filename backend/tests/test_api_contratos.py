@@ -317,6 +317,28 @@ def test_ficha_original_igual_compara_com_o_vigente_de_execucao(client_admin):
     assert f["topo"]["vigente_centavos"] == 100_000_000 and f["topo"]["reajuste_centavos"] == 500
 
 
+def test_ficha_ritmo_e_prazo_na_cota_e_com_o_saldo_do_topo(client_admin, monkeypatch):
+    """#655: o cartao "Ritmo e prazo" fala na mesma base do resto do resumo: ritmo na cota da Lotufo e o saldo do
+    topo (o mesmo numero do cartao Execucao). Conclusao, situacao e dias sao os de `prazos.ritmo_e_prazo`."""
+    import datetime
+    from app import contratos, db, prazos, tempo
+    hoje = datetime.date(2026, 10, 15)   # janela 04 a 09/2026: as duas medicoes do cenario estao nela
+    monkeypatch.setattr(tempo, "hoje_local", lambda: hoje)
+    cid = _obra_com_reajuste_e_medicoes(bp=4900)
+    conn = db.get_conn()
+    conn.execute("UPDATE contratos SET execucao_fim='2026-12-20' WHERE id=?", (cid,))
+    conn.commit()
+    cheio = prazos.ritmo_e_prazo(conn, cid, hoje)
+    conn.close()
+    f = client_admin.get(f"/api/contratos/{cid}/ficha").json()
+    r = f["ritmo"]
+    assert cheio["ritmo_centavos"] == 66_666_72 and cheio["situacao"] == "atrasa" and cheio["dias_alem"] > 0
+    assert r["ritmo_centavos"] == contratos.cota(66_666_72, 4900) == 32_666_69
+    assert r["saldo_centavos"] == f["topo"]["saldo_centavos"] == 391_999_84
+    assert (r["conclusao"], r["execucao_fim"], r["situacao"], r["dias_alem"]) == (
+        cheio["conclusao"], "2026-12-20", "atrasa", cheio["dias_alem"])
+
+
 def test_listar_traz_a_posicao_na_cota_igual_ao_topo_da_pagina_da_obra(client_admin):
     """#645: a lista de Obras le `posicao` (vigente, medido e saldo de execucao, na cota da Lotufo), a mesma conta do
     topo da pagina da obra, obra a obra; os campos cheios de antes continuam para as outras telas."""

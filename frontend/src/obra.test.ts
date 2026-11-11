@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { curvaS, desfechoDoPedido, diasEntre, instrumentosDaObra, linhaDoTempo, reajustePorDataBase, seloDoPrazo } from "./obra";
+import { desfechoDoPedido, diasEntre, instrumentosDaObra, linhaDoTempo, reajustePorDataBase, seloDoPrazo } from "./obra";
 
 // texto na tela (26/10/2026): o prazo so' vira selo quando pede acao, nos limites do aviso "Execucao vencendo"
 describe("seloDoPrazo", () => {
@@ -14,27 +14,7 @@ describe("seloDoPrazo", () => {
   });
 });
 
-describe("Página da obra: curva S e linhas do tempo", () => {
-  const p = (competencia: string, prev: number, exec: number, pend = false) =>
-    ({ competencia, previsto_centavos: prev, medido_execucao_centavos: exec, atestado_pendente: pend });
-
-  it("a curva acumula previsto e medido e para o medido na última competência medida", () => {
-    const c = curvaS([p("2026-03", 100, 0), p("2026-01", 100, 80), p("2026-02", 100, 0), p("2026-04", 100, 0)]);
-    expect(c.map(x => x.competencia)).toEqual(["2026-01", "2026-02", "2026-03", "2026-04"]);
-    expect(c.map(x => x.acumuladoPrevisto)).toEqual([100, 200, 300, 400]);
-    expect(c.map(x => x.acumuladoMedido)).toEqual([80, null, null, null]);
-    const d = curvaS([p("2026-01", 100, 50), p("2026-02", 100, 0), p("2026-03", 100, 70, true)]);
-    expect(d.map(x => x.acumuladoMedido)).toEqual([50, 50, 120]);
-    expect(d.map(x => x.provisorio)).toEqual([false, false, true]);
-  });
-
-  it("a curva preenche os meses sem previsto nem medido, para o eixo ser de tempo", () => {
-    const c = curvaS([p("2026-01", 100, 10), p("2026-04", 100, 0)]);
-    expect(c.map(x => x.competencia)).toEqual(["2026-01", "2026-02", "2026-03", "2026-04"]);
-    expect(c.map(x => x.acumuladoPrevisto)).toEqual([100, 100, 100, 200]);
-    expect(curvaS([p("2025-12", 1, 0), p("2026-01", 1, 0)]).map(x => x.competencia)).toEqual(["2025-12", "2026-01"]);
-  });
-
+describe("Página da obra: linhas do tempo", () => {
   it("a linha do tempo põe o hoje entre o início e o fim, conta os dias e aceita início ausente", () => {
     expect(diasEntre("2026-10-16", "2026-10-26")).toBe(10);
     const meio = linhaDoTempo("2026-01-01", "2026-12-31", "2026-07-02");

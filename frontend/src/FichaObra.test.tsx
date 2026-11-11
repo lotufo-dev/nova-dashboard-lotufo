@@ -1,11 +1,9 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import FichaObra, { CurvaDaFicha, desvioDaCurva, mesAno, type Ficha } from "./FichaObra";
+import FichaObra, { RitmoEPrazo, mesAno, type Ficha } from "./FichaObra";
 
-// O resumo da obra (#646) nao le nada: a pagina unica (`ContratoPagina`) le a ficha e a curva e passa para ca'.
+// O resumo da obra (#646) nao le nada: a pagina unica (`ContratoPagina`) le a ficha e passa para ca'.
 const PRAZOS = { execucao_fim: "2026-11-18", vigencia_fim: "2027-02-16" };
-const p = (competencia: string, previsto: number, medido: number) => ({ competencia, previsto_centavos: previsto, medido_execucao_centavos: medido, atestado_pendente: false });
-const CURVA = { pontos: [p("2026-08", 50, 40), p("2026-09", 50, 40), p("2026-10", 100, 0)], anterior: null };
 const FICHA: Ficha = {
   // base de execucao e cota: 1.000.000,01 − 812.345,67 = 187.654,34
   topo: { vigente_centavos: 100000001, medido_centavos: 81234567, saldo_centavos: 18765434, reajuste_centavos: 0 },
@@ -14,6 +12,9 @@ const FICHA: Ficha = {
     recebida_em: "2026-10-16", dias_apos_nota: 14 },
   em_andamento: { id: 16, titulo: "16ª Medição", rotulo: "16ª", competencia: "2026-10", valor_centavos: 6000022,
     etapa: "análise do órgão", desde: "2026-11-05", outras: 0 },
+  // ritmo 50.000,00/mes para 187.654,34 de saldo: conclusao depois do fim da execucao
+  ritmo: { ritmo_centavos: 5000000, saldo_centavos: 18765434, conclusao: "2027-03-08", execucao_fim: "2026-11-18",
+    situacao: "atrasa", dias_alem: 110 },
   vencimentos: [
     { chave: "certidao", rotulo: "FGTS Construtora Alfa", data: "2026-11-15", dias: 9, nivel: "atencao" },
     { chave: "execucao", rotulo: "Fim da execução", data: "2026-11-18", dias: 12, nivel: "critico" },
@@ -91,44 +92,59 @@ describe("Resumo da obra", () => {
   });
 });
 
-describe("Previsto × medido do resumo", () => {
+describe("Ritmo e prazo (#655)", () => {
   afterEach(cleanup);
+  const valor = (rotulo: string) => within(cartao("Ritmo e prazo")).getByText(rotulo).closest("div")!.querySelector("dd")!;
+  const comRitmo = (ritmo: Partial<Ficha["ritmo"]>) => render(<RitmoEPrazo ficha={{ ...FICHA, ritmo: { ...FICHA.ritmo, ...ritmo } }} />);
 
-  it("curva S com as duas séries e a pílula do desvio", () => {
-    const { container } = render(<CurvaDaFicha curva={CURVA} />);
-    expect(screen.getByRole("img", { name: /Curva S/ })).toBeTruthy();
-    expect(container.querySelector("path.ficha__previsto")).toBeTruthy();
-    expect(container.querySelector("path.ficha__medido")).toBeTruthy();
-    // medido 80 de 200 previstos no total; previsto acumulado até a última medição: 100 → 10 pontos abaixo
-    expect(screen.getByText(/medido/, { selector: ".pilula-info" }).textContent).toBe("medido 10% abaixo do previsto");
+  it("mostra ritmo mensal, saldo, conclusão estimada e fim da execução", () => {
+    render(<RitmoEPrazo ficha={FICHA} />);
+    expect(valor("Ritmo mensal").textContent).toMatch(/^R\$\s50\.000,00$/);
+    expect(valor("Saldo").textContent).toMatch(/^R\$\s187\.654,34$/);
+    expect(valor("Conclusão estimada").textContent).toBe("08/03/2027");
+    expect(valor("Fim da execução").textContent).toBe("18/11/2026");
   });
 
-  it("curva S no celular: o desenho acompanha a largura do cartão e o último mês cabe dentro dele (#552)", () => {
-    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
-    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 241 });
-    try {
-      const { container } = render(<CurvaDaFicha curva={CURVA} />);
-      expect(screen.getByRole("img", { name: /Curva S/ }).getAttribute("viewBox")).toBe("0 0 241 170");
-      const rotulos = [...container.querySelectorAll("text.c-eixo")].filter(t => /\/\d{2}$/.test(t.textContent ?? ""));
-      // rotulo centralizado no ultimo ponto: a metade dele (~18 px) precisa caber antes da borda direita
-      expect(Number(rotulos[rotulos.length - 1].getAttribute("x"))).toBeLessThanOrEqual(241 - 18);
-    } finally {
-      if (original) Object.defineProperty(HTMLElement.prototype, "clientWidth", original);
-      else delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientWidth;
-    }
+  it("conclusão depois do fim da execução: selo vermelho com os dias", () => {
+    render(<RitmoEPrazo ficha={FICHA} />);
+    const selo = cartao("Ritmo e prazo").querySelector(".selo")!;
+    expect(selo.className).toContain("selo--acao");
+    expect(selo.textContent).toBe("110\u00a0dias além do prazo");
   });
 
-  it("falha da curva mostra indisponível", () => {
-    render(<CurvaDaFicha curva={null} />);
-    expect(screen.getByRole("alert").textContent).toBe("indisponível agora");
+  it("conclusão até o fim da execução: selo verde", () => {
+    comRitmo({ conclusao: "2026-11-10", situacao: "no_prazo", dias_alem: null });
+    const selo = cartao("Ritmo e prazo").querySelector(".selo")!;
+    expect(selo.className).toContain("selo--ok");
+    expect(selo.textContent).toBe("No prazo");
+  });
+
+  it("sem medição nas 6 últimas competências: '—' no ritmo e na conclusão e nenhum selo", () => {
+    comRitmo({ ritmo_centavos: null, conclusao: null, situacao: null, dias_alem: null });
+    expect(valor("Ritmo mensal").textContent).toBe("—");
+    expect(valor("Conclusão estimada").textContent).toBe("—");
+    expect(valor("Saldo").textContent).toMatch(/187\.654,34/);
+    expect(valor("Fim da execução").textContent).toBe("18/11/2026");
+    expect(cartao("Ritmo e prazo").querySelector(".selo")).toBeNull();
+  });
+
+  it("sem fim de execução: '—' no fim e na conclusão e nenhum selo", () => {
+    comRitmo({ conclusao: null, execucao_fim: null, situacao: null, dias_alem: null });
+    expect(valor("Fim da execução").textContent).toBe("—");
+    expect(valor("Conclusão estimada").textContent).toBe("—");
+    expect(cartao("Ritmo e prazo").querySelector(".selo")).toBeNull();
+  });
+
+  it("carregando e falha da ficha: sem número inventado e sem selo", () => {
+    render(<RitmoEPrazo ficha={null} />);
+    expect(within(cartao("Ritmo e prazo")).getByRole("alert").textContent).toBe("indisponível agora");
+    expect(cartao("Ritmo e prazo").querySelector(".selo")).toBeNull();
+    cleanup();
+    render(<RitmoEPrazo ficha={undefined} />);
+    expect(within(cartao("Ritmo e prazo")).getByText("Carregando…")).toBeTruthy();
   });
 });
 
 describe("regras puras da ficha", () => {
-  it("desvio: acima, abaixo e sem medição", () => {
-    expect(desvioDaCurva([p("2026-01", 50, 60), p("2026-02", 50, 0)], null)!.pp).toBeCloseTo(10);
-    expect(desvioDaCurva([p("2026-01", 50, 40), p("2026-02", 50, 0)], null)!.pp).toBeCloseTo(-10);
-    expect(desvioDaCurva([p("2026-01", 50, 0)], null)).toBeNull();
-  });
   it("mês e ano", () => expect(mesAno("2026-09")).toBe("set/2026"));
 });
