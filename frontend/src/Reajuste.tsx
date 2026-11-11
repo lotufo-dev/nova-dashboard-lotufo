@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import { CartaoPleito, NovoPleito, type Pleito, type Reemissao } from "./FluxoOficio";
 import { IconeAlerta } from "./icones";
@@ -46,10 +46,10 @@ const ACAO_REEMISSAO: Record<Reemissao, { botao: string; titulo: string }> = {
  *  para nomear o termo de uma competencia quando o cadastro nao o lista. */
 type CompetenciaApostilada = { instrumento_chave: string; instrumento_numero: string | null; instrumento_data: string };
 
-// Issue #275 (spec 2026-10-20 §2.2): uma linha de `reajuste.competencias_por_ciclo`. O estado, o valor de cada fonte e
-// os avisos vem do servidor; a tela so' desenha, com a origem de cada celula no titulo (e para o leitor de tela).
+// Issue #275 (spec 2026-10-20 §2.2): uma linha de `reajuste.competencias_da_aba`. O estado e o valor de cada fonte
+// vem do servidor; a tela so' desenha, com a origem de cada celula no titulo (e para o leitor de tela). Issue #648: a
+// linha nao acusa diferenca (o apostilado e' previsao e o vinculo nota-medicao ainda nao e' confiavel).
 type EstadoCompetencia = "prevista" | "pedida" | "aprovada" | "apostilada" | "faturada" | "recebida";
-type AvisoCompetencia = "fora_da_previsao" | "sem_apostilamento" | "nota_antes_do_apostilamento";
 type Competencia = { competencia: string; estado: EstadoCompetencia; previsto_centavos: number | null;
   previsto_origem: "pleito" | "manual" | null; medicao_numero: number | null; medicoes: number[];
   /** As medicoes que entraram em cada soma (rodada 1 da PR #438): o complemento so' pedido nao e' origem do aprovado. */
@@ -58,7 +58,6 @@ type Competencia = { competencia: string; estado: EstadoCompetencia; previsto_ce
   apostilado_centavos: number | null; apostilado_percentual: string | number | null; apostilamento_chave: string | null;
   medicao_orgao: string | number | null; faturado_centavos: number | null; recebida_em: string | null;
   recebidas?: { numero: number; recebida_em: string }[];
-  avisos?: AvisoCompetencia[];
   /** Issue #274: a justificativa do pedido fora da previsao que ainda vale (pedido e previsto sao os dela). */
   justificativa?: Justificativa | null };
 type Justificativa = { texto: string; usuario: string | null; criado_em: string; pedido_centavos: number;
@@ -100,61 +99,17 @@ function Celula({ origem, className = "col-num dinheiro num", children }: { orig
   );
 }
 
-/** O estado da competencia e, quando ha', a marca do aviso. A nota antes do termo e' o critico e cobre o "sem
- *  apostilamento" da mesma competencia: um selo so', o mais grave. */
+/** O estado da competencia e, quando ha', a justificativa ja' registrada (issue #274). */
 function SituacaoDaCompetencia({ x }: { x: Competencia }) {
-  const avisos = x.avisos ?? [];
-  const comApostilado = x.apostilado_centavos !== null;
   return (
     <span className="selos">
       <Selo>{x.estado}</Selo>
-      {avisos.includes("fora_da_previsao") && (
-        <Selo classe="selo--atencao" title={`Pedido ${brl(x.pedido_centavos)}; ${comApostilado ? "apostilado" : "previsto"} ${
-          brl(comApostilado ? x.apostilado_centavos : x.previsto_centavos)}`}>fora da previsão</Selo>
-      )}
       {x.justificativa && (
         <Selo title={`${x.justificativa.texto}${x.justificativa.usuario ? ` (${x.justificativa.usuario})` : ""}`}>
           justificado
         </Selo>
       )}
-      {avisos.includes("nota_antes_do_apostilamento")
-        ? <Selo classe="selo--acao">nota antes do apostilamento</Selo>
-        : avisos.includes("sem_apostilamento") && <Selo classe="selo--atencao">sem apostilamento</Selo>}
     </span>
-  );
-}
-
-/** Issue #274: onde a tabela grava a justificativa do pedido fora da previsao (so' quem edita, so' o grupo com
- *  data-base e ciclo). */
-type Justificar = { contratoId: number; dataBase: string; ciclo: number; aoMudar: () => void };
-
-/** O formulario da justificativa, numa linha logo abaixo da competencia. */
-function FormJustificativa({ j, competencia, aoFechar }: { j: Justificar; competencia: string; aoFechar: () => void }) {
-  const [texto, setTexto] = useState("");
-  const [erro, setErro] = useState("");
-  const [gravando, setGravando] = useState(false);
-  const id = `justificativa-${j.dataBase}-${j.ciclo}-${competencia}`;
-  async function gravar(e: React.FormEvent) {
-    e.preventDefault();
-    setGravando(true); setErro("");
-    try {
-      await api(`/api/contratos/${j.contratoId}/reajuste/justificativas`, { method: "POST", body: JSON.stringify({
-        data_base_mes: j.dataBase, ciclo: j.ciclo, competencia, texto }) });
-      aoFechar();
-      j.aoMudar();
-    } catch (er) { setErro(mensagemDeErro(er)); } finally { setGravando(false); }
-  }
-  return (
-    <form className="pilha" onSubmit={gravar}>
-      <label htmlFor={id}>Justificativa</label>
-      <textarea id={id} rows={2} maxLength={2000} value={texto} onChange={e => setTexto(e.target.value)}
-        aria-label={`Justificativa do pedido de ${mesAno(competencia)}`} required autoFocus />
-      <div className="acoes">
-        <button type="submit" className="btn btn--pequeno btn--primario" disabled={gravando}>Gravar justificativa</button>
-        <button type="button" className="btn btn--pequeno" onClick={aoFechar}>Cancelar</button>
-      </div>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
-    </form>
   );
 }
 
@@ -221,10 +176,10 @@ function TotalApostilado({ linhas }: { linhas: Competencia[] }) {
   );
 }
 
-/** A tabela de um ciclo: competencia × previsto × pedido × aprovado × apostilado × nota × recebido, com o estado. */
-function TabelaCompetencias({ rotulo, linhas, termos, justificar }: { rotulo: string; linhas: Competencia[];
-    termos: Map<string, NomeDoTermo>; justificar?: Justificar }) {
-  const [justificando, setJustificando] = useState<string | null>(null);
+/** A tabela de um ciclo: competencia × previsto × pedido × aprovado × previsto no apostilamento × nota × recebido, com
+ *  o estado. */
+function TabelaCompetencias({ rotulo, linhas, termos }: { rotulo: string; linhas: Competencia[];
+    termos: Map<string, NomeDoTermo> }) {
   const origem = (texto: string | null) => (texto ? `Origem: ${texto}` : undefined);
   // cada soma cita so' as medicoes que entraram nela; o recebido e' da medicao principal, dona do `recebida_em`
   const daMedicao = (prefixo: string, valor: unknown, ns: number[] | undefined) =>
@@ -246,17 +201,16 @@ function TabelaCompetencias({ rotulo, linhas, termos, justificar }: { rotulo: st
             <th scope="col" className="col-num">Previsto</th>
             <th scope="col" className="col-num">Pedido</th>
             <th scope="col" className="col-num">Aprovado</th>
-            <th scope="col" className="col-num">Apostilado</th>
+            <th scope="col" className="col-num">Previsto no apostilamento</th>
             <th scope="col" className="col-num">Nota</th>
             <th scope="col" className="col-num">Recebido</th>
-            {/* a 1024 px a tabela rola na horizontal: a situacao, com a marca do aviso, fica ancorada a' direita */}
+            {/* a 1024 px a tabela rola na horizontal: a situacao fica ancorada a' direita */}
             <th scope="col" className="col-fixa">Situação</th>
           </tr>
         </thead>
         <tbody>
           {linhas.map((x, i) => (
-            <Fragment key={x.competencia}>
-            <tr className={`linha${i % 2 === 1 ? " par" : ""}`}>
+            <tr key={x.competencia} className={`linha${i % 2 === 1 ? " par" : ""}`}>
               <th scope="row" className="forte num">{mesAno(x.competencia)}</th>
               <Celula origem={x.previsto_centavos !== null && x.previsto_origem
                 ? origem(ORIGEM_PREVISTO[x.previsto_origem] ?? x.previsto_origem) : undefined}>
@@ -279,22 +233,8 @@ function TabelaCompetencias({ rotulo, linhas, termos, justificar }: { rotulo: st
                 origem={daMedicao("baixa no RM da ", x.recebida_em, (x.recebidas ?? []).map(r => r.numero))}>
                 {x.recebida_em ? fmtDataPura(x.recebida_em.slice(0, 10)) : "—"}
               </Celula>
-              <td className="col-fixa">
-                <SituacaoDaCompetencia x={x} />
-                {justificar && (x.avisos ?? []).includes("fora_da_previsao") && justificando !== x.competencia && (
-                  <button type="button" className="btn btn--pequeno" onClick={() => setJustificando(x.competencia)}
-                    aria-label={`Justificar o pedido de ${mesAno(x.competencia)}`}>Justificar</button>
-                )}
-              </td>
+              <td className="col-fixa"><SituacaoDaCompetencia x={x} /></td>
             </tr>
-            {justificar && justificando === x.competencia && (
-              <tr>
-                <td colSpan={8}>
-                  <FormJustificativa j={justificar} competencia={x.competencia} aoFechar={() => setJustificando(null)} />
-                </td>
-              </tr>
-            )}
-            </Fragment>
           ))}
         </tbody>
         <tfoot>
@@ -487,9 +427,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   // a tabela de um grupo (data-base e ciclo) de `competencias_por_ciclo`
   const tabela = (g: GrupoDoCiclo) => (
     <TabelaCompetencias key={`${g.data_base_mes}-${g.ciclo}`} rotulo={rotuloDoGrupo(g)} linhas={g.competencias}
-      termos={nomesDosTermos}
-      justificar={podeEditar && g.data_base_mes !== null && g.ciclo !== null
-        ? { contratoId, dataBase: g.data_base_mes, ciclo: g.ciclo, aoMudar: () => void carregar() } : undefined} />
+      termos={nomesDosTermos} />
   );
   // grupo sem data-base (medicao de base incerta) ou de data-base que o cadastro nao tem mais: cartao proprio no fim
   const conhecidas = new Set(dataBases.map(db => db.data_base_mes));
