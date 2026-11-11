@@ -101,8 +101,10 @@ def pendencias_cadastro(usuario: dict = Depends(exigir("administrar", com_csrf=F
                         conn: sqlite3.Connection = Depends(conexao)):
     """Administracao > Pendencias de cadastro (issue #649): o documento que nao foi achado no cadastro (termo de
     apostilamento da competencia, garantia cujo ultimo registro venceu). So' admin: a equipe e a diretoria nao veem
-    esses casos em lugar nenhum. `[{contrato_id, obra, falta, desde, aba}]` (`avisos.pendencias_cadastro`)."""
-    return avisos.pendencias_cadastro(conn)
+    esses casos em lugar nenhum. `documentos`: `[{contrato_id, obra, falta, desde, aba}]` (`avisos.pendencias_cadastro`).
+    `sem_data` (issue #656): o aviso de fato sem data, que nao entra na agenda da tela Avisos: `[{contrato_id, obra,
+    aviso}]` (`avisos.sem_data`)."""
+    return {"documentos": avisos.pendencias_cadastro(conn), "sem_data": avisos.sem_data(conn)}
 
 
 @router.get("/contas-microsoft")

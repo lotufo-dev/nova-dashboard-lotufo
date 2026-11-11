@@ -148,7 +148,7 @@ def listar(conn, hoje: datetime.date | None = None, publico: str = "operacao", n
     """A fila de avisos do perfil. So' os de `natureza` "fato" (issue #649): os de "ausencia" nao aparecem para
     ninguem na tela Avisos nem no Inicio; quem os le e' `pendencias_cadastro`."""
     hoje = hoje or tempo.hoje_local()
-    todos = [a for fonte in FONTES for a in fonte(conn, hoje) if a.get("natureza", "fato") == natureza]
+    todos = [_com_dias(a, hoje) for fonte in FONTES for a in fonte(conn, hoje) if a.get("natureza", "fato") == natureza]
     if publico != "todos":
         todos = [a for a in todos if publico in a["publico"]]
     # nivel; depois o mais atrasado primeiro (os piores no topo do nivel); sem data nem dias, no fim
@@ -173,6 +173,29 @@ def pendencias_cadastro(conn, hoje: datetime.date | None = None) -> list[dict]:
             out.append({"contrato_id": a["contrato_id"], "obra": a["obra"], "falta": p["falta"], "desde": p["desde"],
                         "aba": _ABA_DA_PENDENCIA.get(a["tipo"].split("_")[0])})
     return sorted(out, key=lambda p: (p["obra"] or "", p["desde"] or "", p["falta"]))
+
+
+def sem_data(conn, hoje: datetime.date | None = None) -> list[dict]:
+    """Issue #656: o aviso de fato SEM data nao entra na agenda da tela Avisos (que so' traz o que tem data); vira o
+    grupo "Sem data" da lista de conferencia do admin: [{contrato_id, obra, aviso}], de todo publico. `aviso` e' a
+    mensagem sem o nome da obra no comeco (a obra tem coluna propria). Por obra; os sem obra primeiro."""
+    out = []
+    for a in listar(conn, hoje, publico="todos"):
+        if a["data"]:
+            continue
+        prefixo = f"{a['obra']}: " if a["obra"] else ""
+        texto = a["mensagem"][len(prefixo):] if prefixo and a["mensagem"].startswith(prefixo) else a["mensagem"]
+        out.append({"contrato_id": a["contrato_id"], "obra": a["obra"], "aviso": texto})
+    return sorted(out, key=lambda p: (p["obra"] or "", p["aviso"]))
+
+
+def _com_dias(a: dict, hoje: datetime.date) -> dict:
+    """Issue #656: o aviso que tem `data` e vem sem `dias` (certidao vencida, regularidade do mes) ganha os dias pela
+    data, para a tela o posicionar no tempo: ate' o prazo (negativo = vencido), ou desde o fato no sentido "desde"."""
+    if a["dias"] is not None or not a["data"]:
+        return a
+    ate = (datetime.date.fromisoformat(a["data"][:10]) - hoje).days
+    return {**a, "dias": -ate if a["sentido"] == "desde" else ate}
 
 
 def _chave_atraso(a: dict, hoje: datetime.date):

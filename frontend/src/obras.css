@@ -62,8 +62,8 @@
 .aviso-secao__cabeca--semana { background: #FFEDD5; }
 .aviso-secao__cabeca--mes { background: #FEF9C3; }
 .aviso-secao__cabeca--semana .aviso-secao__n, .aviso-secao__cabeca--mes .aviso-secao__n { color: var(--atencao); }
-.aviso-secao__cabeca--depois, .aviso-secao__cabeca--sem-data { background: var(--neutro-fundo); }
-.aviso-secao__cabeca--depois .aviso-secao__n, .aviso-secao__cabeca--sem-data .aviso-secao__n { color: var(--texto-fraco); }
+.aviso-secao__cabeca--depois { background: var(--neutro-fundo); }
+.aviso-secao__cabeca--depois .aviso-secao__n { color: var(--texto-fraco); }
 .aviso-secao__lista { list-style: none; margin: 0; padding: 0 16px; }
 .aviso-linha { position: relative; display: grid; grid-template-columns: 110px minmax(120px, 220px) minmax(0, 1fr) auto; gap: 4px 16px;
   align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--linha); }
@@ -75,7 +75,6 @@
 .aviso-linha__dias { font-weight: 600; text-align: right; white-space: nowrap; }
 .aviso-linha__dias--vencido { color: var(--acao); }
 .aviso-linha__dias--semana, .aviso-linha__dias--mes { color: var(--atencao); }
-.aviso-secao__mais { margin: 0 16px 12px; padding: 4px 12px; border: 0; border-radius: 999px; background: var(--pressionado); color: var(--acento-mais); cursor: pointer; font: inherit; }
 .avisos-area__corpo > *, .avisos-area__grupos > * { min-width: 0; }
 .avisos-area .form-inline select { max-width: 100%; }
 @media (max-width: 700px) {
