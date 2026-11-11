@@ -19,7 +19,7 @@
    --ini-faixa-colunas) com o minimo que mantem o valor numa linha. A 1024px, com o menu lateral aberto (240px), o
    painel tem 688px por dentro e os cinco trechos cabem (5 x 128 + 4 x 6 = 664); em painel mais estreito que isso a
    faixa vira lista vertical, sem rolagem. */
-.ini-ciclo { container-type: inline-size; padding: 16px; }
+.ini-ciclo { container-type: inline-size; padding: 16px; position: relative; }
 .ini-faixa {
   --ini-faixa-min: 128px;
   list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; grid-template-columns: var(--ini-faixa-colunas);

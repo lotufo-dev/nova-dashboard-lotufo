@@ -73,7 +73,12 @@ describe("Início", () => {
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const regiao = await screen.findByRole("region", { name: CICLO });
     const tabela = within(regiao).getByRole("table", { name: "Ciclo da medição por etapa, na cota da Lotufo" });
-    expect(tabela.className).toBe("sr-only");
+    // PR #676: `sr-only` na propria <table> nao recorta (tabela ignora largura e overflow) e a pagina ganhava rolagem
+    // horizontal no celular; quem recorta e' o div em volta
+    expect(tabela.className).toBe("");
+    expect(tabela.parentElement?.tagName).toBe("DIV");
+    expect(tabela.parentElement?.className).toBe("sr-only");
+    expect(regiao.querySelector("table.sr-only")).toBeNull();
     expect(regiao.querySelector(".ini-faixa")?.getAttribute("aria-hidden")).toBe("true");
     const linhas = within(tabela).getAllByRole("row").map(l => [...l.children].map(limpo));
     expect(linhas).toEqual([

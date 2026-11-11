@@ -86,7 +86,8 @@ function FaixaCiclo({ etapas }: { etapas: EtapaCiclo[] }) {
           </li>
         ))}
       </ol>
-      <table className="sr-only">
+      {/* `sr-only` no div, nao na <table>: tabela ignora largura e overflow e alargava a pagina no celular (PR #676) */}
+      <div className="sr-only"><table>
         <caption>Ciclo da medição por etapa, na cota da Lotufo</caption>
         <thead><tr><th scope="col">Etapa</th><th scope="col">Valor</th><th scope="col">Quantidade</th><th scope="col">Mais antiga</th></tr></thead>
         <tbody>
@@ -99,7 +100,7 @@ function FaixaCiclo({ etapas }: { etapas: EtapaCiclo[] }) {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </section>
   );
 }
