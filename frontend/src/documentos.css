@@ -200,3 +200,18 @@ a.doc-chip:focus-visible { outline: 2px solid var(--foco); outline-offset: 2px; 
 .doc-chip--linha .doc-chip__valor { justify-content: center; }
 .doc-chip--linha .doc-chip__valor b { font-size: 15px; line-height: 22px; }
 @media (max-width: 720px) { .doc-linha--cabeca .doc-chips { display: none; } }
+
+/* aba Garantias: os quatro chips (Apolice, Valida ate', Cobre a execucao, CNO) na mesma linha a 1024 px (#658) */
+.doc-chips--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* "Renovar agora" (#658): empresa, certidao, validade e as acoes, uma linha por certidao */
+.doc-renovar { display: grid; gap: 8px; }
+.doc-renovar__titulo { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; }
+.doc-linha--renovar { grid-template-columns: minmax(150px, 220px) minmax(72px, 1fr) minmax(150px, 1.5fr) auto; padding-top: 6px; padding-bottom: 6px; }
+.doc-renovar__certidao { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.doc-renovar__acoes { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+@media (max-width: 720px) {
+  .doc-chips--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .doc-linha--renovar { grid-template-columns: minmax(0, 1fr); }
+  .doc-renovar__acoes { justify-content: flex-start; }
+}
