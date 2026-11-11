@@ -7,30 +7,25 @@ vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api"
 
 const USUARIO = { id: 1, nome: "Leonardo Praeiro", email: "leonardo@lotufo.com", perfil: "admin" };
 
-const dias = (n: number, f: (i: number) => number) => Array.from({ length: n }, (_, i) => f(i));
-
 const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   hoje: "2026-10-09",
   notas_a_enviar: 3,
   certidoes: { vencidas: 1, vencendo: 1, itens: [] },
   reajustes: [],
   protocoladas: { obras_protocoladas: 2, obras_ativas: 18, ultima: "2026-09-30" },
-  medido: { competencia: "2026-09", anterior_competencia: "2026-08", valor_centavos: 1_827_715_696,
-            anterior_centavos: 2_140_000_000, quantidade: 2, ultimo_lancamento: "2026-10-08", variacao_pct: -14.6 },
-  por_contratante: [{ contratante: "SINFRA", atual_centavos: 124_000_000, anterior_centavos: 100_000_000 }],
+  medido: { competencia: "2026-09", valor_centavos: 1_827_715_696, quantidade: 2, ultimo_lancamento: "2026-10-08" },
   recebido_ano: { valor_centavos: null, mes_centavos: 0, sem_data: 12, real_centavos: 18_785_640_866 },
   a_receber: { liberado: true, valor_centavos: 1_720_000_000, mais_60_centavos: 210_000_000 },
   prazos: [],
   espelhos: [{ espelho_id: 1, contrato_id: 7, medicao_id: 9, obra: "Obra A", titulo: "1ª Medição", situacao: "aprovado_mudou" }],
-  protocolado_mes: {
-    dia: 9,
-    atual: { mes: "2026-10", ate_dia: 9, valor_centavos: 1_586_677_904, quantidade: 6,
-             acumulado_centavos: dias(9, i => (i + 1) * 176_297_545) },
-    anterior: { mes: "2026-09", ate_dia: 9, valor_centavos: 1_148_230_577, quantidade: 5,
-                acumulado_centavos: dias(9, i => (i + 1) * 127_581_175) },
-    variacao_pct: 38.2,
-  },
-  notas_mes: { mes: "2026-10", valor_centavos: 1_522_295_618, notas: 5, obras: 2, acumulado_centavos: dias(9, i => i * 100) },
+  ciclo: [
+    { etapa: "em_analise", valor_centavos: 300_100, quantidade: 2, mais_antigo_dias: 20 },
+    { etapa: "boletim", valor_centavos: 1_200_300, quantidade: 3, mais_antigo_dias: 1 },
+    { etapa: "nota", valor_centavos: 600_100, quantidade: 1, mais_antigo_dias: 0 },
+    { etapa: "protocolado", valor_centavos: 1_586_677_904, quantidade: 6, mais_antigo_dias: 100 },
+    { etapa: "recebido_mes", valor_centavos: 12_000_200, quantidade: 2, mais_antigo_dias: null },
+  ],
+  notas_mes: { mes: "2026-10", valor_centavos: 1_522_295_618, notas: 5, obras: 2 },
   avisos_importantes: {
     reajustes: { total: 9, itens: [{ contrato_id: 9, obra: "Cultural", dias: null, tipo: "reajuste_nota_antes_do_apostilamento", nivel: "critico",
         competencias: ["2026-07", "2026-08", "2026-09"], datas_base: ["2024-06"] },
@@ -45,44 +40,98 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   ...extra,
 });
 
+/** O texto do elemento com espaco simples no lugar do espaco inseparavel do valor em reais. */
+const limpo = (el: Element | null | undefined) => (el?.textContent ?? "").replace(/\s/g, " ");
+
+const CICLO = "Ciclo da medição (cota da Lotufo)";
+
 describe("Início", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
-  it("destaque de medições protocoladas: mês atual contra o anterior no mesmo período, com variação e gráfico", async () => {
+  it("faixa do ciclo: cinco etapas na ordem, cada uma com valor, quantidade e idade do mais antigo", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     expect(api).toHaveBeenCalledWith("/api/inicio/painel");
     expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/, Leonardo$/);
-    const regiao = await screen.findByRole("region", { name: "Medições protocoladas" });
-    const d = within(regiao);
-    const texto = (regiao.textContent ?? "").replace(/\u00a0/g, " ");
-    expect(texto).toContain("outubro × setembro, mesmo período (dias 1 a 9)");
-    expect(texto).toContain("R$ 15.866.779,04");
-    expect(texto).toContain("R$ 11.482.305,77");
-    expect(texto).toContain("6 medições");
-    expect(texto).toContain("5 medições");
-    expect(texto).toContain("+38,2%");
-    expect(d.getByRole("img", { name: /Protocolado acumulado por dia/ })).toBeTruthy();
-    expect(d.getByText("outubro")).toBeTruthy();
-    expect(d.getByText("setembro")).toBeTruthy();
+    const regiao = await screen.findByRole("region", { name: CICLO });
+    const etapas = [...regiao.querySelectorAll(".ini-faixa__etapa")];
+    expect(etapas.map(e => [...e.children].map(limpo))).toEqual([
+      ["Em análise", "R$ 3.001,00", "2 medições", "mais antiga há 20 dias"],
+      ["Boletim", "R$ 12.003,00", "3 medições", "mais antiga há 1 dia"],
+      ["Nota", "R$ 6.001,00", "1 medição", "mais antiga de hoje"],
+      ["Protocolado", "R$ 15.866.779,04", "6 medições", "mais antiga há 100 dias"],
+      ["Recebido no mês", "R$ 120.002,00", "2 notas"],          // sem idade
+    ]);
+    // cor da informacao: as quatro etapas abertas em andamento (azul); o recebido, feito (verde)
+    expect(etapas.map(e => e.className.replace("ini-faixa__etapa ", ""))).toEqual(
+      [...Array<string>(4).fill("ini-faixa__etapa--andamento"), "ini-faixa__etapa--feito"]);
+    expect(screen.getByRole("list", { name: "Legenda das cores" })).toBeTruthy();
   });
 
-  it("três cartões: notas protocoladas, medido do mês fechado com variação e recebido no ano", async () => {
+  it("faixa do ciclo: tabela equivalente para leitor de tela", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: CICLO });
+    const tabela = within(regiao).getByRole("table", { name: "Ciclo da medição por etapa, na cota da Lotufo" });
+    expect(tabela.className).toBe("sr-only");
+    expect(regiao.querySelector(".ini-faixa")?.getAttribute("aria-hidden")).toBe("true");
+    const linhas = within(tabela).getAllByRole("row").map(l => [...l.children].map(limpo));
+    expect(linhas).toEqual([
+      ["Etapa", "Valor", "Quantidade", "Mais antiga"],
+      ["Em análise", "R$ 3.001,00", "2 medições", "20 dias"],
+      ["Boletim", "R$ 12.003,00", "3 medições", "1 dia"],
+      ["Nota", "R$ 6.001,00", "1 medição", "0 dias"],
+      ["Protocolado", "R$ 15.866.779,04", "6 medições", "100 dias"],
+      ["Recebido no mês", "R$ 120.002,00", "2 notas", "—"],
+    ]);
+  });
+
+  it("faixa do ciclo: largura de cada trecho proporcional ao valor, com mínimo; etapa vazia não mostra idade", async () => {
+    api.mockResolvedValue(painel({ ciclo: [
+      { etapa: "em_analise", valor_centavos: 0, quantidade: 0, mais_antigo_dias: null },
+      { etapa: "boletim", valor_centavos: 100, quantidade: 1, mais_antigo_dias: 3 },
+      { etapa: "nota", valor_centavos: 0, quantidade: 0, mais_antigo_dias: null },
+      { etapa: "protocolado", valor_centavos: 300, quantidade: 1, mais_antigo_dias: 9 },
+      { etapa: "recebido_mes", valor_centavos: 0, quantidade: 0, mais_antigo_dias: null },
+    ] }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: CICLO });
+    const faixa = regiao.querySelector<HTMLElement>(".ini-faixa");
+    const m = "minmax(var(--ini-faixa-min), ";
+    expect(faixa?.style.getPropertyValue("--ini-faixa-colunas")).toBe(`${m}0fr) ${m}25fr) ${m}0fr) ${m}75fr) ${m}0fr)`);
+    expect([...(regiao.querySelector(".ini-faixa__etapa")?.children ?? [])].map(limpo)).toEqual(["Em análise", "R$ 0,00", "0 medições"]);
+  });
+
+  it("faixa do ciclo sem nenhum valor: os cinco trechos com a mesma largura", async () => {
+    api.mockResolvedValue(painel({ ciclo: painel().ciclo.map(e => ({ ...e, valor_centavos: 0, quantidade: 0, mais_antigo_dias: null })) }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: CICLO });
+    expect(regiao.querySelector<HTMLElement>(".ini-faixa")?.style.getPropertyValue("--ini-faixa-colunas"))
+      .toBe(Array<string>(5).fill("minmax(var(--ini-faixa-min), 1fr)").join(" "));
+  });
+
+  it("três cartões só com rótulo e valor: notas protocoladas, medido do mês e recebido no ano", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const regiao = await screen.findByRole("region", { name: "Números do mês" });
-    const n = within(regiao);
-    const t = (regiao.textContent ?? "").replace(/\u00a0/g, " ");
-    expect(t).toContain("Notas fiscais protocoladas em outubro");
-    expect(t).toContain("R$ 15.222.956,18");
-    expect(t).toContain("5 notas · 2 obras");
-    expect(t).toContain("Medido em setembro");
-    expect(t).toContain("R$ 18.277.156,96");
-    expect(t).toContain("mês fechado");
-    expect(t).toContain("-14,6% vs. agosto");
-    expect(t).toContain("Recebido em 2026");
-    expect(t).toContain("R$ 187.856.408,66");
-    expect(n.getByText("-14,6% vs. agosto").className).toContain("ini-variacao--atencao");
+    expect([...regiao.children].map(c => [...c.children].map(limpo))).toEqual([
+      ["Notas fiscais protocoladas em outubro", "R$ 15.222.956,18"],
+      ["Medido em setembro", "R$ 18.277.156,96"],
+      ["Recebido em 2026", "R$ 187.856.408,66"],
+    ]);
+  });
+
+  it("#642: saíram a curva diária, a variação, as barras por contratante, a barra verde e o selo de mês fechado", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    await screen.findByRole("region", { name: "Números do mês" });
+    expect(screen.queryByRole("region", { name: "Medições protocoladas" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Medido por contratante" })).toBeNull();
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(document.querySelector(".ini-mini, .ini-grafico, .ini-barra, .ini-barras, .ini-variacao")).toBeNull();
+    const tudo = document.body.textContent ?? "";
+    for (const velho of ["mesmo período", "mês fechado", "vs.", "%", "Medido por contratante", "até dia"])
+      expect(tudo).not.toContain(velho);
   });
 
   it("os cartões e a tabela antigos não existem mais", async () => {
@@ -140,31 +189,6 @@ describe("Início", () => {
     await screen.findByRole("complementary", { name: "Avisos importantes" });
     expect(screen.getByText("Nenhum aviso de reajuste.")).toBeTruthy();
     expect(screen.getByText("Nenhuma certidão vencendo.")).toBeTruthy();
-  });
-
-  it("sem base de comparação não há selo de variação", async () => {
-    api.mockResolvedValue(painel({ medido: { ...painel().medido, variacao_pct: null } }));
-    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const n = await screen.findByRole("region", { name: "Números do mês" });
-    expect(n.textContent).not.toContain("vs. agosto");
-  });
-
-  it("medido por contratante com os dois meses fechados; mês sem medição mostra o aviso e o botão", async () => {
-    api.mockResolvedValue(painel());
-    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const sec = within(await screen.findByRole("region", { name: "Medido por contratante" }));
-    expect(sec.getByText("SINFRA")).toBeTruthy();
-    expect(sec.queryByRole("status")).toBeNull();
-    cleanup();
-    api.mockResolvedValue(painel({
-      medido: { competencia: "2026-09", anterior_competencia: "2026-08",
-                valor_centavos: 0, anterior_centavos: 0, quantidade: 0, ultimo_lancamento: null, variacao_pct: null },
-      por_contratante: [],
-    }));
-    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const aviso = await screen.findByRole("status");
-    expect(aviso.textContent).toContain("Nenhuma medição da competência de setembro.");
-    expect(within(aviso).getByRole("link", { name: /Lançar medição/ }).getAttribute("href")).toBe("/medicoes");
   });
 
   it("saudação pela hora de Cuiabá", () => {
