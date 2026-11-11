@@ -162,9 +162,10 @@ def cabecalho(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | 
     v = vigente(conn, contrato_id)
     o = conn.execute("SELECT nome FROM orgaos WHERE id=?", (v["orgao_id"],)).fetchone() if v.get("orgao_id") else None
     status = "em_encerramento" if v["estado"] == "ativo" and v.get("encerramento_iniciado_em") else v["estado"]
-    from app import prazos            # import tardio: `prazos` importa este modulo
+    from app import medicoes, prazos  # import tardio: os dois importam este modulo ou sao importados por quem importa
     # #662: execucao registrada vencida e aditivo posterior so' de vigencia: a data fica, sem dias (nada de "vencido")
     sem_prazo = prazos.execucao_sem_prazo(conn, contrato_id, hoje) is not None
+    sem_fluxo = contrato_id in medicoes.sem_fluxo(conn)
     return {"id": contrato_id, "obra": v.get("nome_curto") or v["numero_instrumento"],
             "orgao": o["nome"] if o else v["orgao"], "instrumento": v["numero_instrumento"],
             "valor_vigente_centavos": v["valor_vigente_centavos"], "cota_vigente_centavos": v["cota_vigente_centavos"],
@@ -174,7 +175,11 @@ def cabecalho(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | 
             "execucao_fim": v["execucao_fim_vigente"], "execucao_sem_prazo": sem_prazo,
             "dias_execucao": None if sem_prazo else _dias_ate(v["execucao_fim_vigente"], hoje),
             "vigencia_fim": v["vigencia_fim_vigente"], "dias_vigencia": _dias_ate(v["vigencia_fim_vigente"], hoje),
-            "status": status}
+            "status": status,
+            # issue #660: os passos da medicao que a obra inicia (familia do orgao e `passos_medicao` do cadastro); a
+            # lista vazia do cadastro e' a obra sem fluxo de medicao, que nao oferece "Iniciar"
+            "sem_fluxo_medicao": sem_fluxo,
+            "passos_medicao": [] if sem_fluxo else list(medicoes.passos_da_obra(conn, contrato_id))}
 
 
 def cadastro_da_obra(conn: sqlite3.Connection, contrato_id: int) -> dict:

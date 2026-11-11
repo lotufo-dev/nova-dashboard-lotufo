@@ -594,6 +594,18 @@ def test_planilha_nao_enviada_fora_da_obra_paralisada_da_mtpar_e_inativa(motor):
     assert _meses_sem_planilha(c, D(2026, 11, 8)) == []
 
 
+def test_planilha_nao_enviada_fora_da_obra_sem_o_passo_no_cadastro(motor):
+    # issue #660: `passos_medicao` do contrato; lista vazia (o fluxo nao e' da empresa) ou sem `planilha` nao avisa
+    c, u, cid = motor
+    _med(c, cid, 1, "2026-08", "protocolada")
+    esperado = ["planilha/carta de 09/2026 não enviada", "planilha/carta de 10/2026 não enviada"]
+    assert _meses_sem_planilha(c, D(2026, 11, 8)) == esperado
+    for lista, avisa in (("[]", False), ('["espelhos", "notas", "pagamento"]', False),
+                         ('["planilha", "analise", "espelhos", "notas", "envio_nota", "pagamento"]', True), (None, True)):
+        c.execute("UPDATE contratos SET passos_medicao=? WHERE id=?", (lista, cid)); c.commit()
+        assert _meses_sem_planilha(c, D(2026, 11, 8)) == (esperado if avisa else []), lista
+
+
 def test_obra_so_de_projeto_conta_a_serie_de_projeto(motor):
     # revisor (rodada 1 da PR #582): sem execucao, a obra segue a serie de projeto (medicoes.resumo, #154)
     c, u, cid = motor

@@ -72,6 +72,8 @@ export type Medicao = {
   planilha_ultimo_envio_em?: string | null;     // o dia do envio mais recente (a revisao enviada recomeca a conta)
   dias_uteis_no_orgao?: number | null;
   com_envio_planilha?: boolean;
+  /** #660: os passos (1 a 6) que a medição tem, decididos no servidor (família do órgão e cadastro da obra) */
+  passos?: number[];
   // #288: a diferenca do boletim VIGENTE aceita com justificativa (tira o aviso "aprovado abaixo do pedido")
   diferenca_aceita?: { atesto_id: number; justificativa: string; usuario: string | null; criado_em: string;
     diferenca_centavos: number } | null;

@@ -28,6 +28,19 @@ describe("passoDe", () => {
     expect(passoInicial(0, true, passosDa(false))).toBe(4);
     expect(passoInicial(0, false, passosDa(false))).toBe(3);
   });
+
+  // #660: a lista de passos da obra vem do servidor (cadastro); o estado num passo ausente está no próximo que ela tem
+  it("com a lista de passos da obra: o passo ausente não é o da vez", () => {
+    const estados = ["prevista", "planilha_gerada", "planilha_enviada", "boletim_recebido", "espelho_gerado", "espelho_enviado",
+      "nota_emitida", "protocolada", "nf_emitida", "recebida", "cancelada"];
+    expect(estados.map(e => passoDe(e, [3, 4, 6]))).toEqual([3, 3, 3, 3, 3, 4, 6, 6, 6, 7, 0]);
+    expect(estados.map(e => passoDe(e, [1, 3, 4, 6]))).toEqual([1, 1, 3, 3, 3, 4, 6, 6, 6, 7, 0]);
+    expect(estados.map(e => passoDe(e, [1, 2, 3, 4, 5, 6]))).toEqual(estados.map(e => passoDe(e, true)));
+    expect(estados.map(e => passoDe(e, [3, 4, 5, 6]))).toEqual(estados.map(e => passoDe(e, false)));
+    // encerrada com nota, numa obra sem o passo Notas: abre o primeiro da barra
+    expect(passoInicial(0, true, [3, 6])).toBe(3);
+    expect(passoInicial(6, true, [3, 4, 6])).toBe(6);
+  });
 });
 
 describe("textos do passo 2", () => {

@@ -160,6 +160,28 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(await screen.findByText(/Registrar o boletim da 23ª medição/)).toBeTruthy();
   });
 
+  it("#660: a barra só tem os passos que o servidor diz que a obra tem, e o passo ausente não é o da vez", async () => {
+    // obra com `passos_medicao: [espelhos, notas, pagamento]` no cadastro; a nota emitida já está no pagamento
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida", nota_emitida_em: "2026-10-02", passos: [3, 4, 6] }] });
+    pagina();
+    const barra = await screen.findByRole("navigation", { name: "Passos da medição" });
+    expect(within(barra).getAllByRole("button").map(b => b.getAttribute("aria-label")!.replace(/, feito em .*/, ""))).toEqual([
+      "Passo 1: Espelhos", "Passo 2: Notas", "Passo 3: Pagamento"]);
+    expect(within(barra).getByRole("button", { name: "Passo 3: Pagamento" }).closest("li")!.getAttribute("aria-current")).toBe("step");
+    expect(document.getElementById("passo-6")).not.toBeNull();
+    expect(document.getElementById("passo-5")).toBeNull();
+  });
+
+  it("#660: os passos do servidor valem mesmo onde a conta antiga da tela daria outros", async () => {
+    // execução com a planilha enviada num órgão que a recebe: a tela sozinha mostraria os seis passos
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_gerado", planilha_enviada_em: "2026-11-05",
+      com_envio_planilha: true, passos: [3, 4, 5, 6] }] });
+    pagina();
+    const barra = await screen.findByRole("navigation", { name: "Passos da medição" });
+    expect(within(barra).getAllByRole("button").map(b => b.getAttribute("aria-label")!.replace(/, feito em .*/, ""))).toEqual([
+      "Passo 1: Espelhos", "Passo 2: Notas", "Passo 3: Envio da nota", "Passo 4: Pagamento"]);
+  });
+
   it("quem só consulta não vê “Mais ações”", async () => {
     responder();
     pagina("diretoria");

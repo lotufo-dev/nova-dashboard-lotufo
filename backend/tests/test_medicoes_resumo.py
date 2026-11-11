@@ -1,6 +1,7 @@
 """Pagina Medicoes com abas (09/10/2026): situacao por estado, marco de cada situacao (nunca o criado_em), a linha
 unica de medicao + reajuste, o contratante (sigla e sub-orgao) e as obras sem medicao aberta (prevista nao conta)."""
 import datetime
+import json
 
 import pytest
 
@@ -438,3 +439,64 @@ def test_rota_do_resumo_traz_o_quadro_da_competencia_pedida(client_admin):
     r = client_admin.get("/api/medicoes/resumo?mes=2026-09")
     assert r.status_code == 200, r.text
     assert r.json()["mes"] == "2026-09" and r.json()["quadro"] == [] and r.json()["anteriores"] == []
+
+
+# --- passos da medicao por obra pelo cadastro (#660) ------------------------------------------------------------
+
+def _passos_do_cadastro(conn, cid, lista):
+    conn.execute("UPDATE contratos SET passos_medicao=? WHERE id=?", (None if lista is None else json.dumps(lista), cid))
+    conn.commit()
+
+
+def test_passo_do_estado_pula_o_passo_que_a_obra_nao_tem():
+    estados = ["prevista", "planilha_gerada", "planilha_enviada", "boletim_recebido", "espelho_gerado",
+               "espelho_enviado", "nota_emitida", "protocolada", "nf_emitida", "recebida", "cancelada"]
+    assert [medicoes.passo_do_estado(e, (1, 2, 3, 4, 5, 6)) for e in estados] == [1, 1, 2, 3, 3, 4, 5, 6, 6, 7, 0]
+    assert [medicoes.passo_do_estado(e, (3, 4, 5, 6)) for e in estados] == [3, 3, 3, 3, 3, 4, 5, 6, 6, 7, 0]
+    # sem "Envio da nota": a nota emitida ja' esta' no pagamento; sem "Análise do órgão": a enviada esta' nos espelhos
+    assert [medicoes.passo_do_estado(e, (1, 3, 4, 6)) for e in estados] == [1, 1, 3, 3, 3, 4, 6, 6, 6, 7, 0]
+
+
+def test_quadro_e_proximo_passo_so_com_os_passos_da_lista_do_cadastro(conn, cenario):
+    ids = cenario
+    _passos_do_cadastro(conn, ids["c"], ["espelhos", "notas", "pagamento"])
+    c = next(x for x in medicoes.resumo(conn, HOJE, mes="2026-09")["quadro"] if x["obra"] == "Obra C")
+    assert [(p["numero"], p["nome"], p["situacao"]) for p in c["passos"]] == [
+        (3, "Espelhos", "atual"), (4, "Notas", "futuro"), (6, "Pagamento", "futuro")]
+    # a nota emitida, sem o passo "Envio da nota": o passo da vez e' o pagamento, no quadro e no proximo passo
+    conn.execute("UPDATE medicoes SET estado='nota_emitida', nota_emitida_em='2026-10-02' WHERE id=?", (ids["c3"],))
+    conn.commit()
+    c = next(x for x in medicoes.resumo(conn, HOJE, mes="2026-09")["quadro"] if x["obra"] == "Obra C")
+    assert _passos(c) == {3: ("feito", None, None), 4: ("feito", "2026-10-02", None), 6: ("atual", None, ids["c3"])}
+    [linha] = [x for x in medicoes.em_andamento(conn) if x["id"] == ids["c3"]]
+    assert linha["proximo_passo"] == "Pagamento" and linha["passo"] == {"numero": 6, "nome": "Pagamento"}
+    # a lista nao da' a' obra o passo que a familia do orgao nao tem (a B e' da MT-PAR: sem planilha e analise)
+    _passos_do_cadastro(conn, ids["b"], ["planilha", "analise", "espelhos", "notas", "envio_nota", "pagamento"])
+    b = next(x for x in medicoes.resumo(conn, HOJE, mes="2026-09")["quadro"] if x["obra"] == "Obra B")
+    assert [p["numero"] for p in b["passos"]] == [3, 4, 5, 6]
+
+
+def test_obra_com_a_lista_vazia_sai_do_quadro_e_nao_oferece_iniciar(conn, cenario):
+    ids = cenario
+    antes = medicoes.resumo(conn, HOJE, mes="2026-10")
+    assert {o["contrato_id"] for o in antes["obras"] if o["sem_no_mes"]} >= {ids["c"], ids["d"]}
+    _passos_do_cadastro(conn, ids["d"], [])     # sem medicao: sairia com o Iniciar
+    _passos_do_cadastro(conn, ids["c"], [])     # com medicao na competencia de setembro
+    setembro = medicoes.resumo(conn, HOJE, mes="2026-09")
+    assert [x["obra"] for x in setembro["quadro"]] == ["Obra A", "Obra B", "Obra F"]
+    outubro = medicoes.resumo(conn, HOJE, mes="2026-10")
+    assert [x["obra"] for x in outubro["quadro"]] == ["Obra A", "Obra B", "Obra F"]
+    sem = {o["contrato_id"]: o["sem_no_mes"] for o in outubro["obras"]}
+    assert sem[ids["c"]] is False and sem[ids["d"]] is False and sem[ids["a"]] is True
+    assert outubro["contagens"]["iniciar"] == antes["contagens"]["iniciar"] - 2
+    # a medicao que ja' existe na obra continua em andamento, com os passos da familia do orgao
+    [linha] = [x for x in medicoes.em_andamento(conn) if x["id"] == ids["c3"]]
+    assert linha["passo"] == {"numero": 3, "nome": "Espelhos"}
+
+
+def test_obra_sem_a_chave_continua_igual(conn, cenario):
+    antes = medicoes.resumo(conn, HOJE, mes="2026-09")
+    _passos_do_cadastro(conn, cenario["c"], ["espelhos", "pagamento"])
+    assert medicoes.resumo(conn, HOJE, mes="2026-09") != antes
+    _passos_do_cadastro(conn, cenario["c"], None)
+    assert medicoes.resumo(conn, HOJE, mes="2026-09") == antes

@@ -16,6 +16,7 @@ import yaml
 
 from app import dinheiro, entidades, espelho, espelho_docx, reajuste, tempo
 from app.leitura_planilha_medicao import titulo_comparavel
+from app.medicoes import CHAVES_PASSO
 
 FAMILIAS = ("mtpar", "sinfra", "ses", "prefeitura")
 LEIS = ("8.666", "14.133", "13.303")
@@ -855,8 +856,33 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
             falha("pecas_no_oficio", f"use uma lista, sem repetição, de {', '.join(tipos)}")
         else:
             c["pecas_no_oficio"] = list(pno)
+    c["passos_medicao"] = _passos_medicao(bruto.get("passos_medicao"), falha)
     c["custo"] = _custo(bruto.get("custo"), falha)
     return c
+
+
+def _passos_medicao(bruto, falha) -> list[str] | None:
+    """Issue #660: os passos da medicao que a obra tem, na ordem do fluxo. Sem a chave (None) vale a regra da familia
+    do orgao; a lista vazia e' a obra cujo fluxo da medicao nao e' feito pela empresa."""
+    if bruto is None:
+        return None
+    nomes = ", ".join(CHAVES_PASSO)
+    if not isinstance(bruto, list) or any(not isinstance(x, str) for x in bruto):
+        falha("passos_medicao", f"use uma lista de passos ({nomes}); [] para a obra sem fluxo de medição")
+        return None
+    fora = [x for x in bruto if x not in CHAVES_PASSO]
+    repetidos = list(dict.fromkeys(x for x in bruto if bruto.count(x) > 1))
+    if fora:
+        falha("passos_medicao", f"passo desconhecido: {', '.join(fora)} (use {nomes})")
+    elif repetidos:
+        falha("passos_medicao", f"passo repetido: {', '.join(repetidos)}")
+    elif bruto and "pagamento" not in bruto:
+        falha("passos_medicao", "a lista precisa ter pagamento (ou ficar vazia, para a obra sem fluxo de medição)")
+    elif "analise" in bruto and "planilha" not in bruto:
+        falha("passos_medicao", "analise só existe com planilha")
+    else:
+        return [k for k in CHAVES_PASSO if k in bruto]
+    return None
 
 
 # Issue #489: custo por obra. Naturezas orcamentarias fora do custo quando o yaml nao diz: 2.02 (nao operacional) e

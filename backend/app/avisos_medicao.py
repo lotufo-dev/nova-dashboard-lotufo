@@ -1,7 +1,8 @@
 """Avisos do motor de medicao (issue #288; spec 2026-10-20 §2.1 "Avisos gerados" e §2.1.1; E4; decisao do Leo de
 08/11/2026). Uma fonte do registro unico de `app/avisos.py`, que a tela le sem saber de onde o aviso vem.
 
-- `planilha_nao_enviada` (operacao): obra ativa, nao paralisada, fora da MT-PAR (onde nao ha' o passo). Avisa cada
+- `planilha_nao_enviada` (operacao): obra ativa, nao paralisada, fora da MT-PAR (onde nao ha' o passo) e da obra
+  cujo `passos_medicao` do cadastro nao tem `planilha` (#660). Avisa cada
   competencia de execucao depois da ultima medicao de execucao ja' enviada (planilha enviada ou etapa seguinte, o
   fluxo antigo tambem), ate' o mes anterior a hoje, a partir do dia 5 do mes seguinte. Obra sem medicao enviada conta
   do mes do inicio da execucao; obra reiniciada, do mes do reinicio. Lacunas anteriores nao avisam.
@@ -17,7 +18,7 @@ import json
 
 from app import avisos as _av, contratos, prazos, tempo
 from app.medicao_planilhas import _mes_br, _mes_seguinte
-from app.medicoes import _data_br, diferenca_aceita, tem_boletim, titulo
+from app.medicoes import _data_br, diferenca_aceita, passos_do_cadastro, tem_boletim, titulo
 
 # a planilha/carta ja' foi ao orgao: o envio dela ou qualquer etapa seguinte (o fluxo antigo nao tem a planilha)
 ESTADOS_ENVIADA = ("planilha_enviada", "boletim_recebido", "espelho_gerado", "espelho_enviado", "nota_emitida",
@@ -38,7 +39,11 @@ def _ultimo_reinicio(conn, cid: int) -> str | None:
 def _planilhas_nao_enviadas(conn, hoje: datetime.date) -> list[dict]:
     out = []
     marcas = ",".join("?" * len(ESTADOS_ENVIADA))
+    do_cadastro = passos_do_cadastro(conn)
     for c in _av.ativos(conn):
+        # issue #660: a obra que o cadastro diz nao ter "Planilha e carta" (ou nao ter fluxo: lista vazia) nao e' cobrada
+        if 1 not in do_cadastro.get(c["id"], (1,)):
+            continue
         familia = conn.execute("SELECT familia FROM orgaos WHERE id=?", (c["orgao_id"],)).fetchone() \
             if c.get("orgao_id") else None
         if familia is not None and familia["familia"] in FAMILIAS_SEM_PEDIDO:

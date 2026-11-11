@@ -125,6 +125,23 @@ def test_contrato_sem_copia_extras_continua_igual_depois_da_migracao_037(conn):
     assert r["contratos"] == {"criados": [], "alterados": [], "iguais": 1}
 
 
+def test_passos_medicao_do_contrato_grava_a_lista_e_sem_a_chave_fica_nulo(conn):
+    # issue #660: sem a chave, NULL (vale a familia do orgao) e o contrato continua igual; a lista vazia e' gravada
+    def gravado():
+        return conn.execute("SELECT passos_medicao FROM contratos").fetchone()[0]
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    assert gravado() is None
+    assert cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(passos_medicao=None)]))["contratos"]["iguais"] == 1
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(passos_medicao=["espelhos", "notas", "pagamento"])]))
+    assert r["contratos"]["alterados"] == ["MT-402"] and json.loads(gravado()) == ["espelhos", "notas", "pagamento"]
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(passos_medicao=["espelhos", "notas", "pagamento"])]))
+    assert r["contratos"] == {"criados": [], "alterados": [], "iguais": 1}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(passos_medicao=[])]))
+    assert gravado() == "[]"
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    assert gravado() is None
+
+
 def test_em_encerramento_mantem_ativo_e_grava_a_data(conn):
     cad = _cad(contratos=[_contrato(status="em_encerramento", status_desde="2026-07-17")])
     cadastro_aplicar.aplicar(conn, 1, cad)
