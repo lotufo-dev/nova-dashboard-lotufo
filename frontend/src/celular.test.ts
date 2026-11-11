@@ -29,6 +29,20 @@ describe("celular", () => {
     expect(bloco).toMatch(/\.ini-numero__valor\s*\{[^}]*font-size:\s*clamp\(/);
   });
 
+  it("Início (#642): a faixa do ciclo cabe a 1024 px e vira lista vertical em painel estreito", () => {
+    // a 1024 px com o menu lateral aberto (240) e o respiro da pagina (2 x 32) e do painel (2 x 16) sobram 688 px
+    const util = 1024 - Number(/--trilho-largo:\s*(\d+)px/.exec(tokensCss)?.[1]) - 2 * 32 - 2 * 16;
+    const minimo = Number(/--ini-faixa-min:\s*(\d+)px/.exec(inicioCss)?.[1]);
+    const vao = Number(/\.ini-faixa\s*\{[^}]*gap:\s*(\d+)px/.exec(inicioCss)?.[1]);
+    const corte = Number(/@container \(max-width:\s*(\d+)px\)/.exec(inicioCss)?.[1]);
+    const cinco = 5 * minimo + 4 * vao;
+    expect(cinco).toBeLessThanOrEqual(util);        // a faixa inteira cabe: sem rolagem horizontal
+    expect(corte).toBe(cinco - 1);                  // abaixo do que os cinco trechos pedem, uma coluna so'
+    expect(inicioCss).toMatch(/\.ini-ciclo\s*\{[^}]*container-type:\s*inline-size[^}]*padding:\s*16px/);
+    const bloco = inicioCss.slice(inicioCss.indexOf("@container"));
+    expect(bloco).toMatch(/\.ini-faixa\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+  });
+
   it("Medição: abaixo de 600 px a meta desce para baixo do título", () => {
     // pagina da obra em medicao (#508): obra, meta e o valor grande num cabecalho, valor e "Mais acoes" ao lado; no
     // celular desce tudo para uma coluna

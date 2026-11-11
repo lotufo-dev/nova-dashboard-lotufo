@@ -37,9 +37,10 @@ def _medicao(c, cid, numero, criado_em, valor, estado="espelho_gerado", competen
     return c.execute("SELECT MAX(id) FROM medicoes").fetchone()[0]
 
 
-def test_medido_da_ultima_competencia_fechada_contra_a_anterior(cenario):
+def test_medido_da_ultima_competencia_fechada(cenario):
     # B-01 (10/10/2026): a regra da Carteira -- competencia, valor cheio, mes inteiro. 06/11/2026: o mes do cartao e' a
-    # ULTIMA COMPETENCIA FECHADA (em outubro, setembro), porque a medicao de um mes so' e' lancada no seguinte
+    # ULTIMA COMPETENCIA FECHADA (em outubro, setembro), porque a medicao de um mes so' e' lancada no seguinte.
+    # #642: a comparacao com o mes anterior e as barras por contratante sairam da tela e do calculo
     c, cid = cenario
     _medicao(c, cid, 1, "2026-10-05 12:00:00", 1_000_000, competencia="2026-09")
     _medicao(c, cid, 2, "2026-10-08 12:00:00", 5, competencia="2026-09")
@@ -51,17 +52,15 @@ def test_medido_da_ultima_competencia_fechada_contra_a_anterior(cenario):
     _medicao(c, cid, 8, "2026-10-09 14:00:00", 9, competencia="2026-10")       # o mes corrente nao entra no cartao
     p = inicio.painel(c, HOJE)
     m = p["medido"]
-    assert (m["valor_centavos"], m["anterior_centavos"], m["quantidade"]) == (1_000_005, 450_999, 2)
-    assert (m["competencia"], m["anterior_competencia"]) == ("2026-09", "2026-08")
-    assert m["ultimo_lancamento"] == "2026-10-09"
-    assert p["por_contratante"] == [{"contratante": "MTPAR", "atual_centavos": 1_000_005, "anterior_centavos": 450_999}]
+    assert m == {"competencia": "2026-09", "valor_centavos": 1_000_005, "quantidade": 2, "ultimo_lancamento": "2026-10-09"}
+    assert "por_contratante" not in p and "protocolado_mes" not in p
 
 
 def test_mes_sem_medicao_da_competencia(cenario):
     c, cid = cenario
     _medicao(c, cid, 1, "2026-08-30 12:00:00", 10, competencia="2026-08")
     m = inicio.painel(c, HOJE)["medido"]
-    assert (m["quantidade"], m["valor_centavos"], m["anterior_centavos"], m["ultimo_lancamento"]) == (0, 0, 10, "2026-08-30")
+    assert (m["quantidade"], m["valor_centavos"], m["ultimo_lancamento"]) == (0, 0, "2026-08-30")
 
 
 def test_nota_do_rm_sem_medicao_lancada_entra_no_medido_do_inicio(cenario):
@@ -75,8 +74,7 @@ def test_nota_do_rm_sem_medicao_lancada_entra_no_medido_do_inicio(cenario):
               "VALUES (?, 501, '501', '2026-10-06', 700001, 'ativa', '9.001.002', '2.2.01')", (col,))
     c.commit()
     p = inicio.painel(c, HOJE)
-    assert (p["medido"]["valor_centavos"], p["medido"]["anterior_centavos"]) == (700_001, 400_000)
-    assert p["por_contratante"] == [{"contratante": "MTPAR", "atual_centavos": 700_001, "anterior_centavos": 400_000}]
+    assert p["medido"]["valor_centavos"] == 700_001
 
 
 def test_prazos_e_reajuste_a_pedir(cenario):
@@ -162,29 +160,14 @@ def _protocolar(c, mid, data, etapa="nota"):
     c.commit()
 
 
-def test_protocolado_por_dia_soma_so_a_primeira_data_de_protocolo_da_nota(cenario):
+def test_protocoladas_por_dia_so_a_primeira_data_de_protocolo_da_nota(cenario):
+    # a base do cartao de notas protocoladas no mes (a curva por dia saiu na #642)
     c, cid = cenario
     a = _medicao(c, cid, 1, "2026-10-01 10:00:00", 1_000, estado="protocolada")
     b = _medicao(c, cid, 2, "2026-10-01 10:00:00", 500, estado="protocolada")
     _protocolar(c, a, "2026-10-02"); _protocolar(c, a, "2026-10-08")       # reprotocolo: nao conta de novo
     _protocolar(c, b, "2026-10-04"); _protocolar(c, b, "2026-10-01", etapa="planilha")   # planilha nao e' da nota
-    atual = inicio.painel(c, HOJE)["protocolado_mes"]["atual"]
-    assert atual["valor_centavos"] == 1_500 and atual["quantidade"] == 2 and atual["ate_dia"] == 9
-    assert atual["acumulado_centavos"] == [0, 1_000, 1_000, 1_500, 1_500, 1_500, 1_500, 1_500, 1_500]
-
-
-def test_mesmo_periodo_do_mes_anterior_corta_no_mesmo_dia(cenario):
-    c, cid = cenario
-    a = _medicao(c, cid, 1, "2026-09-01 10:00:00", 2_000, estado="protocolada")
-    b = _medicao(c, cid, 2, "2026-09-01 10:00:00", 700, estado="protocolada")
-    _protocolar(c, a, "2026-09-05"); _protocolar(c, b, "2026-09-10")     # 10/09 esta' depois do dia 9: fora
-    p = inicio.painel(c, HOJE)["protocolado_mes"]
-    assert p["anterior"]["mes"] == "2026-09" and p["anterior"]["ate_dia"] == 9
-    assert p["anterior"]["valor_centavos"] == 2_000 and p["anterior"]["quantidade"] == 1
-    assert len(p["anterior"]["acumulado_centavos"]) == 9
-    assert p["atual"]["valor_centavos"] == 0 and p["variacao_pct"] == -100.0
-    # mes anterior mais curto: 31/03 compara com ate' 28/02
-    assert inicio._protocolado_mes(c, D(2026, 3, 31))["anterior"]["ate_dia"] == 28
+    assert {r["id"]: r["data"] for r in inicio._protocoladas_dia(c)} == {a: "2026-10-02", b: "2026-10-04"}
 
 
 def test_notas_protocoladas_no_mes_contam_notas_e_obras_distintas(cenario):
@@ -211,16 +194,7 @@ def test_notas_protocoladas_no_mes_contam_notas_e_obras_distintas(cenario):
               "VALUES (?, ?, 1, 'manual', '2026-10-07')", (m1, nota[4]))   # alocacao desfeita nao conta
     c.commit()
     n = inicio.painel(c, HOJE)["notas_mes"]
-    assert (n["valor_centavos"], n["notas"], n["obras"]) == (7_000, 2, 2)
-    assert n["acumulado_centavos"][-1] == 7_000 and len(n["acumulado_centavos"]) == 9
-
-
-def test_variacao_do_medido_do_mes_fechado(cenario):
-    c, cid = cenario
-    _medicao(c, cid, 1, "2026-10-01 10:00:00", 1_000, competencia="2026-09")
-    _medicao(c, cid, 2, "2026-10-01 10:00:00", 1_250, competencia="2026-08")
-    assert inicio.painel(c, HOJE)["medido"]["variacao_pct"] == -20.0
-    assert inicio._variacao_pct(10, 0) is None
+    assert n == {"mes": "2026-10", "valor_centavos": 7_000, "notas": 2, "obras": 2}
 
 
 def test_avisos_importantes_tem_contagem_e_tres_itens_por_secao(cenario):
@@ -238,3 +212,99 @@ def test_avisos_importantes_tem_contagem_e_tres_itens_por_secao(cenario):
     p = inicio.painel(c, HOJE)["avisos_importantes"]["prazos"]
     assert p["total"] == 7 and len(p["itens"]) == 3
     assert [x["dias"] for x in p["itens"]] == sorted(x["dias"] for x in p["itens"]) and p["itens"][0]["dias"] < 0
+
+
+# --- faixa do ciclo (#642): quanto dinheiro esta' em cada etapa, na cota, e a idade do item mais antigo ---
+
+def _no_ciclo(c, cid, numero, estado, pedido, aprovado=None, **datas):
+    """Medicao num estado do ciclo, com as datas de evento dadas (`planilha_enviada_em`, `atestado_em`,
+    `nota_emitida_em`); o protocolo entra por `_protocolar`."""
+    mid = _medicao(c, cid, numero, "2026-09-01 10:00:00", pedido, estado=estado)
+    campos = {"valor_atestado_centavos": aprovado, **datas}
+    c.execute(f"UPDATE medicoes SET {', '.join(k + '=?' for k in campos)} WHERE id=?", (*campos.values(), mid))
+    c.commit()
+    return mid
+
+
+def _etapas(c):
+    return {e["etapa"]: (e["valor_centavos"], e["quantidade"], e["mais_antigo_dias"]) for e in inicio.painel(c, HOJE)["ciclo"]}
+
+
+def test_ciclo_tem_as_cinco_etapas_na_ordem_e_vazio_sem_medicao(cenario):
+    c, _ = cenario
+    ciclo = inicio.painel(c, HOJE)["ciclo"]
+    assert [e["etapa"] for e in ciclo] == ["em_analise", "boletim", "nota", "protocolado", "recebido_mes"]
+    assert set(_etapas(c).values()) == {(0, 0, None)}
+
+
+def test_ciclo_valor_quantidade_e_idade_do_mais_antigo_por_etapa(cenario):
+    c, cid = cenario
+    _no_ciclo(c, cid, 1, "planilha_enviada", 1_001, planilha_enviada_em="2026-10-01")
+    _no_ciclo(c, cid, 2, "planilha_enviada", 2_000, planilha_enviada_em="2026-09-19 14:00:00")
+    # o valor e' o aprovado; enquanto nao ha', o pedido
+    _no_ciclo(c, cid, 3, "boletim_recebido", 9_999, aprovado=3_003, atestado_em="2026-10-08")
+    _no_ciclo(c, cid, 4, "espelho_gerado", 9_999, aprovado=4_000, atestado_em="2026-09-09")
+    _no_ciclo(c, cid, 5, "espelho_enviado", 9_999, aprovado=5_000, atestado_em="2026-10-09")
+    _no_ciclo(c, cid, 6, "nota_emitida", 9_999, aprovado=6_001, atestado_em="2026-08-01", nota_emitida_em="2026-10-04")
+    p1 = _no_ciclo(c, cid, 7, "protocolada", 7_000, nota_emitida_em="2026-08-01")
+    p2 = _no_ciclo(c, cid, 8, "nf_emitida", 8_005)                      # legado com data de protocolo: conta
+    _protocolar(c, p1, "2026-09-29"); _protocolar(c, p1, "2026-10-07")   # reprotocolo: a idade e' do primeiro
+    _protocolar(c, p2, "2026-07-01")
+    # fora do ciclo: prevista, cancelada e recebida
+    _no_ciclo(c, cid, 9, "prevista", 111, planilha_enviada_em="2026-10-01")
+    _no_ciclo(c, cid, 10, "cancelada", 222, atestado_em="2026-10-01")
+    _medicao(c, cid, 11, "2026-09-01 10:00:00", 333, estado="recebida", recebida_em="2026-10-02")
+    assert _etapas(c) == {"em_analise": (3_001, 2, 20), "boletim": (12_003, 3, 30), "nota": (6_001, 1, 5),
+                          "protocolado": (15_005, 2, 100), "recebido_mes": (0, 0, None)}
+
+
+def test_ciclo_medicao_sem_a_data_do_evento_fica_fora(cenario):
+    # so' aparece o que tem evidencia: a idade nunca conta da competencia nem do lancamento
+    c, cid = cenario
+    _no_ciclo(c, cid, 1, "planilha_enviada", 1_000)                                  # sem data do envio
+    _no_ciclo(c, cid, 2, "espelho_gerado", 2_000, aprovado=2_000)                    # sem data do atesto
+    _no_ciclo(c, cid, 3, "nota_emitida", 3_000, atestado_em="2026-09-01")            # sem data da nota
+    _no_ciclo(c, cid, 4, "protocolada", 4_000, nota_emitida_em="2026-09-01")         # sem protocolo
+    so_planilha = _no_ciclo(c, cid, 5, "protocolada", 5_000)
+    _protocolar(c, so_planilha, "2026-09-10", etapa="planilha")                      # protocolo da planilha nao e' o da nota
+    _no_ciclo(c, cid, 6, "nf_emitida", 6_000)
+    _no_ciclo(c, cid, 7, "planilha_enviada", 7_000, planilha_enviada_em="sem data")  # data ilegivel nao e' evidencia
+    assert set(_etapas(c).values()) == {(0, 0, None)}
+
+
+def test_ciclo_na_cota_da_lotufo_com_centavo_impar(cenario):
+    # consorcio a 50%: cada medicao vai para a cota com o arredondamento unico (100.001 -> 50.001, meio para cima);
+    # duas somam 100.002, nao a cota da soma (100.001)
+    c, cid = cenario
+    c.execute("UPDATE contratos SET percentual_direito_bp=5000")
+    _no_ciclo(c, cid, 1, "planilha_enviada", 100_001, planilha_enviada_em="2026-10-08")
+    _no_ciclo(c, cid, 2, "planilha_enviada", 100_001, planilha_enviada_em="2026-10-08")
+    p = _no_ciclo(c, cid, 3, "protocolada", 999_999, aprovado=300_003)
+    _protocolar(c, p, "2026-10-09")
+    e = _etapas(c)
+    assert e["em_analise"] == (100_002, 2, 1)
+    assert e["protocolado"] == (150_002, 1, 0)
+
+
+def test_ciclo_recebido_no_mes_sao_as_baixas_do_rm_do_mes_corrente_na_cota_e_sem_idade(cenario):
+    from app import diretoria
+    c, cid = cenario
+    c.execute("UPDATE contratos SET percentual_direito_bp=5000, centro_custo_rm='9.001.002' WHERE id=?", (cid,))
+    col = c.execute("SELECT e.coligada_rm FROM contratos k JOIN entidades e ON e.id=COALESCE(k.entidade_id, 1) WHERE k.id=?",
+                    (cid,)).fetchone()[0]
+    nota = {}
+    for n in (1, 2, 3):
+        nota[n] = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo, "
+                            "codtmv) VALUES (?, ?, ?, '2026-08-05', 900000, 'ativa', '9.001.002', '2.2.01')",
+                            (col, n, str(n))).lastrowid
+    baixas = ((11, nota[1], 100_001, 1, "2026-10-02"),     # no mes: 50.001 na cota
+              (12, nota[1], 100_001, 1, "2026-10-09"),     # a mesma nota, outro titulo: soma o valor, a nota conta uma vez
+              (13, nota[2], 40_000, 4, "2026-10-01"),      # baixa parcial e' recebido
+              (14, nota[3], 70_000, 1, "2026-09-30"),      # mes anterior: fora
+              (15, nota[3], 80_000, 0, "2026-10-05"))      # titulo em aberto nao e' recebido
+    for idlan, nid, valor, status, data in baixas:
+        c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
+                  "status_lan, data_baixa) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (col, idlan, nid, idlan, valor, valor, status, data))
+    c.commit()
+    assert _etapas(c)["recebido_mes"] == (120_002, 2, None)
+    assert diretoria.rm_por_mes(c)[1]["2026-10"] == 120_002     # a mesma conta do recebido por mes da diretoria

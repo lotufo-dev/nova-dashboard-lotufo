@@ -7,10 +7,11 @@ Nada e' calculado de novo aqui: cada numero vem do modulo que ja' o calcula para
 - obras protocoladas: `avisos.resumo_mes` (o mesmo "X de N obras ativas" da fila de Medicoes);
 - a receber: a regra da Carteira (`diretoria`), na COTA da Lotufo, so' com o total liberado;
 - recebido no ano: a regra do "recebido no mes" da Carteira (medicao recebida, pela data da baixa, na cota);
-- prazos: `prazos.situacao` (execucao e vigencia) e `reajuste.ciclos` (data-base).
+- prazos: `prazos.situacao` (execucao e vigencia) e `reajuste.ciclos` (data-base);
+- faixa do ciclo (#642): `_ciclo`, na cota, so' com a data do evento de cada etapa.
 
-Medido no mes: B-01 (10/10/2026) -- a regra da Carteira: medicoes pela COMPETENCIA do mes contra a competencia
-do mes anterior INTEIRO, em valor CHEIO (atestado, senao protocolado), como a pagina da medicao mostra. A data de
+Medido no mes: B-01 (10/10/2026) -- a regra da Carteira: medicoes pela COMPETENCIA do mes INTEIRO, em valor CHEIO
+(atestado, senao protocolado), como a pagina da medicao mostra. A data de
 lancamento fazia a carga do legado virar "setembro R$ 765 mi". Cancelada, desistida e prevista nao contam (a
 mesma exclusao do "medido" da Carteira).
 """
@@ -37,54 +38,53 @@ def _contratante(familia: str | None, chave: str | None, nome: str | None, orgao
     return orgao_texto or "sem contratante"
 
 
-def _medido(conn, hoje: datetime.date) -> tuple[dict, list[dict]]:
-    """06/11/2026: o mes do cartao e' a ULTIMA COMPETENCIA FECHADA (o mes anterior a hoje), contra a anterior a ela: a
-    medicao de um mes so' e' lancada no seguinte, entao o mes corrente ficava sempre zerado. Entra tambem o que o RM
-    mostra e ainda nao tem medicao lancada (`diretoria.complemento_rm`), em valor cheio, como as medicoes daqui."""
-    mes, ant = diretoria._mes(hoje, -1), diretoria._mes(hoje, -2)
+def _medido(conn, hoje: datetime.date) -> dict:
+    """06/11/2026: o mes do cartao e' a ULTIMA COMPETENCIA FECHADA (o mes anterior a hoje): a medicao de um mes so' e'
+    lancada no seguinte, entao o mes corrente ficava sempre zerado. Entra tambem o que o RM mostra e ainda nao tem
+    medicao lancada (`diretoria.complemento_rm`), em valor cheio, como as medicoes daqui. Issue #642: a comparacao
+    com a competencia anterior e a quebra por contratante sairam da tela e daqui."""
+    mes = diretoria._mes(hoje, -1)
     linhas = conn.execute(
-        "SELECT m.criado_em, m.competencia, COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos, 0) AS valor, "
-        "c.orgao_id, c.orgao AS orgao_texto, o.familia, o.chave, o.nome "
-        f"FROM medicoes m JOIN contratos c ON c.id=m.contrato_id LEFT JOIN orgaos o ON o.id=c.orgao_id "
-        f"WHERE m.estado NOT IN ({','.join('?' * len(FORA))})", FORA).fetchall()
-    atual = anterior = quantidade = 0
+        "SELECT criado_em, competencia, COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS valor "
+        f"FROM medicoes WHERE estado NOT IN ({','.join('?' * len(FORA))})", FORA).fetchall()
+    atual = quantidade = 0
     ultimo = None
-    grupos: dict[str, dict] = {}
     for r in linhas:
         d = _dia_local(r["criado_em"])
         if d is not None and d <= hoje:
             ultimo = max(ultimo, d) if ultimo else d
-        if r["competencia"] not in (mes, ant):
-            continue
-        nome = _contratante(r["familia"], r["chave"], r["nome"], r["orgao_texto"])
-        g = grupos.setdefault(nome, {"contratante": nome, "atual_centavos": 0, "anterior_centavos": 0})
         if r["competencia"] == mes:
             atual += r["valor"]; quantidade += 1
-            g["atual_centavos"] += r["valor"]
-        else:
-            anterior += r["valor"]
-            g["anterior_centavos"] += r["valor"]
-    compl = diretoria.complemento_rm(conn)
-    if compl:
-        orgaos = {r["id"]: r for r in conn.execute(
-            "SELECT c.id, c.orgao AS orgao_texto, o.familia, o.chave, o.nome FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id")}
-        for cid, por_comp in compl.items():
-            o = orgaos.get(cid)
-            nome = _contratante(o["familia"], o["chave"], o["nome"], o["orgao_texto"]) if o else "sem contratante"
-            for comp, campo in ((mes, "atual_centavos"), (ant, "anterior_centavos")):
-                v = por_comp.get(comp, 0)
-                if not v:
-                    continue
-                g = grupos.setdefault(nome, {"contratante": nome, "atual_centavos": 0, "anterior_centavos": 0})
-                g[campo] += v
-                if comp == mes:
-                    atual += v
-                else:
-                    anterior += v
-    medido = {"competencia": mes, "anterior_competencia": ant, "valor_centavos": atual, "anterior_centavos": anterior,
-              "quantidade": quantidade, "ultimo_lancamento": ultimo.isoformat() if ultimo else None}
-    por = sorted(grupos.values(), key=lambda g: (-max(g["atual_centavos"], g["anterior_centavos"]), g["contratante"]))
-    return medido, por
+    atual += sum(por_comp.get(mes, 0) for por_comp in diretoria.complemento_rm(conn).values())
+    return {"competencia": mes, "valor_centavos": atual, "quantidade": quantidade,
+            "ultimo_lancamento": ultimo.isoformat() if ultimo else None}
+
+
+# Issue #642: a faixa do ciclo. Cada etapa com os estados dela e a coluna da data do evento que e' a evidencia (envio
+# da planilha, atesto, emissao da nota, primeiro protocolo da nota). "Recebido no mes" vem das baixas do RM.
+CICLO = (("em_analise", ("planilha_enviada",), "planilha_enviada_em"),
+         ("boletim", ("boletim_recebido", "espelho_gerado", "espelho_enviado"), "atestado_em"),
+         ("nota", ("nota_emitida",), "nota_emitida_em"),
+         ("protocolado", diretoria.PROTOCOLADAS, "protocolo_em"))
+
+
+def _ciclo(conn, hoje: datetime.date) -> list[dict]:
+    """Quanto dinheiro esta' em cada etapa do ciclo da medicao, na COTA da Lotufo (`diretoria._cota`: o aprovado,
+    senao o pedido, medicao a medicao com o arredondamento unico), quantas medicoes e a idade, em dias, da mais
+    antiga. So' entra a medicao que tem a data do evento da etapa: a idade conta dessa data ate' hoje, nunca da
+    competencia; medicao no estado e sem a data fica fora do valor e da quantidade. "Recebido no mes" sao as baixas
+    do RM com data no mes de hoje (`diretoria.recebido_rm_no_mes`); a quantidade dele e' de notas, e nao tem idade."""
+    ms = diretoria._medicoes(conn)
+    out = []
+    for etapa, estados, campo in CICLO:
+        com_data = [(m, d) for m, d in ((m, diretoria._d(m[campo])) for m in ms if m["estado"] in estados) if d]
+        out.append({"etapa": etapa, "valor_centavos": sum(diretoria._cota(m) for m, _ in com_data),
+                    "quantidade": len(com_data),
+                    "mais_antigo_dias": max(0, max((hoje - d).days for _, d in com_data)) if com_data else None})
+    recebido = diretoria.recebido_rm_no_mes(conn, hoje.strftime("%Y-%m"))
+    out.append({"etapa": "recebido_mes", "valor_centavos": recebido["valor_centavos"], "quantidade": recebido["notas"],
+                "mais_antigo_dias": None})
+    return out
 
 
 def _recebido_ano(conn, hoje: datetime.date) -> dict:
@@ -152,43 +152,10 @@ def _protocoladas_dia(conn) -> list[dict]:
         "WHERE m.estado NOT IN ('cancelada','desistida') GROUP BY m.id")]
 
 
-def _acumulado(linhas: list[dict], mes: str, ate: int) -> dict:
-    por_dia = [0] * ate
-    quantidade = 0
-    for r in linhas:
-        d = (r["data"] or "")[:10]
-        if d[:7] != mes or not d[8:10].isdigit() or not 1 <= int(d[8:10]) <= ate:
-            continue
-        por_dia[int(d[8:10]) - 1] += r["valor"]
-        quantidade += 1
-    acumulado, soma = [], 0
-    for v in por_dia:
-        soma += v
-        acumulado.append(soma)
-    return {"mes": mes, "ate_dia": ate, "valor_centavos": soma, "quantidade": quantidade, "acumulado_centavos": acumulado}
-
-
-def _variacao_pct(atual: int, anterior: int) -> float | None:
-    """Variacao percentual com uma casa (meio para cima, em inteiros); nula sem base de comparacao."""
-    if anterior <= 0:
-        return None
-    return ((atual - anterior) * 2000 // anterior + 1) // 2 / 10
-
-
-def _protocolado_mes(conn, hoje: datetime.date, linhas: list[dict] | None = None) -> dict:
-    """Cartao de destaque: o mes de hoje (dia 1 ate hoje) contra o mesmo recorte do mes anterior (se o anterior
-    for mais curto, ate o ultimo dia dele), em valor protocolado acumulado por dia."""
-    linhas = _protocoladas_dia(conn) if linhas is None else linhas
-    fim_ant = hoje.replace(day=1) - datetime.timedelta(days=1)
-    atual = _acumulado(linhas, hoje.strftime("%Y-%m"), hoje.day)
-    anterior = _acumulado(linhas, fim_ant.strftime("%Y-%m"), min(hoje.day, fim_ant.day))
-    return {"dia": hoje.day, "atual": atual, "anterior": anterior,
-            "variacao_pct": _variacao_pct(atual["valor_centavos"], anterior["valor_centavos"])}
-
-
 def _notas_mes(conn, hoje: datetime.date, linhas: list[dict] | None = None) -> dict:
     """Notas fiscais ativas alocadas (alocacao nao desfeita) as medicoes protocoladas no mes de hoje: valor da nota
-    (cada nota uma vez), quantidade de notas e de obras distintas, e o acumulado por dia (data do protocolo)."""
+    (cada nota uma vez), quantidade de notas e de obras distintas. Issue #642: o acumulado por dia saiu com o
+    minigrafico do cartao."""
     mes = hoje.strftime("%Y-%m")
     linhas = _protocoladas_dia(conn) if linhas is None else linhas
     do_mes = {r["id"]: r for r in linhas if (r["data"] or "")[:7] == mes}
@@ -199,19 +166,10 @@ def _notas_mes(conn, hoje: datetime.date, linhas: list[dict] | None = None) -> d
         m = do_mes.get(a["medicao_id"])
         if m is None:
             continue
-        n = notas.setdefault(a["nota_id"], {"valor": a["valor_centavos"], "obras": set(), "dia": m["data"][:10]})
+        n = notas.setdefault(a["nota_id"], {"valor": a["valor_centavos"], "obras": set()})
         n["obras"].add(m["contrato_id"])
-        n["dia"] = min(n["dia"], m["data"][:10])
-    por_dia = [0] * hoje.day
-    for n in notas.values():
-        if n["dia"][8:10].isdigit() and 1 <= int(n["dia"][8:10]) <= hoje.day:
-            por_dia[int(n["dia"][8:10]) - 1] += n["valor"]
-    acumulado, soma = [], 0
-    for v in por_dia:
-        soma += v
-        acumulado.append(soma)
     return {"mes": mes, "valor_centavos": sum(n["valor"] for n in notas.values()), "notas": len(notas),
-            "obras": len({o for n in notas.values() for o in n["obras"]}), "acumulado_centavos": acumulado}
+            "obras": len({o for n in notas.values() for o in n["obras"]})}
 
 
 AVISOS_VISIVEIS = 3
@@ -272,10 +230,7 @@ def painel(conn, hoje: datetime.date | None = None, publico: str = "operacao") -
     resumo = avisos.resumo_mes(conn, hoje)
     ultima = conn.execute("SELECT MAX(mp.data) FROM medicao_protocolos mp JOIN medicoes m ON m.id=mp.medicao_id "
                           "WHERE mp.etapa='nota' AND m.estado NOT IN ('cancelada','desistida')").fetchone()[0]
-    medido, por_contratante = _medido(conn, hoje)
-    medido["variacao_pct"] = _variacao_pct(medido["valor_centavos"], medido["anterior_centavos"])
     prazos_lista = _prazos(conn, hoje)
-    protocoladas_dia = _protocoladas_dia(conn)
     return {
         "hoje": hoje.isoformat(),
         "notas_a_enviar": notas_envio.a_enviar(conn, hoje)["contadores"]["Todas"],
@@ -286,14 +241,13 @@ def painel(conn, hoje: datetime.date | None = None, publico: str = "operacao") -
                        "aniversario": a["data"], "dias": a["dias"]} for a in sorted(pedir, key=lambda a: a["dias"])],
         "protocoladas": {"obras_protocoladas": resumo["obras_protocoladas"], "obras_ativas": resumo["obras_ativas"],
                          "ultima": ultima[:10] if ultima else None},
-        "medido": medido,
-        "por_contratante": por_contratante,
+        "medido": _medido(conn, hoje),
         "recebido_ano": _recebido_ano(conn, hoje),
         "a_receber": _a_receber(conn, hoje),
         "prazos": prazos_lista,
         "espelhos": _espelhos(conn),
-        "protocolado_mes": _protocolado_mes(conn, hoje, protocoladas_dia),
-        "notas_mes": _notas_mes(conn, hoje, protocoladas_dia),
+        "ciclo": _ciclo(conn, hoje),
+        "notas_mes": _notas_mes(conn, hoje),
         "avisos_importantes": _avisos_importantes(reaj_caixa, prazos_lista, vencidas, vencendo, hoje),
     }
 
