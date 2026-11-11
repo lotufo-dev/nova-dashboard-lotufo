@@ -47,6 +47,29 @@ def _instrumentos_prazo(conn, contrato_id: int) -> list[dict]:
     return out
 
 
+def _execucao_sem_prazo(insts: list[dict], exe: str | None, hoje: datetime.date) -> dict | None:
+    """Issue #662: o fim de execucao registrado ja' passou e ha' instrumento de prazo assinado DEPOIS dele que
+    prorroga a vigencia sem trazer a execucao (e nenhum mais novo que a traga). O que se sabe e' so' isso: o ultimo
+    prazo de execucao registrado terminou e o contrato foi prorrogado; o prazo de execucao de hoje nao esta' no
+    cadastro. Devolve {aditivo_em, execucao_fim} (o mais novo desses instrumentos), ou None. Nada e' inferido."""
+    exe_d = _d(exe)
+    if not exe_d or exe_d >= hoje:
+        return None
+    depois = []
+    for a in insts:
+        if a["nova_execucao_fim"]:
+            depois = []          # este traz a execucao: os de so' vigencia anteriores a ele nao contam
+        elif a["nova_vigencia_fim"] and (a["data_assinatura"] or "")[:10] > exe[:10]:
+            depois.append(a)
+    return {"aditivo_em": depois[-1]["data_assinatura"][:10], "execucao_fim": exe[:10]} if depois else None
+
+
+def execucao_sem_prazo(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict | None:
+    """`_execucao_sem_prazo` da obra, para quem nao precisa da `situacao` inteira (cabecalho da pagina da obra)."""
+    exe = contratos.vigente(conn, contrato_id).get("execucao_fim_vigente")
+    return _execucao_sem_prazo(_instrumentos_prazo(conn, contrato_id), exe, hoje or tempo.hoje_local())
+
+
 def _outros(conn, contrato_id: int, tipo: str) -> list[dict]:
     return [{**dict(r), "dados": json.loads(r["dados"] or "{}")} for r in conn.execute(
         "SELECT * FROM instrumentos WHERE contrato_id=? AND tipo=? ORDER BY data, id", (contrato_id, tipo))]
@@ -103,7 +126,10 @@ def situacao(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict:
         marcos = {m["dados"].get("marco"): m["data"] for m in _outros(conn, contrato_id, "marco_encerramento")}
         enc = {"desde": v["encerramento_iniciado_em"], "marcos": marcos,
                "conclusao_comunicada": _pleito(conn, contrato_id, "conclusao") is not None}
-    return {"execucao_fim": exe, "dias_execucao": (exe_d - hoje).days if exe_d else None,
+    # #662: sem prazo de execucao conhecido nao ha' dias a contar (nem aviso, nem selo de vencido); a data fica
+    sem_prazo = _execucao_sem_prazo(insts, exe, hoje)
+    return {"execucao_fim": exe, "dias_execucao": (exe_d - hoje).days if exe_d and not sem_prazo else None,
+            "execucao_sem_prazo": sem_prazo,
             "vigencia_fim": vig, "dias_vigencia": (vig_d - hoje).days if vig_d else None,
             "vigencia_automatica": bool(regras.get("vigencia_automatica")),
             "folga": {"exigida": exigida, "real": real,
@@ -272,6 +298,9 @@ def ritmo_e_prazo(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
     dias = (conclusao - exe).days if conclusao and exe else None
     if dias is not None and dias > TETO_DIAS:
         conclusao = dias = None
+    # #662: sem prazo de execucao conhecido nao ha' com o que comparar a conclusao (a conta nao fecha); a data fica
+    if dias is not None and execucao_sem_prazo(conn, contrato_id, hoje):
+        conclusao = dias = None
     return {"ritmo_centavos": s["ritmo_centavos"], "saldo_centavos": s["saldo_centavos"],
             "conclusao": conclusao.isoformat() if conclusao and dias is not None else None,
             "execucao_fim": s["execucao_fim"],
@@ -296,6 +325,14 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                                      cid, nome, dias=dias, destino=destino,
                                      data=desde.isoformat(), sentido="desde"))
             continue
+        sem_prazo = s["execucao_sem_prazo"]
+        if sem_prazo:
+            # #662: no lugar do aviso de execucao vencida, a pendencia de cadastro (so' o admin a le)
+            out.append(_av.aviso("execucao_sem_prazo", "atencao",
+                                 f"Aditivo de {_br(sem_prazo['aditivo_em'])} prorroga a vigência sem o prazo de "
+                                 f"execução; último prazo de execução registrado: {_br(sem_prazo['execucao_fim'])}",
+                                 cid, nome, destino=destino, data=sem_prazo["aditivo_em"], sentido="desde",
+                                 natureza="ausencia"))
         if s["paralisacao"]:
             out.append(_av.aviso("obra_paralisada", "atencao",
                                  f"paralisada desde {_br(s['paralisacao']['desde'])}", cid, nome,
@@ -310,9 +347,12 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                        f"({s['pedido']['numero_oficio']}); instrumento pendente há {desde} dias")
                 if vencida:
                     msg += f"; execução vencida há {-dias} dias"
+                # #662: sem prazo de execucao conhecido o aviso conta desde o pedido, e nao ate' a execucao registrada
+                quando = {"dias": desde, "data": s["pedido"]["enviado_em"][:10], "sentido": "desde"} if sem_prazo \
+                    else {"dias": dias, "data": s["execucao_fim"], "sentido": "prazo"}
                 out.append(_av.aviso("instrumento_pendente", "critico" if vencida else "atencao", msg, cid, nome,
-                                     dias=dias, publico=("operacao", "diretoria") if vencida else ("operacao",),
-                                     destino=destino, data=s["execucao_fim"], sentido="prazo"))
+                                     publico=("operacao", "diretoria") if vencida else ("operacao",),
+                                     destino=destino, **quando))
             elif dias is not None and dias < 0:
                 out.append(_av.aviso("instrumento_pendente", "critico",
                                      f"execução vencida há {-dias} dias, sem pedido de prorrogação",

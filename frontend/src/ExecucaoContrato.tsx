@@ -20,10 +20,12 @@ export function useHoje(): string {
   return hoje;
 }
 
-function Linha({ titulo, inicio, fim, status, hoje, paralisada }:
-    { titulo: string; inicio: string | null; fim: string | null; status: Status; hoje: string; paralisada?: boolean }) {
-  // data final ausente ou ilegivel: so' a data, como a tela antiga (nunca "vencida ha NaN dias")
-  if (!fim || Number.isNaN(diasEntre(hoje, fim))) {
+function Linha({ titulo, inicio, fim, status, hoje, paralisada, soData }:
+    { titulo: string; inicio: string | null; fim: string | null; status: Status; hoje: string; paralisada?: boolean;
+      soData?: boolean }) {
+  // data final ausente ou ilegivel: so' a data, como a tela antiga (nunca "vencida ha NaN dias"). #662: tambem quando
+  // o prazo de execucao de hoje nao e' conhecido (`soData`): a data registrada, sem trilho nem selo de vencida
+  if (!fim || soData || Number.isNaN(diasEntre(hoje, fim))) {
     return (
       <div className="lt">
         <p className="lt__titulo"><span>{titulo}</span></p>
@@ -60,15 +62,16 @@ function Linha({ titulo, inicio, fim, status, hoje, paralisada }:
   );
 }
 
-export default function ExecucaoContrato({ execucaoInicio, execucaoFim, vigenciaInicio, vigenciaFim, status }:
+export default function ExecucaoContrato({ execucaoInicio, execucaoFim, vigenciaInicio, vigenciaFim, status, execucaoSemPrazo }:
     { execucaoInicio: string | null; execucaoFim: string | null; vigenciaInicio: string | null; vigenciaFim: string | null;
-      status: Status }) {
+      status: Status; execucaoSemPrazo?: boolean }) {
   const hoje = useHoje();
   return (
     <section className="cartao" aria-labelledby="titulo-execucao">
       <div className="cartao__cabeca"><h2 className="cartao__titulo" id="titulo-execucao">Execução do contrato</h2></div>
       <div className="linhas-tempo">
-        <Linha titulo="Execução" inicio={execucaoInicio} fim={execucaoFim} status={status} hoje={hoje} paralisada={status === "suspenso"} />
+        <Linha titulo="Execução" inicio={execucaoInicio} fim={execucaoFim} status={status} hoje={hoje} paralisada={status === "suspenso"}
+          soData={execucaoSemPrazo} />
         <Linha titulo="Vigência" inicio={vigenciaInicio} fim={vigenciaFim} status={status} hoje={hoje} />
       </div>
     </section>
