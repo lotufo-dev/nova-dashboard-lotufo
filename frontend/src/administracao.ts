@@ -7,7 +7,15 @@ import { diaLocal } from "./tempo";
 export const ABAS_ADMIN: { id: AbaAdmin; rotulo: string }[] = [
   { id: "saude", rotulo: "Saúde" }, { id: "reconciliacao", rotulo: "Reconciliação" },
   { id: "usuarios", rotulo: "Usuários" }, { id: "auditoria", rotulo: "Auditoria" },
+  { id: "pendencias", rotulo: "Pendências de cadastro" },
 ];
+
+/* ------------------------------------------------------ pendencias de cadastro */
+
+// Issue #649: o documento que nao foi achado no cadastro (`/api/admin/pendencias-cadastro`, so' admin). `desde` e' data
+// (AAAA-MM-DD) ou competencia (AAAA-MM); `aba`, a da obra onde o documento se confere (nula: a ficha da obra).
+export type PendenciaCadastro = { contrato_id: number; obra: string | null; falta: string; desde: string | null;
+                                  aba: "reajuste" | "prazos" | null };
 
 /* ------------------------------------------------------------ reconciliacao */
 

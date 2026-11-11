@@ -65,7 +65,7 @@ describe("Reajuste", () => {
     render(<Reajuste contratoId={7} podeEditar={false} />);
     const tabela = await screen.findByRole("table", { name: "Reajuste por competência da data-base 06/2024, ciclo de 2026" });
     expect(within(tabela).getAllByRole("columnheader").map(c => c.textContent)).toEqual(
-      ["Competência", "Previsto", "Pedido", "Aprovado", "Apostilado", "Nota", "Recebido", "Situação"]);
+      ["Competência", "Previsto", "Pedido", "Aprovado", "Previsto no apostilamento", "Nota", "Recebido", "Situação"]);
     const [jul, ago, set] = [...tabela.querySelectorAll("tbody tr")];
     // o nº da medicao que o termo cita fica a' vista ao lado do apostilado
     expect(celulas(jul).map(visivel)).toEqual(
@@ -98,9 +98,10 @@ describe("Reajuste", () => {
     expect(seguinte.closest("section")?.id).toBe("db-2024-06");
   });
 
-  it("marca a competência com aviso: fora da previsão, sem apostilamento e nota antes do termo (issue #275)", async () => {
+  it("a tabela por competência não acusa diferença: sem os três selos e sem cor de alerta (issue #648)", async () => {
     api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
       ? { ciclos: [cicloAberto], pleitos: [],
+          // a marca de diferenca vinha do servidor em `avisos`: mesmo que venha, a aba nao a desenha
           competencias_por_ciclo: [{ data_base_mes: "2024-06", ciclo: 2026, competencias: [
             comp("2026-07", { estado: "pedida", previsto_centavos: 100_01, previsto_origem: "manual", medicoes: [1],
               pedido_centavos: 101_02, avisos: ["fora_da_previsao"] }),
@@ -114,59 +115,37 @@ describe("Reajuste", () => {
             comp("2026-11", { estado: "apostilada", apostilada: true, apostilado_percentual: "4,125%",
               apostilamento_chave: "ap-mtpar" })] }] }
       : { instrumentos: [] });
-    render(<Reajuste contratoId={7} podeEditar={false} />);
-    const tabela = await screen.findByRole("table", { name: "Reajuste por competência da data-base 06/2024, ciclo de 2026" });
-    const situacao = [...tabela.querySelectorAll("tbody tr")].map(tr => celulas(tr)[7]);
-    const selos = (td: Element) => [...td.querySelectorAll(".selo")].map(s => [s.textContent, s.className]);
-    expect(selos(situacao[0])).toEqual([["pedida", "selo"], ["fora da previsão", "selo selo--atencao"]]);
-    expect(situacao[0].querySelector(".selo--atencao")?.getAttribute("title")).toBe(
-      `Pedido ${brl(101_02)}; previsto ${brl(100_01)}`);
-    expect(selos(situacao[1])).toEqual([["aprovada", "selo"], ["sem apostilamento", "selo selo--atencao"]]);
-    // a nota antes do termo e' o critico: um selo so', o mais grave
-    expect(selos(situacao[2])).toEqual([["faturada", "selo"], ["nota antes do apostilamento", "selo selo--acao"]]);
-    expect(selos(situacao[3])).toEqual([["apostilada", "selo"]]);
-    // o percentual da MT-PAR no lugar do valor apostilado
-    expect(visivel(celulas(tabela.querySelectorAll("tbody tr")[3])[4])).toBe("6,76%");
-    expect(visivel(celulas(tabela.querySelectorAll("tbody tr")[4])[4])).toBe("4,125%");
-  });
-
-  it("justifica o pedido fora da previsão na linha da competência e mostra o texto depois (issue #274)", async () => {
-    let justificada = false;
-    const linha = () => comp("2026-07", { estado: "pedida", previsto_centavos: 100_01, previsto_origem: "manual",
-      medicoes: [1], pedido_centavos: 150_03, ...(justificada
-        ? { avisos: [], justificativa: { texto: "Índice definitivo saiu maior", usuario: "Engenharia",
-            criado_em: "2026-10-01 12:00:00", pedido_centavos: 150_03, previsto_centavos: 100_01 } }
-        : { avisos: ["fora_da_previsao"], justificativa: null }) });
-    api.mockImplementation(async (caminho: string) => {
-      if (caminho.endsWith("/justificativas")) { justificada = true; return { id: 1 }; }
-      return caminho.endsWith("/reajuste")
-        ? { ciclos: [cicloAberto], pleitos: [],
-            competencias_por_ciclo: [{ data_base_mes: "2024-06", ciclo: 2026, competencias: [linha()] }] }
-        : { instrumentos: [] };
-    });
     render(<Reajuste contratoId={7} podeEditar />);
-    fireEvent.click(await screen.findByRole("button", { name: "Justificar o pedido de 07/2026" }));
-    fireEvent.change(screen.getByLabelText("Justificativa do pedido de 07/2026"),
-      { target: { value: "Índice definitivo saiu maior" } });
-    fireEvent.click(screen.getByRole("button", { name: "Gravar justificativa" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Justificar o pedido de 07/2026" })).toBeNull());
-    const post = api.mock.calls.find(([c]) => c === "/api/contratos/7/reajuste/justificativas");
-    expect(post?.[1]?.method).toBe("POST");
-    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ data_base_mes: "2024-06", ciclo: 2026, competencia: "2026-07",
-      texto: "Índice definitivo saiu maior" });
-    const selo = await screen.findByText("justificado");
-    expect(selo.closest(".selo")?.getAttribute("title")).toBe("Índice definitivo saiu maior (Engenharia)");
-    expect(screen.queryByText("fora da previsão")).toBeNull();
+    const tabela = await screen.findByRole("table", { name: "Reajuste por competência da data-base 06/2024, ciclo de 2026" });
+    const linhas = [...tabela.querySelectorAll("tbody tr")];
+    const selos = (tr: Element) => [...celulas(tr)[7].querySelectorAll(".selo")].map(s => [s.textContent, s.className]);
+    expect(linhas.map(selos)).toEqual([[["pedida", "selo"]], [["aprovada", "selo"]], [["faturada", "selo"]],
+      [["apostilada", "selo"]], [["apostilada", "selo"]]]);
+    for (const texto of ["fora da previsão", "sem apostilamento", "nota antes do apostilamento"])
+      expect(within(tabela).queryByText(texto)).toBeNull();
+    expect(tabela.querySelector(".selo--atencao, .selo--acao")).toBeNull();
+    // sem a marca, nada a justificar na linha
+    expect(within(tabela).queryByRole("button", { name: /^Justificar/ })).toBeNull();
+    // nenhum valor some: previsto, pedido, aprovado e nota continuam na linha
+    expect(celulas(linhas[0]).slice(0, 4).map(visivel)).toEqual(["07/2026", brl(100_01), brl(101_02), "—"]);
+    expect(celulas(linhas[2]).slice(0, 6).map(visivel)).toEqual(
+      ["09/2026", "—", brl(300_05), brl(300_05), "—", brl(300_05)]);
+    // o percentual da MT-PAR no lugar do valor previsto no apostilamento
+    expect(visivel(celulas(linhas[3])[4])).toBe("6,76%");
+    expect(visivel(celulas(linhas[4])[4])).toBe("4,125%");
   });
 
-  it("quem só consulta não vê o botão de justificar (issue #274)", async () => {
+  it("a justificativa já registrada continua na linha da competência (issue #274)", async () => {
     api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
       ? { ciclos: [cicloAberto], pleitos: [], competencias_por_ciclo: [{ data_base_mes: "2024-06", ciclo: 2026,
-          competencias: [comp("2026-07", { estado: "pedida", previsto_centavos: 100_01, medicoes: [1],
-            pedido_centavos: 150_03, avisos: ["fora_da_previsao"] })] }] }
+          competencias: [comp("2026-07", { estado: "pedida", previsto_centavos: 100_01, previsto_origem: "manual",
+            medicoes: [1], pedido_centavos: 150_03, justificativa: { texto: "Índice definitivo saiu maior",
+              usuario: "Engenharia", criado_em: "2026-10-01 12:00:00", pedido_centavos: 150_03,
+              previsto_centavos: 100_01 } })] }] }
       : { instrumentos: [] });
-    render(<Reajuste contratoId={7} podeEditar={false} />);
-    expect(await screen.findByText("fora da previsão")).toBeTruthy();
+    render(<Reajuste contratoId={7} podeEditar />);
+    const selo = await screen.findByText("justificado");
+    expect(selo.closest(".selo")?.getAttribute("title")).toBe("Índice definitivo saiu maior (Engenharia)");
     expect(screen.queryByRole("button", { name: /^Justificar/ })).toBeNull();
   });
 
@@ -319,7 +298,7 @@ describe("Reajuste", () => {
     render(<Reajuste contratoId={7} podeEditar={false} />);
     await screen.findByRole("table", { name: "Reajuste por competência da data-base 09/2024, ciclo de 2026" });
     expect(screen.queryAllByRole("button")).toEqual([]);
-    expect(screen.getByText("sem apostilamento")).toBeTruthy();       // a marca do aviso continua para quem so' le
+    expect(screen.queryByText("sem apostilamento")).toBeNull();       // issue #648: a aba nao acusa a diferenca
   });
 
   it("competência fora das datas-base do cadastro não some (issue #275)", async () => {

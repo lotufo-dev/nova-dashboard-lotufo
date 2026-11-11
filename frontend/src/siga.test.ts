@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  casaComBusca, contagemPorTipo, detalheDoEvento, ehRecebimentoNoSetorAtual, filtrarMovimentacoes, nivelDias, ordenar, periodoDe,
+  casaComBusca, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, nivelDias, ordenar, periodoDe,
   roboAtivo, setorPessoa, situacaoDoBotao, tempoNoSetor, tituloDoEvento, volumeDe, type Movimentacao, type ProcessoSiga, type Robo,
 } from "./siga";
 
@@ -73,12 +73,16 @@ describe("siga", () => {
     expect(periodoDe([], iso => iso)).toBe("");
   });
 
-  it("destaca só o recebimento da entrada no setor atual (não na caixa de entrada)", () => {
+  it("destaca só a movimentação da entrada no setor atual: recebimento ou transferência (não na caixa de entrada)", () => {
     const rec = MOVS[1];
-    expect(ehRecebimentoNoSetorAtual(p({ desde: rec.data }), rec)).toBe(true);
-    expect(ehRecebimentoNoSetorAtual(p({ desde: rec.data, caixa_entrada: true }), rec)).toBe(false);
-    expect(ehRecebimentoNoSetorAtual(p({ desde: MOVS[0].data }), rec)).toBe(false);
-    expect(ehRecebimentoNoSetorAtual(p({ desde: rec.data }), MOVS[0])).toBe(false);
+    expect(ehEntradaNoSetorAtual(p({ desde: rec.data }), rec)).toBe(true);
+    expect(ehEntradaNoSetorAtual(p({ desde: rec.data, caixa_entrada: true }), rec)).toBe(false);
+    expect(ehEntradaNoSetorAtual(p({ desde: MOVS[0].data }), rec)).toBe(false);
+    // #650: a entrada no setor pode ser a transferência que levou o processo para lá
+    const transf = MOVS.find(m => m.tipo === "transferencia")!;
+    expect(ehEntradaNoSetorAtual(p({ desde: transf.data }), transf)).toBe(true);
+    const outra = MOVS.find(m => m.tipo !== "transferencia" && m.tipo !== "recebimento")!;
+    expect(ehEntradaNoSetorAtual(p({ desde: outra.data }), outra)).toBe(false);
   });
 
   it("volume só aparece depois do primeiro, e vale o último da situação", () => {

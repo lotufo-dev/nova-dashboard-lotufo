@@ -1,6 +1,7 @@
 /* Ficha executiva da obra (#510): seis cartoes e a curva S numa tela so'. Cores so' dos tokens; a cor e' da informacao. */
 
 .ficha { display: grid; gap: 12px; align-content: start; }
+.ficha > * { min-width: 0; }
 .ficha__grade { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .ficha__cartao { display: flex; flex-direction: column; gap: 6px; padding: 14px 18px; min-height: 124px; }
 .ficha__titulo { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; }

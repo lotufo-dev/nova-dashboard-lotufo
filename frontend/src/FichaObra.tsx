@@ -1,31 +1,22 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api, mensagemDeErro } from "./api";
-import { STATUS } from "./ContratoPagina";
-import { baseDosValores, brl, fmtDias, fmtPercentual } from "./formato";
-import LegendaCor from "./LegendaCor";
+import { useLayoutEffect, useRef, useState } from "react";
+import { brl, fmtDias, fmtPercentual } from "./formato";
 import { Link } from "./Link";
 import { curvaS, type PontoDaCurva, type PrevistoAnterior } from "./obra";
-import type { Origem } from "./rota";
-import Selo from "./Selo";
 import { fmtDataPura, fmtMesCurto } from "./tempo";
-import { Migalhas, VoltarOrigem } from "./Topo";
 import "./ficha.css";
 
-// Ficha executiva da obra (#510, aprovada em 06/11/2026): seis cartoes e a curva S numa tela so', sem abas.
+// Ficha executiva da obra (#510, aprovada em 06/11/2026): seis cartoes e a curva S. Desde a #646 ela e' o resumo no
+// alto da pagina unica da obra (`ContratoPagina`), que le os dados e os passa para ca'.
 // A cor e' so' da informacao (docs/identidade-visual.md): feito verde, em andamento azul, vence em breve ambar,
 // critico vermelho, o resto preto. Quem decide o nivel de prazo e de certidao e' o servidor (`ficha_obra`).
 
 type Nivel = "critico" | "atencao" | "normal";
-type Cabecalho = {
-  id: number; obra: string; orgao: string; instrumento: string; valor_vigente_centavos: number;
-  percentual_lotufo_bp: number; execucao_fim: string | null; dias_execucao: number | null;
-  vigencia_fim: string | null; dias_vigencia: number | null; status: keyof typeof STATUS;
-};
-type Saldo = { vigente_centavos: number; vigente_execucao_centavos: number; atestado_execucao_centavos: number; saldo_centavos: number };
-type Curva = { pontos: PontoDaCurva[]; saldo: Saldo; anterior: PrevistoAnterior | null };
+type Curva = { pontos: PontoDaCurva[]; anterior: PrevistoAnterior | null };
 type Vencimento = { chave: "certidao" | "execucao" | "vigencia"; rotulo: string; data: string | null; dias: number | null; nivel: Nivel };
 type Medicao = { id: number; titulo: string; rotulo: string; competencia: string; valor_centavos: number | null };
 export type Ficha = {
+  // #646: base de execucao (sem o aditivo de reajuste) e cota da Lotufo; vigente − medido = saldo
+  topo: { vigente_centavos: number; medido_centavos: number; saldo_centavos: number; reajuste_centavos: number };
   contrato: { original_centavos: number; original_igual: boolean; tas: number; data_base: string | null };
   ultima_medicao: (Medicao & { recebida_em: string | null; dias_apos_nota: number | null }) | null;
   em_andamento: (Medicao & { etapa: string; desde: string | null; outras: number }) | null;
@@ -42,6 +33,8 @@ const diaMes = (iso: string) => { const m = /^\d{4}-(\d{2})-(\d{2})/.exec(iso); 
 const data = (iso: string | null) => (iso ? fmtDataPura(iso.slice(0, 10)) : "—");
 const INFO: Record<Nivel, string> = { critico: "info--critico", atencao: "info--breve", normal: "" };
 const PONTO: Record<Nivel, string> = { critico: "ponto--critico", atencao: "ponto--breve", normal: "ponto--normal" };
+const INDISPONIVEL = <p className="erro" role="alert">indisponível agora</p>;
+const CARREGANDO = <p className="ficha__nota">Carregando…</p>;
 
 /** O desvio do medido contra o previsto, em pontos percentuais do previsto total, ate' a ultima competencia medida. */
 export function desvioDaCurva(pontos: PontoDaCurva[], anterior: PrevistoAnterior | null): { pp: number } | null {
@@ -109,155 +102,120 @@ function CurvaFicha({ pontos, anterior }: { pontos: PontoDaCurva[]; anterior: Pr
   );
 }
 
-export default function FichaObra({ contratoId, origem }: { contratoId: number; origem: Origem | null }) {
-  const [c, setC] = useState<Cabecalho | null>(null);
-  const [erro, setErro] = useState("");
-  const [curva, setCurva] = useState<Curva | null | undefined>(undefined);
-  const [ficha, setFicha] = useState<Ficha | null | undefined>(undefined);
-
-  useEffect(() => {
-    let vivo = true;
-    setC(null); setErro(""); setCurva(undefined); setFicha(undefined);
-    api<Cabecalho>(`/api/contratos/${contratoId}/cabecalho`)
-      .then(d => { if (vivo) setC(d); }).catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
-    api<{ curva?: PontoDaCurva[]; saldo: Saldo; anterior?: PrevistoAnterior | null }>(`/api/contratos/${contratoId}/curva`)
-      .then(d => { if (vivo) setCurva({ pontos: d.curva ?? [], saldo: d.saldo, anterior: d.anterior ?? null }); })
-      .catch(() => { if (vivo) setCurva(null); });
-    api<Ficha>(`/api/contratos/${contratoId}/ficha`)
-      .then(d => { if (vivo) setFicha(d); }).catch(() => { if (vivo) setFicha(null); });
-    return () => { vivo = false; };
-  }, [contratoId]);
-
-  useEffect(() => { document.title = `${c ? c.obra : "Obra"} · grupolotufo`; }, [c]);
-
-  const venc = (chave: Vencimento["chave"]) => ficha?.vencimentos.find(v => v.chave === chave) ?? null;
-  const prazo = venc("execucao");
-  const cota = c && baseDosValores(c.percentual_lotufo_bp) ? `Consórcio, ${baseDosValores(c.percentual_lotufo_bp)!.replace("cota ", "cota Lotufo ")}` : null;
-  const pctExec = curva && curva.saldo.vigente_execucao_centavos > 0 ? curva.saldo.atestado_execucao_centavos / curva.saldo.vigente_execucao_centavos : null;
+/** O cartao "Previsto × medido acumulado" da ficha: as duas series e a pilula do desvio. */
+export function CurvaDaFicha({ curva }: { curva: Curva | null | undefined }) {
   const desvio = curva ? desvioDaCurva(curva.pontos, curva.anterior) : null;
-  const indisponivel = <p className="erro" role="alert">indisponível agora</p>;
-  const carregando = <p className="ficha__nota">Carregando…</p>;
-
   return (
-    <>
-      <header className="topbar topbar--detalhe">
-        <div className="topbar__linha topbar__linha--quebra">
-          <div className="topbar__trilha">
-            <VoltarOrigem origem={origem} alemDe={["obras"]} />
-            <Migalhas origem={origem} itens={[{ rotulo: "Obras", para: { tela: "obras" } }, { rotulo: c?.obra ?? "Obra" }]} />
-          </div>
-          <LegendaCor />
-        </div>
-        <div className="topbar__linha topbar__linha--quebra">
-          <h1 className="topbar__titulo topbar__titulo--grande" title={c?.obra}>{c ? c.obra : "Obra"}</h1>
-          {c && c.status !== "ativo" && <Selo classe={STATUS[c.status]?.classe ?? ""}>{STATUS[c.status]?.rotulo ?? c.status}</Selo>}
-          {c && <p className="topbar__meta topbar__meta--obra">{[c.orgao, `Contrato ${c.instrumento}`, cota].filter(Boolean).join(" · ")}</p>}
-        </div>
-      </header>
-
-      <div className="pagina ficha">
-        {erro && <p className="erro" role="alert">{erro}</p>}
-        {!c && !erro && <section className="cartao"><div className="vazio"><p>Carregando a obra…</p></div></section>}
-        {c && (
-          <>
-            <div className="ficha__grade">
-              <Cartao titulo="Contrato">
-                <p className="ficha__rotulo">Valor vigente</p>
-                <p className="ficha__grande ficha__valor">{brl(c.valor_vigente_centavos)}</p>
-                {ficha === undefined ? carregando : ficha === null ? indisponivel : (
-                  <p className="ficha__rodape">
-                    {[ficha.contrato.original_igual ? "original igual" : `original ${brl(ficha.contrato.original_centavos)}`,
-                      `${ficha.contrato.tas} ${ficha.contrato.tas === 1 ? "TA" : "TAs"}`,
-                      ficha.contrato.data_base ? `data-base ${mesAno(ficha.contrato.data_base)}` : null].filter(Boolean).join(" · ")}
-                    {" · "}<Link para={{ tela: "obra", id: contratoId, aba: "contrato" }}>ver contrato</Link>
-                  </p>
-                )}
-              </Cartao>
-
-              <Cartao titulo="Execução" lado={curva ? <span className="ficha__pct info--feito">{pctExec === null ? "—" : fmtPercentual(pctExec, 0)}</span> : undefined}>
-                {curva === undefined ? carregando : curva === null ? indisponivel : (
-                  <>
-                    <div className="ficha__barra" role="progressbar" aria-label="Execução do contrato" aria-valuemin={0} aria-valuemax={100}
-                      aria-valuenow={pctExec === null ? undefined : Math.round(Math.min(1, pctExec) * 100)}>
-                      <span style={{ width: `${Math.min(100, Math.max(0, (pctExec ?? 0) * 100))}%` }} />
-                    </div>
-                    <dl className="ficha__linhas">
-                      <div><dt>Medido</dt><dd>{brl(curva.saldo.atestado_execucao_centavos)}</dd></div>
-                      <div><dt>Saldo</dt><dd className={curva.saldo.saldo_centavos < 0 ? "info--critico" : ""}>{brl(curva.saldo.saldo_centavos)}</dd></div>
-                    </dl>
-                  </>
-                )}
-              </Cartao>
-
-              <Cartao titulo="Prazo">
-                {ficha === undefined ? carregando : ficha === null || !prazo ? indisponivel : (
-                  <p className={`ficha__grande ficha__dias ${INFO[prazo.nivel]}`}>
-                    {prazo.dias === null ? "—" : prazo.dias < 0 ? `vencido há ${fmtDias(-prazo.dias)}` : fmtDias(prazo.dias)}</p>
-                )}
-                <p className="ficha__rodape">execução até {data(c.execucao_fim)} · vigência até {data(c.vigencia_fim)}</p>
-              </Cartao>
-
-              <Cartao titulo="Última medição">
-                {ficha === undefined ? carregando : ficha === null ? indisponivel : !ficha.ultima_medicao
-                  ? <p className="ficha__nota">—</p> : (
-                    <>
-                      <p className="ficha__medicao">
-                        <Link para={{ tela: "medicao", obra: contratoId, id: ficha.ultima_medicao.id }}>
-                          {ficha.ultima_medicao.rotulo} · {mesAno(ficha.ultima_medicao.competencia)} · {brl(ficha.ultima_medicao.valor_centavos)}</Link></p>
-                      <p className="ficha__rodape info--feito">
-                        {ficha.ultima_medicao.recebida_em ? `recebida em ${data(ficha.ultima_medicao.recebida_em)}` : "recebida"}
-                        {ficha.ultima_medicao.dias_apos_nota !== null && `, ${fmtDias(ficha.ultima_medicao.dias_apos_nota)} após a nota`}</p>
-                    </>
-                  )}
-              </Cartao>
-
-              <Cartao titulo="Em andamento">
-                {ficha === undefined ? carregando : ficha === null ? indisponivel : !ficha.em_andamento
-                  ? <p className="ficha__nota">—</p> : (
-                    <>
-                      <p className="ficha__medicao">
-                        <Link para={{ tela: "medicao", obra: contratoId, id: ficha.em_andamento.id }}>
-                          {ficha.em_andamento.rotulo} · {mesAno(ficha.em_andamento.competencia)} · {brl(ficha.em_andamento.valor_centavos)}</Link></p>
-                      <p className="ficha__rodape">
-                        <span className="pilula-info pilula-info--andamento">
-                          {ficha.em_andamento.etapa}{ficha.em_andamento.desde && ` desde ${diaMes(ficha.em_andamento.desde)}`}</span>
-                      </p>
-                    </>
-                  )}
-              </Cartao>
-
-              <Cartao titulo="Próximos vencimentos">
-                {ficha === undefined ? carregando : ficha === null ? indisponivel : (
-                  <ul className="ficha__venc">
-                    {ficha.vencimentos.map(v => (
-                      <li key={v.chave}>
-                        <span className={`ponto ${PONTO[v.nivel]}`} aria-hidden="true" />
-                        <span className="ficha__venc-rotulo">{v.rotulo}</span>
-                        <span className={`ficha__venc-data ${INFO[v.nivel]}`}>{data(v.data)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Cartao>
-            </div>
-
-            <section className="cartao ficha__curva" aria-label="Previsto × medido acumulado">
-              <div className="ficha__curva-cabeca">
-                <h2 className="ficha__titulo">Previsto × medido acumulado</h2>
-                {desvio && (
-                  <span className="pilula-info pilula-info--andamento">
-                    {Math.abs(desvio.pp) < 0.05 ? "medido no previsto"
-                      : <>medido <strong>{fmtPercentual(Math.abs(desvio.pp) / 100, 1)}</strong> {desvio.pp < 0 ? "abaixo" : "acima"} do previsto</>}
-                  </span>
-                )}
-              </div>
-              {curva === undefined ? carregando : curva === null ? indisponivel
-                : curva.pontos.length === 0 ? <p className="ficha__nota">—</p>
-                : <CurvaFicha pontos={curva.pontos} anterior={curva.anterior} />}
-            </section>
-          </>
+    <section className="cartao ficha__curva" aria-label="Previsto × medido acumulado">
+      <div className="ficha__curva-cabeca">
+        <h2 className="ficha__titulo">Previsto × medido acumulado</h2>
+        {desvio && (
+          <span className="pilula-info pilula-info--andamento">
+            {Math.abs(desvio.pp) < 0.05 ? "medido no previsto"
+              : <>medido <strong>{fmtPercentual(Math.abs(desvio.pp) / 100, 1)}</strong> {desvio.pp < 0 ? "abaixo" : "acima"} do previsto</>}
+          </span>
         )}
       </div>
-    </>
+      {curva === undefined ? CARREGANDO : curva === null ? INDISPONIVEL
+        : curva.pontos.length === 0 ? <p className="ficha__nota">—</p>
+        : <CurvaFicha pontos={curva.pontos} anterior={curva.anterior} />}
+    </section>
+  );
+}
+
+/** Os seis cartoes do resumo da obra, no alto da pagina unica (#646). Valor vigente, medido e saldo vem do `topo` do
+ *  servidor: base de execucao (sem o aditivo de reajuste) e cota da Lotufo; o reajuste contratado vai a parte. */
+export default function FichaObra({ contratoId, prazos, ficha }:
+    { contratoId: number; prazos: { execucao_fim: string | null; vigencia_fim: string | null }; ficha: Ficha | null | undefined }) {
+  const venc = (chave: Vencimento["chave"]) => ficha?.vencimentos.find(v => v.chave === chave) ?? null;
+  const prazo = venc("execucao");
+  const topo = ficha?.topo;
+  const pctExec = topo && topo.vigente_centavos > 0 ? topo.medido_centavos / topo.vigente_centavos : null;
+
+  return (
+    <div className="ficha__grade" id="resumo">
+      <Cartao titulo="Contrato">
+        <p className="ficha__rotulo">Valor vigente</p>
+        {ficha === undefined ? CARREGANDO : ficha === null ? INDISPONIVEL : (
+          <>
+            <p className="ficha__grande ficha__valor">{brl(ficha.topo.vigente_centavos)}</p>
+            {ficha.topo.reajuste_centavos !== 0 && (
+              <dl className="ficha__linhas"><div><dt>Reajuste</dt><dd>{brl(ficha.topo.reajuste_centavos)}</dd></div></dl>
+            )}
+            <p className="ficha__rodape">
+              {[ficha.contrato.original_igual ? "original igual" : `original ${brl(ficha.contrato.original_centavos)}`,
+                `${ficha.contrato.tas} ${ficha.contrato.tas === 1 ? "TA" : "TAs"}`,
+                ficha.contrato.data_base ? `data-base ${mesAno(ficha.contrato.data_base)}` : null].filter(Boolean).join(" · ")}
+            </p>
+          </>
+        )}
+      </Cartao>
+
+      <Cartao titulo="Execução" lado={topo ? <span className="ficha__pct info--feito">{pctExec === null ? "—" : fmtPercentual(pctExec, 0)}</span> : undefined}>
+        {ficha === undefined ? CARREGANDO : ficha === null ? INDISPONIVEL : (
+          <>
+            <div className="ficha__barra" role="progressbar" aria-label="Execução do contrato" aria-valuemin={0} aria-valuemax={100}
+              aria-valuenow={pctExec === null ? undefined : Math.round(Math.min(1, pctExec) * 100)}>
+              <span style={{ width: `${Math.min(100, Math.max(0, (pctExec ?? 0) * 100))}%` }} />
+            </div>
+            <dl className="ficha__linhas">
+              <div><dt>Medido</dt><dd>{brl(ficha.topo.medido_centavos)}</dd></div>
+              <div><dt>Saldo</dt><dd className={ficha.topo.saldo_centavos < 0 ? "info--critico" : ""}>{brl(ficha.topo.saldo_centavos)}</dd></div>
+            </dl>
+          </>
+        )}
+      </Cartao>
+
+      <Cartao titulo="Prazo">
+        {ficha === undefined ? CARREGANDO : ficha === null || !prazo ? INDISPONIVEL : (
+          <p className={`ficha__grande ficha__dias ${INFO[prazo.nivel]}`}>
+            {prazo.dias === null ? "—" : prazo.dias < 0 ? `vencido há ${fmtDias(-prazo.dias)}` : fmtDias(prazo.dias)}</p>
+        )}
+        <p className="ficha__rodape">execução até {data(prazos.execucao_fim)} · vigência até {data(prazos.vigencia_fim)}</p>
+      </Cartao>
+
+      <Cartao titulo="Última medição">
+        {ficha === undefined ? CARREGANDO : ficha === null ? INDISPONIVEL : !ficha.ultima_medicao
+          ? <p className="ficha__nota">—</p> : (
+            <>
+              <p className="ficha__medicao">
+                <Link para={{ tela: "medicao", obra: contratoId, id: ficha.ultima_medicao.id }}>
+                  {ficha.ultima_medicao.rotulo} · {mesAno(ficha.ultima_medicao.competencia)} · {brl(ficha.ultima_medicao.valor_centavos)}</Link></p>
+              <p className="ficha__rodape info--feito">
+                {ficha.ultima_medicao.recebida_em ? `recebida em ${data(ficha.ultima_medicao.recebida_em)}` : "recebida"}
+                {ficha.ultima_medicao.dias_apos_nota !== null && `, ${fmtDias(ficha.ultima_medicao.dias_apos_nota)} após a nota`}</p>
+            </>
+          )}
+      </Cartao>
+
+      <Cartao titulo="Medição em andamento">
+        {ficha === undefined ? CARREGANDO : ficha === null ? INDISPONIVEL : !ficha.em_andamento
+          ? <p className="ficha__nota">—</p> : (
+            <>
+              <p className="ficha__medicao">
+                <Link para={{ tela: "medicao", obra: contratoId, id: ficha.em_andamento.id }}>
+                  {ficha.em_andamento.rotulo} · {mesAno(ficha.em_andamento.competencia)} · {brl(ficha.em_andamento.valor_centavos)}</Link></p>
+              <p className="ficha__rodape">
+                <span className="pilula-info pilula-info--andamento">
+                  {ficha.em_andamento.etapa}{ficha.em_andamento.desde && ` desde ${diaMes(ficha.em_andamento.desde)}`}</span>
+              </p>
+            </>
+          )}
+      </Cartao>
+
+      <Cartao titulo="Próximos vencimentos">
+        {ficha === undefined ? CARREGANDO : ficha === null ? INDISPONIVEL : (
+          <ul className="ficha__venc">
+            {ficha.vencimentos.map(v => (
+              <li key={v.chave}>
+                <span className={`ponto ${PONTO[v.nivel]}`} aria-hidden="true" />
+                <span className="ficha__venc-rotulo">{v.rotulo}</span>
+                <span className={`ficha__venc-data ${INFO[v.nivel]}`}>{data(v.data)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Cartao>
+    </div>
   );
 }
