@@ -165,34 +165,59 @@ describe("Cronograma: texto na tela", () => {
   });
 });
 
-// issue #413: o cadeado bate com o servidor (depois de repactuacao, mes passado sem previsto tambem e' congelado)
-describe("Cronograma: cadeado depois da repactuação", () => {
-  const ponto = (competencia: string, previsto: number) => ({ competencia, previsto_centavos: previsto,
-    medido_execucao_centavos: 0, medido_reajuste_centavos: 0, medido_projeto_centavos: 0, atestado_pendente: false });
-  const curva = { curva: [ponto("2020-02", 0), ponto("2020-03", 5000)], saldo: CURVA.saldo };
-  const lista = (origem: string | null, superada: string | null = null) => [{
-    numero: 1, criado_em: "2020-02-10 12:00:00", chave: "c", origem_documento: origem, data_documento: null,
-    instrumento: null, competencias: 2, total_centavos: 5000, vigente: true, superada_em: superada }];
-  const servir = (versoes: unknown) => api.mockImplementation((c: string) => Promise.resolve(
-    c.endsWith("/curva") ? curva : c.endsWith("/cronograma") ? VERSAO : c.endsWith("/versoes") ? versoes : null));
+// issue #647: a "Tabela por competência" vira a Evolução mensal, aberta, com Pedido e Aprovado e sem Previsto;
+// o gráfico previsto × medido sai e o cronograma fica só com a lista de versões
+describe("Cronograma: evolução mensal", () => {
+  const ponto = (competencia: string, extra: Record<string, unknown> = {}) => ({ competencia, previsto_centavos: 0,
+    medido_execucao_centavos: 0, medido_reajuste_centavos: 0, medido_projeto_centavos: 0, atestado_pendente: false,
+    pendente_por_tipo: { execucao: false, reajuste: false, projeto: false },
+    pedido_execucao_centavos: null, aprovado_execucao_centavos: null, ...extra });
+  const curva = { curva: [
+    ponto("2026-07", { previsto_centavos: 30000, medido_execucao_centavos: 24003, pedido_execucao_centavos: 25001,
+      aprovado_execucao_centavos: 24003, medido_reajuste_centavos: 1001 }),
+    ponto("2026-08", { previsto_centavos: 40000, medido_execucao_centavos: 15003, pedido_execucao_centavos: 15003,
+      atestado_pendente: true, pendente_por_tipo: { execucao: true, reajuste: false, projeto: false } }),
+    ponto("2026-09", { previsto_centavos: 77777 }),            // só previsto: mês sem medição não entra
+  ], saldo: CURVA.saldo };
+  const versoes = [{ numero: 1, criado_em: "2026-07-01 12:00:00", chave: "c", origem_documento: "contratual",
+    data_documento: "2026-07-01", instrumento: null, competencias: 3, total_centavos: 147777, vigente: true }];
+  beforeEach(() => api.mockImplementation((c: string) => Promise.resolve(
+    c.endsWith("/curva") ? curva : c.endsWith("/cronograma") ? VERSAO : c.endsWith("/versoes") ? versoes : null)));
   afterEach(() => { cleanup(); api.mockReset(); });
 
-  it("com repactuação, o mês passado sem previsto também leva o cadeado", async () => {
-    servir(lista("carta"));
+  const celulas = (l: HTMLElement, seletor: string) =>
+    Array.from(l.querySelectorAll(seletor), c => (c.textContent ?? "").replace(/\s/g, " ")).join("|");
+
+  it("aberta, sem Previsto, com Pedido e Aprovado; sem aprovado mostra “—”", async () => {
     render(<Cronograma contratoId={1} podeEditar={false} />);
-    await screen.findByRole("table", { name: /Versões do cronograma/ });
-    expect(document.querySelectorAll(".cadeado").length).toBe(2);
+    expect(await screen.findByRole("heading", { name: "Evolução mensal" })).toBeTruthy();
+    const tabela = screen.getByRole("table", { name: "Evolução mensal" });
+    expect(tabela.closest("details")).toBeNull();
+    const linhas = within(tabela).getAllByRole("row");
+    expect(celulas(linhas[0], "th")).toBe("Competência|Pedido|Aprovado|Reajuste|Projeto|Situação");
+    expect(linhas.slice(1).map(l => celulas(l, "td"))).toEqual([
+      "07/2026|R$ 250,01|R$ 240,03|R$ 10,01|—|atestado",
+      "08/2026|R$ 150,03|—|—|—|provisório",
+      "Total|R$ 400,04|R$ 240,03|R$ 10,01|—|",
+    ]);
+    expect(document.body.textContent).not.toMatch(/Previsto|Tabela por competência|777,77/);
+    expect(document.querySelector(".cadeado")).toBeNull();
   });
 
-  it("sem repactuação (ou com ela superada), só o mês passado com previsto leva o cadeado", async () => {
-    servir(lista("contratual"));
+  it("o gráfico previsto × medido não aparece; a lista de versões continua", async () => {
     render(<Cronograma contratoId={1} podeEditar={false} />);
-    await screen.findByRole("table", { name: /Versões do cronograma/ });
-    expect(document.querySelectorAll(".cadeado").length).toBe(1);
-    cleanup();
-    servir(lista("carta", "2026-11-05 15:00:00"));
+    expect(await screen.findByRole("table", { name: /Versões do cronograma/ })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Cronograma" })).toBeTruthy();
+    expect(document.querySelector(".grafico, .grafico__quadro, .legenda, svg[role='img']")).toBeNull();
+    expect(screen.queryByText(/Medido — execução|Provisório/)).toBeNull();
+  });
+
+  it("sem medição nenhuma, a evolução mensal diz que não há o que mostrar", async () => {
+    api.mockImplementation((c: string) => Promise.resolve(
+      c.endsWith("/curva") ? { ...curva, curva: [ponto("2026-09", { previsto_centavos: 77777 })] }
+        : c.endsWith("/cronograma") ? VERSAO : c.endsWith("/versoes") ? versoes : null));
     render(<Cronograma contratoId={1} podeEditar={false} />);
-    await screen.findByRole("table", { name: /Versões do cronograma/ });
-    expect(document.querySelectorAll(".cadeado").length).toBe(1);
+    expect(await screen.findByText("Nenhuma medição.")).toBeTruthy();
+    expect(screen.queryByRole("table", { name: "Evolução mensal" })).toBeNull();
   });
 });

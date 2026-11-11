@@ -20,6 +20,7 @@ import Diretoria from "./Diretoria";
 import { entradaDe, itemDe, tituloDaSecao, tituloDe } from "./navegacao";
 import SigaPagina from "./SigaPagina";
 import AncorasDocusign from "./AncorasDocusign";
+import { useLeituraDasRespostas } from "./respostasOrgao";
 import { buscaDosAvisosEmObras, caminhoDe, ehDetalhe, useRolarAteSecao, useRota } from "./rota";
 
 // Menu e entrada por perfil moram em navegacao.ts (NAVEGACAO.md › Perfis e tela de entrada); o trilho e a barra
@@ -88,6 +89,9 @@ export default function App() {
       : rota.tela === "admin" && rota.aba && rota.aba !== "saude" ? ABAS_ADMIN.find(a => a.id === rota.aba)?.rotulo : undefined;
     document.title = rota.tela === "raiz" ? tituloDe("raiz") : `${tituloDe(rota.tela)}${aba ? ` · ${aba}` : ""} · grupolotufo`;
   }, [rota]);
+
+  // #644: quem envia e-mail le as respostas do orgao ao entrar e a cada 5 minutos; quem so' consulta nao dispara leitura.
+  useLeituraDasRespostas(!!usuario && usuario.perfil !== "diretoria");
 
   // A ancora (#emp-3) leva a secao quando a tela terminar de montar.
   useRolarAteSecao(usuario ? secao : "", caminhoDe(rota));

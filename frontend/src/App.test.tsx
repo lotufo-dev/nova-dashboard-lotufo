@@ -38,14 +38,12 @@ describe("App: a rota antiga /avisos", () => {
 const PAINEL_MINIMO = {
   hoje: "2026-10-28", notas_a_enviar: 0, certidoes: { vencidas: 0, vencendo: 0, itens: [] }, reajustes: [],
   protocoladas: { obras_protocoladas: 0, obras_ativas: 0, ultima: null },
-  medido: { competencia: "2026-10", anterior_competencia: "2026-09", valor_centavos: 0, anterior_centavos: 0,
-            quantidade: 0, ultimo_lancamento: null, variacao_pct: null },
-  por_contratante: [], recebido_ano: { valor_centavos: null, mes_centavos: 0, sem_data: 0 },
+  medido: { competencia: "2026-10", valor_centavos: 0, quantidade: 0, ultimo_lancamento: null },
+  recebido_ano: { valor_centavos: null, mes_centavos: 0, sem_data: 0 },
   a_receber: { liberado: false, valor_centavos: null, mais_60_centavos: null }, prazos: [],
-  protocolado_mes: {
-    dia: 28, atual: { mes: "2026-10", ate_dia: 28, valor_centavos: 0, quantidade: 0, acumulado_centavos: [] },
-    anterior: { mes: "2026-09", ate_dia: 28, valor_centavos: 0, quantidade: 0, acumulado_centavos: [] }, variacao_pct: null },
-  notas_mes: { mes: "2026-10", valor_centavos: 0, notas: 0, obras: 0, acumulado_centavos: [] },
+  ciclo: ["em_analise", "boletim", "nota", "protocolado", "recebido_mes"].map(
+    etapa => ({ etapa, valor_centavos: 0, quantidade: 0, mais_antigo_dias: null })),
+  notas_mes: { mes: "2026-10", valor_centavos: 0, notas: 0, obras: 0 },
   avisos_importantes: { reajustes: { total: 0, itens: [] }, prazos: { total: 0, itens: [] }, certidoes: { total: 0, itens: [] } },
 };
 
