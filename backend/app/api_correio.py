@@ -6,7 +6,7 @@ import time
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
-from app import correio, graph, instalacao
+from app import correio, graph, instalacao, respostas_orgao
 from app.api_auth import conexao
 from app.permissoes import exigir
 
@@ -115,6 +115,15 @@ def teste(usuario: dict = Depends(exigir("editar_cadastros")),
     except graph.ErroGraph as e:
         raise HTTPException(422, str(e)) from None
     return {"envio_id": eid, "remetente": destino}
+
+
+@router.post("/respostas/ler")
+def ler_respostas(usuario: dict = Depends(exigir("editar_cadastros")),
+                  conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #644: a tela de quem envia chama ao entrar e a cada 5 minutos. Le so' as conversas dos envios da propria
+    pessoa, com a conta Microsoft dela; quem so' consulta (diretoria) nao tem a permissao e nada e' lido para ela.
+    Sem conta conectada ou com o Graph fora do ar: lista vazia, sem erro."""
+    return {"novas": respostas_orgao.ler(conn, {"id": usuario["id"], "email": usuario["email"]})}
 
 
 @router.get("/remetente")

@@ -2,8 +2,12 @@
 
 Cada pessoa conecta a propria conta uma vez (codigo de dispositivo). O refresh token fica num
 arquivo por usuario na pasta de segredos (`DASH_GRAPH_TOKENS_DIR`), fora do repositorio e do
-banco. O sistema NAO le caixa de e-mail: `Mail.ReadWrite` e' o que o Graph exige para criar o
-rascunho e subir anexo acima de 3 MB; nenhuma funcao deste modulo lista ou le mensagem.
+banco. `Mail.ReadWrite` e' o que o Graph exige para criar o rascunho e subir anexo acima de 3 MB.
+
+Leitura (issue #644, regra decidida em 10/11/2026): o sistema le SO' a conversa que ele mesmo enviou. A unica
+consulta que lista mensagem e' a de `consulta_da_conversa`, filtrada pelo identificador da conversa gravado no
+envio (`envios.conversa_id`), com o token de quem enviou. Nenhuma funcao deste modulo lista a caixa de entrada,
+busca por texto ou le mensagem de outra conversa; quem decide quais conversas ler e' `respostas_orgao.py`.
 """
 import base64
 import datetime
@@ -110,14 +114,16 @@ def redirecionamento() -> str | None:
 def registrar_envio(conn, usuario_id: int, tipo: str, remetente: str, para: list[str],
                     copia: list[str], assunto: str, mensagem_id: str | None,
                     anexos: list[tuple[str, bytes]], cco: list[str] | None = None,
-                    redirecionado_para: str | None = None) -> int:
+                    redirecionado_para: str | None = None, conversa_id: str | None = None) -> int:
+    """`conversa_id` (issue #644): a conversa do e-mail no Outlook de quem enviou; e' por ela, e so' por ela, que as
+    respostas sao lidas depois."""
     cco = list(cco or [])
     with db.mutacao(conn):
         cur = conn.execute(
-            "INSERT INTO envios (tipo, usuario_id, remetente, para, copia, cco, assunto, mensagem_id) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO envios (tipo, usuario_id, remetente, para, copia, cco, assunto, mensagem_id, conversa_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             (tipo, usuario_id, remetente, json.dumps(para), json.dumps(copia), json.dumps(cco) if cco else None,
-             assunto, mensagem_id))
+             assunto, mensagem_id, conversa_id or None))
         eid = cur.lastrowid
         resumo = []
         for nome, dados in anexos:
@@ -200,9 +206,56 @@ def _conferir_tamanho(anexos: list[tuple[str, bytes]]) -> None:
                               f"{MAX_TOTAL // 1024 // 1024} MB. Divida o envio.")
 
 
+# --- leitura: so' a conversa de um envio registrado (issue #644) ---------------------------------------------
+
+# O que se pede de cada mensagem da conversa. O corpo vem em texto (cabecalho Prefer) so' para tirar o trecho
+# inicial; ele nao e' gravado.
+_CAMPOS_LEITURA = "id,internetMessageId,conversationId,from,receivedDateTime,subject,body,hasAttachments,isDraft"
+_TOPO_LEITURA = 100
+_CONVERSA_SIMULADA = re.compile(r"[A-Za-z0-9_=-]+")
+
+
+def consulta_da_conversa(conversa_id: str | None) -> str:
+    """A UNICA consulta do sistema que lista mensagens: as da conversa `conversa_id` na caixa de quem enviou, e nada
+    mais (sem busca, sem pasta, sem pagina seguinte). Sem identificador, recusa: nunca vira listagem da caixa."""
+    conversa_id = (conversa_id or "").strip()
+    if not conversa_id:
+        raise graph.ErroGraph("Envio sem conversa registrada: nada a ler")
+    literal = conversa_id.replace("'", "''")        # aspa dobrada: o identificador nunca sai do literal do filtro
+    return "/me/messages?" + urllib.parse.urlencode({
+        "$filter": f"conversationId eq '{literal}'", "$select": _CAMPOS_LEITURA, "$top": str(_TOPO_LEITURA)})
+
+
 class ClienteCorreio:
+    conversa_do_ultimo_envio: str | None = None
+
     def __init__(self, token: graph.Token):
         self.token = token
+
+    def mensagens_da_conversa(self, conversa_id: str) -> list[dict]:
+        """As mensagens da conversa de um envio, menos os rascunhos. O que o Graph devolver com outra conversa e'
+        descartado aqui (a consulta ja' filtra; isto e' a segunda trava)."""
+        conversa_id = (conversa_id or "").strip()
+        r = self._json("GET", consulta_da_conversa(conversa_id), headers={"Prefer": 'outlook.body-content-type="text"'})
+        out = []
+        for m in r.get("value") or []:
+            if m.get("conversationId") != conversa_id or m.get("isDraft") or not m.get("id"):
+                continue
+            de = (m.get("from") or {}).get("emailAddress") or {}
+            out.append({"id": m.get("internetMessageId") or m["id"], "de": (de.get("address") or "").lower(),
+                        "nome": de.get("name") or None, "recebida_em": m.get("receivedDateTime") or "",
+                        "assunto": m.get("subject") or "", "texto": (m.get("body") or {}).get("content") or "",
+                        "_graph_id": m["id"], "_tem_anexos": bool(m.get("hasAttachments"))})
+        return out
+
+    def anexos_da_mensagem(self, mensagem: dict) -> list[str]:
+        """So' os NOMES dos anexos de uma mensagem que `mensagens_da_conversa` devolveu (o conteudo nao e' pedido);
+        imagem embutida no corpo (assinatura) nao conta."""
+        if not mensagem.get("_tem_anexos"):
+            return []
+        r = self._json("GET", f"/me/messages/{urllib.parse.quote(mensagem['_graph_id'], safe='')}/attachments?"
+                       + urllib.parse.urlencode({"$select": "name,isInline"}))
+        return [a["name"] for a in r.get("value") or [] if a.get("name") and not a.get("isInline")]
 
     def _json(self, metodo: str, caminho: str, corpo: dict | None = None, headers: dict | None = None) -> dict:
         dados = None if corpo is None else json.dumps(corpo).encode("utf-8")
@@ -219,6 +272,7 @@ class ClienteCorreio:
             "subject": assunto, "body": {"contentType": "HTML", "content": corpo_html},
             "toRecipients": _enderecos(para), "ccRecipients": _enderecos(copia), "bccRecipients": _enderecos(cco)})
         mid = rascunho["id"]
+        self.conversa_do_ultimo_envio = rascunho.get("conversationId") or None
         try:
             for nome, dados, cid in inline:          # assinatura: imagem no corpo (cid), pequena
                 self._json("POST", f"/me/messages/{mid}/attachments", {
@@ -265,10 +319,35 @@ class ClienteCorreio:
 
 
 class CorreioSimulado:
-    """`DASH_GRAPH_SIMULADOR=<pasta>`: grava o que seria enviado, para dev e testes de API."""
+    """`DASH_GRAPH_SIMULADOR=<pasta>`: grava o que seria enviado, para dev e testes de API. Cada envio ganha uma
+    conversa (`conversa` no arquivo gravado); a resposta simulada e' um `.json` em `<pasta>/respostas/<conversa>/`
+    com `de`, `nome`, `recebida_em`, `assunto`, `texto` e `anexos` (nomes), lido em ordem alfabetica."""
+    conversa_do_ultimo_envio: str | None = None
 
     def __init__(self, pasta: Path, remetente: str):
-        self.pasta, self._remetente = pasta / "enviados", remetente
+        self.pasta, self._respostas, self._remetente = pasta / "enviados", pasta / "respostas", remetente
+
+    def mensagens_da_conversa(self, conversa_id: str) -> list[dict]:
+        conversa_id = (conversa_id or "").strip()
+        if not _CONVERSA_SIMULADA.fullmatch(conversa_id):     # o nome vira pasta: nada de `..` nem barra
+            return []
+        out = []
+        for arq in sorted((self._respostas / conversa_id).glob("*.json")):
+            try:
+                d = json.loads(arq.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(d, dict):
+                continue
+            out.append({"id": str(d.get("id") or f"<{conversa_id}-{arq.stem}@simulado>"),
+                        "de": str(d.get("de") or "").lower(), "nome": d.get("nome") or None,
+                        "recebida_em": str(d.get("recebida_em") or ""), "assunto": str(d.get("assunto") or ""),
+                        "texto": str(d.get("texto") or ""),
+                        "_anexos": [str(n) for n in d.get("anexos") or []]})
+        return out
+
+    def anexos_da_mensagem(self, mensagem: dict) -> list[str]:
+        return list(mensagem.get("_anexos") or [])
 
     def remetente(self) -> str:
         return self._remetente
@@ -279,8 +358,9 @@ class CorreioSimulado:
         # Nome unico (10/10/2026, N-02): contar os .json da pasta dava o MESMO nome a envios simultaneos, um
         # sobrescrevia o outro e o simulador subestimava os envios. Ordem alfabetica = ordem de envio.
         n = f"{datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')}-{secrets.token_hex(2)}"
+        self.conversa_do_ultimo_envio = f"conversa-{n}"
         (self.pasta / f"{n}.json").write_text(json.dumps({
-            "remetente": self._remetente, "para": para, "copia": copia, "cco": list(cco), "assunto": assunto,
+            "conversa": self.conversa_do_ultimo_envio, "remetente": self._remetente, "para": para, "copia": copia, "cco": list(cco), "assunto": assunto,
             "corpo": corpo_html, "inline": [{"nome": nome, "cid": cid, "tamanho": len(d)} for nome, d, cid in inline],
             "anexos": [{"nome": nome, "tamanho": len(d), "sha256": hashlib.sha256(d).hexdigest()}
                        for nome, d in anexos]}, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -328,6 +408,7 @@ def enviar_e_registrar(conn, usuario: dict, tipo: str, para: list[str], copia: l
         mensagem_id = c.enviar([destino_teste], [], f"[TESTE] {assunto}", aviso + corpo_html, anexos, cco=[], inline=inline)
     else:
         mensagem_id = c.enviar(para, copia, assunto, corpo_html, anexos, cco=cco, inline=inline)
+    conversa_id = getattr(c, "conversa_do_ultimo_envio", None)     # issue #644: por onde as respostas sao lidas
     # O e-mail SAIU: daqui para baixo nenhuma falha pode virar "tente de novo" (A-03, 10/10/2026). Banco travado
     # alem do busy_timeout ganha mais duas chances; o que ainda falhar vira EnvioNaoRegistrado.
     for tentativa in range(3):
@@ -335,7 +416,7 @@ def enviar_e_registrar(conn, usuario: dict, tipo: str, para: list[str], copia: l
             time.sleep(1)
         try:
             return registrar_envio(conn, usuario["id"], tipo, remetente, para, copia, assunto, mensagem_id, anexos,
-                                   cco=cco, redirecionado_para=destino_teste)
+                                   cco=cco, redirecionado_para=destino_teste, conversa_id=conversa_id)
         except Exception as e:
             erro = e
             if not db.eh_lock(e):

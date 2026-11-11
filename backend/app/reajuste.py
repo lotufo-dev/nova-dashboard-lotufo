@@ -754,6 +754,14 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
     return out
 
 
+def competencias_da_aba(conn, contrato_id: int) -> list[dict]:
+    """Issue #648: o que a aba Reajuste recebe de `competencias_por_ciclo`, os valores de cada fonte sem a marca de
+    diferenca (`avisos`). O apostilado e' previsao e o vinculo nota-medicao ainda nao e' confiavel: a diferenca nao
+    e' acusada na linha da competencia."""
+    return [{**g, "competencias": [{k: v for k, v in x.items() if k != "avisos"} for x in g["competencias"]]}
+            for g in competencias_por_ciclo(conn, contrato_id)]
+
+
 # Issue #274 (spec 2026-10-20 §2.2; decisao do Leo de 08/11/2026): justificativa do "Reajuste fora da previsao"
 MIN_JUSTIFICATIVA = 10
 
