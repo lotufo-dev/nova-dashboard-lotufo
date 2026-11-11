@@ -37,6 +37,11 @@ fiscais:
   desde: '2025-03-10'
 destinatarios_extras: []
 copia_extras: []
+# Opcional (issue #660): os passos que a medição desta obra tem, entre planilha, analise, espelhos, notas, envio_nota
+# e pagamento. Sem a chave vale a regra da família do órgão; a lista só tira passo (não dá à obra o que a família do
+# órgão não tem) e, quando não vazia, precisa ter pagamento. [] = o fluxo da medição não é feito pela empresa: a obra
+# sai do quadro do mês, não oferece "Iniciar" e não gera aviso de planilha não enviada.
+passos_medicao: [planilha, analise, espelhos, notas, envio_nota, pagamento]
 # Opcional (issue #462): substitui, só neste contrato, as peças que o órgão marca `no_oficio`; [] desliga todas.
 # pecas_no_oficio: [cronograma]
 # Opcional (issue #489): custo por obra. Grupos na ordem da planilha do órgão; tarefas = prefixos do código da tarefa

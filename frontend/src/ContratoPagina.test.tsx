@@ -61,6 +61,20 @@ describe("Página da obra: o desenho novo", () => {
   beforeEach(() => { window.history.replaceState(null, "", "/obras/1"); });
   afterEach(() => { cleanup(); api.mockReset(); vi.useRealTimers(); });
 
+  it("#660: a obra sem fluxo de medição no cadastro não oferece iniciar a medição", async () => {
+    responderCompleto();
+    const { unmount } = render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    expect(await screen.findByRole("button", { name: "Gerar espelho (teste)" })).toBeTruthy();
+    unmount();
+    const base = api.getMockImplementation()!;
+    api.mockImplementation(async (url: string, o?: { method?: string }) =>
+      url.endsWith("/cabecalho") ? { ...CABECALHO_COMPLETO, sem_fluxo_medicao: true } : base(url, o));
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Hospital" })).toBeTruthy();
+    await screen.findByRole("region", { name: "Seções da obra" });
+    expect(screen.queryByRole("button", { name: "Gerar espelho (teste)" })).toBeNull();
+  });
+
   it("página única: /obras/:id mostra o resumo e as abas juntos, sem 'ver contrato' nem 'Ficha da obra' (#646)", async () => {
     responderCompleto();
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="ficha" origem={null} busca={{}} />);

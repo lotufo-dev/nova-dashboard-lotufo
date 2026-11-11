@@ -54,6 +54,13 @@ describe("Medição que ainda não existe", () => {
     expect(container.querySelector("[data-nova-planilha]")).toBeNull();
   });
 
+  it("#660: a barra é a dos passos que o servidor diz que a obra tem (cadastro)", async () => {
+    responder("ativa", { ...CAB, passos_medicao: [1, 3, 4, 6] });
+    render(<MedicaoNova contratoId={7} usuario={usuario} origem={null} />);
+    await waitFor(() => expect(within(screen.getByRole("navigation", { name: "Passos da medição" })).getAllByRole("button")
+      .map(b => b.getAttribute("aria-label"))).toEqual(["Passo 1: Planilha e carta", "Passo 2: Espelhos", "Passo 3: Notas", "Passo 4: Pagamento"]));
+  });
+
   it("diretoria não vê o formulário da planilha/carta", async () => {
     responder("ativa");
     const { container } = render(<MedicaoNova contratoId={7} usuario={{ ...usuario, perfil: "diretoria" } as Usuario} origem={null} />);

@@ -231,13 +231,15 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
 
   // #508: a obra tem os passos "Planilha e carta" e "Análise do órgão" quando a planilha/carta e' o 1o passo da
   // medicao (execucao e projeto, regra de espelho ativa ou medicao que ja' nasceu dela) e vai ao orgao (nunca na MT-PAR)
-  const temPassosPlanilha = !!m && comPlanilha && m.com_envio_planilha !== false
-    && (regraAtiva || DA_PLANILHA.includes(m.estado) || !!m.planilha_enviada_em);
-  const passos = passosDa(temPassosPlanilha);
+  // #660: os passos da medicao vem do servidor (`passos`: a familia do orgao e a chave `passos_medicao` do cadastro
+  // da obra); a conta daqui so' vale para a resposta sem o campo
+  const temPassosPlanilha = !!m && (m.passos ? m.passos.includes(1) : comPlanilha && m.com_envio_planilha !== false
+    && (regraAtiva || DA_PLANILHA.includes(m.estado) || !!m.planilha_enviada_em));
+  const passos = m?.passos ?? passosDa(temPassosPlanilha);
   // quando o passo da vez muda (enviou, a nota chegou), a pagina acompanha: o clique num passo so' vale ate' la'.
   // A revisao registrada e nao enviada devolve a vez ao passo 1 (e' la' que ela sai).
   const atual = !m ? 0 : temPassosPlanilha && m.estado === "planilha_enviada" && revisao === "pendente" ? 1
-    : passoDoEstado(m.estado, temPassosPlanilha);
+    : passoDoEstado(m.estado, passos);
   // enquanto a conferencia da revisao nao volta, o passo da vez ainda nao esta' firme: a chegada dela nao descarta o
   // passo aberto pela ancora (#passo-2, #etapa-N do Inicio e do SIGA)
   const atualFirme = !(temPassosPlanilha && m?.estado === "planilha_enviada" && revisao === "conferindo");
@@ -327,7 +329,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     ...(assinados?.disponivel ? [{ id: "assinados", rotulo: "Enviar documentos assinados" },
       { id: "assinados_fora", rotulo: "Registrar envio dos assinados por fora" }] : []),
     // #288: sem o passo 2 (MT-PAR, SES, prefeituras), o aceite da diferenca do boletim mora aqui
-    ...(!temPassosPlanilha && diferencaAAceitar ? [{ id: "diferenca", rotulo: "Aceitar a diferença" }] : []),
+    ...(!passos.includes(2) && diferencaAAceitar ? [{ id: "diferenca", rotulo: "Aceitar a diferença" }] : []),
     ...(m.final !== 1 && !EXCECOES.includes(m.estado) ? [{ id: "final", rotulo: "Marcar como medição final" }] : []),
     ...(m.final === 1 ? [{ id: "desfinal", rotulo: "Desmarcar a medição final" }] : []),
     ...(PROXIMOS[m.estado] ?? []).filter(e => e !== "recebida").map((e, i) =>

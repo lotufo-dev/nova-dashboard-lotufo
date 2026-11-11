@@ -14,7 +14,9 @@ import "./etapas.css";
 // pagina dela abre com o cartao da planilha/carta. #653: a barra e' a mesma da pagina da medicao (os seis passos de
 // Passos.tsx; a obra sem planilha/carta comeca em Espelhos). Os outros passos aparecem na barra, mas so' liberam depois.
 
-type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number };
+type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number;
+  /** #660: os passos da medição que a obra inicia, decididos no servidor (família do órgão e cadastro da obra) */
+  passos_medicao?: number[] };
 
 // A janela "Iniciar processo" (#151) manda o número, a competência e a série pela busca da URL
 // (?numero=25&competencia=2026-10&tipo=projeto); valor fora do padrão é ignorado.
@@ -43,7 +45,7 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
   }, [contratoId]);
   const obra = cab?.obra ?? "Obra";
   useEffect(() => { document.title = `${obra} · ${nome} · grupolotufo`; }, [obra, nome]);
-  const passos = passosDa(regraAtiva !== false);
+  const passos = cab?.passos_medicao?.length ? cab.passos_medicao : passosDa(regraAtiva !== false);
   const atual = passos[0];
   const aberto = vendo !== null && passos.includes(vendo) ? vendo : atual;
 

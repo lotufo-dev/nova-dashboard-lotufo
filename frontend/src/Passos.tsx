@@ -9,11 +9,10 @@ import "./passos.css";
 
 export const PASSOS = ["Planilha e carta", "Análise do órgão", "Espelhos", "Notas", "Envio da nota", "Pagamento"] as const;
 
-/** O passo da vez pelo estado da medicao. `comPlanilha`: a obra tem os passos 1 e 2 (a planilha/carta vai ao orgao). */
-export function passoDe(estado: string, comPlanilha: boolean): number {
+function passoNoFluxoCompleto(estado: string): number {
   switch (estado) {
-    case "prevista": case "planilha_gerada": return comPlanilha ? 1 : 3;
-    case "planilha_enviada": return comPlanilha ? 2 : 3;
+    case "prevista": case "planilha_gerada": return 1;
+    case "planilha_enviada": return 2;
     case "boletim_recebido": case "espelho_gerado": return 3;
     case "espelho_enviado": return 4;
     case "nota_emitida": return 5;
@@ -21,6 +20,16 @@ export function passoDe(estado: string, comPlanilha: boolean): number {
     case "recebida": return 7;
     default: return 0;
   }
+}
+
+/** O passo da vez pelo estado da medicao, entre os passos que ela tem (#660: a lista vem do servidor, pela familia do
+ *  orgao e pelo cadastro da obra; `true`/`false` = com ou sem os passos 1 e 2). O estado que cairia num passo ausente
+ *  esta' no proximo passo que a medicao tem (`medicoes.passo_do_estado`, no servidor). */
+export function passoDe(estado: string, passos: boolean | number[]): number {
+  const lista = typeof passos === "boolean" ? passosDa(passos) : passos;
+  const n = passoNoFluxoCompleto(estado);
+  if (n < 1 || n > 6) return n;
+  return lista.find(p => p >= n) ?? lista[lista.length - 1] ?? n;
 }
 
 /** Os passos que a barra mostra, pelo id. */
@@ -35,7 +44,7 @@ export function situacaoDoPasso(n: number, atual: number): SituacaoPasso {
 
 /** O passo que a pagina abre: o da vez; tudo feito abre o pagamento; encerrada abre a nota (se saiu) ou o primeiro. */
 export function passoInicial(atual: number, temNota: boolean, passos: number[]): number {
-  if (atual === 0) return temNota ? 4 : passos[0];
+  if (atual === 0) return temNota && passos.includes(4) ? 4 : passos[0];
   return Math.min(atual, 6);
 }
 

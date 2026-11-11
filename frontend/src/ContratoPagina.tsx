@@ -27,6 +27,7 @@ type Cabecalho = {
   execucao_fim: string | null; dias_execucao: number | null; vigencia_fim: string | null; dias_vigencia: number | null;
   execucao_sem_prazo?: boolean;      // #662: execucao registrada vencida e aditivo posterior so' de vigencia
   status: StatusObra;
+  sem_fluxo_medicao?: boolean;       // #660: `passos_medicao: []` no cadastro: a obra não inicia medição
 };
 
 export type StatusObra = "ativo" | "suspenso" | "em_encerramento" | "encerrado" | "rescindido";
@@ -176,7 +177,7 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
                   {abaAtiva === "medicoes" && (
                     <div className="pilha">
                       {/* a medicao nasce do espelho, na etapa 1 da pagina dela (ou, no fluxo antigo, a mao): aqui so' o atalho */}
-                      {podeEditar && <IniciarProxima contratoId={contratoId} versao={versaoMedicoes} inicial={medicaoDaBusca(busca)} aoCriar={() => setVersaoMedicoes(v => v + 1)} />}
+                      {podeEditar && !c.sem_fluxo_medicao && <IniciarProxima contratoId={contratoId} versao={versaoMedicoes} inicial={medicaoDaBusca(busca)} aoCriar={() => setVersaoMedicoes(v => v + 1)} />}
                       <Medicoes contratoId={contratoId} busca={busca} versao={versaoMedicoes} />
                       {podeEditar && <NovoProtocolo contratoId={contratoId} versao={versaoMedicoes} aoMudar={() => setVersaoMedicoes(v => v + 1)} />}
                     </div>
