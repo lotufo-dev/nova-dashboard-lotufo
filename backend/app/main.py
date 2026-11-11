@@ -230,7 +230,7 @@ def create_app() -> FastAPI:
             # Bloco 9: a observacao do Outlook e do SharePoint (fase 6) saiu; o RM e' a unica fonte automatica.
             from app import sincronizacao_rm
             sincronizacao_rm.agendar()
-            # Cobranca de certidoes por e-mail ao dono (plano 2026-10-09): vencidas a cada 2 h, vencendo 1x/dia.
+            # Cobranca de certidoes por e-mail (plano 2026-10-09): um e-mail por dia util, so' o "Renovar agora" (#665).
             from app import cobranca_certidoes
             cobranca_certidoes.agendar()
             # Issue #424: alertas de seguranca por e-mail ao dono, na hora, e o resumo diario das 07:00

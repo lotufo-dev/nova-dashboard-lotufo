@@ -3,6 +3,7 @@ por fora, aguardando pagamento, regras D1-D9 e a cobranca de certidoes por e-mai
 import datetime
 import io
 import json
+import threading
 import zipfile
 
 import pytest
@@ -706,18 +707,119 @@ def _hora(h, mi=0, dia=HOJE):
     return datetime.datetime(dia.year, dia.month, dia.day, h, mi)
 
 
-def test_cobranca_de_vencidas_a_cada_2h_e_vencendo_uma_vez_por_dia(svc):
+def _enviados(ids):
+    return [json.loads(f.read_text(encoding="utf-8")) for f in sorted((ids["sim"] / "enviados").glob("*.json"))]
+
+
+def test_cobranca_sai_uma_vez_por_dia_util_mesmo_com_varias_rodadas_e_reinicio(svc):
+    """Issue #665: no maximo um e-mail por dia util, na primeira rodada a partir das 08h; o controle esta' no banco."""
     c, ids = svc
     _validade(c, "federal", "2026-09-10")
-    _validade(c, "municipal", "2026-09-24")
     assert cobranca_certidoes.rodada(c, _hora(7, 50)) == []
-    assert cobranca_certidoes.rodada(c, _hora(8, 5)) == ["Certidões vencidas (1)", "Certidões vencendo em 15 dias (1)"]
-    assert cobranca_certidoes.rodada(c, _hora(9, 40)) == []                # mesma faixa, mesma lista
-    assert cobranca_certidoes.rodada(c, _hora(10, 5)) == ["Certidões vencidas (1)"]
-    assert cobranca_certidoes.rodada(c, _hora(19, 0)) == []
-    enviado = json.loads(sorted((ids["sim"] / "enviados").glob("*.json"))[0].read_text(encoding="utf-8"))
-    assert enviado["para"] == ["leo.outlook@exemplo.com.br"] and enviado["copia"] == []
-    assert "Lotufo — CND Federal (RFB/PGFN) — validade 10/09/2026 — emitir em: https://" in enviado["corpo"]
+    assert cobranca_certidoes.rodada(c, _hora(8, 5)) == ["Certidões a renovar (1)"]
+    for h, mi in ((8, 15), (9, 40), (10, 5), (12, 0), (17, 55), (19, 0)):
+        assert cobranca_certidoes.rodada(c, _hora(h, mi)) == []
+    outra = db.get_conn()                                       # servidor reiniciado no meio do dia
+    try:
+        assert cobranca_certidoes.rodada(outra, _hora(14, 0)) == []
+    finally:
+        outra.close()
+    assert len(_enviados(ids)) == 1
+    assert cobranca_certidoes.rodada(c, _hora(8, 5, dia=D(2026, 9, 17))) == ["Certidões a renovar (1)"]
+    enviados = _enviados(ids)
+    assert len(enviados) == 2
+    assert all(e["para"] == ["leo.outlook@exemplo.com.br"] and e["copia"] == [] for e in enviados)
+    assert all(e["assunto"] == "Certidões a renovar (1)" for e in enviados)
+
+
+def test_cobranca_nao_sai_em_sabado_domingo_nem_feriado(svc):
+    c, ids = svc
+    _validade(c, "federal", "2026-09-01")
+    for dia in (D(2026, 9, 19), D(2026, 9, 20), D(2026, 9, 7)):          # sabado, domingo, Independencia (segunda)
+        for h in (8, 10, 14):
+            assert cobranca_certidoes.rodada(c, _hora(h, 5, dia=dia)) == []
+    assert _enviados(ids) == []
+    assert c.execute("SELECT COUNT(*) FROM cobranca_certidoes_envios").fetchone()[0] == 0
+    assert cobranca_certidoes.rodada(c, _hora(8, 5, dia=D(2026, 9, 8))) == ["Certidões a renovar (1)"]   # terca util
+
+
+def test_cobranca_sem_nada_a_renovar_nao_envia(svc):
+    c, ids = svc
+    assert cobranca_certidoes.rodada(c, _hora(8, 5)) == []
+    _validade(c, "municipal", "2026-09-24")      # vence em 8 dias, depois do protocolo previsto: nao e' "renovar agora"
+    assert documentos.renovar_agora(c, HOJE) == []
+    assert cobranca_certidoes.rodada(c, _hora(10, 5)) == []
+    assert _enviados(ids) == []
+    assert c.execute("SELECT COUNT(*) FROM cobranca_certidoes_envios").fetchone()[0] == 0
+
+
+def test_cobranca_lista_so_o_renovar_agora(svc):
+    c, ids = svc
+    _validade(c, "federal", "2026-09-10")        # vencida
+    _validade(c, "fgts", "2026-09-16")           # vence no dia do proximo protocolo previsto (nota esperando: hoje)
+    _validade(c, "municipal", "2026-09-24")      # vence depois do protocolo: fora
+    c.execute("DELETE FROM certidoes WHERE tipo_id=(SELECT id FROM certidao_tipos WHERE chave='estadual')"); c.commit()
+    lista = documentos.renovar_agora(c, HOJE)
+    assert sorted(x["chave"] for x in lista) == ["estadual", "federal", "fgts"]
+    assert cobranca_certidoes.rodada(c, _hora(8, 5)) == ["Certidões a renovar (3)"]
+    enviado, = _enviados(ids)
+    assert enviado["assunto"] == "Certidões a renovar (3)"
+    corpo = enviado["corpo"]
+    assert corpo.count("<p>- ") == 3
+    for x in lista:
+        assert f"<p>- {x['entidade']} — {x['tipo']} — " in corpo
+    assert ("Lotufo — CND Federal (RFB/PGFN) — vencida em 10/09/2026 — próximo protocolo previsto para 16/09/2026 "
+            "— emitir em: https://") in corpo
+    assert "— vence em 16/09/2026 — próximo protocolo previsto para 16/09/2026" in corpo
+    assert "— nunca anexada — próximo protocolo previsto para 16/09/2026" in corpo
+    assert documentos.tipo_por_chave(c, "municipal")["nome"] not in corpo and "24/09/2026" not in corpo
+
+
+def test_cobranca_que_nao_saiu_tenta_de_novo_no_mesmo_dia(svc, monkeypatch):
+    c, ids = svc
+    _validade(c, "federal", "2026-09-10")
+    monkeypatch.delenv("DASH_GRAPH_SIMULADOR")                  # sem conta conectada: com certeza nao saiu
+    assert cobranca_certidoes.rodada(c, _hora(8, 5)) == []
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(ids["sim"]))
+    assert cobranca_certidoes.rodada(c, _hora(8, 15)) == ["Certidões a renovar (1)"]
+    assert len(_enviados(ids)) == 1
+
+
+def test_cobranca_com_envio_incerto_nao_repete_no_dia(svc, monkeypatch):
+    """O e-mail pode ter saido sem registro: a reserva do dia fica e nenhuma rodada manda outro."""
+    c, ids = svc
+    _validade(c, "federal", "2026-09-10")
+    original = correio.enviar_e_registrar
+
+    def incerto(conn, usuario, tipo, para, copia, assunto, *a, **k):
+        raise correio.EnvioIncerto(None, assunto, para)
+    monkeypatch.setattr(correio, "enviar_e_registrar", incerto)
+    assert cobranca_certidoes.rodada(c, _hora(8, 5)) == []
+    monkeypatch.setattr(correio, "enviar_e_registrar", original)
+    assert cobranca_certidoes.rodada(c, _hora(8, 15)) == []
+    assert _enviados(ids) == []
+    assert cobranca_certidoes.rodada(c, _hora(8, 5, dia=D(2026, 9, 17))) == ["Certidões a renovar (1)"]
+
+
+def test_duas_rodadas_ao_mesmo_tempo_mandam_um_email_so(svc):
+    c, ids = svc
+    _validade(c, "federal", "2026-09-10")
+    largada, saidas = threading.Barrier(2), []
+
+    def uma():
+        conn = db.get_conn()
+        try:
+            largada.wait(timeout=10)
+            saidas.append(cobranca_certidoes.rodada(conn, _hora(8, 5)))
+        finally:
+            conn.close()
+    fios = [threading.Thread(target=uma) for _ in range(2)]
+    for f in fios:
+        f.start()
+    for f in fios:
+        f.join(timeout=30)
+    assert sorted(saidas) == [[], ["Certidões a renovar (1)"]]
+    assert len(_enviados(ids)) == 1
 
 
 def test_cobranca_sem_conta_conectada_so_registra_no_log(svc, monkeypatch):
