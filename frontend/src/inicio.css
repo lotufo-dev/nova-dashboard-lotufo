@@ -140,19 +140,17 @@ a.ini-matriz__celula:focus-visible { outline: 2px solid var(--foco); outline-off
   font-size: clamp(18px, 1.7vw, 26px); line-height: 32px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 
-/* avisos importantes: tres secoes lado a lado; a 900px ou menos, empilham */
+/* avisos importantes (#666): tres secoes pelo tempo, lado a lado; a 900px ou menos, empilham */
 .ini-avisos { gap: 12px; }
+.ini-avisos__topo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .ini-avisos__secoes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
 @media (max-width: 900px) { .ini-avisos__secoes { grid-template-columns: minmax(0, 1fr); } }
 .ini-aviso { border: 1px solid var(--linha); border-radius: var(--raio); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ini-aviso__topo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .ini-aviso__topo h3 { margin: 0; font-size: 17px; line-height: 24px; font-weight: 700; }
-.ini-aviso__icone { display: inline-flex; color: var(--acento); }
-.ini-aviso--acao .ini-aviso__icone { color: var(--acao); }
-.ini-aviso--atencao .ini-aviso__icone { color: var(--atencao-ponto); }
 .ini-aviso__conta {
   min-width: 28px; text-align: center; padding: 0 10px; border-radius: var(--raio-pilula); font-weight: 700;
-  background: var(--acento-fundo); color: var(--acento-mais);
+  background: var(--neutro-fundo); color: var(--texto);
 }
 .ini-aviso--acao .ini-aviso__conta { background: var(--acao-fundo); color: var(--acao); }
 .ini-aviso--atencao .ini-aviso__conta { background: var(--atencao-fundo); color: var(--atencao); }

@@ -1,5 +1,7 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Aviso } from "./Alertas";
+import AvisosPagina from "./AvisosPagina";
 import Inicio, { saudacao, type PainelInicio } from "./Inicio";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
@@ -53,17 +55,6 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
     ],
   },
   notas_mes: { mes: "2026-10", valor_centavos: 1_522_295_618, notas: 5, obras: 2 },
-  avisos_importantes: {
-    reajustes: { total: 9, itens: [{ contrato_id: 9, obra: "Cultural", dias: null, tipo: "reajuste_nota_antes_do_apostilamento", nivel: "critico",
-        competencias: ["2026-07", "2026-08", "2026-09"], datas_base: ["2024-06"] },
-      { contrato_id: 7, obra: "MT-388", dias: -3, tipo: "reajuste_pleito", nivel: "acao" }, { contrato_id: 8, obra: "Leblon", dias: 4 }] },
-    prazos: { total: 6, itens: [{ contrato_id: 3, obra: "Coxipó 3ª Etapa", tipo: "execucao", dias: -450 },
-                                { contrato_id: 4, obra: "Deciolândia", tipo: "vigencia", dias: 20 }] },
-    certidoes: { total: 11, itens: [
-      { tipo: "FGTS", entidade: "Integra BRT", validade: "2026-10-14", dias: 5, vencida: false },
-      { tipo: "Estadual", entidade: "Montante", validade: "2026-10-09", dias: 0, vencida: false },
-      { tipo: "FGTS", entidade: "Encomind", validade: "2026-10-01", dias: -8, vencida: true }] },
-  },
   ...extra,
 });
 
@@ -326,50 +317,111 @@ describe("Início", () => {
       expect(tudo).not.toContain(velho);
   });
 
-  it("avisos importantes: três seções com contagem, itens e Ver todos levando à tela Avisos com a categoria", async () => {
-    api.mockResolvedValue(painel());
+  // #666: a caixa le a MESMA fila da tela Avisos (GET /api/inicio) e aplica a mesma regra de secao (`avisos.ts`)
+  const aviso = (extra: Partial<Aviso> = {}): Aviso => ({
+    tipo: "execucao_vencendo", nivel: "atencao", publico: ["operacao"], contrato_id: 7, obra: "Obra A", dias: 20,
+    valor_centavos: null, mensagem: "Obra A: execução termina", destino: { tela: "contrato", id: 7, aba: "prazos" },
+    data: "2026-10-29", sentido: "prazo", ...extra });
+  const FILA: Aviso[] = [
+    aviso({ obra: "Obra B", contrato_id: 8, mensagem: "Obra B: execução vencida", dias: -450, data: "2025-07-16",
+      destino: { tela: "contrato", id: 8, aba: "prazos" } }),
+    aviso({ obra: "Obra C", contrato_id: 9, tipo: "nota_parada", mensagem: "Obra C: nota sem envio", dias: 12, data: "2026-09-27", sentido: "desde",
+      destino: { tela: "contrato", id: 9, aba: "notas" }, medicao_id: 31 }),
+    aviso({ obra: null, contrato_id: null, tipo: "certidao_vencendo", entidade_id: 4, entidade: "Empresa X", mensagem: "Empresa X: FGTS vence",
+      dias: 0, data: "2026-10-09", destino: { tela: "documentos" } }),
+    aviso({ obra: "Obra A", mensagem: "Obra A: vigência termina", dias: 5, data: "2026-10-14" }),
+    aviso({ obra: "Obra A", mensagem: "Obra A: execução termina", dias: 20 }),
+    aviso({ obra: "Obra D", contrato_id: 10, dias: 60, data: "2026-12-08" }),                       // Depois: fora da caixa
+    aviso({ obra: "Obra E", contrato_id: 11, dias: 120, data: "2027-02-06" }),                      // além de 90 dias
+    aviso({ obra: "Obra F", contrato_id: 12, tipo: "nota_divergente", mensagem: "Obra F: nota divergente", dias: null, data: null, sentido: null }),
+  ];
+  const servir = (fila: Aviso[] | Error = FILA) => api.mockImplementation(async (caminho: string) => {
+    if (caminho !== "/api/inicio") return painel();
+    if (fila instanceof Error) throw fila;
+    return { avisos: fila, resumo: {} };
+  });
+  const linhasDe = (secao: HTMLElement) => within(secao).queryAllByRole("link").map(l => [...l.children].map(limpo));
+
+  it("#666: avisos em três seções pelo tempo (Vencido, Esta semana, Este mês), com a contagem, os itens e o selo de dias", async () => {
+    servir();
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const caixa = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
-    const reaj = within(caixa.getByRole("region", { name: "Reajustes" }));
-    expect(reaj.getByText("9")).toBeTruthy();
-    expect(reaj.getByText("MT-388 · reajuste a pedir")).toBeTruthy();
-    // issue #274: os avisos do motor de apostilamento entram na secao, cada um com o que diz
-    expect(reaj.getByText("Cultural · nota antes do apostilamento (3 competências)")).toBeTruthy();
-    expect(reaj.getByText("Leblon · reajuste a pedir")).toBeTruthy();
-    const prazos = within(caixa.getByRole("region", { name: "Prazos" }));
-    expect(prazos.getByText("vencido há 450 dias").className).toContain("ini-pilula--acao");
-    expect(prazos.getByText("faltam 20 dias").className).toContain("ini-pilula--atencao");
-    const cert = within(caixa.getByRole("region", { name: "Certidões" }));
-    expect(cert.getByText("vence em 5 dias").className).toContain("ini-pilula--atencao");
-    expect(cert.getByText("vence hoje")).toBeTruthy();
-    expect(cert.getByText("vencido há 8 dias").className).toContain("ini-pilula--acao");
-    expect(cert.getByText("FGTS · Integra BRT")).toBeTruthy();
-    const hrefs = ["Reajustes", "Prazos", "Certidões"].map(
-      t => caixa.getByRole("link", { name: `Ver todos: ${t}` }).getAttribute("href"));
-    expect(hrefs).toEqual(["/avisos?familia=reajustes", "/avisos?familia=prazos", "/avisos?familia=certidoes"]);
+    expect(api).toHaveBeenCalledWith("/api/inicio");
+    await caixa.findByRole("region", { name: "Vencido" });
+    expect(caixa.getAllByRole("heading", { level: 3 }).map(limpo)).toEqual(["Vencido", "Esta semana", "Este mês"]);
+    const vencido = caixa.getByRole("region", { name: "Vencido" });
+    // o mais antigo primeiro; o fato parado "desde" 12 dias é passado
+    expect(linhasDe(vencido)).toEqual([["Obra B · execução vencida", "há 450 dias"], ["Obra C · nota sem envio", "há 12 dias"]]);
+    expect(within(vencido).getByText("há 450 dias").className).toContain("ini-pilula--acao");
+    const semana = caixa.getByRole("region", { name: "Esta semana" });
+    expect(linhasDe(semana)).toEqual([["Empresa X · FGTS vence", "hoje"], ["Obra A · vigência termina", "em 5 dias"]]);
+    expect(within(semana).getByText("em 5 dias").className).toContain("ini-pilula--atencao");
+    const mes = caixa.getByRole("region", { name: "Este mês" });
+    expect(linhasDe(mes)).toEqual([["Obra A · execução termina", "em 20 dias"]]);
+    expect([vencido, semana, mes].map(s => limpo(s.querySelector(".ini-aviso__conta")))).toEqual(["2", "2", "1"]);
+    // cada item leva ao lugar do aviso, como na tela Avisos
+    expect(within(vencido).getAllByRole("link").map(l => l.getAttribute("href"))).toEqual(["/obras/8/prazos", "/obras/9/medicoes/31#notas"]);
+    expect(within(semana).getAllByRole("link")[0]?.getAttribute("href")).toBe("/documentos/4");
   });
 
-  it("seção Reajustes: detalhe do item com uma data-base, várias datas-base e várias competências", async () => {
-    api.mockResolvedValue(painel({ avisos_importantes: { ...painel().avisos_importantes, reajustes: { total: 3, itens: [
-      { contrato_id: 1, obra: "Alfa", dias: null, tipo: "reajuste_sem_resposta", nivel: "acao", competencias: ["2026-07"] },
-      { contrato_id: 2, obra: "Beta", dias: null, tipo: "reajuste_sem_resposta", nivel: "acao", datas_base: ["2024-06", "2025-03"] },
-      { contrato_id: 3, obra: "Gama", dias: null, tipo: "reajuste_sem_resposta", nivel: "acao", datas_base: ["2024-06"] }] } } }));
+  it("#666: a contagem da caixa é a soma de Vencido, Esta semana e Este mês da tela Avisos, com a mesma fila", async () => {
+    servir();
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const caixa = await screen.findByRole("complementary", { name: "Avisos importantes" });
+    await within(caixa).findByRole("region", { name: "Vencido" });
+    const total = limpo(caixa.querySelector(".ini-avisos__total"));
+    cleanup();
+    render(<AvisosPagina busca={{}} avisos={FILA} nome="Todas as obras" onFechar={() => {}} />);
+    const naTela = screen.getAllByRole("heading", { level: 3 }).map(limpo);
+    expect(naTela).toEqual(["VENCIDO · 2", "ESTA SEMANA · 2", "ESTE MÊS · 1", "DEPOIS · 1"]);
+    expect(total).toBe(String(2 + 2 + 1));
+  });
+
+  it("#666: aviso sem data, além de 90 dias ou da seção Depois não conta nem aparece na caixa", async () => {
+    servir();
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const caixa = await screen.findByRole("complementary", { name: "Avisos importantes" });
+    await within(caixa).findByRole("region", { name: "Vencido" });
+    expect(caixa.textContent).not.toMatch(/Obra D|Obra E|Obra F|Depois|Sem data/);
+    expect(within(caixa).queryByRole("region", { name: "Depois" })).toBeNull();
+  });
+
+  it("#666: cada seção mostra os três primeiros itens; a contagem é de todos", async () => {
+    servir([1, 2, 3, 4, 5].map(n => aviso({ obra: `Obra ${n}`, contrato_id: n, mensagem: `Obra ${n}: execução vencida`, dias: -n, data: `2026-10-0${9 - n}` })));
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const caixa = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
-    const reaj = within(caixa.getByRole("region", { name: "Reajustes" }));
-    expect(reaj.getByText("Alfa · pedido de reajuste sem resposta (07/2026)")).toBeTruthy();
-    expect(reaj.getByText("Beta · pedido de reajuste sem resposta (2 datas-base)")).toBeTruthy();
-    expect(reaj.getByText("Gama · pedido de reajuste sem resposta")).toBeTruthy();
-    expect(reaj.getByText("3")).toBeTruthy();
+    const vencido = await caixa.findByRole("region", { name: "Vencido" });
+    expect(linhasDe(vencido).map(l => l[0])).toEqual(["Obra 5 · execução vencida", "Obra 4 · execução vencida", "Obra 3 · execução vencida"]);
+    expect(limpo(vencido.querySelector(".ini-aviso__conta"))).toBe("5");
+    expect(limpo(document.querySelector(".ini-avisos__total"))).toBe("5");
+    // seção sem aviso: a contagem zero, sem lista
+    const semana = caixa.getByRole("region", { name: "Esta semana" });
+    expect(limpo(semana.querySelector(".ini-aviso__conta"))).toBe("0");
+    expect(semana.querySelector("ul")).toBeNull();
   });
 
-  it("seção de avisos sem item mostra uma linha curta no lugar da lista", async () => {
-    api.mockResolvedValue(painel({ avisos_importantes: {
-      reajustes: { total: 0, itens: [] }, prazos: { total: 0, itens: [] }, certidoes: { total: 0, itens: [] } } }));
+  it("#666: Ver todos abre a tela Avisos, sem filtro de categoria; as seções por assunto saíram", async () => {
+    servir();
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    await screen.findByRole("complementary", { name: "Avisos importantes" });
-    expect(screen.getByText("Nenhum aviso de reajuste.")).toBeTruthy();
-    expect(screen.getByText("Nenhuma certidão vencendo.")).toBeTruthy();
+    const caixa = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
+    await caixa.findByRole("region", { name: "Vencido" });
+    expect(caixa.getAllByRole("link", { name: "Ver todos os avisos" }).map(l => l.getAttribute("href"))).toEqual(["/avisos"]);
+    for (const velha of ["Reajustes", "Prazos", "Certidões"]) expect(caixa.queryByRole("region", { name: velha })).toBeNull();
+  });
+
+  it("#666: fila sem aviso na agenda mostra uma linha curta; falha ao ler a fila vira erro na caixa, sem derrubar a página", async () => {
+    servir([]);
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const caixa = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
+    expect(await caixa.findByText("Nenhum aviso.")).toBeTruthy();
+    expect(limpo(document.querySelector(".ini-avisos__total"))).toBe("0");
+    expect(caixa.queryByRole("region")).toBeNull();
+    cleanup();
+    servir(new Error("falhou"));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const comErro = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
+    expect((await comErro.findByRole("alert")).textContent).toBe("Não foi possível verificar os avisos. Recarregue a página para tentar de novo.");
+    expect(screen.getByRole("region", { name: "Números do mês" })).toBeTruthy();
   });
 
   it("saudação pela hora de Cuiabá", () => {

@@ -207,21 +207,35 @@ def test_notas_protocoladas_no_mes_contam_notas_e_obras_distintas(cenario):
     assert n == {"mes": "2026-10", "valor_centavos": 7_000, "notas": 2, "obras": 2}
 
 
-def test_avisos_importantes_tem_contagem_e_tres_itens_por_secao(cenario):
+def test_painel_nao_monta_mais_a_caixa_de_avisos(cenario):
+    # issue #666: a caixa "Avisos importantes" le a fila da tela Avisos (GET /api/inicio) e a divide pelo tempo na
+    # tela; as tres secoes por assunto (reajustes, prazos, certidoes) sairam do painel
+    c, _ = cenario
+    assert "avisos_importantes" not in inicio.painel(c, HOJE)
+    assert not hasattr(inicio, "_avisos_importantes") and not hasattr(inicio, "AVISOS_REAJUSTE_NA_CAIXA")
+
+
+def test_fila_que_a_caixa_le_ignora_pendencia_de_cadastro_e_marca_o_aviso_sem_data(cenario, monkeypatch):
+    # issue #666: a fila da caixa e' `avisos.listar` (a mesma da tela Avisos). A pendencia de cadastro (natureza
+    # "ausencia") nao chega a nenhum perfil; o aviso de fato sem data chega com `data` e `dias` nulos, que e' o que
+    # a tela usa para deixa-lo fora da agenda (`secaoDoAviso` em frontend/src/avisos.ts)
+    from app import avisos
     c, cid = cenario
-    a = inicio.painel(c, HOJE)["avisos_importantes"]
-    assert set(a) == {"reajustes", "prazos", "certidoes"}
-    assert a["reajustes"]["total"] == 1 and a["reajustes"]["itens"][0]["obra"] == "Obra A"
-    # execucao em 20/10 (11 dias); a vigencia 30/12 e' alem do horizonte e a data-base nao e' "prazo"
-    assert a["prazos"]["total"] == 2 and a["prazos"]["itens"][0]["tipo"] == "execucao"
-    assert a["certidoes"] == {"total": 0, "itens": []}
-    for i in range(5):
-        c.execute("INSERT INTO contratos (orgao, numero_instrumento, nome_curto, objeto, valor_original_centavos, "
-                  "execucao_fim) VALUES ('X', ?, ?, 'o', 100, ?)", (f"N{i}", f"Obra {i}", f"2026-09-0{i + 1}"))
-    c.commit()
-    p = inicio.painel(c, HOJE)["avisos_importantes"]["prazos"]
-    assert p["total"] == 7 and len(p["itens"]) == 3
-    assert [x["dias"] for x in p["itens"]] == sorted(x["dias"] for x in p["itens"]) and p["itens"][0]["dias"] < 0
+    base = {"nivel": "acao", "publico": ["operacao", "diretoria"], "contrato_id": cid, "obra": "Obra A",
+            "valor_centavos": None, "destino": {"tela": "contrato", "id": cid, "aba": "prazos"}}
+
+    def fonte(conn, hoje):
+        return [
+            {**base, "tipo": "com_data", "mensagem": "Obra A: com data", "data": "2026-10-01", "dias": None, "sentido": "prazo"},
+            {**base, "tipo": "sem_data", "mensagem": "Obra A: sem data", "data": None, "dias": None, "sentido": None},
+            {**base, "tipo": "pendencia", "mensagem": "Obra A: documento fora do cadastro", "data": "2026-09-01",
+             "dias": None, "sentido": "desde", "natureza": "ausencia"}]
+    monkeypatch.setattr(avisos, "FONTES", [fonte])
+    for publico in ("operacao", "diretoria"):
+        fila = {a["tipo"]: a for a in avisos.listar(c, HOJE, publico=publico)}
+        assert set(fila) == {"com_data", "sem_data"}
+        assert fila["com_data"]["dias"] == -8                    # vencido ha' 8 dias: entra na caixa
+        assert fila["sem_data"]["data"] is None and fila["sem_data"]["dias"] is None      # fora da agenda
 
 
 # --- faixa do ciclo (#642): quanto dinheiro esta' em cada etapa, na cota, e a idade do item mais antigo ---
