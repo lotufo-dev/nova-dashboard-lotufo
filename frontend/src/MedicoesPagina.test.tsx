@@ -58,9 +58,6 @@ const ANTERIORES: LinhaAnterior[] = [
 
 const RESUMO: ResumoMedicoes = {
   hoje: "2026-11-07", mes: "2026-10",
-  contagens: { "sem-medicao": 2, "planilha-gerada": 0, "planilha-enviada": 0, "boletim-recebido": 0, faturamento: 0, "aguardando-nota": 0,
-    "enviar-nota": 0, "aguardando-pagamento": 0, iniciar: 2, "em-andamento": 4 },
-  linhas: [],
   obras: [obra({ contrato_id: 1, obra: "Cinco Bairros", proxima: 35 }), obra({ contrato_id: 3, obra: "Complexo Gama", contratante: "MTPAR", proxima: 24 })],
   quadro: QUADRO, anteriores: ANTERIORES,
 };

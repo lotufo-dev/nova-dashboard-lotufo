@@ -91,10 +91,9 @@ def test_estados_novos_do_motor_entram_na_lista_antes_do_espelho(conn, cenario):
     _medicao(conn, ids["b"], 31, "execucao", "planilha_enviada", 2000, planilha_enviada_em="2026-10-07")
     _medicao(conn, ids["d"], 32, "execucao", "planilha_gerada", 3000)
     conn.commit()
-    r = medicoes.resumo(conn, HOJE)
-    assert [x["situacao"] for x in r["linhas"]][:3] == ["planilha-gerada", "planilha-enviada", "boletim-recebido"]
-    assert r["contagens"]["planilha-gerada"] == r["contagens"]["planilha-enviada"] == r["contagens"]["boletim-recebido"] == 1
-    env = next(x for x in r["linhas"] if x["situacao"] == "planilha-enviada")
+    linhas = medicoes.linhas_em_andamento(conn, HOJE)
+    assert [x["situacao"] for x in linhas][:3] == ["planilha-gerada", "planilha-enviada", "boletim-recebido"]
+    env = next(x for x in linhas if x["situacao"] == "planilha-enviada")
     assert env["dias"] == 2 and env["proximo_passo"] == "Espelhos"   # a obra B (MTPAR) nao tem planilha e carta: comeca em Espelhos
     assert [x["estado"] for x in medicoes.em_andamento(conn, estado="boletim_recebido")] == ["boletim_recebido"]
     # "desde" usa os marcos novos (nao o criado_em); a planilha gerada conta da 1a versao
@@ -121,10 +120,11 @@ def test_contratante_sigla_e_sub_orgao():
     assert medicoes.contratante(None, None, None, "Órgão antigo") == ("Órgão antigo", None)
 
 
-def test_resumo_linhas_marcos_e_contagens(conn, cenario):
+def test_linhas_em_andamento_marcos_e_obras_do_resumo(conn, cenario):
     ids = cenario
     r = medicoes.resumo(conn, HOJE)
-    linhas = [(x["obra"], x["titulo"], x["situacao"], x["valor_centavos"], x["dias"]) for x in r["linhas"]]
+    em_linhas = medicoes.linhas_em_andamento(conn, HOJE)
+    linhas = [(x["obra"], x["titulo"], x["situacao"], x["valor_centavos"], x["dias"]) for x in em_linhas]
     assert linhas == [
         ("Obra C", "3ª Medição", "faturamento", 5000, 0),               # o espelho vigente, de hoje
         ("Obra B", "Reajuste da 15ª Medição", "aguardando-nota", 4000, 2),  # 02:00 UTC do dia 8 = dia 7 em Cuiaba
@@ -133,14 +133,14 @@ def test_resumo_linhas_marcos_e_contagens(conn, cenario):
         ("Obra A", "1ª Medição de Projeto", "enviar-nota", 7000, 1),
         ("Obra B", "15ª Medição", "aguardando-pagamento", 300000, 38),
     ]
-    par = r["linhas"][3]
+    par = em_linhas[3]
     assert par["medicao_id"] == ids["a24"] and par["medicao_ids"] == [ids["a24"], ids["a24r"]]
     assert par["contratante"] == "SINFRA" and par["orgao_sub"] == "SUEF II" and par["marco"] == "2026-10-01"
     assert par["proximo_passo"] == "Envio da nota" and par["passo"] == {"numero": 5, "nome": "Envio da nota"}
-    assert {x["competencia"] for x in r["linhas"]} == {"2026-09"}   # #155: a competencia da medicao (AAAA-MM)
-    assert r["contagens"] == {"sem-medicao": 1, "planilha-gerada": 0, "planilha-enviada": 0, "boletim-recebido": 0,
-                              "faturamento": 1, "aguardando-nota": 2, "enviar-nota": 2, "aguardando-pagamento": 1,
-                                  "iniciar": 5, "em-andamento": 6}   # #507: contagens do menu
+    assert {x["competencia"] for x in em_linhas} == {"2026-09"}   # #155: a competencia da medicao (AAAA-MM)
+    # #699: as contagens e as linhas sairam da resposta (nenhuma tela as lia)
+    assert "contagens" not in r and "linhas" not in r
+    assert sum(1 for o in r["obras"] if o["sem_no_mes"]) == 5 and sum(1 for o in r["obras"] if not o["aberta"]) == 1
     # obras ativas (a suspensa fica fora); a D so' tem prevista: sem medicao aberta, com a prevista mais antiga
     obras = {o["obra"]: o for o in r["obras"]}
     assert set(obras) == {"Obra A", "Obra B", "Obra C", "Obra D", "Obra F"}
@@ -148,19 +148,6 @@ def test_resumo_linhas_marcos_e_contagens(conn, cenario):
     assert obras["Obra D"]["contratante"] == "Pref. Várzea Grande"
     assert obras["Obra F"]["contratante"] == "Órgão sem cadastro" and obras["Obra F"]["aberta"] is True
     assert obras["Obra A"]["prevista_id"] is None
-
-
-def test_aba_aguardando_pagamento_conta_as_notas_da_tabela(conn, cenario):
-    """N-01 (10/10/2026): a aba contava linhas (medicao + reajuste viram uma) e a tabela, notas; agora as duas
-    contam as medicoes protocoladas, uma por nota."""
-    from app import notas_envio
-    ids = cenario
-    _medicao(conn, ids["b"], 16, "execucao", "protocolada", 1000)
-    _medicao(conn, ids["b"], 16, "reajuste", "protocolada", 100)
-    conn.commit()
-    r = medicoes.resumo(conn, HOJE)
-    assert sum(1 for x in r["linhas"] if x["situacao"] == "aguardando-pagamento") == 2      # o par vira uma linha
-    assert r["contagens"]["aguardando-pagamento"] == len(notas_envio.aguardando_pagamento(conn)) == 3
 
 
 def test_obra_sem_medicao_traz_ultima_ha_quanto_tempo_prevista_e_proxima(conn):
@@ -264,7 +251,8 @@ def test_prevista_da_aba_desempata_por_competencia_tipo_numero_e_id(conn):
 def test_rota_do_resumo(client_admin):
     r = client_admin.get("/api/medicoes/resumo")
     assert r.status_code == 200, r.text
-    assert set(r.json()) == {"hoje", "mes", "contagens", "linhas", "obras", "quadro", "anteriores"}
+    # #699: `contagens` e `linhas` (a lista "em andamento" antiga) sairam: nenhuma tela as lia
+    assert set(r.json()) == {"hoje", "mes", "obras", "quadro", "anteriores"}
     # a rota fixa nao cai em /api/medicoes/{medicao_id}
     assert client_admin.get("/api/medicoes/999").status_code == 404
 
@@ -488,7 +476,7 @@ def test_obra_com_a_lista_vazia_sai_do_quadro_e_nao_oferece_iniciar(conn, cenari
     assert [x["obra"] for x in outubro["quadro"]] == ["Obra A", "Obra B", "Obra F"]
     sem = {o["contrato_id"]: o["sem_no_mes"] for o in outubro["obras"]}
     assert sem[ids["c"]] is False and sem[ids["d"]] is False and sem[ids["a"]] is True
-    assert outubro["contagens"]["iniciar"] == antes["contagens"]["iniciar"] - 2
+    assert sum(1 for o in outubro["obras"] if o["sem_no_mes"]) == sum(1 for o in antes["obras"] if o["sem_no_mes"]) - 2
     # a medicao que ja' existe na obra continua em andamento, com os passos da familia do orgao
     [linha] = [x for x in medicoes.em_andamento(conn) if x["id"] == ids["c3"]]
     assert linha["passo"] == {"numero": 3, "nome": "Espelhos"}

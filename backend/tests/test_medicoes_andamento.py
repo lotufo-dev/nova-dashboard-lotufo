@@ -1,4 +1,4 @@
-"""Redesenho 2026-11 (#507): a lista "Em andamento" (passo e com quem) e as contagens do menu lateral. Usa o cenario de
+"""Redesenho 2026-11 (#507): as linhas de "em andamento" (passo e com quem) e as obras de "Iniciar medicao". Usa o cenario de
 `test_medicoes_resumo` (as medicoes dele sao todas da competencia 2026-09; HOJE e' 2026-10-09)."""
 from app import medicoes
 from tests.test_medicoes_resumo import HOJE, _medicao, cenario, conn  # noqa: F401  (fixtures)
@@ -12,7 +12,7 @@ def test_em_andamento_traz_o_passo_e_com_quem_esta(conn, cenario):
     _medicao(conn, ids["c"], 32, "execucao", "planilha_gerada", 3000)
     _medicao(conn, ids["c"], 33, "execucao", "planilha_enviada", 3000, planilha_enviada_em="2026-10-07")
     conn.commit()
-    linhas = medicoes.resumo(conn, HOJE)["linhas"]
+    linhas = medicoes.linhas_em_andamento(conn, HOJE)
     por = {x["situacao"]: x for x in linhas}
     assert [por[s]["passo"] for s in medicoes.ORDEM_SITUACAO] == [
         {"numero": 1, "nome": "Planilha e carta"}, {"numero": 2, "nome": "Análise do órgão"}, {"numero": 3, "nome": "Espelhos"},
@@ -46,34 +46,37 @@ def test_obra_sem_planilha_e_carta_comeca_em_espelhos(conn, cenario):
 def test_meses_anteriores_trazem_o_mesmo_passo_da_linha(conn, cenario):
     """#653: o passo de "Meses anteriores" e' o do selo da linha, com o numero que a tela usa na ancora da medicao."""
     r = medicoes.resumo(conn, HOJE, mes="2026-10")
-    passo_da_linha = {x["medicao_id"]: x["passo"] for x in r["linhas"]}
+    passo_da_linha = {x["medicao_id"]: x["passo"] for x in medicoes.linhas_em_andamento(conn, HOJE)}
     assert r["anteriores"] and all(x["passo"] == passo_da_linha[x["medicao_id"]] for x in r["anteriores"])
     assert {x["titulo"]: x["passo"]["numero"] for x in r["anteriores"] if x["obra"] == "Obra A"} == {
         "24ª Medição + Reajuste": 5, "1ª Medição de Projeto": 5}
 
 
-def test_contagens_do_menu_iniciar_e_em_andamento(conn, cenario):
-    """"Iniciar medicao" conta as obras ativas sem medicao NA competencia do mes; "Em andamento", as linhas da lista."""
+def _iniciar(r) -> int:
+    return sum(1 for o in r["obras"] if o["sem_no_mes"])
+
+
+def test_obras_de_iniciar_medicao_sao_as_sem_medicao_no_mes(conn, cenario):
+    """"Iniciar medicao": as obras ativas sem medicao NA competencia do mes (`sem_no_mes`)."""
     ids = cenario
     r = medicoes.resumo(conn, HOJE)
     assert r["mes"] == "2026-10"
     # o cenario so' tem medicoes de 2026-09: as obras ativas (A, B, C, D e F) estao sem medicao em outubro
     assert {o["obra"] for o in r["obras"] if o["sem_no_mes"]} == {"Obra A", "Obra B", "Obra C", "Obra D", "Obra F"}
-    assert r["contagens"]["iniciar"] == 5
-    assert r["contagens"]["em-andamento"] == len(r["linhas"]) > 0
+    assert _iniciar(r) == 5
     # em setembro saem as que tem medicao viva; a prevista (D) nao conta como medicao
     s = medicoes.resumo(conn, HOJE, mes="2026-09")
-    assert {o["obra"] for o in s["obras"] if o["sem_no_mes"]} == {"Obra D"} and s["contagens"]["iniciar"] == 1
+    assert {o["obra"] for o in s["obras"] if o["sem_no_mes"]} == {"Obra D"} and _iniciar(s) == 1
     # uma medicao de outubro tira a obra da lista de outubro, mesmo com a de setembro ainda aberta
     nova = _medicao(conn, ids["a"], 25, "execucao", "planilha_gerada", 100)
     conn.execute("UPDATE medicoes SET competencia='2026-10' WHERE id=?", (nova,))
     conn.commit()
     r2 = medicoes.resumo(conn, HOJE)
-    assert "Obra A" not in {o["obra"] for o in r2["obras"] if o["sem_no_mes"]} and r2["contagens"]["iniciar"] == 4
+    assert "Obra A" not in {o["obra"] for o in r2["obras"] if o["sem_no_mes"]} and _iniciar(r2) == 4
     # cancelada nao conta como medicao do mes
     conn.execute("UPDATE medicoes SET estado='cancelada' WHERE id=?", (nova,))
     conn.commit()
-    assert medicoes.resumo(conn, HOJE)["contagens"]["iniciar"] == 5
+    assert _iniciar(medicoes.resumo(conn, HOJE)) == 5
 
 
 def test_reajuste_sozinho_no_mes_nao_tira_a_obra_de_iniciar_medicao(conn, cenario):
@@ -86,12 +89,12 @@ def test_reajuste_sozinho_no_mes_nao_tira_a_obra_de_iniciar_medicao(conn, cenari
 
 
 def test_obra_em_encerramento_fica_fora_de_iniciar_medicao(conn, cenario):
-    """A-21: a obra em encerramento nao e' ativa; sai da lista e da contagem de "Iniciar medicao"."""
+    """A-21: a obra em encerramento nao e' ativa; sai da lista de "Iniciar medicao"."""
     ids = cenario
     conn.execute("UPDATE contratos SET encerramento_iniciado_em='2026-10-01' WHERE id=?", (ids["a"],))
     conn.commit()
     r = medicoes.resumo(conn, HOJE)
-    assert "Obra A" not in {o["obra"] for o in r["obras"] if o["sem_no_mes"]} and r["contagens"]["iniciar"] == 4
+    assert "Obra A" not in {o["obra"] for o in r["obras"] if o["sem_no_mes"]} and _iniciar(r) == 4
 
 
 def test_ultima_medicao_traz_estado_e_valor(conn, cenario):

@@ -272,7 +272,7 @@ describe("App: Medições é o quadro do mês (#643)", () => {
     try { localStorage.removeItem("menu-lateral"); } catch { /* sem armazenamento */ }
     api.mockImplementation(async (caminho: string) => {
       if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa da Engenharia", email: "eng@lotufo.com", perfil: "engenharia", csrf: "x" };
-      if (caminho.startsWith("/api/medicoes/resumo")) return { hoje: "2026-11-07", mes: caminho.split("mes=")[1], contagens: {}, linhas: [], obras: [], quadro: [], anteriores: [] };
+      if (caminho.startsWith("/api/medicoes/resumo")) return { hoje: "2026-11-07", mes: caminho.split("mes=")[1], obras: [], quadro: [], anteriores: [] };
       return [];
     });
   });

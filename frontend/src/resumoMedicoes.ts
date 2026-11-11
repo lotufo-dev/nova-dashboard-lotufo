@@ -5,13 +5,6 @@
 export type Situacao = "planilha-gerada" | "planilha-enviada" | "boletim-recebido" | "faturamento" | "aguardando-nota" | "enviar-nota" | "aguardando-pagamento";
 export type SituacaoOuSem = "sem-medicao" | Situacao;
 
-export type LinhaResumo = {
-  situacao: Situacao; contrato_id: number; obra: string; contratante: string; orgao_sub: string | null;
-  medicao_id: number; medicao_ids: number[]; numero: number; competencia: string; titulo: string; proximo_passo: string;
-  valor_centavos: number | null; marco: string | null; dias: number | null;
-  // #507: o passo da barra de passos (1 Planilha e carta ... 6 Pagamento) e com quem a medicao esta
-  passo: { numero: number; nome: string }; com_quem: "Lotufo" | "Órgão";
-};
 /** #151: o que a janela "Iniciar processo" sabe de uma serie de medicao da obra (execucao ou Projeto). */
 export type SerieObra = {
   aberta_id: number | null; aberta_numero: number | null; aberta_passo: string | null;
@@ -54,7 +47,7 @@ export type LinhaAnterior = {
   passo: { numero: number; nome: string };
 };
 export type ResumoMedicoes = {
-  hoje: string; mes: string; contagens: Record<SituacaoOuSem | "iniciar" | "em-andamento", number>; linhas: LinhaResumo[]; obras: ObraResumo[];
+  hoje: string; mes: string; obras: ObraResumo[];
   quadro: LinhaQuadro[]; anteriores: LinhaAnterior[];
 };
 
