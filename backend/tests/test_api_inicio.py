@@ -128,8 +128,9 @@ def test_painel_do_inicio(client_admin):
     r = client_admin.get("/api/inicio/painel")
     assert r.status_code == 200
     assert set(r.json()) == {"hoje", "notas_a_enviar", "certidoes", "reajustes", "protocoladas", "medido",
-                             "por_contratante", "recebido_ano", "a_receber", "prazos", "espelhos",
-                             "protocolado_mes", "notas_mes", "avisos_importantes"}
+                             "recebido_ano", "a_receber", "prazos", "espelhos", "ciclo", "notas_mes",
+                             "avisos_importantes"}
+    assert [e["etapa"] for e in r.json()["ciclo"]] == ["em_analise", "boletim", "nota", "protocolado", "recebido_mes"]
     assert r.json()["protocoladas"]["obras_ativas"] == 1
     assert r.json()["espelhos"] == []
 
@@ -148,6 +149,23 @@ def test_painel_do_inicio_leva_a_medicao_com_o_aprovado_mudado_depois_do_espelho
     assert {k: e[k] for k in ("contrato_id", "medicao_id", "titulo", "situacao")} == {
         "contrato_id": cid, "medicao_id": mid, "titulo": "23ª Medição", "situacao": "aprovado_mudou"}
     assert e["obra"] and e["espelho_id"] == g.json()["espelho_id"]
+
+
+def test_faixa_do_ciclo_e_a_mesma_para_admin_diretoria_e_engenharia(client_admin):
+    # issue #642: a obra de teste tem uma medicao protocolada em 28/07/2026, de R$ 250,00
+    from app import auth, db
+    _obra(client_admin)
+    faixa = client_admin.get("/api/inicio/painel").json()["ciclo"]
+    protocolado = next(e for e in faixa if e["etapa"] == "protocolado")
+    assert (protocolado["valor_centavos"], protocolado["quantidade"]) == (250_00, 1)
+    c = db.get_conn()
+    for perfil in ("diretoria", "engenharia"):
+        auth.criar_usuario(c, perfil.capitalize(), f"{perfil}@lotufo.com", "senha-forte-123", perfil)
+    c.close()
+    for perfil in ("diretoria", "engenharia"):
+        r = client_admin.post("/api/auth/login", json={"email": f"{perfil}@lotufo.com", "senha": "senha-forte-123"})
+        client_admin.cookies.set("sessao", r.cookies.get("sessao") or client_admin.cookies.get("sessao"))
+        assert client_admin.get("/api/inicio/painel").json()["ciclo"] == faixa
 
 
 def test_painel_do_inicio_exige_login(client):
