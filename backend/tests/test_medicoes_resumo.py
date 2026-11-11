@@ -549,16 +549,21 @@ def test_quadro_mostra_setor_e_dias_uteis_no_passo_em_que_o_processo_corre(conn,
     g1 = _medicao(c, g, 1, "execucao", "planilha_enviada", 1001, planilha_enviada_em="2026-10-05 12:00:00")
     pid_g = _processo_siga(c, "ANA001", medicao_id=g1, setor="SUPE", entrada="2026-10-28 10:00:00")
     b = _siga(_linha(c, "Obra B"))
-    assert b[6] == {"processo_id": pid, "setor": "COFIN", "dias_uteis": 8, "desde": "2026-10-20T09:00:00-04:00"}
+    assert b[6] == {"processo_id": pid, "setor": "COFIN", "dias_uteis": 8, "desde": "2026-10-20T09:00:00-04:00",
+                    "hoje": 0}
     assert all(v is None for n, v in b.items() if n != 6)
     gq = _siga(_linha(c, "Obra G"))
-    assert gq[2] == {"processo_id": pid_g, "setor": "SUPE", "dias_uteis": 2, "desde": "2026-10-28T10:00:00-04:00"}
+    assert gq[2] == {"processo_id": pid_g, "setor": "SUPE", "dias_uteis": 2, "desde": "2026-10-28T10:00:00-04:00",
+                     "hoje": 0}
     assert all(v is None for n, v in gq.items() if n != 2)
     # os mesmos setor, dias e entrada da tela SIGA
     from app import siga
     agora = datetime.datetime(2026, 10, 30, 16, tzinfo=datetime.timezone.utc)
     painel = {p["id"]: p for p in siga.painel(c, agora)["processos"]}
     assert (painel[pid]["setor"], painel[pid]["dias_uteis"], painel[pid]["desde"]) == ("COFIN", 8, b[6]["desde"])
+    # movimentacao de hoje no processo: a tela SIGA escreve "hoje" no lugar dos dias, e o quadro recebe a mesma conta
+    c.execute("INSERT INTO siga_movimentacoes (processo_id, data, evento) VALUES (?, '2026-10-30 08:00:00', 'Juntada')", (pid,))
+    assert _siga(_linha(c, "Obra B"))[6]["hoje"] == siga.painel(c, agora)["processos"][0]["hoje"] == 1
     # as outras obras continuam sem nada
     assert all(v is None for v in _siga(_linha(c, "Obra A")).values())
 

@@ -8,7 +8,8 @@ import LegendaCor from "./LegendaCor";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import { diaMes, PASSOS } from "./Passos";
-import { mesPorExtenso, somarMes, type LinhaAnterior, type LinhaQuadro, type ObraResumo, type PassoQuadro, type ResumoMedicoes } from "./resumoMedicoes";
+import { mesPorExtenso, somarMes, type LinhaAnterior, type LinhaQuadro, type ObraResumo, type PassoQuadro, type ResumoMedicoes, type SigaNoQuadro } from "./resumoMedicoes";
+import { nivelDias, tempoNoSetor } from "./siga";
 import { fmtCompetencia, hojeLocal } from "./tempo";
 import "./iniciarMedicao.css";
 import "./medicoes.css";
@@ -20,6 +21,22 @@ import "./medicoes.css";
 // medições abertas de outras competências. Tudo vem de GET /api/medicoes/resumo (`medicoes.resumo`); a tela só desenha.
 
 const traco = <span className="medicoes__traco">—</span>;
+
+/** #664: onde está o processo do SIGA da medição que está neste passo: sigla do setor e tempo no setor, com o texto e a
+ *  cor da tela SIGA (o `NoSetor` de SigaPagina: "hoje" quando houve movimentação hoje; senão `tempoNoSetor` com a cor de
+ *  atraso de `nivelDias`). Sem data de entrada no setor, só a sigla. */
+function PosicaoSiga({ siga }: { siga: SigaNoQuadro | null }) {
+  if (!siga) return null;
+  const nivel = siga.hoje > 0 ? "hoje" : nivelDias(siga.dias_uteis);
+  const tempo = siga.hoje > 0 ? "hoje" : siga.desde === null || siga.dias_uteis === null ? "—" : tempoNoSetor(siga, new Date());
+  return (
+    <span className="quadro__siga">
+      <span className="sr-only">No SIGA: </span>
+      <span className="quadro__siga-setor">{siga.setor}</span>
+      {tempo !== "—" && <> <span className={`quadro__siga-tempo num${nivel ? ` quadro__siga-tempo--${nivel}` : ""}`}>{tempo}</span></>}
+    </span>
+  );
+}
 
 function CelulaPasso({ n, passo, linha }: { n: number; passo: PassoQuadro | undefined; linha: LinhaQuadro }) {
   const nome = PASSOS[n - 1];
@@ -41,10 +58,11 @@ function CelulaPasso({ n, passo, linha }: { n: number; passo: PassoQuadro | unde
         <Link className="pilula-info pilula-info--andamento quadro__atual" para={{ tela: "medicao", obra: linha.contrato_id, id: passo.medicao_id }}
           secao={`passo-${n}`}
           aria-label={`Abrir ${medicao?.titulo ?? "a medição"} de ${linha.obra}: ${nome}`}>Atual</Link>
+        <PosicaoSiga siga={passo.siga} />
       </td>
     );
   }
-  return <td className="quadro__passo quadro__passo--futuro" data-rotulo={nome}>A fazer</td>;
+  return <td className="quadro__passo quadro__passo--futuro" data-rotulo={nome}>A fazer<PosicaoSiga siga={passo.siga} /></td>;
 }
 
 function Linha({ linha, podeIniciar, aoIniciar }: { linha: LinhaQuadro; podeIniciar: boolean; aoIniciar: () => void }) {

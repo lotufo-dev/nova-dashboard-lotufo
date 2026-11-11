@@ -89,7 +89,7 @@ export const ROTULO_ENCERRADO = { recebida: "Medição recebida", arquivado: "Ar
 
 /** "N dias uteis" a partir de um dia util; antes disso, minutos ou horas; passado um dia corrido sem dia util
  *  completo (fim de semana, feriado), "menos de 1 dia util". */
-export function tempoNoSetor(p: ProcessoSiga, agora: Date): string {
+export function tempoNoSetor(p: Pick<ProcessoSiga, "desde" | "dias_uteis">, agora: Date): string {
   if (p.desde === null || p.dias_uteis === null) return "—";
   if (p.dias_uteis >= 1) return p.dias_uteis === 1 ? "1 dia útil" : `${p.dias_uteis} dias úteis`;
   const desde = instante(p.desde, NaN);

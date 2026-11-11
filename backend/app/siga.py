@@ -683,8 +683,8 @@ def mais_parado(posicoes: list[dict]) -> dict | None:
 def posicao_das_medicoes(conn, medicao_ids, hoje: datetime.date) -> dict[int, dict]:
     """Issue #664: {medicao: posicao do processo vivo ligado a ela}, para o quadro do mes. Ligado pela medicao ou
     pelo protocolo que a leva. Fica de fora o processo encerrado (`_encerramento`), o que ainda nao foi lido e o que
-    nao tem setor na situacao. Com mais de um processo vivo na medicao, o mais parado. Setor, entrada e dias uteis
-    sao os de `derivar`, os mesmos da tela SIGA. Le as movimentacoes de todos os processos numa consulta por lote."""
+    nao tem setor na situacao. Com mais de um processo vivo na medicao, o mais parado. Setor, entrada, dias uteis e
+    movimentacoes de hoje sao os de `derivar`, os mesmos da tela SIGA. Le as movimentacoes de todos os processos numa consulta por lote."""
     medicoes_de: dict[int, set[int]] = {}
     for lote in _em_lotes(medicao_ids):
         marcas = ",".join("?" * len(lote))
@@ -716,7 +716,7 @@ def posicao_das_medicoes(conn, medicao_ids, hoje: datetime.date) -> dict[int, di
         if not d["setor"]:
             continue
         posicao = {"processo_id": pid, "setor": d["setor"], "dias_uteis": d["dias_uteis"],
-                   "desde": tempo.iso_local(d["desde"]) if d["desde"] else None}
+                   "desde": tempo.iso_local(d["desde"]) if d["desde"] else None, "hoje": d["hoje"]}
         for mid in medicoes_de[pid]:
             candidatas.setdefault(mid, []).append(posicao)
     return {mid: mais_parado(posicoes) for mid, posicoes in candidatas.items()}
