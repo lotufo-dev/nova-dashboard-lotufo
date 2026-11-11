@@ -43,6 +43,9 @@ const PAINEL_MINIMO = {
   a_receber: { liberado: false, valor_centavos: null, mais_60_centavos: null }, prazos: [],
   ciclo: ["em_analise", "boletim", "nota", "protocolado", "recebido_mes"].map(
     etapa => ({ etapa, valor_centavos: 0, quantidade: 0, mais_antigo_dias: null })),
+  recebido_12m: [],
+  previsao: Object.fromEntries(["neste_mes", "proximo_mes", "atrasado", "sem_previsao", "depois"].map(
+    k => [k, { valor_centavos: 0, quantidade: 0 }])),
   notas_mes: { mes: "2026-10", valor_centavos: 0, notas: 0, obras: 0 },
   avisos_importantes: { reajustes: { total: 0, itens: [] }, prazos: { total: 0, itens: [] }, certidoes: { total: 0, itens: [] } },
 };

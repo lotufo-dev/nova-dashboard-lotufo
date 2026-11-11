@@ -7,6 +7,10 @@ vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api"
 
 const USUARIO = { id: 1, nome: "Leonardo Praeiro", email: "leonardo@lotufo.com", perfil: "admin" };
 
+const MESES_12 = ["2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08",
+  "2026-09", "2026-10"];
+const RECEBIDO: Record<string, number> = { "2025-11": 120_000_000, "2026-03": 35_000_000, "2026-09": 240_000_000, "2026-10": 60_000_050 };
+
 const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   hoje: "2026-10-09",
   notas_a_enviar: 3,
@@ -25,6 +29,14 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
     { etapa: "protocolado", valor_centavos: 1_586_677_904, quantidade: 6, mais_antigo_dias: 100 },
     { etapa: "recebido_mes", valor_centavos: 12_000_200, quantidade: 2, mais_antigo_dias: null },
   ],
+  recebido_12m: MESES_12.map(mes => ({ mes, valor_centavos: RECEBIDO[mes] ?? 0 })),
+  previsao: {
+    neste_mes: { valor_centavos: 500_000, quantidade: 2 },
+    proximo_mes: { valor_centavos: 900_001, quantidade: 1 },
+    atrasado: { valor_centavos: 800_100, quantidade: 2 },
+    sem_previsao: { valor_centavos: 0, quantidade: 0 },
+    depois: { valor_centavos: 1_584_477_803, quantidade: 1 },     // as cinco somam a etapa "Protocolado" do ciclo
+  },
   notas_mes: { mes: "2026-10", valor_centavos: 1_522_295_618, notas: 5, obras: 2 },
   avisos_importantes: {
     reajustes: { total: 9, itens: [{ contrato_id: 9, obra: "Cultural", dias: null, tipo: "reajuste_nota_antes_do_apostilamento", nivel: "critico",
@@ -115,15 +127,97 @@ describe("Início", () => {
       .toBe(Array<string>(5).fill("minmax(var(--ini-faixa-min), 1fr)").join(" "));
   });
 
-  it("três cartões só com rótulo e valor: notas protocoladas, medido do mês e recebido no ano", async () => {
+  it("#652: recebido em 12 meses, uma barra por mês até o mês corrente, com a altura proporcional ao maior", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: "Recebido em 12 meses (cota da Lotufo)" });
+    const meses = [...regiao.querySelectorAll<HTMLElement>(".ini-rec__mes")];
+    expect(meses.map(m => limpo(m.querySelector(".ini-rec__rotulo")))).toEqual(
+      ["nov/25", "dez/25", "jan/26", "fev/26", "mar/26", "abr/26", "mai/26", "jun/26", "jul/26", "ago/26", "set/26", "out/26"]);
+    expect(meses.map(m => limpo(m.querySelector(".ini-rec__valor")))).toEqual(
+      ["1,2 mi", "—", "—", "—", "350 mil", "—", "—", "—", "—", "—", "2,4 mi", "600 mil"]);
+    expect(meses.map(m => m.style.getPropertyValue("--ini-rec-tamanho"))).toEqual(
+      ["50%", "0%", "0%", "0%", "15%", "0%", "0%", "0%", "0%", "0%", "100%", "25%"]);
+    expect(regiao.querySelector(".ini-rec")?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("#652: recebido em 12 meses tem a tabela equivalente, dentro de um div sr-only", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: "Recebido em 12 meses (cota da Lotufo)" });
+    const tabela = within(regiao).getByRole("table", { name: "Recebido por mês, na cota da Lotufo" });
+    expect(tabela.className).toBe("");
+    expect(tabela.parentElement?.tagName).toBe("DIV");
+    expect(tabela.parentElement?.className).toBe("sr-only");
+    const linhas = within(tabela).getAllByRole("row").map(l => [...l.children].map(limpo));
+    expect(linhas).toHaveLength(13);
+    expect(linhas[0]).toEqual(["Mês", "Recebido"]);
+    expect(linhas[1]).toEqual(["11/2025", "R$ 1.200.000,00"]);
+    expect(linhas[2]).toEqual(["12/2025", "R$ 0,00"]);
+    expect(linhas[12]).toEqual(["10/2026", "R$ 600.000,50"]);
+  });
+
+  it("#652: recebido em 12 meses sem nenhuma baixa não divide por zero", async () => {
+    api.mockResolvedValue(painel({ recebido_12m: MESES_12.map(mes => ({ mes, valor_centavos: 0 })) }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: "Recebido em 12 meses (cota da Lotufo)" });
+    expect([...regiao.querySelectorAll<HTMLElement>(".ini-rec__mes")].map(m => m.style.getPropertyValue("--ini-rec-tamanho")))
+      .toEqual(Array<string>(12).fill("0%"));
+  });
+
+  it("#652: previsão de entrada com as cinco linhas, valor e quantidade; só o atrasado com valor fica vermelho", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: "Previsão de entrada (cota da Lotufo)" });
+    const linhas = within(regiao).getAllByRole("listitem");
+    expect(linhas.map(l => [...l.children].map(limpo))).toEqual([
+      ["Neste mês", "R$ 5.000,00", "2 medições"],
+      ["No próximo mês", "R$ 9.000,01", "1 medição"],
+      ["Depois", "R$ 15.844.778,03", "1 medição"],
+      ["Atrasado", "R$ 8.001,00", "2 medições"],
+      ["Sem previsão", "R$ 0,00", "0 medições"],
+    ]);
+    expect(linhas.map(l => l.className.includes("--critico"))).toEqual([false, false, false, true, false]);
+  });
+
+  it("#652: as cinco linhas da previsão fecham com a etapa Protocolado da faixa do ciclo, em quantidade e valor", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: "Previsão de entrada (cota da Lotufo)" });
+    const centavos = (t: string) => Number(t.replace(/\D/g, ""));
+    const linhas = within(regiao).getAllByRole("listitem").map(l => [...l.children].map(limpo));
+    expect(linhas).toHaveLength(5);
+    const protocolado = [...document.querySelectorAll(".ini-faixa__etapa")].map(e => [...e.children].map(limpo))
+      .find(e => e[0] === "Protocolado");
+    expect(linhas.reduce((s, l) => s + parseInt(l[2] ?? "", 10), 0)).toBe(parseInt(protocolado?.[2] ?? "", 10));
+    expect(linhas.reduce((s, l) => s + centavos(l[1] ?? ""), 0)).toBe(centavos(protocolado?.[1] ?? ""));
+  });
+
+  it("#652: linha da previsão sem medição continua no lugar, zerada", async () => {
+    const zero = { valor_centavos: 0, quantidade: 0 };
+    api.mockResolvedValue(painel({ previsao: { neste_mes: zero, proximo_mes: zero, atrasado: zero, sem_previsao: zero, depois: zero } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: "Previsão de entrada (cota da Lotufo)" });
+    expect(within(regiao).getAllByRole("listitem").map(l => [...l.children].map(limpo))).toEqual(
+      ["Neste mês", "No próximo mês", "Depois", "Atrasado", "Sem previsão"].map(r => [r, "R$ 0,00", "0 medições"]));
+  });
+
+  it("#652: sem medição atrasada a linha Atrasado fica na cor padrão", async () => {
+    api.mockResolvedValue(painel({ previsao: { ...painel().previsao, atrasado: { valor_centavos: 0, quantidade: 0 } } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: "Previsão de entrada (cota da Lotufo)" });
+    expect(regiao.querySelector("[class*='--critico']")).toBeNull();
+  });
+
+  it("dois cartões só com rótulo e valor: notas protocoladas e medido do mês (#652: o recebido no ano virou as barras)", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const regiao = await screen.findByRole("region", { name: "Números do mês" });
     expect([...regiao.children].map(c => [...c.children].map(limpo))).toEqual([
       ["Notas fiscais protocoladas em outubro", "R$ 15.222.956,18"],
       ["Medido em setembro", "R$ 18.277.156,96"],
-      ["Recebido em 2026", "R$ 187.856.408,66"],
     ]);
+    expect(document.body.textContent).not.toContain("Recebido em 2026");
   });
 
   it("#642: saíram a curva diária, a variação, as barras por contratante, a barra verde e o selo de mês fechado", async () => {
