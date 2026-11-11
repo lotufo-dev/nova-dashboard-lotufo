@@ -92,14 +92,21 @@ describe("Documentos só cobra o que é exigido (#651)", () => {
   });
   const estados = (emp: EmpresaDoc, hoje: string) => estadosRegularidade(emp, hoje).map(x => x.estado);
 
-  it("mês anterior ao primeiro PDF da empresa fica sem cobrança; depois dele, o que não foi anexado falta", () => {
+  it("#699: sem PDF, só a competência esperada falta (a que o contador conta); as outras ficam sem cobrança", () => {
     // hoje 23/09: os chips vao de 03 a 08/2026; o proximo protocolo pede 07/2026
     expect(estados(comReg(1, ["2026-06"], "2026-07", "2026-06"), "2026-09-23"))
-      .toEqual(["sem", "sem", "sem", "anexada", "faltando", "faltando"]);
-    // a primeira anexada vem do servidor (a lista das anexadas tem teto); sem o campo, vale a mais antiga da lista
+      .toEqual(["sem", "sem", "sem", "anexada", "faltando", "sem"]);
+    // mes antigo sem PDF, posterior ao primeiro anexado (04 e 05), nao e' pedido por protocolo nenhum: sem cobranca
     expect(estados(comReg(1, ["2026-06"], "2026-07", "2026-04"), "2026-09-23"))
-      .toEqual(["sem", "faltando", "faltando", "anexada", "faltando", "faltando"]);
-    expect(estados(comReg(1, ["2026-06"], "2026-07"), "2026-09-23")[2]).toBe("sem");
+      .toEqual(["sem", "sem", "sem", "anexada", "faltando", "sem"]);
+    // a esperada anterior ao primeiro PDF da empresa nao e' cobrada (a primeira vem do servidor; sem o campo, a
+    // mais antiga da lista)
+    expect(estados(comReg(1, ["2026-08"], "2026-07", "2026-08"), "2026-09-23")[4]).toBe("sem");
+    expect(estados(comReg(1, ["2026-08"], "2026-07"), "2026-09-23")[4]).toBe("sem");
+    // a quantidade de "faltando" na tela e' a do contador
+    const lista = [comReg(1, ["2026-06"], "2026-07", "2026-04"), comReg(2, ["2026-07"], "2026-07", "2026-07"),
+      comReg(3, ["2026-08"], "2026-07", "2026-08"), comReg(4, [], "2026-07", null)];
+    expect(lista.flatMap(x => estados(x, "2026-09-23")).filter(x => x === "faltando")).toHaveLength(regularidadesFaltando(lista));
     // antes do dia 10 o ultimo mes aguarda o DP, como antes
     expect(estados(comReg(1, ["2026-06"], "2026-06", "2026-06"), "2026-09-07")[5]).toBe("aguardando");
   });
