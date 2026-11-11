@@ -7,8 +7,17 @@ export type Movimentacao = {
   data: string; evento: string | null; tipo: TipoMovimentacao; cad_lotacao: string; cad_pessoa: string; at_lotacao: string; at_pessoa: string;
 };
 
+// #663: quatro categorias fechadas. "medicoes" e' automatica (processo ligado a medicao ou a protocolo de medicao).
+export type Categoria = "medicoes" | "aditivos" | "indenizatorios" | "outros";
+export const CATEGORIAS: { categoria: Categoria; rotulo: string }[] = [
+  { categoria: "medicoes", rotulo: "Medições" }, { categoria: "aditivos", rotulo: "Aditivos" },
+  { categoria: "indenizatorios", rotulo: "Indenizatórios" }, { categoria: "outros", rotulo: "Outros" },
+];
+
 export type ProcessoSiga = {
   id: number; codigo: string | null; link: string | null; numero: string | null; nome: string | null;
+  // o_que_e: a segunda parte do nome montado pelo servidor ("7ª Medição", "Aditivo de prazo")
+  categoria: Categoria; complemento: string | null; o_que_e: string;
   contrato_id: number | null; obra: string | null; medicao_id: number | null; medicao_titulo: string | null;
   protocolo_id: number | null; situacao: string | null; setor: string; caixa_entrada: boolean; com_quem: string;
   // #657: medicao recebida ou processo arquivado; derivado pelo servidor a cada leitura. null = vivo
@@ -68,6 +77,14 @@ export function ordenar(processos: ProcessoSiga[]): ProcessoSiga[] {
   });
 }
 
+/** As secoes da tabela principal (#663): uma por categoria, na ordem fixa, cada uma do mais parado ao menos; a
+ *  categoria sem processo nao aparece. */
+export function porCategoria(processos: ProcessoSiga[]): { categoria: Categoria; rotulo: string; processos: ProcessoSiga[] }[] {
+  return CATEGORIAS
+    .map(c => ({ ...c, processos: ordenar(processos.filter(p => p.categoria === c.categoria)) }))
+    .filter(s => s.processos.length > 0);
+}
+
 export const ROTULO_ENCERRADO = { recebida: "Medição recebida", arquivado: "Arquivado" } as const;
 
 /** "N dias uteis" a partir de um dia util; antes disso, minutos ou horas; passado um dia corrido sem dia util
@@ -115,10 +132,11 @@ export function destinoDaMovimentacao(m: Movimentacao): string {
   return ehTransferencia(m) && sigla(m.at_lotacao) ? `→ ${sigla(m.at_lotacao)}` : "";
 }
 
-/** Nome do processo como a pessoa o reconhece: obra e medicao quando ligado, senao o que o robo mandou. */
+/** Nome montado pelo sistema (#663): "<obra> · <o que e'>". O numero do SIGA nao entra. Sem obra, o complemento
+ *  e, na falta dele, o nome que o robo mandou. */
 export function nomeDoProcesso(p: ProcessoSiga): string {
-  if (p.medicao_id !== null && p.obra) return p.medicao_titulo ? `${p.obra} · ${p.medicao_titulo}` : p.obra;
-  return p.nome || p.numero || p.codigo || "Processo sem nome";
+  if (p.obra) return `${p.obra} · ${p.o_que_e}`;
+  return p.complemento || p.nome || p.numero || p.codigo || "Processo sem nome";
 }
 
 const semAcento = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();

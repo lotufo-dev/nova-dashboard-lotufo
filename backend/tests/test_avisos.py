@@ -57,6 +57,27 @@ def test_contrato_em_encerramento_nao_tem_aviso_de_prazo(cenario):
     assert not [a for a in avisos.listar(c, D(2026, 10, 1)) if a["tipo"].startswith("execucao")]
 
 
+def test_execucao_sem_prazo_conhecido_sai_dos_avisos_e_entra_nas_pendencias_de_cadastro(cenario):
+    # issue #662: execucao registrada ate' 2026-10-20 e aditivo posterior que so' prorroga a vigencia
+    c, ids = cenario
+    hoje = D(2026, 12, 1)
+    assert [a["tipo"] for a in avisos.listar(c, hoje, publico="todos") if "execução vencida" in a["mensagem"]] == [
+        "instrumento_pendente"]
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, nova_vigencia_fim, status, data_assinatura) "
+              "VALUES (?, 'prazo', 0, '2027-06-30', 'assinado', '2026-11-10')", (ids["contrato"],)); c.commit()
+    for publico in ("operacao", "diretoria", "todos"):
+        fila = avisos.listar(c, hoje, publico=publico)
+        assert not [a for a in fila if a["tipo"] in ("instrumento_pendente", "execucao_vencendo", "execucao_sem_prazo")]
+        assert not [a for a in fila if "execução vencida" in a["mensagem"]]
+    [a] = [x for x in avisos.listar(c, hoje, publico="todos", natureza="ausencia") if x["tipo"] == "execucao_sem_prazo"]
+    assert a["natureza"] == "ausencia"
+    assert [p for p in avisos.pendencias_cadastro(c, hoje) if p["aba"] == "prazos"] == [
+        {"contrato_id": ids["contrato"], "obra": "Obra A", "desde": "2026-11-10", "aba": "prazos",
+         "falta": "Aditivo de 10/11/2026 prorroga a vigência sem o prazo de execução; "
+                  "último prazo de execução registrado: 20/10/2026"}]
+    assert not [p for p in avisos.sem_data(c, hoje) if "execução" in p["aviso"]]
+
+
 def test_formato_ordem_e_publico(cenario):
     c, ids = cenario
     lista = avisos.listar(c, D(2026, 11, 1))

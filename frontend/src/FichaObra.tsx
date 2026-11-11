@@ -7,10 +7,10 @@ import "./ficha.css";
 // Ficha executiva da obra (#510, aprovada em 06/11/2026): seis cartoes. Desde a #646 ela e' o resumo no
 // alto da pagina unica da obra (`ContratoPagina`), que le os dados e os passa para ca'. Desde a #655, no lugar da curva S, o cartao "Ritmo e prazo".
 // A cor e' so' da informacao (docs/identidade-visual.md): feito verde, em andamento azul, vence em breve ambar,
-// critico vermelho, o resto preto. Quem decide o nivel de prazo e de certidao e' o servidor (`ficha_obra`).
+// critico vermelho, o resto preto. Quem decide o nivel de prazo e' o servidor (`ficha_obra`).
 
 type Nivel = "critico" | "atencao" | "normal";
-type Vencimento = { chave: "certidao" | "execucao" | "vigencia"; rotulo: string; data: string | null; dias: number | null; nivel: Nivel };
+type Vencimento = { chave: "execucao" | "vigencia"; rotulo: string; data: string | null; dias: number | null; nivel: Nivel };
 type Medicao = { id: number; titulo: string; rotulo: string; competencia: string; valor_centavos: number | null };
 export type Ficha = {
   // #646: base de execucao (sem o aditivo de reajuste) e cota da Lotufo; vigente − medido = saldo

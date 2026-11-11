@@ -188,7 +188,7 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
                 )}
                 <dl className="pag-dados">
                   <div><dt>Processo</dt><dd>{numero ?? (env
-                    ? <Link className="link" para={aqui} secao="etapa-4">Registrar o protocolo</Link> : "—")}</dd></div>
+                    ? <Link className="link" para={aqui} secao="passo-5">Registrar o protocolo</Link> : "—")}</dd></div>
                   <div><dt>Enviada em</dt><dd className="num">{env ? fmtDataPura(env) : "—"}</dd></div>
                 </dl>
                 {proc?.link && (

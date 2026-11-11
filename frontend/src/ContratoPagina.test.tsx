@@ -241,6 +241,16 @@ describe("Página da obra: o desenho novo", () => {
     expect(within(cartao).queryByText(/contrato rescindido|vencida/)).toBeNull();
   });
 
+  it("execução sem prazo conhecido (#662) mostra só a data registrada, sem selo de vencida", async () => {
+    fixarDia("2027-01-05T15:00:00Z");     // execucao registrada vencida (31/12/2026), vigencia em dia
+    responderCom({ dias_execucao: null, execucao_sem_prazo: true });
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    const cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
+    expect(within(cartao).getByText("31/12/2026")).toBeTruthy();
+    expect(within(cartao).queryByText("vencida")).toBeNull();
+    expect(within(cartao).getAllByText(/^Hoje /)).toHaveLength(1);     // so' a linha da vigencia tem trilho
+  });
+
   it("o dia vira à meia-noite de Cuiabá, não à do UTC", async () => {
     fixarDia("2026-10-17T03:30:00Z");   // 23h30 do dia 16 em Cuiabá
     responderCompleto();

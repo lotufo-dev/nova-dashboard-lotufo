@@ -15,8 +15,8 @@ const FICHA: Ficha = {
   // ritmo 50.000,00/mes para 187.654,34 de saldo: conclusao depois do fim da execucao
   ritmo: { ritmo_centavos: 5000000, saldo_centavos: 18765434, conclusao: "2027-03-08", execucao_fim: "2026-11-18",
     situacao: "atrasa", dias_alem: 110 },
+  // #661: so' o que e' da obra; a certidao da empresa saiu daqui
   vencimentos: [
-    { chave: "certidao", rotulo: "FGTS Construtora Alfa", data: "2026-11-15", dias: 9, nivel: "atencao" },
     { chave: "execucao", rotulo: "Fim da execução", data: "2026-11-18", dias: 12, nivel: "critico" },
     { chave: "vigencia", rotulo: "Fim da vigência", data: "2027-02-16", dias: 102, nivel: "normal" }],
 };
@@ -73,9 +73,13 @@ describe("Resumo da obra", () => {
     expect(within(cartao("Prazo")).getByText("12 dias").className).toContain("info--critico");
     expect(within(cartao("Prazo")).getByText(/execução até 18\/11\/2026 · vigência até 16\/02\/2027/)).toBeTruthy();
     const venc = cartao("Próximos vencimentos");
-    expect(within(venc).getByText("15/11/2026").className).toContain("info--breve");
+    expect(within(venc).getAllByRole("listitem").map(l => l.textContent)).toEqual(
+      ["Fim da execução18/11/2026", "Fim da vigência16/02/2027"]);
     expect(within(venc).getByText("18/11/2026").className).toContain("info--critico");
     expect(within(venc).getByText("16/02/2027").className).not.toContain("info-");
+    cleanup();
+    montar({ ...FICHA, vencimentos: FICHA.vencimentos.map(v => v.chave === "vigencia" ? { ...v, nivel: "atencao" } : v) });
+    expect(within(cartao("Próximos vencimentos")).getByText("16/02/2027").className).toContain("info--breve");
   });
 
   it("prazo longe do fim não fica vermelho", () => {

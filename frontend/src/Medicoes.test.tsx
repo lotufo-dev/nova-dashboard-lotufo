@@ -12,7 +12,7 @@ const medicao = (extra: Record<string, unknown> = {}) => ({
 
 function responder(rm: { configurado: boolean; ultima_sincronizacao: string | null; ultimo_erro: string | null }) {
   api.mockImplementation(async (url: string) => {
-    if (url.startsWith("/api/medicoes/andamento")) return [{ id: 70, proximo_passo: "protocolar", desde: "2026-10-01" }];
+    if (url.startsWith("/api/medicoes/andamento")) return [{ id: 70, proximo_passo: "Envio da nota", desde: "2026-10-01" }];
     if (url === "/api/rm/status") return rm;
     return [medicao(), medicao({ id: 60, numero: 6, estado: "recebida", recebida_em: "2026-09-20",
       notas: [{ nota_id: 1, numero: "0002322", serie: null, emissao: null, valor_centavos: 1, coligada: 1,
@@ -28,7 +28,9 @@ describe("Medições da obra", () => {
     responder({ configurado: true, ultima_sincronizacao: "2026-10-26T08:00:00-04:00", ultimo_erro: null });
     render(<Medicoes contratoId={3} busca={{}} />);
     expect(await screen.findByRole("heading", { name: "Em andamento" })).toBeTruthy();
-    expect(screen.getByText("Enviar a nota")).toBeTruthy();
+    // #653: o próximo passo é o nome do passo, e a medição abre na âncora dele
+    expect(screen.getByText("Envio da nota")).toBeTruthy();
+    expect(screen.getAllByRole("link", { name: /Medição/ }).map(l => l.getAttribute("href"))).toContain("/obras/3/medicoes/70#passo-5");
     expect(screen.queryByText(/desde|sincronizado|1 medição|recebidas, canceladas/)).toBeNull();
     expect(screen.queryByText(/Sincronização com o RM falhou/)).toBeNull();
     expect(screen.getByText("NF 2322")).toBeTruthy();
@@ -37,7 +39,7 @@ describe("Medições da obra", () => {
   // issue #647: Pedido (protocolado) e Aprovado (atestado) em colunas próprias, nas duas tabelas
   it("mostra Pedido e Aprovado; medição sem aprovado mostra “—”", async () => {
     api.mockImplementation(async (url: string) => {
-      if (url.startsWith("/api/medicoes/andamento")) return [{ id: 70, proximo_passo: "protocolar", desde: "2026-10-01" }];
+      if (url.startsWith("/api/medicoes/andamento")) return [{ id: 70, proximo_passo: "Envio da nota", desde: "2026-10-01" }];
       if (url === "/api/rm/status") return { configurado: false, ultima_sincronizacao: null, ultimo_erro: null };
       return [medicao({ valor_protocolado_centavos: 25001 }),
         medicao({ id: 60, numero: 6, estado: "recebida", recebida_em: "2026-09-20", valor_protocolado_centavos: 15003,

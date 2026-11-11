@@ -197,7 +197,7 @@ def test_custo_rm_exige_ver_paineis(client, monkeypatch):
 
 def test_ficha_traz_ultima_medicao_em_andamento_e_vencimentos(client_admin, monkeypatch):
     """#510: a ficha executiva da obra. Ultima = a recebida mais nova; em andamento = a aberta mais nova, com a etapa
-    e o desde; vencimentos = certidao (quando ha), fim da execucao e fim da vigencia, com o nivel do semaforo."""
+    e o desde; vencimentos = fim da execucao e fim da vigencia, com o nivel do semaforo (sem certidao: #661)."""
     import datetime
     from app import db, medicoes, tempo
     hoje = datetime.date(2026, 11, 6)
@@ -223,6 +223,27 @@ def test_ficha_traz_ultima_medicao_em_andamento_e_vencimentos(client_admin, monk
     assert v["execucao"]["data"] == "2026-11-18" and v["execucao"]["dias"] == 12 and v["execucao"]["nivel"] == "critico"
     assert v["vigencia"]["data"] == "2027-02-16" and v["vigencia"]["nivel"] == "normal"
     assert f["contrato"]["original_igual"] is True and f["contrato"]["tas"] == 0
+
+
+def test_ficha_e_cabecalho_sem_prazo_de_execucao_conhecido_mostram_so_a_data(client_admin, monkeypatch):
+    """#662: execucao registrada vencida e aditivo posterior so' de vigencia: a data fica, sem dias nem vermelho."""
+    import datetime
+    from app import db, tempo
+    monkeypatch.setattr(tempo, "hoje_local", lambda: datetime.date(2026, 12, 1))
+    cid = novo_contrato({**NOVO, "execucao_fim": "2026-10-20", "vigencia_fim": "2027-02-16"})
+
+    def execucao():
+        f = client_admin.get(f"/api/contratos/{cid}/ficha").json()
+        cab = client_admin.get(f"/api/contratos/{cid}/cabecalho").json()
+        v = {x["chave"]: x for x in f["vencimentos"]}["execucao"]
+        return (v["data"], v["dias"], v["nivel"]), (cab["execucao_fim"], cab["dias_execucao"], cab["execucao_sem_prazo"])
+
+    assert execucao() == (("2026-10-20", -42, "critico"), ("2026-10-20", -42, False))
+    conn = db.get_conn()
+    conn.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, nova_vigencia_fim, status, data_assinatura) "
+                 "VALUES (?, 'prazo', 0, '2027-06-30', 'assinado', '2026-11-10')", (cid,))
+    conn.commit(); conn.close()
+    assert execucao() == (("2026-10-20", None, "normal"), ("2026-10-20", None, True))
 
 
 def test_ficha_obra_sem_medicao_e_inexistente_404(client_admin):
@@ -374,3 +395,24 @@ def test_listar_traz_o_a_receber_na_cota_so_com_o_total_liberado(client_admin):
     assert lista[cid]["posicao"]["a_receber_centavos"] == 147_000_16 + 49_000_00 == tela[cid]   # 147.000,1617 e 49.000,00
     assert "a_receber_centavos" not in lista[cid]                         # o cheio saiu da lista
     assert lista[outro]["posicao"]["a_receber_centavos"] == 0
+
+
+def test_ficha_vencimentos_sem_certidao_da_empresa(client_admin, monkeypatch):
+    """#661: certidao e' da empresa e se resolve em Documentos; "Proximos vencimentos" fica com o que e' da obra,
+    mesmo com certidao exigida perto de vencer."""
+    import datetime
+    from app import certidoes, contratos, db, documentos, tempo
+    hoje = datetime.date(2026, 11, 6)
+    monkeypatch.setattr(tempo, "hoje_local", lambda: hoje)
+    cid = novo_contrato({**NOVO, "execucao_fim": "2026-11-18", "vigencia_fim": "2027-02-16"})
+    conn = db.get_conn()
+    try:
+        c = conn.execute("SELECT * FROM contratos WHERE id=?", (cid,)).fetchone()
+        ex = documentos.exigidos(conn, cid, "execucao")
+        assert ex["tipos"], "o cenario precisa de certidao exigida"
+        certidoes.registrar(conn, 1, contratos.entidade_de(c), ex["tipos"][0]["id"], "2026-08-01", "2026-11-10",
+                            "dados/certidoes/teste.pdf", "a" * 64, "upload")
+    finally:
+        conn.close()
+    venc = client_admin.get(f"/api/contratos/{cid}/ficha").json()["vencimentos"]
+    assert [x["chave"] for x in venc] == ["execucao", "vigencia"]

@@ -257,7 +257,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
 /** Nova medicao a mao, na obra do fluxo antigo (sem espelho pelo sistema): numero, tipo e competencia. A medicao
  *  nasce `prevista` e a pagina dela recebe as notas e o protocolo. */
 export function NovaMedicaoManual({ contratoId, aoCriar, inicial }: {
-  contratoId: number; aoCriar: () => void;
+  contratoId: number; aoCriar: (id: number) => void;
   // o que a janela "Iniciar processo" (#151) mandou pela URL, ja' validado (medicaoDaBusca)
   inicial?: { numero: string; competencia: string; tipo: "projeto" | "" };
 }) {
@@ -281,7 +281,7 @@ export function NovaMedicaoManual({ contratoId, aoCriar, inicial }: {
       setFeito({ id: r.id, numero: Number(novo.numero), tipo: novo.tipo });
       setNovo({ numero: "", tipo: "execucao", competencia: "" });
       setReaj({ valor: "", dataBase: "" });
-      aoCriar();
+      aoCriar(r.id);
     } catch (e) { setErro(mensagemDeErro(e)); } finally { setSalvando(false); }
   }
 

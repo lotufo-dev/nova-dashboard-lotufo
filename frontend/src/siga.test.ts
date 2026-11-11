@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  casaComBusca, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, nivelDias, ordenar, periodoDe,
+  casaComBusca, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, nivelDias, nomeDoProcesso, ordenar, periodoDe, porCategoria,
   roboAtivo, setorPessoa, situacaoDoBotao, tempoNoSetor, tituloDoEvento, volumeDe, type Movimentacao, type ProcessoSiga, type Robo,
 } from "./siga";
 
 const p = (extra: Partial<ProcessoSiga>): ProcessoSiga => ({
   id: 1, codigo: null, link: null, numero: null, nome: null, contrato_id: null, obra: null, medicao_id: null,
+  categoria: "outros", complemento: null, o_que_e: "Outro",
   medicao_titulo: null, protocolo_id: null, situacao: null, encerrado: null, setor: "", caixa_entrada: false, com_quem: "",
   desde: null, dias_uteis: null, hoje: 0, ultima: null, protocolado_em: null, movimentacoes: [], ...extra });
 
@@ -94,6 +95,27 @@ describe("siga", () => {
   it("evento sem o texto depois de ' |'", () => {
     expect(tituloDoEvento("Recebimento | texto do órgão")).toBe("Recebimento");
     expect(tituloDoEvento(null)).toBe("");
+  });
+
+  it("seções por categoria na ordem fixa, cada uma do mais parado ao menos; a vazia não aparece (#663)", () => {
+    const lista = [
+      p({ id: 1, categoria: "outros", dias_uteis: 1 }), p({ id: 2, categoria: "medicoes", dias_uteis: 2 }),
+      p({ id: 3, categoria: "outros", dias_uteis: 9 }), p({ id: 4, categoria: "medicoes", dias_uteis: 7 }),
+      p({ id: 5, categoria: "aditivos", dias_uteis: 30 }),
+    ];
+    expect(porCategoria(lista).map(s => [s.rotulo, s.processos.map(x => x.id)])).toEqual(
+      [["Medições", [4, 2]], ["Aditivos", [5]], ["Outros", [3, 1]]]);
+    expect(porCategoria([])).toEqual([]);
+  });
+
+  it("nome montado: '<obra> · <o que é>', sem o número; sem obra, o complemento e depois o nome do robô (#663)", () => {
+    const base = { nome: "Nome do robô", numero: "ORGAO-PRO-2026/00011", codigo: "ABC123" };
+    expect(nomeDoProcesso(p({ ...base, obra: "Obra Alfa", categoria: "aditivos", complemento: "de prazo", o_que_e: "Aditivo de prazo" }))).toBe("Obra Alfa · Aditivo de prazo");
+    expect(nomeDoProcesso(p({ ...base, obra: "Obra Alfa", categoria: "medicoes", medicao_id: 3, medicao_titulo: "7ª Medição", o_que_e: "7ª Medição" }))).toBe("Obra Alfa · 7ª Medição");
+    expect(nomeDoProcesso(p({ ...base, complemento: "Licença ambiental", o_que_e: "Licença ambiental" }))).toBe("Licença ambiental");
+    expect(nomeDoProcesso(p(base))).toBe("Nome do robô");
+    expect(nomeDoProcesso(p({ ...base, nome: null }))).toBe("ORGAO-PRO-2026/00011");
+    expect(nomeDoProcesso(p({}))).toBe("Processo sem nome");
   });
 
   it("busca por obra ignora maiúscula e acento e olha também o nome do robô e o número", () => {

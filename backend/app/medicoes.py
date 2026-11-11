@@ -1202,17 +1202,19 @@ def titulo(m: dict) -> str:
     return f"{m['numero']}ª Medição" + (" de Projeto" if m["tipo"] == "projeto" else "")
 
 
-PROXIMO_PASSO = {"planilha_gerada": "enviar a planilha/carta", "planilha_enviada": "registrar o boletim",
-                 "boletim_recebido": "gerar o espelho", "espelho_gerado": "enviar ao faturamento", "espelho_enviado": "anexar as notas",
-                 "nota_emitida": "protocolar", "protocolada": "aguardando pagamento",
-                 "nf_emitida": "aguardando pagamento"}
+# Os estados de "em andamento" e o passo de cada um na barra da pagina da medicao (#653: o proximo passo diz o NOME do
+# passo, o mesmo vocabulario em toda tela). O valor daqui e' o do fluxo completo; `em_andamento` devolve o da medicao,
+# que na obra sem planilha/carta comeca em "Espelhos" (`passo_do_estado`).
+PROXIMO_PASSO = {"planilha_gerada": "Planilha e carta", "planilha_enviada": "Análise do órgão",
+                 "boletim_recebido": "Espelhos", "espelho_gerado": "Espelhos", "espelho_enviado": "Notas",
+                 "nota_emitida": "Envio da nota", "protocolada": "Pagamento", "nf_emitida": "Pagamento"}
 
 
 def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None) -> list[dict]:
     """Medicoes entre o espelho e o pagamento, com o proximo passo e a data do ultimo marco."""
-    sql = ("SELECT m.*, c.nome_curto, c.numero_instrumento, "
+    sql = ("SELECT m.*, c.nome_curto, c.numero_instrumento, o.familia, "
            "(SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') AS protocolado_em "
-           "FROM medicoes m JOIN contratos c ON c.id=m.contrato_id "
+           "FROM medicoes m JOIN contratos c ON c.id=m.contrato_id LEFT JOIN orgaos o ON o.id=c.orgao_id "
            f"WHERE m.estado IN ({','.join('?' * len(PROXIMO_PASSO))})")
     args: list = list(PROXIMO_PASSO)
     if contrato_id is not None:
@@ -1222,7 +1224,10 @@ def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None
         sql += " AND m.estado=?"
         args.append(estado)
     out = []
-    for r in conn.execute(sql + " ORDER BY c.nome_curto, c.id, m.numero DESC, m.tipo", args):
+    linhas = conn.execute(sql + " ORDER BY c.nome_curto, c.id, m.numero DESC, m.tipo", args).fetchall()
+    com_planilha = _com_planilha(conn, {r["contrato_id"]: {"familia": r["familia"]} for r in linhas})
+    for r in linhas:
+        passo = passo_do_estado(r["estado"], com_planilha(r))
         # dia de Cuiaba (`_dia`) nos marcos e no criado_em: carimbo UTC das 20h as 24h cairia no dia seguinte
         brutos = [r["espelho_em"], r["nota_emitida_em"], r["protocolado_em"]]
         # marcos do motor so' no estado deles: atesto/glosa posterior numa medicao adiante nao rebaixa o "desde"
@@ -1237,7 +1242,8 @@ def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None
                     "titulo": titulo(r), "competencia": r["competencia"], "estado": r["estado"],
                     # #284: o valor da linha e' o que vale para a nota (aprovado, senao pedido), em todo estado
                     "valor_centavos": (valor_travado(r) or (r["valor_protocolado_centavos"],))[0],
-                    "proximo_passo": PROXIMO_PASSO[r["estado"]],
+                    # #653: o nome do passo da vez (os seis de `PASSOS`), e o passo com o numero para a ancora
+                    "proximo_passo": PASSOS[passo - 1], "passo": {"numero": passo, "nome": PASSOS[passo - 1]},
                     "desde": max(marcos) if marcos else (criado.isoformat() if criado else ""),
                     # os marcos crus, para quem precisa do marco da SITUACAO e nao do mais recente (resumo abaixo)
                     "espelho_em": r["espelho_em"], "nota_emitida_em": r["nota_emitida_em"],
@@ -1256,16 +1262,9 @@ SITUACAO = {"planilha_gerada": "planilha-gerada", "planilha_enviada": "planilha-
             "protocolada": "aguardando-pagamento", "nf_emitida": "aguardando-pagamento"}
 ORDEM_SITUACAO = ("planilha-gerada", "planilha-enviada", "boletim-recebido", "faturamento", "aguardando-nota", "enviar-nota", "aguardando-pagamento")
 
-# Redesenho 2026-11 (#507, "Em andamento"): o selo da lista usa as ETAPAS da pagina da medicao (frontend/src/Etapas.tsx:
-# 1 Espelho, 2 Faturamento, 3 Nota fiscal, 4 Envio ao orgao, 5 Pagamento; `etapaDe` la' e' esta mesma tabela), para a
-# medicao nao mostrar "6" na lista e "Etapa 5" na pagina. A #508 (fluxo unico na pagina da obra) redefine a barra de
-# passos e o selo acompanha. "Com quem": so' a analise do orgao (planilha enviada) e o pagamento estao com o orgao.
-PASSO_DA_SITUACAO = {
-    "planilha-gerada": (1, "Espelho", "Lotufo"), "planilha-enviada": (1, "Espelho", "Órgão"),
-    "boletim-recebido": (1, "Espelho", "Lotufo"), "faturamento": (2, "Faturamento", "Lotufo"),
-    "aguardando-nota": (3, "Nota fiscal", "Lotufo"), "enviar-nota": (4, "Envio ao órgão", "Lotufo"),
-    "aguardando-pagamento": (5, "Pagamento", "Órgão"),
-}
+# O selo de passo da linha (#653) e' o da barra de passos da pagina da medicao (`PASSOS`, os seis nomes), o mesmo do
+# quadro do mes. "Com quem": so' a analise do orgao (planilha enviada) e o pagamento estao com o orgao.
+SITUACOES_COM_O_ORGAO = ("planilha-enviada", "aguardando-pagamento")
 
 # Sigla curta do contratante pela chave do orgao no cadastro (orgaos.chave). A SINFRA sai da familia, com a
 # superintendencia ao lado; o que nao estiver aqui aparece com o nome do cadastro, sem sigla inventada.
@@ -1364,8 +1363,9 @@ def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> d
                 "numero": principal["numero"], "competencia": principal["competencia"],
                 "titulo": f"{principal['titulo']} + Reajuste" if len(p) == 2 else principal["titulo"],
                 "proximo_passo": principal["proximo_passo"],
-                "passo": {"numero": PASSO_DA_SITUACAO[situacao][0], "nome": PASSO_DA_SITUACAO[situacao][1]},
-                "com_quem": PASSO_DA_SITUACAO[situacao][2],
+                # medicao + reajuste na mesma linha: o passo da menos adiantada
+                "passo": min((m["passo"] for m in p), key=lambda x: x["numero"]),
+                "com_quem": "Órgão" if situacao in SITUACOES_COM_O_ORGAO else "Lotufo",
                 "valor_centavos": sum(valores) if valores else None,
                 "marco": d.isoformat() if d else None, "dias": (hoje - d).days if d else None})
     linhas.sort(key=lambda x: (ORDEM_SITUACAO.index(x["situacao"]), _chave_nome(x["obra"]), x["contrato_id"],
@@ -1482,7 +1482,7 @@ def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> d
     com_planilha = _com_planilha(conn, obras)
     return {"hoje": hoje.isoformat(), "mes": mes, "contagens": contagens, "linhas": linhas, "obras": lista_obras,
             "quadro": _quadro_do_mes(conn, mes, obras, com_planilha),
-            "anteriores": _meses_anteriores(mes, linhas, andamento, com_planilha)}
+            "anteriores": _meses_anteriores(mes, linhas)}
 
 
 # --- quadro do mes (#643): uma linha por obra e uma coluna por passo, na competencia em trabalho --------------
@@ -1579,18 +1579,16 @@ def _quadro_do_mes(conn, mes: str, obras: dict[int, dict], com_planilha) -> list
     return quadro
 
 
-def _meses_anteriores(mes: str, linhas: list[dict], andamento: list[dict], com_planilha) -> list[dict]:
+def _meses_anteriores(mes: str, linhas: list[dict]) -> list[dict]:
     """As medicoes de competencias anteriores a do quadro ainda abertas (as linhas de "em andamento": medicao e
     reajuste na mesma situacao sao uma so'), da competencia mais antiga para a mais nova, com o passo da vez."""
-    por_id = {m["id"]: m for m in andamento}
     out = []
     for x in linhas:
         if not x["competencia"] or x["competencia"] >= mes:
             continue
-        n = min(passo_do_estado(por_id[i]["estado"], com_planilha(por_id[i])) for i in x["medicao_ids"])
         out.append({"contrato_id": x["contrato_id"], "obra": x["obra"], "medicao_id": x["medicao_id"],
                     "titulo": x["titulo"], "numero": x["numero"], "competencia": x["competencia"],
-                    "passo": {"numero": n, "nome": PASSOS[n - 1]}})
+                    "passo": x["passo"]})
     out.sort(key=lambda x: (x["competencia"], _chave_nome(x["obra"]), x["contrato_id"], -x["numero"], x["titulo"]))
     return out
 

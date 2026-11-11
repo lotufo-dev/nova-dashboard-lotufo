@@ -20,6 +20,7 @@ const mov = (data: string, evento: string, extra: Partial<Movimentacao> = {}): M
   data, evento, tipo: tipoDe(evento), cad_lotacao: "PROTOC/ORGAO", cad_pessoa: "Beltrano", at_lotacao: "COFIN/ORGAO", at_pessoa: "Fulano", ...extra });
 const processo = (extra: Partial<ProcessoSiga>): ProcessoSiga => ({
   id: 1, codigo: null, link: null, numero: null, nome: null, contrato_id: null, obra: null, medicao_id: null,
+  categoria: extra.medicao_id ? "medicoes" : "outros", complemento: null, o_que_e: extra.medicao_titulo ?? "Outro",
   medicao_titulo: null, protocolo_id: null, situacao: "1º Volume - Aguardando Andamento [COFIN, [X]]", encerrado: null, setor: "COFIN",
   caixa_entrada: false, com_quem: "Fulano", desde: "2026-10-20T10:00:00-04:00", dias_uteis: 6, hoje: 0,
   ultima: mov("2026-10-20T10:00:00-04:00", "Recebimento"), protocolado_em: "2026-10-01T08:00:00-04:00",
@@ -65,20 +66,40 @@ const mostrar = (dados: PainelSiga, busca: Record<string, string> = {}) => {
   api.mockResolvedValue(dados);
   return render(<SigaPagina busca={busca} agora={AGORA} />);
 };
-const nomesNaTabela = () => screen.getAllByRole("row").slice(1).map(l => l.getAttribute("aria-label"));
+const linhasDe = (onde: HTMLElement) => within(onde).getAllByRole("row").filter(l => l.classList.contains("sg__linha"));
+const nomesEm = (onde: HTMLElement) => linhasDe(onde).map(l => l.getAttribute("aria-label"));
+const nomesNaTabela = () => nomesEm(document.body);
+const ADITIVO = processo({ id: 21, nome: "Nome do robô", contrato_id: 7, obra: "Obra Alfa", categoria: "aditivos", complemento: "de prazo",
+  o_que_e: "Aditivo de prazo", dias_uteis: 2 });
+const ADITIVO_PARADO = processo({ id: 22, contrato_id: 9, obra: "Obra Delta", categoria: "aditivos", o_que_e: "Aditivo", dias_uteis: 8 });
+const INDENIZATORIO = processo({ id: 23, contrato_id: 8, obra: "Obra Épsilon", categoria: "indenizatorios", o_que_e: "Indenizatório", dias_uteis: 20 });
 
 describe("SigaPagina", () => {
   afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
 
-  it("uma tabela só, do mais parado ao menos (dias úteis), sem grupos nem coluna Hoje nem painel lateral", async () => {
-    mostrar(painel([ALFA, DELTA, EPSILON, BETA, GAMA]));
-    await screen.findByRole("grid");
-    expect(nomesNaTabela()).toEqual(["Processo Gama", "Processo Beta", "Obra Delta · 4ª Medição", "Obra Alfa · 7ª Medição", "Obra Épsilon · 2ª Medição"]);
-    expect(screen.getAllByRole("columnheader").map(c => c.textContent)).toEqual(
+  it("uma tabela só, com uma seção por categoria na ordem fixa, cada uma do mais parado ao menos; sem coluna Hoje nem painel lateral (#663)", async () => {
+    mostrar(painel([ALFA, ADITIVO, INDENIZATORIO, DELTA, EPSILON, BETA, GAMA, ADITIVO_PARADO]));
+    const grade = await screen.findByRole("grid");
+    expect(screen.getAllByRole("grid")).toHaveLength(1);
+    const secoes = within(grade).getAllByRole("rowgroup").filter(g => g.tagName === "TBODY");
+    expect(secoes.map(s => s.getAttribute("aria-label"))).toEqual(["Medições", "Aditivos", "Indenizatórios", "Outros"]);
+    expect(secoes.map(s => s.querySelector(".sg__secao th")?.textContent)).toEqual(["Medições", "Aditivos", "Indenizatórios", "Outros"]);
+    expect(secoes.map(nomesEm)).toEqual([
+      ["Obra Delta · 4ª Medição", "Obra Alfa · 7ª Medição", "Obra Épsilon · 2ª Medição"],
+      ["Obra Delta · Aditivo", "Obra Alfa · Aditivo de prazo"],
+      ["Obra Épsilon · Indenizatório"],
+      ["Processo Gama", "Processo Beta"]]);
+    expect(within(grade.querySelector("thead") as HTMLElement).getAllByRole("columnheader").map(c => c.textContent)).toEqual(
       ["Processo", "Onde está", "Com quem", "No setor há", "Última movimentação", "Protocolado em", "Abrir"]);
-    expect(screen.queryByText("Processos de medições")).toBeNull();
-    expect(screen.queryByText("Outros processos")).toBeNull();
     expect(screen.queryByRole("complementary")).toBeNull();
+  });
+
+  it("seção vazia não aparece (#663)", async () => {
+    mostrar(painel([ALFA, GAMA]));
+    const grade = await screen.findByRole("grid");
+    expect(within(grade).getAllByRole("rowgroup").filter(g => g.tagName === "TBODY").map(s => s.getAttribute("aria-label"))).toEqual(["Medições", "Outros"]);
+    expect(screen.queryByText("Aditivos")).toBeNull();
+    expect(screen.queryByText("Indenizatórios")).toBeNull();
   });
 
   it("subtítulo com o número de processos e a hora da última leitura; legenda da cor", async () => {
@@ -90,12 +111,16 @@ describe("SigaPagina", () => {
       ["andou hoje", "parado há 5 dias úteis ou mais", "10 dias úteis ou mais"]);
   });
 
-  it("Processo: obra em negrito e a medição embaixo; sem medição, o nome do robô e a obra embaixo", async () => {
-    mostrar(painel([ALFA, BETA]));
-    const alfa = await screen.findByRole("row", { name: /Obra Alfa/ });
+  it("Processo: obra em negrito e o que é embaixo (título da medição, 'Aditivo de prazo'); o nome do robô só sem obra; o número não entra no nome (#663)", async () => {
+    mostrar(painel([ALFA, BETA, ADITIVO]));
+    const alfa = await screen.findByRole("row", { name: "Obra Alfa · 7ª Medição" });
     expect(within(alfa).getByText("Obra Alfa").className).toContain("sg__nome");
     expect(within(alfa).getByText("7ª Medição").className).toContain("sg__fraco");
     expect(within(alfa).queryByRole("link")).toBeNull();
+    expect(alfa.textContent).not.toContain("ORGAO-PRO-2026/00001");
+    const aditivo = screen.getByRole("row", { name: "Obra Alfa · Aditivo de prazo" });
+    expect(within(aditivo).getByText("Aditivo de prazo").className).toContain("sg__fraco");
+    expect(aditivo.textContent).not.toContain("Nome do robô");
     const beta = screen.getByRole("row", { name: "Processo Beta" });
     expect(within(beta).getByText("Processo Beta").className).toContain("sg__nome");
   });
@@ -218,7 +243,7 @@ describe("SigaPagina", () => {
     expect(within(trilha).getByText("Histórico").getAttribute("aria-current")).toBe("page");
     expect(screen.getByText("ORGAO-PRO-2026/00001 · 5 movimentações · 20/10/2026 a 28/10/2026")).toBeTruthy();
     expect(screen.getByRole("link", { name: /Abrir no SIGA/ }).getAttribute("href")).toBe("https://siga.exemplo.com.br/acompanhar?n=ABC123");
-    expect(screen.getByRole("link", { name: "Ver a medição" }).getAttribute("href")).toBe("/obras/7/medicoes/31#etapa-4");
+    expect(screen.getByRole("link", { name: "Ver a medição" }).getAttribute("href")).toBe("/obras/7/medicoes/31#passo-5");
   });
 
   it("histórico: tabela De/Para, a mais recente primeiro, documento na juntada", async () => {
@@ -304,7 +329,10 @@ describe("SigaPagina", () => {
   // issue #339: link colado na tela SIGA
   const OBRAS = [{ id: 9, orgao: "ORGAO", numero_instrumento: "IC 9/2026", nome_curto: "Obra Zeta", estado: "em_andamento" },
                  { id: 7, orgao: "ORGAO", numero_instrumento: "IC 7/2026", nome_curto: "Obra Alfa", estado: "em_andamento" }];
-  const NOVO = processo({ id: 8, codigo: "XyZ98765", nome: "Aditivo de prazo", contrato_id: 7, obra: "Obra Alfa",
+  const MEDICOES_DA_OBRA = [{ id: 31, numero: 7, tipo: "execucao", estado: "protocolada" }, { id: 30, numero: 6, tipo: "execucao", estado: "recebida" },
+                            { id: 32, numero: 7, tipo: "reajuste", estado: "nota_emitida" }, { id: 29, numero: 5, tipo: "execucao", estado: "cancelada" }];
+  const NOVO = processo({ id: 8, codigo: "XyZ98765", nome: "Obra Alfa · Aditivo de prazo", contrato_id: 7, obra: "Obra Alfa",
+    categoria: "aditivos", complemento: "de prazo", o_que_e: "Aditivo de prazo",
     situacao: null, setor: "", com_quem: "", desde: null, dias_uteis: null, ultima: null, protocolado_em: null, movimentacoes: [] });
   const comFormulario = (antes: ProcessoSiga[], depois: ProcessoSiga[], resposta: () => Promise<unknown>) => {
     const chamadas: { caminho: string; opts?: RequestInit }[] = [];
@@ -312,6 +340,7 @@ describe("SigaPagina", () => {
     api.mockImplementation(async (caminho: string, opts?: RequestInit) => {
       chamadas.push({ caminho, opts });
       if (caminho === "/api/contratos") return OBRAS;
+      if (caminho === "/api/contratos/7/medicoes") return MEDICOES_DA_OBRA;
       if (caminho === "/api/siga/processos-avulsos") { const r = await resposta(); gravado = true; return r; }
       return painel(gravado ? depois : antes);
     });
@@ -322,26 +351,115 @@ describe("SigaPagina", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Acompanhar processo" }));
     const form = screen.getByRole("form", { name: "Acompanhar processo" });
     fireEvent.change(within(form).getByLabelText("Link do SIGA"), { target: { value: "https://siga.exemplo.com.br/acompanhar?n=XyZ98765" } });
-    fireEvent.change(within(form).getByLabelText("Nome"), { target: { value: "Aditivo de prazo" } });
+    fireEvent.change(within(form).getByLabelText("Categoria"), { target: { value: "aditivos" } });
     await within(form).findByRole("option", { name: "Obra Alfa" });
     fireEvent.change(within(form).getByLabelText("Obra"), { target: { value: "7" } });
-    fireEvent.change(within(form).getByLabelText("Nº do processo"), { target: { value: "ORGAO-PRO-2026/00009" } });
+    fireEvent.change(within(form).getByLabelText("Complemento"), { target: { value: " de prazo " } });
     fireEvent.click(within(form).getByRole("button", { name: "Acompanhar" }));
     return form;
   };
 
-  it("Acompanhar processo: abre o formulário com link, nome, obra (em ordem alfabética, 'Sem obra' primeiro) e número; envia, a lista recarrega e o novo aparece na tabela", async () => {
+  it("Acompanhar processo: o formulário pede Categoria, Obra, Complemento e Link, sem campo Nome; envia, a lista recarrega e o novo aparece com o nome montado (#663)", async () => {
     const chamadas = comFormulario([BETA], [BETA, NOVO], async () => ({ id: 8 }));
-    await preencher();
-    const linha = await screen.findByRole("row", { name: "Aditivo de prazo" });
-    expect(within(linha).getByText("Obra Alfa")).toBeTruthy();
+    const form = await preencher();
+    expect(within(form).queryByLabelText("Nome")).toBeNull();
+    expect(within(form).queryByLabelText("Medição")).toBeNull();
+    expect(Array.from(form.querySelectorAll("#siga-categoria option")).map(o => o.textContent)).toEqual(
+      ["Escolha", "Medições", "Aditivos", "Indenizatórios", "Outros"]);
+    const linha = await screen.findByRole("row", { name: "Obra Alfa · Aditivo de prazo" });
+    expect(linha.closest("tbody")?.getAttribute("aria-label")).toBe("Aditivos");
     expect(screen.queryByRole("form", { name: "Acompanhar processo" })).toBeNull();
     const envio = chamadas.find(c => c.caminho === "/api/siga/processos-avulsos");
     expect(envio?.opts?.method).toBe("POST");
     expect(JSON.parse(envio?.opts?.body as string)).toEqual({
-      link: "https://siga.exemplo.com.br/acompanhar?n=XyZ98765", nome: "Aditivo de prazo", numero: "ORGAO-PRO-2026/00009", contrato_id: 7 });
+      link: "https://siga.exemplo.com.br/acompanhar?n=XyZ98765", categoria: "aditivos", contrato_id: 7, medicao_id: null, complemento: "de prazo" });
     const opcoes = Array.from(document.querySelectorAll("#siga-obra option")).map(o => o.textContent);
     expect(opcoes).toEqual([]);   // formulario fechado depois de gravar
+  });
+
+  it("Medição só aparece na categoria Medições, com as medições abertas da obra, e vai no envio no lugar do complemento (#663)", async () => {
+    const chamadas = comFormulario([BETA], [BETA], async () => ({ id: 8 }));
+    fireEvent.click(await screen.findByRole("button", { name: "Acompanhar processo" }));
+    const form = screen.getByRole("form", { name: "Acompanhar processo" });
+    expect(within(form).queryByLabelText("Medição")).toBeNull();
+    fireEvent.change(within(form).getByLabelText("Categoria"), { target: { value: "medicoes" } });
+    expect(within(form).queryByLabelText("Complemento")).toBeNull();
+    await within(form).findByRole("option", { name: "Obra Alfa" });
+    fireEvent.change(within(form).getByLabelText("Obra"), { target: { value: "7" } });
+    await within(form).findByRole("option", { name: "7ª Medição" });
+    expect(Array.from(form.querySelectorAll("#siga-medicao option")).map(o => o.textContent)).toEqual(["Escolha", "7ª Medição", "Reajuste da 7ª Medição"]);
+    fireEvent.change(within(form).getByLabelText("Medição"), { target: { value: "31" } });
+    fireEvent.change(within(form).getByLabelText("Link do SIGA"), { target: { value: "XyZ98765" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Acompanhar" }));
+    await vi.waitFor(() => expect(chamadas.some(c => c.caminho === "/api/siga/processos-avulsos")).toBe(true));
+    expect(JSON.parse(chamadas.find(c => c.caminho === "/api/siga/processos-avulsos")?.opts?.body as string)).toEqual({
+      link: "XyZ98765", categoria: "medicoes", contrato_id: 7, medicao_id: 31, complemento: null });
+    // trocar a categoria tira o campo Medição
+    fireEvent.click(await screen.findByRole("button", { name: "Acompanhar processo" }));
+    const de_novo = screen.getByRole("form", { name: "Acompanhar processo" });
+    fireEvent.change(within(de_novo).getByLabelText("Categoria"), { target: { value: "outros" } });
+    expect(within(de_novo).queryByLabelText("Medição")).toBeNull();
+  });
+
+  it("histórico: quem edita corrige a categoria do processo; passando a Medições liga à medição da obra (#663)", async () => {
+    const chamadas: { caminho: string; opts?: RequestInit }[] = [];
+    let gravado = false;
+    const DEPOIS = { ...ADITIVO, categoria: "medicoes" as const, complemento: null, medicao_id: 31, medicao_titulo: "7ª Medição", o_que_e: "7ª Medição" };
+    api.mockImplementation(async (caminho: string, opts?: RequestInit) => {
+      chamadas.push({ caminho, opts });
+      if (caminho === "/api/contratos") return OBRAS;
+      if (caminho === "/api/contratos/7/medicoes") return MEDICOES_DA_OBRA;
+      if (caminho === "/api/siga/processos/21/classificacao") { gravado = true; return { id: 21 }; }
+      return painel([gravado ? DEPOIS : ADITIVO]);
+    });
+    render(<SigaPagina busca={{ processo: "21" }} agora={AGORA} />);
+    expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Histórico · Obra Alfa · Aditivo de prazo");
+    fireEvent.click(screen.getByRole("button", { name: "Corrigir categoria" }));
+    const form = screen.getByRole("form", { name: "Corrigir categoria" });
+    await within(form).findByRole("option", { name: "Obra Alfa" });
+    expect((within(form).getByLabelText("Categoria") as HTMLSelectElement).value).toBe("aditivos");
+    expect((within(form).getByLabelText("Obra") as HTMLSelectElement).value).toBe("7");
+    expect((within(form).getByLabelText("Complemento") as HTMLInputElement).value).toBe("de prazo");
+    fireEvent.change(within(form).getByLabelText("Categoria"), { target: { value: "medicoes" } });
+    await within(form).findByRole("option", { name: "7ª Medição" });
+    fireEvent.change(within(form).getByLabelText("Medição"), { target: { value: "31" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Salvar" }));
+    await vi.waitFor(() => expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Histórico · Obra Alfa · 7ª Medição"));
+    const envio = chamadas.find(c => c.caminho === "/api/siga/processos/21/classificacao");
+    expect(envio?.opts?.method).toBe("POST");
+    expect(JSON.parse(envio?.opts?.body as string)).toEqual({ categoria: "medicoes", contrato_id: 7, medicao_id: 31, complemento: null });
+    expect(screen.queryByRole("form", { name: "Corrigir categoria" })).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Categoria gravada.");
+  });
+
+  it("histórico: erro do servidor ao corrigir aparece em português e o formulário fica aberto (#663)", async () => {
+    const { ApiErro } = await import("./api");
+    api.mockImplementation(async (caminho: string) => {
+      if (caminho === "/api/contratos") return OBRAS;
+      if (caminho === "/api/siga/processos/21/classificacao") throw new ApiErro(422, "Escolha a obra do processo");
+      return painel([ADITIVO]);
+    });
+    render(<SigaPagina busca={{ processo: "21" }} agora={AGORA} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Corrigir categoria" }));
+    const form = screen.getByRole("form", { name: "Corrigir categoria" });
+    fireEvent.change(within(form).getByLabelText("Obra"), { target: { value: "" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Salvar" }));
+    expect((await within(form).findByRole("alert")).textContent).toContain("Escolha a obra do processo");
+  });
+
+  it("quem só consulta não vê Corrigir categoria nem Acompanhar processo; processo de protocolo do sistema não tem o que corrigir (#663)", async () => {
+    api.mockResolvedValue(painel([ALFA, ADITIVO]));
+    const { unmount } = render(<SigaPagina busca={{ processo: "21" }} agora={AGORA} podeEditar={false} />);
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.queryByRole("button", { name: "Corrigir categoria" })).toBeNull();
+    unmount();
+    const tabela = render(<SigaPagina busca={{}} agora={AGORA} podeEditar={false} />);
+    await screen.findByRole("grid");
+    expect(screen.queryByRole("button", { name: "Acompanhar processo" })).toBeNull();
+    tabela.unmount();
+    render(<SigaPagina busca={{ processo: String(ALFA.id) }} agora={AGORA} />);   // ALFA tem protocolo_id
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.queryByRole("button", { name: "Corrigir categoria" })).toBeNull();
   });
 
   it("as obras vêm em ordem alfabética depois de 'Sem obra'", async () => {
@@ -358,7 +476,7 @@ describe("SigaPagina", () => {
     const alerta = await within(form).findByRole("alert");
     expect(alerta.textContent).toContain("Este processo do SIGA já está sendo acompanhado: Processo Beta");
     expect(nomesNaTabela()).toEqual(["Processo Beta"]);
-    expect((within(form).getByLabelText("Nome") as HTMLInputElement).value).toBe("Aditivo de prazo");
+    expect((within(form).getByLabelText("Complemento") as HTMLInputElement).value).toBe(" de prazo ");
   });
 
   it("sem nenhum processo o botão Acompanhar processo também aparece", async () => {
@@ -533,7 +651,9 @@ describe("SigaPagina", () => {
   it("encerrados: fora da tabela principal e do contador, na seção 'Encerrados', recolhida, no fim da página", async () => {
     const { container } = mostrar(painel([RECEBIDO, GAMA, ARQUIVADO, DELTA]));
     const grade = await screen.findByRole("grid");
-    expect(within(grade).getAllByRole("row").slice(1).map(l => l.getAttribute("aria-label"))).toEqual(["Processo Gama", "Obra Delta · 4ª Medição"]);
+    expect(nomesEm(grade)).toEqual(["Obra Delta · 4ª Medição", "Processo Gama"]);
+    // os encerrados continuam numa secao so', sem categoria
+    expect(encerrados().querySelector(".sg__secao")).toBeNull();
     expect(screen.getByText("2 processos · última leitura 11:00")).toBeTruthy();
     const secao = encerrados();
     expect(secao.open).toBe(false);
