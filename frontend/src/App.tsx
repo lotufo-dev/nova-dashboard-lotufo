@@ -9,7 +9,6 @@ import Documentos from "./Documentos";
 import DocumentosEmpresa from "./DocumentosEmpresa";
 import AbrirEnvio from "./AbrirEnvio";
 import ContratoPagina from "./ContratoPagina";
-import FichaObra from "./FichaObra";
 import Contratos from "./Contratos";
 import Inicio from "./Inicio";
 import Login, { type Usuario } from "./Login";
@@ -151,10 +150,8 @@ export default function App() {
             // `key` no id: trocar de obra REMONTA a pagina em vez de reaproveitar a
             // instancia. Sem isso, o painel aberto e os rascunhos de formulario da
             // obra anterior sobreviviam a troca — e um cronograma digitado para a
-            // obra A podia ser publicado na B. A aba vem da URL: cada aba tem link.
-            rota.aba === "ficha"
-              ? <FichaObra key={rota.id} contratoId={rota.id} origem={origem} />
-              : <ContratoPagina key={rota.id} contratoId={rota.id} usuario={usuario} aba={rota.aba} origem={origem} busca={busca} />
+            // obra A podia ser publicado na B. A aba vem da URL: cada aba tem link; sem aba, a pagina abre na primeira (#646).
+            <ContratoPagina key={rota.id} contratoId={rota.id} usuario={usuario} aba={rota.aba} origem={origem} busca={busca} />
           )}
           {rota.tela === "medicao" && (
             // `key` na medicao: trocar de medicao (a da mesma competencia) remonta a pagina e os formularios dela.
