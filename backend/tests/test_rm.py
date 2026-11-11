@@ -1588,3 +1588,66 @@ def test_fatura_do_consorcio_pelo_liquido_com_vinculo_desfeito_a_mao_fecha_o_par
     for m in (mid, rid):
         d = medicoes.detalhe(conn, m)
         assert (d["estado"], d["recebida_em"]) == ("recebida", "2026-09-01")
+
+
+# --- nota desconsiderada pela correcao de cadastro (issue #638) ---
+
+def _corrigir_nota(conn, operacao, nf, **extra):
+    from app import correcao_medicoes
+    return correcao_medicoes.executar(conn, 1, [{"operacao": operacao, "nf": nf, "fonte": "comprovante da prefeitura",
+                                                 **extra}], ensaio=False)
+
+
+def _marca(conn, idmov):
+    return tuple(conn.execute("SELECT situacao, desconsiderada_em IS NOT NULL, status_rm FROM notas_fiscais WHERE idmov=?",
+                              (idmov,)).fetchone())
+
+
+def test_sincronizacao_nao_desfaz_a_nota_desconsiderada_nem_o_casador_a_liga(conn, cid, tmp_path):
+    """A nota continua vindo ativa do RM: a marca fica, ela nao volta a "NFs sem medicao" e o casador nao a liga
+    (nem pelo campo livre). Depois de `reconsiderar_nf`, a rodada seguinte a liga como qualquer nota."""
+    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12"), _nf(101, 55.55)]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 100, 920.0, 0, 0)]))
+    assert sincronizacao_rm.reconciliacao(conn)["totais"]["nfs_sem_medicao"] == 2
+    _corrigir_nota(conn, "desconsiderar_nf", 100, motivo="cancelada na prefeitura e substituída")
+    assert _marca(conn, 100) == ("cancelada", 1, "F")
+    mid = _medicao(conn, cid, 12, 1000_00)
+    for _ in range(2):
+        sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 100, 920.0, 0, 0)]))
+        assert _marca(conn, 100) == ("cancelada", 1, "F")
+        assert not _tem_nf(conn, mid)
+        rec = sincronizacao_rm.reconciliacao(conn)
+        assert [n["idmov"] for n in rec["nfs_sem_medicao"]] == [101] and rec["totais"]["nfs_sem_medicao"] == 1
+        assert rec["alocacoes_desfeitas"] == [] and rec["recebidas_sem_baixa"] == []
+    assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes").fetchone()[0] == 0
+    _corrigir_nota(conn, "reconsiderar_nf", 100)
+    assert _marca(conn, 100) == ("ativa", 0, "F")
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 100, 920.0, 0, 0)]))
+    assert _tem_nf(conn, mid)
+    assert auditoria.verificar_cadeia(conn)
+
+
+def test_nota_desconsiderada_que_o_rm_cancela_depois_fica_cancelada(conn, cid, tmp_path):
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(100, 1000.0)], []))
+    _corrigir_nota(conn, "desconsiderar_nf", 100, motivo="cancelada na prefeitura")
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(100, 1000.0, status="C")], []))
+    assert _marca(conn, 100) == ("cancelada", 1, "C")
+    _corrigir_nota(conn, "reconsiderar_nf", 100)                 # a marca sai; a nota segue cancelada, como qualquer outra
+    assert _marca(conn, 100) == ("cancelada", 0, "C")
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(100, 1000.0, status="C")], []))
+    assert _marca(conn, 100) == ("cancelada", 0, "C")
+    assert sincronizacao_rm.reconciliacao(conn)["totais"]["nfs_sem_medicao"] == 0
+
+
+def test_nota_do_pdf_desconsiderada_nao_volta_a_ativa_quando_o_rm_a_confirma(conn, cid, tmp_path):
+    """A nota que entrou pelo PDF (sem idmov) e foi desconsiderada: quando o RM a traz, a confirmacao preenche a linha
+    e a marca fica."""
+    nid = conn.execute("INSERT INTO notas_fiscais (coligada, numero, numero_int, emissao, valor_centavos, origem, "
+                       "confirmacao, valor_pdf_centavos) VALUES (1, '100', 100, '2026-08-10', 100000, 'pdf', "
+                       "'aguardando_rm', 100000)").lastrowid
+    conn.commit()
+    _corrigir_nota(conn, "desconsiderar_nf", 100, motivo="cancelada na prefeitura")
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(100, 1000.0, numero="100")], []))
+    r = conn.execute("SELECT id, idmov, situacao, desconsiderada_em FROM notas_fiscais").fetchall()
+    assert len(r) == 1 and r[0]["id"] == nid and r[0]["idmov"] == 100
+    assert r[0]["situacao"] == "cancelada" and r[0]["desconsiderada_em"] is not None

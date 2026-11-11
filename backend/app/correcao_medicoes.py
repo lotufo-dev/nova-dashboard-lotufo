@@ -10,6 +10,10 @@ Regras:
 - toda operacao feita grava `medicao.correcao_cadastro` na auditoria, com a fonte e a origem "correção de cadastro";
 - rodar de novo o mesmo arquivo nao duplica: a operacao ja' aplicada sai como "já feito";
 - o ensaio executa o arquivo inteiro na mesma transacao e a desfaz no fim: o relatorio e' o do que seria gravado.
+
+Issue #638: `desconsiderar_nf` e `reconsiderar_nf` nao tem medicao; o alvo e' a nota. A nota desconsiderada continua
+ativa no RM e vale, para a dashboard, como cancelada: `situacao` passa a 'cancelada' com a marca `desconsiderada_em`
+(todo leitor de nota ativa ja' a deixa de fora, e a sincronizacao nao a devolve); o registro e' so' a auditoria.
 """
 import datetime
 import re
@@ -24,13 +28,17 @@ from app.cadastro_arquivos import slug
 ORIGEM = "correção de cadastro"
 REGRA_NF = "correcao_cadastro"
 TIPOS = ("execucao", "projeto", "reajuste")
-OPERACOES = ("cancelar", "reabrir", "trocar_tipo", "desligar_nf", "ligar_nf", "protocolar", "estado")
+OPERACOES_DE_NOTA = ("desconsiderar_nf", "reconsiderar_nf")      # issue #638: sem medicao, o alvo e' a nota
+OPERACOES = ("cancelar", "reabrir", "trocar_tipo", "desligar_nf", "ligar_nf", "protocolar", "estado", *OPERACOES_DE_NOTA)
 ENCERRADAS = ("cancelada", "desistida")
 # Campos que cada operacao aceita, alem de `operacao`, `fonte`, `medicao_id`, `obra`, `numero` e `tipo`
 CAMPOS = {"cancelar": {"duplicata_de", "motivo"}, "reabrir": set(), "trocar_tipo": {"novo_tipo", "novo_numero"},
           "desligar_nf": {"nf", "coligada"}, "ligar_nf": {"nfs", "coligada", "forcar_centro", "parcial"},
-          "protocolar": {"data", "processo", "oficio"}, "estado": {"novo", "motivo", "data", "processo", "oficio"}}
+          "protocolar": {"data", "processo", "oficio"}, "estado": {"novo", "motivo", "data", "processo", "oficio"},
+          "desconsiderar_nf": {"nf", "coligada", "motivo", "substituida_por"},
+          "reconsiderar_nf": {"nf", "coligada", "motivo"}}
 CAMPOS_COMUNS = {"operacao", "fonte", "medicao_id", "obra", "numero", "tipo"}
+CAMPOS_COMUNS_DE_NOTA = {"operacao", "fonte"}
 
 
 class ArquivoInvalido(ValueError):
@@ -427,9 +435,8 @@ def _mesma_serie(gravada, pedida: str) -> bool:
     return g == pedida or (g.isdigit() and pedida.isdigit() and int(g) == int(pedida))
 
 
-def _nota_da_referencia(conn, coligada: int, ref):
-    """Issue #565: a nota de um item de `nfs`. O número sozinho (`501`) vale quando é único na coligada; quando se
-    repete no RM (outra série, outro movimento), o item diz qual: `{idmov: N}` ou `{numero: N, serie: S}`."""
+def _ler_referencia(ref) -> tuple:
+    """`(idmov, numero, serie)` de uma referencia de nota: o número sozinho, `{idmov: N}` ou `{numero: N, serie: S}`."""
     if isinstance(ref, dict):
         chaves, forma = set(ref), "{idmov: N} ou {numero: N, serie: S}"
         if not chaves or chaves - {"idmov", "numero", "serie"}:
@@ -437,24 +444,37 @@ def _nota_da_referencia(conn, coligada: int, ref):
         if "idmov" in chaves and chaves != {"idmov"}:
             raise ValueError(f"nota {ref!r} inválida: diga idmov ou numero + serie, não os dois ({forma})")
         if "idmov" in chaves:
-            idmov = _inteiro(ref, "idmov")
-            achadas = conn.execute("SELECT * FROM notas_fiscais WHERE coligada=? AND idmov=? AND situacao='ativa'",
-                                   (coligada, idmov)).fetchall()
-            if not achadas:
-                raise ValueError(f"NF idmov {idmov} não encontrada (ativa) na coligada {coligada}")
-            return achadas[0]
+            return _inteiro(ref, "idmov"), None, None
         nf, serie = _texto(ref, "numero"), _texto(ref, "serie")
         if nf is None:
             raise ValueError(f"nota {ref!r} inválida: falta o numero")
-    elif isinstance(ref, (str, int)) and not isinstance(ref, bool):
-        nf, serie = str(ref).strip(), None
-    else:
-        raise ValueError(f"nota {ref!r} inválida: use o número, {{idmov: N}} ou {{numero: N, serie: S}}")
-    achadas = _notas(conn, coligada, nf, so_ativas=True)
-    if serie is not None:
-        achadas = [n for n in achadas if _mesma_serie(n["serie"], serie)]
+        return None, nf, serie
+    if isinstance(ref, (str, int)) and not isinstance(ref, bool):
+        return None, str(ref).strip(), None
+    raise ValueError(f"nota {ref!r} inválida: use o número, {{idmov: N}} ou {{numero: N, serie: S}}")
+
+
+def _nota_da_referencia(conn, coligada: int, ref):
+    """Issue #565: a nota de um item de `nfs`. O número sozinho (`501`) vale quando é único na coligada; quando se
+    repete no RM (outra série, outro movimento), o item diz qual: `{idmov: N}` ou `{numero: N, serie: S}`."""
+    idmov, nf, serie = _ler_referencia(ref)
+    # issue #638: a nota desconsiderada nao recebe medicao, e a recusa diz por que (ela nao esta' "ativa")
+    recusa = "foi desconsiderada pela correção de cadastro e não recebe medição (reconsiderar_nf a devolve)"
+    if idmov is not None:
+        todas = conn.execute("SELECT * FROM notas_fiscais WHERE coligada=? AND idmov=?", (coligada, idmov)).fetchall()
+        achadas = [n for n in todas if n["situacao"] == "ativa"]
+        if not achadas:
+            if any(n["desconsiderada_em"] is not None for n in todas):
+                raise ValueError(f"NF idmov {idmov} {recusa}")
+            raise ValueError(f"NF idmov {idmov} não encontrada (ativa) na coligada {coligada}")
+        return achadas[0]
+    todas = [n for n in _notas(conn, coligada, nf, so_ativas=False)
+             if serie is None or _mesma_serie(n["serie"], serie)]
+    achadas = [n for n in todas if n["situacao"] == "ativa"]
     rotulo = f"NF {nf}" + (f" série {serie}" if serie is not None else "")
     if not achadas:
+        if any(n["desconsiderada_em"] is not None for n in todas):
+            raise ValueError(f"{rotulo} {recusa}")
         raise ValueError(f"{rotulo} não encontrada (ativa) na coligada {coligada}")
     if len(achadas) > 1:
         raise ValueError(f"{rotulo} é ambígua: {len(achadas)} notas ativas com esse número na coligada {coligada} ("
@@ -571,6 +591,104 @@ def _estado(conn, uid, m, op, fonte):
     return []
 
 
+# ------------------------------------------------------------------ operacoes de nota (issue #638)
+
+def _nota_da_operacao(conn, op: dict):
+    """A nota de `desconsiderar_nf`/`reconsiderar_nf`: `nf` como no `ligar_nf` (número, `{idmov: N}` ou
+    `{numero: N, serie: S}`), em qualquer situacao. Sem `coligada`, a nota e' procurada em todas: se o número (ou o
+    idmov) existe em mais de uma, a operacao e' recusada com a lista, e nada e' escolhido por ela."""
+    if op.get("nf") is None:
+        raise ValueError("diga a nf (o número, {idmov: N} ou {numero: N, serie: S})")
+    idmov, nf, serie = _ler_referencia(op["nf"])
+    coligada = _inteiro(op, "coligada")
+    onde, args = ("coligada=? AND ", (coligada,)) if coligada is not None else ("", ())
+    if idmov is not None:
+        achadas = conn.execute(f"SELECT * FROM notas_fiscais WHERE {onde}idmov=? ORDER BY id", (*args, idmov)).fetchall()
+        rotulo = f"NF idmov {idmov}"
+    else:
+        numero = int(nf) if nf.isdigit() and len(nf) <= 18 else None
+        achadas = [n for n in conn.execute(f"SELECT * FROM notas_fiscais WHERE {onde}(numero=? OR numero_int=?) "
+                                           "ORDER BY id", (*args, nf, numero))
+                   if serie is None or _mesma_serie(n["serie"], serie)]
+        rotulo = f"NF {nf}" + (f" série {serie}" if serie is not None else "")
+    if not achadas:
+        raise ValueError(f"{rotulo} não encontrada" + (f" na coligada {coligada}" if coligada is not None else ""))
+    if len(achadas) > 1:
+        raise ValueError(f"{rotulo} é ambígua: {len(achadas)} notas ("
+                         + "; ".join(f"coligada {n['coligada']}, {_descrever_nota(n)}" for n in achadas)
+                         + "); diga qual com a coligada e {idmov: N} ou {numero: N, serie: S}")
+    return achadas[0]
+
+
+def _situacao_da_nota(n) -> str:
+    return "desconsiderada" if n["desconsiderada_em"] is not None else n["situacao"]
+
+
+def _registro_da_nota(n) -> dict:
+    return {"numero": n["numero"], "coligada": n["coligada"], "serie": n["serie"], "idmov": n["idmov"],
+            "emissao": n["emissao"], "valor_centavos": n["valor_centavos"]}
+
+
+def _desconsiderar_nf(conn, uid, nota, op, fonte):
+    from app import sincronizacao_rm   # import local: sincronizacao_rm importa medicoes
+    motivo, substituta = _texto(op, "motivo"), _texto(op, "substituida_por")
+    if motivo is None:
+        raise ValueError("diga o motivo (motivo: ...)")
+    if nota["desconsiderada_em"] is not None:
+        raise _JaFeito("já desconsiderada")
+    if nota["situacao"] != "ativa":
+        raise ValueError(f"NF {nota['numero']} já está {nota['situacao']} no RM: não há o que desconsiderar")
+    ligada = conn.execute("SELECT m.id, m.numero, m.tipo FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id "
+                          "WHERE a.nota_id=? AND a.desfeita_em IS NULL", (nota["id"],)).fetchone()
+    if ligada is not None:
+        raise ValueError(f"NF {nota['numero']} está ligada à {medicoes.nome_medicao(ligada['numero'], ligada['tipo']).lower()} "
+                         f"(id {ligada['id']}): desligue-a antes (desligar_nf)")
+    # dinheiro recebido nao some em silencio: qualquer baixa (com valor, ou baixa total sem valor) recusa
+    marcas = ",".join("?" * len(sincronizacao_rm.STATUS_RECEBIDO))
+    if conn.execute(f"SELECT 1 FROM baixas WHERE nota_id=? AND status_lan<>2 AND (status_lan IN ({marcas}) "
+                    "OR COALESCE(valor_baixado_centavos, 0)>0)",
+                    (nota["id"], *sincronizacao_rm.STATUS_RECEBIDO)).fetchone():
+        raise ValueError(f"NF {nota['numero']} tem baixa no RM: nota com recebimento não se desconsidera")
+    falta = sincronizacao_rm._falta_por_titulo(conn, nota["id"], aberto_inteiro=True, baixa_total_quita=True) or 0
+    cur = conn.execute("UPDATE notas_fiscais SET situacao='cancelada', desconsiderada_em=datetime('now') "
+                       "WHERE id=? AND situacao='ativa' AND desconsiderada_em IS NULL", (nota["id"],))
+    db.exigir_uma_linha(cur, f"A NF {nota['numero']} mudou concorrentemente; tente novamente")
+    auditoria.registrar(conn, uid, "nota.desconsiderar", "nota_fiscal", nota["id"], {"situacao": "ativa"},
+                        {"situacao": "desconsiderada", **_registro_da_nota(nota), "titulo_aberto_centavos": falta,
+                         "motivo": motivo, "fonte": fonte, "origem": ORIGEM,
+                         **({"substituida_por": substituta} if substituta else {})})
+    return [f"deixa de contar: {dinheiro.format_brl(nota['valor_centavos'])} no faturado e "
+            f"{dinheiro.format_brl(falta)} de título em aberto no a receber (valores cheios)"]
+
+
+def _reconsiderar_nf(conn, uid, nota, op, fonte):
+    if nota["desconsiderada_em"] is None:
+        raise _JaFeito("não está desconsiderada")
+    # o que o RM diz da nota ficou em `status_rm`: se ele a cancelou nesse meio-tempo, ela segue cancelada
+    nova = "cancelada" if str(nota["status_rm"] or "").upper() == "C" else "ativa"
+    cur = conn.execute("UPDATE notas_fiscais SET situacao=?, desconsiderada_em=NULL "
+                       "WHERE id=? AND desconsiderada_em IS NOT NULL", (nova, nota["id"]))
+    db.exigir_uma_linha(cur, f"A NF {nota['numero']} mudou concorrentemente; tente novamente")
+    motivo = _texto(op, "motivo")
+    auditoria.registrar(conn, uid, "nota.reconsiderar", "nota_fiscal", nota["id"],
+                        {"situacao": "desconsiderada", "desconsiderada_em": nota["desconsiderada_em"]},
+                        {"situacao": nova, **_registro_da_nota(nota), "fonte": fonte, "origem": ORIGEM,
+                         **({"motivo": motivo} if motivo else {})})
+    return ["AVISO: o RM cancelou a nota: ela continua cancelada"] if nova == "cancelada" else ["volta a contar"]
+
+
+EXECUTORES_DE_NOTA = {"desconsiderar_nf": _desconsiderar_nf, "reconsiderar_nf": _reconsiderar_nf}
+
+
+def _aplicar_nota(conn, uid: int, op: dict, item: dict, nome: str, fonte: str) -> None:
+    nota = _nota_da_operacao(conn, op)
+    item["alvo"] = f"{_fmt_nf(nota)}, coligada {nota['coligada']}"
+    item["antes"] = _situacao_da_nota(nota)
+    detalhes = EXECUTORES_DE_NOTA[nome](conn, uid, nota, op, fonte)
+    depois = conn.execute("SELECT * FROM notas_fiscais WHERE id=?", (nota["id"],)).fetchone()
+    item["depois"], item["detalhes"], item["situacao"] = _situacao_da_nota(depois), detalhes, "feito"
+
+
 EXECUTORES = {"cancelar": _cancelar, "reabrir": _reabrir, "trocar_tipo": _trocar_tipo, "desligar_nf": _desligar_nf,
               "ligar_nf": _ligar_nf, "protocolar": _protocolar, "estado": _estado}
 
@@ -581,12 +699,14 @@ def _aplicar(conn, uid: int, op, item: dict) -> None:
     nome = op.get("operacao")
     if nome not in OPERACOES:
         raise ValueError(f"operação desconhecida: {nome!r} (use {', '.join(OPERACOES)})")
-    sobra = set(op) - CAMPOS_COMUNS - CAMPOS[nome]
+    sobra = set(op) - (CAMPOS_COMUNS_DE_NOTA if nome in OPERACOES_DE_NOTA else CAMPOS_COMUNS) - CAMPOS[nome]
     if sobra:
         raise ValueError(f"campo que {nome} não usa: {', '.join(sorted(map(str, sobra)))}")
     fonte = _texto(op, "fonte")
     if fonte is None:
         raise ValueError("falta a fonte (o documento que justifica a correção)")
+    if nome in OPERACOES_DE_NOTA:
+        return _aplicar_nota(conn, uid, op, item, nome, fonte)
     m = _resolver(conn, op)
     item["alvo"], item["antes"] = _rotulo(conn, m), m["estado"]
     antes = _foto(conn, m["id"])

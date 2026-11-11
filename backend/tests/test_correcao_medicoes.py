@@ -542,3 +542,165 @@ def test_cli_recusa_arquivo_com_erro_e_sem_usuario(cenario, tmp_path, capsys):
     arq.write_text("operacao: cancelar\n", "utf-8")
     assert cli.main(["cadastro", "corrigir-medicoes", str(arq), "--usuario", "leo@l.com"]) == 1
     assert "lista de operações" in capsys.readouterr().out
+
+
+# ------------------------------------------------------------------ nota desconsiderada (issue #638)
+
+def _titulo_aberto(c, nid, valor):
+    c.execute("INSERT INTO baixas (coligada, idlan, nota_id, valor_original_centavos, valor_baixado_centavos, status_lan) "
+              "VALUES (1,?,?,?,0,0)", (5000 + nid, nid, valor))
+    c.commit()
+
+
+def _nota_db(c, nid):
+    return c.execute("SELECT situacao, desconsiderada_em, status_rm, valor_centavos FROM notas_fiscais WHERE id=?",
+                     (nid,)).fetchone()
+
+
+def _eventos_da_nota(c, nid):
+    return [(r[0], r[1], json.loads(r[2]), json.loads(r[3])) for r in c.execute(
+        "SELECT acao, usuario_id, antes, depois FROM audit_log WHERE entidade='nota_fiscal' AND entidade_id=? "
+        "ORDER BY id", (str(nid),))]
+
+
+DESCONSIDERAR = {"operacao": "desconsiderar_nf", "nf": 601, "motivo": "cancelada na prefeitura e substituída",
+                 "substituida_por": "NF 615", "fonte": "comprovante de cancelamento da prefeitura"}
+
+
+def test_desconsiderar_nf_marca_a_nota_e_audita_motivo_e_fonte(cenario):
+    c, cid, uid = cenario
+    nid = _nota(c, 601, valor=100_001)
+    _titulo_aberto(c, nid, 93_001)
+    rel = _rodar(c, uid, [DESCONSIDERAR])
+    assert rel["feitos"] == 1 and rel["erros"] == 0
+    item = rel["itens"][0]
+    assert item["antes"] == "ativa" and item["depois"] == "desconsiderada"
+    assert "NF 601, idmov 1501 (R$ 1.000,01)" in item["alvo"]
+    n = _nota_db(c, nid)
+    assert n["situacao"] == "cancelada" and n["desconsiderada_em"] is not None and n["valor_centavos"] == 100_001
+    assert c.execute("SELECT COUNT(*) FROM baixas WHERE nota_id=?", (nid,)).fetchone()[0] == 1     # nada se apaga
+    (acao, quem, antes, depois), = _eventos_da_nota(c, nid)
+    assert acao == "nota.desconsiderar" and quem == uid and antes == {"situacao": "ativa"}
+    assert depois["motivo"] == "cancelada na prefeitura e substituída"
+    assert depois["fonte"] == "comprovante de cancelamento da prefeitura" and depois["substituida_por"] == "NF 615"
+    assert depois["numero"] == "601" and depois["idmov"] == 1501 and depois["valor_centavos"] == 100_001
+    assert depois["origem"] == "correção de cadastro"
+
+
+def test_desconsiderar_nf_ja_feito_na_segunda_vez_e_ensaio_nao_grava(cenario):
+    c, cid, uid = cenario
+    nid = _nota(c, 601)
+    rel = _rodar(c, uid, [DESCONSIDERAR], ensaio=True)
+    assert rel["ensaio"] and rel["feitos"] == 1 and rel["itens"][0]["depois"] == "desconsiderada"
+    assert _nota_db(c, nid)["situacao"] == "ativa" and _nota_db(c, nid)["desconsiderada_em"] is None
+    assert _eventos_da_nota(c, nid) == []
+    assert _rodar(c, uid, [DESCONSIDERAR])["feitos"] == 1
+    rel = _rodar(c, uid, [DESCONSIDERAR])
+    assert rel["feitos"] == 0 and rel["ja_feitos"] == 1 and rel["erros"] == 0
+    assert len(_eventos_da_nota(c, nid)) == 1
+
+
+def test_desconsiderar_nf_recusa_o_arquivo_inteiro(cenario):
+    """Ligada a medicao, com baixa, inexistente e ambigua: nada gravado, nem a operacao valida do mesmo arquivo."""
+    c, cid, uid = cenario
+    boa = _nota(c, 601)
+    ligada = _nota(c, 602)
+    mid = _medicao(c, cid, 1)
+    _ligar(c, mid, ligada)
+    paga = _nota(c, 603, paga=True)
+    _nota_serie(c, 1856, 7001, "1")
+    _nota_serie(c, 1856, 7002, "2")
+    c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, numero_int, emissao, valor_centavos, situacao, status_rm) "
+              "VALUES (1, 1604, '604', 604, '2025-07-01', 5000, 'cancelada', 'C')")
+    c.commit()
+    base = {"operacao": "desconsiderar_nf", "motivo": "cancelada na prefeitura", "fonte": "comprovante"}
+    ops = [{**base, "nf": 601}, {**base, "nf": 602}, {**base, "nf": 603}, {**base, "nf": 999}, {**base, "nf": 1856},
+           {**base, "nf": 604}, {"operacao": "desconsiderar_nf", "nf": 601, "fonte": "comprovante"},
+           {**base, "nf": 601, "medicao_id": mid}]
+    with pytest.raises(correcao_medicoes.CorrecaoRecusada) as e:
+        correcao_medicoes.executar(c, uid, ops, ensaio=False)
+    erros = [i.get("erro") for i in e.value.relatorio["itens"]]
+    assert erros[0] is None
+    assert "ligada" in erros[1] and "desligar_nf" in erros[1]
+    assert "tem baixa no RM" in erros[2]
+    assert "NF 999 não encontrada" in erros[3]
+    assert "NF 1856 é ambígua" in erros[4] and "idmov 7001" in erros[4] and "idmov 7002" in erros[4]
+    assert "já está cancelada no RM" in erros[5]
+    assert "diga o motivo" in erros[6]
+    assert "campo que desconsiderar_nf não usa: medicao_id" in erros[7]
+    for nid in (boa, ligada, paga):
+        assert _nota_db(c, nid)["situacao"] == "ativa" and _nota_db(c, nid)["desconsiderada_em"] is None
+    assert c.execute("SELECT COUNT(*) FROM audit_log WHERE acao='nota.desconsiderar'").fetchone()[0] == 0
+    assert _ativas(c, mid) == [ligada]
+
+
+def test_desconsiderar_nf_por_idmov_e_coligada_desempatam(cenario):
+    c, cid, uid = cenario
+    a = _nota_serie(c, 1856, 7001, "1")
+    b = _nota_serie(c, 1856, 7002, "2")
+    outra = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, numero_int, serie, emissao, valor_centavos, "
+                      "situacao) VALUES (12, 7003, '1856', 1856, '2', '2025-07-01', 50000, 'ativa')").lastrowid
+    c.commit()                                    # mesmo numero e serie em outra coligada
+    base = {"operacao": "desconsiderar_nf", "motivo": "substituída", "fonte": "comprovante"}
+    rel = _rodar(c, uid, [{**base, "nf": {"numero": 1856, "serie": 2}}])
+    assert "ambígua" in rel["itens"][0]["erro"] and "coligada 12" in rel["itens"][0]["erro"]
+    rel = _rodar(c, uid, [{**base, "nf": {"numero": 1856, "serie": 2}, "coligada": 1}, {**base, "nf": {"idmov": 7001}}])
+    assert rel["feitos"] == 2
+    assert [_nota_db(c, n)["situacao"] for n in (a, b, outra)] == ["cancelada", "cancelada", "ativa"]
+
+
+def test_reconsiderar_nf_desfaz_com_evento_novo(cenario):
+    c, cid, uid = cenario
+    nid = _nota(c, 601)
+    _rodar(c, uid, [DESCONSIDERAR])
+    volta = {"operacao": "reconsiderar_nf", "nf": 601, "fonte": "a prefeitura reativou a nota"}
+    rel = _rodar(c, uid, [volta])
+    assert rel["feitos"] == 1 and rel["itens"][0]["antes"] == "desconsiderada" and rel["itens"][0]["depois"] == "ativa"
+    n = _nota_db(c, nid)
+    assert n["situacao"] == "ativa" and n["desconsiderada_em"] is None
+    ev = _eventos_da_nota(c, nid)
+    assert [e[0] for e in ev] == ["nota.desconsiderar", "nota.reconsiderar"]
+    assert ev[1][3]["fonte"] == "a prefeitura reativou a nota" and ev[1][2]["situacao"] == "desconsiderada"
+    rel = _rodar(c, uid, [volta])
+    assert rel["ja_feitos"] == 1 and len(_eventos_da_nota(c, nid)) == 2
+    assert "falta a fonte" in _rodar(c, uid, [{"operacao": "reconsiderar_nf", "nf": 601}])["itens"][0]["erro"]
+
+
+def test_reconsiderar_nf_que_o_rm_cancelou_continua_cancelada(cenario):
+    c, cid, uid = cenario
+    nid = _nota(c, 601)
+    _rodar(c, uid, [DESCONSIDERAR])
+    c.execute("UPDATE notas_fiscais SET status_rm='C' WHERE id=?", (nid,)); c.commit()
+    rel = _rodar(c, uid, [{"operacao": "reconsiderar_nf", "nf": 601, "fonte": "conferência"}])
+    assert rel["itens"][0]["depois"] == "cancelada" and any("AVISO" in d for d in rel["itens"][0]["detalhes"])
+    assert _nota_db(c, nid)["situacao"] == "cancelada" and _nota_db(c, nid)["desconsiderada_em"] is None
+
+
+def test_ligar_nf_em_nota_desconsiderada_e_recusado(cenario):
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 1)
+    nid = _nota(c, 601)
+    _rodar(c, uid, [DESCONSIDERAR])
+    for ref in (601, {"idmov": 1501}):
+        rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [ref], "fonte": "NF no RM"}])
+        assert "foi desconsiderada" in rel["itens"][0]["erro"] and "reconsiderar_nf" in rel["itens"][0]["erro"]
+    assert _ativas(c, mid) == []
+    # a tela de vincular nota (e qualquer outro caminho) cai em `alocar`, que recusa em portugues e sem citar o RM
+    from app import sincronizacao_rm
+    with pytest.raises(ValueError, match="Nota fiscal 601 está cancelada$"):
+        sincronizacao_rm.alocar(c, uid, nid, mid, "manual", None, "manual")
+
+
+def test_cli_desconsiderar_nf_ensaio_e_gravacao(cenario, tmp_path, capsys):
+    c, cid, uid = cenario
+    nid = _nota(c, 601)
+    arq = tmp_path / "correcoes.yaml"
+    arq.write_text(yaml.safe_dump([DESCONSIDERAR], allow_unicode=True), "utf-8")
+    assert cli.main(["cadastro", "corrigir-medicoes", str(arq), "--ensaio", "--usuario", "leo@l.com"]) == 0
+    saida = capsys.readouterr().out
+    assert "ENSAIO (nada foi gravado)" in saida and "ativa → desconsiderada" in saida and "NF 601" in saida
+    assert _nota_db(c, nid)["situacao"] == "ativa"
+    assert cli.main(["cadastro", "corrigir-medicoes", str(arq), "--usuario", "leo@l.com"]) == 0
+    assert "GRAVADO" in capsys.readouterr().out and _nota_db(c, nid)["situacao"] == "cancelada"
+    assert cli.main(["cadastro", "corrigir-medicoes", str(arq), "--usuario", "leo@l.com"]) == 0
+    assert "já feito 1" in capsys.readouterr().out

@@ -118,7 +118,8 @@ def _confirmar_nota_do_pdf(conn, coligada: int, idmov: int, numero_int, emissao,
     r = cands[0]
     conf = "confirmada" if r["valor_pdf_centavos"] == valor else "divergente"
     conn.execute("""UPDATE notas_fiscais SET idmov=?, numero=?, serie=?, emissao=COALESCE(emissao, ?), valor_centavos=?,
-                    codtmv=?, status_rm=?, campo_livre1=?, centro_custo=?, tomador=?, situacao=?,
+                    codtmv=?, status_rm=?, campo_livre1=?, centro_custo=?, tomador=?,
+                    situacao=CASE WHEN desconsiderada_em IS NOT NULL THEN 'cancelada' ELSE ? END,
                     confirmacao=?, confirmada_em=datetime('now'), ultimo_visto_em=datetime('now') WHERE id=?""",
                  (idmov, str(linha.get("NUMEROMOV") or ""), linha.get("SERIE"), emissao, valor, linha.get("CODTMV"),
                   linha.get("STATUS"), linha.get("CAMPOLIVRE1"), linha.get("CODCCUSTO"), linha.get("TOMADOR"),
@@ -130,6 +131,8 @@ def _confirmar_nota_do_pdf(conn, coligada: int, idmov: int, numero_int, emissao,
 
 
 def _upsert_nf(conn, linha: dict) -> int:
+    """Issue #638: a nota desconsiderada pela correcao de cadastro (`desconsiderada_em`) continua vindo ativa do RM e
+    fica 'cancelada' aqui; o que o RM diz dela segue em `status_rm`, e e' ele que vale se a marca for retirada."""
     coligada, idmov = int(linha["CODCOLIGADA"]), int(linha["IDMOV"])
     situacao = "cancelada" if str(linha.get("STATUS", "")).upper() == "C" else "ativa"
     numero = str(linha.get("NUMEROMOV") or "")
@@ -146,7 +149,8 @@ def _upsert_nf(conn, linha: dict) -> int:
             numero=excluded.numero, numero_int=excluded.numero_int, serie=excluded.serie, emissao=excluded.emissao,
             valor_centavos=excluded.valor_centavos, codtmv=excluded.codtmv,
             status_rm=excluded.status_rm, campo_livre1=excluded.campo_livre1,
-            centro_custo=excluded.centro_custo, tomador=excluded.tomador, situacao=excluded.situacao,
+            centro_custo=excluded.centro_custo, tomador=excluded.tomador,
+            situacao=CASE WHEN notas_fiscais.desconsiderada_em IS NOT NULL THEN 'cancelada' ELSE excluded.situacao END,
             confirmacao=CASE WHEN notas_fiscais.valor_pdf_centavos IS NULL THEN notas_fiscais.confirmacao
                              WHEN notas_fiscais.valor_pdf_centavos=excluded.valor_centavos THEN 'confirmada'
                              ELSE 'divergente' END,
@@ -198,7 +202,9 @@ def alocar(conn, usuario_id, nota_id: int, medicao_id: int, origem: str, confian
         if nf is None:
             raise ValueError("Nota fiscal não encontrada")
         if nf["situacao"] != "ativa":
-            raise ValueError(f"Nota fiscal {nf['numero']} está {nf['situacao']} no RM")
+            # issue #638: a desconsiderada vale como cancelada, mas nao foi o RM que a cancelou
+            raise ValueError(f"Nota fiscal {nf['numero']} está {nf['situacao']}"
+                             + ("" if nf["desconsiderada_em"] is not None else " no RM"))
         m = medicoes.detalhe(conn, medicao_id)
         if m is None:
             raise ValueError("Medição não encontrada")

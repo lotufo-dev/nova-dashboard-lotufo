@@ -1183,3 +1183,50 @@ def test_fora_do_medido_e_o_complemento_da_lista_unica():
     """#561: FORA (Diretoria, Inicio, custo da obra) e `medicoes.ESTADOS_NO_MEDIDO` repartem os estados sem sobra."""
     assert not set(diretoria.FORA) & set(medicoes.ESTADOS_NO_MEDIDO)
     assert set(diretoria.FORA) | set(medicoes.ESTADOS_NO_MEDIDO) == set(medicoes.TRANSICOES)
+
+
+def test_nota_desconsiderada_sai_do_faturado_e_do_a_receber_ao_centavo_e_volta(cenario):
+    """Issue #638: a nota desconsiderada pela correcao de cadastro vale como cancelada. O faturado do mes cai o valor
+    dela na cota e o a receber cai o que faltava do titulo, na cota (centavo impar e consorcio de 50%); a nota que
+    ficou continua contando, e `reconsiderar_nf` devolve tudo."""
+    from app import contratos, correcao_medicoes, inicio
+    c, ids = cenario
+    c.execute("UPDATE contratos SET centro_custo_rm='9.001.001' WHERE id=?", (ids["propria"],))
+    c.execute("UPDATE entidades SET coligada_rm=12 WHERE chave='cons'")
+
+    def nota(idmov, valor, falta, coligada=1):
+        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, numero_int, emissao, valor_centavos, situacao, "
+                        "codtmv, centro_custo) VALUES (?, ?, ?, ?, '2026-07-10', ?, 'ativa', '2.2.01', ?)",
+                        (coligada, idmov, str(idmov), idmov, valor, "9.001.001" if coligada == 1 else None)).lastrowid
+        c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
+                  "status_lan) VALUES (?, ?, ?, ?, ?, 0, 0)", (coligada, idmov, nid, idmov, falta))
+    nota(951, 1_000_001, 930_001)
+    nota(952, 333_333, 300_001, coligada=12)          # consorcio: 50% de 333.333 = 166.667; de 300.001 = 150.001
+    nota(953, 80_000, 80_000)
+    c.commit()
+    ids["liberar"]()
+
+    def retrato():
+        r = diretoria.a_receber(c, HOJE)
+        return (diretoria.rm_por_mes(c)[0]["2026-07"], r["total"]["valor_centavos"],
+                inicio._a_receber(c, HOJE)["valor_centavos"], diretoria._faturado_rm(c, HOJE)["ano_centavos"],
+                sorted(i["nota_numero"] for i in r["itens"] if i["tipo"] == "nota"),
+                diretoria.a_receber_por_obra(c)[ids["propria"]])
+    antes = retrato()
+    assert antes[4] == ["951", "952", "953"]
+    assert (contratos.cota(333_333, 5000), contratos.cota(300_001, 5000)) == (166_667, 150_001)
+    base = {"motivo": "cancelada na prefeitura e substituída", "fonte": "comprovante da prefeitura"}
+    correcao_medicoes.executar(c, 1, [{"operacao": "desconsiderar_nf", "nf": 951, "coligada": 1, **base},
+                                      {"operacao": "desconsiderar_nf", "nf": 952, "coligada": 12, **base}], ensaio=False)
+    depois = retrato()
+    assert depois[0] == antes[0] - 1_000_001 - 166_667
+    assert depois[1] == antes[1] - 930_001 - 150_001
+    assert depois[2] == antes[2] - 930_001 - 150_001
+    assert depois[3] == antes[3] - 1_000_001 - 166_667
+    assert depois[4] == ["953"]
+    assert depois[5] == antes[5] - 930_001
+    assert diretoria.complemento_rm(c).get(ids["propria"], {}).get("2026-06", 0) <= 80_000     # so' a nota que ficou
+    correcao_medicoes.executar(c, 1, [{"operacao": "reconsiderar_nf", "nf": 951, "coligada": 1, "fonte": "conferência"},
+                                      {"operacao": "reconsiderar_nf", "nf": 952, "coligada": 12, "fonte": "conferência"}],
+                               ensaio=False)
+    assert retrato() == antes
