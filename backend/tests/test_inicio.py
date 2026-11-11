@@ -93,6 +93,16 @@ def test_prazos_e_reajuste_a_pedir(cenario):
     assert p["reajustes"] == [] and "data_base" not in {x["tipo"] for x in p["prazos"]}
 
 
+def test_execucao_sem_prazo_conhecido_sai_da_caixa_de_prazos(cenario):
+    # issue #662: execucao registrada vencida e aditivo posterior so' de vigencia: a caixa nao a traz como vencida
+    c, cid = cenario
+    hoje = D(2026, 12, 1)
+    assert ("execucao", "2026-10-20", -42) in [(x["tipo"], x["data"], x["dias"]) for x in inicio.painel(c, hoje)["prazos"]]
+    c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, nova_vigencia_fim, status, data_assinatura) "
+              "VALUES (?, 'prazo', 0, '2027-06-30', 'assinado', '2026-11-10')", (cid,)); c.commit()
+    assert "execucao" not in {x["tipo"] for x in inicio.painel(c, hoje)["prazos"]}
+
+
 def test_recebido_no_ano_nulo_com_recebida_sem_data(cenario):
     c, cid = cenario
     _medicao(c, cid, 1, "2026-08-01 12:00:00", 300_000, estado="recebida", competencia="2026-07", recebida_em="2026-10-02")

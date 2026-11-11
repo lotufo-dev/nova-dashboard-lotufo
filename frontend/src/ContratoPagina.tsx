@@ -27,6 +27,7 @@ type Cabecalho = {
   // os inicios alimentam as linhas do tempo (#160); nulos quando o cadastro nao os tem
   execucao_inicio?: string | null; vigencia_inicio?: string | null;
   execucao_fim: string | null; dias_execucao: number | null; vigencia_fim: string | null; dias_vigencia: number | null;
+  execucao_sem_prazo?: boolean;      // #662: execucao registrada vencida e aditivo posterior so' de vigencia
   status: StatusObra;
 };
 
@@ -209,7 +210,8 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
               <div id="avisos-obra"><AvisosDaObra contratoId={contratoId} itens={avisos} /></div>
               <div id="execucao">
                 <ExecucaoContrato execucaoInicio={c.execucao_inicio ?? null} execucaoFim={c.execucao_fim}
-                  vigenciaInicio={c.vigencia_inicio ?? null} vigenciaFim={c.vigencia_fim} status={c.status} />
+                  vigenciaInicio={c.vigencia_inicio ?? null} vigenciaFim={c.vigencia_fim} status={c.status}
+                  execucaoSemPrazo={c.execucao_sem_prazo} />
               </div>
             </aside>
           </div>

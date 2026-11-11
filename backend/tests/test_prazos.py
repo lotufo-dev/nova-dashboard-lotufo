@@ -354,3 +354,73 @@ def test_mes_exato_nao_calcula_o_mes_seguinte(cenario):
     _medicao(c, cid, 1, "9999-10", atestado=600)   # ritmo 1,00; saldo 1,00 = 1 mes
     s = prazos.sugestao_dias(c, cid, D(9999, 11, 15))
     assert (s["novo_fim"], s["dias"], s["motivo"]) == ("9999-12-15", 1, None)
+
+
+# --- issue #662: execucao vencida so' quando o prazo de execucao e' conhecido -------------------------------------
+
+TEXTO_662 = ("Aditivo de 10/11/2026 prorroga a vigência sem o prazo de execução; "
+             "último prazo de execução registrado: 20/10/2026")
+
+
+def test_execucao_vencida_com_aditivo_posterior_so_de_vigencia_vira_pendencia_de_cadastro(cenario):
+    c, ids = cenario                  # execucao registrada ate' 2026-10-20; aditivo de 10/11 so' prorroga a vigencia
+    ids["aditivo"]("2026-11-10", None, "2027-06-30")
+    hoje = D(2026, 12, 1)
+    todos = prazos.avisos(c, hoje)
+    assert not [a for a in todos if a["tipo"] in ("instrumento_pendente", "execucao_vencendo")]
+    assert not [a for a in todos if "execução vencida" in a["mensagem"]]
+    [p] = [a for a in todos if a["tipo"] == "execucao_sem_prazo"]
+    assert (p["natureza"], p["mensagem"], p["data"], p["contrato_id"]) == ("ausencia", TEXTO_662, "2026-11-10", ids["contrato"])
+    s = prazos.situacao(c, ids["contrato"], hoje)
+    # nada e' inferido: a data registrada fica; so' nao ha' dias a contar
+    assert (s["execucao_fim"], s["dias_execucao"]) == ("2026-10-20", None)
+    assert s["execucao_sem_prazo"] == {"aditivo_em": "2026-11-10", "execucao_fim": "2026-10-20"}
+    assert prazos.resumo(c, ids["contrato"], hoje)["dias_execucao"] is None
+
+
+def test_execucao_vencida_sem_aditivo_posterior_continua_com_o_aviso(cenario):
+    c, ids = cenario
+    hoje = D(2026, 12, 1)
+    a = _por_tipo(c, hoje)["instrumento_pendente"]
+    assert a["nivel"] == "critico" and "execução vencida há 42 dias" in a["mensagem"]
+    s = prazos.situacao(c, ids["contrato"], hoje)
+    assert s["dias_execucao"] == -42 and s["execucao_sem_prazo"] is None
+    assert "execucao_sem_prazo" not in _por_tipo(c, hoje)
+
+
+def test_aditivo_de_vigencia_assinado_antes_do_fim_da_execucao_nao_tira_o_aviso(cenario):
+    c, ids = cenario                  # o aditivo e' anterior ao fim da execucao registrada: ela venceu depois dele
+    ids["aditivo"]("2026-10-01", None, "2027-06-30")
+    a = _por_tipo(c, D(2026, 12, 1))
+    assert "execução vencida há 42 dias" in a["instrumento_pendente"]["mensagem"] and "execucao_sem_prazo" not in a
+
+
+def test_aditivo_posterior_que_traz_a_execucao_segue_a_regra_de_sempre(cenario):
+    c, ids = cenario
+    ids["aditivo"]("2026-11-10", None, "2027-06-30")
+    # um aditivo mais novo traz a execucao: o prazo e' conhecido de novo, vencido ou nao
+    ids["aditivo"]("2026-11-15", "2026-11-20", None, numero="002/2026", chave="ta-2")
+    a = _por_tipo(c, D(2026, 12, 1))
+    assert "execução vencida há 11 dias" in a["instrumento_pendente"]["mensagem"] and "execucao_sem_prazo" not in a
+    ids["aditivo"]("2026-11-25", "2027-03-31", None, numero="003/2026", chave="ta-3")
+    a = _por_tipo(c, D(2026, 12, 1))
+    assert not {"instrumento_pendente", "execucao_vencendo", "execucao_sem_prazo"} & set(a)
+
+
+def test_pedido_em_curso_sem_prazo_de_execucao_conhecido_nao_diz_vencida(cenario):
+    c, ids = cenario
+    ids["aditivo"]("2026-11-10", None, "2027-06-30")
+    ids["pleito"]("prazo", "2026-11-20")          # pedido posterior ao aditivo: segue sem instrumento
+    todos = _por_tipo(c, D(2026, 12, 1))
+    a = todos["instrumento_pendente"]
+    assert a["nivel"] == "atencao" and a["publico"] == ["operacao"] and "vencida" not in a["mensagem"]
+    # o aviso conta desde o pedido, e nao ate' a execucao registrada (que o poria como vencido na agenda)
+    assert (a["data"], a["sentido"], a["dias"]) == ("2026-11-20", "desde", 11)
+    assert "execucao_sem_prazo" in todos
+
+
+def test_pendencia_de_execucao_sem_prazo_para_no_encerramento(cenario):
+    c, ids = cenario
+    ids["aditivo"]("2026-11-10", None, "2027-06-30")
+    c.execute("UPDATE contratos SET encerramento_iniciado_em='2026-11-20' WHERE id=?", (ids["contrato"],)); c.commit()
+    assert "execucao_sem_prazo" not in _por_tipo(c, D(2026, 12, 1))
