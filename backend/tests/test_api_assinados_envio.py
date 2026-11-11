@@ -2,6 +2,7 @@
 envio por fora e o evento de assinatura com o PDF."""
 import json
 import threading
+import unicodedata
 
 import pytest
 
@@ -563,3 +564,180 @@ def test_diretoria_recebe_403_nos_dois_atos(api):
                 files=_arquivos())
     assert r.status_code == 403
     assert _assinaturas(mid) == []
+
+
+# --- issue #628: conferencia do pacote assinado contra o checklist do orgao --------------------------
+
+TITULOS = ["Relatório de Capa da Medição", "Relatório de Resumo da Medição",
+           "Relatório de Cronograma Físico-Financeiro de Evolução Mensal", "Relatório de Ficha do Contrato Analítica",
+           "Boletim de Desempenho"]
+TITULOS_REAJUSTE = ["Relatório de Cálculo de Medição Reajustada", "Relatório de Capa da Medição"]
+CRONOGRAMA = TITULOS[2]
+FALTA_CRONOGRAMA = f"Falta no PDF assinado: {CRONOGRAMA}"
+SEM_TEXTO = "PDF sem texto: não foi possível conferir o conteúdo"
+
+
+def _capa(numero=1, situacao="APROVADA") -> str:
+    """As tres marcas da capa do SMO (texto sintetico, no leiaute de tests/fixtures/smo)."""
+    return (f"Capa da Medicao Provisoria : {numero} - {numero}a Medicao Provisoria - {situacao} Tipo : Parcial "
+            "RESUMO FINANCEIRO")
+
+
+def _pacote(titulos=TITULOS, sem=(), numero=1, situacao="APROVADA", nome="Medicao assinada.pdf"):
+    """PDF sintetico com o cabecalho de cada relatorio como o SMO imprime (o boletim em maiusculas) e a capa. Sem
+    acento: a fonte padrao do PDF de teste (conftest._pdf_com_texto) nao os devolve, e a procura os ignora."""
+    cab = ["BOLETIM  DE DESEMPENHO PARCIAL" if t == "Boletim de Desempenho" else t for t in titulos if t not in sem]
+    texto = " ".join(f"SMO - Sistema de Gestão de Contratos e Medições {t} Página: 1 de 3" for t in cab)
+    sem_acento = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
+    return _pdf(f"Docusign Envelope ID: {ENVELOPE} {sem_acento} {_capa(numero, situacao)}", nome)
+
+
+@pytest.fixture
+def conferida(client_admin, tmp_path, monkeypatch):
+    """A SINFRA com o checklist do pacote assinado no cadastro."""
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    cad = _cadastro()
+    cad["orgaos"][0]["regras"]["pacote_assinado"] = {"medicao": TITULOS, "reajuste": TITULOS_REAJUSTE}
+    c = db.get_conn()
+    cadastro_aplicar.aplicar(c, 1, cad)
+    cid = c.execute("SELECT id FROM contratos WHERE nome_curto='Obra SINFRA'").fetchone()[0]
+    c.commit(); c.close()
+    return client_admin, cid
+
+
+def _mensagens(r):
+    assert r.status_code == 200, r.text
+    return [p["mensagem"] for p in r.json()["pendencias"]]
+
+
+def test_titulos_do_pacote_ignoram_maiusculas_acentos_e_quebras_de_linha():
+    from app import assinados_envio
+    texto = ("RELATORIO DE CAPA DA\nMEDICAO\nPágina: 1 de 1\nRelatório   de Resumo da Medição\n"
+             "relatório de cronograma físico-financeiro\n de evolução mensal\nBOLETIM DE DESEMPENHO PARCIAL")
+    assert assinados_envio.titulos_que_faltam(texto, TITULOS) == ["Relatório de Ficha do Contrato Analítica"]
+
+
+def test_previa_avisa_o_relatorio_que_falta_no_pdf_e_nada_com_o_pacote_completo(conferida):
+    cl, cid = conferida
+    mid, _, _ = _com_boletim(cl, cid)
+    r = _previa(cl, mid, medicao=_pacote(sem=[CRONOGRAMA]))
+    assert _mensagens(r) == [FALTA_CRONOGRAMA]
+    assert r.json()["pendencias"][0]["codigo"] == "pacote_falta"
+    assert _mensagens(_previa(cl, mid, medicao=_pacote())) == []
+    # uma falta por peca, na ordem do cadastro
+    r = _previa(cl, mid, medicao=_pacote(sem=[TITULOS[1], "Boletim de Desempenho"]))
+    assert _mensagens(r) == [f"Falta no PDF assinado: {TITULOS[1]}", "Falta no PDF assinado: Boletim de Desempenho"]
+
+
+def test_capa_de_outra_medicao_dentro_do_pdf_vira_aviso(conferida):
+    cl, cid = conferida
+    mid, _, _ = _com_boletim(cl, cid)
+    c = db.get_conn()
+    c.execute("UPDATE medicoes SET numero_orgao=15 WHERE id=?", (mid,))
+    c.commit(); c.close()
+    assert _mensagens(_previa(cl, mid, medicao=_pacote(numero=14))) == ["A capa dentro do PDF é da 14ª medição"]
+    assert _mensagens(_previa(cl, mid, medicao=_pacote(numero=15))) == []
+    assert _mensagens(_previa(cl, mid, medicao=_pacote(numero=15, situacao="EM ANALISE"))) == [
+        "A capa dentro do PDF não está aprovada (situação: EM ANALISE)"]
+
+
+def test_sem_numero_do_orgao_a_capa_e_conferida_pelo_numero_da_lotufo(conferida):
+    cl, cid = conferida
+    mid, _, _ = _com_boletim(cl, cid)          # a 1ª medicao, sem numero_orgao
+    assert _mensagens(_previa(cl, mid, medicao=_pacote(numero=2))) == ["A capa dentro do PDF é da 2ª medição"]
+
+
+def test_orgao_sem_pacote_assinado_no_cadastro_nao_confere_nada(api, monkeypatch):
+    from app import leitura_pdf
+    cl, cid, _ = api
+    mid, _, _ = _com_boletim(cl, cid)
+    monkeypatch.setattr(leitura_pdf, "textos_por_pagina_com_limite",
+                        lambda *a, **k: pytest.fail("sem a chave no cadastro o PDF nem é lido"))
+    r = _previa(cl, mid)                          # PDF sem nenhum dos relatorios
+    assert _mensagens(r) == []
+    monkeypatch.setattr(correio, "cliente", CorreioFalso())
+    assert _enviar(cl, mid, r.json()).status_code == 200
+    assert "faltas_confirmadas" not in _auditoria_do_envio(mid)
+
+
+def test_pdf_sem_texto_da_um_aviso_so(conferida):
+    cl, cid = conferida
+    mid, _, _ = _com_boletim(cl, cid)
+    r = _previa(cl, mid, medicao=_pdf("", "Escaneado.pdf"))
+    assert _mensagens(r) == [SEM_TEXTO]
+
+
+def test_pdf_do_reajuste_e_conferido_contra_a_lista_do_reajuste(conferida):
+    cl, cid = conferida
+    mid, rid, _ = _com_boletim(cl, cid, reajuste=True)
+
+    def reaj(**kw):
+        return _pacote(TITULOS_REAJUSTE, nome="Reajuste assinado.pdf", **kw)
+    falta = TITULOS_REAJUSTE[0]
+    # no envio pela execucao: o da medicao contra `medicao`, o do reajuste contra `reajuste`
+    r = cl.post(f"/api/medicoes/{mid}/assinados/previa",
+                files={"arquivo": _pacote(), "arquivo_reajuste": reaj(sem=[falta])})
+    assert _mensagens(r) == [f"Falta no PDF assinado do reajuste: {falta}"]
+    # no envio pelo reajuste (issue #637): o PDF dele e' o documento da medicao de reajuste, contra `reajuste`
+    r = cl.post(f"/api/medicoes/{rid}/assinados/previa", files={"arquivo": reaj(sem=[falta])})
+    assert _mensagens(r) == [f"Falta no PDF assinado: {falta}"]
+    assert _mensagens(cl.post(f"/api/medicoes/{rid}/assinados/previa", files={"arquivo": reaj()})) == []
+
+
+def _auditoria_do_envio(mid):
+    c = db.get_conn()
+    try:
+        r = c.execute("SELECT depois FROM audit_log WHERE acao='medicao.assinados_envio' AND entidade_id=? "
+                      "ORDER BY id DESC LIMIT 1", (str(mid),)).fetchone()
+        return json.loads(r[0]) if r else None
+    finally:
+        c.close()
+
+
+def test_envio_com_falta_exige_a_confirmacao_e_audita_as_faltas(conferida, monkeypatch):
+    cl, cid = conferida
+    mid, _, _ = _com_boletim(cl, cid)
+
+    def files():
+        return {"arquivo": _pacote(sem=[CRONOGRAMA])}
+    pv = cl.post(f"/api/medicoes/{mid}/assinados/previa", files=files()).json()
+    falso = CorreioFalso()
+    monkeypatch.setattr(correio, "cliente", falso)
+    r = _enviar(cl, mid, pv, files=files())
+    assert r.status_code == 422, r.text
+    d = r.json()["detail"]
+    assert d["codigo"] == "CONFIRMAR_PENDENCIAS" and d["pendencias"] == [FALTA_CRONOGRAMA]
+    # a confirmacao de outra lista nao vale
+    r = _enviar(cl, mid, pv, files=files(), confirmadas=["Falta no PDF assinado: outra"])
+    assert r.status_code == 422 and r.json()["detail"]["codigo"] == "CONFIRMAR_PENDENCIAS"
+    assert falso.enviados == [] and _assinaturas(mid) == [] and _auditoria_do_envio(mid) is None
+    r = _enviar(cl, mid, pv, files=files(), confirmadas=[FALTA_CRONOGRAMA])
+    assert r.status_code == 200, r.text
+    assert len(falso.enviados) == 1
+    assert _auditoria_do_envio(mid)["faltas_confirmadas"] == [FALTA_CRONOGRAMA]
+
+
+def test_envio_com_o_pacote_completo_sai_sem_confirmacao(conferida, monkeypatch):
+    cl, cid = conferida
+    mid, _, _ = _com_boletim(cl, cid)
+    pv = cl.post(f"/api/medicoes/{mid}/assinados/previa", files={"arquivo": _pacote()}).json()
+    monkeypatch.setattr(correio, "cliente", CorreioFalso())
+    assert _enviar(cl, mid, pv, files={"arquivo": _pacote()}).status_code == 200
+    assert "faltas_confirmadas" not in _auditoria_do_envio(mid)
+
+
+def test_registro_por_fora_com_falta_exige_a_confirmacao_e_audita(conferida):
+    cl, cid = conferida
+    mid, _, _ = _com_boletim(cl, cid)
+    hoje = tempo.hoje_local().isoformat()
+    url = f"/api/medicoes/{mid}/assinados/envio-externo"
+    r = cl.post(url, data={"enviado_em": hoje}, files={"arquivo": _pacote(sem=[CRONOGRAMA])})
+    assert r.status_code == 422, r.text
+    d = r.json()["detail"]
+    assert d["codigo"] == "CONFIRMAR_PENDENCIAS" and d["pendencias"] == [FALTA_CRONOGRAMA]
+    assert "registro do envio" in d["mensagem"]
+    assert _assinaturas(mid) == []
+    r = cl.post(url, data={"enviado_em": hoje, "confirmadas": [FALTA_CRONOGRAMA]},
+                files={"arquivo": _pacote(sem=[CRONOGRAMA])})
+    assert r.status_code == 201, r.text
+    assert _auditoria_do_envio(mid)["faltas_confirmadas"] == [FALTA_CRONOGRAMA]
