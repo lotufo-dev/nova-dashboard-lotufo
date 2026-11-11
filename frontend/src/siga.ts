@@ -160,9 +160,11 @@ export function setorPessoa(lotacao: string | null, pessoa: string | null): stri
   return [sigla(lotacao), (pessoa ?? "").trim()].filter(Boolean).join(" · ");
 }
 
-/** O recebimento que colocou o processo no setor atual (o que a linha destaca): o da data de entrada no setor. */
-export function ehRecebimentoNoSetorAtual(p: ProcessoSiga, m: Movimentacao): boolean {
-  return !p.caixa_entrada && m.tipo === "recebimento" && p.desde !== null && Date.parse(m.data) === Date.parse(p.desde);
+/** A movimentacao que colocou o processo no setor atual (a que a linha destaca): a transferencia ou o recebimento
+ *  da data de entrada no setor (#650). */
+export function ehEntradaNoSetorAtual(p: ProcessoSiga, m: Movimentacao): boolean {
+  return !p.caixa_entrada && (m.tipo === "recebimento" || m.tipo === "transferencia")
+    && p.desde !== null && Date.parse(m.data) === Date.parse(p.desde);
 }
 
 /** "02/10/2026 a 23/10/2026" (primeira e ultima movimentacao); vazio sem movimentacao. */

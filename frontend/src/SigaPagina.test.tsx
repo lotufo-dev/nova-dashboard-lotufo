@@ -1,3 +1,6 @@
+/// <reference types="node" />
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SigaPagina from "./SigaPagina";
@@ -130,6 +133,21 @@ describe("SigaPagina", () => {
     expect(within(alfa).getByText("01/10/2026")).toBeTruthy();            // Protocolado em
   });
 
+  it("a 1024 px o cabeçalho quebra entre palavras em vez de invadir a coluna vizinha e a data não quebra (#650)", async () => {
+    // o jsdom nao mede layout: aqui so' a presenca das regras e das classes; a medida foi conferida no navegador
+    const css = readFileSync(join(process.cwd(), "src", "siga.css"), "utf8").split("@media")[0];
+    expect(css).not.toMatch(/\.sg__tabela th\s*\{[^}]*white-space:\s*nowrap/);
+    expect(css).toMatch(/\.sg__tabela td\.num\s*\{[^}]*white-space:\s*nowrap/);
+    const largura = (col: string) => Number(new RegExp(`\\.sg__c-${col}\\s*\\{\\s*width:\\s*(\\d+)%`).exec(css)?.[1]);
+    const colunas = ["proc", "onde", "quem", "setor", "ultima", "prot", "seta"];
+    expect(colunas.reduce((soma, c) => soma + largura(c), 0)).toBe(100);
+    expect(largura("prot")).toBeGreaterThanOrEqual(16);       // "DD/MM/AAAA" numa linha na tabela de ~718 px
+    mostrar(painel([ALFA]));
+    const alfa = await screen.findByRole("row", { name: /Obra Alfa/ });
+    expect(within(alfa).getByText("01/10/2026").className).toBe("num");
+    expect(document.querySelectorAll("colgroup col")).toHaveLength(7);
+  });
+
   it("clicar na linha, ou Enter nela, abre o histórico do processo (?processo=)", async () => {
     mostrar(painel([ALFA, BETA]));
     fireEvent.click(await screen.findByRole("row", { name: /Processo Beta/ }));
@@ -213,6 +231,17 @@ describe("SigaPagina", () => {
     expect(within(transf).getAllByRole("cell")[3].textContent).toBe("GABIN");
     expect(within(linhas[1]).getAllByRole("cell")[3].textContent).toBe("GSAGPM · Helia");
     expect(within(linhas[0]).getAllByRole("cell")[0].textContent).toBe("28/10/2026 às 08:00");
+  });
+
+  it("histórico: quando a entrada no setor é a transferência, é ela a linha destacada (#650)", async () => {
+    const entrada = mov("2026-10-21T09:00:00-04:00", "Transferência");
+    const p = processo({ id: 9, nome: "Processo Pi", desde: entrada.data,
+      movimentacoes: [entrada, mov("2026-10-22T10:00:00-04:00", "Recebimento"), mov("2026-10-26T10:00:00-04:00", "Recebimento")] });
+    mostrar(painel([p]), { processo: "9" });
+    await screen.findByRole("heading", { name: /Histórico/ });
+    const destacadas = screen.getAllByRole("row").filter(l => l.getAttribute("aria-current") === "true");
+    expect(destacadas).toHaveLength(1);
+    expect(within(destacadas[0]).getAllByRole("cell")[0].textContent).toBe("21/10/2026 às 09:00");
   });
 
   it("histórico: traz TODAS as movimentações (não só 30), 15 por vez com 'Ver mais', e a linha do recebimento no setor atual destacada", async () => {
