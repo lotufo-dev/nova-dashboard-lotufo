@@ -377,15 +377,30 @@ def test_ritmo_e_prazo_conclusao_ate_o_fim_e_no_prazo(cenario):
     assert (r["conclusao"], r["situacao"], r["dias_alem"]) == ("2027-02-15", "no_prazo", None)
 
 
-def test_ritmo_e_prazo_acima_do_teto_do_pedido_ainda_diz_os_dias(cenario):
-    """O teto de 3.650 dias e' do pedido ao orgao, nao do cartao: a obra atrasa do mesmo jeito."""
+def test_ritmo_e_prazo_acima_do_teto_do_pedido_nao_fecha_a_conta(cenario):
+    """Ritmo muito baixo (obra que mal comecou ou quase parada): a conclusao cairia decadas a frente. Acima do teto
+    do pedido o cartao nao diz conclusao nem situacao; ritmo, saldo e fim da execucao continuam."""
     c, ids = cenario
     cid = ids["contrato"]
     _valor(c, cid, 1_006_00)
-    _medicao(c, cid, 1, "2026-09", atestado=6_00)   # 1.000 meses de saldo
+    _medicao(c, cid, 1, "2026-09", atestado=6_00)   # ritmo 1,00; saldo 1.000,00 = 1.000 meses
     r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
-    assert r["situacao"] == "atrasa" and r["dias_alem"] > prazos.TETO_DIAS
-    assert r["dias_alem"] == (D.fromisoformat(r["conclusao"]) - D(2026, 10, 20)).days
+    assert r == {"ritmo_centavos": 1_00, "saldo_centavos": 1_000_00, "conclusao": None,
+                 "execucao_fim": "2026-10-20", "situacao": None, "dias_alem": None}
+
+
+def test_ritmo_e_prazo_no_teto_do_pedido_ainda_atrasa(cenario):
+    """O limite e' o do pedido: exatamente 3.650 dias alem do fim ainda aparece; um dia a mais, nao."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 1_000_00)
+    _medicao(c, cid, 1, "2026-09", atestado=600_00)   # ritmo 100,00; saldo 400,00; conclusao 15/02/2027
+    _fim(c, cid, (D(2027, 2, 15) - datetime.timedelta(days=prazos.TETO_DIAS)).isoformat())
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
+    assert (r["conclusao"], r["situacao"], r["dias_alem"]) == ("2027-02-15", "atrasa", prazos.TETO_DIAS)
+    _fim(c, cid, (D(2027, 2, 14) - datetime.timedelta(days=prazos.TETO_DIAS)).isoformat())
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
+    assert (r["conclusao"], r["situacao"], r["dias_alem"]) == (None, None, None)
 
 
 def test_ritmo_e_prazo_sem_medicao_na_janela_sem_ritmo_sem_conclusao_sem_situacao(cenario):
