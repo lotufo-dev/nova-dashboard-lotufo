@@ -5,7 +5,8 @@ import { rotuloPerfil } from "./navegacao";
 import CaixaAviso from "./CaixaAviso";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import {
-  ABAS_ADMIN, campoDoErroDeUsuario, CATEGORIAS_REC, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, pessoaDoEvento, quantidadeRec,
+  ABAS_ADMIN, campoDoErroDeUsuario, CATEGORIAS_REC, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, pessoaDoEvento,
+  quantidadeRec,
   reconciliacaoDaObra, rotaDoObjeto, rotuloAcao, rotuloObjeto, rotuloRec, urlPaginaRec,
   type CategoriaRec, type Evento, type Reconciliacao,
 } from "./administracao";
@@ -1009,6 +1010,8 @@ function Auditoria({ busca }: { busca: Busca }) {
   const eventos = audit ? filtrarEventos(audit.eventos, f) : [];
   // o objeto e' link para a tela dele; sem tela, fica o texto
   const objeto = (ev: Evento) => {
+    const nota = objetoDaCorrecaoDeNota(ev);      // #638: a nota, o motivo e a fonte da correcao
+    if (nota) return nota;
     const rota = rotaDoObjeto(ev);
     return rota ? <Link para={rota}>{rotuloObjeto(ev.entidade, ev.entidade_id)}</Link> : rotuloObjeto(ev.entidade, ev.entidade_id);
   };
