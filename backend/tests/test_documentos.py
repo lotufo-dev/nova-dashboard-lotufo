@@ -273,3 +273,29 @@ def test_painel_traz_orgao_cobertura_da_execucao_art_e_cno_de_cada_obra(conn):
     assert (por[a]["cno"], por[a]["art"]) == ("123", "ART-9")
     assert por[b]["cobre_execucao"] == {"cobre": False, "ate": "2027-06-30"} and por[b]["cno"] is None
     assert por[sem]["cobre_execucao"]["cobre"] is None and por[sem]["orgao"] == "SINFRA"
+
+
+def test_painel_diz_o_tipo_do_contratante_de_cada_obra(conn):
+    # issue #651: contrato de contratante privado vai para o grupo "Privados" da aba Garantias
+    conn.execute("INSERT INTO orgaos (chave, nome, familia, regras) VALUES ('privado-x','Privado X','prefeitura',?)",
+                 (json.dumps({"tipo_contratante": "PRIVADO"}),))
+    conn.commit()
+    privado = _contrato(conn, conn.execute("SELECT id FROM orgaos WHERE chave='privado-x'").fetchone()[0])
+    publico = _contrato(conn, _orgao(conn, ["fgts"], []))
+    sem_orgao = _contrato(conn, None)
+    por = {o["contrato_id"]: o["tipo_contratante"] for o in documentos.painel(conn)["contratos"]}
+    assert por == {privado: "PRIVADO", publico: "PÚBLICO", sem_orgao: "PÚBLICO"}
+
+
+def test_painel_diz_a_primeira_competencia_anexada_da_empresa(conn):
+    # issue #651: mes anterior ao primeiro PDF da empresa nao e' cobrado; a lista das anexadas tem teto, o minimo nao
+    _consorcio(conn)
+    _contrato(conn, _orgao(conn, ["regularidade"], []), entidade_id=2)
+    for i in range(26):                                  # 26 competencias: passa do teto de 24 da lista
+        comp = f"{2024 + i // 12}-{i % 12 + 1:02d}"
+        conn.execute("INSERT INTO regularidades (entidade_id, competencia, arquivo, sha256, tamanho) "
+                     "VALUES (1, ?, ?, ?, 1)", (comp, f"regularidades/{comp}.pdf", f"{i:02d}" * 32))
+    conn.commit()
+    por = {e["entidade_id"]: e for e in documentos.painel(conn)["empresas"]}
+    assert por[1]["primeira_regularidade"] == "2024-01" and len(por[1]["regularidades_anexadas"]) == 24
+    assert por[2]["primeira_regularidade"] is None
