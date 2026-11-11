@@ -5,7 +5,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from app import arquivos, envio_reserva, graph, pdfs, planilha_envio
+from app import arquivos, envio_reserva, graph, pdfs, planilha_envio, respostas_orgao
 from app.api_auth import conexao
 from app.api_espelhos import _emails
 from app.api_medicoes import ID, _medicao_existe
@@ -36,6 +36,15 @@ class EnvioIn(BaseModel):
     # os anexos que a pessoa conferiu na previa (nome, tamanho e sha256): obrigatorio, como no envio da nota; mudou depois
     # dela, o envio recusa
     anexos_previa: list[AnexoConferido] = Field(max_length=60)
+
+
+@router.get("/api/medicoes/{mid}/respostas-orgao")
+def respostas_do_orgao(mid: ID, usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+                       conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #644: as respostas ja' registradas da medicao (o passo "Análise do órgão"). So' le o banco; quem le o
+    e-mail e' `POST /api/correio/respostas/ler`, de quem enviou."""
+    _medicao_existe(conn, mid)
+    return respostas_orgao.da_medicao(conn, mid)
 
 
 @router.post("/api/medicoes/{mid}/envio-planilha/previa")
