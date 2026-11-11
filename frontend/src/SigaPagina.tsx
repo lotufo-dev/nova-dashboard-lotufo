@@ -241,6 +241,9 @@ function CamposCategoria({ id, valor, mudar, obras, aoFalhar }: {
   const [medicoes, setMedicoes] = useState<{ obra: string; lista: MedicaoDaObra[] } | null>(null);
   const pedeMedicao = valor.categoria === "medicoes" && valor.obra !== "";
   const obra = valor.obra;
+  // texto livre: fora da marcacao do campo, o nome da variavel nao o faz passar por campo de valor (formularios.test.ts)
+  const complemento = valor.complemento;
+  const mudarComplemento = (texto: string) => mudar({ ...valor, complemento: texto });
   useEffect(() => {
     if (!pedeMedicao) return;
     let vale = true;
@@ -278,8 +281,8 @@ function CamposCategoria({ id, valor, mudar, obras, aoFalhar }: {
       ) : (
         <div className="campo">
           <label className="campo__rotulo" htmlFor={`${id}-complemento`}>Complemento</label>
-          <input id={`${id}-complemento`} className="entrada--media" autoComplete="off" maxLength={100} placeholder="de prazo"
-            value={valor.complemento} onChange={e => mudar({ ...valor, complemento: e.target.value })} />
+          <input id={`${id}-complemento`} name="complemento" className="entrada--media" autoComplete="off" maxLength={100} placeholder="de prazo…"
+            value={complemento} onChange={e => mudarComplemento(e.target.value)} />
         </div>
       )}
     </>
