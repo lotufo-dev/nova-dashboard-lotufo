@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
+import { destinoDoAviso, semEmpresa, semObra, type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
+import { daAgenda, diasAteOAviso, porSecao, semRSOrfao, type Secao } from "./avisos";
 import { brl, contar } from "./formato";
 import LegendaCor from "./LegendaCor";
 import type { Usuario } from "./Login";
@@ -12,11 +14,12 @@ import "./inicio.css";
 // faixa do ciclo da medicao entrou no lugar do destaque de protocoladas e das barras por contratante.
 // Tudo vem de GET /api/inicio/painel; as regras de cada numero moram em `backend/app/inicio.py`. A tela so' desenha.
 // Acao operacional (nota a enviar, espelho a conferir) saiu daqui: vive nas telas dela e na tela Avisos.
+// #666: a caixa "Avisos importantes" le GET /api/inicio, a MESMA fila da tela Avisos (com o recorte do perfil), e usa a
+// mesma regra de secao (`avisos.ts`): a contagem dela e' a soma de Vencido, Esta semana e Este mes daquela tela.
 
 type Certidao = { tipo: string; entidade: string; validade: string | null; dias: number | null; vencida: boolean };
 type Reajuste = { contrato_id: number; obra: string; data_base_mes: string; aniversario: string; dias: number };
 type Prazo = { contrato_id: number; obra: string; contratante: string; tipo: "execucao" | "vigencia" | "data_base"; data: string; dias: number };
-type SecaoAvisos<T> = { total: number; itens: T[] };
 type ChaveEtapa = "em_analise" | "boletim" | "nota" | "protocolado" | "recebido_mes";
 // #642: uma etapa da faixa do ciclo, na cota da Lotufo; `mais_antigo_dias` nulo = etapa vazia ou sem idade (recebido)
 type EtapaCiclo = { etapa: ChaveEtapa; valor_centavos: number; quantidade: number; mais_antigo_dias: number | null };
@@ -45,13 +48,6 @@ export type PainelInicio = {
   previsao: Record<"neste_mes" | "proximo_mes" | "atrasado" | "sem_previsao" | "depois", GrupoPrevisao>;
   matriz: { competencias: string[]; grupos: { contratante: string; obras: ObraMatriz[] }[] };
   notas_mes: { mes: string; valor_centavos: number; notas: number; obras: number };
-  avisos_importantes: {
-    // issue #274: o pleito a pedir e os avisos do motor de apostilamento, o mais grave primeiro
-    reajustes: SecaoAvisos<{ contrato_id: number; obra: string; dias: number | null; tipo?: string;
-      nivel?: "critico" | "acao" | "atencao"; competencias?: string[]; datas_base?: string[] }>;
-    prazos: SecaoAvisos<{ contrato_id: number; obra: string; tipo: "execucao" | "vigencia"; dias: number }>;
-    certidoes: SecaoAvisos<Certidao>;
-  };
 };
 // #359: o aprovado mudou depois do espelho (ou o espelho antigo nao se confere): a mesma fonte do aviso
 type EspelhoAConferir = { espelho_id: number; contrato_id: number; medicao_id: number; obra: string | null; titulo: string;
@@ -251,71 +247,81 @@ function MatrizObras({ matriz }: { matriz: PainelInicio["matriz"] }) {
   );
 }
 
-const IconeReajuste = () => (
-  <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M12 3 3 8l9 5 9-5-9-5Z" /><path d="m3 13 9 5 9-5" /><path d="m3 17.5 9 5 9-5" />
-  </svg>);
-const IconePrazo = () => (
-  <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" />
-  </svg>);
-const IconeCertidao = () => (
-  <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z" />
-  </svg>);
+// #666: as secoes da caixa, na ordem da tela Avisos; "Depois" (31 a 90 dias) fica so' la'. O tom e' a cor da
+// informacao: vencido = critico (vermelho); o que vence na semana ou no mes = vence em breve (ambar)
+const SECOES_DA_CAIXA: Partial<Record<Secao, "acao" | "atencao">> = { vencido: "acao", semana: "atencao", mes: "atencao" };
+const AVISOS_VISIVEIS = 3;
 
-// issue #274: o que cada aviso de reajuste diz na linha da secao Reajustes (o tipo vem de `app/reajuste.py`)
-const AVISO_REAJUSTE: Record<string, string> = {
-  reajuste_pleito: "reajuste a pedir",
-  reajuste_fora_da_previsao: "reajuste fora da previsão",
-  reajuste_sem_apostilamento: "reajuste sem apostilamento",
-  reajuste_nota_antes_do_apostilamento: "nota antes do apostilamento",
-  reajuste_reemitir: "cronograma de reajuste a reemitir",
-  reajuste_sem_resposta: "pedido de reajuste sem resposta",
-};
-
-/** O que o item juntou (rodada 2 da PR #579: um item por obra e tipo): a competencia, ou quantas; sem competencia,
- *  quantas datas-base quando ha' mais de uma. */
-function detalheDoReajuste(x: { competencias?: string[]; datas_base?: string[] }): string {
-  const cs = x.competencias ?? [], bs = x.datas_base ?? [];
-  if (cs.length === 1) return ` (${fmtCompetencia(cs[0])})`;
-  if (cs.length > 1) return ` (${cs.length} competências)`;
-  return bs.length > 1 ? ` (${bs.length} datas-base)` : "";
+/** O selo de dias do item: "há N dias" no vencido; "hoje" ou "em N dias" no que vence. */
+function seloDeDias(a: Aviso, secao: Secao): string {
+  const n = Math.abs(diasAteOAviso(a) ?? 0), d = `${n.toLocaleString("pt-BR")} ${n === 1 ? "dia" : "dias"}`;
+  return secao === "vencido" ? `há ${d}` : n === 0 ? "hoje" : `em ${d}`;
 }
 
-/** "vencido há 450 dias" / "vence hoje" / "vence em 5 dias" (dias < 0 = vencido). */
-function quando(dias: number | null, vencida: boolean): string {
-  if (dias === null) return vencida ? "vencida" : "—";
-  if (dias < 0) return `vencido há ${(-dias).toLocaleString("pt-BR")} ${-dias === 1 ? "dia" : "dias"}`;
-  if (dias === 0) return "vence hoje";
-  return `vence em ${dias.toLocaleString("pt-BR")} ${dias === 1 ? "dia" : "dias"}`;
+function ItemAviso({ a, secao, tom, ir }: { a: Aviso; secao: Secao; tom: "acao" | "atencao"; ir: Ir }) {
+  const d = destinoDoAviso(a);
+  // a obra (ou a empresa) abre a linha: a mensagem perde o "Nome: " do comeco, como na tela Avisos
+  const quem = a.obra ?? a.entidade ?? "";
+  const texto = semRSOrfao((a.obra ? semObra(a) : semEmpresa(a)).mensagem);
+  const corpo = <>
+    <span className="ini-aviso__nome">{quem ? `${quem} · ${texto}` : texto}</span>
+    <span className={`ini-pilula ini-pilula--${tom}`}>{seloDeDias(a, secao)}</span>
+  </>;
+  return <li>{d ? <Link para={d.para} busca={d.busca} secao={d.secao} ir={ir} className="ini-aviso__linha">{corpo}</Link>
+    : <span className="ini-aviso__linha">{corpo}</span>}</li>;
 }
 
-function SecaoAviso({ id, titulo, icone, total, tom, familia, ir, vazio, children }:
-    { id: string; titulo: string; icone: React.ReactNode; total: number; tom: "neutro" | "acao" | "atencao"; familia: string; ir: Ir;
-      vazio: string; children: React.ReactNode }) {
+/** Caixa "Avisos importantes" (#666): so' o que esta' na agenda da tela Avisos, em tres secoes pelo tempo, cada uma
+ *  com a contagem e os primeiros itens. `avisos`: `undefined` carregando, `null` falhou (como em AvisosPagina). */
+function CaixaAvisos({ avisos, ir }: { avisos: Aviso[] | null | undefined; ir: Ir }) {
+  const secoes = porSecao(daAgenda(avisos ?? [])).filter(s => SECOES_DA_CAIXA[s.id]);
+  const total = secoes.reduce((n, s) => n + s.itens.length, 0);
   return (
-    <section aria-labelledby={id} className={`ini-aviso ini-aviso--${tom}`}>
-      <header className="ini-aviso__topo">
-        <span className="ini-aviso__icone">{icone}</span>
-        <h3 id={id}>{titulo}</h3>
-        <span className="ini-aviso__conta" aria-label={`${total} ${titulo.toLowerCase()}`}>{total.toLocaleString("pt-BR")}</span>
-        <Link para={{ tela: "avisos" }} busca={{ familia }} ir={ir} className="ini-ver-todos" aria-label={`Ver todos: ${titulo}`}>Ver todos</Link>
+    <aside aria-labelledby="ini-avisos" className="ini-painel ini-avisos">
+      <header className="ini-avisos__topo">
+        <h2 id="ini-avisos">Avisos importantes</h2>
+        {avisos && <span className="ini-aviso__conta ini-avisos__total" aria-label={contar(total, "aviso", "avisos")}>{total.toLocaleString("pt-BR")}</span>}
+        <Link para={{ tela: "avisos" }} ir={ir} className="ini-ver-todos" aria-label="Ver todos os avisos">Ver todos</Link>
       </header>
-      {total === 0 ? <p className="ini-vazio">{vazio}</p> : <ul className="ini-aviso__lista">{children}</ul>}
-    </section>
+      {avisos === undefined && <p className="ini-carregando">Carregando…</p>}
+      {avisos === null && <p className="erro" role="alert">Não foi possível verificar os avisos. Recarregue a página para tentar de novo.</p>}
+      {avisos && total === 0 && <p className="ini-vazio">Nenhum aviso.</p>}
+      {avisos && total > 0 && (
+        <div className="ini-avisos__secoes">
+          {secoes.map(s => {
+            const tom = SECOES_DA_CAIXA[s.id] ?? "atencao", id = `ini-av-${s.id}`;
+            return (
+              <section key={s.id} aria-labelledby={id} className={`ini-aviso ini-aviso--${s.itens.length > 0 ? tom : "neutro"}`}>
+                <header className="ini-aviso__topo">
+                  <h3 id={id}>{s.rotulo}</h3>
+                  <span className="ini-aviso__conta">{s.itens.length.toLocaleString("pt-BR")}</span>
+                </header>
+                {s.itens.length > 0 && (
+                  <ul className="ini-aviso__lista">
+                    {s.itens.slice(0, AVISOS_VISIVEIS).map((a, i) =>
+                      <ItemAviso key={`${a.tipo}-${a.contrato_id}-${a.entidade_id ?? ""}-${a.medicao_id ?? ""}-${i}`} a={a} secao={s.id} tom={tom} ir={ir} />)}
+                  </ul>)}
+              </section>);
+          })}
+        </div>)}
+    </aside>
   );
 }
 
 export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
   const [p, setP] = useState<PainelInicio | null>(null);
   const [erro, setErro] = useState("");
+  const [avisos, setAvisos] = useState<Aviso[] | null | undefined>(undefined);
 
   useEffect(() => {
     let vivo = true;
     api<PainelInicio>("/api/inicio/painel")
       .then(d => { if (vivo) setP(d); })
       .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
+    // a fila da tela Avisos; se falhar, so' a caixa mostra o erro
+    api<{ avisos: Aviso[] }>("/api/inicio")
+      .then(d => { if (vivo) setAvisos(d.avisos); })
+      .catch(() => { if (vivo) setAvisos(null); });
     return () => { vivo = false; };
   }, []);
 
@@ -332,7 +338,6 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
   }
 
   const m = p.medido;
-  const av = p.avisos_importantes;
 
   return (
     <div className="ini">
@@ -356,42 +361,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
         </div>
       </section>
 
-      <aside aria-labelledby="ini-avisos" className="ini-painel ini-avisos">
-        <h2 id="ini-avisos">Avisos importantes</h2>
-        <div className="ini-avisos__secoes">
-          <SecaoAviso id="ini-av-reajustes" titulo="Reajustes" icone={<IconeReajuste />} total={av.reajustes.total} tom="neutro"
-            familia="reajustes" ir={ir} vazio="Nenhum aviso de reajuste.">
-            {av.reajustes.itens.map((x, i) => (
-              <li key={`${x.contrato_id}-${i}`}>
-                <Link para={{ tela: "obra", id: x.contrato_id, aba: "reajuste" }} ir={ir} className="ini-aviso__linha">
-                  <span className="ini-aviso__nome">{x.obra} · {AVISO_REAJUSTE[x.tipo ?? "reajuste_pleito"] ?? "reajuste"}{detalheDoReajuste(x)}</span>
-                </Link>
-              </li>))}
-          </SecaoAviso>
-          <SecaoAviso id="ini-av-prazos" titulo="Prazos" icone={<IconePrazo />} total={av.prazos.total} tom="acao"
-            familia="prazos" ir={ir} vazio="Nenhum prazo vencido ou chegando.">
-            {av.prazos.itens.map(x => (
-              <li key={`${x.contrato_id}-${x.tipo}`}>
-                <Link para={{ tela: "obra", id: x.contrato_id, aba: "prazos" }} ir={ir} className="ini-aviso__linha">
-                  <span className="ini-aviso__nome">{x.obra}</span>
-                  <span className={`ini-pilula ini-pilula--${x.dias <= 15 ? "acao" : "atencao"}`}>
-                    {x.dias < 0 ? `vencido há ${(-x.dias).toLocaleString("pt-BR")} ${-x.dias === 1 ? "dia" : "dias"}`
-                      : `faltam ${x.dias.toLocaleString("pt-BR")} ${x.dias === 1 ? "dia" : "dias"}`}</span>
-                </Link>
-              </li>))}
-          </SecaoAviso>
-          <SecaoAviso id="ini-av-certidoes" titulo="Certidões" icone={<IconeCertidao />} total={av.certidoes.total} tom="atencao"
-            familia="certidoes" ir={ir} vazio="Nenhuma certidão vencendo.">
-            {av.certidoes.itens.map((x, i) => (
-              <li key={`${x.tipo}-${x.entidade}-${i}`}>
-                <Link para={{ tela: "documentos" }} ir={ir} className="ini-aviso__linha">
-                  <span className="ini-aviso__nome">{x.tipo} · {x.entidade}</span>
-                  <span className={`ini-pilula ini-pilula--${x.vencida ? "acao" : "atencao"}`}>{quando(x.dias, x.vencida)}</span>
-                </Link>
-              </li>))}
-          </SecaoAviso>
-        </div>
-      </aside>
+      <CaixaAvisos avisos={avisos} ir={ir} />
     </div>
   );
 }

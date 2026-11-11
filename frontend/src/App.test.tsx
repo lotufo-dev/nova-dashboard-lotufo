@@ -47,7 +47,6 @@ const PAINEL_MINIMO = {
   previsao: Object.fromEntries(["neste_mes", "proximo_mes", "atrasado", "sem_previsao", "depois"].map(
     k => [k, { valor_centavos: 0, quantidade: 0 }])),
   notas_mes: { mes: "2026-10", valor_centavos: 0, notas: 0, obras: 0 },
-  avisos_importantes: { reajustes: { total: 0, itens: [] }, prazos: { total: 0, itens: [] }, certidoes: { total: 0, itens: [] } },
 };
 
 describe("App: a tela SIGA", () => {

@@ -32,13 +32,12 @@ def test_inicio_e_medicoes_em_andamento(client_admin):
 
 def test_termo_que_nao_esta_no_cadastro_nao_chega_ao_inicio_e_vai_para_o_admin(client_admin):
     # issue #649: a nota de reajuste sem termo que cubra a competencia so' diz "nao achamos o documento"; sai da lista
-    # de avisos (/api/inicio) e da secao Reajustes da pagina Inicio (/api/inicio/painel) e vira pendencia de cadastro
+    # de avisos (/api/inicio), que e' tambem a fila da caixa do Inicio (#666), e vira pendencia de cadastro
     cid = _obra_reajuste("Obra R", "099/2024")
     _reajuste_com_nota(cid, 1, "2025-09", 300_05)
     tipos = {a["tipo"] for a in client_admin.get("/api/inicio").json()["avisos"]}
     assert not tipos & {"reajuste_nota_antes_do_apostilamento", "reajuste_sem_apostilamento", "reajuste_fora_da_previsao"}
-    reaj = client_admin.get("/api/inicio/painel").json()["avisos_importantes"]["reajustes"]
-    assert {x["tipo"] for x in reaj["itens"]} == {"reajuste_pleito"} and reaj["total"] == 1
+    assert "avisos_importantes" not in client_admin.get("/api/inicio/painel").json()      # #666: a caixa le /api/inicio
     assert client_admin.get("/api/admin/pendencias-cadastro").json()["documentos"] == [
         {"contrato_id": cid, "obra": "Obra R", "falta": "Termo de apostilamento da competência 09/2025 não está no cadastro",
          "desde": "2025-09", "aba": "reajuste"}]
@@ -69,50 +68,19 @@ def _reajuste_com_nota(cid, numero, comp, valor):
     c.commit(); c.close()
 
 
-def _pleito_enviado(cid, enviado_em, ciclo=2025):
-    from app import db
-    c = db.get_conn()
-    c.execute("INSERT INTO pleitos (contrato_id, tipo, origem, data_base_mes, ciclo, numero_oficio, situacao, enviado_em) "
-              "VALUES (?, 'reajuste', 'cadastro', '2024-06', ?, ?, 'enviado', ?)", (cid, ciclo, f"CT-{cid}-{ciclo}", enviado_em))
-    c.commit(); c.close()
-
-
-def test_secao_reajustes_um_item_por_obra_e_tipo_e_o_total_conta_os_itens(client_admin, monkeypatch):
-    # revisor (rodada 2 da PR #579): os avisos do mesmo tipo na mesma obra viram um item; a outra obra aparece.
-    # issue #587: o total conta os itens (obra x tipo), a mesma unidade das linhas. Issue #649: as notas sem termo no
-    # cadastro nao contam mais (sao pendencia de cadastro do admin)
-    import datetime
-    from app import tempo
-    monkeypatch.setattr(tempo, "hoje_local", lambda: datetime.date(2026, 11, 11))
-    a = _obra_reajuste("Obra Alfa", "001/2024")
-    b = _obra_reajuste("Obra Beta", "002/2024")
-    for i, comp in enumerate(("2025-07", "2025-08", "2025-09"), start=1):
-        _reajuste_com_nota(a, i, comp, 100_01)
-    _reajuste_com_nota(b, 1, "2025-07", 200_03)
-    _pleito_enviado(a, "2025-06-10")
-    _pleito_enviado(a, "2026-06-10", ciclo=2026)
-    _pleito_enviado(b, "2025-06-10")
-    reaj = client_admin.get("/api/inicio/painel").json()["avisos_importantes"]["reajustes"]
-    assert sorted((x["contrato_id"], x["tipo"]) for x in reaj["itens"]) == [
-        (a, "reajuste_sem_resposta"), (b, "reajuste_pleito"), (b, "reajuste_sem_resposta")]   # os dois ciclos de Alfa: um item
-    assert reaj["total"] == 3
-
-
-def test_secao_reajustes_da_diretoria_nao_traz_a_pendencia_de_cadastro(client_admin):
-    # revisor (rodada 2 da PR #579): o painel recebe o perfil. Issue #649: nem a operacao nem a diretoria veem a nota
-    # sem termo no cadastro; o pleito a pedir segue para todo perfil, como antes
+def test_fila_do_inicio_da_diretoria_nao_traz_a_pendencia_de_cadastro(client_admin):
+    # revisor (rodada 2 da PR #579): a fila segue o perfil. Issue #649: nem a operacao nem a diretoria veem a nota
+    # sem termo no cadastro. Issue #666: a caixa do Inicio le esta mesma fila, entao a pendencia nao conta nela
     from app import auth, db
     cid = _obra_reajuste("Obra Alfa", "001/2024")
     _reajuste_com_nota(cid, 1, "2025-07", 300_000_00)
-    tipos = {x["tipo"] for x in client_admin.get("/api/inicio/painel").json()["avisos_importantes"]["reajustes"]["itens"]}
-    assert tipos == {"reajuste_pleito"}
+    assert not [a for a in client_admin.get("/api/inicio").json()["avisos"] if a["natureza"] != "fato"]
     c = db.get_conn()
     auth.criar_usuario(c, "Diretoria", "dir@lotufo.com", "senha-forte-123", "diretoria")
     c.close()
     r = client_admin.post("/api/auth/login", json={"email": "dir@lotufo.com", "senha": "senha-forte-123"})
     client_admin.cookies.set("sessao", r.cookies.get("sessao") or client_admin.cookies.get("sessao"))
-    itens = client_admin.get("/api/inicio/painel").json()["avisos_importantes"]["reajustes"]["itens"]
-    assert {x["tipo"] for x in itens} == {"reajuste_pleito"}
+    assert "avisos_importantes" not in client_admin.get("/api/inicio/painel").json()
     assert not [a for a in client_admin.get("/api/inicio").json()["avisos"] if a["natureza"] != "fato"]
     assert client_admin.get("/api/admin/pendencias-cadastro").status_code == 403
 
@@ -133,8 +101,7 @@ def test_painel_do_inicio(client_admin):
     assert r.status_code == 200
     assert set(r.json()) == {"hoje", "notas_a_enviar", "certidoes", "reajustes", "protocoladas", "medido",
                              "recebido_ano", "a_receber", "prazos", "espelhos", "ciclo", "notas_mes",
-                             "recebido_12m", "previsao", "matriz",
-                             "avisos_importantes"}
+                             "recebido_12m", "previsao", "matriz"}
     assert [e["etapa"] for e in r.json()["ciclo"]] == ["em_analise", "boletim", "nota", "protocolado", "recebido_mes"]
     assert r.json()["protocoladas"]["obras_ativas"] == 1
     assert r.json()["espelhos"] == []
