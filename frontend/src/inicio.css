@@ -64,20 +64,22 @@
   .ini-rec__valor { grid-column: 3; grid-row: 1; text-align: right; }
 }
 
-/* previsao de entrada (#652): quatro linhas com rotulo, valor e quantidade; so' o atrasado ganha cor (critico) */
-.ini-previsao__linhas { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+/* previsao de entrada (#652): cinco linhas com rotulo, valor e quantidade; so' o atrasado ganha cor (critico). A
+   1024px com o menu aberto o painel tem 688px por dentro e cinco colunas nao comportam o valor numa linha: abaixo de
+   900px de painel as linhas empilham (rotulo a' esquerda, valor a' direita) */
+.ini-previsao__linhas { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
 .ini-previsao__linha {
   min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px 12px;
   border: 1px solid var(--linha); border-radius: var(--raio);
 }
 .ini-previsao__rotulo { font-size: 13px; line-height: 20px; font-weight: 600; }
 .ini-previsao__valor {
-  font-size: clamp(14px, 2.4cqi, 20px); line-height: 28px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
+  font-size: clamp(14px, 1.6cqi, 20px); line-height: 28px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .ini-previsao__conta { font-size: 13px; line-height: 18px; color: var(--texto-2); }
 .ini-previsao__linha--critico { border-color: var(--acao-linha); background: var(--acao-fundo); }
 .ini-previsao__linha--critico .ini-previsao__rotulo, .ini-previsao__linha--critico .ini-previsao__valor { color: var(--acao); }
-@container (max-width: 559px) {
+@container (max-width: 899px) {
   .ini-previsao__linhas { grid-template-columns: minmax(0, 1fr); }
   .ini-previsao__linha { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: baseline; }
   .ini-previsao__valor { grid-column: 2; grid-row: 1; font-size: 16px; line-height: 24px; }

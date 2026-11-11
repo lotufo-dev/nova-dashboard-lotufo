@@ -33,9 +33,9 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   previsao: {
     neste_mes: { valor_centavos: 500_000, quantidade: 2 },
     proximo_mes: { valor_centavos: 900_001, quantidade: 1 },
-    atrasado: { valor_centavos: 800_100, quantidade: 3 },
+    atrasado: { valor_centavos: 800_100, quantidade: 2 },
     sem_previsao: { valor_centavos: 0, quantidade: 0 },
-    depois: { valor_centavos: 600_000, quantidade: 1 },
+    depois: { valor_centavos: 1_584_477_803, quantidade: 1 },     // as cinco somam a etapa "Protocolado" do ciclo
   },
   notas_mes: { mes: "2026-10", valor_centavos: 1_522_295_618, notas: 5, obras: 2 },
   avisos_importantes: {
@@ -165,7 +165,7 @@ describe("Início", () => {
       .toEqual(Array<string>(12).fill("0%"));
   });
 
-  it("#652: previsão de entrada com as quatro linhas, valor e quantidade; só o atrasado com valor fica vermelho", async () => {
+  it("#652: previsão de entrada com as cinco linhas, valor e quantidade; só o atrasado com valor fica vermelho", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const regiao = await screen.findByRole("region", { name: "Previsão de entrada (cota da Lotufo)" });
@@ -173,10 +173,33 @@ describe("Início", () => {
     expect(linhas.map(l => [...l.children].map(limpo))).toEqual([
       ["Neste mês", "R$ 5.000,00", "2 medições"],
       ["No próximo mês", "R$ 9.000,01", "1 medição"],
-      ["Atrasado", "R$ 8.001,00", "3 medições"],
+      ["Depois", "R$ 15.844.778,03", "1 medição"],
+      ["Atrasado", "R$ 8.001,00", "2 medições"],
       ["Sem previsão", "R$ 0,00", "0 medições"],
     ]);
-    expect(linhas.map(l => l.className.includes("--critico"))).toEqual([false, false, true, false]);
+    expect(linhas.map(l => l.className.includes("--critico"))).toEqual([false, false, false, true, false]);
+  });
+
+  it("#652: as cinco linhas da previsão fecham com a etapa Protocolado da faixa do ciclo, em quantidade e valor", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: "Previsão de entrada (cota da Lotufo)" });
+    const centavos = (t: string) => Number(t.replace(/\D/g, ""));
+    const linhas = within(regiao).getAllByRole("listitem").map(l => [...l.children].map(limpo));
+    expect(linhas).toHaveLength(5);
+    const protocolado = [...document.querySelectorAll(".ini-faixa__etapa")].map(e => [...e.children].map(limpo))
+      .find(e => e[0] === "Protocolado");
+    expect(linhas.reduce((s, l) => s + parseInt(l[2] ?? "", 10), 0)).toBe(parseInt(protocolado?.[2] ?? "", 10));
+    expect(linhas.reduce((s, l) => s + centavos(l[1] ?? ""), 0)).toBe(centavos(protocolado?.[1] ?? ""));
+  });
+
+  it("#652: linha da previsão sem medição continua no lugar, zerada", async () => {
+    const zero = { valor_centavos: 0, quantidade: 0 };
+    api.mockResolvedValue(painel({ previsao: { neste_mes: zero, proximo_mes: zero, atrasado: zero, sem_previsao: zero, depois: zero } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: "Previsão de entrada (cota da Lotufo)" });
+    expect(within(regiao).getAllByRole("listitem").map(l => [...l.children].map(limpo))).toEqual(
+      ["Neste mês", "No próximo mês", "Depois", "Atrasado", "Sem previsão"].map(r => [r, "R$ 0,00", "0 medições"]));
   });
 
   it("#652: sem medição atrasada a linha Atrasado fica na cor padrão", async () => {

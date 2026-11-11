@@ -36,7 +36,7 @@ export type PainelInicio = {
   espelhos: EspelhoAConferir[];
   ciclo: EtapaCiclo[];
   recebido_12m: MesRecebido[];
-  // #652: `depois` (data esperada alem do proximo mes) vem do servidor e a tela nao mostra
+  // #652: `depois` = data esperada alem do proximo mes
   previsao: Record<"neste_mes" | "proximo_mes" | "atrasado" | "sem_previsao" | "depois", GrupoPrevisao>;
   notas_mes: { mes: string; valor_centavos: number; notas: number; obras: number };
   avisos_importantes: {
@@ -144,10 +144,12 @@ function Recebido12Meses({ meses }: { meses: MesRecebido[] }) {
   );
 }
 
-// #652: as quatro linhas da previsao, na ordem da tela
+// #652: as cinco linhas da previsao, na ordem da tela. Juntas somam a etapa "Protocolado" da faixa do ciclo: "Depois"
+// (data esperada alem do proximo mes) entrou para o numero fechar na tela
 const LINHAS_PREVISAO: { chave: keyof PainelInicio["previsao"]; rotulo: string }[] = [
   { chave: "neste_mes", rotulo: "Neste mês" },
   { chave: "proximo_mes", rotulo: "No próximo mês" },
+  { chave: "depois", rotulo: "Depois" },
   { chave: "atrasado", rotulo: "Atrasado" },
   { chave: "sem_previsao", rotulo: "Sem previsão" },
 ];

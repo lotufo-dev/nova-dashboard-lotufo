@@ -127,7 +127,7 @@ def _previsao(conn, hoje: datetime.date) -> dict:
     (estado protocolado e com a data do primeiro protocolo da nota), na cota (`diretoria._cota`), e cada uma cai em
     uma e so' uma linha, pela data esperada = protocolo + prazo do contratante (a parte inteira da mediana: quem esta'
     protocolado ha' mais dias que a mediana ja' passou da data): `atrasado` (a data ja' passou), `neste_mes`,
-    `proximo_mes`, `depois` (alem do proximo mes; a tela nao mostra) e `sem_previsao` (contratante sem prazo)."""
+    `proximo_mes`, `depois` (alem do proximo mes) e `sem_previsao` (contratante sem prazo)."""
     ms = diretoria._medicoes(conn)
     prazos_ = _prazos_do_orgao(ms, hoje)
     neste, proximo = diretoria._mes(hoje), diretoria._mes(hoje, 1)
