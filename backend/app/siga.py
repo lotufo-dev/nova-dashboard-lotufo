@@ -120,25 +120,48 @@ def _sigla(lotacao: str | None) -> str:
     return (lotacao or "").split("/")[0].strip().upper()
 
 
+def _entrada_no_setor(validas: list[dict], setor: str) -> dict | None:
+    """Primeira movimentacao da permanencia atual no setor (#650): das Transferencias e Recebimentos com destino
+    informado, a mais antiga do ultimo trecho seguido no `setor`. Recebimento seguinte no mesmo setor nao recomeca;
+    saiu e voltou, vale a volta. None quando a ultima dessas movimentacoes nao e' do setor."""
+    entrada = None
+    for m in reversed(validas):
+        if tipo_da_movimentacao(m["evento"]) not in ("transferencia", "recebimento") or not _sigla(m["at_lotacao"]):
+            continue
+        if _sigla(m["at_lotacao"]) != setor.upper():
+            break
+        entrada = m
+    return entrada
+
+
+def _marcacao_ou_anotacao(evento: str | None) -> bool:
+    texto = unicodedata.normalize("NFD", evento or "").encode("ascii", "ignore").decode().lower()
+    return "marcacao" in texto or "anotacao" in texto
+
+
 def derivar(situacao: str | None, movimentacoes: list[dict], hoje: datetime.date) -> dict:
     """Movimentacoes com `data` em 'AAAA-MM-DD HH:MM:SS'. As canceladas nao entram em nenhuma conta.
 
-    Na caixa de entrada ninguem recebeu ainda: conta desde a ultima Transferencia (senao a movimentacao mais
-    recente) e nao ha' "com quem". Fora dela, desde o ultimo Recebimento no setor (senao a mais antiga)."""
+    `desde` e' a entrada no setor atual (`_entrada_no_setor`): a Transferencia que levou o processo para la'; sem
+    ela, o primeiro Recebimento. Sem nenhuma das duas: na caixa de entrada, a ultima Transferencia (senao a
+    movimentacao mais recente); fora dela, a movimentacao mais antiga. "Com quem" e' quem fez o ultimo Recebimento
+    no setor (na caixa de entrada ninguem recebeu ainda). `ultima` nao considera Marcacao nem Anotacao."""
     validas = sorted((m for m in movimentacoes if "cancelad" not in (m["evento"] or "").lower()),
                      key=lambda m: m["data"])
     setor = _setor(situacao)
     caixa_entrada = "caixa de entrada" in (situacao or "").lower()
     recebimento = None
+    entrada = _entrada_no_setor(validas, setor) if setor else None
     if caixa_entrada:
         transferencias = [m for m in validas if "transfer" in (m["evento"] or "").lower()]
-        desde = (transferencias or validas or [{"data": None}])[-1]["data"]
+        desde = entrada["data"] if entrada else (transferencias or validas or [{"data": None}])[-1]["data"]
     else:
         recebimentos = [m for m in validas if "recebimento" in (m["evento"] or "").lower()
                         and setor and _sigla(m["at_lotacao"]) == setor.upper()]
         recebimento = recebimentos[-1] if recebimentos else None
-        desde = recebimento["data"] if recebimento else (validas[0]["data"] if validas else None)
+        desde = entrada["data"] if entrada else (validas[0]["data"] if validas else None)
     hoje_iso = hoje.isoformat()
+    andamentos = [m for m in validas if not _marcacao_ou_anotacao(m["evento"])]
     return {
         "setor": setor,
         "caixa_entrada": caixa_entrada,
@@ -146,7 +169,7 @@ def derivar(situacao: str | None, movimentacoes: list[dict], hoje: datetime.date
         "desde": desde,
         "dias_uteis": _dias_uteis(datetime.date.fromisoformat(desde[:10]), hoje) if desde else None,
         "hoje": sum(m["data"][:10] == hoje_iso for m in validas),
-        "ultima": validas[-1] if validas else None,
+        "ultima": andamentos[-1] if andamentos else None,
         "protocolado_em": validas[0]["data"] if validas else None,
     }
 
@@ -770,7 +793,7 @@ def saude(conn) -> dict:
 
 def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) -> list[dict]:
     """Avisos da fila (issue #330). `siga_parado`: processo ligado a medicao ainda nao recebida, 5 dias uteis ou
-    mais parado: os dias contam da maior data entre o inicio no setor e a ultima movimentacao valida, e o nivel
+    mais parado: os dias sao os do "No setor ha'" da tela (`derivar`, desde a entrada no setor atual, #650), e o nivel
     segue `DIAS_ATENCAO` e `DIAS_ACAO`. Um so' por medicao: o do processo do protocolo mais recente (sem protocolo
     vale menos que com; empate, o processo mais novo), porque o antigo fica arquivado no SIGA depois de uma
     devolucao. `siga_sem_leitura`: um so', quando o robo passou do atraso e ha' processo acompanhado. Processo sem
@@ -791,8 +814,7 @@ def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) ->
         d = derivar(leitura["situacao"] if leitura else None, movs, hoje)
         if d["desde"] is None:
             continue
-        parado_desde = max(d["desde"], d["ultima"]["data"])[:10]
-        dias = _dias_uteis(datetime.date.fromisoformat(parado_desde), hoje)
+        parado_desde, dias = d["desde"][:10], d["dias_uteis"]
         if dias < DIAS_ATENCAO:
             continue
         onde = f" em {d['setor']}" if d["setor"] else ""

@@ -41,8 +41,8 @@ def test_derivacoes_do_processo_com_recebimento_no_setor():
     assert d["setor"] == "COFIN"                 # ultimo volume, primeiro nome entre colchetes
     assert d["caixa_entrada"] is False
     assert d["com_quem"] == "Fulano"             # o Recebimento cancelado (Sicrana) nao conta
-    assert d["desde"] == "2026-10-19 10:00:00"
-    assert d["dias_uteis"] == 7                  # 19, 20, 21, 22, 23, 26 e 27/10
+    assert d["desde"] == "2026-10-02 09:00:00"   # a Transferencia que o levou ao setor, nao o Recebimento (#650)
+    assert d["dias_uteis"] == 17                 # 02/10 a 27/10, sem o feriado de 12/10
     assert d["hoje"] == 1                        # o cancelado de hoje tambem nao conta
     assert d["ultima"]["evento"] == "Despacho"
     assert d["protocolado_em"] == "2026-10-01 08:10:00"
@@ -98,6 +98,60 @@ def test_sem_recebimento_no_setor_conta_desde_a_movimentacao_mais_antiga():
     d = siga.derivar("1º Volume - Aguardando Andamento [GABIN, [X]]", movs, datetime.date(2026, 10, 2))
     assert d["setor"] == "GABIN" and d["com_quem"] == ""
     assert d["desde"] == "2026-10-01 08:00:00" and d["dias_uteis"] == 1
+
+
+# issue #650: "No setor ha'" conta da entrada no setor atual; Marcacao e Anotacao nao sao a ultima movimentacao
+SITUACAO_GABIN = "1º Volume - Aguardando Andamento [GABIN, [X]]"
+
+
+def test_varios_recebimentos_no_mesmo_setor_contam_da_primeira_entrada():
+    movs = [_mov("2026-10-01 08:00:00", "Cadastro", at_lotacao="PROTOC/ORGAO"),
+            _mov("2026-10-05 09:00:00", "Transferência", at_lotacao="GABIN/ORGAO"),
+            _mov("2026-10-06 09:00:00", "Recebimento", at_lotacao="GABIN/ORGAO", at_pessoa="Fulano"),
+            _mov("2026-10-20 09:00:00", "Recebimento", at_lotacao="GABIN/ORGAO", at_pessoa="Beltrano"),
+            _mov("2026-10-26 09:00:00", "Recebimento", at_lotacao="GABIN/ORGAO", at_pessoa="Sicrana")]
+    d = siga.derivar(SITUACAO_GABIN, movs, datetime.date(2026, 10, 28))
+    assert d["desde"] == "2026-10-05 09:00:00"   # a Transferencia que o levou ao setor
+    assert d["dias_uteis"] == 16                 # 05/10 a 27/10, sem o feriado de 12/10
+    assert d["com_quem"] == "Sicrana"            # quem recebeu por ultimo
+    # sem a Transferencia gravada, vale o primeiro Recebimento da permanencia
+    d = siga.derivar(SITUACAO_GABIN, [movs[0], *movs[2:]], datetime.date(2026, 10, 28))
+    assert d["desde"] == "2026-10-06 09:00:00" and d["dias_uteis"] == 15
+
+
+def test_processo_que_saiu_e_voltou_ao_setor_conta_da_volta():
+    movs = [_mov("2026-10-01 09:00:00", "Recebimento", at_lotacao="GABIN/ORGAO", at_pessoa="Fulano"),
+            _mov("2026-10-08 09:00:00", "Transferência", at_lotacao="COFIN/ORGAO"),
+            _mov("2026-10-09 09:00:00", "Recebimento", at_lotacao="COFIN/ORGAO", at_pessoa="Beltrano"),
+            _mov("2026-10-21 09:00:00", "Transferência", at_lotacao="GABIN/ORGAO"),
+            _mov("2026-10-22 09:00:00", "Recebimento", at_lotacao="GABIN/ORGAO", at_pessoa="Fulano"),
+            _mov("2026-10-26 09:00:00", "Recebimento", at_lotacao="GABIN/ORGAO", at_pessoa="Sicrana")]
+    d = siga.derivar(SITUACAO_GABIN, movs, datetime.date(2026, 10, 28))
+    assert d["desde"] == "2026-10-21 09:00:00" and d["dias_uteis"] == 5     # 21, 22, 23, 26 e 27/10
+    # juntada ou despacho no meio da permanencia nao recomeca a conta
+    movs.append(_mov("2026-10-27 09:00:00", "Juntada", at_lotacao="OUTRO/ORGAO"))
+    assert siga.derivar(SITUACAO_GABIN, movs, datetime.date(2026, 10, 28))["desde"] == "2026-10-21 09:00:00"
+
+
+def test_caixa_de_entrada_com_duas_transferencias_ao_setor_conta_da_primeira():
+    movs = [_mov("2026-10-01 08:00:00", "Cadastro", at_lotacao="PROTOC/ORGAO"),
+            _mov("2026-10-19 08:00:00", "Transferência", at_lotacao="GABIN/ORGAO"),
+            _mov("2026-10-23 08:00:00", "Transferência", at_lotacao="GABIN/ORGAO")]
+    d = siga.derivar("1º Volume - Caixa de Entrada [GABIN, [X]]", movs, datetime.date(2026, 10, 28))
+    assert (d["com_quem"], d["desde"], d["dias_uteis"]) == ("", "2026-10-19 08:00:00", 7)
+
+
+def test_ultima_movimentacao_nao_e_marcacao_nem_anotacao():
+    movs = [_mov("2026-10-01 08:00:00", "Cadastro", at_lotacao="PROTOC/ORGAO"),
+            _mov("2026-10-20 09:00:00", "Recebimento", at_lotacao="GABIN/ORGAO", at_pessoa="Fulano"),
+            _mov("2026-10-26 09:00:00", "Marcação", at_lotacao="GABIN/ORGAO"),
+            _mov("2026-10-27 09:00:00", "Anotação | texto", at_lotacao="GABIN/ORGAO")]
+    d = siga.derivar(SITUACAO_GABIN, movs, datetime.date(2026, 10, 28))
+    assert d["ultima"]["evento"] == "Recebimento" and d["ultima"]["data"] == "2026-10-20 09:00:00"
+    assert d["protocolado_em"] == "2026-10-01 08:00:00"
+    so_marcacao = [_mov("2026-10-26 09:00:00", "Marcação", at_lotacao="GABIN/ORGAO")]
+    d = siga.derivar(SITUACAO_GABIN, so_marcacao, datetime.date(2026, 10, 28))
+    assert d["ultima"] is None and d["protocolado_em"] == "2026-10-26 09:00:00"
 
 
 def test_processo_sem_movimentacao_nao_quebra():
@@ -394,6 +448,21 @@ def test_link_colado_na_medicao_nao_cede_ao_processo_da_nota(conn):
     conn.commit()
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), _leitura_unica("SINFRA-PRO-2026/00222", "NOT222"))
     assert _ligados(conn) == [("SINFRA-PRO-2026/00111", 7, 31), ("SINFRA-PRO-2026/00222", None, None)]
+
+
+def test_aviso_de_processo_parado_usa_a_data_de_entrada_no_setor(conn):
+    # issue #650: o aviso conta os mesmos dias da tela; recebimento ou despacho seguinte no setor nao recomeca
+    _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+    proc = _leitura(numero="SINFRA-PRO-2026/00001")[:1]
+    proc[0]["movimentacoes"] += [
+        {**_mov("", "Recebimento", at_lotacao="COFIN/ORGAO", at_pessoa="Sicrana"), "data": "26/10/2026 09:00:00"}]
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), proc)
+    hoje = datetime.date(2026, 10, 28)
+    p = next(x for x in siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"] if x["codigo"] == "ABC123")
+    [a] = [x for x in siga.avisos(conn, hoje) if x["tipo"] == "siga_parado"]
+    assert p["desde"] == "2026-10-02T09:00:00-04:00" and p["dias_uteis"] == 17
+    assert (a["dias"], a["data"], a["nivel"]) == (17, "2026-10-02", "acao")
+    assert a["mensagem"] == "processo SINFRA-PRO-2026/00001 parado em COFIN há 17 dias úteis"
 
 
 def test_vinculo_chega_na_rodada_seguinte_ao_numero_registrado(conn):
