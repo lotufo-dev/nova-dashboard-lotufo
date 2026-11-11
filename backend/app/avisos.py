@@ -155,7 +155,7 @@ def listar(conn, hoje: datetime.date | None = None, publico: str = "operacao", n
     return sorted(todos, key=lambda a: (_ORDEM[a["nivel"]], _chave_atraso(a, hoje), a["obra"] or ""))
 
 
-_ABA_DA_PENDENCIA = {"reajuste": "reajuste", "garantia": "prazos"}     # a aba da obra onde o documento se confere
+_ABA_DA_PENDENCIA = {"reajuste": "reajuste", "garantia": "prazos", "execucao": "prazos"}    # a aba da obra onde o documento se confere
 
 
 def pendencias_cadastro(conn, hoje: datetime.date | None = None) -> list[dict]:

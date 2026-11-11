@@ -1,6 +1,8 @@
 // Regras de APRESENTACAO da pagina da medicao (NAVEGACAO.md › Medicao): funcoes puras sobre o que a API ja
 // entrega. Nada aqui decide estado, valor ou prazo — isso mora no servidor.
 
+import { PASSOS } from "./Passos";
+
 export type MarcoProtocolo = { id: number; data: string; numero_oficio: string | null; numero_processo: string | null;
   origem: string; protocolo_id?: number | null };
 export type Conferencia = { campo: string; espelho: number | string | null; nota: number | string | null; grau: string };
@@ -90,20 +92,12 @@ export function metadeQueEspera(par: ParDaMedicao | null): Metade | null {
   return par?.junta ? par.metades.find(x => x.espera) ?? null : null;
 }
 
-// O proximo passo vem do servidor (`medicoes.PROXIMO_PASSO`); aqui so' o rotulo do mapa e a secao da
-// pagina da medicao onde ele se resolve.
-const PASSOS: Record<string, { rotulo: string; secao: string }> = {
-  "enviar a planilha/carta": { rotulo: "Enviar a planilha/carta", secao: "" },
-  "registrar o boletim": { rotulo: "Registrar o boletim", secao: "" },
-  "gerar o espelho": { rotulo: "Gerar o espelho", secao: "" },
-  "enviar ao faturamento": { rotulo: "Enviar ao faturamento", secao: "etapa-2" },
-  "anexar as notas": { rotulo: "Nota fiscal", secao: "etapa-3" },
-  "protocolar": { rotulo: "Enviar a nota", secao: "etapa-4" },
-  "aguardando pagamento": { rotulo: "Aguardando o órgão", secao: "etapa-5" },
-};
-
+// O proximo passo vem do servidor (`medicoes.em_andamento`) e, desde a #653, diz o NOME do passo da barra de passos da
+// pagina da medicao (Passos.tsx): o rotulo e' esse nome e a secao e' a ancora do passo (#passo-N).
 export function passoDe(proximo: string | null | undefined): { rotulo: string; secao: string } | null {
-  return proximo ? PASSOS[proximo] ?? { rotulo: proximo, secao: "" } : null;
+  if (!proximo) return null;
+  const n = (PASSOS as readonly string[]).indexOf(proximo) + 1;
+  return { rotulo: proximo, secao: n ? `passo-${n}` : "" };
 }
 
 /** Antes do protocolo: a medicao tem "O que falta para protocolar". */
@@ -195,7 +189,7 @@ export type ItemChecklist = { entidade_id: number; entidade: string | null; tipo
 export function itensOQueFalta(m: MedicaoBase, faltamNotas: number | null, checklist: ItemChecklist[] | null,
                                protocolo: ProtocoloResumo | null): ItemFalta[] {
   const itens: ItemFalta[] = [];
-  if (m.estado === "espelho_gerado") itens.push({ tipo: "passo", nivel: "neutro", texto: "Enviar o espelho ao faturamento", secao: "etapa-2" });
+  if (m.estado === "espelho_gerado") itens.push({ tipo: "passo", nivel: "neutro", texto: "Enviar o espelho ao faturamento", secao: "passo-3" });
   const semNotas = ["espelho_gerado", "espelho_enviado"].includes(m.estado);
   if (semNotas || (faltamNotas ?? 0) > 0) {
     const n = faltamNotas ?? 0;

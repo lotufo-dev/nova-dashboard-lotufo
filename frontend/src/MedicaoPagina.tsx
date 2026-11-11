@@ -42,8 +42,8 @@ type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_
 type LinhaAndamento = { id: number; proximo_passo: string; desde: string };
 type Painel = "fora" | "protocolado" | "atestado" | "recebimento" | "cancelada" | "desistida" | "final" | "desfinal" | "assinatura" | "boletim" | "diferenca" | "sozinha" | "liberar" | "assinados" | "assinados_fora" | null;
 
-// Ancoras antigas (#notas, #espelho, #protocolo e as #etapa-N do trilho de cinco setas, que o Inicio, as listas e o
-// SIGA ainda usam) abrem o passo onde a coisa mora hoje.
+// Ancoras antigas (#notas, #espelho, #protocolo e as #etapa-N do trilho de cinco setas, que ficaram em endereco
+// guardado; desde a #653 nenhum link da dashboard usa as #etapa-N) abrem o passo onde a coisa mora hoje.
 const SECAO_PASSO: Record<string, number> = { espelho: 3, notas: 4, protocolo: 5, "planilha-carta": 1,
   "etapa-1": 3, "etapa-2": 3, "etapa-3": 4, "etapa-4": 5, "etapa-5": 6 };
 
@@ -217,7 +217,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // issue #188: a metade pronta que espera a outra (orgao que junta); o passo da vez e' a espera
   const pronta = metadeQueEspera(par);
   const esperaAqui = pronta?.medicao_id === medicaoId ? pronta.espera : null;
-  const passoBase: PassoResumo = esperaAqui ? { rotulo: esperaAqui.texto.charAt(0).toUpperCase() + esperaAqui.texto.slice(1), secao: "etapa-4" }
+  const passoBase: PassoResumo = esperaAqui ? { rotulo: esperaAqui.texto.charAt(0).toUpperCase() + esperaAqui.texto.slice(1), secao: "passo-5" }
     : passoDe(linha?.proximo_passo);
   const aqui: Rota = { tela: "medicao", obra: contratoId, id: medicaoId };
   // #359: o aprovado mudou depois do espelho (o servidor compara com o espelho vigente): uma linha por medicao da
@@ -316,11 +316,10 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     && m.valor_atestado_centavos !== null && m.valor_protocolado_centavos !== null
     && (m.valor_atestado_centavos < m.valor_protocolado_centavos || (m.capa_divergencias ?? []).length > 0);
   // #568: o boletim fora da etapa mora em "Mais ações"; o proximo passo abre a janela dele direto
-  const SECAO_DO_PASSO: Record<string, string> = { "enviar a planilha/carta": "passo-1", "registrar o boletim": "passo-2", "gerar o espelho": "espelho" };
-  const proximo = linha?.proximo_passo ?? "";
-  const passo: PassoResumo = !passoBase || esperaAqui || passoBase.secao ? passoBase
-    : proximo === "registrar o boletim" && podeBoletim && !boletimNaEtapa ? { ...passoBase, acao: "boletim" }
-    : { ...passoBase, secao: (temPassosPlanilha || proximo === "gerar o espelho" ? SECAO_DO_PASSO[proximo] : "") ?? "" };
+  // #653: o proximo passo e' o nome do passo com a ancora dele; o boletim fora do passo segue sendo um ato da janela
+  const passo: PassoResumo = !passoBase || esperaAqui ? passoBase
+    : m.estado === "planilha_enviada" && podeBoletim && !boletimNaEtapa ? { rotulo: "Registrar o boletim", secao: "", acao: "boletim" }
+    : passoBase;
   const acoes: ItemAcao[] = !podeEditar ? [] : [
     ...(valorEditavel(m, "atestado", podeEditar) ? [{ id: "atestado", rotulo: m.valor_atestado_centavos === null ? "Definir o atestado" : "Editar o atestado" }] : []),
     ...(podeBoletim && !boletimNaEtapa ? [{ id: "boletim", rotulo: comBoletim ? "Registrar boletim novo" : "Registrar boletim" }] : []),

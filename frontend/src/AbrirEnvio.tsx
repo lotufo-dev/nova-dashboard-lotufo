@@ -12,7 +12,7 @@ export default function AbrirEnvio({ protocoloId }: { protocoloId: number }) {
   useEffect(() => {
     let vivo = true;
     api<{ envio: { contrato_id: number; medicao_ids: number[] } }>(`/api/notas/envio/${protocoloId}`)
-      .then(d => { if (vivo) substituir({ tela: "medicao", obra: d.envio.contrato_id, id: d.envio.medicao_ids[0] }, { secao: "etapa-4", semBusca: true }); })
+      .then(d => { if (vivo) substituir({ tela: "medicao", obra: d.envio.contrato_id, id: d.envio.medicao_ids[0] }, { secao: "passo-5", semBusca: true }); })
       .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
     return () => { vivo = false; };
   }, [protocoloId]);
