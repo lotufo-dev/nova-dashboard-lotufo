@@ -10,8 +10,9 @@ Regras por tema carregam sozinhas de `.claude/rules/` quando a sessão mexe nos 
 
 Sistema web interno da Lotufo Engenharia (FastAPI + React + SQLite) para contratos de obras públicas e o
 ciclo da medição: espelho de NF → envio ao faturamento → nota → envio ao órgão/protocolo → pagamento.
-O sistema é onde o trabalho é feito; o registro é consequência. Nada adivinha: não lê e-mail, planilha nem
-SharePoint; a única fonte automática é o TOTVS RM, que só confirma o que a pessoa já fez. Quem opera
+O sistema é onde o trabalho é feito; o registro é consequência. Nada adivinha: não lê planilha nem SharePoint, e de
+e-mail lê só a conversa que ele mesmo enviou (a resposta do órgão à planilha enviada, pela conta de quem enviou);
+fora isso, a única fonte automática é o TOTVS RM, que só confirma o que a pessoa já fez. Quem opera
 digita pouco e confere; regra, cadastro e instrumento são do Leo, em arquivo versionado (`cadastro/*.yaml`).
 
 ## Regras que o código não conta
