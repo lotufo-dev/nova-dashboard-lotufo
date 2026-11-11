@@ -259,6 +259,21 @@ def sugestao_dias(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
     return {**out, "novo_fim": conclusao.isoformat(), "dias": dias}
 
 
+def ritmo_e_prazo(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict:
+    """Issue #655: o cartao "Ritmo e prazo" da pagina da obra. E' a conta de `sugestao_dias`, so' mostrada: ritmo
+    mensal, saldo a executar, conclusao estimada nesse ritmo e fim da execucao vigente. `situacao` e' "no_prazo"
+    (a conclusao cai ate' o fim da execucao) ou "atrasa", com `dias_alem` (os dias que faltariam); None quando a
+    conta nao fecha (sem fim de execucao, sem saldo ou sem medicao na janela). O teto de 3.650 dias e' do pedido ao
+    orgao, nao daqui: acima dele a obra atrasa do mesmo jeito e os dias aparecem. Valores cheios, como os da sugestao."""
+    s = sugestao_dias(conn, contrato_id, hoje)
+    conclusao, exe = _d(s["novo_fim"]), _d(s["execucao_fim"])
+    dias = (conclusao - exe).days if conclusao and exe else None
+    return {"ritmo_centavos": s["ritmo_centavos"], "saldo_centavos": s["saldo_centavos"], "conclusao": s["novo_fim"],
+            "execucao_fim": s["execucao_fim"],
+            "situacao": None if dias is None else "atrasa" if dias > 0 else "no_prazo",
+            "dias_alem": dias if dias is not None and dias > 0 else None}
+
+
 def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
     hoje = hoje or tempo.hoje_local()
     out = []

@@ -5,7 +5,7 @@ A cor da informacao (semaforo, decidido em 06/11/2026) e' decidida AQUI, num lug
 import datetime
 import sqlite3
 
-from app import contratos, documentos, entidades, medicoes, paineis, tempo
+from app import contratos, documentos, entidades, medicoes, paineis, prazos, tempo
 
 CRITICO_DIAS = 30      # prazo de execucao/vigencia a ate' 30 dias (ou ja' vencido): vermelho
 ATENCAO_DIAS = 90      # ate' 90 dias: ambar
@@ -103,8 +103,15 @@ def da_obra(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | No
     s = paineis.saldo(conn, contrato_id)
     vigente = contratos.cota(s["vigente_execucao_centavos"], bp)
     medido = contratos.cota(s["atestado_execucao_centavos"], bp)
+    # #655: o cartao "Ritmo e prazo" na mesma base do topo: o ritmo vai na cota e o saldo e' o do topo (o mesmo
+    # numero do cartao Execucao). As datas e a situacao nao mudam com a cota (saldo e ritmo na mesma proporcao).
+    ritmo = prazos.ritmo_e_prazo(conn, contrato_id, hoje)
+    if ritmo["ritmo_centavos"] is not None:
+        ritmo["ritmo_centavos"] = contratos.cota(ritmo["ritmo_centavos"], bp)
+    ritmo["saldo_centavos"] = vigente - medido
     return {"topo": {"vigente_centavos": vigente, "medido_centavos": medido, "saldo_centavos": vigente - medido,
                      "reajuste_centavos": contratos.cota(s["reajuste_contratado_centavos"], bp)},
+            "ritmo": ritmo,
             "contrato": {"original_centavos": contratos.cota(v["valor_original_centavos"], bp),
                          "original_igual": v["valor_original_centavos"] == v["valor_vigente_execucao_centavos"],
                          "tas": tas, "data_base": base or None},
