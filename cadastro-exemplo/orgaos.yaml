@@ -16,6 +16,18 @@
   # dias do envio da planilha/carta até o boletim do órgão; passou, aviso à operação (e à diretoria no dobro).
   # Sem a chave, o órgão não tem o aviso (MT-PAR). Issue #288
   prazo_boletim_dias: 15
+  # relatórios que o PDF assinado tem de trazer, pelo título impresso no cabeçalho de cada um; o envio dos
+  # assinados avisa o que falta e pede confirmação. Sem a chave, o órgão não tem a conferência. Issue #628
+  pacote_assinado:
+    medicao:
+      - Relatório de Capa da Medição
+      - Relatório de Resumo da Medição
+      - Relatório de Cronograma Físico-Financeiro de Evolução Mensal
+      - Relatório de Ficha do Contrato Analítica
+      - Boletim de Desempenho
+    reajuste:
+      - Relatório de Cálculo de Medição Reajustada
+      - Relatório de Capa da Medição
   documentos_medicao: [fgts, federal, trabalhista, estadual, municipal]
   documentos_reajuste: [fgts, federal, trabalhista, estadual, municipal]
   ordem_certidoes: [federal, trabalhista, municipal, estadual, fgts]

@@ -1025,6 +1025,18 @@ def preparar(raiz: Path) -> dict:
         # orgao nao tem o aviso (MT-PAR, sem o passo do pedido)
         if "prazo_boletim_dias" in o and _inteiro(o["prazo_boletim_dias"], 1) is None:
             erros.append(f"{onde}: prazo_boletim_dias: use um inteiro maior que zero")
+        # Issue #628: os relatorios que o pacote assinado tem de trazer, pelo titulo impresso, por natureza; sem a
+        # chave, o orgao nao tem a conferencia
+        if "pacote_assinado" in o:
+            pa = o["pacote_assinado"]
+            if not isinstance(pa, dict) or not pa:
+                erros.append(f"{onde}: pacote_assinado: use medicao e/ou reajuste, cada um com a lista de títulos")
+            else:
+                for k, v in pa.items():
+                    if k not in ("medicao", "reajuste"):
+                        erros.append(f"{onde}: pacote_assinado.{k}: chave desconhecida (use medicao ou reajuste)")
+                    elif not v or not _textos(v):
+                        erros.append(f"{onde}: pacote_assinado.{k}: use uma lista, não vazia, de títulos de relatório")
         orgaos.append({"chave": o["chave"], "nome": o.get("nome"), "familia": o.get("familia"), "cnpj": cnpj,
                        "regras": {k: v for k, v in o.items() if k not in ("chave", "nome", "familia", "cnpj")}})
     if len({o["chave"] for o in orgaos}) != len(orgaos):
