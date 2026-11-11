@@ -1,5 +1,5 @@
-/* Formulário de iniciar a medição (#507; desde a #643 abre numa janela, pelo "Iniciar" do quadro do mês) e o seletor de
-   mês do quadro. Cores só dos tokens (tokens.css). */
+/* O seletor de mês do quadro do mês (#643). O formulário de iniciar é o da planilha/carta (#653), com o estilo dele.
+   Cores só dos tokens (tokens.css). */
 
 /* seletor de mês */
 .iniciar-med__mes { display: flex; align-items: center; gap: 8px; }
@@ -13,38 +13,5 @@
 }
 .iniciar-med__mes-seta:hover { background: var(--hover); }
 
-/* formulário */
+/* enquanto a regra da obra não chega */
 .iniciar-med__carregando { margin: 0; color: var(--texto-2); }
-.iniciar-med__cartao { display: flex; flex-direction: column; gap: 16px; padding: 20px 24px; }
-.iniciar-med__cartao-titulo { margin: 0; font-size: 18px; line-height: 26px; }
-
-.iniciar-med__corpo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
-.iniciar-med__corpo--so-campos { grid-template-columns: minmax(0, 320px); }
-.iniciar-med__campos { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.iniciar-med__campos input:not([type="date"]) { width: 100%; max-width: none; text-align: left; }
-.iniciar-med__periodo { border: 0; margin: 0; padding: 0; min-width: 0; }
-.iniciar-med__periodo-datas { display: flex; align-items: center; gap: 8px; }
-.iniciar-med__periodo-datas input { flex: 1; min-width: 0; }
-.iniciar-med__arquivos { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.iniciar-med__soltar-caixa { display: flex; flex-direction: column; gap: 6px; }
-.iniciar-med__soltar {
-  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 112px;
-  padding: 16px; border: 2px dashed var(--linha-forte); border-radius: var(--raio); text-align: center; cursor: pointer;
-}
-.iniciar-med__soltar:hover, .iniciar-med__soltar--sobre { border-color: var(--acento); background: var(--acento-fundo); }
-.iniciar-med__soltar--cheia { border-style: solid; border-color: var(--acento-linha); background: var(--acento-fundo); }
-.iniciar-med__soltar-icone { width: 28px; height: 28px; color: var(--acento); }
-.iniciar-med__soltar-sub { max-width: 100%; color: var(--texto-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* o <input> real fica por cima, invisivel: foco e teclado funcionam, o anel aparece na area */
-.iniciar-med__arquivo { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-.iniciar-med__soltar:has(.iniciar-med__arquivo:focus-visible) { outline: 2px solid var(--foco); outline-offset: 2px; }
-
-.iniciar-med__botoes { display: flex; justify-content: flex-end; gap: 10px; }
-.iniciar-med__botoes .btn--primario { height: 44px; padding: 0 22px; font-weight: 600; }
-
-@media (max-width: 599px) {
-  .iniciar-med__corpo, .iniciar-med__corpo--so-campos { grid-template-columns: minmax(0, 1fr); }
-  .iniciar-med__cartao { padding: 16px; }
-  .iniciar-med__botoes { flex-direction: column-reverse; }
-  .iniciar-med__botoes .btn { width: 100%; justify-content: center; }
-}

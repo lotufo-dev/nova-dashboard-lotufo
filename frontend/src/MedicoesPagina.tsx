@@ -10,12 +10,13 @@ import type { Usuario } from "./Login";
 import { diaMes, PASSOS } from "./Passos";
 import { mesPorExtenso, somarMes, type LinhaAnterior, type LinhaQuadro, type ObraResumo, type PassoQuadro, type ResumoMedicoes } from "./resumoMedicoes";
 import { fmtCompetencia, hojeLocal } from "./tempo";
+import "./iniciarMedicao.css";
 import "./medicoes.css";
 
 // Medições (#643, decisão do dono na revisão página a página de 10/11/2026): o QUADRO DO MÊS no lugar de "Iniciar medição"
 // e "Em andamento". Uma linha por obra e uma coluna por passo do fluxo, na competência em trabalho (o mês anterior ao de
-// hoje; o seletor mostra outra). O passo feito mostra a data, o da vez é o link para a medição e a obra sem medição na
-// competência tem o "Iniciar", que abre o formulário de sempre já nessa competência. Abaixo, "Meses anteriores": as
+// hoje; o seletor mostra outra). O passo feito mostra a data, o da vez é o link para o passo na página da medição e a obra sem
+// medição na competência tem o "Iniciar", que abre o formulário de sempre (a Nova planilha/carta, #653) já nessa competência. Abaixo, "Meses anteriores": as
 // medições abertas de outras competências. Tudo vem de GET /api/medicoes/resumo (`medicoes.resumo`); a tela só desenha.
 
 const traco = <span className="medicoes__traco">—</span>;
@@ -38,6 +39,7 @@ function CelulaPasso({ n, passo, linha }: { n: number; passo: PassoQuadro | unde
     return (
       <td className="quadro__passo" data-rotulo={nome} aria-current="step">
         <Link className="pilula-info pilula-info--andamento quadro__atual" para={{ tela: "medicao", obra: linha.contrato_id, id: passo.medicao_id }}
+          secao={`passo-${n}`}
           aria-label={`Abrir ${medicao?.titulo ?? "a medição"} de ${linha.obra}: ${nome}`}>Atual</Link>
       </td>
     );
@@ -87,7 +89,7 @@ function Anteriores({ linhas }: { linhas: LinhaAnterior[] }) {
                 <td data-rotulo="Competência" className="num">{fmtCompetencia(l.competencia)}</td>
                 <td data-rotulo="Passo atual"><span className="pilula-info pilula-info--andamento">{l.passo.nome}</span></td>
                 <td className="quadro__acao">
-                  <Link className="btn btn--pequeno" para={{ tela: "medicao", obra: l.contrato_id, id: l.medicao_id }}
+                  <Link className="btn btn--pequeno" para={{ tela: "medicao", obra: l.contrato_id, id: l.medicao_id }} secao={`passo-${l.passo.numero}`}
                     aria-label={`Abrir ${l.titulo} de ${l.obra}`}>Abrir</Link>
                 </td>
               </tr>
@@ -163,7 +165,7 @@ export default function MedicoesPagina({ usuario }: { usuario: Usuario }) {
 
       {iniciando && (
         <Janela titulo={`${iniciando.obra} · ${mesPorExtenso(mes)}`} aoFechar={() => setIniciando(null)}>
-          <IniciarMedicao key={`${iniciando.contrato_id}-${mes}`} obra={iniciando} mes={mes} aoCancelar={() => setIniciando(null)} />
+          <IniciarMedicao key={`${iniciando.contrato_id}-${mes}`} obra={iniciando} mes={mes} />
         </Janela>
       )}
     </div>

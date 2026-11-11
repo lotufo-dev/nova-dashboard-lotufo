@@ -155,7 +155,7 @@ function Historico({ p, dados, aoPedir }: { p: ProcessoSiga; dados: PainelSiga; 
             </a>
           )}
           {p.medicao_id !== null && p.contrato_id !== null && (
-            <Link className="sg__link" para={{ tela: "medicao", obra: p.contrato_id, id: p.medicao_id }} secao="etapa-4">Ver a medição</Link>
+            <Link className="sg__link" para={{ tela: "medicao", obra: p.contrato_id, id: p.medicao_id }} secao="passo-5">Ver a medição</Link>
           )}
           {dados.pode_atualizar && <Atualizar rotulo="Pedir leitura" processoId={p.id} robo={dados.robo} aoPedir={aoPedir} />}
         </div>

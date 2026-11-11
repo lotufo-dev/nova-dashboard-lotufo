@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { eventosDaMedicao, itensOQueFalta, larDoEspelho, metadeQueEspera, PROXIMOS, protocolosDa, resumoNotas,
+import { eventosDaMedicao, itensOQueFalta, larDoEspelho, metadeQueEspera, passoDe, PROXIMOS, protocolosDa, resumoNotas,
          rotuloDoBloco, separarMedicoes, tituloMedicao,
          type EspelhoResumo, type MedicaoBase, type Metade, type ProtocoloResumo } from "./medicao";
 
@@ -115,10 +115,23 @@ describe("medição", () => {
 });
 
 describe("itensOQueFalta: o espelho a enviar", () => {
-  it("o passo “Enviar o espelho ao faturamento” leva à etapa 2 da página da medição", () => {
+  it("o passo “Enviar o espelho ao faturamento” leva ao passo Espelhos da página da medição", () => {
     const m = { id: 1, numero: 3, tipo: "execucao", competencia: "2026-09", estado: "espelho_gerado", valor_protocolado_centavos: 1,
       valor_atestado_centavos: null, atestado_em: null, recebida_em: null, protocolos: [] };
     const passo = itensOQueFalta(m, null, [], null).find(i => i.texto === "Enviar o espelho ao faturamento");
-    expect(passo && "secao" in passo ? passo.secao : null).toBe("etapa-2");
+    expect(passo && "secao" in passo ? passo.secao : null).toBe("passo-3");
+  });
+});
+
+describe("passoDe: o próximo passo é o nome do passo e a âncora dele (#653)", () => {
+  it("cada um dos seis nomes leva à âncora do passo na página da medição", () => {
+    expect(["Planilha e carta", "Análise do órgão", "Espelhos", "Notas", "Envio da nota", "Pagamento"].map(n => passoDe(n))).toEqual([
+      { rotulo: "Planilha e carta", secao: "passo-1" }, { rotulo: "Análise do órgão", secao: "passo-2" },
+      { rotulo: "Espelhos", secao: "passo-3" }, { rotulo: "Notas", secao: "passo-4" },
+      { rotulo: "Envio da nota", secao: "passo-5" }, { rotulo: "Pagamento", secao: "passo-6" }]);
+  });
+  it("sem próximo passo não há rótulo; texto desconhecido aparece sem âncora", () => {
+    expect(passoDe(null)).toBeNull();
+    expect(passoDe("outro")).toEqual({ rotulo: "outro", secao: "" });
   });
 });

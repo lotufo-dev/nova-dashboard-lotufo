@@ -146,9 +146,10 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
 
   it("#568: o próximo passo “Registrar o boletim” é um botão que abre o registro do boletim", async () => {
     api.mockImplementation(async (url: string) => {
-      if (url.startsWith("/api/medicoes/andamento")) return [{ id: 5, proximo_passo: "registrar o boletim", desde: "2026-11-01" }];
+      // a obra sem os passos da planilha (o servidor diz "Espelhos") com a planilha enviada: o boletim e' um ato da janela
+      if (url.startsWith("/api/medicoes/andamento")) return [{ id: 5, proximo_passo: "Espelhos", desde: "2026-11-01" }];
       if (url.endsWith("/cabecalho")) return { obra: "Hospital", orgao: "SES", instrumento: "CT 1/2026", percentual_lotufo_bp: 10000 };
-      if (url === "/api/contratos/1/medicoes") return [{ ...MEDICAO, estado: "prevista" }];
+      if (url === "/api/contratos/1/medicoes") return [{ ...MEDICAO, estado: "planilha_enviada", com_envio_planilha: false }];
       if (url === "/api/contratos/1/protocolos") return LISTA;
       if (url === "/api/contratos/1/espelho") return { espelhos: [] };
       if (url === "/api/notas/a-enviar") return { envios: [], contadores: {} };
@@ -520,7 +521,7 @@ describe("Página da medição: medição e reajuste", () => {
     expect(trilho.querySelector(".passo--espera")!.textContent).toContain("Envio da nota");
     expect(screen.queryByRole("button", { name: "Enviar a nota" })).toBeNull();    // nada a iniciar: falta a outra metade
     // o próximo passo, "Esperando as notas do reajuste", leva à etapa 4 (onde a espera e a saída de emergência moram)
-    expect(screen.getByRole("link", { name: "Esperando as notas do reajuste" }).getAttribute("href")).toBe("/obras/1/medicoes/5#etapa-4");
+    expect(screen.getByRole("link", { name: "Esperando as notas do reajuste" }).getAttribute("href")).toBe("/obras/1/medicoes/5#passo-5");
     fireEvent.click(botao);
     const enviar = screen.getByRole("button", { name: "Liberar o envio só da medição" }) as HTMLButtonElement;
     expect(enviar.disabled).toBe(true);
@@ -594,7 +595,7 @@ describe("Página da medição: pagamento (etapa 5)", () => {
       numero_processo: null, origem: "manual", protocolo_id: null }] }] });
     pagina();
     const link = await screen.findByRole("link", { name: "Registrar o protocolo" });
-    expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#etapa-4");
+    expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#passo-5");
   });
 });
 

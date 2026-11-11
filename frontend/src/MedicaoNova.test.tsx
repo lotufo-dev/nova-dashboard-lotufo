@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Usuario } from "./Login";
 import MedicaoNova from "./MedicaoNova";
@@ -16,23 +16,30 @@ function responder(situacao: string | null, cab: object = CAB) {
   api.mockImplementation(async (url: string) => (url.endsWith("/espelho") ? { regra: situacao ? { situacao } : null, espelhos: [] } : cab));
 }
 
-// #153: a tela Nova medição virou a etapa 1 (Espelho) da página da medição
+// #153: a tela Nova medição virou o primeiro passo da página da medição; #653: com a barra dos seis passos de Passos.tsx
 describe("Medição que ainda não existe", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
   // #289: o primeiro passo deixou de ser o espelho e passou a ser a planilha/carta
-  it("abre na etapa 1 com a Nova planilha/carta, sem o espelho; as outras etapas liberam depois", async () => {
+  it("abre no passo 1 (Planilha e carta) com a Nova planilha/carta, sem o espelho; os outros passos liberam depois", async () => {
     responder("ativa");
     const { container } = render(<MedicaoNova contratoId={7} usuario={usuario} origem={null} />);
     expect(await screen.findByRole("heading", { name: "Nova medição", level: 1 })).toBeTruthy();
     await waitFor(() => expect(container.querySelector("[data-nova-planilha='7']")).not.toBeNull());
     expect(container.querySelector("[data-espelho]")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Etapa 4: Envio ao órgão/ }));
+    // #653: a barra é a da página da medição, com os seis nomes; as cinco etapas antigas saíram
+    const barra = screen.getByRole("navigation", { name: "Passos da medição" });
+    expect(within(barra).getAllByRole("button").map(b => b.getAttribute("aria-label"))).toEqual([
+      "Passo 1: Planilha e carta", "Passo 2: Análise do órgão", "Passo 3: Espelhos", "Passo 4: Notas", "Passo 5: Envio da nota",
+      "Passo 6: Pagamento"]);
+    expect(screen.getByRole("heading", { name: "Planilha e carta", level: 2 })).toBeTruthy();
+    expect(container.textContent).not.toMatch(/Faturamento|Envio ao órgão|Etapa/);
+    expect(container.innerHTML).not.toMatch(/Faturamento|Envio ao órgão|Etapa \d|etapa-\d/);
+    fireEvent.click(screen.getByRole("button", { name: "Passo 5: Envio da nota" }));
     // o selo diz que libera depois; o corpo nao repete
-    expect(screen.getByText("Libera depois da etapa 3")).toBeTruthy();
-    expect(screen.queryByText("Libera depois da etapa 3.")).toBeNull();
+    expect(screen.getByText("Libera depois do passo 4")).toBeTruthy();
     expect(container.querySelector("[data-nova-planilha]")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Voltar à etapa atual" }));
+    fireEvent.click(screen.getByRole("button", { name: "Voltar ao passo atual" }));
     expect(container.querySelector("[data-nova-planilha]")).not.toBeNull();
   });
 
@@ -40,6 +47,10 @@ describe("Medição que ainda não existe", () => {
     responder(null);
     const { container } = render(<MedicaoNova contratoId={7} usuario={usuario} origem={null} />);
     expect((await screen.findByRole("link", { name: "Lançar a medição à mão" })).getAttribute("href")).toBe("/obras/7/medicoes");
+    // #653: a obra sem planilha e carta começa em Espelhos, como na página da medição
+    expect(within(screen.getByRole("navigation", { name: "Passos da medição" })).getAllByRole("button").map(b => b.getAttribute("aria-label")))
+      .toEqual(["Passo 1: Espelhos", "Passo 2: Notas", "Passo 3: Envio da nota", "Passo 4: Pagamento"]);
+    expect(screen.getByRole("heading", { name: "Espelhos", level: 2 })).toBeTruthy();
     expect(container.querySelector("[data-nova-planilha]")).toBeNull();
   });
 

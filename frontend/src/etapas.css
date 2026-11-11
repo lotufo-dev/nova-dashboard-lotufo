@@ -21,33 +21,6 @@
 .med-principal { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .med-lateral { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
-/* trilho de setas */
-.setas ol { display: flex; gap: 3px; margin: 0; padding: 0; list-style: none; }
-.setas li { flex: 1 1 0; min-width: 0; }
-.setas button { width: 100%; height: 48px; padding: 0 10px 0 22px; border: 0; border-radius: 0; justify-content: center; gap: 6px;
-  font-size: 14px; font-weight: 500; white-space: normal; overflow: hidden;
-  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 50%, calc(100% - 16px) 100%, 0 100%, 16px 50%); }
-.setas li:first-child button { padding-left: 14px; border-radius: var(--raio) 0 0 var(--raio); clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 50%, calc(100% - 16px) 100%, 0 100%); }
-.setas li:last-child button { border-radius: 0 var(--raio) var(--raio) 0; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 16px 50%); }
-.seta--feita button { background: var(--ok-fundo); color: var(--ok); }
-.seta--feita button:hover:not(:disabled) { background: var(--ok-linha); color: var(--ok); }
-.seta--atual button, .seta--atual button:hover:not(:disabled) { background: var(--acento); color: var(--superficie); font-weight: 600; }
-/* issue #188: a etapa da vez parada esperando a outra metade (execucao x reajuste no mesmo e-mail) */
-.seta--espera button, .seta--espera button:hover:not(:disabled) { background: var(--atencao-fundo); color: var(--atencao); font-weight: 600; }
-.seta--futura button, .seta--encerrada button { background: var(--neutro-fundo); color: var(--texto-2); }
-.seta--futura button:hover:not(:disabled), .seta--encerrada button:hover:not(:disabled) { background: var(--linha); color: var(--texto); }
-.seta--vendo button, .seta--vendo button:hover:not(:disabled) { background: var(--acento-fundo); color: var(--acento-mais); font-weight: 600; }
-.seta__marca { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: none; border-radius: var(--raio-pilula); font-size: 12px; font-weight: 600; }
-.seta__marca svg { width: 12px; height: 12px; }
-.seta--feita .seta__marca { background: var(--ok-ponto); color: var(--superficie); }
-.seta--futura .seta__marca, .seta--encerrada .seta__marca { background: var(--superficie); color: var(--texto-2); }
-.seta--atual .seta__marca { background: var(--superficie); color: var(--acento); }
-.seta--espera .seta__marca { background: var(--atencao-ponto); color: var(--superficie); }
-.seta--vendo .seta__marca { background: var(--acento); color: var(--superficie); }
-/* 06/11/2026: o nome da etapa nunca e' cortado; sem largura para uma linha, quebra em duas ("Envio ao / órgão") */
-.seta__rotulo { min-width: 0; line-height: 16px; text-align: left; }
-@media (max-width: 1279px) { .setas button { font-size: 13px; } }
-
 /* "Voltar a' etapa atual", com outra etapa aberta */
 .med-faixa { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; padding: 12px 16px; border-radius: var(--raio);
   background: var(--acento-fundo); color: var(--acento-mais); font-size: 14px; }
@@ -145,11 +118,6 @@
 }
 @media (max-width: 767px) {
   .pagina.med { padding: 16px 16px 32px; }
-  .setas button { padding: 0 14px 0 18px; justify-content: center; font-size: 13px; gap: 6px; }
-  .setas li:first-child button { padding-left: 8px; }
-  /* so' a seta aberta mostra o nome; as outras ficam so' com o numero */
-  .setas li:not(.seta--rotulo) { flex: 0 0 44px; }
-  .setas li:not(.seta--rotulo) .seta__rotulo { display: none; }
   .med-cabeca { flex-direction: column; }
   .med-etapa { padding: 16px 12px; }
   /* a tabela de envios vira uma pilha de cartoes */
