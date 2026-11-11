@@ -1,15 +1,13 @@
 import { useRascunho } from "./rascunho";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import CaixaAviso from "./CaixaAviso";
 import { api, mensagemDeErro } from "./api";
-import { IconeAlerta, IconeCadeado, IconeMais } from "./icones";
+import { IconeAlerta, IconeMais } from "./icones";
 import { brl } from "./Medicoes";
-// O cadeado do passado congelado e a data de publicacao da versao sao decisoes de
-// CALENDARIO: valem no fuso do escritorio (America/Cuiaba), nao no do navegador nem
-// no UTC em que o carimbo esta gravado. Ver tempo.ts.
-// competencia vem "AAAA-MM" (formato do CHECK da tabela); na tabela le-se "MM/AAAA",
-// no eixo do grafico "jul/26" — o eixo tem 11px e nao cabe o ano inteiro legivel.
-import { fmtCompetencia as competenciaBR, fmtData, fmtDataPura, fmtMesCurto as mesCurto, mesAtualLocal } from "./tempo";
+// A data de publicacao da versao e' decisao de CALENDARIO: vale no fuso do escritorio (America/Cuiaba),
+// nao no do navegador nem no UTC em que o carimbo esta gravado. Ver tempo.ts.
+// competencia vem "AAAA-MM" (formato do CHECK da tabela); na tabela le-se "MM/AAAA".
+import { fmtCompetencia as competenciaBR, fmtData, fmtDataPura } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 
@@ -46,6 +44,9 @@ type Ponto = {
   medido_execucao_centavos: number;
   medido_reajuste_centavos: number;
   medido_projeto_centavos: number;
+  // issue #647: o pedido (protocolado) e o aprovado (atestado) da execucao, em separado; null = nao ha'
+  pedido_execucao_centavos?: number | null;
+  aprovado_execucao_centavos?: number | null;
   atestado_pendente: boolean;
   pendente_por_tipo?: Record<string, boolean>;
 };
@@ -63,9 +64,8 @@ function brlCampo(centavos: number): string {
   return (centavos / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Zero em centavos aqui quer dizer AUSENCIA (competencia sem previsao, serie sem
-// lancamento) — o servidor completa com 0 o que nao existe. Exibir "R$ 0,00" seria
-// afirmar um lancamento de zero que ninguem fez.
+// Zero em centavos aqui quer dizer AUSENCIA (serie sem lancamento) — o servidor completa com 0 o
+// que nao existe. Exibir "R$ 0,00" seria afirmar um lancamento de zero que ninguem fez.
 function valorOuTraco(centavos: number): string {
   return centavos === 0 ? "—" : brl(centavos);
 }
@@ -127,204 +127,14 @@ function analisar(texto: string): Analise {
   return { itens, erro: "" };
 }
 
-/* ------------------------------------------------------------------ grafico */
-
-// Escala "redonda" para a grade: 4 a 5 linhas em passos de 1/2/2,5/5 x potencia de 10.
-function escala(maxCentavos: number): { topo: number; passo: number } {
-  const max = Math.max(1, maxCentavos);
-  const alvo = max / 4;
-  const mag = Math.pow(10, Math.floor(Math.log10(alvo)));
-  const passo = Math.max(1, [1, 2, 2.5, 5, 10].map(m => m * mag).find(p => p >= alvo) ?? mag * 10);
-  return { topo: Math.ceil(max / passo) * passo, passo };
-}
-
-// O eixo nao repete "R$ 1.200.000,00" cinco vezes: a unidade sai uma vez no topo do
-// eixo e os rotulos ficam com 1 a 5 caracteres.
-function unidade(topoCentavos: number): { divisor: number; rotulo: string } {
-  const reais = topoCentavos / 100;
-  if (reais >= 1_000_000) return { divisor: 100_000_000, rotulo: "R$ mi" };
-  if (reais >= 10_000) return { divisor: 100_000, rotulo: "R$ mil" };
-  return { divisor: 100, rotulo: "R$" };
-}
-
-function numeroEixo(centavos: number, divisor: number): string {
-  return (centavos / divisor).toLocaleString("pt-BR", { maximumFractionDigits: 1 });
-}
-
-function outrasSeries(p: Ponto): number {
-  return p.medido_reajuste_centavos + p.medido_projeto_centavos;
-}
-
-function medidoTotal(p: Ponto): number {
-  return p.medido_execucao_centavos + outrasSeries(p);
-}
-
 function pendenteOutras(p: Ponto): boolean {
   return Boolean(p.pendente_por_tipo?.reajuste) || Boolean(p.pendente_por_tipo?.projeto);
 }
 
-function resumoPonto(p: Ponto): string {
-  const partes = [`previsto ${valorOuTraco(p.previsto_centavos)}`,
-                  `execução ${valorOuTraco(p.medido_execucao_centavos)}${p.atestado_pendente ? " (provisório)" : ""}`];
-  if (p.medido_reajuste_centavos > 0) {
-    partes.push(`reajuste ${brl(p.medido_reajuste_centavos)}${p.pendente_por_tipo?.reajuste ? " (provisório)" : ""}`);
-  }
-  if (p.medido_projeto_centavos > 0) {
-    partes.push(`projeto ${brl(p.medido_projeto_centavos)}${p.pendente_por_tipo?.projeto ? " (provisório)" : ""}`);
-  }
-  return `${mesCurto(p.competencia)} — ${partes.join(" · ")}`;
-}
-
-function Grafico({ pontos, mes }: { pontos: Ponto[]; mes: string }) {
-  // Passo maior quando ha poucos meses: o SVG e' desenhado no tamanho natural (nao
-  // escalado por width:100%), senao os 11px do eixo esticariam junto com as barras.
-  // Passando da largura do cartao, quem rola e' o .grafico.
-  const PASSO = pontos.length <= 8 ? 104 : pontos.length <= 16 ? 76 : 56;
-  const LARG = Math.max(12, Math.round(PASSO * 0.26));
-  const VAO = 4;
-  // N07-03: o eixo Y mora num SVG proprio, FORA da caixa de rolagem (EIXO_W de largura, mesmas
-  // coordenadas y), para nao sumir quando o grafico abre rolado ate' a competencia corrente. O SVG
-  // que rola comeca na grade (MARGEM_E = 0); o vao de 8px entre rotulo e grade vem do EIXO_W.
-  const EIXO_W = 66, MARGEM_E = 0, MARGEM_D = 14, TOPO = 24, ALTURA = 200;
-  const BASE = TOPO + ALTURA;
-  const comRotulo = PASSO >= 76;                 // valor medido sob o eixo: so quando cabe
-  const H = BASE + (comRotulo ? 46 : 28);
-  const W = MARGEM_E + pontos.length * PASSO + MARGEM_D;
-
-  const { topo, passo } = escala(Math.max(...pontos.map(p => Math.max(p.previsto_centavos, medidoTotal(p)))));
-  const { divisor, rotulo } = unidade(topo);
-  const y = (v: number) => BASE - (v / topo) * ALTURA;
-  // Valor lancado nunca vira barra invisivel: piso de 2px preserva "existe, e' pouco".
-  const altura = (v: number) => (v <= 0 ? 0 : Math.max(2, (v / topo) * ALTURA));
-
-  const linhas: number[] = [];
-  for (let v = 0; v <= topo + passo / 2; v += passo) linhas.push(v);
-
-  // F-73: a caixa de rolagem (.grafico, dona do overflow) abre rolada ate' a competencia
-  // corrente, que fica perto da borda direita (com uma competencia futura depois dela), em
-  // vez de abrir no mes mais antigo. So' acontece na montagem: republicar uma versao nao
-  // pode tirar a pessoa de onde ela esta. Se o grafico cabe sem rolar (F-83), nada e' forcado.
-  // `data-esq` marca "ha mais a esquerda" (scrollLeft > 0) para o CSS esmaecer a borda; o
-  // atributo e' escrito aqui, e nao na className, porque a className da caixa e' do Rolagem.
-  const svg = useRef<SVGSVGElement>(null);
-  useLayoutEffect(() => {
-    const caixa = svg.current?.closest<HTMLElement>(".grafico");
-    if (!caixa) return;
-    const marcar = () => {
-      if (caixa.scrollLeft > 1) caixa.setAttribute("data-esq", "1");
-      else caixa.removeAttribute("data-esq");
-    };
-    if (caixa.clientWidth > 0 && caixa.scrollWidth > caixa.clientWidth + 1) {
-      let atual = pontos.findIndex(p => p.competencia >= mes);
-      if (atual < 0) atual = pontos.length - 1;
-      const borda = MARGEM_E + (atual + 1) * PASSO;           // borda direita da coluna corrente
-      const alvo = borda + PASSO - caixa.clientWidth;          // a caixa rolavel nao tem padding esquerdo
-      caixa.scrollLeft = Math.max(0, alvo);
-    }
-    marcar();
-    caixa.addEventListener("scroll", marcar, { passive: true });
-    return () => { caixa.removeEventListener("scroll", marcar); caixa.removeAttribute("data-esq"); };
-    // so' na montagem (ver o comentario acima)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return (
-    <div className="grafico__quadro">
-    <svg className="grafico__eixo-y" width={EIXO_W} height={H} viewBox={`0 0 ${EIXO_W} ${H}`} aria-hidden="true" focusable="false">
-      <text className="g-eixo num" x={EIXO_W - 8} y={TOPO - 9} textAnchor="end">{rotulo}</text>
-      {linhas.map(v => (
-        <text key={v} className="g-eixo num" x={EIXO_W - 8} y={y(v) + 4} textAnchor="end">
-          {numeroEixo(v, divisor)}
-        </text>
-      ))}
-    </svg>
-    <Rolagem rotulo="Gráfico de previsto e medido por competência" className="grafico">
-    <svg ref={svg} className="grafico__svg" width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img"
-      aria-label={`Previsto e medido por competência, de ${mesCurto(pontos[0].competencia)} a `
-        + `${mesCurto(pontos[pontos.length - 1].competencia)}, em ${rotulo}. `
-        + "Os mesmos números estão na “Tabela por competência”, recolhida logo abaixo."}>
-      <defs>
-        {/* Hachura clara POR CIMA da barra: o medido provisorio continua sendo lido como
-            a serie dele (a cor nao e' substituida), com a marca ambar por cima. */}
-        <pattern id="cronograma-hachura" width="6" height="6"
-          patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <line className="g-hachura" x1="0" y1="0" x2="0" y2="6" />
-        </pattern>
-      </defs>
-
-      {linhas.map(v => (
-        <line key={v} className={v === 0 ? "g-base" : "g-grade"}
-          x1={MARGEM_E} y1={y(v)} x2={W - MARGEM_D} y2={y(v)} />
-      ))}
-
-      {pontos.map((p, i) => {
-        const cx = MARGEM_E + i * PASSO + PASSO / 2;
-        const xPrev = cx - VAO / 2 - LARG;
-        const xMed = cx + VAO / 2;
-        const cxMed = xMed + LARG / 2;
-        const exec = p.medido_execucao_centavos;
-        const outras = outrasSeries(p);
-        const hPrev = altura(p.previsto_centavos);
-        const hExec = altura(exec);
-        const hOutras = altura(outras);
-        const hMed = hExec + hOutras;
-        const pendOutras = pendenteOutras(p);
-        const pendente = (p.atestado_pendente && hExec > 0) || (pendOutras && hOutras > 0);
-        const ySelo = Math.max(11, BASE - Math.max(hMed, hPrev) - 12);
-        return (
-          <g key={p.competencia}>
-            <title>{resumoPonto(p)}</title>
-
-            {hPrev > 0
-              ? <rect className="g-previsto" x={xPrev} y={BASE - hPrev} width={LARG} height={hPrev} rx={2.5} />
-              /* sem previsao no cronograma: talo no zero, nunca barra de altura zero
-                 (que se confundiria com "previsto igual a zero") */
-              : <rect className="g-talo" x={xPrev} y={BASE - 4} width={LARG} height={4} rx={2} />}
-
-            {hMed > 0 ? (
-              <>
-                {hExec > 0 && (
-                  <rect className="g-execucao" x={xMed} y={BASE - hExec} width={LARG} height={hExec} rx={2.5} />
-                )}
-                {hOutras > 0 && (
-                  <rect className="g-outras" x={xMed} y={BASE - hMed} width={LARG} height={hOutras} rx={2.5} />
-                )}
-                {p.atestado_pendente && hExec > 0 && (
-                  <rect className="g-provisorio" fill="url(#cronograma-hachura)"
-                    x={xMed} y={BASE - hExec} width={LARG} height={hExec} rx={2.5} />
-                )}
-                {pendOutras && hOutras > 0 && (
-                  <rect className="g-provisorio" fill="url(#cronograma-hachura)"
-                    x={xMed} y={BASE - hMed} width={LARG} height={hOutras} rx={2.5} />
-                )}
-              </>
-            ) : (
-              <rect className="g-talo" x={xMed} y={BASE - 4} width={LARG} height={4} rx={2} />
-            )}
-
-            {pendente && (
-              <>
-                <circle className="g-selo" cx={cxMed} cy={ySelo} r={6.5} />
-                <path className="g-selo__marca"
-                  d={`M${cxMed} ${ySelo - 3.4}v3.6M${cxMed} ${ySelo + 3.1}h.01`} />
-              </>
-            )}
-
-            <text className={`g-eixo-x${pendente ? " g-eixo-x--pendente" : ""}`}
-              x={cx} y={BASE + 18} textAnchor="middle">{mesCurto(p.competencia)}</text>
-            {comRotulo && (
-              <text className={`g-eixo num${pendente ? " g-eixo--pendente" : ""}`}
-                x={cx} y={BASE + 36} textAnchor="middle">
-                {medidoTotal(p) === 0 ? "—" : numeroEixo(medidoTotal(p), divisor)}
-              </text>
-            )}
-          </g>
-        );
-      })}
-    </svg>
-    </Rolagem>
-    </div>
-  );
+// issue #647: a evolucao mensal so' tem os meses em que a obra mediu; mes so' com previsto nao entra
+function temMedicao(p: Ponto): boolean {
+  return p.pedido_execucao_centavos != null || p.aprovado_execucao_centavos != null
+    || p.medido_execucao_centavos !== 0 || p.medido_reajuste_centavos !== 0 || p.medido_projeto_centavos !== 0;
 }
 
 /* ---------------------------------------------------------------- componente */
@@ -411,17 +221,8 @@ export default function Cronograma({ contratoId, podeEditar }:
 
   const analise = analisar(texto);
   const vazio = texto.trim() === "";
-  const pontos = dados?.curva ?? [];
+  const pontos = (dados?.curva ?? []).filter(temMedicao);
   const saldo = dados?.saldo ?? null;
-  // Mesmo mes que o servidor usa para congelar o passado (backend tempo.mes_local):
-  // com o mes do navegador, o cadeado da tela discordaria do previsto do servidor
-  // durante as 4 horas de defasagem na virada.
-  const mes = mesAtualLocal();
-  // Igual ao servidor (previsto_efetivo, issue #413): depois de uma repactuacao ainda valida (aditivo, carta ou
-  // curva do SMO, nao superada), versao manual nao semeia mes nenhum, nem o passado sem previsto.
-  const houveRepactuacao = Array.isArray(versoes) && versoes.some(v => !v.superada_em
-    && ["aditivo", "carta", "smo"].includes(v.origem_documento ?? ""));
-
   async function publicar(ev: React.FormEvent) {
     ev.preventDefault();
     setSucesso("");
@@ -441,7 +242,7 @@ export default function Cronograma({ contratoId, podeEditar }:
     });
     if (!ok) return;
     setTexto(atual => (atual === enviado ? "" : atual));
-    setSucesso(`Versão ${numero} publicada: o previsto acima já é o dela.`);
+    setSucesso(`Versão ${numero} publicada.`);
     // O botao de publicar fica desabilitado com o campo vazio; sem devolver o foco
     // ele morreria no elemento desabilitado e o teclado recomecaria a pagina.
     area.current?.focus();
@@ -458,26 +259,25 @@ export default function Cronograma({ contratoId, podeEditar }:
 
 
   const totais = pontos.reduce((a, p) => ({
-    previsto: a.previsto + p.previsto_centavos,
-    execucao: a.execucao + p.medido_execucao_centavos,
+    pedido: a.pedido + (p.pedido_execucao_centavos ?? 0),
+    aprovado: a.aprovado + (p.aprovado_execucao_centavos ?? 0),
     reajuste: a.reajuste + p.medido_reajuste_centavos,
     projeto: a.projeto + p.medido_projeto_centavos,
-  }), { previsto: 0, execucao: 0, reajuste: 0, projeto: 0 });
+  }), { pedido: 0, aprovado: 0, reajuste: 0, projeto: 0 });
 
   return (
-    <section className="cartao" aria-labelledby="titulo-cronograma" id="cronograma">
+    <>
+    {/* issue #647: o que a obra pediu e o que o orgao aprovou, mes a mes; aberta, sem o previsto */}
+    <section className="cartao" aria-labelledby="titulo-evolucao-mensal" id="evolucao-mensal">
       <div className="cartao__cabeca">
-        <h2 className="cartao__titulo" id="titulo-cronograma">Cronograma</h2>
-        {/* a versao que /cronograma devolveu (o numero dela, nao a marca `vigente` da lista: gate Sol, PR #311);
-            documento, data e competencias estao na tabela de versoes */}
-        {!carregando && versao && <span className="cartao__dica num">versão {versao.numero}</span>}
+        <h2 className="cartao__titulo" id="titulo-evolucao-mensal">Evolução mensal</h2>
       </div>
 
       {erro && <div className="cartao__corpo"><p className="erro" role="alert">
         <IconeAlerta className="icone icone--p" />{erro}
       </p></div>}
 
-      {carregando && <div className="vazio"><p>Carregando cronograma…</p></div>}
+      {carregando && <div className="vazio"><p>Carregando…</p></div>}
 
       {!carregando && saldo && (
         <div className={`saldo${saldo.saldo_centavos < 0 ? " saldo--negativo" : ""}`}>
@@ -509,43 +309,19 @@ export default function Cronograma({ contratoId, podeEditar }:
 
       {!carregando && pontos.length === 0 && (
         <div className="vazio">
-          <p className="vazio__titulo">Nenhuma competência.</p>
+          <p className="vazio__titulo">Nenhuma medição.</p>
         </div>
       )}
 
-      {!carregando && pontos.length > 0 && <>
-        <Grafico pontos={pontos} mes={mes} />
-
-        <div className="legenda">
-          <span className="legenda__item">
-            <span className="legenda__chave legenda__chave--previsto" aria-hidden="true" />
-            Previsto
-          </span>
-          <span className="legenda__item">
-            <span className="legenda__chave legenda__chave--execucao" aria-hidden="true" />
-            Medido — execução
-          </span>
-          <span className="legenda__item">
-            <span className="legenda__chave legenda__chave--outras" aria-hidden="true" />
-            Medido — reajuste e projeto
-          </span>
-          <span className="legenda__item">
-            <span className="legenda__chave legenda__chave--provisorio" aria-hidden="true" />
-            Provisório
-          </span>
-        </div>
-
-        {/* a tabela e' a consulta fina do grafico: recolhida (NAVEGACAO.md › Obra › Contrato) */}
-        <details className="detalhes cartao__corpo">
-        <summary>Tabela por competência</summary>
-        <Rolagem rotulo="Previsto e medido por competência">
+      {!carregando && pontos.length > 0 && (
+        <Rolagem rotulo="Evolução mensal">
           <table className="tabela">
-            <caption className="sr-only">Previsto e medido por competência</caption>
+            <caption className="sr-only">Evolução mensal</caption>
             <thead>
               <tr>
                 <th scope="col">Competência</th>
-                <th scope="col" className="col-num">Previsto</th>
-                <th scope="col" className="col-num">Execução</th>
+                <th scope="col" className="col-num">Pedido</th>
+                <th scope="col" className="col-num">Aprovado</th>
                 <th scope="col" className="col-num">Reajuste</th>
                 <th scope="col" className="col-num">Projeto</th>
                 <th scope="col">Situação</th>
@@ -553,31 +329,23 @@ export default function Cronograma({ contratoId, podeEditar }:
             </thead>
             <tbody>
               {pontos.map((p, i) => {
-                // Uma versao nova so alcanca competencias a partir do mes em que nasce:
-                // mes ja decorrido COM previsto e' passado congelado (spec §5).
-                const congelado = p.competencia < mes && (p.previsto_centavos > 0 || houveRepactuacao);
-                const total = medidoTotal(p);
+                const semValor = (p.pedido_execucao_centavos ?? 0) === 0 && (p.aprovado_execucao_centavos ?? 0) === 0
+                  && p.medido_reajuste_centavos === 0 && p.medido_projeto_centavos === 0;
                 const pend = (p.atestado_pendente && p.medido_execucao_centavos > 0) || pendenteOutras(p);
                 return (
                   <tr key={p.competencia} className={`linha${i % 2 === 1 ? " par" : ""}`}>
-                    <td className="forte num">
-                      {competenciaBR(p.competencia)}
-                      {congelado && <span className="cadeado">
-                        <IconeCadeado className="icone icone--p"
-                          titulo="Competência congelada" />
-                      </span>}
-                    </td>
-                    <td className="col-num dinheiro num">{valorOuTraco(p.previsto_centavos)}</td>
-                    <td className="col-num dinheiro num">{valorOuTraco(p.medido_execucao_centavos)}</td>
+                    <td className="forte num">{competenciaBR(p.competencia)}</td>
+                    <td className="col-num dinheiro num">{brl(p.pedido_execucao_centavos ?? null)}</td>
+                    <td className="col-num dinheiro num">{brl(p.aprovado_execucao_centavos ?? null)}</td>
                     <td className="col-num dinheiro num">{valorOuTraco(p.medido_reajuste_centavos)}</td>
                     <td className="col-num dinheiro num">{valorOuTraco(p.medido_projeto_centavos)}</td>
                     <td>
-                      {total === 0 ? (
+                      {semValor ? (
                         <span className="estado estado--aberto">
                           <span className="estado__ponto" aria-hidden="true" />em aberto
                         </span>
                       ) : pend ? (
-                        <span className="estado estado--provisorio" title={resumoPonto(p)}>
+                        <span className="estado estado--provisorio">
                           <span className="estado__ponto" aria-hidden="true" />provisório
                         </span>
                       ) : (
@@ -593,8 +361,8 @@ export default function Cronograma({ contratoId, podeEditar }:
             <tfoot>
               <tr>
                 <td>Total</td>
-                <td className="col-num num">{valorOuTraco(totais.previsto)}</td>
-                <td className="col-num num">{valorOuTraco(totais.execucao)}</td>
+                <td className="col-num num">{valorOuTraco(totais.pedido)}</td>
+                <td className="col-num num">{valorOuTraco(totais.aprovado)}</td>
                 <td className="col-num num">{valorOuTraco(totais.reajuste)}</td>
                 <td className="col-num num">{valorOuTraco(totais.projeto)}</td>
                 <td />
@@ -602,8 +370,20 @@ export default function Cronograma({ contratoId, podeEditar }:
             </tfoot>
           </table>
         </Rolagem>
-        </details>
-      </>}
+      )}
+    </section>
+
+    <section className="cartao" aria-labelledby="titulo-cronograma" id="cronograma">
+      <div className="cartao__cabeca">
+        <h2 className="cartao__titulo" id="titulo-cronograma">Cronograma</h2>
+        {/* a versao que /cronograma devolveu (o numero dela, nao a marca `vigente` da lista: gate Sol, PR #311);
+            documento, data e competencias estao na tabela de versoes */}
+        {!carregando && versao && <span className="cartao__dica num">versão {versao.numero}</span>}
+      </div>
+
+      {!carregando && versoes.length === 0 && !podeEditar && (
+        <div className="vazio vazio--curto"><p>Nenhuma versão.</p></div>
+      )}
 
       {/* issue #256: uma linha por versao, na ordem em que passaram a valer (data do documento) */}
       {!carregando && versoes.length > 0 && (
@@ -669,5 +449,6 @@ export default function Cronograma({ contratoId, podeEditar }:
         </form>
       )}
     </section>
+    </>
   );
 }

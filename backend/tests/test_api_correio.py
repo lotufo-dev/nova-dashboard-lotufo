@@ -201,3 +201,23 @@ def test_falha_inesperada_no_acompanhamento_vira_erro_em_portugues(monkeypatch):
     api_correio._acompanhar(7, {"tenant": "t", "client_id": "c"}, "c1", 0, api_correio.time.time() + 60)
     assert api_correio._LOGINS[7]["estado"] == "erro"
     assert api_correio._LOGINS[7]["erro"] == "Não foi possível concluir a conexão; tente de novo"
+
+
+# --- leitura das respostas do orgao (issue #644) -------------------------------------------------------------
+
+def test_leitura_sem_conta_conectada_responde_vazio_sem_erro(client_admin, monkeypatch):
+    from app import correio
+    monkeypatch.setattr(correio, "_http", lambda *a, **k: pytest.fail("sem conta conectada nada vai ao Graph"))
+    r = client_admin.post("/api/correio/respostas/ler")
+    assert r.status_code == 200 and r.json() == {"novas": []}
+
+
+def test_diretoria_nao_dispara_a_leitura(client):
+    from app import auth, db
+    conn = db.get_conn()
+    auth.criar_usuario(conn, "Diretoria", "diretoria@lotufo.com", "senha-forte-123", "diretoria")
+    conn.close()
+    r = client.post("/api/auth/login", json={"email": "diretoria@lotufo.com", "senha": "senha-forte-123"})
+    client.cookies.set("sessao", r.cookies.get("sessao") or client.cookies.get("sessao"))
+    client.headers["X-CSRF-Token"] = r.json()["csrf"]
+    assert client.post("/api/correio/respostas/ler").status_code == 403

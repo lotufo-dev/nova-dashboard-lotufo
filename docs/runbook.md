@@ -476,7 +476,7 @@ repositório "Autoridades de Certificação Raiz Confiáveis" pelo thumbprint.
   com a mesma saída. Depois, subir o serviço e apagar o sentinela do watchdog. O próximo deploy de um commit com a #456 recria a tabela e os gatilhos, a partir do último ponto da auditoria.
 
 ## Variáveis de ambiente
-`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db` e sobe a instalação como `dev`), `DASH_INSTALACAO_ARQUIVO` (troca o caminho do arquivo da instalação assinada), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`; só com `-SemTls`, fora da produção desde o corte da issue #425), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_CHAVE_PUBLICA_DONO` (cópia do dono), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_CONSULTA_CUSTO` / `DASH_RM_CONSULTA_ESTOQUE` (padrão `DASH25` / `DASH26`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
+`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db` e sobe a instalação como `dev`), `DASH_INSTALACAO_ARQUIVO` (troca o caminho do arquivo da instalação assinada), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`; só com `-SemTls`, fora da produção desde o corte da issue #425), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_CHAVE_PUBLICA_DONO` (cópia do dono), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_CONSULTA_CUSTO` / `DASH_RM_CONSULTA_ESTOQUE` (padrão `DASH25` / `DASH26`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste; a resposta simulada do órgão é um `.json` em `respostas/<conversa>/`). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
 
 ## TOTVS RM (fase 5, leitura)
 A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_USUARIO` e a senha estão definidos; sem eles o sistema segue com NF e recebimento registrados à mão. Botão "Sincronizar agora" e reconciliação em Administração → TOTVS RM.
@@ -714,7 +714,7 @@ da onda. Casos conhecidos: Região Oeste (sem `periodo` e sem `valor_extenso` na
 
 ## Envio de e-mail pela conta de cada pessoa
 
-Só o envio usa o Microsoft Graph. O sistema não lê caixa de e-mail nem SharePoint desde o bloco 9.
+O Microsoft Graph serve ao envio e à leitura da conversa que o próprio sistema enviou (issue #644). O sistema não lê a caixa de entrada nem SharePoint.
 
 1. No portal do Entra ID, no aplicativo `Dashboard Lotufo` (Registros de aplicativo; *Permitir fluxos de
    cliente público* = Sim, sem segredo de cliente), em Permissões de API → Microsoft Graph → delegadas:
@@ -725,8 +725,9 @@ Só o envio usa o Microsoft Graph. O sistema não lê caixa de e-mail nem ShareP
    de teste". O e-mail tem que aparecer na caixa de entrada E nos itens enviados dela.
 3. O token fica em `C:\DashboardLotufo\segredos\usuarios\usuario-<id>.txt`. Apagar o arquivo desconecta
    a pessoa. Token sem uso por 90 dias expira: basta conectar de novo.
-4. O sistema não lê caixa de e-mail. `Mail.ReadWrite` é exigida pelo Graph para criar o rascunho e subir
-   anexo acima de 3 MB.
+4. `Mail.ReadWrite` é exigida pelo Graph para criar o rascunho e subir anexo acima de 3 MB. De e-mail, o sistema lê
+   só a conversa da planilha/carta que ele mesmo enviou, com a conta de quem enviou e com essa pessoa logada: a
+   resposta do órgão aparece no passo "Análise do órgão" da medição. Nada mais da caixa é lido.
 5. **Tenant**: `organizations` e `common` não funcionam nesta conta. O endpoint de código de dispositivo
    responde AADSTS50059 ("No tenant-identifying information found") e a tela mostra "invalid_request".
    Passar o tenant explícito (o domínio do tenant ou o GUID do diretório).

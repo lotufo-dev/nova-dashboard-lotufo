@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Medicoes from "./Medicoes";
 
@@ -32,6 +32,27 @@ describe("Medições da obra", () => {
     expect(screen.queryByText(/desde|sincronizado|1 medição|recebidas, canceladas/)).toBeNull();
     expect(screen.queryByText(/Sincronização com o RM falhou/)).toBeNull();
     expect(screen.getByText("NF 2322")).toBeTruthy();
+  });
+
+  // issue #647: Pedido (protocolado) e Aprovado (atestado) em colunas próprias, nas duas tabelas
+  it("mostra Pedido e Aprovado; medição sem aprovado mostra “—”", async () => {
+    api.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/medicoes/andamento")) return [{ id: 70, proximo_passo: "protocolar", desde: "2026-10-01" }];
+      if (url === "/api/rm/status") return { configurado: false, ultima_sincronizacao: null, ultimo_erro: null };
+      return [medicao({ valor_protocolado_centavos: 25001 }),
+        medicao({ id: 60, numero: 6, estado: "recebida", recebida_em: "2026-09-20", valor_protocolado_centavos: 15003,
+          valor_atestado_centavos: 14901 })];
+    });
+    render(<Medicoes contratoId={3} busca={{}} />);
+    await screen.findByRole("heading", { name: "Em andamento" });
+    const [abertas, anteriores] = screen.getAllByRole("table");
+    const celulas = (tabela: HTMLElement, seletor: string) => within(tabela).getAllByRole("row")
+      .map(l => Array.from(l.querySelectorAll(seletor), c => (c.textContent ?? "").replace(/\s/g, " ")).join("|"))
+      .filter(Boolean);
+    expect(celulas(abertas, "th")[0]).toBe("Medição|Competência|Estado|Pedido|Aprovado|Próximo passo|Marcas");
+    expect(celulas(anteriores, "th")[0]).toBe("Medição|Competência|Estado|Pedido|Aprovado|Notas|Recebida em");
+    expect(celulas(abertas, "td")[0]).toContain("|R$ 250,01|—|");
+    expect(celulas(anteriores, "td")[0]).toContain("|R$ 150,03|R$ 149,01|");
   });
 
   it("a falha da última sincronização do RM vira selo, só quando acontece", async () => {

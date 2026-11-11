@@ -164,12 +164,13 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
             <table className="tabela tabela--grade">
               <colgroup>
                 <col className="c-medicao-obra" /><col className="c-comp" /><col className="c-estado" />
-                <col className="c-valor" /><col /><col className="c-marcas" />
+                <col className="c-valor" /><col className="c-valor" /><col /><col className="c-marcas" />
               </colgroup>
               <thead>
                 <tr>
                   <th scope="col">Medição</th><th scope="col">Competência</th><th scope="col">Estado</th>
-                  <th scope="col" className="col-num">Valor</th><th scope="col">Próximo passo</th><th scope="col">Marcas</th>
+                  <th scope="col" className="col-num">Pedido</th><th scope="col" className="col-num">Aprovado</th>
+                  <th scope="col">Próximo passo</th><th scope="col">Marcas</th>
                 </tr>
               </thead>
               <tbody>
@@ -184,6 +185,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
                       <td className="num">{competenciaBR(m.competencia)}</td>
                       <td><Estado m={m} /></td>
                       <td className="col-num dinheiro num">{brl(m.valor_protocolado_centavos)}</td>
+                      <td className="col-num dinheiro num">{brl(m.valor_atestado_centavos)}</td>
                       <td>{passo ? passo.rotulo : "—"}</td>
                       <td>{notasDivergentes(m).length > 0
                         ? <Link className="link-selo" para={destino} secao="notas"><Selo classe="selo--acao">nota diverge</Selo></Link> : "—"}</td>
@@ -213,12 +215,13 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
             <table className="tabela tabela--grade">
               <colgroup>
                 <col className="c-medicao-obra" /><col className="c-comp" /><col className="c-estado" />
-                <col className="c-valor" /><col /><col className="c-data" />
+                <col className="c-valor" /><col className="c-valor" /><col /><col className="c-data" />
               </colgroup>
               <thead>
                 <tr>
                   <th scope="col">Medição</th><th scope="col">Competência</th><th scope="col">Estado</th>
-                  <th scope="col" className="col-num">Protocolado</th><th scope="col">Notas</th><th scope="col">Recebida em</th>
+                  <th scope="col" className="col-num">Pedido</th><th scope="col" className="col-num">Aprovado</th>
+                  <th scope="col">Notas</th><th scope="col">Recebida em</th>
                 </tr>
               </thead>
               <tbody>
@@ -228,6 +231,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
                     <td className="num">{competenciaBR(m.competencia)}</td>
                     <td><Estado m={m} /></td>
                     <td className="col-num dinheiro num">{brl(m.valor_protocolado_centavos)}</td>
+                    <td className="col-num dinheiro num">{brl(m.valor_atestado_centavos)}</td>
                     <td>{resumoNotas(m)}</td>
                     <td className="num">{m.recebida_em ? dataBR(m.recebida_em) : "—"}</td>
                   </tr>

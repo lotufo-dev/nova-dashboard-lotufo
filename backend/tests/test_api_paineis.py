@@ -25,6 +25,9 @@ def test_curva(client_admin):
     r = client_admin.get(f"/api/contratos/{cid}/curva").json()
     assert r["curva"][0]["previsto_centavos"] == 300_00
     assert r["saldo"]["saldo_centavos"] == 750_00 and r["saldo"]["formula"].startswith("saldo")
+    # issue #647: pedido e aprovado em separado; pedida e ainda sem aprovado
+    assert r["curva"][0]["pedido_execucao_centavos"] == 250_00
+    assert r["curva"][0]["aprovado_execucao_centavos"] is None
 
 def test_alertas_endpoint(client_admin):
     _cenario(client_admin)
