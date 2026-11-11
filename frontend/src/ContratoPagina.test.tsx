@@ -19,12 +19,20 @@ const MEDICAO = { id: 5, numero: 23, tipo: "execucao", titulo: "23ª Medição",
 const LISTA = { familia: "ses", etapas: [{ chave: "unico", rotulo: "Protocolo", carta: false }], pecas: [],
   medicoes: [MEDICAO], protocolos: [] };
 
+// o resumo do alto (#646): base de execucao e cota; 1.000,00 − 450,00 = 550,00
+const FICHA = { topo: { vigente_centavos: 100000, medido_centavos: 45000, saldo_centavos: 55000, reajuste_centavos: 0 },
+  contrato: { original_centavos: 100000, original_igual: true, tas: 0, data_base: null },
+  ultima_medicao: null, em_andamento: null,
+  vencimentos: [{ chave: "execucao", rotulo: "Fim da execução", data: null, dias: null, nivel: "normal" },
+    { chave: "vigencia", rotulo: "Fim da vigência", data: null, dias: null, nivel: "normal" }] };
+
 const leituras = (caminho: string) => api.mock.calls.filter(c => c[0] === caminho && !c[1]);
 
 function responder() {
   api.mockImplementation(async (url: string, opcoes?: { method?: string }) => {
     if (url.endsWith("/cabecalho")) return CABECALHO;
     if (url.endsWith("/curva")) return { saldo: { vigente_centavos: 0, atestado_execucao_centavos: 0, saldo_centavos: 0, formula: "" } };
+    if (url.endsWith("/ficha")) return FICHA;
     if (url === "/api/inicio") return { avisos: [] };
     if (url.endsWith("/protocolos")) return opcoes?.method === "POST" ? {} : LISTA;
     if (url.endsWith("/medicoes")) return [];
@@ -34,7 +42,7 @@ function responder() {
   });
 }
 
-// redesenho de 16/10/2026 (#160): indicadores, curva S, secoes em abas, avisos e execucao do contrato
+// redesenho de 16/10/2026 (#160) e pagina unica (#646): resumo da ficha, curva S, secoes em abas, avisos e execucao do contrato
 describe("Página da obra: o desenho novo", () => {
   const CABECALHO_COMPLETO = { ...CABECALHO, execucao_inicio: "2026-01-01", execucao_fim: "2026-12-31", dias_execucao: 76,
     vigencia_inicio: "2025-12-01", vigencia_fim: "2027-01-31", dias_vigencia: 106, faturado_centavos: 40000, a_receber_centavos: 15000 };
@@ -57,37 +65,89 @@ describe("Página da obra: o desenho novo", () => {
   beforeEach(() => { window.history.replaceState(null, "", "/obras/1"); });
   afterEach(() => { cleanup(); api.mockReset(); vi.useRealTimers(); });
 
-  it("mostra os cinco indicadores, o caminho com o contratante e as cinco abas como links", async () => {
+  it("página única: /obras/:id mostra o resumo e as abas juntos, sem 'ver contrato' nem 'Ficha da obra' (#646)", async () => {
+    responderCompleto();
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="ficha" origem={null} busca={{}} />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Hospital" })).toBeTruthy();
+    // o resumo: valor vigente, medido e saldo do topo da ficha
+    const contrato = await screen.findByRole("region", { name: "Contrato" });
+    await waitFor(() => expect(within(contrato).getByText(/1\.000,00/)).toBeTruthy());
+    const execucao = screen.getByRole("region", { name: "Execução" });
+    expect(within(execucao).getByText(/450,00/)).toBeTruthy();
+    expect(within(execucao).getByText(/550,00/)).toBeTruthy();
+    expect(within(execucao).getByText("45%")).toBeTruthy();
+    for (const nome of ["Prazo", "Última medição", "Medição em andamento", "Próximos vencimentos", "Previsto × medido acumulado"]) {
+      expect(screen.getByRole("region", { name: nome })).toBeTruthy();
+    }
+    // as abas, na mesma pagina; sem aba na URL, a primeira (Medições)
+    const abas = screen.getByRole("navigation", { name: "Seções da obra" });
+    expect(within(abas).getAllByRole("link").map(a => a.getAttribute("href"))).toEqual(
+      ["/obras/1/medicoes", "/obras/1/prazos", "/obras/1/reajuste", "/obras/1/documentos", "/obras/1/contrato"]);
+    expect(within(abas).getByRole("link", { name: "Medições" }).getAttribute("aria-current")).toBe("page");
+    await waitFor(() => expect(leituras("/api/contratos/1/medicoes")).toHaveLength(1));
+    // sairam os dois links entre as telas e a faixa de indicadores
+    expect(screen.queryByRole("link", { name: /ver contrato/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Ficha da obra/i })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Números da obra" })).toBeNull();
+    expect(document.title).toBe("Hospital · grupolotufo");
+    // a lateral continua: avisos da obra e a linha do tempo
+    expect(screen.getByRole("heading", { name: "Avisos desta obra" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Execução do contrato" })).toBeTruthy();
+  });
+
+  it("/obras/:id/prazos abre a página única com a aba Prazos selecionada e o resumo no alto (#646)", async () => {
+    responderCompleto();
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="prazos" origem={null} busca={{}} />);
+    await screen.findByRole("heading", { level: 1, name: "Hospital" });
+    const abas = screen.getByRole("navigation", { name: "Seções da obra" });
+    expect(within(abas).getByRole("link", { name: "Prazos" }).getAttribute("aria-current")).toBe("page");
+    expect(within(abas).getByRole("link", { name: "Medições" }).getAttribute("aria-current")).toBeNull();
+    expect(screen.getByRole("region", { name: "Contrato" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Execução" })).toBeTruthy();
+    expect(leituras("/api/contratos/1/medicoes")).toHaveLength(0);
+    await waitFor(() => expect(document.title).toBe("Hospital · Prazos · grupolotufo"));
+  });
+
+  it("há um link para voltar a todas as obras; vindo da lista filtrada, ele volta com os filtros (#646)", async () => {
+    responderCompleto();
+    const { unmount } = render(<ContratoPagina contratoId={1} usuario={usuario} aba="ficha" origem={null} busca={{}} />);
+    expect(screen.getByRole("link", { name: "Todas as obras" }).getAttribute("href")).toBe("/obras");
+    unmount();
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="contrato" origem={{ tela: "obras", href: "/obras?orgao=SES" }} busca={{}} />);
+    expect(screen.getByRole("link", { name: "Todas as obras" }).getAttribute("href")).toBe("/obras?orgao=SES");
+  });
+
+  it("o caminho traz o contratante e o cabeçalho de quem tem 100% não fala de cota", async () => {
     responderCompleto();
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
-    const lista = await screen.findByRole("list", { name: "Números da obra" });
-    for (const r of ["Valor vigente", "Medido (execução)", "Faturado", "A receber", "Saldo do cronograma"]) {
-      expect(within(lista).getByText(r)).toBeTruthy();
-    }
-    await waitFor(() => expect(within(lista).getByText("R$ 450,00")).toBeTruthy());   // medido de execucao
-    expect(within(lista).getByText("R$ 550,00")).toBeTruthy();                         // saldo do cronograma
-    // texto na tela (26/10/2026): os numeros sem legenda embaixo; 100% da Lotufo nao fala de cota
-    expect(lista.textContent).not.toMatch(/do valor vigente|valor vigente −|a conciliar|cota da Lotufo/);
+    await screen.findByRole("heading", { level: 1, name: "Hospital" });
     expect(document.querySelector(".topbar__meta")!.textContent).toBe("SES · Contrato CT 1/2026");
     const caminho = screen.getByRole("navigation", { name: "Você está em" });
     expect(within(caminho).getByRole("link", { name: "Obras" }).getAttribute("href")).toBe("/obras");
     expect(within(caminho).getByRole("link", { name: "SES" }).getAttribute("href")).toBe("/obras?orgao=SES");
-    expect(screen.getByRole("heading", { level: 1, name: "Hospital" })).toBeTruthy();
-    const abas = screen.getByRole("navigation", { name: "Seções da obra" });
-    expect(within(abas).getAllByRole("link").map(a => a.getAttribute("href"))).toEqual(
-      ["/obras/1/medicoes", "/obras/1/prazos", "/obras/1/reajuste", "/obras/1/documentos", "/obras/1/contrato"]);
-    expect(within(abas).getByRole("link", { name: "Documentos" })).toBeTruthy();
-    expect(within(abas).getByRole("link", { name: "Medições" }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("em consórcio, o cabeçalho diz a cota e o valor dela uma vez, sem \"valores cheios\"", async () => {
+  it("em consórcio, o cabeçalho diz a cota uma vez: é a base dos números do resumo (#646)", async () => {
     responderCompleto();
     const base = api.getMockImplementation()!;
     api.mockImplementation(async (url: string, opcoes?: { method?: string }) =>
-      url.endsWith("/cabecalho") ? { ...CABECALHO_COMPLETO, percentual_lotufo_bp: 4000, cota_vigente_centavos: 40000 } : base(url, opcoes));
+      url.endsWith("/cabecalho") ? { ...CABECALHO_COMPLETO, percentual_lotufo_bp: 4000 } : base(url, opcoes));
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
     await screen.findByRole("heading", { level: 1, name: "Hospital" });
-    expect(document.querySelector(".topbar__meta")!.textContent).toMatch(/^SES · Contrato CT 1\/2026 · cota 40% \(R\$\s400,00\)$/);
+    expect(document.querySelector(".topbar__meta")!.textContent).toBe("SES · Contrato CT 1/2026 · Consórcio, cota Lotufo 40%");
+  });
+
+  it("falha na leitura da ficha: os cartões dizem indisponível e as abas continuam", async () => {
+    responderCompleto();
+    const base = api.getMockImplementation()!;
+    api.mockImplementation(async (url: string, opcoes?: { method?: string }) => {
+      if (url.endsWith("/ficha")) throw new Error("falhou");
+      return base(url, opcoes);
+    });
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="prazos" origem={null} busca={{}} />);
+    const execucao = await screen.findByRole("region", { name: "Execução" });
+    expect((await within(execucao).findByRole("alert")).textContent).toBe("indisponível agora");
+    expect(screen.getByRole("navigation", { name: "Seções da obra" })).toBeTruthy();
   });
 
   it("a curva S alterna entre acumulado e por mês", async () => {
@@ -206,13 +266,14 @@ describe("Página da obra: o desenho novo", () => {
     await waitFor(() => expect(within(cartao).getByText(/execução vence em 3 dias/)).toBeTruthy());
   });
 
-  it("quem só consulta não vê a ação de gerar espelho", async () => {
+  it("diretoria vê a página única sem botões de escrita (#646)", async () => {
     responderCompleto();
-    const { rerender } = render(<ContratoPagina contratoId={1} usuario={{ ...usuario, perfil: "diretoria" }} aba="medicoes" origem={null} busca={{}} />);
+    const { rerender } = render(<ContratoPagina contratoId={1} usuario={{ ...usuario, perfil: "diretoria" }} aba="ficha" origem={null} busca={{}} />);
     await waitFor(() => expect(leituras("/api/contratos/1/medicoes")).toHaveLength(1));
+    await screen.findByRole("region", { name: "Execução" });
     expect(screen.queryByRole("button", { name: "Gerar espelho (teste)" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Criar protocolo" })).toBeNull();
-    rerender(<ContratoPagina contratoId={1} usuario={{ ...usuario, perfil: "engenharia" }} aba="medicoes" origem={null} busca={{}} />);
+    rerender(<ContratoPagina contratoId={1} usuario={{ ...usuario, perfil: "engenharia" }} aba="ficha" origem={null} busca={{}} />);
     expect(await screen.findByRole("button", { name: "Gerar espelho (teste)" })).toBeTruthy();
   });
 });
@@ -238,6 +299,17 @@ describe("Página da obra: os cartões se atualizam entre si", () => {
     await waitFor(() => expect(leituras("/api/contratos/1/protocolos")).toHaveLength(2));
   });
 
+  it("depois de gerar o espelho, o resumo do alto é lido de novo, sem voltar a 'Carregando' (#646)", async () => {
+    responder();
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    const execucao = await screen.findByRole("region", { name: "Execução" });
+    await waitFor(() => expect(within(execucao).getByText(/450,00/)).toBeTruthy());
+    expect(leituras("/api/contratos/1/ficha")).toHaveLength(1);
+    fireEvent.click(await screen.findByRole("button", { name: "Gerar espelho (teste)" }));
+    expect(within(execucao).queryByText("Carregando…")).toBeNull();
+    await waitFor(() => expect(leituras("/api/contratos/1/ficha")).toHaveLength(2));
+  });
+
   it("a releitura não troca a tabela por 'Carregando' e não leva ao servidor medição que deixou de ser elegível", async () => {
     responder();
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
@@ -246,6 +318,7 @@ describe("Página da obra: os cartões se atualizam entre si", () => {
     // o espelho avança a medição 5: ela some da lista de elegíveis
     api.mockImplementation(async (url: string) => {
       if (url.endsWith("/protocolos")) return { ...LISTA, medicoes: [] };
+      if (url.endsWith("/ficha")) return FICHA;
       if (url.endsWith("/medicoes")) return [];
       if (url.startsWith("/api/medicoes/andamento")) return [];
       return {};
