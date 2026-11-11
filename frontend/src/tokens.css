@@ -1925,7 +1925,7 @@ td.col-num .campo__nota { font-family: var(--fonte); }
 .cart-curva svg { display: block; width: 100%; }
 .cart-c-prev { fill: none; stroke: var(--linha-hover); stroke-width: 2; }
 .cart-c-med { fill: none; stroke: var(--acento); stroke-width: 2.5; }
-/* #296: o previsto anterior a ultima repactuacao, tracejado como o da curva S da obra (.c-previsto-anterior) */
+/* #296: o previsto anterior a ultima repactuacao, tracejado */
 .cart-c-ant { fill: none; stroke: var(--texto-2); stroke-width: 2; stroke-dasharray: 6 4; }
 .cart-c-area { fill: var(--acento-fundo); }
 .cart-c-ponto-prev { fill: var(--superficie); stroke: var(--linha-hover); stroke-width: 2; }
@@ -1964,8 +1964,8 @@ td.col-num .campo__nota { font-family: var(--fonte); }
 }
 
 /* ------------------------------------------------------------------- Pagina da obra (redesenho de 16/10/2026, #160)
-   Pagina unica (#646): o resumo da ficha no alto; abaixo, o previsto x medido, as secoes em abas e a curva S; a direita,
-   os avisos e a execucao do contrato. Abaixo de 1280px a lateral desce para entre o previsto x medido e as abas
+   Pagina unica (#646): o resumo da ficha no alto; abaixo, o cartao "Ritmo e prazo" (#655) e as secoes em abas; a
+   direita, os avisos e a execucao do contrato. Abaixo de 1280px a lateral desce para depois das abas
    (display: contents desfaz as duas colunas; `order` ordena). */
 .topbar__titulo--grande { font-size: 28px; line-height: 36px; }
 .topbar__linha--quebra { flex-wrap: wrap; }
@@ -1981,52 +1981,6 @@ td.col-num .campo__nota { font-family: var(--fonte); }
   .obra-grade__principal, .obra-grade__lateral { display: contents; }
   #ritmo { order: 1; } #secoes { order: 2; } #avisos-obra { order: 3; } #execucao { order: 4; }
 }
-
-/* Curva S */
-.curva { position: relative; }
-.curva .cartao__cabeca { flex-wrap: wrap; }
-.curva__cabeca-acoes { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
-.curva__modo { display: inline-flex; }
-.curva__modo button { height: 28px; padding: 0 12px; border-radius: 0; font-size: 13px; }
-.curva__modo button:first-child { border-radius: var(--raio-ctrl) 0 0 var(--raio-ctrl); }
-.curva__modo button:last-child { margin-left: -1px; border-radius: 0 var(--raio-ctrl) var(--raio-ctrl) 0; }
-.curva__modo button[aria-pressed="true"] { background: var(--acento-fundo); border-color: var(--acento-linha); color: var(--acento-mais); z-index: 1; }
-.curva__legenda { display: flex; gap: 14px; font-size: 12.5px; color: var(--texto-2); }
-.curva__legenda span { display: inline-flex; align-items: center; gap: 6px; }
-.curva__chave { width: 14px; height: 3px; border-radius: 2px; }
-.curva__chave--previsto { background: var(--linha-hover); }
-.curva__chave--anterior { background: repeating-linear-gradient(90deg, var(--texto-2) 0 4px, transparent 4px 7px); }
-.curva__chave--medido { background: var(--marca); }
-.curva__quadro { position: relative; padding: 12px 16px 8px 8px; }
-.curva__quadro[hidden] { display: none; }
-.curva__svg { display: block; max-width: 100%; height: auto; overflow: visible; }
-.c-grade { stroke: var(--linha-suave); }
-.c-base { stroke: var(--linha); }
-.c-eixo { fill: var(--texto-2); font-size: 11px; font-family: var(--fonte); }
-.c-previsto { fill: none; stroke: var(--linha-hover); stroke-width: 2; }
-.c-previsto-ponto { fill: var(--superficie); stroke: var(--linha-hover); stroke-width: 1.5; }
-.c-previsto-anterior { fill: none; stroke: var(--texto-2); stroke-width: 2; stroke-dasharray: 6 4; }
-.c-aditivo-linha { stroke: var(--acento-linha); stroke-width: 1; }
-.c-aditivo-txt { fill: var(--acento-mais); font-size: 11px; font-family: var(--fonte); }
-.c-medido { fill: none; stroke: var(--marca); stroke-width: 2.25; }
-.c-medido-ponto { fill: var(--marca); }
-.c-medido-ponto--provisorio { fill: var(--superficie); stroke: var(--marca); stroke-width: 1.5; }
-.c-area { fill: var(--acento-fundo); opacity: .75; }
-.c-barra-previsto { fill: var(--linha-hover); }
-.c-barra-medido { fill: var(--marca); }
-.c-barra-medido--provisorio { opacity: .55; }
-.c-hoje { stroke: var(--acento-linha); stroke-dasharray: 3 3; }
-.c-hoje-txt { fill: var(--acento); font-size: 11px; font-weight: 600; }
-.c-alvo { fill: transparent; cursor: crosshair; }
-.c-guia { stroke: var(--linha-forte); }
-.curva__dica {
-  position: absolute; pointer-events: none; z-index: 5; min-width: 200px; padding: 8px 10px;
-  background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio-sobreposicao);
-  box-shadow: var(--sombra-sobreposicao); font-size: 12.5px; line-height: 18px;
-}
-.curva__dica strong { display: block; margin-bottom: 2px; }
-.curva__dica .linha-dica { display: flex; justify-content: space-between; gap: 16px; }
-.curva__dica .linha-dica span:last-child { font-family: var(--fonte-num); }
 
 /* Secoes em abas: a faixa dentro do cartao; o conteudo de cada aba (cartoes de hoje) fica num painel com respiro */
 .abas--obra { padding: 0 12px; overflow-x: auto; scrollbar-width: none; }
