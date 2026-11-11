@@ -28,8 +28,9 @@ const obra = (extra: Partial<ObraResumo>): ObraResumo => ({
   ultima_medicao: null, execucao: SERIE, ...extra });
 
 const NOMES = ["Planilha e carta", "Análise do órgão", "Espelhos", "Notas", "Envio da nota", "Pagamento"];
-const passo = (numero: number, situacao: PassoQuadro["situacao"], data: string | null = null, medicao_id: number | null = null): PassoQuadro =>
-  ({ numero, nome: NOMES[numero - 1], situacao, data, medicao_id });
+const passo = (numero: number, situacao: PassoQuadro["situacao"], data: string | null = null, medicao_id: number | null = null,
+  siga: PassoQuadro["siga"] = null): PassoQuadro =>
+  ({ numero, nome: NOMES[numero - 1], situacao, data, medicao_id, siga });
 const linha = (extra: Partial<LinhaQuadro>): LinhaQuadro => ({
   contrato_id: 1, obra: "Obra", contratante: "SINFRA", orgao_sub: null, medicoes: [], passos: [], iniciar: false,
   pedido_centavos: null, aprovado_centavos: null, ...extra });
@@ -124,6 +125,58 @@ describe("Medições: quadro do mês (#643)", () => {
     expect(within(celulas[3]).getByRole("link", { name: "Abrir Reajuste da 24ª Medição de Complexo Zeta: Notas" }).getAttribute("href"))
       .toBe("/obras/14/medicoes/73#passo-4");
     expect(celulas[7].textContent).toBe("—");
+  });
+
+  it("a medição com processo vivo do SIGA mostra o setor e o tempo no setor na célula do passo, com a cor de atraso da tela SIGA (#664)", async () => {
+    const siga = (setor: string, dias_uteis: number | null, desde: string | null = "2026-10-20T09:00:00-04:00", hoje = 0) =>
+      ({ processo_id: 5, setor, dias_uteis, desde, hoje });
+    const quadro = [
+      // na análise do órgão há 4 dias úteis: sem cor
+      linha({ contrato_id: 21, obra: "Obra Um", medicoes: [{ id: 81, titulo: "3ª Medição" }],
+        passos: [passo(1, "feito", "2026-11-02"), passo(2, "atual", null, 81, siga("SUPE", 4)), passo(3, "futuro")] }),
+      // no pagamento há 5 dias úteis: atenção
+      linha({ contrato_id: 22, obra: "Obra Dois", medicoes: [{ id: 82, titulo: "4ª Medição" }],
+        passos: [passo(5, "feito"), passo(6, "atual", null, 82, siga("COFIN", 5))] }),
+      // execução no pagamento (10 dias úteis: ação) e o reajuste ainda nas notas: a célula do pagamento é "A fazer", com a posição
+      linha({ contrato_id: 23, obra: "Obra Três", medicoes: [{ id: 83, titulo: "5ª Medição" }, { id: 84, titulo: "Reajuste da 5ª Medição" }],
+        passos: [passo(4, "atual", null, 84), passo(6, "futuro", null, null, siga("GABIN", 10))] }),
+      // entrou no setor hoje (o mesmo texto da tela SIGA) e o processo sem data de entrada (só o setor)
+      linha({ contrato_id: 24, obra: "Obra Quatro", medicoes: [{ id: 85, titulo: "6ª Medição" }],
+        passos: [passo(6, "atual", null, 85, siga("PROTOC", 0, "2026-11-07T08:00:00-04:00"))] }),
+      linha({ contrato_id: 25, obra: "Obra Cinco", medicoes: [{ id: 86, titulo: "7ª Medição" }],
+        passos: [passo(6, "atual", null, 86, siga("ASSEJUR", null, null))] }),
+      // parado há 12 dias úteis, com movimentação hoje: "hoje", como na tela SIGA
+      linha({ contrato_id: 26, obra: "Obra Seis", medicoes: [{ id: 87, titulo: "8ª Medição" }],
+        passos: [passo(6, "atual", null, 87, siga("COFIN", 12, "2026-10-20T09:00:00-04:00", 2))] }),
+    ];
+    responder(url => url.startsWith("/api/medicoes/resumo") ? { ...RESUMO, mes: "2026-10", quadro } : undefined);
+    render(<MedicoesPagina usuario={usuario} />);
+    const tabela = await screen.findByRole("table", { name: "Quadro do mês" });
+    const posicao = (obra: string, coluna: number) => within(linhaDa(tabela, obra)).getAllByRole("cell")[coluna].querySelector(".quadro__siga");
+    const um = posicao("Obra Um", 1) as HTMLElement;
+    expect(um.textContent).toBe("No SIGA: SUPE 4 dias úteis");
+    expect(um.querySelector(".quadro__siga-tempo")?.className).toBe("quadro__siga-tempo num");
+    // a célula continua com a situação e o link do passo
+    expect(within(linhaDa(tabela, "Obra Um")).getByRole("link", { name: "Abrir 3ª Medição de Obra Um: Análise do órgão" })).toBeTruthy();
+    const dois = posicao("Obra Dois", 5) as HTMLElement;
+    expect(dois.textContent).toBe("No SIGA: COFIN 5 dias úteis");
+    expect(dois.querySelector(".quadro__siga-tempo")?.classList.contains("quadro__siga-tempo--atencao")).toBe(true);
+    const tres = within(linhaDa(tabela, "Obra Três")).getAllByRole("cell")[5];
+    expect(tres.textContent).toBe("A fazerNo SIGA: GABIN 10 dias úteis");
+    expect(tres.querySelector(".quadro__siga-tempo")?.classList.contains("quadro__siga-tempo--acao")).toBe(true);
+    expect((posicao("Obra Quatro", 5) as HTMLElement).textContent).toBe("No SIGA: PROTOC 3 h");
+    expect((posicao("Obra Cinco", 5) as HTMLElement).textContent).toBe("No SIGA: ASSEJUR");
+    const seis = posicao("Obra Seis", 5) as HTMLElement;
+    expect(seis.textContent).toBe("No SIGA: COFIN hoje");
+    expect(seis.querySelector(".quadro__siga-tempo")?.className).toBe("quadro__siga-tempo num quadro__siga-tempo--hoje");
+  });
+
+  it("a medição sem processo do SIGA não mostra o bloco (#664)", async () => {
+    responder();
+    render(<MedicoesPagina usuario={usuario} />);
+    const tabela = await screen.findByRole("table", { name: "Quadro do mês" });
+    expect(tabela.querySelector(".quadro__siga")).toBeNull();
+    expect(within(tabela).queryByText(/No SIGA/)).toBeNull();
   });
 
   it("a obra sem medição na competência mostra Iniciar, e a Nova planilha/carta abre na competência do quadro (#653)", async () => {

@@ -1483,7 +1483,7 @@ def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> d
     contagens["aguardando-pagamento"] = conn.execute(
         "SELECT COUNT(*) FROM medicoes WHERE estado='protocolada'").fetchone()[0]
     return {"hoje": hoje.isoformat(), "mes": mes, "contagens": contagens, "linhas": linhas, "obras": lista_obras,
-            "quadro": _quadro_do_mes(conn, mes, obras, sem_fluxo_medicao),
+            "quadro": _quadro_do_mes(conn, mes, obras, sem_fluxo_medicao, hoje),
             "anteriores": _meses_anteriores(mes, linhas)}
 
 
@@ -1580,12 +1580,19 @@ def _datas_dos_passos(conn, m: dict) -> dict[int, datetime.date | None]:
             4: _dia(m["nota_emitida_em"]), 5: _dia(m["protocolado_em"]), 6: _dia(m["recebida_em"])}
 
 
-def _quadro_do_mes(conn, mes: str, obras: dict[int, dict], sem_fluxo_medicao: set[int]) -> list[dict]:
+PASSOS_COM_SIGA = (2, 6)    # #664: o processo do orgao corre na Analise do orgao e no Pagamento
+
+
+def _quadro_do_mes(conn, mes: str, obras: dict[int, dict], sem_fluxo_medicao: set[int],
+                   hoje: datetime.date) -> list[dict]:
     """Uma linha por obra ativa (e por obra, ativa ou nao, com medicao na competencia): cada passo com a situacao
     (feito, atual, futuro), o dia em que foi feito e a medicao que o passo da vez abre. Com mais de uma medicao na
     competencia (execucao e reajuste), cada passo mostra a menos adiantada; o passo feito leva o dia da ultima a
     fechar. A prevista, a cancelada e a desistida nao contam: a obra so' com elas esta' sem medicao (`iniciar`).
-    A obra sem fluxo de medicao no cadastro (`passos_medicao: []`, #660) fica fora do quadro."""
+    A obra sem fluxo de medicao no cadastro (`passos_medicao: []`, #660) fica fora do quadro.
+    `siga` (#664): no passo em que o processo do SIGA corre (`PASSOS_COM_SIGA`), a posicao do processo vivo ligado
+    a' medicao que esta' nesse passo (setor, entrada e dias uteis no setor); None nos demais."""
+    from app import siga                # import local: siga importa este modulo
     passos_de = passos_das_medicoes(conn)
     do_mes: dict[int, list[dict]] = {}
     for r in conn.execute(
@@ -1593,16 +1600,20 @@ def _quadro_do_mes(conn, mes: str, obras: dict[int, dict], sem_fluxo_medicao: se
             "AS protocolado_em FROM medicoes m WHERE m.competencia=? "
             "AND m.estado NOT IN ('prevista','cancelada','desistida')", (mes,)):
         do_mes.setdefault(r["contrato_id"], []).append(dict(r))
+    passo_de = {}       # medicao -> (passos que ela tem, passo da vez)
+    for m in (m for ms in do_mes.values() for m in ms):
+        tem = passos_de(m)
+        passo_de[m["id"]] = (tem, passo_do_estado(m["estado"], tem))
+    # #664: a posicao do processo vivo do SIGA, de uma vez, so' das medicoes que estao num passo em que o processo corre
+    siga_de = siga.posicao_das_medicoes(conn, [i for i, (_, atual) in passo_de.items() if atual in PASSOS_COM_SIGA], hoje)
     quadro = []
     for o in sorted(obras.values(), key=lambda o: (_chave_nome(o["obra"]), o["id"])):
         ms = sorted(do_mes.get(o["id"], []), key=lambda m: (_ORDEM_TIPO.index(m["tipo"]), m["numero"], m["id"]))
         # A-21: a obra em encerramento nao e' ativa; sem medicao na competencia ela nao tem o que mostrar nem iniciar
         if o["id"] in sem_fluxo_medicao or (not ms and (o["estado"] != "ativo" or o["encerramento_iniciado_em"])):
             continue
-        partes = []     # por medicao: (medicao, passos que ela tem, passo da vez, dia de cada passo)
-        for m in ms:
-            tem = passos_de(m)
-            partes.append((m, tem, passo_do_estado(m["estado"], tem), _datas_dos_passos(conn, m)))
+        # por medicao: (medicao, passos que ela tem, passo da vez, dia de cada passo)
+        partes = [(m, *passo_de[m["id"]], _datas_dos_passos(conn, m)) for m in ms]
         passos = []
         for n in range(1, 7):
             nesse = [(m, atual, datas) for m, tem, atual, datas in partes if n in tem]
@@ -1612,9 +1623,12 @@ def _quadro_do_mes(conn, mes: str, obras: dict[int, dict], sem_fluxo_medicao: se
             situacao = min(situacoes, key=_ORDEM_SITUACAO_PASSO.index)
             dias = [datas[n] for _, _, datas in nesse if datas[n]] if situacao == "feito" else []
             da_vez = next((m["id"] for (m, _, _), s in zip(nesse, situacoes) if s == "atual"), None)
+            # #664: o processo da medicao que esta' NESTE passo; com mais de uma (execucao e reajuste), o mais parado
+            no_siga = [siga_de[m["id"]] for m, atual, _ in nesse if atual == n and m["id"] in siga_de]
             passos.append({"numero": n, "nome": PASSOS[n - 1], "situacao": situacao,
                            "data": max(dias).isoformat() if dias else None,
-                           "medicao_id": da_vez if situacao == "atual" else None})
+                           "medicao_id": da_vez if situacao == "atual" else None,
+                           "siga": siga.mais_parado(no_siga)})
         pedidos = [m["valor_protocolado_centavos"] for m in ms if m["valor_protocolado_centavos"] is not None]
         aprovados = [m["valor_atestado_centavos"] for m in ms if m["valor_atestado_centavos"] is not None]
         quadro.append({"contrato_id": o["id"], "obra": o["obra"], "contratante": o["contratante"],

@@ -36,7 +36,13 @@ export type ObraResumo = {
 };
 export type MedicaoCurta = { numero: number; tipo: string; competencia: string };
 /** #643, quadro do mês: o passo de uma obra na competência. `data` (AAAA-MM-DD) só no passo feito; `medicao_id` só no da vez. */
-export type PassoQuadro = { numero: number; nome: string; situacao: "feito" | "atual" | "futuro"; data: string | null; medicao_id: number | null };
+/** #664: o processo vivo do SIGA da medição que está no passo: setor atual, entrada nele, dias úteis e quantas
+ *  movimentações teve hoje (os da tela SIGA). */
+export type SigaNoQuadro = { processo_id: number; setor: string; dias_uteis: number | null; desde: string | null; hoje: number };
+export type PassoQuadro = {
+  numero: number; nome: string; situacao: "feito" | "atual" | "futuro"; data: string | null; medicao_id: number | null;
+  siga: SigaNoQuadro | null;
+};
 /** Uma obra no quadro: os passos que ela tem, as medições da competência e o pedido e o aprovado somados. Sem medição, `iniciar`. */
 export type LinhaQuadro = {
   contrato_id: number; obra: string; contratante: string; orgao_sub: string | null; medicoes: { id: number; titulo: string }[];

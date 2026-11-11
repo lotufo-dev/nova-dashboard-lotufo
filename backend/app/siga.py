@@ -685,6 +685,64 @@ def do_protocolo(conn, protocolo_id: int, hoje: datetime.date | None = None) -> 
     return saida
 
 
+def _em_lotes(ids, tamanho: int = 500):
+    ids = list(ids)
+    for i in range(0, len(ids), tamanho):
+        yield ids[i:i + tamanho]
+
+
+def _mais_parado(posicao: dict) -> tuple:
+    """Chave de ordem da tela SIGA (`ordenar` em siga.ts): mais dias uteis no setor, depois o mais antigo nele."""
+    return (-(posicao["dias_uteis"] if posicao["dias_uteis"] is not None else -1), posicao["desde"] or "9",
+            posicao["processo_id"])
+
+
+def mais_parado(posicoes: list[dict]) -> dict | None:
+    return min(posicoes, key=_mais_parado, default=None)
+
+
+def posicao_das_medicoes(conn, medicao_ids, hoje: datetime.date) -> dict[int, dict]:
+    """Issue #664: {medicao: posicao do processo vivo ligado a ela}, para o quadro do mes. Ligado pela medicao ou
+    pelo protocolo que a leva. Fica de fora o processo encerrado (`_encerramento`), o que ainda nao foi lido e o que
+    nao tem setor na situacao. Com mais de um processo vivo na medicao, o mais parado. Setor, entrada, dias uteis e
+    movimentacoes de hoje sao os de `derivar`, os mesmos da tela SIGA. Le as movimentacoes de todos os processos numa consulta por lote."""
+    medicoes_de: dict[int, set[int]] = {}
+    for lote in _em_lotes(medicao_ids):
+        marcas = ",".join("?" * len(lote))
+        for r in conn.execute(
+                f"SELECT id, medicao_id FROM siga_processos WHERE medicao_id IN ({marcas}) "
+                "UNION SELECT sp.id, pm.medicao_id FROM siga_processos sp "
+                f"JOIN protocolo_medicoes pm ON pm.protocolo_id=sp.protocolo_id WHERE pm.medicao_id IN ({marcas})",
+                [*lote, *lote]):
+            medicoes_de.setdefault(r[0], set()).add(r[1])
+    lidos, movs_de = {}, {}
+    for lote in _em_lotes(sorted(medicoes_de)):
+        marcas = ",".join("?" * len(lote))
+        for r in conn.execute(
+                "SELECT sp.id, m.estado, l.situacao FROM siga_processos sp "
+                "JOIN siga_leituras l ON l.id=(SELECT u.id FROM siga_leituras u WHERE u.processo_id=sp.id "
+                "ORDER BY u.lido_em DESC, u.id DESC LIMIT 1) "
+                f"LEFT JOIN medicoes m ON m.id=sp.medicao_id WHERE sp.id IN ({marcas})", lote):
+            lidos[r["id"]] = (r["estado"], r["situacao"])
+    for lote in _em_lotes(sorted(lidos)):
+        for r in conn.execute("SELECT processo_id, data, evento, at_lotacao, at_pessoa FROM siga_movimentacoes "
+                              f"WHERE processo_id IN ({','.join('?' * len(lote))})", lote):
+            movs_de.setdefault(r["processo_id"], []).append(dict(r))
+    candidatas: dict[int, list[dict]] = {}
+    for pid, (estado, situacao) in lidos.items():
+        movs = movs_de.get(pid, [])
+        if _encerramento(estado, situacao, movs):
+            continue
+        d = derivar(situacao, movs, hoje)
+        if not d["setor"]:
+            continue
+        posicao = {"processo_id": pid, "setor": d["setor"], "dias_uteis": d["dias_uteis"],
+                   "desde": tempo.iso_local(d["desde"]) if d["desde"] else None, "hoje": d["hoje"]}
+        for mid in medicoes_de[pid]:
+            candidatas.setdefault(mid, []).append(posicao)
+    return {mid: mais_parado(posicoes) for mid, posicoes in candidatas.items()}
+
+
 # --- leitura -----------------------------------------------------------------------------------------------
 
 def processos_para_o_robo(conn) -> list[dict]:

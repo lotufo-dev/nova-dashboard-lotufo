@@ -160,6 +160,15 @@
 .quadro__passo--futuro { color: var(--texto-fraco); font-size: 11px; }
 .quadro__atual { padding: 2px 8px; font-size: 12px; text-decoration: none; }
 .quadro__atual:hover { text-decoration: underline; }
+/* #664: a posição do processo no SIGA, em linhas pequenas sob a situação do passo: a sigla do setor e, embaixo, o tempo
+   no setor. A coluna não alarga: o bloco usa também o respiro lateral da célula e o tempo quebra entre palavras, nunca
+   no meio. A cor do tempo é a da tela SIGA (siga.css, .sg__dias). */
+.quadro__siga { display: block; margin: 3px -2px 0; font-size: 10px; line-height: 13px; white-space: normal; overflow-wrap: normal; color: var(--texto-2); font-weight: 400; }
+.quadro__siga-setor { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.quadro__siga-tempo { color: var(--texto); }
+.quadro__siga-tempo--hoje { color: var(--ok); font-weight: 600; }
+.quadro__siga-tempo--atencao { color: var(--atencao); font-weight: 600; }
+.quadro__siga-tempo--acao { color: var(--acao); font-weight: 600; }
 .quadro__tabela td.quadro__iniciar { text-align: left; padding-left: 12px; }
 .quadro__acao { text-align: right; }
 .quadro__anteriores { table-layout: auto; }
@@ -179,6 +188,12 @@
     content: attr(data-rotulo); flex: none; color: var(--texto-2); font-size: 12px; text-align: left;
   }
   .quadro__tabela td.quadro__passo--sem { display: none; }
+  /* o nome do passo à esquerda; a situação e a posição do SIGA à direita, a posição inteira numa linha (se não couber ao
+     lado da situação, desce para a linha de baixo) */
+  .quadro__tabela tbody td.quadro__passo:has(.quadro__siga) { flex-wrap: wrap; justify-content: flex-end; row-gap: 2px; }
+  .quadro__tabela td.quadro__passo:has(.quadro__siga)::before { margin-right: auto; }
+  .quadro__siga { display: inline; margin: 0; font-size: 12px; line-height: 16px; white-space: nowrap; }
+  .quadro__siga-setor { display: inline; overflow-wrap: normal; }
   .quadro__tabela .col-num { font-size: 14px; }
   .quadro__anteriores.medicoes__tabela .quadro__acao { justify-content: flex-end; padding-top: 8px; }
 }
