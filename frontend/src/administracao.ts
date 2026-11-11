@@ -16,6 +16,9 @@ export const ABAS_ADMIN: { id: AbaAdmin; rotulo: string }[] = [
 // (AAAA-MM-DD) ou competencia (AAAA-MM); `aba`, a da obra onde o documento se confere (nula: a ficha da obra).
 export type PendenciaCadastro = { contrato_id: number; obra: string | null; falta: string; desde: string | null;
                                   aba: "reajuste" | "prazos" | null };
+// Issue #656: o aviso de fato sem data, que nao entra na agenda da tela Avisos; sem obra, `contrato_id` nulo.
+export type AvisoSemData = { contrato_id: number | null; obra: string | null; aviso: string };
+export type PendenciasCadastro = { documentos: PendenciaCadastro[]; sem_data: AvisoSemData[] };
 
 /* ------------------------------------------------------------ reconciliacao */
 

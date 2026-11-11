@@ -299,3 +299,108 @@ def test_painel_diz_a_primeira_competencia_anexada_da_empresa(conn):
     por = {e["entidade_id"]: e for e in documentos.painel(conn)["empresas"]}
     assert por[1]["primeira_regularidade"] == "2024-01" and len(por[1]["regularidades_anexadas"]) == 24
     assert por[2]["primeira_regularidade"] is None
+
+
+# --- issue #658: proximo protocolo previsto e "Renovar agora" ----------------------------------
+
+def _medicao(conn, contrato_id, numero, estado, protocolos=()):
+    mid = conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado) VALUES (?,?,'execucao',?,?)",
+                       (contrato_id, numero, f"2026-{numero:02d}", estado)).lastrowid
+    for data, etapa in protocolos:
+        conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem, etapa) VALUES (?, ?, 'manual', ?)",
+                     (mid, data, etapa))
+    conn.commit()
+    return mid
+
+
+def test_proximo_protocolo_previsto_nos_tres_casos(conn):
+    hoje = D(2026, 9, 23)
+    oid = _orgao(conn, ["fgts"], [])
+    com_protocolo, com_nota, sem_nada, atrasada, encerrada = (
+        _contrato(conn, oid, documentos_json=json.dumps({"n": i})) for i in range(5))
+    conn.execute("UPDATE contratos SET estado='encerrado' WHERE id=?", (encerrada,))
+    # um mes depois do ULTIMO protocolo de nota (o da planilha e o da medicao cancelada nao contam)
+    _medicao(conn, com_protocolo, 1, "protocolada", [("2026-08-05", "nota")])
+    _medicao(conn, com_protocolo, 2, "protocolada", [("2026-09-10", "nota"), ("2026-09-20", "planilha")])
+    _medicao(conn, com_protocolo, 3, "cancelada", [("2026-09-22", "nota")])
+    # nota emitida esperando protocolo: e' hoje, mesmo com protocolo anterior recente
+    _medicao(conn, com_nota, 1, "protocolada", [("2026-09-15", "nota")])
+    _medicao(conn, com_nota, 2, "nota_emitida")
+    # o previsto que ja' passou nao fica no passado: e' hoje
+    _medicao(conn, atrasada, 1, "protocolada", [("2026-05-31", "nota")])
+    _medicao(conn, encerrada, 1, "protocolada", [("2026-09-10", "nota")])
+    assert documentos.proximos_protocolos(conn, hoje) == {
+        com_protocolo: D(2026, 10, 10), com_nota: hoje, sem_nada: None, atrasada: hoje}
+
+
+def test_um_mes_depois_do_dia_31_cai_no_fim_do_mes_seguinte(conn):
+    cid = _contrato(conn, _orgao(conn, ["fgts"], []))
+    _medicao(conn, cid, 1, "protocolada", [("2027-01-31", "nota")])
+    assert documentos.proximos_protocolos(conn, D(2027, 2, 1)) == {cid: D(2027, 2, 28)}
+
+
+def test_renovar_agora_pela_data_do_proximo_protocolo(conn):
+    hoje = D(2026, 9, 23)
+    _consorcio(conn)
+    oid = _orgao(conn, ["fgts", "federal", "municipal", "estadual"], [])
+    cid = _contrato(conn, oid)
+    _medicao(conn, cid, 1, "protocolada", [("2026-09-10", "nota")])       # proximo protocolo: 10/10/2026
+    _cert(conn, 1, "fgts", "2026-09-06", "2026-10-05")          # vence antes do protocolo
+    _cert(conn, 1, "federal", "2026-06-01", "2026-11-20")       # vence depois
+    _cert(conn, 1, "municipal", "2026-08-20", "2026-09-20")     # vencida
+    # estadual: nunca anexada
+    lista = documentos.renovar_agora(conn, hoje)
+    assert [(x["entidade_id"], x["chave"], x["situacao"], x["validade"], x["proximo_protocolo"]) for x in lista] == [
+        (1, "municipal", "vencida", "2026-09-20", "2026-10-10"),
+        (1, "estadual", "faltando", None, "2026-10-10"),
+        (1, "fgts", "ok", "2026-10-05", "2026-10-10")]
+    assert lista[0]["entidade"] == "Lotufo"
+    assert lista[2]["link_emissao"] == documentos.tipo_por_chave(conn, "fgts")["link_emissao"]
+    # o painel devolve a mesma lista e marca cada certidao
+    p = documentos.painel(conn, hoje)
+    assert p["renovar_agora"] == lista
+    linhas = {x["chave"]: x for x in {e["entidade_id"]: e for e in p["empresas"]}[1]["certidoes"]}
+    assert (linhas["fgts"]["renovar"], linhas["fgts"]["proximo_protocolo"]) == (True, "2026-10-10")
+    assert (linhas["federal"]["renovar"], linhas["federal"]["proximo_protocolo"]) == (False, None)
+    assert linhas["municipal"]["renovar"] is True and linhas["estadual"]["renovar"] is True
+    assert linhas["trabalhista"]["renovar"] is False            # nao exigida
+
+
+def test_certidao_que_vence_depois_do_protocolo_nao_entra_mesmo_a_menos_de_7_dias(conn):
+    hoje = D(2026, 9, 23)
+    cid = _contrato(conn, _orgao(conn, ["fgts"], []))
+    _medicao(conn, cid, 1, "protocolada", [("2026-09-15", "nota")])
+    _medicao(conn, cid, 2, "nota_emitida")                      # proximo protocolo: hoje
+    _cert(conn, 1, "fgts", "2026-08-28", "2026-09-26")          # vence em 3 dias, depois do protocolo
+    assert documentos.renovar_agora(conn, hoje) == []
+    # a situacao que o Inicio, os avisos e o checklist leem nao muda
+    assert documentos.situacao(conn, 1, documentos.tipo_por_chave(conn, "fgts"), hoje)["situacao"] == "vencendo"
+
+
+def test_obra_sem_protocolo_anterior_vale_o_limite_de_7_dias(conn):
+    hoje = D(2026, 9, 23)
+    _contrato(conn, _orgao(conn, ["fgts", "federal"], []))
+    _cert(conn, 1, "fgts", "2026-09-01", "2026-09-30")          # 7 dias: entra
+    _cert(conn, 1, "federal", "2026-06-01", "2026-10-01")       # 8 dias: nao entra
+    lista = documentos.renovar_agora(conn, hoje)
+    assert [(x["chave"], x["proximo_protocolo"]) for x in lista] == [("fgts", None)]
+
+
+def test_renovar_agora_olha_a_obra_que_protocola_mais_tarde_e_devolve_a_primeira_que_trava(conn):
+    hoje = D(2026, 9, 23)
+    oid = _orgao(conn, ["fgts"], [])
+    a = _contrato(conn, oid, documentos_json=json.dumps({"n": 1}))
+    b = _contrato(conn, oid, documentos_json=json.dumps({"n": 2}))
+    _medicao(conn, a, 1, "protocolada", [("2026-08-28", "nota")])      # 28/09
+    _medicao(conn, b, 1, "protocolada", [("2026-09-20", "nota")])      # 20/10
+    _cert(conn, 1, "fgts", "2026-09-06", "2026-10-05")          # passa pela obra A, trava a B
+    assert [x["proximo_protocolo"] for x in documentos.renovar_agora(conn, hoje)] == ["2026-10-20"]
+
+
+def test_renovar_agora_fica_fora_da_empresa_desativada(conn):
+    hoje = D(2026, 9, 23)
+    _consorcio(conn)
+    _contrato(conn, _orgao(conn, ["fgts"], []), entidade_id=2)
+    conn.execute("UPDATE entidades SET ativo=0 WHERE id=3")
+    conn.commit()
+    assert {x["entidade_id"] for x in documentos.renovar_agora(conn, hoje)} == {1, 2}

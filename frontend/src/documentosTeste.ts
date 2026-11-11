@@ -34,15 +34,25 @@ export const PAINEL = {
       obras: [{ contrato_id: 5, obra: "Obra Alfa" }, { contrato_id: 6, obra: "Obra Beta" }],
       regularidades_anexadas: [{ id: 9, competencia: "2026-06", anexada_em: "2026-07-08" }], primeira_regularidade: "2026-06",
       certidoes: [
-        base("fgts", "CRF/FGTS", { tipo_id: 2, situacao: "vencendo", dias: 4,
+        base("fgts", "CRF/FGTS", { tipo_id: 2, situacao: "vencendo", dias: 4, renovar: true, proximo_protocolo: "2026-10-10",
           certidao: { id: 7, emissao: "2026-08-29", validade: "2026-09-27", natureza: "negativa", leitura: "manual" } }),
         base("municipal", "Certidão de Débitos Gerais (Prefeitura de Cuiabá)", { tipo_id: 5, situacao: "vencida", dias: null,
+          renovar: true, proximo_protocolo: "2026-10-10",
           certidao: { id: 8, emissao: "2026-08-20", validade: "2026-09-20", natureza: "negativa" } }),
         base("falencia", "Certidão de Falência e Recuperação Judicial (TJMT)", { tipo_id: 6, exigida: false, situacao: "faltando",
           dias: null, certidao: null }),
         base("federal", "Federal", { tipo_id: 1, certidao: { id: 10, emissao: "2026-08-01", validade: "2027-01-20", natureza: "negativa" } }),
       ],
     },
+  ],
+  // #658: o que renovar para nao travar o proximo protocolo (a lista e' do servidor)
+  renovar_agora: [
+    { entidade_id: 1, entidade: "Lotufo", tipo_id: 5, chave: "municipal", tipo: "Certidão de Débitos Gerais (Prefeitura de Cuiabá)",
+      link_emissao: "https://emissao.exemplo.com.br/municipal", situacao: "vencida" as const, dias: null, validade: "2026-09-20",
+      certidao_id: 8, proximo_protocolo: "2026-10-10" },
+    { entidade_id: 1, entidade: "Lotufo", tipo_id: 2, chave: "fgts", tipo: "CRF/FGTS",
+      link_emissao: "https://emissao.exemplo.com.br/fgts", situacao: "vencendo" as const, dias: 4, validade: "2026-09-27",
+      certidao_id: 7, proximo_protocolo: "2026-10-10" },
   ],
   contratos: [
     { contrato_id: 5, obra: "Obra Alfa", entidade_id: 1, orgao: "SINFRA", art: "ART-1", cno: "99001",

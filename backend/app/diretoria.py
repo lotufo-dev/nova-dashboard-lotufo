@@ -651,18 +651,20 @@ def da_obra(conn, contrato_id: int) -> dict:
     return {"faturado_centavos": faturado, "a_receber_centavos": a_receber}
 
 
-def a_receber_por_obra(conn) -> dict[int, int] | None:
-    """O a receber de TODAS as obras de uma vez, em valor CHEIO, pela mesma conta de `da_obra` (lista de Obras, #509).
-    Sem o total liberado, nulo: a lista mostra "—" em vez de um numero nao conciliado. Obra sem nada a receber fica de fora."""
+def a_receber_por_obra(conn, na_cota: bool = False) -> dict[int, int] | None:
+    """O a receber de TODAS as obras de uma vez, em valor CHEIO, pela mesma conta de `da_obra` (#509).
+    Sem o total liberado, nulo: a lista mostra "—" em vez de um numero nao conciliado. Obra sem nada a receber fica de fora.
+    `na_cota` (lista de Obras, #645): cada cobranca na cota da Lotufo (`_cota`), a conta do `por_obra` da tela A receber."""
     if not _liberado(conn):
         return None
     cheio = lambda m: m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"] or 0
+    valor = _cota if na_cota else cheio
     por_obra: dict[int, int] = {}
     for m in _medicoes(conn):
         if m["estado"] in PROTOCOLADAS:
-            por_obra[m["contrato_id"]] = por_obra.get(m["contrato_id"], 0) + cheio(m)
+            por_obra[m["contrato_id"]] = por_obra.get(m["contrato_id"], 0) + valor(m)
     for n in _notas_em_aberto(conn):
-        por_obra[n["contrato_id"]] = por_obra.get(n["contrato_id"], 0) + cheio(n)
+        por_obra[n["contrato_id"]] = por_obra.get(n["contrato_id"], 0) + valor(n)
     return por_obra
 
 

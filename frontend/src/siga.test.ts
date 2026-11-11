@@ -6,7 +6,7 @@ import {
 
 const p = (extra: Partial<ProcessoSiga>): ProcessoSiga => ({
   id: 1, codigo: null, link: null, numero: null, nome: null, contrato_id: null, obra: null, medicao_id: null,
-  medicao_titulo: null, protocolo_id: null, situacao: null, setor: "", caixa_entrada: false, com_quem: "",
+  medicao_titulo: null, protocolo_id: null, situacao: null, encerrado: null, setor: "", caixa_entrada: false, com_quem: "",
   desde: null, dias_uteis: null, hoje: 0, ultima: null, protocolado_em: null, movimentacoes: [], ...extra });
 
 describe("siga", () => {

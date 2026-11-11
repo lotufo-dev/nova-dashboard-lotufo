@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { IconeAlerta, IconeCheck, IconeEnviarNuvem, IconeRelogio, IconeTraco } from "./icones";
+import { IconeAlerta, IconeCheck, IconeClipe, IconeEnviarNuvem, IconeLinkExterno, IconeRelogio, IconeTraco } from "./icones";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import {
   certidoesVencendo, chipCertidao, chipValidadeGarantia, competenciasRegularidade, empresasComCertidaoExigida, empresasComFolha,
-  estadosRegularidade, garantiasAConferir, obrasPorOrgao, regularidadesFaltando, type CorChip, type EmpresaDoc, type ObraDoc,
+  estadosRegularidade, garantiasAConferir, obrasPorOrgao, regularidadesFaltando, type CorChip, type EmpresaDoc, type ObraDoc, type RenovarDoc,
 } from "./matriz";
 import { substituir, trocarBusca, type Busca } from "./rota";
 import { fmtCompetencia, fmtDataPura, fmtMesCurto, fmtMesExtenso } from "./tempo";
@@ -98,7 +98,7 @@ function JanelaZip({ empresas, hoje, aoFechar }: { empresas: EmpresaDoc[]; hoje:
 }
 
 const ABAS = [
-  { id: "certidoes", rotulo: "Certidões", sufixo: (n: number) => `${n} vencendo`, cor: "critico" },
+  { id: "certidoes", rotulo: "Certidões", sufixo: (n: number) => `${n} a renovar`, cor: "critico" },
   { id: "regularidade", rotulo: "Regularidade mensal", sufixo: (n: number) => `${n} faltando`, cor: "critico" },
   // #651: do ultimo documento vencido so' se sabe a data; o contador pede conferencia, sem vermelho
   { id: "garantias", rotulo: "Garantias", sufixo: (n: number) => `${n} a conferir`, cor: "breve" },
@@ -168,6 +168,46 @@ function AbaCertidoes({ empresas, podeBaixar, aoZip }: {
 const CHIPS_CERTIDAO = ["federal", "fgts", "trabalhista", "estadual", "municipal"] as const;
 const NOME_CHIP: Record<string, string> = { federal: "Federal", fgts: "FGTS", trabalhista: "CNDT", estadual: "Estadual", municipal: "Municipal" };
 
+/** "Renovar agora" (#658): o que trava o proximo protocolo, uma linha por certidao. A lista e' do servidor; sem nada
+ *  a renovar o bloco nao existe. Quem so' consulta ve as linhas, sem Emitir nem Anexar. */
+function RenovarAgora({ itens, podeEditar, aoAnexar }: { itens: RenovarDoc[]; podeEditar: boolean; aoAnexar: (chave: string) => void }) {
+  if (itens.length === 0) return null;
+  return (
+    <section className="doc-renovar" aria-labelledby="titulo-renovar">
+      <h2 id="titulo-renovar" className="doc-renovar__titulo">Renovar agora</h2>
+      <ul className="doc-linhas">
+        {itens.map(x => {
+          const nome = NOME_CHIP[x.chave] ?? (x.chave === "falencia" ? "Falência" : x.tipo);
+          const critico = x.situacao === "vencida" || x.situacao === "faltando" || x.dias === 0;
+          const valor = !x.validade ? "sem registro" : x.situacao === "vencida" ? "vencida" : x.dias === 0 ? "hoje" : `${x.dias} d`;
+          return (
+            <li key={`${x.entidade_id}-${x.chave}`} className="doc-linha doc-linha--renovar">
+              <div className="doc-linha__nome"><span className="doc-linha__obra">{x.entidade}</span></div>
+              <span className="doc-renovar__certidao">{nome}</span>
+              <Chip semRotulo cor={critico ? "critico" : "breve"} rotulo="Validade" valor={valor}
+                data={x.validade ? fmtDataPura(x.validade) : undefined} />
+              {podeEditar && (
+                <div className="doc-renovar__acoes">
+                  {x.link_emissao && (
+                    <a href={x.link_emissao} target="_blank" rel="noreferrer" className="btn btn--pequeno"
+                      aria-label={`Emitir ${nome} de ${x.entidade} (abre o site do órgão)`}>
+                      <IconeLinkExterno className="icone" />Emitir
+                    </a>
+                  )}
+                  <button type="button" className="btn btn--pequeno" aria-label={`Anexar ${nome} de ${x.entidade}`}
+                    onClick={() => aoAnexar(x.chave)}>
+                    <IconeClipe className="icone" />Anexar
+                  </button>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 function AbaRegularidade({ empresas, hoje }: { empresas: EmpresaDoc[]; hoje: string }) {
   const comFolha = empresasComFolha(empresas);
   const semFolha = empresas.filter(e => !comFolha.includes(e));
@@ -225,7 +265,7 @@ function GrupoGarantias({ orgao, obras }: { orgao: string; obras: ObraDoc[] }) {
     <section className="doc-grupo" aria-label={`Garantias de ${orgao}`}>
       <div className="doc-linha doc-linha--cabeca">
         <h2 className="doc-grupo__cabeca">{orgao} <span>· {obras.length} {obras.length === 1 ? "obra" : "obras"}</span></h2>
-        <div className="doc-chips doc-chips--5" aria-hidden="true">
+        <div className="doc-chips doc-chips--4" aria-hidden="true">
           {["Apólice", "Válida até", "Cobre a execução", "CNO"].map(r => <span key={r}>{r}</span>)}
         </div>
       </div>
@@ -237,7 +277,7 @@ function GrupoGarantias({ orgao, obras }: { orgao: string; obras: ObraDoc[] }) {
           return (
             <li key={o.contrato_id} className="doc-linha doc-linha--obra">
               <div className="doc-linha__nome"><span className="doc-linha__obra">{o.obra}</span></div>
-              <div className="doc-chips doc-chips--5">
+              <div className="doc-chips doc-chips--4">
                 <Chip semRotulo cor={g?.apolice ? "feito" : "critico"} rotulo="Apólice" valor={g?.apolice || "sem registro"} />
                 <Chip semRotulo cor={valida.cor} rotulo="Válida até" valor={valida.valor} />
                 <Chip semRotulo cor={!g ? "critico" : cob?.cobre === true ? "feito" : cob?.cobre === false && cob.ate ? "breve" : "neutro"}
@@ -259,7 +299,7 @@ function GrupoGarantias({ orgao, obras }: { orgao: string; obras: ObraDoc[] }) {
 }
 
 const LEGENDAS: Record<IdAba, { classe: string; texto: string }[]> = {
-  certidoes: [{ classe: "feito", texto: "em dia" }, { classe: "breve", texto: "vence em até 7 dias" }, { classe: "critico", texto: "vencida" }],
+  certidoes: [{ classe: "feito", texto: "em dia" }, { classe: "breve", texto: "vence antes do próximo protocolo" }, { classe: "critico", texto: "vencida" }],
   regularidade: [{ classe: "feito", texto: "anexada" }, { classe: "andamento", texto: "aguardando o DP" }, { classe: "breve", texto: "faltando" }],
   garantias: [{ classe: "feito", texto: "em dia" }, { classe: "breve", texto: "não cobre" }, { classe: "critico", texto: "sem registro" }],
 };
@@ -290,8 +330,10 @@ export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; 
   const comCertidao = useMemo(() => empresasComCertidaoExigida(empresas), [empresas]);
   const obras = painel?.contratos ?? [];
   const hoje = painel?.hoje ?? "";
+  // #658: o contador da aba e' o que esta' em "Renovar agora" (a lista do servidor)
+  const renovar = painel?.renovar_agora;
   const contadores: Record<IdAba, number> = painel ? {
-    certidoes: certidoesVencendo(comCertidao),
+    certidoes: renovar ? renovar.length : certidoesVencendo(comCertidao),
     regularidade: regularidadesFaltando(empresas),
     garantias: garantiasAConferir(obras),
   } : { certidoes: 0, regularidade: 0, garantias: 0 };
@@ -330,6 +372,7 @@ export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; 
       )}
       {painel && (
         <div id="painel-documentos" role="tabpanel" aria-labelledby={`aba-${aba}`} className="doc-painel-aba">
+          {aba === "certidoes" && <RenovarAgora itens={renovar ?? []} podeEditar={podeEditar} aoAnexar={chave => anexar.current?.escolher(chave)} />}
           {aba === "certidoes" && <AbaCertidoes empresas={comCertidao} podeBaixar={true} aoZip={setZip} />}
           {aba === "regularidade" && <AbaRegularidade empresas={empresas} hoje={hoje} />}
           {aba === "garantias" && (

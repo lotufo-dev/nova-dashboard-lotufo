@@ -7,6 +7,15 @@ export type LinhaCertidao = {
   tipo_id: number; chave: string; tipo: string; link_emissao: string | null; exigida: boolean;
   situacao: "ok" | "vencendo" | "vencida" | "faltando" | "nao_se_aplica"; dias: number | null;
   certidao: CertidaoDoc | null;
+  // #658: do servidor. `renovar` = vencida, sem registro ou vence ate' o proximo protocolo previsto de uma obra que a
+  // exige; `proximo_protocolo` = a data do primeiro protocolo que ela trava.
+  renovar?: boolean; proximo_protocolo?: string | null;
+};
+/** Uma linha do bloco "Renovar agora" (#658): a lista e' do servidor (`documentos.renovar_agora`). */
+export type RenovarDoc = {
+  entidade_id: number; entidade: string; tipo_id: number; chave: string; tipo: string; link_emissao: string | null;
+  situacao: LinhaCertidao["situacao"]; dias: number | null; validade: string | null; certidao_id: number | null;
+  proximo_protocolo: string | null;
 };
 export type RegularidadeDoc = { situacao: "ok" | "atrasada" | "faltando"; competencia: string | null; esperada: string };
 export type Garantia = { apolice: string | null; vigencia_fim: string; dias: number; origem: "contrato" | "endosso";
@@ -160,13 +169,15 @@ export function situacaoGarantia(g: Garantia | null, ate: string): { texto: stri
 
 /* ---------------------------------------------------------------- Documentos em tres abas (#513) */
 
-/** A cor do chip (as classes `info--*` do tokens.css): feito = em dia/anexada, andamento = aguardando, breve = vence em
- *  ate' 7 dias ou falta, critico = vencida, sem registro ou vence hoje. */
+/** A cor do chip (as classes `info--*` do tokens.css): feito = em dia/anexada, andamento = aguardando, breve = vence
+ *  antes do proximo protocolo (#658) ou falta, critico = vencida, sem registro ou vence hoje. */
 export type CorChip = "feito" | "andamento" | "breve" | "critico" | "neutro";
 export const LIMITE_BREVE_DIAS = 7;
 
 /** O chip de uma certidao na aba Certidoes: dias que faltam ("9 d", "hoje") e a data completa. Certidao nao exigida
- *  fica neutra ("—"); `contaNoAviso` diz se entra no contador "N vencendo" (amarelo ou vermelho, so' as exigidas). */
+ *  fica neutra ("—"); `contaNoAviso` diz se entra no contador "N a renovar" (amarelo ou vermelho, so' as exigidas).
+ *  Ambar (#658): a que o servidor marca `renovar` (vence ate' o proximo protocolo previsto); resposta sem a marca cai
+ *  no limite fixo de 7 dias. */
 export function chipCertidao(l: LinhaCertidao | undefined, validade: string):
     { cor: CorChip; valor: string; data: string; contaNoAviso: boolean } {
   if (!l || l.situacao === "nao_se_aplica" || !l.exigida) return { cor: "neutro", valor: "—", data: "", contaNoAviso: false };
@@ -175,7 +186,7 @@ export function chipCertidao(l: LinhaCertidao | undefined, validade: string):
     return { cor: "critico", valor: "vencida", data: validade, contaNoAviso: true };
   }
   if (l.dias === 0) return { cor: "critico", valor: "hoje", data: validade, contaNoAviso: true };
-  const breve = l.dias <= LIMITE_BREVE_DIAS;
+  const breve = l.renovar ?? l.dias <= LIMITE_BREVE_DIAS;
   return { cor: breve ? "breve" : "feito", valor: `${l.dias} d`, data: validade, contaNoAviso: breve };
 }
 

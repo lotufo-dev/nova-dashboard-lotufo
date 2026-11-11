@@ -16,9 +16,14 @@ export type ObraLista = {
   medido_execucao_centavos?: number | null; saldo_centavos?: number | null;
   // o contratante, como em Medicoes ("SINFRA" para toda a familia, com a superintendencia em `orgao_sub`)
   contratante?: string | null; orgao_sub?: string | null;
-  // a cota da Lotufo (10000 = 100%) e o a receber CHEIO da obra (nulo ate' o total ser liberado), da lista de Obras (#509)
-  percentual_direito_bp?: number | null; a_receber_centavos?: number | null;
+  // a cota da Lotufo (10000 = 100%)
+  percentual_direito_bp?: number | null;
+  // #645: o que a lista de Obras mostra, ja' NA COTA da Lotufo e na base de execucao, pela conta do topo da pagina da
+  // obra (servidor); o a receber e' nulo ate' o total ser liberado
+  posicao?: PosicaoObra | null;
 };
+
+export type PosicaoObra = { vigente_centavos: number; medido_centavos: number; saldo_centavos: number; a_receber_centavos: number | null };
 
 /** `paralisadas`: os ids das obras paralisadas (`prazoDaObra`); a execucao delas nao vence (D16). */
 export type FiltroObras = {
@@ -128,21 +133,31 @@ export function filtrarObras(lista: ObraLista[], f: FiltroObras): ObraLista[] {
 export const vigenteDe = (o: ObraLista) => o.valor_vigente_execucao_centavos ?? o.valor_vigente_centavos ?? 0;
 export const medidoDe = (o: ObraLista) => o.medido_execucao_centavos ?? 0;
 
-/** Os totais do topo, somados sobre as linhas que a tabela mostra. O a receber so' tem valor com o total liberado
- *  (todas as obras com nulo): nulo vira "—", nunca zero. */
-export function totaisDe(obras: ObraLista[]) {
-  const t = { contratado: 0, medido: 0, saldo: 0, aReceber: 0, temReceber: false };
+/** A posicao da obra na cota da Lotufo (#645), como o servidor mandou; o que ele nao deu conta como zero. */
+export function posicaoDe(o: ObraLista): PosicaoObra {
+  return o.posicao ?? { vigente_centavos: 0, medido_centavos: 0, saldo_centavos: 0, a_receber_centavos: null };
+}
+
+export type TotaisObras = { contratado: number; medido: number; saldo: number; aReceber: number; temReceber: boolean };
+
+/** Os totais (do topo ou de um contratante), somados sobre as linhas que a tabela mostra, ja' na cota: so' soma, nenhum
+ *  arredondamento novo. O a receber so' tem valor com o total liberado (todas as obras com nulo): nulo vira "—", nunca zero. */
+export function totaisDe(obras: ObraLista[]): TotaisObras {
+  const t: TotaisObras = { contratado: 0, medido: 0, saldo: 0, aReceber: 0, temReceber: false };
   for (const o of obras) {
-    t.contratado += vigenteDe(o); t.medido += medidoDe(o); t.saldo += vigenteDe(o) - medidoDe(o);
-    if (o.a_receber_centavos != null) { t.aReceber += o.a_receber_centavos; t.temReceber = true; }
+    const p = posicaoDe(o);
+    t.contratado += p.vigente_centavos; t.medido += p.medido_centavos; t.saldo += p.saldo_centavos;
+    if (p.a_receber_centavos != null) { t.aReceber += p.a_receber_centavos; t.temReceber = true; }
   }
   return t;
 }
 
-/** Quanto da obra ja' foi executado, em %, inteiro: medido de execucao ÷ valor vigente. Sem valor vigente, nulo. */
+/** Quanto da obra ja' foi executado, em %, inteiro: medido de execucao ÷ valor vigente (da posicao na cota quando a
+ *  lista a traz; a razao e' a mesma do cheio). Sem valor vigente, nulo. */
 export function pctExecutado(o: ObraLista): number | null {
-  const v = vigenteDe(o);
-  return v > 0 ? Math.round((medidoDe(o) * 100) / v) : null;
+  const v = o.posicao ? o.posicao.vigente_centavos : vigenteDe(o);
+  const m = o.posicao ? o.posicao.medido_centavos : medidoDe(o);
+  return v > 0 ? Math.round((m * 100) / v) : null;
 }
 
 export type ResumoContratante = {
@@ -183,23 +198,24 @@ export function contratantesDe(lista: ObraLista[]): string[] {
   return [...new Set(lista.map(contratanteDaObra))].sort((a, b) => a.localeCompare(b, "pt-BR"));
 }
 
+/** As obras agrupadas pelo contratante (#645), os grupos na ordem do nome do contratante e as obras de cada um na ordem
+ *  do nome, com o subtotal do grupo (`totaisDe`). */
+export function gruposPorContratante(obras: ObraLista[]): { contratante: string; obras: ObraLista[]; subtotal: TotaisObras }[] {
+  return contratantesDe(obras).map(contratante => {
+    const doGrupo = obras.filter(o => contratanteDaObra(o) === contratante)
+      .sort((a, b) => nomeDaObra(a).localeCompare(nomeDaObra(b), "pt-BR"));
+    return { contratante, obras: doGrupo, subtotal: totaisDe(doGrupo) };
+  });
+}
+
 /** O contratante da URL: `?c=todas` e' "Todas as obras" (sem recorte de orgao); `?c=<orgao>` (ou o `?orgao=` dos
  *  links de antes) e' um orgao. Sem `c`, a pagina e' a escolha do contratante, a menos que haja um filtro de antes
- *  (`?termina=`, `?q=`, `?situacao=`): esses links abrem a lista de todas as obras, como abriam, e a tela poe `c`
- *  na URL (`cDaUrlAntiga`) para que limpar o ultimo filtro nao volte a escolha. */
+ *  (`?termina=`, `?q=`, `?situacao=`): esses links abrem a lista de todas as obras, como abriam. */
 export function escopoDaUrl(busca: Record<string, string>): { escolha: boolean; orgao: string | null } {
   const c = busca.c ?? busca.orgao ?? "";
   if (c && c !== "todas") return { escolha: false, orgao: c };
   const antigo = ["termina", "q", "situacao", "ver", "avisos"].some(k => busca[k] !== undefined);
   return { escolha: !c && !antigo, orgao: null };
-}
-
-/** O `c` que um link de antes ainda nao tem: `?orgao=X` vira `?c=X` e os filtros soltos (`?termina=`, `?q=`...) viram
- *  `?c=todas`. Nulo quando a URL ja' esta' no formato novo (ou e' a escolha do contratante). */
-export function cDaUrlAntiga(busca: Record<string, string>): string | null {
-  if (busca.c !== undefined) return null;
-  if (busca.orgao) return busca.orgao;
-  return ["termina", "q", "situacao", "ver", "avisos"].some(k => busca[k] !== undefined) ? "todas" : null;
 }
 
 /** O aviso mais grave da obra, para a linha do cartao. */

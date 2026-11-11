@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { api } from "./api";
 import { IconeAjustes, IconeAlerta, IconeArquivo, IconeCifrao, IconeDocumento, IconeGrade, IconeInicio, IconeMedicoes, IconeObras, IconeSiga,
   IconeSeta, IconeSino, IconeVoltar } from "./icones";
@@ -35,12 +35,7 @@ const ICONES: Record<ItemMenu, (p: { className?: string }) => React.ReactElement
   "a-receber": IconeCifrao, carteira: IconeGrade, "ancoras-docusign": IconeArquivo, admin: IconeAjustes,
 };
 
-/** Os dois itens de baixo de "Medições" (#507), cada um com a contagem; aparecem com a seção aberta. */
-export type ContagensMedicoes = { iniciar: number; andamento: number };
-
-export function Trilho({ perfil, marcado, ir, subitem = null, contagens = null }: {
-  perfil: string; marcado: ItemMenu | "conta" | null; ir: Ir; subitem?: "iniciar" | "em-andamento" | null; contagens?: ContagensMedicoes | null;
-}) {
+export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemMenu | "conta" | null; ir: Ir }) {
   const [estado, setEstado] = useState<"largo" | "recolhido">(estadoInicial);
   const largo = estado === "largo";
   const caixa = useRef<HTMLElement>(null);
@@ -85,27 +80,12 @@ export function Trilho({ perfil, marcado, ir, subitem = null, contagens = null }
             copiar link e historico de graca. O item fica aceso tambem abaixo dele na hierarquia (navegacao.ts). */}
         {menuDe(perfil).map(i => {
           const Icone = ICONES[i];
-          const aberta = i === "medicoes" && marcado === "medicoes" && subitem !== null;
           return (
-            <Fragment key={i}>
-              {/* dentro de Medições o item pai vira o título da seção e o marcado é o subitem (#507) */}
-              <Link className="trilho__item" para={rotaDoItem(i)} menu ir={ir} title={largo ? undefined : ROTULO[i]}
-                aria-current={marcado === i && !aberta ? "page" : undefined} data-secao={aberta ? "aberta" : undefined}>
-                <span className="trilho__celula"><Icone className="icone trilho__icone" /></span>
-                <span className="trilho__rotulo">{ROTULO[i]}</span>
-              </Link>
-              {aberta && (
-                <div className="trilho__sub" role="group" aria-label="Medições">
-                  {([["iniciar", "Iniciar medição", { tela: "medicoes" }, contagens?.iniciar],
-                    ["em-andamento", "Em andamento", { tela: "medicoes", aba: "em-andamento" }, contagens?.andamento]] as const).map(([id, rotulo, para, n]) => (
-                    <Link key={id} className="trilho__subitem" para={para} menu ir={ir} aria-current={subitem === id ? "page" : undefined}>
-                      <span className="trilho__rotulo">{rotulo}</span>
-                      {n !== undefined && <span className="trilho__n">{n}</span>}
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </Fragment>
+            <Link key={i} className="trilho__item" para={rotaDoItem(i)} menu ir={ir} title={largo ? undefined : ROTULO[i]}
+              aria-current={marcado === i ? "page" : undefined}>
+              <span className="trilho__celula"><Icone className="icone trilho__icone" /></span>
+              <span className="trilho__rotulo">{ROTULO[i]}</span>
+            </Link>
           );
         })}
         <button type="button" className="trilho__alternar" aria-expanded={largo}

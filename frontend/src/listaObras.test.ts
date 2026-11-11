@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Aviso } from "./Alertas";
-import { avisoPrincipal, contratantesDe, escopoDaUrl, filtrarObras, pctExecutado, prazoDaObra, resumoContratante, type ObraLista } from "./listaObras";
+import { avisoPrincipal, contratantesDe, escopoDaUrl, filtrarObras, gruposPorContratante, pctExecutado, posicaoDe, prazoDaObra, resumoContratante, totaisDe, type ObraLista } from "./listaObras";
 
 const o = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => ({
   id, orgao: "SINFRA", numero_instrumento: `${id}/2026`, nome_curto: nome, estado: "ativo", ...extra });
@@ -108,5 +108,43 @@ describe("contratantes (entrada de Obras, #159)", () => {
     expect(filtrarObras(l, { q: "alfa", empresas }).map(x => x.id)).toEqual([1]);
     expect(filtrarObras(l, { q: "mtpar", empresas }).map(x => x.id)).toEqual([2]);
     expect(filtrarObras(l, { q: "alfa" })).toHaveLength(0);
+  });
+});
+
+describe("lista de Obras na cota da Lotufo, por contratante (#645)", () => {
+  // `posicao` vem do servidor já na cota; os cheios ao lado são de propósito outros, para a soma não os usar
+  const naCota = (id: number, nome: string, contratante: string, vigente: number, medido: number, aReceber: number | null) =>
+    o(id, nome, { contratante, orgao: `${contratante} - SUP`, valor_vigente_centavos: vigente * 2, valor_vigente_execucao_centavos: vigente * 2, medido_execucao_centavos: medido * 2,
+      posicao: { vigente_centavos: vigente, medido_centavos: medido, saldo_centavos: vigente - medido, a_receber_centavos: aReceber } });
+  const lista = [
+    naCota(1, "Ponte", "SINFRA", 1000_01, 250_00, 100_01), naCota(2, "Avenida", "SINFRA", 3000_00, 750_33, 0),
+    naCota(3, "Hospital", "MTPAR", 2000_00, 1000_00, 50_00),
+  ];
+
+  it("os totais somam as linhas na cota, sem arredondar de novo; a receber nulo fica sem valor", () => {
+    expect(totaisDe(lista)).toEqual({ contratado: 6000_01, medido: 2000_33, saldo: 3999_68, aReceber: 150_01, temReceber: true });
+    const semLiberar = lista.map(x => ({ ...x, posicao: { ...x.posicao!, a_receber_centavos: null } }));
+    expect(totaisDe(semLiberar)).toMatchObject({ aReceber: 0, temReceber: false });
+  });
+
+  it("obra sem `posicao` conta zero e o % executado sai da posição", () => {
+    expect(posicaoDe(o(9, "Sem posição", { valor_vigente_centavos: 500_00 }))).toEqual({ vigente_centavos: 0, medido_centavos: 0, saldo_centavos: 0, a_receber_centavos: null });
+    expect(pctExecutado(lista[0])).toBe(25);
+  });
+
+  it("agrupa por contratante na ordem do nome, as obras na ordem do nome, com o subtotal do grupo", () => {
+    const grupos = gruposPorContratante(lista);
+    expect(grupos.map(g => g.contratante)).toEqual(["MTPAR", "SINFRA"]);
+    expect(grupos[1].obras.map(x => x.nome_curto)).toEqual(["Avenida", "Ponte"]);
+    expect(grupos[1].subtotal).toEqual({ contratado: 4000_01, medido: 1000_33, saldo: 2999_68, aReceber: 100_01, temReceber: true });
+    // a soma dos subtotais é o total do topo
+    const t = totaisDe(lista);
+    for (const k of ["contratado", "medido", "saldo", "aReceber"] as const) expect(grupos.reduce((a, g) => a + g.subtotal[k], 0)).toBe(t[k]);
+  });
+
+  it("a busca da lista acha por parte do nome ou do número do contrato; vazia, volta tudo", () => {
+    expect(filtrarObras(lista, { q: "pon" }).map(x => x.id)).toEqual([1]);
+    expect(filtrarObras(lista, { q: "3/2026" }).map(x => x.id)).toEqual([3]);
+    expect(filtrarObras(lista, { q: "" })).toHaveLength(3);
   });
 });

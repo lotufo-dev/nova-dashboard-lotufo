@@ -101,15 +101,14 @@ def da_obra(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | No
     # e' a diferenca dos dois, para a conta da tela fechar ao centavo. O reajuste contratado vai a parte.
     bp = v["percentual_direito_bp"]
     s = paineis.saldo(conn, contrato_id)
-    vigente = contratos.cota(s["vigente_execucao_centavos"], bp)
-    medido = contratos.cota(s["atestado_execucao_centavos"], bp)
+    posicao = paineis.posicao_na_cota(s["vigente_execucao_centavos"], s["atestado_execucao_centavos"], bp)   # a da lista (#645)
     # #655: o cartao "Ritmo e prazo" na mesma base do topo: o ritmo vai na cota e o saldo e' o do topo (o mesmo
     # numero do cartao Execucao). As datas e a situacao nao mudam com a cota (saldo e ritmo na mesma proporcao).
     ritmo = prazos.ritmo_e_prazo(conn, contrato_id, hoje)
     if ritmo["ritmo_centavos"] is not None:
         ritmo["ritmo_centavos"] = contratos.cota(ritmo["ritmo_centavos"], bp)
-    ritmo["saldo_centavos"] = vigente - medido
-    return {"topo": {"vigente_centavos": vigente, "medido_centavos": medido, "saldo_centavos": vigente - medido,
+    ritmo["saldo_centavos"] = posicao["saldo_centavos"]
+    return {"topo": {**posicao,
                      "reajuste_centavos": contratos.cota(s["reajuste_contratado_centavos"], bp)},
             "ritmo": ritmo,
             "contrato": {"original_centavos": contratos.cota(v["valor_original_centavos"], bp),

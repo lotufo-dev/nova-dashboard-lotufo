@@ -17,21 +17,26 @@ const secao = (nome: RegExp) => screen.getByRole("heading", { name: nome }).clos
 describe("Avisos: o que vence quando", () => {
   afterEach(() => { cleanup(); });
 
-  it("cada aviso cai em uma seção só: vencido há 3 dias, 5 dias, 20 dias, 60 dias e sem data", () => {
-    painel([
+  it("cada aviso cai em uma seção só: vencido há 3 dias, 5 dias, 20 dias e 60 dias; sem data e além de 90 dias não aparecem (#656)", () => {
+    const { container } = painel([
       aviso({ obra: "Vencida", mensagem: "Vencida: execução vencida", dias: -3, data: "2026-11-04" }),
       aviso({ obra: "Semana", mensagem: "Semana: FGTS vence", dias: 5, data: "2026-11-12" }),
       aviso({ obra: "Mes", dias: 20, data: "2026-11-27" }),
       aviso({ obra: "Longe", dias: 60, data: "2027-01-06" }),
-      aviso({ obra: "Parada", tipo: "nota_divergente", dias: null, data: null, sentido: null, destino: null, mensagem: "Parada: nota divergente" }),
+      aviso({ obra: "Distante", contrato_id: 8, dias: 120, data: "2027-03-07" }),
+      aviso({ obra: "Parada", contrato_id: 9, tipo: "nota_divergente", dias: null, data: null, sentido: null, mensagem: "Parada: nota divergente",
+        destino: { tela: "contrato", id: 9, aba: "notas" } }),
     ]);
     const nomes = screen.getAllByRole("heading", { level: 3 }).map(h => h.textContent);
-    expect(nomes).toEqual(["VENCIDO · 1", "ESTA SEMANA · 1", "ESTE MÊS · 1", "DEPOIS · 1", "SEM DATA · 1"]);
+    expect(nomes).toEqual(["VENCIDO · 1", "ESTA SEMANA · 1", "ESTE MÊS · 1", "DEPOIS · 1"]);
     expect(within(secao(/^VENCIDO/)).getByText("Vencida")).toBeTruthy();
     expect(within(secao(/^ESTA SEMANA/)).getByText("Semana")).toBeTruthy();
     expect(within(secao(/^ESTE MÊS/)).getByText("Mes")).toBeTruthy();
     expect(within(secao(/^DEPOIS/)).getByText("Longe")).toBeTruthy();
-    expect(within(secao(/^SEM DATA/)).getByText("Parada")).toBeTruthy();
+    // fora da agenda: nem linha, nem obra no filtro, nem família no filtro
+    expect(container.textContent).not.toMatch(/Sem data|Parada|Distante/i);
+    expect(screen.queryByRole("link", { name: "Nota" })).toBeNull();
+    expect(within(screen.getByLabelText("Obra")).getAllByRole("option").map(o => o.textContent)).toEqual(["Todas", "Longe"]);      // a obra 7 (o último nome dela); 8 e 9 não
     // a data do fato, a obra em coluna própria e os dias
     const vencido = within(secao(/^VENCIDO/));
     expect(vencido.getByText("04/11/2026")).toBeTruthy();
@@ -40,20 +45,41 @@ describe("Avisos: o que vence quando", () => {
     expect(vencido.getByRole("link", { name: /execução vencida/  }).getAttribute("href")).toContain("/obras/7");
   });
 
-  it("sem aviso sem data, a seção 'Sem data' não aparece; as quatro do tempo aparecem sempre", () => {
+  it("as quatro seções do tempo aparecem sempre", () => {
     painel([aviso()]);
     expect(screen.getAllByRole("heading", { level: 3 }).map(h => h.textContent))
       .toEqual(["VENCIDO · 0", "ESTA SEMANA · 0", "ESTE MÊS · 1", "DEPOIS · 0"]);
   });
 
-  it("o vencido mostra os primeiros, do mais antigo, e '… e mais N' abre o resto", () => {
+  it("só aviso fora da agenda (sem data, ou além de 90 dias): 'Nenhum aviso.'", () => {
+    painel([aviso({ dias: null, data: null, sentido: null }), aviso({ dias: 200, data: "2027-05-30" })]);
+    expect(screen.getByText("Nenhum aviso.")).toBeTruthy();
+    expect(screen.queryAllByRole("heading", { level: 3 })).toHaveLength(0);
+  });
+
+  it("certidão vencida que vem com data e sem dias aparece em Vencido, na posição da data de validade (#656)", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-11T15:00:00Z"));
+    try {
+      const certidao = (entidade: string, data: string) => aviso({ tipo: "documento_vencido", nivel: "critico", contrato_id: null, obra: null,
+        entidade_id: 3, entidade, dias: null, data, mensagem: `${entidade}: FGTS vencida`, destino: { tela: "documentos" } });
+      painel([aviso({ obra: "Recente", dias: -2, data: "2026-11-09" }), certidao("Construtora Alfa", "2026-11-01"),
+        aviso({ obra: "Antiga", dias: -30, data: "2026-10-12" }), certidao("Construtora Beta", "2026-11-20")]);
+      const linhas = within(secao(/^VENCIDO/)).getAllByRole("listitem");
+      expect(linhas.map(l => l.querySelector(".aviso-linha__obra")?.textContent)).toEqual(["Antiga", "Construtora Alfa", "Recente"]);
+      expect(within(linhas[1]).getByText("01/11/2026")).toBeTruthy();
+      expect(within(linhas[1]).getByText("há 10 dias")).toBeTruthy();
+      expect(within(secao(/^ESTE MÊS/)).getByText("9 dias")).toBeTruthy();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("o vencido mostra todos, do mais antigo, sem o corte '… e mais N' (#656)", () => {
     const vencidos = Array.from({ length: 9 }, (_, i) => aviso({ obra: `Obra ${i}`, dias: -(i + 1), data: `2026-10-${String(20 - i).padStart(2, "0")}` }));
     painel(vencidos);
     const vencido = secao(/^VENCIDO/);
-    expect(within(vencido).getAllByRole("listitem")).toHaveLength(6);
-    expect(within(vencido).getAllByRole("listitem")[0].textContent).toContain("Obra 8");
-    fireEvent.click(within(vencido).getByRole("button", { name: "… e mais 3" }));
     expect(within(vencido).getAllByRole("listitem")).toHaveLength(9);
+    expect(within(vencido).getAllByRole("listitem")[0].textContent).toContain("Obra 8");
+    expect(within(vencido).queryByRole("button")).toBeNull();
   });
 
   it("a vencer, o mais próximo primeiro", () => {

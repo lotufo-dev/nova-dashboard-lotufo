@@ -617,19 +617,19 @@ def test_sem_rodada_completa_terminada_a_rodada_e_completa_e_automatica(conn, ro
                               {"codigo": None, "numero": "ORGAO-PRO-2026/00012", "nome": "Processo Gama"}]
 
 
-def test_rodada_completa_por_tempo_aos_14_minutos_da_ultima_completa(conn, robo):
+def test_rodada_completa_por_tempo_aos_59_minutos_da_ultima_completa(conn, robo):
     r = siga.iniciar_rodada(conn, AGORA)
     siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(3))
-    # 13 minutos depois, sem pedido: nada a ler, e nada gravado
-    assert siga.iniciar_rodada(conn, AGORA + _min(13)) == {"rodada_id": None, "tipo": None, "processos": []}
+    # 58 minutos depois, sem pedido: nada a ler, e nada gravado
+    assert siga.iniciar_rodada(conn, AGORA + _min(58)) == {"rodada_id": None, "tipo": None, "processos": []}
     assert _conta(conn, "siga_rodadas") == 1
     # com o pedido de um processo, so' ele
-    _pedir(conn, robo, robo.ids[1], AGORA + _min(13))
-    r2 = siga.iniciar_rodada(conn, AGORA + _min(13))
+    _pedir(conn, robo, robo.ids[1], AGORA + _min(58))
+    r2 = siga.iniciar_rodada(conn, AGORA + _min(58))
     assert r2["tipo"] == "pedido" and [p["codigo"] for p in r2["processos"]] == ["DEF456"]
-    siga.terminar_rodada(conn, r2["rodada_id"], [], AGORA + _min(13, 30))
-    # 14 minutos depois do inicio da ultima completa (a rodada automatica de 15 em 15 minutos), todos
-    r3 = siga.iniciar_rodada(conn, AGORA + _min(14))
+    siga.terminar_rodada(conn, r2["rodada_id"], [], AGORA + _min(58, 30))
+    # 59 minutos depois do inicio da ultima completa (a rodada automatica de hora em hora, #657), todos
+    r3 = siga.iniciar_rodada(conn, AGORA + _min(59))
     assert r3["tipo"] == "automatica" and len(r3["processos"]) == 3
 
 
@@ -657,7 +657,7 @@ def test_rodada_de_pedido_le_so_os_processos_pedidos(conn, robo):
 
 
 def test_so_pedidos_nunca_abre_rodada_automatica(conn, robo):
-    # o robo fora do horario (#347): sem pedido nada a ler, mesmo sem rodada completa ha' mais de 14 minutos
+    # o robo fora do horario (#347): sem pedido nada a ler, mesmo sem rodada completa ha' mais de 59 minutos
     assert siga.iniciar_rodada(conn, AGORA, so_pedidos=True) == {"rodada_id": None, "tipo": None, "processos": []}
     assert _conta(conn, "siga_rodadas") == 0
     _pedir(conn, robo, robo.ids[1], AGORA)
@@ -878,7 +878,150 @@ def test_rodada_terminada_nao_aceita_outro_fim_nem_falha(conn, robo):
         siga.falhar_rodada(conn, r["rodada_id"], "caiu", AGORA + _min(3))
     with pytest.raises(LookupError):
         siga.falhar_rodada(conn, 999, "caiu", AGORA + _min(3))
-    r2 = siga.iniciar_rodada(conn, AGORA + _min(20))
+    r2 = siga.iniciar_rodada(conn, AGORA + _min(60))
     with pytest.raises(ValueError, match="código ou o número"):
-        siga.terminar_rodada(conn, r2["rodada_id"], [{"codigo": " ", "numero": None, "motivo": "x"}], AGORA + _min(21))
+        siga.terminar_rodada(conn, r2["rodada_id"], [{"codigo": " ", "numero": None, "motivo": "x"}], AGORA + _min(61))
     assert conn.execute("SELECT terminada_em FROM siga_rodadas WHERE id=?", (r2["rodada_id"],)).fetchone()[0] is None
+
+
+# --- processo encerrado (issue #657) ----------------------------------------------------------------------
+
+def _encerrado(conn, codigo="ABC123"):
+    painel = siga.painel(conn, _cuiaba(2026, 10, 28, 11))
+    return next(p for p in painel["processos"] if p["codigo"] == codigo)["encerrado"]
+
+
+def test_processo_de_medicao_recebida_e_encerrado_e_volta_se_a_medicao_deixar_de_estar_recebida(conn):
+    _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), _leitura(numero="SINFRA-PRO-2026/00001"))
+    assert _encerrado(conn) is None
+    conn.execute("UPDATE medicoes SET estado='recebida' WHERE id=31"); conn.commit()
+    assert _encerrado(conn) == "recebida"
+    assert _encerrado(conn, codigo=None) is None            # o outro processo, sem medicao, continua vivo
+    conn.execute("UPDATE medicoes SET estado='protocolada' WHERE id=31"); conn.commit()
+    assert _encerrado(conn) is None                          # derivado: nada foi gravado
+
+
+@pytest.mark.parametrize("situacao,eventos,esperado", [
+    ("1º Volume - Aguardando Andamento [ARQUIVO GERAL, [X]]", ["Transferência"], "arquivado"),
+    ("1º Volume - Arquivado [PROTOC, [X]]", ["Transferência"], "arquivado"),
+    ("1º Volume - Aguardando Andamento [COFIN, [X]]", ["Transferência", "ARQUIVAMENTO definitivo"], "arquivado"),
+    ("1º Volume - Aguardando Andamento [COFIN, [X]]", ["Arquivamento", "Marcação"], "arquivado"),
+    ("1º Volume - Aguardando Andamento [COFIN, [X]]", ["Arquivamento", "Desarquivamento"], None),
+    ("1º Volume - Aguardando Andamento [COFIN, [X]]", ["Arquivamento", "Transferência"], None),
+    ("1º Volume - Aguardando Andamento [COFIN, [X]]", ["Arquivamento", "Arquivamento Cancelado"], None),
+    # o volume anterior arquivado nao encerra o processo: vale o ultimo volume
+    (SITUACAO_COFIN, ["Transferência", "Juntada | Termo de arquivamento"], None),
+])
+def test_processo_arquivado_pelo_setor_ou_pela_ultima_movimentacao(conn, situacao, eventos, esperado):
+    proc = [{"codigo": "ABC123", "numero": None, "nome": "Processo Alfa", "situacao": situacao,
+             "movimentacoes": [{**_mov("", e, at_lotacao="COFIN/ORGAO"), "data": f"{20 + i}/10/2026 09:00:00"}
+                               for i, e in enumerate(eventos)]}]
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), proc)
+    assert _encerrado(conn) == esperado
+
+
+def _ler(conn, processo_id, lido, situacao="1º Volume - Aguardando Andamento [COFIN, [X]]"):
+    with db.mutacao(conn):
+        conn.execute("INSERT INTO siga_leituras (processo_id, lido_em, situacao) VALUES (?,?,?)",
+                     (processo_id, _banco(lido), situacao))
+
+
+def _arquivar(conn, processo_id, lido=None):
+    _ler(conn, processo_id, lido or AGORA - _min(60), "1º Volume - Aguardando Andamento [ARQUIVO, [X]]")
+
+
+def test_lista_do_robo_e_rodada_completa_nao_trazem_processo_encerrado(conn, robo):
+    _arquivar(conn, robo.ids[1])
+    assert [p["nome"] for p in siga.processos_para_o_robo(conn)] == ["Processo Alfa", "Processo Gama"]
+    r = siga.iniciar_rodada(conn, AGORA)
+    assert r["tipo"] == "automatica" and [p["nome"] for p in r["processos"]] == ["Processo Alfa", "Processo Gama"]
+    siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(2))
+    _pedir(conn, robo, None, AGORA + _min(3))                # "todos" tambem nao traz o encerrado
+    r2 = siga.iniciar_rodada(conn, AGORA + _min(3))
+    assert [p["nome"] for p in r2["processos"]] == ["Processo Alfa", "Processo Gama"]
+    siga.terminar_rodada(conn, r2["rodada_id"], [], AGORA + _min(4))
+    _pedir(conn, robo, robo.ids[1], AGORA + _min(5))         # pedido da pessoa para aquele processo: e' lido
+    r3 = siga.iniciar_rodada(conn, AGORA + _min(5))
+    assert [p["nome"] for p in r3["processos"]] == ["Processo Beta"]
+
+
+def test_so_processos_encerrados_nao_abrem_rodada_automatica(conn, robo):
+    for pid in robo.ids:
+        _arquivar(conn, pid)
+    assert siga.iniciar_rodada(conn, AGORA) == {"rodada_id": None, "tipo": None, "processos": []}
+    assert _conta(conn, "siga_rodadas") == 0
+
+
+def test_rodada_completa_no_maximo_uma_vez_por_hora(conn, robo):
+    r = siga.iniciar_rodada(conn, AGORA)
+    siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(3))
+    for minutos in (15, 30, 45, 58):
+        assert siga.iniciar_rodada(conn, AGORA + _min(minutos))["rodada_id"] is None
+    assert _conta(conn, "siga_rodadas") == 1
+    r2 = siga.iniciar_rodada(conn, AGORA + _min(59))        # a tarefa de hora em hora, com a folga de 1 minuto
+    assert r2["tipo"] == "automatica" and len(r2["processos"]) == 3
+
+
+def _nao_lido_do_beta(conn, robo, lido, agora):
+    """Beta lido em `lido`; a rodada de `agora` nao consegue le-lo. -> os avisos logo depois."""
+    _ler(conn, robo.ids[1], lido)
+    r = siga.iniciar_rodada(conn, agora)
+    siga.terminar_rodada(conn, r["rodada_id"], [{"codigo": "DEF456", "numero": None, "motivo": "Não abriu"}],
+                         agora + _min(1))
+    return siga.situacao_robo(conn, agora + _min(1))["avisos"]
+
+
+def test_processo_vivo_sem_leitura_ha_30_minutos_nao_mostra_nao_lido(conn, robo):
+    assert _nao_lido_do_beta(conn, robo, AGORA - _min(30), AGORA) == []
+
+
+def test_processo_vivo_sem_leitura_ha_mais_de_2_horas_uteis_mostra_nao_lido(conn, robo):
+    agora = _cuiaba(2026, 10, 28, 11)
+    assert _nao_lido_do_beta(conn, robo, _cuiaba(2026, 10, 28, 8, 30), agora) == [
+        {"tipo": "nao_lido", "processo_id": robo.ids[1], "texto": "não lido às 11:00: Não abriu"},
+        {"tipo": "nao_lidos", "processo_id": None, "texto": "1 de 3 processos não foram lidos"}]
+
+
+def test_nao_lido_conta_das_8h_quando_a_ultima_leitura_e_de_ontem(conn, robo):
+    # a mesma regra de horario do atraso geral: a leitura de ontem as 17h nao acusa as 9h
+    assert _nao_lido_do_beta(conn, robo, _cuiaba(2026, 10, 27, 17), _cuiaba(2026, 10, 28, 9)) == []
+
+
+def test_processo_encerrado_nao_mostra_nao_lido(conn, robo):
+    _pedir(conn, robo, robo.ids[1], AGORA)
+    _arquivar(conn, robo.ids[1], _cuiaba(2026, 10, 27, 9))
+    r = siga.iniciar_rodada(conn, AGORA)
+    siga.terminar_rodada(conn, r["rodada_id"], [{"codigo": "DEF456", "numero": None, "motivo": "Não abriu"}],
+                         AGORA + _min(1))
+    assert siga.situacao_robo(conn, AGORA + _min(1))["avisos"] == []
+
+
+def test_atraso_do_monitor_so_olha_os_processos_vivos(conn, robo):
+    agora = _cuiaba(2026, 10, 28, 11)
+    _arquivar(conn, robo.ids[1], _cuiaba(2026, 10, 27, 9))
+    # so' o encerrado tem leitura, e antiga: ninguem esta' atrasado
+
+    def sem_leitura():
+        return [a["mensagem"] for a in siga.avisos(conn, agora.date(), agora) if a["tipo"] == "siga_sem_leitura"]
+    assert siga.painel(conn, agora)["atrasado"] is False and sem_leitura() == []
+    _ler(conn, robo.ids[0], _cuiaba(2026, 10, 28, 8, 30))
+    assert siga.painel(conn, agora)["atrasado"] is True
+    assert sem_leitura() == ["monitor do SIGA sem leitura desde 28/10 08:30"]
+    # leitura mais nova so' do encerrado nao desliga o atraso dos vivos
+    _arquivar(conn, robo.ids[1], _cuiaba(2026, 10, 28, 10, 50))
+    assert siga.painel(conn, agora)["atrasado"] is True
+
+
+def test_processo_arquivado_nao_avisa_parado(conn):
+    _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+    proc = _leitura(numero="SINFRA-PRO-2026/00001")[:1]
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), proc)
+    hoje = datetime.date(2026, 10, 28)
+
+    def parados():
+        return [a["tipo"] for a in siga.avisos(conn, hoje) if a["tipo"] == "siga_parado"]
+    assert parados() == ["siga_parado"]
+    proc[0]["movimentacoes"] += [{**_mov("", "Arquivamento", at_lotacao="COFIN/ORGAO"), "data": "28/10/2026 10:30:00"}]
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), proc)
+    assert parados() == []
