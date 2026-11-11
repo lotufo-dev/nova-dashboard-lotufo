@@ -35,9 +35,39 @@ export type ObraResumo = {
   sem_no_mes: boolean; ultima_medicao: (MedicaoCurta & { estado: string; valor_centavos: number | null }) | null;
 };
 export type MedicaoCurta = { numero: number; tipo: string; competencia: string };
+/** #643, quadro do mês: o passo de uma obra na competência. `data` (AAAA-MM-DD) só no passo feito; `medicao_id` só no da vez. */
+export type PassoQuadro = { numero: number; nome: string; situacao: "feito" | "atual" | "futuro"; data: string | null; medicao_id: number | null };
+/** Uma obra no quadro: os passos que ela tem, as medições da competência e o pedido e o aprovado somados. Sem medição, `iniciar`. */
+export type LinhaQuadro = {
+  contrato_id: number; obra: string; contratante: string; orgao_sub: string | null; medicoes: { id: number; titulo: string }[];
+  passos: PassoQuadro[]; iniciar: boolean; pedido_centavos: number | null; aprovado_centavos: number | null;
+};
+/** Medição aberta de uma competência anterior à do quadro. */
+export type LinhaAnterior = {
+  contrato_id: number; obra: string; medicao_id: number; titulo: string; numero: number; competencia: string;
+  passo: { numero: number; nome: string };
+};
 export type ResumoMedicoes = {
   hoje: string; mes: string; contagens: Record<SituacaoOuSem | "iniciar" | "em-andamento", number>; linhas: LinhaResumo[]; obras: ObraResumo[];
+  quadro: LinhaQuadro[]; anteriores: LinhaAnterior[];
 };
+
+const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+
+/** "2026-10" -> "outubro de 2026" (o seletor de mês do quadro). */
+export function mesPorExtenso(aaaaMm: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(aaaaMm);
+  const nome = m ? MESES[Number(m[2]) - 1] : undefined;
+  return m && nome ? `${nome} de ${m[1]}` : aaaaMm;
+}
+
+/** "2026-12" + 1 -> "2027-01"; -1 volta o mês. */
+export function somarMes(aaaaMm: string, n: number): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(aaaaMm);
+  if (!m) return aaaaMm;
+  const total = Number(m[1]) * 12 + (Number(m[2]) - 1) + n;
+  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, "0")}`;
+}
 
 /** "hoje", "1 dia", "24 dias"; sem marco (o servidor nunca usa a data de lancamento no lugar dele), "—". */
 export function textoParada(dias: number | null): string {

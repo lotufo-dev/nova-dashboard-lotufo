@@ -1479,7 +1479,120 @@ def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> d
     # medicao protocolada); contar as linhas daqui (o par medicao + reajuste vira uma) dava outro numero
     contagens["aguardando-pagamento"] = conn.execute(
         "SELECT COUNT(*) FROM medicoes WHERE estado='protocolada'").fetchone()[0]
-    return {"hoje": hoje.isoformat(), "mes": mes, "contagens": contagens, "linhas": linhas, "obras": lista_obras}
+    com_planilha = _com_planilha(conn, obras)
+    return {"hoje": hoje.isoformat(), "mes": mes, "contagens": contagens, "linhas": linhas, "obras": lista_obras,
+            "quadro": _quadro_do_mes(conn, mes, obras, com_planilha),
+            "anteriores": _meses_anteriores(mes, linhas, andamento, com_planilha)}
+
+
+# --- quadro do mes (#643): uma linha por obra e uma coluna por passo, na competencia em trabalho --------------
+# Os seis passos da barra da pagina da medicao (frontend/src/Passos.tsx, #508), com os mesmos nomes. 7 = recebida.
+PASSOS = ("Planilha e carta", "Análise do órgão", "Espelhos", "Notas", "Envio da nota", "Pagamento")
+_PASSO_DO_ESTADO = {"boletim_recebido": 3, "espelho_gerado": 3, "espelho_enviado": 4, "nota_emitida": 5,
+                    "protocolada": 6, "nf_emitida": 6, "recebida": 7}
+_ORDEM_SITUACAO_PASSO = ("futuro", "atual", "feito")     # do menos ao mais adiantado
+_ORDEM_TIPO = ("execucao", "projeto", "reajuste")
+
+
+def passo_do_estado(estado: str, com_planilha: bool) -> int:
+    """O passo da vez pelo estado (o `passoDe` de Passos.tsx). `com_planilha`: a medicao tem os passos 1 e 2."""
+    if estado in ("prevista", "planilha_gerada"):
+        return 1 if com_planilha else 3
+    if estado == "planilha_enviada":
+        return 2 if com_planilha else 3
+    return _PASSO_DO_ESTADO.get(estado, 0)
+
+
+def _com_planilha(conn, obras: dict[int, dict]):
+    """Devolve a funcao que diz se a medicao tem "Planilha e carta" e "Análise do órgão" (#508): execucao ou projeto,
+    em orgao que recebe a planilha/carta, com a regra de espelho ativa ou a medicao ja' nascida da planilha."""
+    from app import planilha_envio      # import local: planilha_envio importa este modulo
+    regra_ativa = {r[0] for r in conn.execute("SELECT contrato_id FROM espelho_regras WHERE situacao='ativa'")}
+
+    def com_planilha(m: dict) -> bool:
+        familia = obras.get(m["contrato_id"], {}).get("familia")
+        return (m["tipo"] in ("execucao", "projeto") and familia not in planilha_envio.FAMILIAS_SEM_ENVIO
+                and (m["contrato_id"] in regra_ativa or m["estado"] in ESTADOS_PLANILHA
+                     or bool(m["planilha_enviada_em"])))
+    return com_planilha
+
+
+def _datas_dos_passos(conn, m: dict) -> dict[int, datetime.date | None]:
+    """O dia (Cuiaba) em que cada passo da medicao foi feito: o ultimo envio da planilha/carta, o boletim vigente, o
+    e-mail do espelho vigente ao faturamento, a emissao da nota, o ultimo protocolo da nota e o recebimento."""
+    from app import planilha_envio      # import local: planilha_envio importa este modulo
+    envio = None
+    if m["planilha_enviada_em"]:
+        dias = [d for d in (_dia(e["enviado_em"]) for e in planilha_envio.envios(conn, m["id"])) if d]
+        envio = max(dias) if dias else _dia(m["planilha_enviada_em"][:10])
+    boletim = conn.execute(
+        "SELECT atestado_em FROM medicao_atestos WHERE medicao_id=? AND (meio IS NOT NULL OR arquivo IS NOT NULL) "
+        "AND atestado_em IS NOT NULL ORDER BY id DESC LIMIT 1", (m["id"],)).fetchone()
+    espelho = conn.execute(
+        "SELECT v.enviado_em FROM espelho_medicoes em JOIN espelhos e ON e.id=em.espelho_id "
+        "LEFT JOIN envios v ON v.id=e.envio_id WHERE em.medicao_id=? AND e.situacao='vigente' "
+        "ORDER BY e.versao DESC, e.id DESC LIMIT 1", (m["id"],)).fetchone()
+    return {1: envio, 2: _dia(boletim[0] if boletim else m["atestado_em"]), 3: _dia(espelho[0]) if espelho else None,
+            4: _dia(m["nota_emitida_em"]), 5: _dia(m["protocolado_em"]), 6: _dia(m["recebida_em"])}
+
+
+def _quadro_do_mes(conn, mes: str, obras: dict[int, dict], com_planilha) -> list[dict]:
+    """Uma linha por obra ativa (e por obra, ativa ou nao, com medicao na competencia): cada passo com a situacao
+    (feito, atual, futuro), o dia em que foi feito e a medicao que o passo da vez abre. Com mais de uma medicao na
+    competencia (execucao e reajuste), cada passo mostra a menos adiantada; o passo feito leva o dia da ultima a
+    fechar. A prevista, a cancelada e a desistida nao contam: a obra so' com elas esta' sem medicao (`iniciar`)."""
+    do_mes: dict[int, list[dict]] = {}
+    for r in conn.execute(
+            "SELECT m.*, (SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') "
+            "AS protocolado_em FROM medicoes m WHERE m.competencia=? "
+            "AND m.estado NOT IN ('prevista','cancelada','desistida')", (mes,)):
+        do_mes.setdefault(r["contrato_id"], []).append(dict(r))
+    quadro = []
+    for o in sorted(obras.values(), key=lambda o: (_chave_nome(o["obra"]), o["id"])):
+        ms = sorted(do_mes.get(o["id"], []), key=lambda m: (_ORDEM_TIPO.index(m["tipo"]), m["numero"], m["id"]))
+        # A-21: a obra em encerramento nao e' ativa; sem medicao na competencia ela nao tem o que mostrar nem iniciar
+        if not ms and (o["estado"] != "ativo" or o["encerramento_iniciado_em"]):
+            continue
+        partes = []     # por medicao: (medicao, passos que ela tem, passo da vez, dia de cada passo)
+        for m in ms:
+            tem = com_planilha(m)
+            partes.append((m, range(1 if tem else 3, 7), passo_do_estado(m["estado"], tem), _datas_dos_passos(conn, m)))
+        passos = []
+        for n in range(1, 7):
+            nesse = [(m, atual, datas) for m, tem, atual, datas in partes if n in tem]
+            if not nesse:
+                continue
+            situacoes = ["feito" if n < atual else "atual" if n == atual else "futuro" for _, atual, _ in nesse]
+            situacao = min(situacoes, key=_ORDEM_SITUACAO_PASSO.index)
+            dias = [datas[n] for _, _, datas in nesse if datas[n]] if situacao == "feito" else []
+            da_vez = next((m["id"] for (m, _, _), s in zip(nesse, situacoes) if s == "atual"), None)
+            passos.append({"numero": n, "nome": PASSOS[n - 1], "situacao": situacao,
+                           "data": max(dias).isoformat() if dias else None,
+                           "medicao_id": da_vez if situacao == "atual" else None})
+        pedidos = [m["valor_protocolado_centavos"] for m in ms if m["valor_protocolado_centavos"] is not None]
+        aprovados = [m["valor_atestado_centavos"] for m in ms if m["valor_atestado_centavos"] is not None]
+        quadro.append({"contrato_id": o["id"], "obra": o["obra"], "contratante": o["contratante"],
+                       "orgao_sub": o["orgao_sub"], "medicoes": [{"id": m["id"], "titulo": titulo(m)} for m in ms],
+                       "passos": passos, "iniciar": not ms,
+                       "pedido_centavos": sum(pedidos) if pedidos else None,
+                       "aprovado_centavos": sum(aprovados) if aprovados else None})
+    return quadro
+
+
+def _meses_anteriores(mes: str, linhas: list[dict], andamento: list[dict], com_planilha) -> list[dict]:
+    """As medicoes de competencias anteriores a do quadro ainda abertas (as linhas de "em andamento": medicao e
+    reajuste na mesma situacao sao uma so'), da competencia mais antiga para a mais nova, com o passo da vez."""
+    por_id = {m["id"]: m for m in andamento}
+    out = []
+    for x in linhas:
+        if not x["competencia"] or x["competencia"] >= mes:
+            continue
+        n = min(passo_do_estado(por_id[i]["estado"], com_planilha(por_id[i])) for i in x["medicao_ids"])
+        out.append({"contrato_id": x["contrato_id"], "obra": x["obra"], "medicao_id": x["medicao_id"],
+                    "titulo": x["titulo"], "numero": x["numero"], "competencia": x["competencia"],
+                    "passo": {"numero": n, "nome": PASSOS[n - 1]}})
+    out.sort(key=lambda x: (x["competencia"], _chave_nome(x["obra"]), x["contrato_id"], -x["numero"], x["titulo"]))
+    return out
 
 
 def _chave_nome(nome: str | None) -> str:

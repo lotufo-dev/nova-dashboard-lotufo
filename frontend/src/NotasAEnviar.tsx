@@ -429,7 +429,7 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
             <div className="en-filtros">
               <div className="nota-pilulas" role="group" aria-label="Situação">
                 {FILTROS.map(f => (
-                  <Link key={f.id} className="nota-pilula" para={{ tela: "medicoes", aba: "em-andamento" }} busca={comFiltro({ situacao: f.id })}
+                  <Link key={f.id} className="nota-pilula" para={{ tela: "medicoes" }} busca={comFiltro({ situacao: f.id })}
                     aria-current={filtro === f.id ? "true" : undefined}>
                     {f.rotulo}
                   </Link>
@@ -443,7 +443,7 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
             {filtrados.length === 0 && (
               <div className="vazio vazio--curto">
                 <p className="vazio__titulo">Nenhuma nota com esses filtros.</p>
-                <p><Link para={{ tela: "medicoes", aba: "em-andamento" }}>Limpar os filtros</Link></p>
+                <p><Link para={{ tela: "medicoes" }}>Limpar os filtros</Link></p>
               </div>
             )}
             {grupos.map(g => {
