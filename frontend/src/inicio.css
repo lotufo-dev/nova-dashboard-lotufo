@@ -46,8 +46,46 @@
   .ini-faixa__conta { grid-column: 1 / -1; }
 }
 
-/* tres cartoes: so' rotulo e valor */
-.ini-numeros { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+/* recebido em 12 meses (#652): uma coluna verde (recebido = feito) por mes, com o valor curto em cima e o mes embaixo.
+   Em painel estreito (celular) as barras deitam, um mes por linha, sem rolagem. */
+.ini-recebido, .ini-previsao { container-type: inline-size; padding: 16px; position: relative; }
+.ini-rec { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; }
+.ini-rec__mes { min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 4px; text-align: center; }
+.ini-rec__valor { font-size: 12px; line-height: 16px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ini-rec__trilho { height: 120px; display: flex; align-items: flex-end; border-bottom: 1px solid var(--linha); }
+.ini-rec__coluna { width: 100%; height: var(--ini-rec-tamanho); background: var(--ok-ponto); border-radius: 3px 3px 0 0; }
+.ini-rec__rotulo { font-size: 11px; line-height: 16px; color: var(--texto-2); white-space: nowrap; }
+@container (max-width: 559px) {
+  .ini-rec { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .ini-rec__mes { display: grid; grid-template-columns: 44px minmax(0, 1fr) 60px; align-items: center; column-gap: 8px; text-align: left; }
+  .ini-rec__rotulo { grid-column: 1; grid-row: 1; }
+  .ini-rec__trilho { grid-column: 2; grid-row: 1; height: 12px; align-items: stretch; border-bottom: 0; border-left: 1px solid var(--linha); }
+  .ini-rec__coluna { width: var(--ini-rec-tamanho); height: auto; border-radius: 0 3px 3px 0; }
+  .ini-rec__valor { grid-column: 3; grid-row: 1; text-align: right; }
+}
+
+/* previsao de entrada (#652): quatro linhas com rotulo, valor e quantidade; so' o atrasado ganha cor (critico) */
+.ini-previsao__linhas { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.ini-previsao__linha {
+  min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px 12px;
+  border: 1px solid var(--linha); border-radius: var(--raio);
+}
+.ini-previsao__rotulo { font-size: 13px; line-height: 20px; font-weight: 600; }
+.ini-previsao__valor {
+  font-size: clamp(14px, 2.4cqi, 20px); line-height: 28px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.ini-previsao__conta { font-size: 13px; line-height: 18px; color: var(--texto-2); }
+.ini-previsao__linha--critico { border-color: var(--acao-linha); background: var(--acao-fundo); }
+.ini-previsao__linha--critico .ini-previsao__rotulo, .ini-previsao__linha--critico .ini-previsao__valor { color: var(--acao); }
+@container (max-width: 559px) {
+  .ini-previsao__linhas { grid-template-columns: minmax(0, 1fr); }
+  .ini-previsao__linha { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: baseline; }
+  .ini-previsao__valor { grid-column: 2; grid-row: 1; font-size: 16px; line-height: 24px; }
+  .ini-previsao__conta { grid-column: 1 / -1; }
+}
+
+/* dois cartoes: so' rotulo e valor (#652: o recebido no ano virou as barras de 12 meses) */
+.ini-numeros { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 @media (max-width: 700px) { .ini-numeros { grid-template-columns: minmax(0, 1fr); } }
 .ini-numero { padding: 16px 20px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ini-numero__rotulo { font-size: 14px; line-height: 20px; font-weight: 600; }

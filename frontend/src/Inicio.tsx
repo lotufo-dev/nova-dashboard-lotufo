@@ -5,7 +5,7 @@ import LegendaCor from "./LegendaCor";
 import type { Usuario } from "./Login";
 import { type Ir } from "./rota";
 import { Link } from "./Link";
-import { fmtCompetencia, fmtMesExtenso } from "./tempo";
+import { fmtCompetencia, fmtMesCurto, fmtMesExtenso } from "./tempo";
 import "./inicio.css";
 
 // Inicio do redesenho de 11/2026: informacao geral para a diretoria. Issue #642 (decisao do dono de 10/11/2026): a
@@ -20,6 +20,9 @@ type SecaoAvisos<T> = { total: number; itens: T[] };
 type ChaveEtapa = "em_analise" | "boletim" | "nota" | "protocolado" | "recebido_mes";
 // #642: uma etapa da faixa do ciclo, na cota da Lotufo; `mais_antigo_dias` nulo = etapa vazia ou sem idade (recebido)
 type EtapaCiclo = { etapa: ChaveEtapa; valor_centavos: number; quantidade: number; mais_antigo_dias: number | null };
+// #652: o recebido de um mes (baixas do RM, na cota) e uma linha da previsao de entrada
+type MesRecebido = { mes: string; valor_centavos: number };
+type GrupoPrevisao = { valor_centavos: number; quantidade: number };
 export type PainelInicio = {
   hoje: string;
   notas_a_enviar: number;
@@ -32,6 +35,9 @@ export type PainelInicio = {
   prazos: Prazo[];
   espelhos: EspelhoAConferir[];
   ciclo: EtapaCiclo[];
+  recebido_12m: MesRecebido[];
+  // #652: `depois` (data esperada alem do proximo mes) vem do servidor e a tela nao mostra
+  previsao: Record<"neste_mes" | "proximo_mes" | "atrasado" | "sem_previsao" | "depois", GrupoPrevisao>;
   notas_mes: { mes: string; valor_centavos: number; notas: number; obras: number };
   avisos_importantes: {
     // issue #274: o pleito a pedir e os avisos do motor de apostilamento, o mais grave primeiro
@@ -101,6 +107,69 @@ function FaixaCiclo({ etapas }: { etapas: EtapaCiclo[] }) {
           ))}
         </tbody>
       </table></div>
+    </section>
+  );
+}
+
+/** Valor de eixo, curto: "1,2 mi", "350 mil"; mes sem recebimento, tracinho. O valor inteiro esta' na tabela. */
+function curto(centavos: number): string {
+  return centavos > 0 ? (centavos / 100).toLocaleString("pt-BR", { notation: "compact", maximumFractionDigits: 1 }) : "—";
+}
+
+/** Recebido em 12 meses (#652): uma barra por mes, a ultima e' o mes corrente; o tamanho de cada uma e' a fracao do
+ *  maior mes (`--ini-rec-tamanho`). Em container estreito as barras deitam, um mes por linha (inicio.css). */
+function Recebido12Meses({ meses }: { meses: MesRecebido[] }) {
+  const maior = Math.max(0, ...meses.map(m => m.valor_centavos));
+  return (
+    <section aria-labelledby="ini-recebido" className="ini-painel ini-recebido">
+      <h2 id="ini-recebido">Recebido em 12 meses (cota da Lotufo)</h2>
+      <ol className="ini-rec" aria-hidden="true">
+        {meses.map(m => (
+          <li key={m.mes} className="ini-rec__mes"
+            style={{ "--ini-rec-tamanho": `${maior > 0 ? Math.round(100 * Math.max(0, m.valor_centavos) / maior) : 0}%` } as React.CSSProperties}>
+            <span className="ini-rec__valor">{curto(m.valor_centavos)}</span>
+            <span className="ini-rec__trilho"><span className="ini-rec__coluna" /></span>
+            <span className="ini-rec__rotulo">{fmtMesCurto(m.mes)}</span>
+          </li>
+        ))}
+      </ol>
+      <div className="sr-only"><table>
+        <caption>Recebido por mês, na cota da Lotufo</caption>
+        <thead><tr><th scope="col">Mês</th><th scope="col">Recebido</th></tr></thead>
+        <tbody>
+          {meses.map(m => <tr key={m.mes}><th scope="row">{fmtCompetencia(m.mes)}</th><td>{brl(m.valor_centavos)}</td></tr>)}
+        </tbody>
+      </table></div>
+    </section>
+  );
+}
+
+// #652: as quatro linhas da previsao, na ordem da tela
+const LINHAS_PREVISAO: { chave: keyof PainelInicio["previsao"]; rotulo: string }[] = [
+  { chave: "neste_mes", rotulo: "Neste mês" },
+  { chave: "proximo_mes", rotulo: "No próximo mês" },
+  { chave: "atrasado", rotulo: "Atrasado" },
+  { chave: "sem_previsao", rotulo: "Sem previsão" },
+];
+
+/** Previsao de entrada (#652): o protocolado pela data esperada (protocolo + prazo do orgao). Cor da informacao: so' o
+ *  atrasado, quando existe, e' critico (vermelho); o resto fica preto. */
+function PrevisaoEntrada({ previsao }: { previsao: PainelInicio["previsao"] }) {
+  return (
+    <section aria-labelledby="ini-previsao" className="ini-painel ini-previsao">
+      <h2 id="ini-previsao">Previsão de entrada (cota da Lotufo)</h2>
+      <ul className="ini-previsao__linhas">
+        {LINHAS_PREVISAO.map(({ chave, rotulo }) => {
+          const g = previsao[chave];
+          const critico = chave === "atrasado" && g.quantidade > 0;
+          return (
+            <li key={chave} className={`ini-previsao__linha${critico ? " ini-previsao__linha--critico" : ""}`}>
+              <span className="ini-previsao__rotulo">{rotulo}</span>
+              <span className="ini-previsao__valor">{brl(g.valor_centavos)}</span>
+              <span className="ini-previsao__conta">{contar(g.quantidade, "medição", "medições")}</span>
+            </li>);
+        })}
+      </ul>
     </section>
   );
 }
@@ -187,7 +256,6 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
 
   const m = p.medido;
   const av = p.avisos_importantes;
-  const recebido = p.recebido_ano.real_centavos ?? p.recebido_ano.valor_centavos;
 
   return (
     <div className="ini">
@@ -196,6 +264,8 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
         <LegendaCor />
       </div>
       <FaixaCiclo etapas={p.ciclo} />
+      <Recebido12Meses meses={p.recebido_12m} />
+      <PrevisaoEntrada previsao={p.previsao} />
 
       <section aria-label="Números do mês" className="ini-numeros">
         <div className="ini-numero">
@@ -205,10 +275,6 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
         <div className="ini-numero">
           <span className="ini-numero__rotulo">Medido em {fmtMesExtenso(m.competencia)}</span>
           <span className="ini-numero__valor">{brl(m.valor_centavos)}</span>
-        </div>
-        <div className="ini-numero">
-          <span className="ini-numero__rotulo">Recebido em {p.hoje.slice(0, 4)}</span>
-          <span className="ini-numero__valor">{brl(recebido)}</span>
         </div>
       </section>
 
