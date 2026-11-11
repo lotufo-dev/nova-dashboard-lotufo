@@ -108,3 +108,64 @@ def test_custo_da_obra_com_planilha_sem_item_lida_pelos_titulos_do_cadastro(clie
     assert r.status_code == 200
     grupos = {g["nome"]: g["medido_centavos"] for g in r.json()["linhas"][0]["grupos"]}
     assert grupos == {"Pavimentação": 1296_23 + 800_27, "outros": 500_55 + 1200_01}
+
+
+def test_nota_desconsiderada_some_das_rotas_sem_marca_e_aparece_so_na_auditoria(client):
+    """Issue #638: depois de `desconsiderar_nf`, A receber, Diretoria (faturado do RM), Inicio e a reconciliacao deixam
+    de contar a nota, ao centavo, e nenhuma dessas respostas fala da correcao; a auditoria do admin traz o evento com
+    o motivo e a fonte. `reconsiderar_nf` devolve os numeros e a auditoria fica com os dois eventos."""
+    import datetime
+    import json
+    from app import correcao_medicoes
+    from tests.test_protocolo import _contrato
+    c = db.get_conn()
+    auth.criar_usuario(c, "Adm", "adm@l.com", "senha-forte-123", "admin")
+    cadastro_aplicar.aplicar(c, 1, {
+        "orgaos": [{"chave": "sinfra-x", "nome": "SINFRA - X", "familia": "sinfra", "cnpj": None,
+                    "regras": {"nome_qdop": "SINFRA - SECRETARIA", "tipo_contratante": "PÚBLICO"}}],
+        "entidades": [{"chave": "lotufo", "nome": "Lotufo Engenharia e Construções Ltda", "cnpj": "31200101000130",
+                       "papel": "lotufo", "coligada_rm": 1, "sigla_oficio": "LT", "nome_curto": "Lotufo"}],
+        "contratos": [{**_contrato("Própria", "sinfra-x", "IC 1/2025"), "centro_custo_rm": "9.001.001"}], "avisos": [],
+        "geral": {"qdop": {"modelo_caminho": str(MODELO)}, "diretoria": {"total_a_receber_liberado": True}}})
+    # emitida no mes passado: entra na serie do faturado do RM (meses fechados) seja qual for o dia do teste
+    mes_passado = (datetime.date.today().replace(day=1) - datetime.timedelta(days=1)).replace(day=1)
+    for idmov, valor, falta in ((961, 1_000_001, 930_001), (962, 80_000, 80_000)):
+        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, numero_int, emissao, valor_centavos, situacao, "
+                        "codtmv, centro_custo) VALUES (1, ?, ?, ?, ?, ?, 'ativa', '2.2.01', '9.001.001')",
+                        (idmov, str(idmov), idmov, mes_passado.isoformat(), valor)).lastrowid
+        c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
+                  "status_lan) VALUES (1, ?, ?, ?, ?, 0, 0)", (idmov, nid, idmov, falta))
+    c.commit()
+    _login(client, "adm@l.com")
+
+    def retrato():
+        rotas = {r: client.get(r) for r in ("/api/a-receber", "/api/diretoria", "/api/inicio", "/api/inicio/painel",
+                                            "/api/rm/reconciliacao")}
+        assert all(v.status_code == 200 for v in rotas.values()), {r: v.status_code for r, v in rotas.items()}
+        j = {r: v.json() for r, v in rotas.items()}
+        mes = [s["faturado_centavos"] for s in j["/api/diretoria"]["faturado_rm"]["serie"]
+               if s["competencia"] == mes_passado.strftime("%Y-%m")][0]
+        numeros = (j["/api/a-receber"]["total"]["valor_centavos"], mes,
+                   j["/api/inicio/painel"]["a_receber"]["valor_centavos"],
+                   sorted(n["numero"] for n in j["/api/rm/reconciliacao"]["nfs_sem_medicao"]),
+                   j["/api/rm/reconciliacao"]["totais"]["nfs_sem_medicao"], j["/api/inicio"]["avisos"])
+        return numeros, json.dumps(j, ensure_ascii=False).lower()
+    antes, _ = retrato()
+    assert antes[3] == ["961", "962"]
+    correcao_medicoes.executar(c, 1, [{"operacao": "desconsiderar_nf", "nf": 961, "motivo": "cancelada na prefeitura",
+                                       "fonte": "comprovante da prefeitura"}], ensaio=False)
+    depois, texto = retrato()
+    assert depois[0] == antes[0] - 930_001 and depois[1] == antes[1] - 1_000_001 and depois[2] == antes[2] - 930_001
+    assert depois[3] == ["962"] and depois[4] == antes[4] - 1 and depois[5] == antes[5]
+    # nenhuma resposta traz a marca, o motivo ou a fonte (a coluna vem nula nas outras notas da reconciliacao)
+    assert '"desconsiderada_em": "' not in texto and "desconsiderada_em" not in texto.replace('"desconsiderada_em": null', "")
+    assert "cancelada na prefeitura" not in texto and "comprovante da prefeitura" not in texto
+    ev = [e for e in client.get("/api/admin/auditoria").json()["eventos"] if e["entidade"] == "nota_fiscal"]
+    assert [e["acao"] for e in ev] == ["nota.desconsiderar"] and ev[0]["usuario_id"] == 1
+    d = json.loads(ev[0]["depois"])
+    assert (d["numero"], d["motivo"], d["fonte"]) == ("961", "cancelada na prefeitura", "comprovante da prefeitura")
+    correcao_medicoes.executar(c, 1, [{"operacao": "reconsiderar_nf", "nf": 961, "fonte": "conferência"}], ensaio=False)
+    c.close()
+    assert retrato()[0] == antes
+    ev = [e["acao"] for e in client.get("/api/admin/auditoria").json()["eventos"] if e["entidade"] == "nota_fiscal"]
+    assert ev == ["nota.reconsiderar", "nota.desconsiderar"]

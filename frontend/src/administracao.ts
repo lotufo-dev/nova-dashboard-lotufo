@@ -136,6 +136,8 @@ export function reconciliacaoDaObra(rec: Reconciliacao, obra: { id: number; nume
 
 export type Evento = { id: number; acao: string; entidade: string | null; entidade_id?: string | null; criado_em: string;
                        usuario_id: number | null;
+                       /** O registro do evento (JSON), como a auditoria o gravou. */
+                       depois?: string | null;
                        /** A obra da medicao ou do protocolo (a API resolve); nulo quando o objeto sumiu. */
                        contrato_id?: number | null };
 export type FiltroAuditoria = { acao?: string | null; pessoa?: string | null; desde?: string | null };
@@ -172,7 +174,8 @@ const ROTULO_ACAO: Record<string, string> = {
   "pleito.curva_s_removida": "Curva S do pleito retirada",
   "nf.alocar": "NF alocada à medição", "nf.desalocar": "Alocação de NF desfeita",
   "nota.confirmacao": "Nota confirmada pelo RM", "nota.conferencia": "Nota conferida", "nota.justificar": "Nota justificada",
-  "nota.manual": "Nota lançada à mão", "rm.sincronizacao": "Sincronização com o RM",
+  "nota.manual": "Nota lançada à mão", "nota.desconsiderar": "Nota desconsiderada", "nota.reconsiderar": "Nota reconsiderada",
+  "rm.sincronizacao": "Sincronização com o RM",
   "siga.vinculo": "Processo do SIGA ligado ao protocolo ou à medição", "protocolo.siga": "Link do SIGA registrado",
   "aditivo.criar": "Aditivo criado", "aditivo.atualizar": "Aditivo alterado", "aditivo.cancelar": "Aditivo cancelado",
   "aditivo.assinar": "Aditivo assinado", "aditivo.carga": "Aditivos carregados do legado",
@@ -207,6 +210,25 @@ export function rotuloObjeto(entidade: string | null, id?: string | null): strin
   if (!entidade) return "—";
   const nome = ROTULO_ENTIDADE[entidade] ?? entidade.charAt(0).toUpperCase() + entidade.slice(1).replace(/_/g, " ");
   return id ? `${nome} ${id}` : nome;
+}
+
+/** Issue #638: a nota desconsiderada (ou reconsiderada) pela correcao de cadastro so' aparece aqui, entao o objeto do
+ *  evento traz a nota, o motivo e a fonte que a auditoria gravou ("NF 501. Motivo: … Fonte: …"). Null nos outros
+ *  eventos e quando o registro nao se le. */
+export function objetoDaCorrecaoDeNota(ev: Pick<Evento, "acao" | "depois">): string | null {
+  if (ev.acao !== "nota.desconsiderar" && ev.acao !== "nota.reconsiderar") return null;
+  let d: Record<string, unknown>;
+  try {
+    d = JSON.parse(ev.depois ?? "") as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (!d || typeof d !== "object" || d.numero == null) return null;
+  const texto = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().replace(/\.+$/, "") : null);
+  const partes = [`NF ${String(d.numero)}`, texto(d.motivo) && `Motivo: ${texto(d.motivo)}`,
+                  texto(d.substituida_por) && `Substituída por: ${texto(d.substituida_por)}`,
+                  texto(d.fonte) && `Fonte: ${texto(d.fonte)}`];
+  return partes.filter(Boolean).join(". ") + ".";
 }
 
 /** A tela do objeto de um evento, ou null quando ele nao tem tela (fica como texto): a obra, a medicao (na obra dela),

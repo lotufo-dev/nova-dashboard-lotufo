@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, reconciliacaoDaObra, rotaDoObjeto, rotuloAcao, urlPaginaRec, type Evento,
+  contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, reconciliacaoDaObra, rotaDoObjeto, rotuloAcao, urlPaginaRec, type Evento,
   type Reconciliacao,
 } from "./administracao";
 
@@ -145,5 +145,21 @@ describe("administração", () => {
     expect(rotaDoObjeto({ entidade: "contrato", entidade_id: null })).toBeNull();
     expect(rotaDoObjeto({ entidade: "cadastro", entidade_id: "1" })).toBeNull();
     expect(rotaDoObjeto({ entidade: null, entidade_id: null })).toBeNull();
+  });
+
+  it("auditoria: a nota desconsiderada aparece com o motivo e a fonte (#638)", () => {
+    expect(rotuloAcao("nota.desconsiderar")).toBe("Nota desconsiderada");
+    expect(rotuloAcao("nota.reconsiderar")).toBe("Nota reconsiderada");
+    const depois = JSON.stringify({ numero: "501", motivo: "cancelada na prefeitura e substituída", substituida_por: "NF 615",
+                                    fonte: "comprovante da prefeitura." });
+    expect(objetoDaCorrecaoDeNota({ acao: "nota.desconsiderar", depois }))
+      .toBe("NF 501. Motivo: cancelada na prefeitura e substituída. Substituída por: NF 615. Fonte: comprovante da prefeitura.");
+    expect(objetoDaCorrecaoDeNota({ acao: "nota.reconsiderar", depois: JSON.stringify({ numero: "501", fonte: "conferência" }) }))
+      .toBe("NF 501. Fonte: conferência.");
+    // outro evento, registro ilegivel ou sem a nota: fica o objeto comum
+    expect(objetoDaCorrecaoDeNota({ acao: "nota.justificar", depois })).toBeNull();
+    expect(objetoDaCorrecaoDeNota({ acao: "nota.desconsiderar", depois: "{" })).toBeNull();
+    expect(objetoDaCorrecaoDeNota({ acao: "nota.desconsiderar", depois: null })).toBeNull();
+    expect(objetoDaCorrecaoDeNota({ acao: "nota.desconsiderar", depois: "{}" })).toBeNull();
   });
 });

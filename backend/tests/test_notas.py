@@ -659,3 +659,49 @@ def test_nota_maior_que_a_medicao_gera_aviso_na_medicao(conn, usuario, _texto):
     medicoes.definir_valor(conn, 1, mid, "atestado", 84678831, "manual")
     assert notas.acima_da_medicao(conn, mid) == []
     assert not [a for a in notas.avisos(conn, datetime.date(2026, 9, 22)) if a["tipo"] == "nota_acima_da_medicao"]
+
+
+def _desconsiderar(conn, nf):
+    from app import correcao_medicoes
+    correcao_medicoes.executar(conn, 1, [{"operacao": "desconsiderar_nf", "nf": nf, "motivo": "cancelada na prefeitura",
+                                          "fonte": "comprovante da prefeitura"}], ensaio=False)
+
+
+def test_nota_desconsiderada_nao_gera_pendencia_nem_aviso(conn, integra):
+    """Issue #638: a correcao e' silenciosa. A nota do RM ativa, sem medicao e com titulo aberto, depois de
+    desconsiderada, nao acrescenta aviso (os de notas e a lista geral) nem pendencia na medicao da obra."""
+    cid, mid, saidas = integra
+    hoje = datetime.date(2026, 9, 22)
+    nid = conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, numero_int, emissao, valor_centavos, codtmv) "
+                       "VALUES (1, 7102, '7102', 7102, '2026-07-15', ?, '2.2.01')", (saidas[1]["valor"],)).lastrowid
+    _titulo(conn, nid, 71021, saidas[1]["valor"] - 7_001, 0, status=0)
+
+    def retrato():
+        d = medicoes.detalhe(conn, mid)
+        return (notas.avisos(conn, hoje), avisos.listar(conn, hoje), avisos.listar(conn, hoje, "diretoria"),
+                d["estado"], d["notas"], d["notas_faltam"], notas.do_contrato(conn, cid))
+    antes = retrato()
+    _desconsiderar(conn, 7102)
+    assert retrato() == antes
+    assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes").fetchone()[0] == 0
+
+
+def test_tela_de_vincular_nota_recusa_a_nota_desconsiderada(conn, usuario, integra, _texto):
+    """Issue #638: o PDF (lido ou digitado) da nota desconsiderada nao a liga a' medicao nem cria uma nota nova no
+    lugar dela; a recusa e' em portugues e nao fala da correcao."""
+    _, mid, saidas = integra
+    vg = saidas[1]
+    conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, numero_int, emissao, valor_centavos, codtmv) "
+                 "VALUES (1, 7102, '3102', 3102, '2026-07-15', ?, '2.2.01')", (vg["valor"],))
+    conn.commit()
+    _desconsiderar(conn, 3102)
+    _texto("")
+    r = notas.anexar_pdf(conn, usuario, mid, PDF, "sem-texto.pdf")
+    with pytest.raises(ValueError, match="Nota fiscal 3102 está cancelada"):
+        notas.registrar_manual(conn, usuario, mid, r["documento_id"], 3102, "2026-07-15", vg["valor"])
+    _texto(_nota_como(vg, 3102))
+    with pytest.raises(ValueError, match="Nota fiscal 3102 está cancelada"):
+        notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto("a nota"), "a.pdf")
+    assert conn.execute("SELECT COUNT(*) FROM notas_fiscais").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes").fetchone()[0] == 0
+    assert medicoes.detalhe(conn, mid)["notas"] == []

@@ -102,6 +102,20 @@ test("Auditoria: filtro sem resultado diz uma linha curta e deixa o Carregar mai
   expect(screen.getByRole("button", { name: "Carregar mais" })).toBeTruthy();
 });
 
+// Issue #638: a nota desconsiderada so' aparece aqui, com o motivo e a fonte
+test("Auditoria: a nota desconsiderada mostra a nota, o motivo e a fonte", async () => {
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/admin/usuarios") return [];
+    return { cadeia_integra: true, ha_mais: false,
+             eventos: [{ id: 9, acao: "nota.desconsiderar", entidade: "nota_fiscal", entidade_id: "12", criado_em: "2026-11-10 12:00:00",
+                         usuario_id: null, depois: JSON.stringify({ numero: "501", motivo: "cancelada na prefeitura",
+                                                                    fonte: "comprovante da prefeitura" }) }] };
+  });
+  render(<Admin aba="auditoria" />);
+  expect(await screen.findByText("NF 501. Motivo: cancelada na prefeitura. Fonte: comprovante da prefeitura.")).toBeTruthy();
+  expect(screen.getAllByText("Nota desconsiderada").length).toBe(2);      // a linha e a opção do filtro
+});
+
 // Issue #22: a reconciliação cortava as NFs sem medição em 200 ("200 ou mais"); agora a contagem é exata e
 // "Carregar mais" traz a página seguinte da API
 test("Reconciliação: a contagem é o total da API e Carregar mais traz as NFs seguintes", async () => {

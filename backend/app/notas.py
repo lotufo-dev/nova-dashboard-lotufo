@@ -259,6 +259,12 @@ def _upsert_nota_pdf(conn, coligada: int, lida: dict, documento_id: int, leitura
               "numero_medicao_lido": lida.get("numero_medicao"), "valor_pdf_centavos": lida["valor_centavos"],
               **{f"{c}_centavos": lida.get(f"{c}_centavos") for c in ("iss", "inss", "irrf", "ibs", "cbs", "liquido")},
               "leitura": leitura}
+    # Issue #638: a nota desconsiderada pela correcao de cadastro vale como cancelada e nao se liga a medicao; sem
+    # esta recusa o PDF dela criaria uma nota nova (sem idmov) no lugar
+    if conn.execute("SELECT 1 FROM notas_fiscais WHERE coligada=? AND numero_int=? AND desconsiderada_em IS NOT NULL "
+                    "AND (emissao=? OR valor_centavos=?)",
+                    (coligada, lida["numero"], lida["emissao"], lida["valor_centavos"])).fetchone():
+        raise ValueError(f"Nota fiscal {lida['numero']} está cancelada e não pode ser ligada a esta medição")
     rm_rows = conn.execute("""SELECT * FROM notas_fiscais WHERE coligada=? AND numero_int=? AND idmov IS NOT NULL
                               AND situacao='ativa' AND (emissao=? OR valor_centavos=?) ORDER BY id""",
                            (coligada, lida["numero"], lida["emissao"], lida["valor_centavos"])).fetchall()
