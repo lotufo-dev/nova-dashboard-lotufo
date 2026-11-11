@@ -26,6 +26,12 @@
 .sg__seta { text-align: right; color: var(--texto-2); }
 .sg__seta .icone { width: 18px; height: 18px; }
 
+/* #663: uma secao por categoria dentro da mesma tabela */
+.sg__tabela .sg__secao th { padding: 16px 12px 8px; background: var(--superficie); border-bottom: 1px solid var(--linha); color: var(--texto); font-size: 14px; line-height: 20px; }
+.sg__acoes > .sg__novo { flex-basis: 100%; }
+.sg__gravado { color: var(--texto-2); font-size: 14px; }
+.sg__gravado:empty { display: none; }
+
 .sg__linha { cursor: pointer; }
 .sg__linha:hover td { background: var(--superficie-2); }
 .sg__linha:focus-visible { outline: 2px solid var(--foco); outline-offset: -2px; }
@@ -97,6 +103,7 @@
   .sg__tabela colgroup, .sg__tabela thead { display: none; }
   .sg__tabela tr.sg__linha, .sg__tabela--hist tbody tr { padding: 12px 16px; border-bottom: 1px solid var(--linha-suave); }
   .sg__tabela .sg__seta { display: none; }
+  .sg__tabela .sg__secao, .sg__tabela .sg__secao th { display: block; }
   .sg__filtros .sg__busca { width: 100%; }
   .sg__tabela--hist td:first-child { font-weight: 600; }
   .sg__tabela td { height: auto; padding: 0; border: 0; }

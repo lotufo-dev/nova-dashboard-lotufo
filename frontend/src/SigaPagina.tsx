@@ -4,9 +4,10 @@ import CaixaAviso from "./CaixaAviso";
 import { IconeAlerta, IconeLinkExterno, IconeSeta, IconeSiga } from "./icones";
 import { Link } from "./Link";
 import type { ObraLista } from "./listaObras";
+import { FINAIS, tituloMedicao } from "./medicao";
 import { ir, trocarBusca, type Busca } from "./rota";
 import {
-  contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, nivelDias, nomeDoProcesso, ordenar, periodoDe,
+  CATEGORIAS, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, nivelDias, nomeDoProcesso, ordenar, periodoDe, porCategoria,
   DIAS_ACAO, DIAS_ATENCAO, roboAtivo, ROTULO_ENCERRADO, setorPessoa, situacaoDoBotao, tempoNoSetor, tituloDoEvento, TIPOS, volumeDe, type Movimentacao, type PainelSiga,
   type ProcessoSiga, type Robo, type TipoMovimentacao,
 } from "./siga";
@@ -16,6 +17,8 @@ import "./siga.css";
 // Tela SIGA (#329; redesenho #512, aprovado pelo Leo em 06/11/2026): duas paginas. A principal e' uma tabela com a
 // posicao atual de cada processo, do mais parado ao menos; clicar na linha abre o historico completo do processo
 // (a mesma rota, com ?processo=<id>). Tudo vem de GET /api/siga; aqui so' se desenha.
+// #663: a tabela principal tem uma secao por categoria (Medicoes, Aditivos, Indenizatorios, Outros) e o nome do
+// processo e' montado pelo sistema; quem edita cadastros corrige categoria, obra e complemento no historico.
 
 const RELER_A_CADA_MS = 60 * 60_000;   // o robo le de hora em hora (#657)
 const RELER_COM_ROBO_MS = 5_000;   // pedido na fila ou rodada em andamento (#343): a tela acompanha o robo
@@ -30,7 +33,6 @@ function NoSetor({ p, agora }: { p: ProcessoSiga; agora: Date }) {
 const abrirHistorico = (id: number) => ir({ tela: "siga" }, { busca: { processo: String(id) } });
 
 function Linha({ p, agora, robo }: { p: ProcessoSiga; agora: Date; robo: Robo }) {
-  const ligado = p.medicao_id !== null && p.contrato_id !== null;
   const volume = volumeDe(p.situacao);
   const ultima = p.ultima;
   const lendo = robo.rodada?.processos.includes(p.id) ?? false;
@@ -41,17 +43,12 @@ function Linha({ p, agora, robo }: { p: ProcessoSiga; agora: Date; robo: Robo })
       onClick={() => abrirHistorico(p.id)}
       onKeyDown={ev => { if (ev.target === ev.currentTarget && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); abrirHistorico(p.id); } }}>
       <td>
-        {ligado ? (
+        {p.obra ? (
           <>
             <span className="sg__nome">{p.obra}</span>
-            {p.medicao_titulo && <span className="sg__fraco">{p.medicao_titulo}</span>}
+            <span className="sg__fraco">{p.o_que_e}</span>
           </>
-        ) : (
-          <>
-            <span className="sg__nome">{nomeDoProcesso(p)}</span>
-            {p.obra && <span className="sg__fraco">{p.obra}</span>}
-          </>
-        )}
+        ) : <span className="sg__nome">{nomeDoProcesso(p)}</span>}
         {lendo && <span className="sg__fraco sg__lendo">lendo...</span>}
         {avisos.map((a, i) => <span key={i} className="sg__fraco sg__nao-lido">{a.texto}</span>)}
       </td>
@@ -124,7 +121,7 @@ const PASSO_HISTORICO = 30;
 const PRIMEIRAS = 15;
 
 // Pagina do historico de um processo (#512): todas as movimentacoes gravadas, com filtro por tipo e busca.
-function Historico({ p, dados, aoPedir }: { p: ProcessoSiga; dados: PainelSiga; aoPedir: () => Promise<void> }) {
+function Historico({ p, dados, aoPedir, podeEditar }: { p: ProcessoSiga; dados: PainelSiga; aoPedir: () => Promise<void>; podeEditar: boolean }) {
   const [tipo, setTipo] = useState<TipoMovimentacao | null>(null);
   const [texto, setTexto] = useState("");
   const [mostrando, setMostrando] = useState(PRIMEIRAS);
@@ -158,6 +155,8 @@ function Historico({ p, dados, aoPedir }: { p: ProcessoSiga; dados: PainelSiga; 
             <Link className="sg__link" para={{ tela: "medicao", obra: p.contrato_id, id: p.medicao_id }} secao="etapa-4">Ver a medição</Link>
           )}
           {dados.pode_atualizar && <Atualizar rotulo="Pedir leitura" processoId={p.id} robo={dados.robo} aoPedir={aoPedir} />}
+          {/* o processo de protocolo enviado pelo sistema e' sempre Medicoes: nao ha' o que corrigir */}
+          {podeEditar && p.protocolo_id === null && <CorrigirCategoria p={p} aoGravar={aoPedir} />}
         </div>
       </header>
       <div className="sg__filtros">
@@ -213,58 +212,111 @@ function LinhaMovimentacao({ m, destaque }: { m: Movimentacao; destaque: boolean
   );
 }
 
-// Link colado na tela SIGA (issue #339): processo sem medicao (aditivo, indenizatorio, avulso). O nome e' da
-// pessoa, porque a pagina do SIGA nao mostra o titulo; a obra e' opcional. O servidor valida e responde em portugues.
-function AcompanharProcesso({ aoGravar }: { aoGravar: (id: number) => Promise<void> }) {
-  const [aberto, setAberto] = useState(false);
-  const [link, setLink] = useState("");
-  const [nome, setNome] = useState("");
-  const [numero, setNumero] = useState("");
-  const [obra, setObra] = useState("");
+// Categoria, obra, medicao e complemento (#663): os mesmos campos em "Acompanhar processo" e em "Corrigir categoria".
+// Medicao so' na categoria Medicoes, com as medicoes abertas da obra; nela nao ha' complemento (o nome e' o titulo da
+// medicao). O servidor valida e responde em portugues.
+type Classificacao = { categoria: string; obra: string; medicao: string; complemento: string };
+type MedicaoDaObra = { id: number; numero: number; tipo: string; estado: string };
+
+const corpoDa = (c: Classificacao) => ({
+  categoria: c.categoria, contrato_id: c.obra ? Number(c.obra) : null,
+  medicao_id: c.categoria === "medicoes" && c.medicao ? Number(c.medicao) : null,
+  complemento: c.categoria === "medicoes" ? null : c.complemento.trim() || null,
+});
+
+function useObras(aberto: boolean, aoFalhar: (erro: string) => void) {
   const [obras, setObras] = useState<ObraLista[] | null>(null);
-  const [erro, setErro] = useState("");
-  const [ocupado, setOcupado] = useState(false);
   useEffect(() => {
     if (!aberto || obras !== null) return;
     api<ObraLista[]>("/api/contratos")
       .then(lista => setObras([...lista].sort((a, b) => (a.nome_curto || a.numero_instrumento).localeCompare(b.nome_curto || b.numero_instrumento))))
-      .catch(e => { setObras([]); setErro(mensagemDeErro(e)); });
-  }, [aberto, obras]);
+      .catch(e => { setObras([]); aoFalhar(mensagemDeErro(e)); });
+  }, [aberto, obras, aoFalhar]);
+  return obras ?? [];
+}
+
+function CamposCategoria({ id, valor, mudar, obras, aoFalhar }: {
+  id: string; valor: Classificacao; mudar: (v: Classificacao) => void; obras: ObraLista[]; aoFalhar: (erro: string) => void;
+}) {
+  const [medicoes, setMedicoes] = useState<{ obra: string; lista: MedicaoDaObra[] } | null>(null);
+  const pedeMedicao = valor.categoria === "medicoes" && valor.obra !== "";
+  const obra = valor.obra;
+  useEffect(() => {
+    if (!pedeMedicao) return;
+    let vale = true;
+    api<MedicaoDaObra[]>(`/api/contratos/${obra}/medicoes`)
+      .then(lista => { if (vale) setMedicoes({ obra, lista }); })
+      .catch(e => { if (vale) { setMedicoes({ obra, lista: [] }); aoFalhar(mensagemDeErro(e)); } });
+    return () => { vale = false; };
+  }, [pedeMedicao, obra, aoFalhar]);
+  // as abertas da obra; a medicao ja' ligada ao processo continua na lista mesmo depois de recebida
+  const abertas = (medicoes?.obra === obra ? medicoes.lista : []).filter(m => !FINAIS.includes(m.estado) || String(m.id) === valor.medicao);
+  return (
+    <>
+      <div className="campo">
+        <label className="campo__rotulo" htmlFor={`${id}-categoria`}>Categoria</label>
+        <select id={`${id}-categoria`} value={valor.categoria} onChange={e => mudar({ ...valor, categoria: e.target.value, medicao: "" })}>
+          <option value="">Escolha</option>
+          {CATEGORIAS.map(c => <option key={c.categoria} value={c.categoria}>{c.rotulo}</option>)}
+        </select>
+      </div>
+      <div className="campo">
+        <label className="campo__rotulo" htmlFor={`${id}-obra`}>Obra</label>
+        <select id={`${id}-obra`} value={valor.obra} onChange={e => mudar({ ...valor, obra: e.target.value, medicao: "" })}>
+          <option value="">Sem obra</option>
+          {obras.map(o => <option key={o.id} value={o.id}>{o.nome_curto || o.numero_instrumento}</option>)}
+        </select>
+      </div>
+      {valor.categoria === "medicoes" ? (
+        <div className="campo">
+          <label className="campo__rotulo" htmlFor={`${id}-medicao`}>Medição</label>
+          <select id={`${id}-medicao`} value={valor.medicao} onChange={e => mudar({ ...valor, medicao: e.target.value })}>
+            <option value="">Escolha</option>
+            {abertas.map(m => <option key={m.id} value={m.id}>{tituloMedicao(m)}</option>)}
+          </select>
+        </div>
+      ) : (
+        <div className="campo">
+          <label className="campo__rotulo" htmlFor={`${id}-complemento`}>Complemento</label>
+          <input id={`${id}-complemento`} className="entrada--media" autoComplete="off" maxLength={100} placeholder="de prazo"
+            value={valor.complemento} onChange={e => mudar({ ...valor, complemento: e.target.value })} />
+        </div>
+      )}
+    </>
+  );
+}
+
+const SEM_CLASSIFICACAO: Classificacao = { categoria: "", obra: "", medicao: "", complemento: "" };
+
+// Link colado na tela SIGA (issue #339; formulario da #663): ninguem digita o nome, o sistema monta a partir da
+// categoria, da obra, da medicao e do complemento.
+function AcompanharProcesso({ aoGravar }: { aoGravar: (id: number) => Promise<void> }) {
+  const [aberto, setAberto] = useState(false);
+  const [link, setLink] = useState("");
+  const [valor, setValor] = useState(SEM_CLASSIFICACAO);
+  const [erro, setErro] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const obras = useObras(aberto, setErro);
 
   async function enviar(ev: FormEvent) {
     ev.preventDefault();
     setOcupado(true); setErro("");
     try {
       const { id } = await api<{ id: number }>("/api/siga/processos-avulsos", { method: "POST", body: JSON.stringify({
-        link: link.trim(), nome: nome.trim(), numero: numero.trim() || null, contrato_id: obra ? Number(obra) : null }) });
+        link: link.trim(), ...corpoDa(valor) }) });
       await aoGravar(id);
-      setAberto(false); setLink(""); setNome(""); setNumero(""); setObra("");
+      setAberto(false); setLink(""); setValor(SEM_CLASSIFICACAO);
     } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
   }
 
   if (!aberto) return <button type="button" className="btn btn--pequeno" onClick={() => setAberto(true)}>Acompanhar processo</button>;
   return (
     <form className="form-inline sg__novo" onSubmit={enviar} aria-label="Acompanhar processo">
+      <CamposCategoria id="siga" valor={valor} mudar={setValor} obras={obras} aoFalhar={setErro} />
       <div className="campo">
         <label className="campo__rotulo" htmlFor="siga-link">Link do SIGA</label>
         <input id="siga-link" className="entrada--larga" autoComplete="off" spellCheck={false} maxLength={500} placeholder="https://…?n=…"
           value={link} onChange={e => setLink(e.target.value)} />
-      </div>
-      <div className="campo">
-        <label className="campo__rotulo" htmlFor="siga-nome">Nome</label>
-        <input id="siga-nome" className="entrada--media" autoComplete="off" maxLength={200} value={nome} onChange={e => setNome(e.target.value)} />
-      </div>
-      <div className="campo">
-        <label className="campo__rotulo" htmlFor="siga-obra">Obra</label>
-        <select id="siga-obra" value={obra} onChange={e => setObra(e.target.value)}>
-          <option value="">Sem obra</option>
-          {(obras ?? []).map(o => <option key={o.id} value={o.id}>{o.nome_curto || o.numero_instrumento}</option>)}
-        </select>
-      </div>
-      <div className="campo">
-        <label className="campo__rotulo" htmlFor="siga-numero">Nº do processo</label>
-        <input id="siga-numero" name="numero" className="entrada--media" autoComplete="off" spellCheck={false} maxLength={100} placeholder="ORGAO-PRO-AAAA/NNNNN…"
-          value={numero} onChange={e => setNumero(e.target.value)} />
       </div>
       <button type="submit" className="btn btn--primario" disabled={ocupado}>Acompanhar</button>
       <button type="button" className="btn btn--pequeno" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
@@ -273,7 +325,48 @@ function AcompanharProcesso({ aoGravar }: { aoGravar: (id: number) => Promise<vo
   );
 }
 
-export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Date }) {
+// Pagina do historico (#663): quem edita cadastros corrige categoria, obra e complemento do processo; passando a
+// Medicoes, liga o processo a uma medicao da obra.
+function CorrigirCategoria({ p, aoGravar }: { p: ProcessoSiga; aoGravar: () => Promise<void> }) {
+  const atual = (): Classificacao => ({
+    categoria: p.categoria, obra: p.contrato_id === null ? "" : String(p.contrato_id),
+    medicao: p.medicao_id === null ? "" : String(p.medicao_id), complemento: p.complemento ?? "" });
+  const [aberto, setAberto] = useState(false);
+  const [valor, setValor] = useState(atual);
+  const [erro, setErro] = useState("");
+  const [gravado, setGravado] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
+  const obras = useObras(aberto, setErro);
+
+  async function enviar(ev: FormEvent) {
+    ev.preventDefault();
+    setOcupado(true); setErro("");
+    try {
+      await api(`/api/siga/processos/${p.id}/classificacao`, { method: "POST", body: JSON.stringify(corpoDa(valor)) });
+      await aoGravar();
+      setAberto(false); setGravado(true);
+    } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
+  }
+
+  if (!aberto) {
+    return (
+      <>
+        <button type="button" className="btn btn--pequeno" onClick={() => { setValor(atual()); setGravado(false); setAberto(true); }}>Corrigir categoria</button>
+        <span className="sg__gravado" role="status">{gravado ? "Categoria gravada." : ""}</span>
+      </>
+    );
+  }
+  return (
+    <form className="form-inline sg__novo" onSubmit={enviar} aria-label="Corrigir categoria">
+      <CamposCategoria id="siga-corrigir" valor={valor} mudar={setValor} obras={obras} aoFalhar={setErro} />
+      <button type="submit" className="btn btn--primario" disabled={ocupado}>Salvar</button>
+      <button type="button" className="btn btn--pequeno" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
+      {erro && <p className="erro sg__erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+    </form>
+  );
+}
+
+export default function SigaPagina({ busca, agora, podeEditar = true }: { busca: Busca; agora?: Date; podeEditar?: boolean }) {
   const [dados, setDados] = useState<PainelSiga | null>(null);
   const [erro, setErro] = useState("");
   const carregar = useCallback(async () => {
@@ -309,7 +402,7 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
   }
   // ?processo=<id> abre o historico (o "Abrir" do aviso tambem); id que nao existe cai na tabela
   const aberto = /^\d+$/.test(busca.processo ?? "") ? processos.find(p => p.id === Number(busca.processo)) : undefined;
-  if (aberto) return <Historico key={aberto.id} p={aberto} dados={dados} aoPedir={carregar} />;
+  if (aberto) return <Historico key={aberto.id} p={aberto} dados={dados} aoPedir={carregar} podeEditar={podeEditar} />;
 
   const robo = dados.robo;
   // #657: a tabela principal so' tem os vivos; os encerrados ficam recolhidos no fim da pagina
@@ -323,7 +416,7 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
         <CaixaAviso nivel="atencao" role="status">O monitor do SIGA não lê desde {fmtData(dados.lido_em).slice(0, 5)} {fmtHora(dados.lido_em)}.</CaixaAviso>
       )}
       {dados.pode_atualizar && <Atualizar rotulo="Pedir leitura" processoId={null} robo={robo} aoPedir={carregar} />}
-      <AcompanharProcesso aoGravar={carregar} />
+      {podeEditar && <AcompanharProcesso aoGravar={carregar} />}
       {robo.avisos.some(a => a.processo_id === null) && (
         <div className="sg__avisos">
           {robo.avisos.filter(a => a.processo_id === null).map((a, i) => (
@@ -356,7 +449,7 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
       ) : (
         <section className="sg__quadro" aria-label="Processos no SIGA">
           <table className="sg__tabela" role="grid">
-            <caption className="sr-only">Processos acompanhados no SIGA, do mais parado ao menos. Escolha um para ver o histórico.</caption>
+            <caption className="sr-only">Processos acompanhados no SIGA, por categoria, do mais parado ao menos. Escolha um para ver o histórico.</caption>
             <colgroup><col className="sg__c-proc" /><col className="sg__c-onde" /><col className="sg__c-quem" /><col className="sg__c-setor" /><col className="sg__c-ultima" /><col className="sg__c-prot" /><col className="sg__c-seta" /></colgroup>
             <thead>
               <tr>
@@ -364,9 +457,12 @@ export default function SigaPagina({ busca, agora }: { busca: Busca; agora?: Dat
                 <th scope="col">Última movimentação</th><th scope="col">Protocolado em</th><th scope="col"><span className="sr-only">Abrir</span></th>
               </tr>
             </thead>
-            <tbody>
-              {vivos.map(p => <Linha key={p.id} p={p} agora={agoraDe} robo={robo} />)}
-            </tbody>
+            {porCategoria(vivos).map(s => (
+              <tbody key={s.categoria} aria-label={s.rotulo}>
+                <tr className="sg__secao"><th colSpan={7} scope="rowgroup">{s.rotulo}</th></tr>
+                {s.processos.map(p => <Linha key={p.id} p={p} agora={agoraDe} robo={robo} />)}
+              </tbody>
+            ))}
           </table>
         </section>
       )}
