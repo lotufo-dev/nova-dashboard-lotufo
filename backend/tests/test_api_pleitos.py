@@ -197,7 +197,8 @@ def test_reajuste_da_obra_traz_a_marca_de_aviso_e_os_aditivos_da_linha_do_tempo(
     assert [(a["numero"], a["tipo"], a["data_assinatura"]) for a in r["ciclos"][0]["aditivos"]] == \
         [("2º TA", "prazo", "2026-08-01")]
     [x] = r["competencias_por_ciclo"][0]["competencias"]
-    assert x["avisos"] == ["fora_da_previsao"]                 # R$ 1,01 acima do previsto
+    # issue #648: R$ 1,01 acima do previsto, e a aba nao recebe a marca de diferenca; os valores continuam
+    assert "avisos" not in x and (x["previsto_centavos"], x["pedido_centavos"]) == (10001, 10102)
     # rodada 1 da PR #438: a origem de cada soma e a linha do tempo de cada ciclo com pleito enviado
     assert (x["medicoes_pedido"], x["medicoes_aprovado"], x["medicoes_nota"]) == ([1], [], [])
     assert [(t["data_base_mes"], t["ciclo"], t["termo"], [a["numero"] for a in t["aditivos"]])
@@ -1365,7 +1366,7 @@ def test_justificativa_do_reajuste_fora_da_previsao_pela_api(api):
     assert r.status_code == 201, r.text
     [g] = cl.get(f"/api/contratos/{cid}/reajuste").json()["competencias_por_ciclo"]
     [x] = g["competencias"]
-    assert (x["avisos"], x["justificativa"]["texto"]) == ([], "Índice definitivo maior")
+    assert ("avisos" in x, x["justificativa"]["texto"]) == (False, "Índice definitivo maior")
     r = cl.post(url, json={**corpo, "texto": "Índice definitivo maior"})       # ja' justificada: nada a justificar
     assert r.status_code == 422 and r.json()["detail"] == "O pedido desta competência não está fora da previsão"
     assert cl.post("/api/contratos/999999/reajuste/justificativas",
