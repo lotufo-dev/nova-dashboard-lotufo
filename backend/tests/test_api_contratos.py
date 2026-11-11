@@ -265,3 +265,66 @@ def test_ficha_conta_so_os_tas_que_valem(client_admin):
     conn.commit()
     conn.close()
     assert client_admin.get(f"/api/contratos/{cid}/ficha").json()["contrato"]["tas"] == 2
+
+
+def _obra_com_reajuste_e_medicoes(bp=None):
+    """Contrato com um aditivo de valor, um aditivo de reajuste e duas medicoes de execucao."""
+    from app import db, medicoes
+    cid = novo_contrato({**NOVO, "valor_original": "1.000.000,01"})
+    conn = db.get_conn()
+    if bp is not None:
+        conn.execute("UPDATE contratos SET percentual_direito_bp=? WHERE id=?", (bp, cid))
+    ins = ("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza, chave_cadastro) "
+           "VALUES (?, 'valor', ?, 'assinado', '2026-03-01', ?, ?)")
+    conn.execute(ins, (cid, 200_000_00, None, "ta1"))
+    conn.execute(ins, (cid, 50_000_03, "reajuste", "rj1"))
+    conn.commit()
+    for numero, competencia, valor in ((1, "2026-04", 300_000_33), (2, "2026-05", 100_000_00)):
+        m = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": numero, "tipo": "execucao", "competencia": competencia})
+        medicoes.definir_valor(conn, 1, m, "protocolado", valor, "manual")
+        conn.execute("UPDATE medicoes SET estado='protocolada' WHERE id=?", (m,))
+        conn.commit()
+    conn.close()
+    return cid
+
+
+def test_ficha_topo_na_base_de_execucao_sem_o_aditivo_de_reajuste(client_admin):
+    """#646: valor vigente, medido e saldo do topo falam da mesma coisa: execucao a precos iniciais. O aditivo de
+    reajuste fica fora dos tres e aparece a parte."""
+    cid = _obra_com_reajuste_e_medicoes()
+    f = client_admin.get(f"/api/contratos/{cid}/ficha").json()
+    t = f["topo"]
+    assert t["vigente_centavos"] == 1_200_000_01          # original + TA de valor, sem o reajuste
+    assert t["medido_centavos"] == 400_000_33
+    assert t["saldo_centavos"] == 799_999_68
+    assert t["vigente_centavos"] - t["medido_centavos"] == t["saldo_centavos"]
+    assert t["reajuste_centavos"] == 50_000_03
+    assert f["contrato"]["original_centavos"] == 1_000_000_01 and f["contrato"]["original_igual"] is False
+
+
+def test_ficha_topo_na_cota_da_lotufo_fecha_ao_centavo(client_admin):
+    """#646: em consorcio os tres numeros vao na cota; vigente e medido arredondam uma vez cada e o saldo e' a
+    diferenca dos dois (centavo impar e rateio com residuo: 49% de 1.200.000,01 e de 400.000,33 nao sao inteiros)."""
+    cid = _obra_com_reajuste_e_medicoes(bp=4900)
+    f = client_admin.get(f"/api/contratos/{cid}/ficha").json()
+    t = f["topo"]
+    assert t["vigente_centavos"] == 588_000_00            # 588.000,0049
+    assert t["medido_centavos"] == 196_000_16             # 196.000,1617
+    assert t["saldo_centavos"] == 391_999_84
+    assert t["vigente_centavos"] - t["medido_centavos"] == t["saldo_centavos"]
+    assert t["reajuste_centavos"] == 24_500_01            # 24.500,0147
+    assert f["contrato"]["original_centavos"] == 490_000_00   # 490.000,0049
+
+
+def test_ficha_original_igual_compara_com_o_vigente_de_execucao(client_admin):
+    """#646: contrato so' com aditivo de reajuste: o valor vigente do topo (sem reajuste) e' o original."""
+    from app import db
+    cid = novo_contrato(NOVO)
+    conn = db.get_conn()
+    conn.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza, chave_cadastro) "
+                 "VALUES (?, 'valor', 500, 'assinado', '2026-03-01', 'reajuste', 'rj')", (cid,))
+    conn.commit()
+    conn.close()
+    f = client_admin.get(f"/api/contratos/{cid}/ficha").json()
+    assert f["contrato"]["original_igual"] is True
+    assert f["topo"]["vigente_centavos"] == 100_000_000 and f["topo"]["reajuste_centavos"] == 500
