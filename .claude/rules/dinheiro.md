@@ -38,3 +38,5 @@ paths:
 - Competência anterior ao início do contrato → 422; anterior à última medição do mesmo tipo → aviso.
 - Reajuste e execução tramitam separados na MTPAR e SES; juntos na SINFRA e Pref. VG (pendência `irma_fora`).
 - Teste de dinheiro sempre com caso de centavo ímpar e de rateio com resíduo.
+- Antes do merge de mudança nestes arquivos, o diff passa por uma revisão do Codex (outro fornecedor, pontos
+  cegos diferentes): `/codex:adversarial-review`, ou o agente `codex:codex-rescue` quando é a própria sessão a pedir.

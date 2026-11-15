@@ -8,8 +8,7 @@ paths:
 
 - Identidade visual em `docs/identidade-visual.md`: claro, índigo `#4F46E5`, tabela como elemento principal,
   símbolo L em grade 2×3. Tokens em `src/tokens.css`. Vermelho/âmbar/verde só com significado (erro, atenção, ok).
-- Tela nova ou redesenho: usar as skills de design do projeto (`.claude/skills/`, taste-skill) e o protótipo
-  aprovado pelo Leo antes de codar. Ajuste pequeno não precisa de protótipo.
+- Tela nova ou redesenho parte do protótipo aprovado pelo dono. Ajuste pequeno não precisa de protótipo.
 - Texto na tela: só rótulo, valor, situação e ação; frase de apoio segue `.claude/rules/texto-na-tela.md`.
 - Tudo em português: rótulos, erros, confirmações ("Nota enviada às HH:MM.", "Número gravado."). Nunca
   mostrar código interno (`medicao.protocolo`), exceção (`ValueError`) ou "Failed to fetch".

@@ -19,5 +19,5 @@ paths:
 - **Máquina, porta e tarefa de produção também não entram**: `<servidor>` nos textos e `$env:DASH_SERVIDOR`
   nos scripts. Client ID e tenant do Microsoft 365 vêm de variável de ambiente; em exemplo, vale
   `00000000-0000-0000-0000-000000000000`.
-- Achou dado real já escrito fora do seu recorte (fixtures, migração, código)? Não mexa: registre em
-  `## Suposições` e deixe para a issue que cuida da anonimização (#104/#110), que usa um mapa único.
+- Achou dado real já escrito (fixtures, migração, código)? Avise o dono e abra uma issue: a troca precisa de um
+  mapa único, para o mesmo dado virar o mesmo valor fictício em todo lugar.
