@@ -23,3 +23,5 @@ paths:
   (`--ensaio` primeiro). Instrumento aplicado não muda; correção é instrumento novo. Reajuste zerado no
   cadastro não significa ausência de reajuste.
 - Backup: snapshot horário com ensaio de restauração; não desligar, não mudar retenção sem issue.
+- Antes do merge de mudança nestes arquivos, o diff passa por uma revisão do Codex (outro fornecedor, pontos
+  cegos diferentes): `/codex:adversarial-review`, ou o agente `codex:codex-rescue` quando é a própria sessão a pedir.

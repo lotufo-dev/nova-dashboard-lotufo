@@ -1,6 +1,6 @@
 ---
 name: Tarefa
-about: Uma tarefa = uma PR = um worktree, no máximo meio dia de trabalho.
+about: Uma tarefa que se entrega e se confere sozinha.
 labels: []
 ---
 

@@ -6,8 +6,7 @@ sem API paga. A única fonte automática é o TOTVS RM.
 
 > Código publicado para a CI; todos os direitos reservados, Lotufo Engenharia e Construções Ltda. Sem licença de uso.
 
-- Como o trabalho anda (issues, worktrees, PR, gates): `docs/fluxo-de-trabalho-2026-10-11.md`
-- Regras para o Claude: `CLAUDE.md` e `.claude/rules/`
+- Como o trabalho anda e regras para o Claude: `CLAUDE.md` e `.claude/rules/`
 - Produto (autoridade): `docs/superpowers/specs/2026-09-21-reestruturacao-design.md`
 - Operação e produção: `docs/runbook.md`
 - Decisões e dívidas: `docs/backlog.md`; tarefas: GitHub Issues

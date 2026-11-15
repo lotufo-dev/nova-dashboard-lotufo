@@ -20,9 +20,9 @@ Closes #
 
 <!-- Não. / Sim: número NNN_nome.sql; só acrescenta (coluna, tabela ou índice) ou mexe em dados (explicar). -->
 
-## Gates
+## Conferência
 
 - [ ] Suíte verde: 
-- [ ] /code-review: 
-- [ ] revisor-adversarial: 
-- [ ] Gate Sol: 
+- [ ] Revisão do código: 
+- [ ] Revisão do Codex (só quando mexe em dinheiro, envio ou banco): 
+- [ ] O que não foi conferido: 

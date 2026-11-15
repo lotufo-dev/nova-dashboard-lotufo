@@ -48,3 +48,5 @@ paths:
   inteiro e anexo não se gravam. O simulador serve a leitura por `<pasta>/respostas/<conversa>/*.json`.
 - Dev nunca manda e-mail de verdade: usar o simulador (`DASH_GRAPH_SIMULADOR=dados/correio-simulado`).
 - Teste obrigatório para qualquer mudança aqui: dois POST simultâneos resultam em 1×200 e 1×409.
+- Antes do merge de mudança nestes arquivos, o diff passa por uma revisão do Codex (outro fornecedor, pontos
+  cegos diferentes): `/codex:adversarial-review`, ou o agente `codex:codex-rescue` quando é a própria sessão a pedir.
