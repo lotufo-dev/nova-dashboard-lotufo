@@ -102,7 +102,7 @@ O valor das notas emitidas para a medição.
 **Medido**:
 O aprovado e, enquanto não houver boletim, o pedido. O medido da obra soma as medições de execução e de projeto
 a partir do envio da planilha/carta; reajuste fica fora, e medição cancelada, desistida ou ainda não enviada não
-conta (`docs/adr/0011`).
+conta (`docs/adr/0012`).
 
 **Saldo a executar**:
 O valor vigente de execução (sem o aditivo de reajuste) menos o medido da obra.

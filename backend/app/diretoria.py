@@ -572,7 +572,7 @@ def _curva_obra(conn, contrato_id: int, cache: dict) -> tuple[dict, str, dict, d
     quando a obra tem repactuacao, com o previsto anterior a ela; senao "vigente", com o vigente: decisao do Leo de
     28/10/2026); e o medido de execucao nos estados que medem (`paineis._medido`). O vigente sai do mesmo `cache` de
     `_previsto`, para nao ler o cronograma duas vezes. #742: so' a execucao, de proposito: a curva e o desvio comparam
-    o realizado com o cronograma, como `paineis.curva_s`; o projeto entra no medido e no saldo (docs/adr/0011)."""
+    o realizado com o cronograma, como `paineis.curva_s`; o projeto entra no medido e no saldo (docs/adr/0012)."""
     chave = ("curva", contrato_id)
     if chave not in cache:
         if contrato_id not in cache:

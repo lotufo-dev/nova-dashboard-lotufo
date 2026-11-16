@@ -12,7 +12,7 @@ from app import avisos, contratos, cronograma, medicoes, tempo
 
 ESTADOS_VALIDOS = medicoes.ESTADOS_NO_MEDIDO  # medem (#561: a mesma lista do acumulado do formulario)
 TIPOS = ("execucao", "reajuste", "projeto")
-# #742 (decisao do dono de 16/11/2026, #670; docs/adr/0011): o medido da obra soma execucao e projeto; o reajuste fica
+# #742 (decisao do dono de 16/11/2026, #670; docs/adr/0012): o medido da obra soma execucao e projeto; o reajuste fica
 # em serie propria, fora do medido e do saldo.
 TIPOS_NO_MEDIDO = ("execucao", "projeto")
 _QT = ",".join("?" * len(TIPOS_NO_MEDIDO))
@@ -104,7 +104,7 @@ def curva_s(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
     uniao das competencias, com os meses vazios do meio; tudo acumulado em centavos. `previsto_anterior_centavos`
     e' None sem repactuacao; `medido_centavos` (execucao) e' None depois do ultimo mes medido. Sem nada previsto nem
     medido, lista vazia. #742: continua so' com a execucao, que e' o realizado contra o cronograma e o que vai ao
-    orgao com a carta de prazo; o projeto entra no medido e no saldo da obra (`saldo`), nao aqui (docs/adr/0011)."""
+    orgao com a carta de prazo; o projeto entra no medido e no saldo da obra (`saldo`), nao aqui (docs/adr/0012)."""
     pontos = {p["competencia"]: p for p in curva(conn, contrato_id)}
     anterior = cronograma.curva_comparativa(conn, contrato_id)["anterior"] if pontos else None
     previsto_anterior = {a["competencia"]: a["previsto_centavos"] for a in anterior or []}

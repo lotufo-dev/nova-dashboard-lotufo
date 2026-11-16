@@ -79,7 +79,7 @@ def _saldo(conn, contrato_id: int, tipo: str, acumulado: int, pedido: int | None
     passo 1, "soma dos aprovados, senao pedidos").
     So' a execucao tem saldo contra o valor do contrato; no projeto, os saldos sao nulos. E' o saldo da SERIE, o que
     vai ao orgao na planilha/carta: o acumulado e' so' o da propria serie. O saldo da obra (paineis.saldo) soma
-    execucao e projeto (#742, docs/adr/0011) e nao muda este."""
+    execucao e projeto (#742, docs/adr/0012) e nao muda este."""
     c = contratos.vigente(conn, contrato_id)
     vigente = c["valor_vigente_centavos"]
     # a base do saldo e' a da execucao, como a do painel (#262, paineis.saldo): o aditivo de reajuste nao entra

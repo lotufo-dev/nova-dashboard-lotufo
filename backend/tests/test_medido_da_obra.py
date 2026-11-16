@@ -1,4 +1,4 @@
-"""Issue #742 (decisao do dono de 16/11/2026, #670; docs/adr/0011): o medido da obra soma execucao e projeto; o
+"""Issue #742 (decisao do dono de 16/11/2026, #670; docs/adr/0012): o medido da obra soma execucao e projeto; o
 reajuste fica fora; cancelada, desistida, prevista e planilha gerada nao contam. Cada numero que parte do medido
 (saldo, lista de Obras, topo e ritmo da pagina da obra) segue a regra; a curva S continua so' com a execucao.
 
