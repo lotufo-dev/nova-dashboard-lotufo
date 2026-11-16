@@ -37,8 +37,6 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 
 - 2026-10-28 #296 (curva S da carteira), gate Sol S1: a curva da carteira no Resumo acumula só dentro da janela de 12 meses (parte de zero no primeiro mês), como já fazia; o dono decide se ela passa a acumular desde o início dos contratos. O desvio em p.p. do QDOP já conta o histórico inteiro.
 - 2026-09-22 **IBS/CBS**: motor e tela prontos (linhas informativas, não deduzem do líquido), mas NENHUMA regra os declara. As notas reais de 2026 trazem CBS 0,9% e IBS 0,1% com redução de 60% (efetivas 0,36% e 0,04%), base = bruto − ISS − PIS − COFINS. Falta decidir se entram no espelho; depois acrescentar os controles `ibs`/`cbs` nos modelos Word e descomentar nos YAMLs.
-- 2026-10-15 Recebimento à mão sem NF ligada (revisor da PR #206, fora do recorte da #203): quando a NF chega depois, `sincronizacao_rm.alocar` recusa ligar a medição já recebida, a NF fica solta e `diretoria._notas_em_aberto` a soma no a receber pelo centro de custo. A Saúde não avisa, porque `_recebidas_sem_baixa` só vê as notas ligadas. Decidir se a NF pode ligar a medição recebida à mão (sem mudar o estado dela) ou se vira aviso próprio.
-- 2026-10-15 Recebimento automático com parte do faturamento cancelada no RM (gate Sol na PR #202; já existia em master, `_recebimentos` só olha as alocações vigentes): uma medição faturada em duas NFs, com uma delas cancelada no RM, vira `recebida` quando a outra é quitada. A PR #202 fechou o caso do vínculo desfeito à mão. O caso da NF cancelada continua aberto: falta decidir se a medição espera a nota nova.
 
 ## Externo (dono)
 
