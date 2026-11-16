@@ -89,8 +89,9 @@ jobs:
       # envio.md ou banco.md, o corpo dela precisa do item "Segunda revisao independente" marcado e preenchido
       # (scripts/segunda_revisao.py). Mora neste job porque ele ja' baixa o historico inteiro e e' check obrigatorio.
       # O corpo e' lido da API na hora, entao editar a PR e reexecutar o job basta (o corpo do evento e' o de quando
-      # a execucao nasceu); se a API falhar, vale o do evento. PR cuja base nao e' o master (branch de integracao)
-      # so' recebe o aviso: a revisao e' cobrada na PR que leva o trabalho ao master. Na fila de merge nao roda.
+      # a execucao nasceu); se a API falhar, vale o do arquivo do evento. PR cuja base nao e' o master (branch de
+      # integracao) so' recebe o aviso: a revisao e' cobrada na PR que leva o trabalho ao master. Na fila de merge
+      # nao roda.
       - name: Segunda revisao em PR que toca dinheiro, envio ou banco
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
@@ -98,12 +99,11 @@ jobs:
           REPOSITORIO: ${{ github.repository }}
           PR_NUMERO: ${{ github.event.pull_request.number }}
           BASE_REF: ${{ github.base_ref }}
-          CORPO_DO_EVENTO: ${{ github.event.pull_request.body }}
         run: |
           corpo="$RUNNER_TEMP/corpo-da-pr.md"
           if ! gh api "repos/$REPOSITORIO/pulls/$PR_NUMERO" --jq '.body // ""' > "$corpo"; then
             echo "Nao consegui ler o corpo da PR pela API; usando o do evento."
-            printf '%s' "$CORPO_DO_EVENTO" > "$corpo"
+            jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" > "$corpo"
           fi
           modo=""
           [ "$BASE_REF" = "master" ] || modo="--so-avisa"
