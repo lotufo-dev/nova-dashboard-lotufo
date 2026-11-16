@@ -1,5 +1,9 @@
 # Dashboard Lotufo: reestruturação (o sistema onde o trabalho é feito)
 
+> **Histórico.** Este documento deixou de ser autoridade em 15/11/2026 (`docs/adr/0001`). As regras vivas estão em
+> `.claude/rules/`, `GLOSSARY.md` e `docs/adr/`. Leia-o só para saber de onde veio uma decisão antiga; onde ele e o
+> código divergem, vale o código.
+
 **Data:** 2026-09-21
 **Autor:** Leonardo Praeiro (com Claude)
 **Status:** Decisões aprovadas tópico a tópico entre 2026-09-16 e 2026-09-21; aguardando revisão desta spec e plano de implementação.

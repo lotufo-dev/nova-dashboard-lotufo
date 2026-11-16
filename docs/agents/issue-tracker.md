@@ -40,22 +40,3 @@ Criar uma issue no GitHub.
 ## Quando uma skill diz "buscar o ticket"
 
 Ler como em **Ler uma issue**, acima.
-
-## Operações do wayfinder
-
-Usadas pela `/wayfinder`. O **mapa** é uma issue só, e os tickets são issues **filhas** dela.
-
-- **Mapa**: uma issue com o label `wayfinder:map`, com o corpo Destino / Notas / Decisões até aqui.
-  `gh issue create --label wayfinder:map`.
-- **Ticket filho**: issue ligada ao mapa como sub-issue (ver **Tornar uma issue filha de outra**). Labels:
-  `wayfinder:<tipo>` (`research`, `prototype`, `grilling`, `task`). Quem pega o ticket vira o responsável.
-- **Bloqueio**: as dependências nativas do GitHub. Acrescentar com
-  `gh api --method POST repos/<dono>/<repo>/issues/<filha>/dependencies/blocked_by -F issue_id=<id-do-banco-da-que-bloqueia>`,
-  onde o id é o numérico do banco (`gh api repos/<dono>/<repo>/issues/<n> --jq .id`), não o `#número`. Onde isso não
-  estiver disponível, uma linha `Bloqueada por: #<n>, #<n>` no topo do corpo da filha. O ticket está livre quando
-  todas as que o bloqueiam estão fechadas.
-- **Fronteira**: listar as filhas abertas do mapa, tirar as que têm bloqueio aberto ou responsável; a primeira na
-  ordem do mapa vence.
-- **Pegar**: `gh issue edit <n> --add-assignee @me`, a primeira escrita da sessão.
-- **Resolver**: `gh issue comment <n> --body-file <resposta>`, depois `gh issue close <n>`, depois acrescentar uma
-  linha (resumo e link) em "Decisões até aqui" do mapa.

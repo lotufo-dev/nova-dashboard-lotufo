@@ -23,20 +23,17 @@ paths:
 
 # Dinheiro, medição e histórico
 
-- Valor é inteiro em centavos; só `app/dinheiro.py` arredonda, uma vez, no fim. `parse_brl` tem teto
-  (R$ 99.999.999.999,99) e aceita só `[0-9]`.
-- A medição guarda o valor **cheio**; a cota do consórcio é derivada na leitura. O cadastro guarda o contrato
-  na cota. Base cheia × cota: provado no Leblon (dobro exato) e na Rota do Oeste (×0,18).
-- Valor protocolado é congelado no protocolo. Correção é evento novo (auditoria), nunca sobrescrita.
-  Valor de origem `espelho` não se edita à mão: gera o espelho de novo; depois de protocolada, reapresentação.
-- Nenhum registro financeiro é apagado fisicamente. Auditoria é append-only e grava quem fez; sem usuário,
-  "pelo sistema".
-- Hierarquia das fontes de valor: documento assinado manda; nota fiscal desempata; planilha é insumo.
-- Estados da medição: prevista → espelho gerado → espelho enviado → nota emitida → protocolada → recebida.
-  Transição fora dessa ordem é 422 com a mensagem por extenso ("Transição inválida: estado → estado"); o
-  servidor valida, não só a tela. O 409 com `codigo` é o da reserva de envio (envio duplicado).
-- Competência anterior ao início do contrato → 422; anterior à última medição do mesmo tipo → aviso.
-- Reajuste e execução tramitam separados na MTPAR e SES; juntos na SINFRA e Pref. VG (pendência `irma_fora`).
-- Teste de dinheiro sempre com caso de centavo ímpar e de rateio com resíduo.
-- Antes do merge de mudança nestes arquivos, o diff passa por uma revisão do Codex (outro fornecedor, pontos
-  cegos diferentes): `/codex:adversarial-review`, ou o agente `codex:codex-rescue` quando é a própria sessão a pedir.
+Os termos (pedido, aprovado, faturado, medido, cota, valor cheio, vínculo) estão no `GLOSSARY.md`.
+
+- **Centavos inteiros.** Só `app/dinheiro.py` arredonda, uma vez, no fim.
+- **Cheio e cota.** A medição guarda o valor cheio; a cota é derivada na leitura. O contrato é cadastrado na cota.
+- **Valor congela, correção é evento.** O pedido congela no envio da planilha/carta e o valor protocolado congela
+  no protocolo. Corrigir é registrar um evento novo, nunca sobrescrever. O valor que veio do espelho muda gerando
+  o espelho de novo; depois do protocolo, por reapresentação.
+- **Nada financeiro se apaga.** A auditoria só acrescenta e grava quem fez; sem usuário, "pelo sistema".
+- **Fontes de valor.** O documento assinado manda; a nota fiscal desempata; a planilha é insumo.
+- **Vínculo nota ↔ medição** segue a força da prova (`docs/adr/0005`): o documento antes do valor; valor só
+  exato, dentro da obra e com candidata única; nunca em carga de histórico nem em fechamento.
+- **Recebimento** vem da baixa no RM; à mão, só o administrador, com motivo (`docs/adr/0006`).
+- **O servidor valida** a transição de estado e o valor; a tela só reflete.
+- Teste de dinheiro leva caso de centavo ímpar e de rateio com resíduo.

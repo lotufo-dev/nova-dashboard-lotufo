@@ -5,49 +5,43 @@ Você é dono e mantenedor de longo prazo deste código, e o desenho dele é dec
 ## O produto em cinco linhas
 
 Sistema web interno da Lotufo Engenharia (FastAPI + React + SQLite) para contratos de obras públicas e o
-ciclo da medição: espelho de NF → envio ao faturamento → nota → envio ao órgão/protocolo → pagamento.
-O sistema é onde o trabalho é feito; o registro é consequência. Nada adivinha: não lê planilha nem SharePoint, e de
-e-mail lê só a conversa que ele mesmo enviou (a resposta do órgão à planilha enviada, pela conta de quem enviou);
-fora isso, a única fonte automática é o TOTVS RM, que só confirma o que a pessoa já fez. Quem opera
-digita pouco e confere; regra, cadastro e instrumento são do dono, em arquivo versionado (`cadastro/*.yaml`).
+ciclo da medição: em análise no órgão → boletim → nota → protocolado → recebido.
+O sistema é onde o trabalho é feito; o registro é consequência. Ele só lê o que a pessoa entregou a ele, o que ele
+mesmo enviou e o TOTVS RM, que só confirma o que a pessoa já fez; caixa de e-mail, pasta e SharePoint ficam fora.
+Trava só o que sai errado para fora e não se desfaz; o resto avisa e segue com justificativa. Quem opera digita
+pouco e confere; regra, cadastro e instrumento são do dono, em arquivo versionado.
 
 ## Onde está cada coisa
 
 - `README.md`: rodar e testar. `docs/runbook.md`: produção e deploy.
-- Autoridade de produto: `docs/superpowers/specs/2026-09-21-reestruturacao-design.md` (o que ela não contradiz
-  da spec de 2026-08-28 continua valendo).
+- Termos: `GLOSSARY.md`. Decisões com o motivo: `docs/adr/`.
+- Regras por tema: `.claude/rules/`, que carregam sozinhas quando a sessão mexe nos arquivos do tema.
+- `docs/superpowers/specs/`: histórico, para saber de onde veio uma decisão antiga (`docs/adr/0001`).
 - Decisões e dívidas que não viraram issue: `docs/backlog.md` (uma linha por item; fechou, apaga a linha).
-- Regras por tema: `.claude/rules/`, que carregam sozinhas quando a sessão mexe nos arquivos certos.
-- Identidade visual: `docs/identidade-visual.md`.
+- Identidade visual: `docs/identidade-visual.md` (em redesenho).
 
-## Regras que o código não conta
+## Regras que valem em qualquer arquivo
 
 - **A produção roda em outro computador**, o `<servidor>`, a partir de uma cópia fixa do código em
-  `C:\DashboardLotufo\app`, com os dados em `C:\DashboardLotufo`. A equipe usa essa instalação todos os dias. Ela
-  só muda por deploy pedido pelo dono (skill `deploy`) ou por gravação que ele autoriza na hora. A máquina onde
-  se desenvolve não é a produção.
-- **Repositório público**: cada push sai na hora e não se apaga. Dado real (cadastro, NF, certidão, e-mail, CNPJ)
-  mora no repositório privado `lotufo-cadastro` (lido via `DASH_CADASTRO_DIR`) e na produção; nesta árvore, não.
-  Nos textos, papel no lugar do nome da pessoa e `<servidor>` no lugar do nome da máquina.
-- **Banco.** Dev usa `backend/dados/dashboard.db` só com `DASH_DEV=1`. Servidor de revisão, seed e teste
+  `C:\DashboardLotufo\app`, com os dados em `C:\DashboardLotufo`. Ela é tratada como em uso: muda só por deploy
+  pedido pelo dono (skill `deploy`) ou por gravação que ele autoriza na hora. A máquina onde se desenvolve não é a
+  produção.
+- **Repositório público**: cada push sai na hora e não se apaga. Dado real (cadastro, NF, certidão, e-mail, CNPJ,
+  fato de domínio com nome de obra) mora no repositório privado `lotufo-cadastro` (lido via `DASH_CADASTRO_DIR`) e
+  na produção; nesta árvore, não. Nos textos, papel no lugar do nome da pessoa ("o dono", "o faturamento") e
+  `<servidor>` no lugar do nome da máquina. O detalhe está em `.claude/rules/dados-de-teste.md`.
+- **Banco de dev.** `backend/dados/dashboard.db` só com `DASH_DEV=1`. Servidor de revisão, seed e teste
   exploratório usam `DASH_DB_PATH` apontando para a pasta temporária da sessão (`DASH_DEV=1`, `DASH_SEM_JOBS=1`),
-  para o banco padrão nunca ser semeado nem apagado. Migrações em `backend/migrations/`, idempotentes e só de
-  acréscimo, porque rodam sozinhas sobre o banco de produção.
+  para o banco padrão nunca ser semeado nem apagado.
 - **Sem custo de API**: o produto não chama serviço pago por uso. Extração determinística (regex, pypdf,
   openpyxl) com fila humana para o resto. Única exceção decidida: OCR local (Tesseract no servidor) nas certidões
   sem texto. Microsoft 365 e RM, já pagos, não contam.
-- **Dinheiro e histórico.** Centavos inteiros, arredondamento único, valor protocolado congelado no protocolo,
-  correção é evento novo (não sobrescreve), sem exclusão física de registro financeiro, auditoria só de acréscimo.
-  O cadastro guarda o contrato na cota do consórcio; as medições guardam o valor cheio e a cota é derivada.
-- **Cadastro versionado.** Obras, órgãos, entidades e instrumentos moram em `cadastro/*.yaml`, editados pelo
-  dono com o Claude e aplicados por `python -m app.cli cadastro aplicar`. Não existe tela de cadastro;
-  instrumento aplicado não se altera (correção é instrumento novo).
-- **Envio de e-mail sai da conta Microsoft de quem clicou**, não de conta de serviço. Envio é único e
-  registrado antes de sair (reserva atômica); reenvio exige intenção explícita.
+- **Dinheiro, envio e banco** têm regra própria em `.claude/rules/`. Mudança neles passa por uma segunda revisão
+  independente, de quem não escreveu o código, antes do merge.
 - **Projeto antigo** (`~/dev/lotufo-dashboard`, `~/dev/lotufo-automacao-medicao`): leitura autorizada para
   comparar produto e extrair regra de domínio. O código de lá não se herda.
 - **Português** nos textos da interface, mensagens de erro, commits, issues e PRs. Assunto de commit no padrão
-  `tipo: descricao` (feat/fix/docs/test/chore), sem acento. Código interno e inglês não aparecem na tela.
+  `tipo: descricao` (feat/fix/docs/test/chore), sem acento.
 - **Sem perguntar a terceiros.** Dúvida não vira proposta de perguntar ao faturamento, à TI ou ao órgão:
   resolve-se pelos documentos (Outlook, RM, SharePoint, banco) ou decide-se e registra-se.
 - **Mudança de comportamento sai com teste** ao lado dos existentes.
