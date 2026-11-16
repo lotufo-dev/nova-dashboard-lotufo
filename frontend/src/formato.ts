@@ -49,6 +49,17 @@ export function fmtPercentual(fracao: number, casas = 2, fixas = false): string 
   });
 }
 
+/** O percentual de um termo de reajuste como o cadastro o guarda ("6,76", "6,76%", "6.76" ou 6.76) -> "6,76%", com as
+ *  casas que ele tem (ate' quatro: o indice de reajuste nao se arredonda na tela). O que nao e' numero (vazio, texto
+ *  solto, nulo) -> null: quem mostra omite ou poe o tracinho, nunca "NaN%". */
+export function fmtPercentualDoCadastro(p: unknown): string | null {
+  if (typeof p !== "string" && typeof p !== "number") return null;
+  const s = String(p).trim().replace(/\s*%$/, "");
+  const n = typeof p === "number" ? p
+    : /^[+-]?\d[\d.]*(,\d+)?$/.test(s) ? Number(s.includes(",") ? s.replace(/\./g, "").replace(",", ".") : s) : NaN;
+  return Number.isFinite(n) ? fmtPercentual(n / 100, 4) : null;
+}
+
 /** A cota da Lotufo no cabecalho da obra e da medicao (F-50): "cota 40%" so' em consorcio; com 100%, null. */
 export function baseDosValores(percentualBp: number): string | null {
   return percentualBp === 10000 ? null : `cota ${fmtPercentual(percentualBp / 10000)}`;
