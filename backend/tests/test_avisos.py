@@ -674,6 +674,29 @@ def test_aprovado_abaixo_do_pedido_operacao_sempre_diretoria_acima_de_10_por_cen
     assert _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos") == []
 
 
+def test_aprovado_abaixo_do_pedido_so_avisa_acima_de_meio_por_cento(motor):
+    # #741: ate' 0,5% do pedido (inclusive) nao avisa; a conta e' em centavos inteiros
+    c, u, cid = motor
+    mid = _med(c, cid, 1, "2026-10", "planilha_enviada", pedido=10_000_00, enviada_em="2026-10-30")
+    _bol(c, u, mid, 9_950_01, "a")               # diferenca de 49,99: abaixo de 0,5%
+    assert _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos") == []
+    _bol(c, u, mid, 9_950_00, "b")               # 50,00: exatamente 0,5% nao avisa
+    assert _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos") == []
+    _bol(c, u, mid, 9_949_99, "c")               # 50,01: acima de 0,5% avisa, so' para a operacao
+    [a] = _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos")
+    assert (a["medicao_id"], a["publico"], a["valor_centavos"]) == (mid, ["operacao"], 50_01)
+
+
+def test_meio_por_cento_de_pedido_com_centavo_impar_nao_arredonda(motor):
+    # 0,5% de 10.000,01 e' 50,00005: 50,00 nao avisa e 50,01 avisa (sem ponto flutuante)
+    c, u, cid = motor
+    mid = _med(c, cid, 1, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol(c, u, mid, 9_950_01, "a")
+    assert _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos") == []
+    _bol(c, u, mid, 9_950_00, "b")
+    assert len(_do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8))) == 1
+
+
 def test_aceitar_a_diferenca_tira_o_aviso_ate_o_proximo_boletim_abaixo(motor):
     c, u, cid = motor
     mid = _med(c, cid, 1, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
