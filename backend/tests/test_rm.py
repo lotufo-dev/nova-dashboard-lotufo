@@ -63,6 +63,27 @@ def _medicao(conn, cid, numero, valor, comp="2026-07", tipo="execucao"):
     return mid
 
 
+def _ligar(conn, mid, *idmovs):
+    """Vinculo gravado sem passar pelo casador: o da medicao faturada em mais de uma nota, que por valor nao liga
+    sozinha fora da obra com centro de custo."""
+    for idmov in idmovs:
+        nid = conn.execute("SELECT id FROM notas_fiscais WHERE idmov=?", (idmov,)).fetchone()[0]
+        sincronizacao_rm.alocar(conn, None, nid, mid, "detectado", 0.9, "centro_custo_soma_dia")
+
+
+def _enviar_espelho(conn, espelho_id, medicao_ids, em="2026-08-05 14:00:00"):
+    """O que `espelhos.enviar` deixa no banco depois do e-mail ao faturamento (sem mandar e-mail): a linha em `envios`
+    (carimbo em UTC), o elo com as medicoes, o estado e o envio na versao do espelho."""
+    with db.mutacao(conn):
+        envio = conn.execute("INSERT INTO envios (tipo, usuario_id, remetente, para, copia, assunto, enviado_em) "
+                             "VALUES ('espelho', 1, 'u@l.com', '[]', '[]', 'Espelho', ?)", (em,)).lastrowid
+        for mid in medicao_ids:
+            conn.execute("INSERT INTO envio_medicoes (envio_id, medicao_id) VALUES (?,?)", (envio, mid))
+            medicoes.marcar_espelho_enviado(conn, 1, mid)
+        conn.execute("UPDATE espelhos SET envio_id=? WHERE id=?", (envio, espelho_id))
+    return envio
+
+
 @pytest.fixture
 def cid(conn):
     from app import auth
@@ -98,29 +119,48 @@ def test_cliente_recusa_http_sem_flag(monkeypatch):
     assert isinstance(rm.de_ambiente(), rm.ClienteRM)
 
 
-def test_interpretar_campo_livre():
-    f = sincronizacao_rm.interpretar_campo_livre
-    assert f("IC 082/2025 - 12") == ("IC 082/2025", 12, "execucao")
-    assert f("ic 082/2025 - 12ª REAJ") == ("IC 082/2025", 12, "reajuste")
-    assert f("CT-271-LT-2026 / medição 3 proj") == ("CT-271-LT-2026", 3, "projeto")
-    assert f("qualquer coisa") is None and f(None) is None
-
-
 # --- sincronizacao ---
 
-def test_campo_livre_aloca_sem_mudar_estado(conn, cid, tmp_path):
+def test_valor_exato_aloca_sem_mudar_estado(conn, cid, tmp_path):
     mid = _medicao(conn, cid, 12, 461_900_00)
-    cli = _simulador(tmp_path, [_nf(100, 461900.0, campo="IC 082/2025 - 12")], [])
+    cli = _simulador(tmp_path, [_nf(100, 461900.0)], [])
     r = sincronizacao_rm.sincronizar(conn, cli, "manual")
     assert r["estado"] == "success" and r["alocacoes"] == 1, r
     m = medicoes.detalhe(conn, mid)
     assert m["estado"] == "protocolada" and m["notas"]
-    assert m["notas"][0]["regra"] == "campo_livre1" and m["notas"][0]["origem"] == "detectado"
+    assert m["notas"][0]["regra"] == "valor_exato" and m["notas"][0]["origem"] == "detectado"
     # idempotente: a segunda rodada nao aloca de novo nem cria sugestao
     r2 = sincronizacao_rm.sincronizar(conn, cli, "agendado")
     assert (r2["alocacoes"], r2["sugestoes"]) == (0, 0)
     assert conn.execute("SELECT COUNT(*) FROM notas_fiscais").fetchone()[0] == 1
     assert auditoria.verificar_cadeia(conn)
+
+
+def test_campo_livre_do_rm_nao_liga_nota(conn, cid, tmp_path):
+    """Issue #708 (docs/adr/0005): o campo livre do RM, preenchido por terceiros, nao e' mais chave. A nota que aponta
+    a medicao por ele, sem valor que a prove, fica sem vinculo; o campo continua guardado na nota."""
+    mid = _medicao(conn, cid, 12, 461_900_00)
+    cli = _simulador(tmp_path, [_nf(100, 1000.01, campo="IC 082/2025 - 12")], [])
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0), r
+    assert not _tem_nf(conn, mid)
+    assert conn.execute("SELECT campo_livre1 FROM notas_fiscais WHERE idmov=100").fetchone()[0] == "IC 082/2025 - 12"
+    assert [n["idmov"] for n in sincronizacao_rm.reconciliacao(conn)["nfs_sem_medicao"]] == [100]
+
+
+def test_vinculo_ja_gravado_pelo_campo_livre_continua(conn, cid, tmp_path):
+    """Issue #708: a regra saiu do casador, mas o vinculo que ela gravou nao muda."""
+    mid = _medicao(conn, cid, 12, 461_900_00)
+    nfs = [_nf(100, 1000.01, campo="IC 082/2025 - 12")]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    nid = conn.execute("SELECT id FROM notas_fiscais WHERE idmov=100").fetchone()[0]
+    sincronizacao_rm.alocar(conn, None, nid, mid, "detectado", 1.0, "campo_livre1")
+    antes = conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao LIKE 'nf.%'").fetchone()[0]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0), r
+    vinculos = conn.execute("SELECT regra, desfeita_em FROM nf_alocacoes WHERE medicao_id=?", (mid,)).fetchall()
+    assert [(v["regra"], v["desfeita_em"]) for v in vinculos] == [("campo_livre1", None)]
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao LIKE 'nf.%'").fetchone()[0] == antes
 
 
 def test_valor_exato_unico_aloca_e_proximo_fica_sem_alocacao(conn, cid, tmp_path):
@@ -217,7 +257,7 @@ def test_baixas_movem_para_recebida_e_parcial_fica(conn, cid, tmp_path):
     # NF bruto R$ 1.000 partida em DOIS titulos (liquido 500 + 424 = 924); so' recebe quando
     # os dois entram. `devido` SOMA os titulos (cada idlan e' um titulo distinto).
     mid = _medicao(conn, cid, 12, 1000_00)
-    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12")]
+    nfs = [_nf(100, 1000.0)]
     cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 500.0, 500.0, 1, "2026-09-01T00:00:00-04:00"),
                                      _baixa(2, 100, 424.0, 0.0, 0)])                 # 2o titulo aberto
     sincronizacao_rm.sincronizar(conn, cli)
@@ -238,7 +278,7 @@ def test_recebida_pelo_titulo_liquido_mesmo_com_retencao(conn, cid, tmp_path):
     """A baixa do RM e' o LIQUIDO (titulo = bruto - ISS/INSS/IRRF). A medicao vira recebida
     quando o titulo esta quitado, mesmo com o recebido MENOR que o bruto da NF."""
     mid = _medicao(conn, cid, 12, 1000_00)
-    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12")]                          # NF bruto R$ 1.000
+    nfs = [_nf(100, 1000.0)]                          # NF bruto R$ 1.000
     cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 924.0, 924.0, 1, "2026-09-01T00:00:00-04:00")])
     r = sincronizacao_rm.sincronizar(conn, cli)
     assert r["recebimentos"] == 1, r
@@ -251,7 +291,7 @@ def test_nota_da_medicao_traz_a_falta_pelo_titulo_liquido_e_se_e_da_lotufo(conn,
     """Issue #514 (passo Pagamento): NF de R$ 1.000,01 com retencao, titulo de R$ 924,01 baixado inteiro: falta zero
     (nunca os R$ 76,00 da retencao); a nota da coligada da Lotufo vem marcada."""
     mid = _medicao(conn, cid, 12, 1000_01)
-    nfs = [_nf(100, 1000.01, campo="IC 082/2025 - 12")]
+    nfs = [_nf(100, 1000.01)]
     cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-01T00:00:00-04:00")])
     sincronizacao_rm.sincronizar(conn, cli)
     n = medicoes.detalhe(conn, mid)["notas"][0]
@@ -261,7 +301,7 @@ def test_nota_da_medicao_traz_a_falta_pelo_titulo_liquido_e_se_e_da_lotufo(conn,
 def test_nota_da_medicao_falta_conta_o_titulo_aberto_inteiro_e_o_parcial(conn, cid, tmp_path):
     """Titulo aberto entra pelo original inteiro; o parcial, pelo que falta dele (titulo a titulo)."""
     mid = _medicao(conn, cid, 12, 1000_00)
-    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12")]
+    nfs = [_nf(100, 1000.0)]
     cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 500.0, 0.0, 0), _baixa(2, 100, 424.0, 100.01, 1, "2026-09-01T00:00:00-04:00")])
     sincronizacao_rm.sincronizar(conn, cli)
     n = medicoes.detalhe(conn, mid)["notas"][0]
@@ -271,7 +311,7 @@ def test_nota_da_medicao_falta_conta_o_titulo_aberto_inteiro_e_o_parcial(conn, c
 def test_titulo_aberto_nao_recebe(conn, cid, tmp_path):
     """Titulo a receber ainda aberto (status 0, nada baixado) segura a medicao em protocolada."""
     mid = _medicao(conn, cid, 12, 1000_00)
-    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12")]
+    nfs = [_nf(100, 1000.0)]
     cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 924.0, 0.0, 0, "2026-09-01T00:00:00-04:00")])
     r = sincronizacao_rm.sincronizar(conn, cli)
     assert r["recebimentos"] == 0
@@ -296,7 +336,7 @@ def test_tolerancia_de_recebimento_ate_um_real(conn, cid, tmp_path, pago, recebe
     """Issue #35 (decisao do Leo, 19/10/2026): titulo pago ate' R$ 1,00 abaixo do devido fecha a medicao como
     recebida; acima disso fica aberta para conferencia. Sem tolerancia percentual."""
     mid = _medicao(conn, cid, 12, 1000_00)
-    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+    cli = _simulador(tmp_path, [_nf(100, 1000.0)],
                      [_baixa(1, 100, 924.0, pago, 1, "2026-09-01T00:00:00-04:00")])
     r = sincronizacao_rm.sincronizar(conn, cli)
     m = medicoes.detalhe(conn, mid)
@@ -309,9 +349,10 @@ def test_tolerancia_de_recebimento_ate_um_real(conn, cid, tmp_path, pago, recebe
 def test_tolerancia_nao_alcanca_diferenca_grande(conn, cid, tmp_path):
     """O caso de R$ 2.016,48 a menos do backlog continua aberto para conferencia, sem evento de diferenca."""
     mid = _medicao(conn, cid, 12, 50_000_00)
-    cli = _simulador(tmp_path, [_nf(100, 50_000.0, campo="IC 082/2025 - 12")],
+    cli = _simulador(tmp_path, [_nf(100, 50_000.0)],
                      [_baixa(1, 100, 46_200.0, 44_183.52, 1, "2026-09-01T00:00:00-04:00")])
     assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert _tem_nf(conn, mid)
     assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
     assert _eventos_diferenca(conn, mid) == []
 
@@ -320,7 +361,9 @@ def test_recebida_com_diferenca_audita_evento_novo(conn, cid, tmp_path):
     """A diferenca aceita vai para a auditoria como evento proprio (quem: o sistema), ao lado da mudanca de estado;
     nada sobrescrito. Medicao com duas notas: a tolerancia vale por titulo e o evento lista so' a que ficou curta."""
     mid = _medicao(conn, cid, 12, 1500_00)
-    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12"), _nf(101, 500.0, campo="IC 082/2025 - 12")]
+    nfs = [_nf(100, 1000.0), _nf(101, 500.0)]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    _ligar(conn, mid, 100, 101)
     cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 924.0, 923.99, 1, "2026-09-01T00:00:00-04:00"),
                                      _baixa(2, 101, 462.0, 462.0, 1, "2026-09-03T00:00:00-04:00")])
     assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 1
@@ -342,17 +385,20 @@ def test_recebida_com_diferenca_audita_evento_novo(conn, cid, tmp_path):
 def test_tolerancia_soma_a_falta_de_todas_as_notas_da_medicao(conn, cid, tmp_path):
     """A tolerancia e' da MEDICAO: duas notas com R$ 0,99 a menos cada (R$ 1,98 no total) nao fecham."""
     mid = _medicao(conn, cid, 12, 1500_00)
-    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12"), _nf(101, 500.0, campo="IC 082/2025 - 12")]
+    nfs = [_nf(100, 1000.0), _nf(101, 500.0)]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    _ligar(conn, mid, 100, 101)
     cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 924.0, 923.01, 1, "2026-09-01T00:00:00-04:00"),
                                      _baixa(2, 101, 462.0, 461.01, 1, "2026-09-03T00:00:00-04:00")])
     assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert len(medicoes.detalhe(conn, mid)["notas"]) == 2
     assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
     assert _eventos_diferenca(conn, mid) == []
 
 
 def test_titulo_quitado_sem_diferenca_nao_gera_evento(conn, cid, tmp_path):
     mid = _medicao(conn, cid, 12, 1000_00)
-    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+    cli = _simulador(tmp_path, [_nf(100, 1000.0)],
                      [_baixa(1, 100, 924.0, 924.0, 1, "2026-09-01T00:00:00-04:00")])
     sincronizacao_rm.sincronizar(conn, cli)
     assert medicoes.detalhe(conn, mid)["estado"] == "recebida"
@@ -362,9 +408,10 @@ def test_titulo_quitado_sem_diferenca_nao_gera_evento(conn, cid, tmp_path):
 def test_tolerancia_exige_baixa_no_titulo(conn, cid, tmp_path):
     """Titulo pequeno (ate' R$ 1,00) sem baixa nenhuma nao e' 'pago com diferenca': nada foi recebido."""
     mid = _medicao(conn, cid, 12, 1000_00)
-    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+    cli = _simulador(tmp_path, [_nf(100, 1000.0)],
                      [_baixa(1, 100, 0.80, 0.0, 0)])
     assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert _tem_nf(conn, mid)
     assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
 
 
@@ -373,10 +420,11 @@ def test_titulo_com_baixa_total_e_valor_baixado_zero_nao_fecha_a_medicao(conn, c
     (`baixa_total_quita`), mas nao fecha a medicao sozinho: pode ser glosa, compensacao ou encontro de contas, nao
     pagamento. Para o recebimento automatico e a pagina da medicao ele continua sem baixa."""
     mid = _medicao(conn, cid, 12, 1000_00)
-    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+    cli = _simulador(tmp_path, [_nf(100, 1000.0)],
                      [_baixa(1, 100, 500.0, 500.0, 1, "2026-09-01T00:00:00-04:00"),
                       _baixa(2, 100, 424.01, 0.0, 1, "2026-09-02T00:00:00-04:00")])
     assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert _tem_nf(conn, mid)
     assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
     assert _eventos_diferenca(conn, mid) == []
     nid = conn.execute("SELECT id FROM notas_fiscais WHERE idmov=100").fetchone()[0]
@@ -397,8 +445,9 @@ def test_tolerancia_exige_baixa_em_cada_titulo_da_nota(conn, cid, tmp_path, titu
     mid = _medicao(conn, cid, 12, 1000_00)
     baixas = [_baixa(i, 100, orig, pago, st, "2026-09-01T00:00:00-04:00" if st else None)
               for i, (orig, pago, st) in enumerate(titulos, 1)]
-    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")], baixas)
+    cli = _simulador(tmp_path, [_nf(100, 1000.0)], baixas)
     assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert _tem_nf(conn, mid)
     assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
 
 
@@ -413,8 +462,9 @@ def test_juros_de_um_titulo_nao_quitam_outro_aberto(conn, cid, tmp_path, titulos
     mid = _medicao(conn, cid, 12, 1000_00)
     baixas = [_baixa(i, 100, orig, pago, st, "2026-09-01T00:00:00-04:00" if st else None)
               for i, (orig, pago, st) in enumerate(titulos, 1)]
-    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")], baixas)
+    cli = _simulador(tmp_path, [_nf(100, 1000.0)], baixas)
     assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert _tem_nf(conn, mid)
     assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
     assert _eventos_diferenca(conn, mid) == []
 
@@ -423,7 +473,7 @@ def test_juros_num_titulo_e_outro_curto_dentro_da_tolerancia_audita_a_falta(conn
     """Issue #251: total da nota acima do devido, mas o titulo B foi pago 1 centavo abaixo. A falta e' a do
     titulo B (os juros de A nao a cobrem): fecha pela tolerancia da #35, com o evento de 1 centavo."""
     mid = _medicao(conn, cid, 12, 1000_00)
-    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+    cli = _simulador(tmp_path, [_nf(100, 1000.0)],
                      [_baixa(1, 100, 500.0, 551.0, 1, "2026-09-01T00:00:00-04:00"),
                       _baixa(2, 100, 50.01, 50.0, 1, "2026-09-02T00:00:00-04:00")])
     assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 1
@@ -435,7 +485,7 @@ def test_juros_num_titulo_e_outro_curto_dentro_da_tolerancia_audita_a_falta(conn
 def test_nota_com_todos_os_titulos_quitados_fecha_sem_evento(conn, cid, tmp_path):
     """Issue #251: nota em dois titulos, os dois quitados (um com juros): fecha como antes, sem evento."""
     mid = _medicao(conn, cid, 12, 1000_00)
-    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")],
+    cli = _simulador(tmp_path, [_nf(100, 1000.0)],
                      [_baixa(1, 100, 500.0, 551.0, 1, "2026-09-01T00:00:00-04:00"),
                       _baixa(2, 100, 50.01, 50.01, 4, "2026-09-05T00:00:00-04:00")])
     assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 1
@@ -450,7 +500,7 @@ def test_reconciliacao_lista_recebida_a_mao_com_titulo_aberto_no_rm(conn, cid, t
     from app import conciliacao
     a_mao = _medicao(conn, cid, 12, 1000_01)
     cortada = _medicao(conn, cid, 13, 500_00)
-    nfs = [_nf(100, 1000.01, campo="IC 082/2025 - 12"), _nf(101, 500.0, campo="IC 082/2025 - 13")]
+    nfs = [_nf(100, 1000.01), _nf(101, 500.0)]
     abertas = [_baixa(1, 100, 924.01, 0.0, 0), _baixa(2, 101, 462.0, 0.0, 0)]
     sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, abertas))
     medicoes.mudar_estado(conn, 1, a_mao, "recebida", "a baixa nao entrou no RM; conferida no extrato", "2026-09-20")
@@ -480,7 +530,7 @@ def test_reconciliacao_lista_recebida_a_mao_com_titulo_aberto_no_rm(conn, cid, t
 def test_recebida_sem_baixa_conta_a_falta_titulo_a_titulo(conn, cid, tmp_path, titulos, falta):
     """Issue #253: o aviso da Saude (#203) conta a falta da nota titulo a titulo, a conta da #35 e da #251."""
     mid = _medicao(conn, cid, 12, 1000_00)
-    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12")]
+    nfs = [_nf(100, 1000.0)]
     sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 100, 924.0, 0.0, 0)]))
     medicoes.mudar_estado(conn, 1, mid, "recebida", "a baixa nao entrou no RM; conferida no extrato", "2026-09-20")
     baixas = [_baixa(i, 100, orig, pago, st, "2026-09-25T00:00:00-04:00" if st else None)
@@ -492,9 +542,9 @@ def test_recebida_sem_baixa_conta_a_falta_titulo_a_titulo(conn, cid, tmp_path, t
 
 def test_nf_cancelada_desfaz_alocacao(conn, cid, tmp_path):
     mid = _medicao(conn, cid, 12, 1000_00)
-    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12")], [])
+    cli = _simulador(tmp_path, [_nf(100, 1000.0)], [])
     sincronizacao_rm.sincronizar(conn, cli)
-    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12", status="C")], [])
+    cli = _simulador(tmp_path, [_nf(100, 1000.0, status="C")], [])
     sincronizacao_rm.sincronizar(conn, cli)
     m = medicoes.detalhe(conn, mid)
     assert m["estado"] == "protocolada" and m["notas"] == []   # nao volta sozinha
@@ -559,10 +609,10 @@ def test_casador_nao_liga_nota_fora_da_cobranca(conn, cid, tmp_path, codtmv):
     assert medicoes.detalhe(conn, m)["estado"] == "protocolada"
 
 
-def test_casador_nao_liga_nota_fora_da_cobranca_nem_pelo_campo_livre(conn, cid, tmp_path):
-    """Issue #584: nem o campo livre no formato instituido faz nota 2.2.15 virar nota da medicao."""
+def test_casador_nao_liga_nota_fora_da_cobranca_nem_pelo_valor_exato_sem_centro(conn, cid, tmp_path):
+    """Issue #584: nem o valor exato da unica medicao candidata (coligada sem centro) faz nota 2.2.15 virar nota dela."""
     m = _medicao(conn, cid, 12, 461_900_00)
-    cli = _simulador(tmp_path, [_nf(100, 461900.0, campo="IC 082/2025 - 12", codtmv="2.2.15")], [])
+    cli = _simulador(tmp_path, [_nf(100, 461900.0, codtmv="2.2.15")], [])
     r = sincronizacao_rm.sincronizar(conn, cli)
     assert (r["alocacoes"], r["sugestoes"]) == (0, 0), r
     assert not _tem_nf(conn, m)
@@ -637,8 +687,9 @@ def test_vinculo_fora_da_cobranca_de_outra_coligada_nao_segura_o_recebimento(con
 def test_vinculos_fora_da_cobranca_lista_sem_gravar(conn, cid, tmp_path):
     """Issue #584: o relato lista os vinculos automaticos vigentes com nota de tipo fora da cobranca ao orgao."""
     m, _ = _vinculo_antigo_fora_da_cobranca(conn, cid, tmp_path)
-    m_ok = _medicao(conn, cid, 12, 461_900_00)
-    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(100, 461900.0, campo="IC 082/2025 - 12")], []))
+    c2 = conn.execute("SELECT contrato_id FROM medicoes WHERE id=?", (m,)).fetchone()[0]
+    m_ok = _medicao(conn, c2, 12, 461_900_00)
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(100, 461900.0, centro_custo="2.001.012")], []))
     assert _tem_nf(conn, m_ok)
     antes = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
     rel = sincronizacao_rm.vinculos_fora_da_cobranca(conn)
@@ -862,26 +913,12 @@ def test_rotas_rm(client_admin, tmp_path, monkeypatch):
 def test_nf_emitida_antes_do_protocolo_aloca_normalmente(conn, cid, tmp_path):
     """Bloco 3: a nota vem ANTES do protocolo por desenho; alocar nao mexe em estado nem em marco."""
     mid = _medicao(conn, cid, 12, 1000_00, comp="2026-09")          # protocolo em 2026-09-28
-    cli = _simulador(tmp_path, [_nf(100, 1000.0, campo="IC 082/2025 - 12",
+    cli = _simulador(tmp_path, [_nf(100, 1000.0,
                                     emissao="2026-09-01T00:00:00-04:00")], [])
     r = sincronizacao_rm.sincronizar(conn, cli)
     assert r["alocacoes"] == 1, r
     m = medicoes.detalhe(conn, mid)
     assert m["estado"] == "protocolada" and m["nota_emitida_em"] is None and len(m["notas"]) == 1
-
-
-def test_campo_livre_exige_coligada_da_entidade(conn, cid, tmp_path):
-    """Instrumento igual em duas entidades: a NF so' casa pelo campo livre dentro da coligada."""
-    eid = entidades.criar(conn, 1, {"nome": "Consórcio Y", "cnpj": "11444777000161",
-                                    "papel": "consorcio", "coligada_rm": 12})
-    c2 = contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 082/2025", "objeto": "Obra",
-                                   "valor_original_centavos": 100_00, "entidade_id": eid})
-    m_lotufo = _medicao(conn, cid, 12, 1000_00)
-    m_cons = _medicao(conn, c2, 12, 7777_00)
-    cli = _simulador(tmp_path, [_nf(7, 1000.0, coligada=12, campo="IC 082/2025 - 12")], [])
-    sincronizacao_rm.sincronizar(conn, cli)
-    assert _tem_nf(conn, m_cons)      # coligada 12 -> consorcio
-    assert not _tem_nf(conn, m_lotufo)
 
 
 def test_rodada_em_andamento_trava_e_expira(conn, tmp_path):
@@ -955,8 +992,8 @@ def test_numero_igual_com_emissao_e_valor_diferentes_nao_confirma(conn, tmp_path
 
 @pytest.fixture
 def espelho_mt402(conn):
-    """Cadastro de exemplo aplicado; espelho da Obra Propria 27a gerado (R$ 719.190,72, uma nota so') e enviado.
-    Devolve (contrato_id, medicao_execucao_id)."""
+    """Cadastro de exemplo aplicado; espelho da Obra Propria 27a gerado (R$ 719.190,72, uma nota so') e enviado ao
+    faturamento em 05/08/2026. Devolve (contrato_id, medicao_execucao_id)."""
     from app import auth, cadastro_aplicar, cadastro_arquivos, espelhos
     auth.criar_usuario(conn, "U", "u@l.com", "senha-forte-123", "engenharia")
     cadastro_aplicar.aplicar(conn, 1, cadastro_arquivos.preparar(RAIZ), ensaio=False)
@@ -964,8 +1001,7 @@ def espelho_mt402(conn):
     eid = espelhos.gerar(conn, {"id": 1, "email": "u@l.com"}, c, 27, "2026-08", {"medicao": 71919072})
     ids = {r["tipo"]: r["id"] for r in conn.execute(
         "SELECT m.id, m.tipo FROM espelho_medicoes em JOIN medicoes m ON m.id=em.medicao_id WHERE em.espelho_id=?", (eid,))}
-    for mid in ids.values():
-        medicoes.marcar_espelho_enviado(conn, 1, mid)
+    _enviar_espelho(conn, eid, list(ids.values()))
     return c, ids["execucao"]
 
 
@@ -984,13 +1020,572 @@ def test_rm_primeiro_casa_pela_saida_esperada_e_fecha_nota_emitida(conn, tmp_pat
     assert conn.execute("SELECT COUNT(*) FROM notas_fiscais").fetchone()[0] == 1
 
 
+def _nota_da_27a(idmov, emissao="2026-09-14", valor=719190.72, centro_custo="9.001.001", **extra):
+    return _nf(idmov, valor, centro_custo=centro_custo, emissao=f"{emissao}T00:00:00-04:00", **extra)
+
+
+def _reenviar_espelho_em(conn, mid, em):
+    """Troca o dia do envio do espelho da medicao (o fixture envia em 05/08/2026)."""
+    conn.execute("UPDATE envios SET enviado_em=? WHERE id IN (SELECT envio_id FROM envio_medicoes WHERE medicao_id=?)",
+                 (em, mid)); conn.commit()
+
+
+def test_nota_emitida_antes_do_envio_do_espelho_nao_liga(conn, tmp_path, espelho_mt402):
+    """Issue #708 (docs/adr/0005): nota antiga da obra com o valor exato da saida nao e' a nota pedida pelo espelho.
+    Fica sem vinculo por regra nenhuma (o valor da saida unica e' o da medicao: nao pode cair em `centro_custo_valor`)."""
+    _, mid = espelho_mt402
+    _reenviar_espelho_em(conn, mid, "2026-09-10 14:00:00")
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910, emissao="2026-09-09")], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0), r
+    assert medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado" and not _tem_nf(conn, mid)
+    assert [n["idmov"] for n in sincronizacao_rm.reconciliacao(conn)["nfs_sem_medicao"]] == [910]
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='nf.alocar'").fetchone()[0] == 0
+
+
+def test_nota_sem_envio_do_espelho_registrado_nao_liga_pela_saida(conn, tmp_path, espelho_mt402):
+    """Issue #708: sem envio do espelho pelo sistema nao ha' data para provar que a nota veio depois do pedido."""
+    _, mid = espelho_mt402
+    with db.mutacao(conn):
+        conn.execute("UPDATE espelhos SET envio_id=NULL")
+        conn.execute("DELETE FROM envio_medicoes")
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910)], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0), r
+    assert not _tem_nf(conn, mid)
+
+
+@pytest.mark.parametrize("enviado_em_utc, emissao", [
+    ("2026-09-14 13:00:00", "2026-09-14"),     # a nota do mesmo dia do envio vale: a emissao do RM so' tem o dia
+    ("2026-09-15 02:30:00", "2026-09-14"),     # 22h30 do dia 14 em Cuiaba: o dia do envio e' o local, nao o UTC
+])
+def test_nota_do_dia_do_envio_do_espelho_liga(conn, tmp_path, espelho_mt402, enviado_em_utc, emissao):
+    _, mid = espelho_mt402
+    _reenviar_espelho_em(conn, mid, enviado_em_utc)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910, emissao=emissao)], []))
+    assert r["alocacoes"] == 1, r
+    assert conn.execute("SELECT regra FROM nf_alocacoes WHERE medicao_id=?", (mid,)).fetchone()[0] == "saida_espelho"
+
+
+def test_reenvio_do_espelho_nao_solta_a_nota_emitida_entre_os_envios(conn, tmp_path, espelho_mt402):
+    """Issue #708: vale o PRIMEIRO envio do espelho da medicao. A nota emitida depois dele e antes de um reenvio
+    responde ao primeiro pedido."""
+    _, mid = espelho_mt402                                             # primeiro envio: 05/08/2026
+    eid = conn.execute("SELECT espelho_id FROM espelho_medicoes WHERE medicao_id=?", (mid,)).fetchone()[0]
+    _enviar_espelho(conn, eid, [mid], em="2026-09-20 14:00:00")        # reenvio
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910, emissao="2026-09-14")], []))
+    assert r["alocacoes"] == 1, r
+
+
+def test_nota_com_um_centavo_de_diferenca_da_saida_nao_liga(conn, tmp_path, espelho_mt402):
+    """A saida so' vale pelo valor EXATO: R$ 719.190,71 (centavo impar) contra R$ 719.190,72 fica sem vinculo."""
+    _, mid = espelho_mt402
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910, valor=719190.71)], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 1), r
+    assert not _tem_nf(conn, mid)
+
+
+def test_duas_notas_do_mesmo_valor_para_a_mesma_saida_ficam_sem_vinculo(conn, tmp_path, espelho_mt402):
+    """Issue #708 (docs/adr/0005): a nota cancelada na pratica e reemitida continua ativa no RM. Com duas notas ativas
+    do mesmo valor e da mesma obra para a mesma saida, nenhuma liga sozinha, as duas contam como ambiguas, e a ordem
+    em que chegam nao decide. Quando uma delas sai (cancelada no RM), a que fica liga."""
+    _, mid = espelho_mt402
+    nfs = [_nota_da_27a(910, emissao="2026-09-14"), _nota_da_27a(911, emissao="2026-09-16")]
+    for ordem in (nfs, nfs[::-1]):
+        r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, ordem, []))
+        assert (r["alocacoes"], r["sugestoes"]) == (0, 2), r
+        assert medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado" and not _tem_nf(conn, mid)
+    assert sorted(n["idmov"] for n in sincronizacao_rm.reconciliacao(conn)["nfs_sem_medicao"]) == [910, 911]
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='nf.alocar'").fetchone()[0] == 0
+    nfs[0]["STATUS"] = "C"
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    assert (r["alocacoes"], r["sugestoes"]) == (1, 0), r
+    assert [n["idmov"] for n in medicoes.detalhe(conn, mid)["notas"]] == [911]
+    assert auditoria.verificar_cadeia(conn)
+
+
+@pytest.mark.parametrize("outra", [
+    {"emissao": "2026-07-30"},                 # mais antiga que o envio do espelho: nao e' candidata a' saida
+    {"emissao": None},                         # sem data de emissao legivel: tambem nao
+    {"centro_custo": "2.001.012"},             # centro de OUTRA obra
+    {"codtmv": "2.2.15"},                      # nota contra fornecedor, fora da cobranca ao orgao
+    {"coligada": 90},                          # outra coligada
+])
+def test_nota_de_mesmo_valor_que_nao_concorre_a_saida_nao_segura_o_vinculo(conn, tmp_path, espelho_mt402, outra):
+    """Issue #708: so' conta como repetida a nota que o casador tambem ligaria a' mesma saida. Nas duas ordens."""
+    _, mid = espelho_mt402
+    _obra_com_centro(conn)                     # a outra obra, com o centro 2.001.012
+    nfs = [_nota_da_27a(910), _nota_da_27a(911, **outra)]
+    if outra.get("emissao", "") is None:
+        del nfs[1]["DATAEMISSAO"]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs[::-1], []))
+    assert r["alocacoes"] == 1, r
+    assert [n["idmov"] for n in medicoes.detalhe(conn, mid)["notas"]] == [910]
+
+
+def test_nota_sem_obra_no_centro_de_custo_concorre_a_mesma_saida(conn, tmp_path, espelho_mt402):
+    """Issue #708 (segunda revisao): a nota cujo centro de custo nao aponta obra nenhuma liga pela saida na carteira
+    inteira, entao concorre com a nota da obra. Nenhuma liga, em qualquer ordem."""
+    _, mid = espelho_mt402
+    nfs = [_nota_da_27a(910), _nota_da_27a(911, centro_custo="0.000.000")]
+    for ordem in (nfs, nfs[::-1]):
+        r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, ordem, []))
+        assert (r["alocacoes"], r["sugestoes"]) == (0, 2), r
+        assert not _tem_nf(conn, mid)
+
+
+def test_nota_sem_data_de_emissao_nao_liga_pela_saida(conn, tmp_path, espelho_mt402):
+    """Issue #708: sem a data de emissao nao ha' como provar que a nota veio depois do envio do espelho."""
+    _, mid = espelho_mt402
+    nf = _nota_da_27a(910)
+    del nf["DATAEMISSAO"]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [nf], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0), r
+    assert not _tem_nf(conn, mid)
+
+
+def _duplicar_saida(conn, mid):
+    """O espelho da medicao passa a pedir DUAS notas do mesmo valor (parcelas iguais), a segunda em outro municipio."""
+    esp = conn.execute("SELECT e.id, e.saidas FROM espelhos e JOIN espelho_medicoes em ON em.espelho_id=e.id "
+                       "WHERE em.medicao_id=?", (mid,)).fetchone()
+    saidas = json.loads(esp["saidas"])
+    saidas.append({**saidas[0], "chave": saidas[0]["chave"] + "-2", "municipio": "Outro Município"})
+    conn.execute("UPDATE espelhos SET saidas=? WHERE id=?", (json.dumps(saidas), esp["id"])); conn.commit()
+
+
+@pytest.mark.parametrize("notas, esperado", [(2, (2, 0)), (3, (0, 3))])
+def test_duas_saidas_do_mesmo_valor_ligam_duas_notas_e_nao_tres(conn, tmp_path, espelho_mt402, notas, esperado):
+    """Issue #708 (segunda revisao): repetida e' a nota A MAIS para as saidas daquele valor. Espelho que pede duas notas
+    de R$ 719.190,72: duas notas ligam (cada uma tem a sua saida); com tres, nenhuma liga e as tres ficam ambiguas."""
+    from app import notas as _notas
+    _, mid = espelho_mt402
+    _duplicar_saida(conn, mid)
+    assert len(_notas.esperadas(conn, mid)) == 2
+    nfs = [_nota_da_27a(910 + i) for i in range(notas)]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    assert (r["alocacoes"], r["sugestoes"]) == esperado, r
+    assert len(medicoes.detalhe(conn, mid)["notas"]) == esperado[0]
+    assert medicoes.detalhe(conn, mid)["estado"] == ("nota_emitida" if esperado[0] else "espelho_enviado")
+
+
+@pytest.mark.parametrize("emissao, liga", [("2026-07-30", False), ("2026-08-06", True)])
+def test_par_de_notas_anterior_ao_envio_do_espelho_nao_liga_pela_soma_do_dia(conn, tmp_path, espelho_mt402, emissao, liga):
+    """Issue #708 (segunda revisao): a medicao que espera nota do espelho nao recebe nota mais antiga que o envio por
+    regra nenhuma. O par do mesmo dia que soma o valor dela (R$ 700.000,00 + R$ 19.190,72) so' liga se for posterior."""
+    _, mid = espelho_mt402
+    nfs = [_nota_da_27a(910, emissao=emissao, valor=700000.00), _nota_da_27a(911, emissao=emissao, valor=19190.72)]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    assert r["alocacoes"] == (1 if liga else 0), r
+    regras = [n["regra"] for n in medicoes.detalhe(conn, mid)["notas"]]
+    assert regras == (["centro_custo_soma_dia"] * 2 if liga else [])
+
+
+def _segunda_medicao_com_a_mesma_saida(conn, cid):
+    """A 28a da mesma obra, com a mesma saida de R$ 719.190,72, espelho enviado em 05/09/2026."""
+    from app import espelhos
+    eid = espelhos.gerar(conn, {"id": 1, "email": "u@l.com"}, cid, 28, "2026-09", {"medicao": 71919072})
+    m28 = conn.execute("SELECT m.id FROM espelho_medicoes em JOIN medicoes m ON m.id=em.medicao_id "
+                       "WHERE em.espelho_id=? AND m.tipo='execucao'", (eid,)).fetchone()[0]
+    _enviar_espelho(conn, eid, [m28], em="2026-09-05 14:00:00")
+    return m28
+
+
+def test_data_do_envio_desempata_duas_medicoes_com_a_mesma_saida(conn, tmp_path, espelho_mt402):
+    """Issue #708 (segunda revisao): duas medicoes da obra esperam nota do mesmo valor, com espelhos enviados em 05/08 e
+    05/09. A nota de 10/08 so' pode ser da primeira (e' anterior ao pedido da segunda) e liga a ela; a de 10/09, que
+    chega depois, liga a' segunda, a unica que ainda espera."""
+    cid, m27 = espelho_mt402
+    m28 = _segunda_medicao_com_a_mesma_saida(conn, cid)
+    nfs = [_nota_da_27a(910, emissao="2026-08-10")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    assert r["alocacoes"] == 1, r
+    assert [n["idmov"] for n in medicoes.detalhe(conn, m27)["notas"]] == [910] and not _tem_nf(conn, m28)
+    nfs.append(_nota_da_27a(911, emissao="2026-09-10"))
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    assert r["alocacoes"] == 1, r
+    assert [n["idmov"] for n in medicoes.detalhe(conn, m28)["notas"]] == [911]
+
+
+def test_duas_medicoes_com_a_mesma_saida_e_as_duas_notas_juntas_ficam_sem_vinculo(conn, tmp_path, espelho_mt402):
+    """Issue #708: chegando juntas, a nota de 10/09 serve as duas medicoes e tambem concorre a' saida da primeira com a
+    de 10/08. Nenhuma liga sozinha, em qualquer ordem; a pessoa decide pelo PDF."""
+    cid, m27 = espelho_mt402
+    m28 = _segunda_medicao_com_a_mesma_saida(conn, cid)
+    nfs = [_nota_da_27a(910, emissao="2026-08-10"), _nota_da_27a(911, emissao="2026-09-10")]
+    for ordem in (nfs, nfs[::-1]):
+        r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, ordem, []))
+        assert (r["alocacoes"], r["sugestoes"]) == (0, 2), r
+        assert not _tem_nf(conn, m27) and not _tem_nf(conn, m28)
+
+
+def test_nota_com_vinculo_desfeito_a_mao_nao_conta_como_repetida(conn, tmp_path, espelho_mt402):
+    """Issue #708: a nota que o administrador tirou da medicao ja' foi decidida por uma pessoa; a reemitida liga."""
+    _, mid = espelho_mt402
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910)], []))
+    al = conn.execute("SELECT id FROM nf_alocacoes WHERE medicao_id=?", (mid,)).fetchone()[0]
+    conn.execute("UPDATE medicoes SET estado='espelho_enviado', nota_emitida_em=NULL WHERE id=?", (mid,)); conn.commit()
+    sincronizacao_rm.desalocar(conn, 1, mid, al, "nota cancelada na prefeitura e reemitida")
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910), _nota_da_27a(911)], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (1, 0), r
+    assert [n["idmov"] for n in medicoes.detalhe(conn, mid)["notas"]] == [911]
+
+
+def test_vinculo_pela_saida_ja_gravado_nao_muda_com_as_travas(conn, tmp_path, espelho_mt402):
+    """Issue #708: o vinculo que existe fica. A nota ligada antes das travas, mais antiga que o envio do espelho e com
+    outra de mesmo valor ao lado, continua ligada; a outra nao entra."""
+    _, mid = espelho_mt402
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910)], []))
+    assert medicoes.detalhe(conn, mid)["estado"] == "nota_emitida"
+    _reenviar_espelho_em(conn, mid, "2026-10-01 14:00:00")
+    antes = conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao LIKE 'nf.%'").fetchone()[0]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910), _nota_da_27a(911, emissao="2026-10-05")], []))
+    assert r["alocacoes"] == 0, r
+    assert [n["idmov"] for n in medicoes.detalhe(conn, mid)["notas"]] == [910]
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao LIKE 'nf.%'").fetchone()[0] == antes
+
+
 def test_recebimento_fecha_medicao_protocolada(conn, cid, tmp_path):
     mid = _medicao(conn, cid, 5, 100_000)                       # protocolada
-    cli = _simulador(tmp_path, [_nf(920, 1000.00, campo="IC 082/2025 - 5")],
+    cli = _simulador(tmp_path, [_nf(920, 1000.00)],
                      [_baixa(1, 920, 924.00, 924.00, 1, "2026-09-01T00:00:00-04:00")])
     sincronizacao_rm.sincronizar(conn, cli)
     m = medicoes.detalhe(conn, mid)
     assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-01")
+
+
+# --- recebimento so' com as notas vigentes cobrindo o valor (issue #714, docs/adr/0006) ---
+
+def _em_duas_notas(conn, cid, tmp_path):
+    """Medicao de R$ 1.500,01 (centavo impar) faturada nas notas 100 (R$ 1.000,01) e 101 (R$ 500,00)."""
+    mid = _medicao(conn, cid, 12, 1500_01)
+    nfs = [_nf(100, 1000.01), _nf(101, 500.0)]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    _ligar(conn, mid, 100, 101)
+    return mid, nfs
+
+
+def test_nota_cancelada_no_rm_nao_deixa_a_medicao_recebida_pela_outra(conn, cid, tmp_path):
+    """Issue #714: medicao em duas notas, uma cancelada no RM e a outra quitada. As notas vigentes nao cobrem o valor:
+    continua protocolada. Ligada e quitada a nota nova, vira recebida com a maior data de baixa."""
+    mid, nfs = _em_duas_notas(conn, cid, tmp_path)
+    nfs[1]["STATUS"] = "C"
+    paga_a_primeira = [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-01T00:00:00-04:00")]
+    for _ in range(2):                                             # a rodada seguinte tambem nao fecha
+        r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, paga_a_primeira))
+        assert r["recebimentos"] == 0, r
+        m = medicoes.detalhe(conn, mid)
+        assert (m["estado"], m["recebida_em"]) == ("protocolada", None)
+        assert [n["idmov"] for n in m["notas"]] == [100]           # a cancelada saiu; a quitada continua ligada
+    nfs.append(_nf(102, 500.0, emissao="2026-09-05T00:00:00-04:00"))    # a reemitida
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, paga_a_primeira))
+    assert r["recebimentos"] == 0, r
+    _ligar(conn, mid, 102)
+    # ligada, mas ainda com o titulo aberto: cobre o valor e nao esta' paga
+    aberta = [*paga_a_primeira, _baixa(2, 102, 462.0, 0.0, 0)]
+    assert sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, aberta))["recebimentos"] == 0
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+    pagas = [*paga_a_primeira, _baixa(2, 102, 462.0, 462.0, 1, "2026-09-10T00:00:00-04:00")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, pagas))
+    assert r["recebimentos"] == 1, r
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-10")
+    assert auditoria.verificar_cadeia(conn)
+
+
+def test_medicao_com_parte_das_notas_ligada_nao_e_recebida(conn, cid, tmp_path):
+    """Issue #714: a medicao faturada em duas notas com so' uma ligada (a outra ainda nao entrou) nao fecha pela
+    quitacao da primeira, mesmo sem vinculo desfeito nenhum."""
+    mid = _medicao(conn, cid, 12, 1500_01)
+    nfs = [_nf(100, 1000.01)]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    _ligar(conn, mid, 100)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 100, 924.01, 924.01, 1,
+                                                                             "2026-09-01T00:00:00-04:00")]))
+    assert r["recebimentos"] == 0, r
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+
+
+def test_uma_nota_so_do_valor_da_medicao_continua_recebendo(conn, cid, tmp_path):
+    """Issue #714: o caso comum nao muda. Uma nota, do valor da medicao (centavo impar), titulo liquido quitado."""
+    mid = _medicao(conn, cid, 12, 1000_01)
+    cli = _simulador(tmp_path, [_nf(100, 1000.01)], [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-01T00:00:00-04:00")])
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 1
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-01")
+
+
+@pytest.mark.parametrize("nota, recebe", [
+    (1000.00, True),     # a nota cobre a medicao inteira
+    (999.99, False),     # 1 centavo a menos (centavo impar): nao cobre
+    (1000.01, True),     # nota acima da medicao cobre
+])
+def test_cobertura_do_valor_e_exata_e_a_tolerancia_continua_no_titulo(conn, cid, tmp_path, nota, recebe):
+    """Issue #714: a cobertura e' exata, como na correcao de cadastro e na carga do historico. A tolerancia de R$ 1,00
+    (#35) continua valendo onde ja' valia, no pagamento do titulo: o de R$ 920,00 pago com R$ 919,00 fecha."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    nfs = [_nf(100, nota)]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    if not _tem_nf(conn, mid):
+        _ligar(conn, mid, 100)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 100, 920.0, 919.0, 1,
+                                                                             "2026-09-01T00:00:00-04:00")]))
+    assert (r["recebimentos"], medicoes.detalhe(conn, mid)["estado"]) == ((1, "recebida") if recebe else (0, "protocolada"))
+
+
+def test_cobertura_usa_o_valor_atual_da_nota_e_nao_o_do_dia_do_vinculo(conn, cid, tmp_path):
+    """Issue #714 (segunda revisao): a nota entrou e foi ligada com R$ 1.500,01 e o RM a corrige para R$ 1.000,01 (a
+    nota do PDF confirmada com outro valor). O vinculo guarda o valor antigo; a cobertura olha o atual, e a medicao de
+    R$ 1.500,01 nao fecha com o titulo dessa nota quitado."""
+    mid = _medicao(conn, cid, 12, 1500_01)
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(100, 1500.01)], []))
+    assert _tem_nf(conn, mid)
+    paga = [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-01T00:00:00-04:00")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(100, 1000.01)], paga))
+    assert r["recebimentos"] == 0, r
+    n = medicoes.detalhe(conn, mid)["notas"][0]
+    assert (n["valor_alocado_centavos"], n["valor_centavos"]) == (1500_01, 1000_01)
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+
+
+def test_medicao_rateada_em_tres_notas_com_residuo_recebe_com_as_tres(conn, cid, tmp_path):
+    """Issue #714, rateio com residuo: R$ 1.000,00 em tres notas (333,34 + 333,33 + 333,33). Duas pagas nao cobrem;
+    com as tres, recebe na maior data de baixa, que aqui e' a da primeira nota e nao a da ultima ligada."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    nfs = [_nf(100, 333.34), _nf(101, 333.33), _nf(102, 333.33)]
+    baixas = [_baixa(1, 100, 306.67, 306.67, 1, "2026-09-20T00:00:00-04:00"),
+              _baixa(2, 101, 306.66, 306.66, 1, "2026-09-03T00:00:00-04:00"),
+              _baixa(3, 102, 306.66, 306.66, 1, "2026-09-05T00:00:00-04:00")]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    _ligar(conn, mid, 100, 101)
+    assert sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, baixas))["recebimentos"] == 0
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+    _ligar(conn, mid, 102)
+    assert sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, baixas))["recebimentos"] == 1
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-20")
+
+
+def test_cobertura_em_consorcio_conta_so_as_notas_da_coligada_do_contrato(conn, cid, tmp_path):
+    """Issue #714: em obra de consorcio a cobertura compara o valor da medicao com as notas da coligada da entidade do
+    contrato. A nota da Lotufo (coligada 1) ligada a' mesma medicao nao completa a fatura do consorcio que falta."""
+    eid = entidades.criar(conn, 1, {"nome": "Consórcio X", "cnpj": "11444777000161",
+                                    "papel": "consorcio", "coligada_rm": 12})
+    c2 = contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 9", "objeto": "Obra",
+                                   "valor_original_centavos": 100_00, "entidade_id": eid})
+    mid = _medicao(conn, c2, 1, 1000_00)
+    nfs = [_nf(7, 600.0, coligada=12), _nf(8, 400.0, coligada=1)]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    for idmov in (7, 8):
+        nid = conn.execute("SELECT id FROM notas_fiscais WHERE idmov=?", (idmov,)).fetchone()[0]
+        sincronizacao_rm.alocar(conn, 1, nid, mid, "manual", None, "pdf")
+    paga = [_baixa(1, 7, 552.0, 552.0, 1, "2026-09-01T00:00:00-04:00", coligada=12)]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, paga))
+    assert r["recebimentos"] == 0, r
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+    nfs.append(_nf(9, 400.0, coligada=12))                          # o resto da fatura do consorcio
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, paga))
+    nid = conn.execute("SELECT id FROM notas_fiscais WHERE idmov=9").fetchone()[0]
+    sincronizacao_rm.alocar(conn, 1, nid, mid, "manual", None, "pdf")
+    pagas = [*paga, _baixa(2, 9, 368.0, 368.0, 1, "2026-09-04T00:00:00-04:00", coligada=12)]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, pagas))
+    assert r["recebimentos"] == 1, r
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-04")   # a nota da Lotufo, sem titulo, nao segura
+
+
+def test_medicao_ja_recebida_nao_muda_com_a_regra_da_cobertura(conn, cid, tmp_path):
+    """Issue #714: a regra vale para quem ainda vai receber. A medicao ja' recebida com notas que nao cobrem o valor
+    continua recebida, com a mesma data."""
+    mid, nfs = _em_duas_notas(conn, cid, tmp_path)
+    pagas = [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-01T00:00:00-04:00"),
+             _baixa(2, 101, 462.0, 462.0, 1, "2026-09-03T00:00:00-04:00")]
+    assert sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, pagas))["recebimentos"] == 1
+    nfs[1]["STATUS"] = "C"                                          # cancelada no RM depois do recebimento
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, pagas))
+    assert r["recebimentos"] == 0, r
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-03")
+
+
+# --- nota que chega depois do recebimento a' mao (issue #713, docs/adr/0006) ---
+
+MOTIVO_A_MAO_TESTE = "a baixa nao entrou no RM; conferida no extrato"
+
+
+def _a_receber_do_rm(conn) -> list[str]:
+    """Os numeros das notas que o a receber da diretoria conta como cobranca do RM em aberto."""
+    from app import diretoria
+    return sorted(n["numero"] for n in diretoria._notas_em_aberto(conn))
+
+
+def _total_a_receber(conn) -> int:
+    """O total da tela A receber (`diretoria.a_receber`), com o total liberado no cadastro."""
+    from app import diretoria
+    conn.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', ?)",
+                 (json.dumps({"total_a_receber_liberado": True}),)); conn.commit()
+    return diretoria.a_receber(conn)["total"]["valor_centavos"]
+
+
+def _receber_a_mao(conn, mid, em="2026-09-20"):
+    """O "Registrar recebimento" do administrador, como a rota de estado grava (`origem="manual"`)."""
+    medicoes.mudar_estado(conn, 1, mid, "recebida", MOTIVO_A_MAO_TESTE, em, origem="manual")
+
+
+def test_nota_que_chega_depois_do_recebimento_a_mao_liga_sem_mudar_o_estado(conn, cid, tmp_path):
+    """Issue #713: o administrador registrou o recebimento a' mao e a nota so' aparece no RM depois. Ela liga a' medicao
+    pela regra de sempre (centro de custo + valor exato), a medicao continua recebida na data registrada, o vinculo
+    fica na auditoria pelo sistema e a nota nao soma no a receber. A outra nota solta da obra continua somando."""
+    c2 = _obra_com_centro(conn)
+    mid = _medicao(conn, c2, 3, 500_01)                                      # centavo impar
+    _receber_a_mao(conn, mid)
+    nfs = [_nf(7, 500.01, centro_custo="2.001.012", numero="77", emissao="2026-09-25T00:00:00-04:00"),
+           _nf(8, 123.45, centro_custo="2.001.012", numero="88", emissao="2026-09-25T00:00:00-04:00")]
+    abertas = [_baixa(1, 7, 462.01, 0.0, 0), _baixa(2, 8, 114.03, 0.0, 0)]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, abertas))
+    assert (r["alocacoes"], r["recebimentos"]) == (1, 0), r
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-20")
+    assert [(n["numero"], n["regra"], n["origem"]) for n in m["notas"]] == [("77", "centro_custo_valor", "detectado")]
+    assert _a_receber_do_rm(conn) == ["88"]
+    assert _total_a_receber(conn) == 114_03          # so' o titulo da nota solta; os R$ 462,01 da ligada nao somam
+    alocar = conn.execute("SELECT usuario_id, entidade_id, depois FROM audit_log WHERE acao='nf.alocar'").fetchall()
+    assert [(a["usuario_id"], a["entidade_id"]) for a in alocar] == [(None, str(mid))]
+    depois = json.loads(alocar[0]["depois"])
+    assert (depois["regra"], depois["estado_medicao"]) == ("centro_custo_valor", "recebida")
+    # nenhuma mudanca de estado alem do registro a' mao
+    estados = conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='medicao.estado' AND entidade_id=? "
+                           "AND json_extract(depois, '$.estado')='recebida'", (str(mid),)).fetchone()[0]
+    assert estados == 1
+    # o titulo aberto da nota ligada vira o aviso da Saude (#203), nao a receber
+    assert [x["medicao_id"] for x in sincronizacao_rm.reconciliacao(conn)["recebidas_sem_baixa"]] == [mid]
+    # rodada seguinte, com o titulo pago: nada muda na medicao
+    pagas = [_baixa(1, 7, 462.01, 462.01, 1, "2026-10-02T00:00:00-04:00"), _baixa(2, 8, 114.03, 0.0, 0)]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, pagas))
+    assert (r["alocacoes"], r["recebimentos"]) == (0, 0), r
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"], len(m["notas"])) == ("recebida", "2026-09-20", 1)
+    assert auditoria.verificar_cadeia(conn)
+
+
+def test_nota_de_outro_valor_nao_liga_a_recebida_a_mao_e_continua_no_a_receber(conn, cid, tmp_path):
+    """Issue #713, o outro lado: a nota de valor diferente do da medicao recebida a' mao continua solta e no a receber
+    pelo centro de custo. Mesmo a R$ 20,01 da medicao (dentro dos 5% das "proximas") ela nao vira ambigua: a recebida
+    a' mao so' vale para valor exato, senao toda nota parecida da obra contaria como ambigua em toda rodada."""
+    c2 = _obra_com_centro(conn)
+    mid = _medicao(conn, c2, 3, 500_01)
+    _receber_a_mao(conn, mid)
+    nfs = [_nf(7, 480.00, centro_custo="2.001.012", numero="77")]
+    for _ in range(2):
+        r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 7, 441.60, 0.0, 0)]))
+        assert (r["alocacoes"], r["sugestoes"]) == (0, 0), r
+    assert not _tem_nf(conn, mid) and _a_receber_do_rm(conn) == ["77"]
+    assert _total_a_receber(conn) == 441_60
+
+
+def test_medicao_em_andamento_fica_com_a_nota_antes_da_recebida_a_mao(conn, cid, tmp_path):
+    """Issue #713 (segunda revisao): duas medicoes da obra com o mesmo valor, uma recebida a' mao sem nota e outra
+    protocolada. A nota liga a' protocolada, como antes (a recebida a' mao nao a deixa ambigua), e o RM a fecha."""
+    c2 = _obra_com_centro(conn)
+    a_mao = _medicao(conn, c2, 3, 500_01)
+    _receber_a_mao(conn, a_mao)
+    viva = _medicao(conn, c2, 7, 500_01, comp="2026-09")
+    nfs = [_nf(7, 500.01, centro_custo="2.001.012", numero="77", emissao="2026-10-01T00:00:00-04:00")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 7, 462.01, 462.01, 1,
+                                                                             "2026-10-20T00:00:00-04:00")]))
+    assert (r["alocacoes"], r["sugestoes"], r["recebimentos"]) == (1, 0, 1), r
+    assert not _tem_nf(conn, a_mao)
+    m = medicoes.detalhe(conn, viva)
+    assert (m["estado"], m["recebida_em"], len(m["notas"])) == ("recebida", "2026-10-20", 1)
+    assert (medicoes.detalhe(conn, a_mao)["estado"], medicoes.detalhe(conn, a_mao)["recebida_em"]) == ("recebida", "2026-09-20")
+
+
+def test_par_do_dia_liga_a_recebida_a_mao_e_nao_rouba_par_de_medicao_em_andamento(conn, cid, tmp_path):
+    """Issue #713 (segunda revisao): a recebida a' mao faturada em duas notas do mesmo dia recebe o par pela soma do
+    dia. E o valor dela nao tira nota do par de uma medicao em andamento: a nota de R$ 500,01 fecha com a de R$ 99,99
+    o par da protocolada de R$ 600,00, em vez de ser reservada para a recebida a' mao de R$ 500,01."""
+    c2 = _obra_com_centro(conn)
+    a_mao = _medicao(conn, c2, 3, 500_01)
+    _receber_a_mao(conn, a_mao)
+    viva = _medicao(conn, c2, 7, 600_00, comp="2026-09")
+    par_da_viva = [_nf(7, 500.01, centro_custo="2.001.012"), _nf(8, 99.99, centro_custo="2.001.012")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, par_da_viva, []))
+    assert r["alocacoes"] == 1, r
+    assert sorted(n["idmov"] for n in medicoes.detalhe(conn, viva)["notas"]) == [7, 8] and not _tem_nf(conn, a_mao)
+    par_da_a_mao = [_nf(9, 300.00, centro_custo="2.001.012", emissao="2026-09-25T00:00:00-04:00"),
+                    _nf(10, 200.01, centro_custo="2.001.012", emissao="2026-09-25T00:00:00-04:00")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, par_da_viva + par_da_a_mao, []))
+    assert r["alocacoes"] == 1, r
+    m = medicoes.detalhe(conn, a_mao)
+    assert sorted(n["idmov"] for n in m["notas"]) == [9, 10] and {n["regra"] for n in m["notas"]} == {"centro_custo_soma_dia"}
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-20")
+
+
+def test_consorcio_sem_centro_liga_a_nota_na_recebida_a_mao_pelo_valor_exato(conn, cid, tmp_path):
+    """Issue #713 no consorcio de uma obra so' (coligada sem centro cadastrado): vale a regra `valor_exato`."""
+    eid = entidades.criar(conn, 1, {"nome": "Consórcio X", "cnpj": "11444777000161",
+                                    "papel": "consorcio", "coligada_rm": 12})
+    c2 = contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 9", "objeto": "Obra",
+                                   "valor_original_centavos": 100_00, "entidade_id": eid})
+    mid = _medicao(conn, c2, 1, 500_01)
+    _receber_a_mao(conn, mid)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(7, 500.01, coligada=12)], []))
+    assert r["alocacoes"] == 1, r
+    m = medicoes.detalhe(conn, mid)
+    assert [(n["idmov"], n["regra"]) for n in m["notas"]] == [(7, "valor_exato")]
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-20")
+
+
+@pytest.mark.parametrize("como", ["rm", "corte", "correcao"])
+def test_medicao_recebida_sem_ser_a_mao_nao_atrai_nota(conn, cid, tmp_path, como):
+    """Issue #713: so' o recebimento registrado a' mao pelo administrador abre a medicao recebida para o casador. A
+    recebida pela baixa do RM (aqui com a nota dela cancelada no RM depois, para ficar sem nota), a fechada pelo corte
+    e a recebida pela correcao de cadastro nao recebem nota nova."""
+    from app import conciliacao
+    c2 = _obra_com_centro(conn)
+    mid = _medicao(conn, c2, 3, 500_01)
+    nfs = []
+    if como == "rm":
+        nfs = [_nf(6, 500.01, centro_custo="2.001.012", numero="66")]
+        paga = [_baixa(9, 6, 462.01, 462.01, 1, "2026-09-01T00:00:00-04:00")]
+        assert sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, paga))["recebimentos"] == 1
+        nfs[0]["STATUS"] = "C"
+        sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, paga))
+    elif como == "corte":
+        medicoes.mudar_estado(conn, 1, mid, "recebida", conciliacao.MOTIVO_CORTE.format(data="22/09/2026"), None,
+                              origem="corte")
+    else:
+        medicoes.mudar_estado(conn, 1, mid, "recebida", "paga, conforme o extrato", "2026-09-20",
+                              origem="correção de cadastro")
+    assert medicoes.detalhe(conn, mid)["estado"] == "recebida" and not _tem_nf(conn, mid)
+    nfs.append(_nf(7, 500.01, centro_custo="2.001.012", numero="77", emissao="2026-09-25T00:00:00-04:00"))
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0), r
+    assert not _tem_nf(conn, mid)
+
+
+def test_recebida_a_mao_do_legado_nao_atrai_nota(conn, cid, tmp_path):
+    """Issue #713: a medicao da carga do legado (competencia anterior ao corte, valor manual) continua fora do casador
+    mesmo recebida a' mao: 24 meses de notas contra o historico e' coincidencia de valor."""
+    c2 = _obra_com_centro(conn)
+    mid = _medicao(conn, c2, 3, 500_01, comp="2026-03")
+    _receber_a_mao(conn, mid, em="2026-04-20")
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(7, 500.01, centro_custo="2.001.012")], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0), r
+    assert not _tem_nf(conn, mid)
+
+
+def test_recebida_a_mao_nascida_do_espelho_liga_pela_saida_com_as_travas(conn, tmp_path, espelho_mt402):
+    """Issue #713 com as regras de docs/adr/0005: a nota mais antiga que o envio do espelho continua sem ligar; a
+    emitida depois liga pela saida, e a medicao segue recebida na data registrada."""
+    _, mid = espelho_mt402                                                   # espelho enviado em 05/08/2026
+    medicoes.registrar_protocolo(conn, 1, mid, "2026-08-20", "CT-1", None, "manual")
+    _receber_a_mao(conn, mid)
+    antiga = _nota_da_27a(909, emissao="2026-07-30")
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [antiga], []))
+    assert r["alocacoes"] == 0 and not _tem_nf(conn, mid), r
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [antiga, _nota_da_27a(910, emissao="2026-09-25")], []))
+    assert r["alocacoes"] == 1, r
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-20")
+    assert [(n["idmov"], n["regra"]) for n in m["notas"]] == [(910, "saida_espelho")]
 
 
 def test_legado_protocolada_sem_nf_nao_atrai_casamento(conn, cid, tmp_path):
@@ -1015,7 +1610,7 @@ def test_nota_lotufo_em_obra_de_consorcio_casa_pela_saida_e_nao_segura_recebimen
     eid = espelhos.gerar(conn, {"id": 1, "email": "u@l.com"}, cid, 12, "2026-06", {"medicao": 1000000007})
     mid = conn.execute("SELECT m.id FROM espelho_medicoes em JOIN medicoes m ON m.id=em.medicao_id "
                        "WHERE em.espelho_id=? AND m.tipo='execucao'", (eid,)).fetchone()[0]
-    medicoes.marcar_espelho_enviado(conn, 1, mid)
+    _enviar_espelho(conn, eid, [mid], em="2026-07-01 14:00:00")
     medicoes.registrar_protocolo(conn, 1, mid, "2026-07-20", "CT-1", None, "manual")     # protocolada sem nota
     from app import notas
     esperadas_lotufo = len(notas.esperadas(conn, mid))
@@ -1033,6 +1628,41 @@ def test_nota_lotufo_em_obra_de_consorcio_casa_pela_saida_e_nao_segura_recebimen
     # issue #514: so' a NFS-e da Lotufo e' da cota dela; a fatura do consorcio (coligada 90) nao
     assert {n["numero"]: n["da_lotufo"] for n in m["notas"]} == {"000003102": True, "000000021": False}
     assert m["notas_faltam"] == esperadas_lotufo - 1       # a nota da Lotufo de VG casou; a fatura nao conta
+
+
+@pytest.fixture
+def espelho_consorcio(conn):
+    """Cadastro de exemplo aplicado; espelho da 12a da Obra Consorcio gerado e enviado ao faturamento em 01/07/2026. A
+    saida da Lotufo e' de R$ 2.000.000,02 e a nota dela chega na coligada 1 com centro 5.001.x, que nao aponta obra."""
+    from app import auth, cadastro_aplicar, cadastro_arquivos, espelhos
+    auth.criar_usuario(conn, "U", "u@l.com", "senha-forte-123", "engenharia")
+    cadastro_aplicar.aplicar(conn, 1, cadastro_arquivos.preparar(RAIZ), ensaio=False)
+    cid = conn.execute("SELECT id FROM contratos WHERE nome_curto='Obra Consórcio'").fetchone()[0]
+    eid = espelhos.gerar(conn, {"id": 1, "email": "u@l.com"}, cid, 12, "2026-06", {"medicao": 1000000007})
+    mid = conn.execute("SELECT m.id FROM espelho_medicoes em JOIN medicoes m ON m.id=em.medicao_id "
+                       "WHERE em.espelho_id=? AND m.tipo='execucao'", (eid,)).fetchone()[0]
+    _enviar_espelho(conn, eid, [mid], em="2026-07-01 14:00:00")
+    return mid
+
+
+def _nota_propria_no_consorcio(idmov, emissao="2026-08-10"):
+    return _nf(idmov, 2000000.02, coligada=1, centro_custo="5.001.011", emissao=f"{emissao}T00:00:00-04:00")
+
+
+def test_travas_valem_para_a_nota_da_lotufo_em_obra_de_consorcio(conn, tmp_path, espelho_consorcio):
+    """Issue #708 no caminho sem obra (o centro 5.001.x nao aponta contrato e a saida e' procurada na carteira
+    inteira): a nota anterior ao envio do espelho nao liga; duas posteriores do mesmo valor ficam ambiguas; uma so' liga."""
+    mid = espelho_consorcio
+    antiga = _nota_propria_no_consorcio(939, emissao="2026-06-20")
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [antiga], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0) and not _tem_nf(conn, mid), r
+    duas = [antiga, _nota_propria_no_consorcio(940), _nota_propria_no_consorcio(942, emissao="2026-08-12")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, duas, []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 2) and not _tem_nf(conn, mid), r
+    duas[2]["STATUS"] = "C"
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, duas, []))
+    assert r["alocacoes"] == 1, r
+    assert [(n["idmov"], n["regra"]) for n in medicoes.detalhe(conn, mid)["notas"]] == [(940, "saida_espelho")]
 
 
 # --- desalocacao manual (issue #71) ---
@@ -1269,7 +1899,7 @@ def test_custo_sincronizado_duas_vezes_nao_duplica_e_substitui(conn, tmp_path):
 
 def test_sem_consulta_de_custo_as_notas_sincronizam_e_o_erro_fica_na_rodada(conn, cid, tmp_path):
     mid = _medicao(conn, cid, 12, 461900_00)
-    cli = _simulador(tmp_path, [_nf(100, 461900.0, campo="IC 082/2025 - 12")], [])   # sem DASH25/DASH26
+    cli = _simulador(tmp_path, [_nf(100, 461900.0)], [])   # sem DASH25/DASH26
     r = sincronizacao_rm.sincronizar(conn, cli)
     assert r["estado"] == "success" and r["nfs"] == 1 and _tem_nf(conn, mid)
     rodada = conn.execute("SELECT estado, erro, custo_tarefas, estoque_baixas, custo_erro FROM rm_sincronizacoes "
@@ -1605,8 +2235,8 @@ def _marca(conn, idmov):
 
 def test_sincronizacao_nao_desfaz_a_nota_desconsiderada_nem_o_casador_a_liga(conn, cid, tmp_path):
     """A nota continua vindo ativa do RM: a marca fica, ela nao volta a "NFs sem medicao" e o casador nao a liga
-    (nem pelo campo livre). Depois de `reconsiderar_nf`, a rodada seguinte a liga como qualquer nota."""
-    nfs = [_nf(100, 1000.0, campo="IC 082/2025 - 12"), _nf(101, 55.55)]
+    (nem pelo valor exato). Depois de `reconsiderar_nf`, a rodada seguinte a liga como qualquer nota."""
+    nfs = [_nf(100, 1000.0), _nf(101, 55.55)]
     sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 100, 920.0, 0, 0)]))
     assert sincronizacao_rm.reconciliacao(conn)["totais"]["nfs_sem_medicao"] == 2
     _corrigir_nota(conn, "desconsiderar_nf", 100, motivo="cancelada na prefeitura e substituída")

@@ -1,0 +1,32 @@
+#!/bin/sh
+# Commit-msg versionado (issue #710; ligado por `git config core.hooksPath .githooks`). O assunto do commit segue
+# `tipo: descricao`, com tipo feat, fix, docs, test ou chore, e sem acento (CLAUDE.md). Commit de merge passa: o
+# assunto dele e' escrito pelo git.
+# Pular uma vez: `git commit --no-verify` (nao fazer isso de habito).
+arquivo=$1
+[ -f "$arquivo" ] || exit 0
+# Assunto: a primeira linha que nao e' vazia nem comentario do git.
+assunto=$(grep -v '^#' "$arquivo" | grep -v '^[[:space:]]*$' | head -n 1)
+[ -n "$assunto" ] || exit 0   # mensagem vazia: o proprio git recusa
+
+# Merge em andamento (MERGE_HEAD) ou assunto que o git escreve para merge.
+git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && exit 0
+case "$assunto" in "Merge "*) exit 0 ;; esac
+
+recusar() {
+    {
+        echo "commit-msg: $1"
+        echo "  assunto: $assunto"
+        echo "  O padrao e' \`tipo: descricao\`, com tipo feat, fix, docs, test ou chore, e sem acento."
+        echo "  Exemplo: fix: nota cancelada sai do a receber"
+    } >&2
+    exit 1
+}
+
+# LC_ALL=C: o grep compara byte a byte, igual no Mac, no Linux e no Git Bash do Windows.
+printf '%s\n' "$assunto" | LC_ALL=C grep -q -E '^(feat|fix|docs|test|chore): [^[:space:]]' \
+    || recusar "assunto fora do padrao."
+if printf '%s\n' "$assunto" | LC_ALL=C grep -q '[^ -~]'; then
+    recusar "assunto com acento ou outro caractere fora do ASCII."
+fi
+exit 0
