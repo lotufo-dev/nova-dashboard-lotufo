@@ -5,11 +5,11 @@ body {
 /* Link de texto (fase 6): abre o e-mail no Outlook a partir da fila e da linha do
    tempo da medicao. Cor do acento interativo, sublinhado so' no hover para nao
    competir com o texto ao redor; foco visivel como nos botoes. */
-.link { color: var(--acento); text-decoration: none; text-underline-offset: 2px; }
-.link:hover { color: var(--acento-forte); text-decoration: underline; }
-.link:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; border-radius: 2px; }
+.link { color: var(--cor-tinta); text-decoration: none; text-underline-offset: 2px; }
+.link:hover { color: var(--cor-menu-realce); text-decoration: underline; }
+.link:focus-visible { outline: 2px solid var(--cor-tinta); outline-offset: 2px; border-radius: 2px; }
 
 /* Campo de uma linha com caixa de marcar (Administracao > Microsoft 365): o rotulo
    e' o proprio <label>, caixa e texto alinhados na mesma linha. */
 .campo--linha { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.campo--linha input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--acento); }
+.campo--linha input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--cor-tinta); }

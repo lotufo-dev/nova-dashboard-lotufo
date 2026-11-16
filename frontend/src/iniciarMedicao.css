@@ -5,13 +5,13 @@
 .iniciar-med__mes { display: flex; align-items: center; gap: 8px; }
 .iniciar-med__mes-nome {
   min-width: 180px; padding: 0 12px; display: flex; align-items: center; justify-content: center; height: 40px;
-  border: 1px solid var(--linha-campo); border-radius: var(--raio-ctrl); background: var(--superficie); font-weight: 600;
+  border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); background: var(--cor-superficie); font-weight: 600;
 }
 .iniciar-med__mes-seta {
-  width: 40px; height: 40px; flex: none; border: 0; border-radius: var(--raio-ctrl); background: none; color: var(--texto-2);
-  font-size: 22px; line-height: 1; cursor: pointer;
+  width: 40px; height: 40px; flex: none; border: 0; border-radius: var(--raio-controle); background: none; color: var(--cor-texto-secundario);
+  font-size: var(--texto-valor); line-height: 1; cursor: pointer;
 }
-.iniciar-med__mes-seta:hover { background: var(--hover); }
+.iniciar-med__mes-seta:hover { background: var(--cor-papel-sombreado); }
 
 /* enquanto a regra da obra não chega */
-.iniciar-med__carregando { margin: 0; color: var(--texto-2); }
+.iniciar-med__carregando { margin: 0; color: var(--cor-texto-secundario); }

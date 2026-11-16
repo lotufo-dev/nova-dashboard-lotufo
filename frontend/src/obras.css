@@ -1,35 +1,35 @@
 /* Obras (redesenho #509): a tabela de posicao financeira por contratante (#645), a busca e os totais; e os Avisos
    que ainda abrem dentro da pagina. So' o que tokens.css nao tem; cores so' dos tokens. */
 
-.topbar__titulo--grande { font-size: 28px; line-height: 36px; }
-.progresso { height: 6px; border-radius: var(--raio-pilula); background: var(--neutro-fundo); overflow: hidden; }
-.progresso__barra { display: block; height: 100%; border-radius: var(--raio-pilula); background: var(--marca); }
-.progresso--feito .progresso__barra { background: var(--ok-ponto); }
+.topbar__titulo--grande { font-size: var(--texto-numero); line-height: 36px; }
+.progresso { height: 6px; border-radius: var(--raio-selo); background: var(--cor-contador-neutro); overflow: hidden; }
+.progresso__barra { display: block; height: 100%; border-radius: var(--raio-selo); background: var(--cor-menu); }
+.progresso--feito .progresso__barra { background: var(--situacao-feito-ponto); }
 
 .obras-topo { flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; }
-.obras-topo__sub { font-size: 18px; font-weight: 400; color: var(--texto-2); letter-spacing: 0; margin-left: 6px; }
+.obras-topo__sub { font-size: var(--texto-titulo-bloco); font-weight: 400; color: var(--cor-texto-secundario); letter-spacing: 0; margin-left: 6px; }
 .topbar__titulo--grande { overflow: visible; white-space: normal; }
-.obras-busca { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; font-size: 14px; }
-.obras-busca__campo { width: 280px; max-width: 100%; height: 40px; padding: 0 12px; box-sizing: border-box; border: 1px solid var(--linha-forte); border-radius: var(--raio); background: var(--superficie); font-size: 14px; }
-.obras-busca__campo:focus-visible { outline: 2px solid var(--foco); outline-offset: 1px; }
+.obras-busca { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; font-size: var(--texto-meta); }
+.obras-busca__campo { width: 280px; max-width: 100%; height: 40px; padding: 0 12px; box-sizing: border-box; border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-canto); background: var(--cor-superficie); font-size: var(--texto-meta); }
+.obras-busca__campo:focus-visible { outline: 2px solid var(--cor-foco); outline-offset: 1px; }
 
-.obras-totais { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 4px 0 0; font-size: 15px; color: var(--texto-2); }
-.obras-totais strong { color: var(--texto); font-weight: 600; }
-.obras-totais span + span::before { content: "·"; margin-right: 20px; color: var(--texto-fraco); }
+.obras-totais { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 4px 0 0; font-size: var(--texto-corpo); color: var(--cor-texto-secundario); }
+.obras-totais strong { color: var(--cor-tinta); font-weight: 600; }
+.obras-totais span + span::before { content: "·"; margin-right: 20px; color: var(--cor-texto-terciario); }
 
 .obras-posicao { table-layout: auto; }
 .obras-posicao thead th { font-weight: 600; }
 .obras-posicao tbody td { vertical-align: middle; padding-top: 12px; padding-bottom: 12px; }
 .linha--obra { cursor: pointer; }
-.obras-posicao__nome { font-weight: 600; color: var(--texto); font-size: 15px; }
-.obras-posicao__sub { font-size: 13px; color: var(--texto-2); }
+.obras-posicao__nome { font-weight: 600; color: var(--cor-tinta); font-size: var(--texto-titulo-sub); }
+.obras-posicao__sub { font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 /* o contratante: a linha que abre o grupo, com o subtotal nas colunas */
-.obras-posicao .obras-grupo th, .obras-posicao .obras-grupo td { background: var(--superficie-2); font-weight: 600; padding-top: 10px; padding-bottom: 10px; }
-.obras-posicao .obras-grupo th { text-align: left; font-size: 14px; color: var(--texto); }
+.obras-posicao .obras-grupo th, .obras-posicao .obras-grupo td { background: var(--cor-papel-sombreado); font-weight: 600; padding-top: 10px; padding-bottom: 10px; }
+.obras-posicao .obras-grupo th { text-align: left; font-size: var(--texto-meta); color: var(--cor-tinta); }
 .obras-exec { display: flex; align-items: center; gap: 12px; min-width: 170px; }
 .obras-exec .progresso { flex: 1; }
-.obras-exec__pct { flex: none; min-width: 44px; justify-content: center; font-size: 13px; font-weight: 600; }
-.obras-rodape { display: flex; justify-content: space-between; gap: 12px; padding: 16px 20px; font-size: 14px; color: var(--texto-2); }
+.obras-exec__pct { flex: none; min-width: 44px; justify-content: center; font-size: var(--texto-meta); font-weight: 600; }
+.obras-rodape { display: flex; justify-content: space-between; gap: 12px; padding: 16px 20px; font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 
 @media (max-width: 1100px) { .obras-totais span + span::before { content: none; } }
 @media (max-width: 700px) {
@@ -37,20 +37,20 @@
   /* a 375 px a tabela vira um cartao por obra, com os mesmos numeros */
   .obras-posicao, .obras-posicao tbody, .obras-posicao tr, .obras-posicao td { display: block; width: 100%; }
   .obras-posicao thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .obras-posicao tbody tr { padding: 14px 16px; border-bottom: 1px solid var(--linha); }
+  .obras-posicao tbody tr { padding: 14px 16px; border-bottom: 1px solid var(--cor-linha); }
   .obras-posicao tbody tr:last-child { border-bottom: 0; }
   .obras-posicao tbody td { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 3px 0; border: 0; text-align: right; }
   .obras-posicao tbody td:first-child { display: block; text-align: left; padding: 0 0 6px; }
-  .obras-posicao tbody td:not(:first-child)::before { content: attr(data-rotulo); color: var(--texto-2); font-size: 13px; text-align: left; }
+  .obras-posicao tbody td:not(:first-child)::before { content: attr(data-rotulo); color: var(--cor-texto-secundario); font-size: var(--texto-meta); text-align: left; }
   .obras-exec { min-width: 0; width: 60%; }
   .obras-busca, .obras-busca__campo { width: 100%; }
   .obras-posicao .obras-grupo th { display: block; padding: 0 0 6px; }
   .obras-posicao .obras-grupo td { padding: 3px 0; }
   .obras-posicao .obras-grupo td:first-of-type { display: flex; text-align: right; }
-  .obras-posicao .obras-grupo td:first-of-type::before { content: attr(data-rotulo); color: var(--texto-2); font-size: 13px; font-weight: 400; text-align: left; }
+  .obras-posicao .obras-grupo td:first-of-type::before { content: attr(data-rotulo); color: var(--cor-texto-secundario); font-size: var(--texto-meta); font-weight: 400; text-align: left; }
   .obras-posicao .obras-grupo td::before { font-weight: 400; }
   .obras-posicao .obras-grupo .obras-grupo__vazio { display: none; }
-  .obras-posicao tbody tr.obras-grupo { background: var(--superficie-2); }
+  .obras-posicao tbody tr.obras-grupo { background: var(--cor-papel-sombreado); }
 }
 
 /* ------------------------------------------------------------ os Avisos, dentro de Obras */
@@ -58,27 +58,27 @@
 .avisos-area__grupos { display: grid; gap: 16px; }
 /* #511: secoes pelo tempo, com faixa de cabecalho e uma linha por aviso */
 .avisos-area__titulos { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; min-width: 0; }
-.avisos-area__sub { color: var(--texto-fraco); font-size: 16px; }
-.aviso-secao { border: 1px solid var(--linha); border-radius: 12px; overflow: hidden; }
-.aviso-secao__cabeca { margin: 0; padding: 8px 16px; font-size: 16px; font-weight: 700; letter-spacing: .02em; }
-.aviso-secao__cabeca--vencido { background: var(--acao-fundo); }
-.aviso-secao__cabeca--vencido .aviso-secao__n { color: var(--acao); }
-.aviso-secao__cabeca--semana { background: #FFEDD5; }
-.aviso-secao__cabeca--mes { background: #FEF9C3; }
-.aviso-secao__cabeca--semana .aviso-secao__n, .aviso-secao__cabeca--mes .aviso-secao__n { color: var(--atencao); }
-.aviso-secao__cabeca--depois { background: var(--neutro-fundo); }
-.aviso-secao__cabeca--depois .aviso-secao__n { color: var(--texto-fraco); }
+.avisos-area__sub { color: var(--cor-texto-terciario); font-size: var(--texto-titulo-sub); }
+.aviso-secao { border: 1px solid var(--cor-linha); border-radius: 12px; overflow: hidden; }
+.aviso-secao__cabeca { margin: 0; padding: 8px 16px; font-size: var(--texto-titulo-sub); font-weight: 700; letter-spacing: .02em; }
+.aviso-secao__cabeca--vencido { background: var(--situacao-critico-fundo); }
+.aviso-secao__cabeca--vencido .aviso-secao__n { color: var(--situacao-critico-texto); }
+.aviso-secao__cabeca--semana { background: var(--situacao-breve-fundo); }
+.aviso-secao__cabeca--mes { background: var(--cor-papel-sombreado); }
+.aviso-secao__cabeca--semana .aviso-secao__n, .aviso-secao__cabeca--mes .aviso-secao__n { color: var(--situacao-breve-texto); }
+.aviso-secao__cabeca--depois { background: var(--cor-contador-neutro); }
+.aviso-secao__cabeca--depois .aviso-secao__n { color: var(--cor-texto-terciario); }
 .aviso-secao__lista { list-style: none; margin: 0; padding: 0 16px; }
 .aviso-linha { position: relative; display: grid; grid-template-columns: 110px minmax(120px, 220px) minmax(0, 1fr) auto; gap: 4px 16px;
-  align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--linha); }
+  align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--cor-linha); }
 .aviso-linha:last-child { border-bottom: 0; }
 .aviso-linha__obra { font-weight: 600; overflow-wrap: anywhere; }
 .aviso-linha__link { color: inherit; text-decoration: none; }
 .aviso-linha__link::after { content: ""; position: absolute; inset: 0; }
 .aviso-linha__link:hover { text-decoration: underline; }
 .aviso-linha__dias { font-weight: 600; text-align: right; white-space: nowrap; }
-.aviso-linha__dias--vencido { color: var(--acao); }
-.aviso-linha__dias--semana, .aviso-linha__dias--mes { color: var(--atencao); }
+.aviso-linha__dias--vencido { color: var(--situacao-critico-texto); }
+.aviso-linha__dias--semana, .aviso-linha__dias--mes { color: var(--situacao-breve-texto); }
 .avisos-area__corpo > *, .avisos-area__grupos > * { min-width: 0; }
 .avisos-area .form-inline select { max-width: 100%; }
 @media (max-width: 700px) {
