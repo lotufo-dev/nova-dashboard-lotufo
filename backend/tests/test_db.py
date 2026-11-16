@@ -1,6 +1,7 @@
 import contextlib
 import re
 import shutil
+import sqlite3
 
 import pytest
 from app import db
@@ -284,6 +285,22 @@ def _pleito_anexos(conn) -> None:
                      "VALUES (?,'outro','anexo.pdf','pleitos/x.pdf','x',1,'pdf')", (pleito,))
 
 
+def _envios(conn) -> None:
+    usuario = _usuario(conn)
+    for n in range(1, _LINHAS + 1):
+        conn.execute("INSERT INTO envios (tipo, usuario_id, remetente, para, copia, assunto) "
+                     "VALUES ('espelho',?,'faturamento@exemplo.com.br','orgao@exemplo.com.br','',?)",
+                     (usuario, f"Envio {n}"))
+
+
+def _espelhos(conn) -> None:
+    contrato, usuario = _contrato(conn), _usuario(conn)
+    for n in range(1, _LINHAS + 1):
+        conn.execute("INSERT INTO espelhos (contrato_id, numero, competencia, versao, situacao, entradas, saidas, "
+                     "regra_sha256, criado_por) VALUES (?,?,'2026-01',1,'vigente','{}','[]','x',?)",
+                     (contrato, n, usuario))
+
+
 # Como por linhas em cada tabela que alguma migracao reconstroi, so' com as colunas obrigatorias: a mesma receita serve
 # em qualquer ponto da historia do esquema. Cada caso semeia TODAS as daqui que ja' existem no banco, nao so' a que a
 # migracao mexe: a tabela reconstruida fica com linhas filhas apontando para ela (medicao_documentos -> medicoes,
@@ -295,6 +312,8 @@ _SEMEAR = {
     "protocolo_pecas": _protocolo_pecas,
     "pleitos": _pleitos,
     "pleito_anexos": _pleito_anexos,
+    "envios": _envios,
+    "espelhos": _espelhos,
 }
 
 
@@ -383,3 +402,108 @@ def test_reconstrucao_de_tabela_preserva_a_contagem_de_linhas(migracao, tmp_path
         conn.commit()
         _aplicar(conn, pasta, migracao)
         _conferir_que_nada_se_perdeu(conn, migracao, antes, reconstruidas)
+
+
+# --- Medicao, nota fiscal, envio e espelho nao se apagam (issue #706) ------------------------------------------------
+
+_MIGRACAO_SEM_DELETE = "087_medicoes_notas_envios_espelhos_sem_delete.sql"
+_SEM_DELETE = {"medicoes": "Medição não se apaga", "notas_fiscais": "Nota fiscal não se apaga",
+               "envios": "Envio não se apaga", "espelhos": "Espelho não se apaga"}
+
+
+def _esquema(conn) -> dict:
+    return {(r[0], r[1]): (r[2], r[3]) for r in conn.execute("SELECT type, name, tbl_name, sql FROM sqlite_master")}
+
+
+def _dados(conn) -> dict:
+    """Todas as linhas de todas as tabelas, fora o registro das migracoes."""
+    return {tabela: sorted(repr(tuple(r)) for r in conn.execute(f'SELECT * FROM "{tabela}"'))
+            for tabela in _contagens(conn)}
+
+
+def _gatilho_sem_delete(tabela: str) -> str:
+    """O CREATE TRIGGER de `tabela`, como esta' escrito no arquivo da migracao."""
+    sql = _arquivo(_MIGRACAO_SEM_DELETE).read_text(encoding="utf-8")
+    return re.search(rf"CREATE TRIGGER IF NOT EXISTS {tabela}_sem_delete\b.*?\bEND;", sql, re.DOTALL).group(0)
+
+
+@pytest.mark.parametrize("tabela", sorted(_SEM_DELETE))
+def test_medicao_nota_envio_e_espelho_nao_se_apagam(tabela, tmp_path, monkeypatch):
+    """No esquema final, com todas as migracoes. O gatilho sai junto quando a tabela e' apagada: se uma migracao
+    futura reconstruir uma destas tabelas e nao recriar o gatilho dela, e' aqui que aparece."""
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    conn = db.get_conn()
+    db.migrate(conn)
+    _SEMEAR[tabela](conn)
+    conn.commit()
+    antes = _contagens(conn)[tabela]
+    assert antes >= _LINHAS
+
+    with pytest.raises(sqlite3.IntegrityError, match=_SEM_DELETE[tabela]):
+        conn.execute(f"DELETE FROM {tabela}")
+    with pytest.raises(sqlite3.IntegrityError, match=_SEM_DELETE[tabela]):
+        conn.execute(f"DELETE FROM {tabela} WHERE id = (SELECT MIN(id) FROM {tabela})")
+    conn.rollback()
+
+    assert _contagens(conn)[tabela] == antes
+    conn.close()
+
+
+def test_gatilhos_contra_exclusao_so_acrescentam_e_podem_ser_reaplicados(tmp_path, monkeypatch):
+    """Sobre um banco com dados, feito pelas migracoes anteriores: a migracao cria os quatro gatilhos e mais nada (o
+    resto do esquema e todas as linhas ficam como estavam), e rodar de novo nao falha nem muda nada."""
+    conn, pasta = _banco_antes_de(_MIGRACAO_SEM_DELETE, tmp_path, monkeypatch)
+    for tabela in _SEM_DELETE:
+        _SEMEAR[tabela](conn)
+    conn.commit()
+    esquema_antes, dados_antes = _esquema(conn), _dados(conn)
+    assert all(dados_antes[tabela] for tabela in _SEM_DELETE)
+
+    _aplicar(conn, pasta, _MIGRACAO_SEM_DELETE)
+
+    esquema = _esquema(conn)
+    assert {chave: esquema[chave] for chave in esquema_antes} == esquema_antes
+    assert set(esquema) - set(esquema_antes) == {("trigger", f"{tabela}_sem_delete") for tabela in _SEM_DELETE}
+    for tabela in _SEM_DELETE:
+        dono, sql = esquema[("trigger", f"{tabela}_sem_delete")]
+        assert dono == tabela and f"BEFORE DELETE ON {tabela}" in sql
+    assert _dados(conn) == dados_antes
+
+    # Reaplicacao de verdade (executescript interrompido antes do registro), e depois a subida normal, que pula.
+    conn.execute("DELETE FROM schema_migrations WHERE nome=?", (_MIGRACAO_SEM_DELETE,))
+    conn.commit()
+    db.migrate(conn)
+    db.migrate(conn)
+    assert _esquema(conn) == esquema
+    assert _dados(conn) == dados_antes
+    conn.close()
+
+
+_RECONSTRUCOES_DAS_PROTEGIDAS = [(migracao, tabela) for migracao in _COM_DROP_TABLE if migracao < _MIGRACAO_SEM_DELETE
+                                 for tabela in _mexidas(migracao) if tabela in _SEM_DELETE]
+
+
+def test_ha_reconstrucao_de_medicoes_e_de_notas_fiscais_para_conferir():
+    assert {tabela for _, tabela in _RECONSTRUCOES_DAS_PROTEGIDAS} >= {"medicoes", "notas_fiscais"}
+
+
+@pytest.mark.parametrize("migracao,tabela", _RECONSTRUCOES_DAS_PROTEGIDAS,
+                         ids=[f"{m}:{t}" for m, t in _RECONSTRUCOES_DAS_PROTEGIDAS])
+def test_reconstrucao_roda_com_o_gatilho_contra_exclusao_presente(migracao, tabela, tmp_path, monkeypatch):
+    """A reconstrucao de tabela (docs/adr/0010) continua possivel numa tabela que recusa DELETE: o DROP TABLE da
+    receita nao dispara o gatilho. Cada migracao que ja' reconstruiu `medicoes` ou `notas_fiscais` roda aqui com o
+    gatilho posto na tabela antes dela. As que vierem depois da 087 ja' encontram o gatilho no teste da contagem."""
+    conn, pasta = _banco_antes_de(migracao, tmp_path, monkeypatch)
+    _SEMEAR[tabela](conn)
+    conn.commit()
+    antes = _contagens(conn)[tabela]
+    assert antes >= _LINHAS
+    conn.executescript(_gatilho_sem_delete(tabela))
+    with pytest.raises(sqlite3.IntegrityError, match=_SEM_DELETE[tabela]):      # o gatilho esta' mesmo la'
+        conn.execute(f"DELETE FROM {tabela}")
+    conn.rollback()
+
+    _aplicar(conn, pasta, migracao)
+
+    assert _contagens(conn)[tabela] == antes
+    conn.close()
