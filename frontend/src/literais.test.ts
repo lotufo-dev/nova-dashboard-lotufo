@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 
 // #719: cor, familia e tamanho de letra moram so' nas variaveis da fundacao (bloco :root de tokens.css). Este teste
 // barra a volta do literal em src/**/*.css e nos estilos escritos em .tsx. Valor novo entra em tokens.css primeiro.
+// Limites conhecidos (o leitor e' por linha, nao entende o codigo): nome de cor guardado numa const fora de estilo,
+// cor montada em template (`#${x}`) e px literal no meio de um clamp() com as pontas em var() passam sem aviso.
 
 const SRC = join(process.cwd(), "src");
 
@@ -15,6 +17,7 @@ export const EXCECOES: { arquivo: string; trecho: string; motivo: string }[] = [
   { arquivo: "EditorCorpo.tsx", trecho: 'cor: "#', motivo: "cores de texto e de realce que o usuario escolhe no corpo do e-mail: dado, nao estilo" },
   { arquivo: "EditorCorpo.tsx", trecho: 'background: "#FF0000"', motivo: "o A do botao de cor mostra o Vermelho da lista do usuario, como no cliente de e-mail" },
   { arquivo: "tokens.css", trecho: "background: #FFFF00", motivo: "o icone do botao de realce mostra o Amarelo da lista do usuario" },
+  { arquivo: "tokens.css", trecho: "font-size: .92em", motivo: "code: tamanho relativo ao texto em volta" },
   { arquivo: "EditorCorpo.tsx", trecho: 'fontSize="5"', motivo: "numeral desenhado no icone de lista numerada, em unidades do viewBox de 16" },
 ];
 
@@ -89,7 +92,8 @@ export function achadosCss(arquivo: string, fonte: string): Achado[] {
   return achados;
 }
 
-const PROPS_COR_TSX = "color|background|backgroundColor|borderColor|border|outline|outlineColor|fill|stroke|boxShadow|textDecorationColor|caretColor|accentColor";
+const PROPS_COR_TSX = "color|background|backgroundColor|borderColor|border|borderLeft|borderTop|borderRight|borderBottom|" +
+  "borderLeftColor|borderTopColor|borderRightColor|borderBottomColor|outline|outlineColor|fill|stroke|boxShadow|textDecorationColor|caretColor|accentColor";
 
 export function achadosTsx(arquivo: string, fonte: string): Achado[] {
   // tira comentario (bloco, JSX e de linha; o "//" de um endereco "http://" fica)
@@ -106,6 +110,9 @@ export function achadosTsx(arquivo: string, fonte: string): Achado[] {
     if (corEmString.test(l) || FUNCAO_COR.test(l) || nomes) add("cor");
     if (/\bfontFamily\s*[:=]\s*(?!\{?\s*["'`]var\()/.test(l)) add("familia");
     if (/\bfontSize\s*[:=]\s*(?!\{?\s*["'`]var\()/.test(l)) add("tamanho");
+    // atalho `font` num objeto de estilo: so' var() e palavras que herdam
+    for (const m of l.matchAll(/\bfont\s*:\s*["'`]([^"'`]*)["'`]/g))
+      if (m[1].replace(/var\(--[\w-]+\)|\/|\b(?:inherit|initial|unset)\b|\s/g, "") !== "") add("tamanho");
   });
   return achados;
 }
@@ -151,9 +158,11 @@ describe("estilos sem literal (#719)", () => {
 
     const tsx = '<span style={{ background: "#ccc", color: "red", fontSize: 12, fontFamily: "Arial" }} />\n' +
       '<span style={{ color: "var(--cor-tinta)", fontSize: "var(--texto-meta)" }} />\n' +
+      '<b style={{ font: "12px Arial", borderLeft: "1px solid red", borderTopColor: "#abc" }} />\n' +
+      '<i style={{ font: "inherit", borderLeft: "1px solid var(--cor-linha)" }} />\n' +
       '// issue #123: comentario nao conta\n<a href="https://exemplo.com.br/#abc">x</a>';
     const tiposTsx = achadosTsx("x.tsx", tsx);
-    expect(tiposTsx.map(a => [a.linha, a.tipo])).toEqual([[1, "cor"], [1, "familia"], [1, "tamanho"]]);
+    expect(tiposTsx.map(a => [a.linha, a.tipo])).toEqual([[1, "cor"], [1, "familia"], [1, "tamanho"], [3, "cor"], [3, "tamanho"]]);
 
     // o bloco de variaveis de tokens.css e' o lugar do literal; fora dele, nao
     const tokens = ":root {\n  --cor-x: #123456;\n}\n.c { color: #123456; }";
