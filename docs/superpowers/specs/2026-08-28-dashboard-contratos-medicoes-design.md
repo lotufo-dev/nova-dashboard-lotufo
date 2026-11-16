@@ -1,5 +1,9 @@
 # Dashboard de Gestão de Contratos e Medições — Lotufo Engenharia
 
+> **Histórico.** Este documento deixou de ser autoridade em 15/11/2026 (`docs/adr/0001`). As regras vivas estão em
+> `.claude/rules/`, `GLOSSARY.md` e `docs/adr/`. Leia-o só para saber de onde veio uma decisão antiga; onde ele e o
+> código divergem, vale o código.
+
 **Data:** 2026-08-28 (v3 — modelo de observação automática; v2 incorporou 4 revisões externas; §15 de 2026-09-01 revoga a §14: produto sem custo de API)
 **Autor:** Leonardo Praeiro (com Claude)
 **Status:** Aprovado em brainstorming + revisão externa + reestruturação de automação; aguardando plano de implementação

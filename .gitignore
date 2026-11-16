@@ -37,7 +37,7 @@ monitor-siga/dados/
 # Worktrees das sessoes paralelas do Claude (juncoes criadas por .claude/hooks/preparar-worktree.ps1)
 .claude/worktrees/
 
-# Repositorio publico: o que e' da maquina do Leo ou tem dado real nunca entra. prototipos/login-3d continua rastreado (launch.json e login usam)
+# Repositorio publico: o que e' da maquina do dono ou tem dado real nunca entra. prototipos/login-3d continua rastreado (launch.json e login usam)
 PENDENCIAS.md
 cobranca.ps1
 contexto-*/
@@ -46,8 +46,6 @@ prototipos/*
 !prototipos/login-3d/
 # Prototipo aprovado da #151 (Iniciar medicao), conferido sem dado real em 15/10/2026
 !prototipos/iniciar/
-# Briefing comum do redesenho (#150): só texto, sem dado real
-!prototipos/redesenho/
 
-# Lista local de nomes de pessoas que scripts/vazamento.py barra (o Leo mantem na maquina dele; na CI a parte e pulada)
+# Lista local de nomes de pessoas que scripts/vazamento.py barra (o dono mantem na maquina dele; na CI a parte e pulada)
 scripts/vazamento-nomes.txt

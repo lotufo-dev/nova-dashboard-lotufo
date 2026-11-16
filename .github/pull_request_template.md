@@ -1,6 +1,6 @@
 ## O que mudou
 
-<!-- 3 a 6 linhas em português, sem jargão: o que o Leo passa a ver ou conseguir fazer. -->
+<!-- 3 a 6 linhas em português, sem jargão: o que o dono passa a ver ou conseguir fazer. -->
 
 ## Por quê
 
@@ -9,7 +9,7 @@ Closes #
 
 ## Como testar no navegador
 
-<!-- Passos numerados que o Leo segue no preview, com a URL da tela. -->
+<!-- Passos numerados que o dono segue no preview, com a URL da tela. -->
 1. 
 
 ## Suposições
@@ -24,5 +24,5 @@ Closes #
 
 - [ ] Suíte verde: 
 - [ ] Revisão do código: 
-- [ ] Revisão do Codex (só quando mexe em dinheiro, envio ou banco): 
+- [ ] Segunda revisão independente, por quem não escreveu o código (obrigatória quando a PR toca dinheiro, envio ou banco): quem revisou e o que achou: 
 - [ ] O que não foi conferido: 

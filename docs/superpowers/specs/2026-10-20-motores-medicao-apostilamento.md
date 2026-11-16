@@ -1,5 +1,9 @@
 # Motores de medição e apostilamento: proposta de consolidação da dashboard
 
+> **Histórico.** Este documento deixou de ser autoridade em 15/11/2026 (`docs/adr/0001`). As regras vivas estão em
+> `.claude/rules/`, `GLOSSARY.md` e `docs/adr/`. Leia-o só para saber de onde veio uma decisão antiga; onde ele e o
+> código divergem, vale o código.
+
 **Data:** 20/10/2026. **Origem:** fases 0 a 3 do levantamento SharePoint + Outlook
 (`docs/superpowers/plans/2026-10-19-levantamento-motores-sharepoint.md`; síntese em
 `docs/levantamento-motores-2026-10-20.md`). **Autoridade:** complementa a spec de 2026-09-21 (§2, §5, §6, §7, §8,

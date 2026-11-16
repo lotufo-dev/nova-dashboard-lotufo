@@ -1,7 +1,13 @@
 # Identidade visual — Lotufo · Plataforma de Obras
 
-Decidida em 06/10/2026 a partir do painel de marca "opção 2" (espírito Stripe: claro, índigo, dados em primeiro plano).
-Este arquivo descreve só o que está no painel aprovado. Não é um manual de regras de tela.
+**Em redesenho desde 15/11/2026.** O dono pediu uma refatoração geral de cores, logo e design, porque o sistema
+não parece da empresa e a execução ficou inconsistente entre as telas. A marca da empresa (laranja, preto e branco)
+passa a ser a inspiração, o símbolo passa a ser o L dela, e a direção nova é escolhida por teste comparativo. Até a
+direção ser aplicada, este arquivo descreve o que está no ar. O que já está decidido para a direção nova: as quatro
+situações mantêm o significado; a cor da marca nunca indica situação; tabela e número ficam em primeiro plano.
+
+O que está no ar foi decidido em 06/10/2026 a partir do painel de marca "opção 2" (claro, índigo, dados em primeiro
+plano).
 
 ## Ideia
 Metáfora: o livro-razão — cada valor na sua linha e coluna.
@@ -25,7 +31,7 @@ Símbolo: letra L formada por quatro quadrados arredondados numa grade 2×3 (col
 A marca não usa verde, azul, âmbar nem vermelho.
 
 ## Regra de cor da informação
-Decidida pelo Leo em 06/11/2026 e válida para a dashboard inteira. A cor é da **informação**, não do desenho da
+Decidida pelo dono em 06/11/2026 e válida para a dashboard inteira. A cor é da **informação**, não do desenho da
 página (menu índigo, fundo cinza-claro e cartões brancos não mudam).
 - Número e data são pretos por padrão.
 - **Verde** = feito ou recebido. **Azul** = em andamento. **Âmbar** = vence em breve ou faltando.
@@ -43,7 +49,6 @@ página (menu índigo, fundo cinza-claro e cartões brancos não mudam).
   app em `frontend/public/fonts/` (licença OFL ao lado), sem CDN. Títulos e valores em negrito (700).
 - Valores em reais na mesma fonte do texto (não há fonte monoespaçada), alinhados à direita nas tabelas, com
   algarismos tabulares (`font-variant-numeric: tabular-nums`, já aplicado a `td` e `th`).
-- Escala: 12 (rótulo), 14 (texto), 16 (texto destacado), 24 (título de página), 32–40 (valor grande em cartão).
 
 ## Menu lateral
 Largo por padrão (240 px), com ícone e nome em cada item e o item ativo em pílula branca; recolhível para só ícones
@@ -51,11 +56,6 @@ Largo por padrão (240 px), com ícone e nome em cada item e o item ativo em pí
 cima da tela e fecha ao navegar. Componente `Trilho` em `frontend/src/Casca.tsx`.
 
 ## Forma
-- Raio dos cartões e botões: 8 px; pílulas de situação: 999 px.
-- Sombra dos cartões: suave (`0 1px 2px rgba(15,23,42,.06), 0 4px 12px rgba(15,23,42,.06)`).
-- Espaçamento base: 8 px; respiro entre cartões: 16–24 px.
+- Raio, sombra e espaçamento: os de `frontend/src/tokens.css`.
 - Tabela é o elemento principal onde há lista de valores: cabeçalho em cinza frio 12 px, linhas de 44 px, um ponto colorido por situação.
 - Pílulas de situação: fundo tingido claro + ponto colorido + texto em ardósia.
-
-## Imagem
-Fotografia clara de infraestrutura (pontes, viadutos, rodovias) em tons frios, com leve véu índigo quando usada como fundo.

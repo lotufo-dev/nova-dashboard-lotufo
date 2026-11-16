@@ -6,16 +6,16 @@ paths:
 
 # Frontend (React 18 + Vite + TypeScript strict)
 
-- Identidade visual em `docs/identidade-visual.md`: claro, índigo `#4F46E5`, tabela como elemento principal,
-  símbolo L em grade 2×3. Tokens em `src/tokens.css`. Vermelho/âmbar/verde só com significado (erro, atenção, ok).
-- Tela nova ou redesenho parte do protótipo aprovado pelo dono. Ajuste pequeno não precisa de protótipo.
-- Texto na tela: só rótulo, valor, situação e ação; frase de apoio segue `.claude/rules/texto-na-tela.md`.
-- Tudo em português: rótulos, erros, confirmações ("Nota enviada às HH:MM.", "Número gravado."). Nunca
-  mostrar código interno (`medicao.protocolo`), exceção (`ValueError`) ou "Failed to fetch".
-- Quem só consulta (diretoria) não vê botão de escrita; 403 vira "Seu perfil só consulta esta tela…".
-- Precisa caber a 1024 px sem rolar na horizontal e funcionar no celular (valor numa linha, título inteiro).
-- Acessibilidade mínima: foco visível, teclado, `aria-live` em confirmação, tabela `sr-only` para gráfico.
-- Teste ao lado do componente (`X.test.tsx`, vitest + jsdom). `npm run typecheck` e `npm run lint` (oxlint)
-  verdes antes da PR.
-- Dev: `npm run dev` em `http://localhost:5173` com proxy de `/api` para o backend em 8080 com `DASH_DEV=1`
-  (sem isso o cookie de sessão não volta e o login "não funciona").
+- **Identidade em redesenho** desde 15/11/2026: `docs/identidade-visual.md` diz o estado. Cor, fonte, tamanho,
+  espaçamento e raio vêm das variáveis de `src/tokens.css`; valor novo entra lá primeiro.
+- **Tela nova ou redesenho parte da decisão do dono registrada na issue:** que pergunta a tela responde e que
+  informação mostra, com a imagem aprovada anexa quando existir. Ajuste pequeno segue direto.
+- **Texto na tela** segue `.claude/rules/texto-na-tela.md`; os termos são os do `GLOSSARY.md`.
+- **Português** em rótulo, erro e confirmação ("Nota enviada às HH:MM."). Erro mostra o que aconteceu em palavras
+  da pessoa: código interno, nome de exceção e "Failed to fetch" ficam fora da tela.
+- **Quem só consulta** (diretoria) não vê botão de escrita; o 403 vira "Seu perfil só consulta esta tela…".
+- **Largura.** A 1024 px a página não rola de lado; tabela larga rola dentro da própria caixa. Celular (390 px) é
+  requisito nas telas de leitura da diretoria: Início, Obras, página da obra e Fechamento. As telas de operação
+  são de computador.
+- **Acessibilidade mínima:** foco visível, teclado, `aria-live` em confirmação, tabela `sr-only` para gráfico.
+- Teste ao lado do componente (`X.test.tsx`, vitest + jsdom).
