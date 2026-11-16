@@ -192,6 +192,23 @@ describe("Reajuste", () => {
     expect(corpo.textContent).not.toContain("NaN");
   });
 
+  it("percentual do termo que não é número não aparece, nem no cabeçalho do ciclo nem na competência", async () => {
+    const termo = { id: 6, chave: "ap-mtpar", tipo: "apostilamento_reajuste", numero: "AP-2", data: "2026-05-11",
+      dados: { data_base: "2024-06", ciclo: 2026, percentual: "a definir" } };
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/reajuste")
+      ? { ciclos: [{ ...cicloAberto, situacao: "apostilado", dias: null, apostilamento: termo }], pleitos: [],
+          competencias_por_ciclo: [{ data_base_mes: "2024-06", ciclo: 2026, competencias: [
+            comp("2026-07", { estado: "apostilada", apostilada: true, apostilado_percentual: "a definir",
+              apostilamento_chave: "ap-mtpar" })] }] }
+      : { instrumentos: [termo] });
+    render(<Reajuste contratoId={7} podeEditar={false} />);
+    const corpo = (await screen.findByText("Ciclo de 2026 · aniversário em 01/06/2026")).parentElement!;
+    expect(corpo.textContent).toContain("AP-2, de 11/05/2026");
+    expect(corpo.textContent).not.toMatch(/a definir|NaN/);
+    const tabela = screen.getByRole("table", { name: "Reajuste por competência da data-base 06/2024, ciclo de 2026" });
+    expect(visivel(celulas(tabela.querySelector("tbody tr")!)[4])).toBe("—");
+  });
+
   it("mostra a linha do tempo do ciclo: pleito, aditivo, reemissão, reiteração e termo, em ordem (issue #275)", async () => {
     const termo = { id: 5, chave: "ap-12", tipo: "apostilamento_reajuste", numero: "019/2024/02/12", data: "2026-11-03",
       dados: { data_base: "2024-06", ciclo: 2026 } };
