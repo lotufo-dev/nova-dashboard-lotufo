@@ -36,6 +36,9 @@ paths:
   listada nem pesquisada. Grava remetente, data, assunto, trecho e nomes dos anexos; o corpo inteiro e os anexos
   ficam fora.
 - **Dev.** Ligue o simulador (`DASH_GRAPH_SIMULADOR=dados/correio-simulado`). Com `DASH_DEV=1` e sem simulador,
-  todo envio é recusado antes da reserva (`instalacao.exigir_envio`, issue #707); o e-mail real em dev só sai com
-  `DASH_EMAIL_REAL_EM_DEV=1`, para o teste deliberado. Sem `DASH_DEV` (produção) a trava não existe.
+  todo envio é recusado (`instalacao.exigir_envio`, issue #707): no envio feito por pessoa, antes da reserva; nos
+  jobs de alerta de segurança e de cobrança de certidões, a marca própria do job é gravada, a recusa vem em
+  `correio.enviar_e_registrar` antes de qualquer chamada ao Graph e a marca é solta: nada sai e nada fica preso.
+  O e-mail real em dev só sai com `DASH_EMAIL_REAL_EM_DEV=1`, para o teste deliberado. Sem `DASH_DEV` (produção)
+  a trava não existe.
 - Toda mudança aqui sai com o teste de concorrência: dois POST simultâneos resultam em 1×200 e 1×409.

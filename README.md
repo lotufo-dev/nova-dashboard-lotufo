@@ -39,8 +39,10 @@ No app do Claude, as mesmas duas coisas estão em `.claude/launch.json` (`backen
 - Banco de dev: `backend\dados\dashboard.db`; `DASH_DB_PATH` aponta outro arquivo (quando usar cada um:
   `CLAUDE.md`, item "Banco"). Sem RM configurado, o sistema roda com o RM desligado
   (`DASH_RM_SIMULADOR=<pasta>`); e-mail no dev vai para o simulador (`DASH_GRAPH_SIMULADOR=dados/correio-simulado`).
-- **E-mail real travado no dev** (issue #707): com `DASH_DEV=1` e sem `DASH_GRAPH_SIMULADOR`, todo envio é recusado
-  antes da reserva, com a mensagem de como ligar o simulador. Para um teste deliberado com e-mail de verdade, suba
+- **E-mail real travado no dev** (issue #707): com `DASH_DEV=1` e sem `DASH_GRAPH_SIMULADOR`, todo envio é recusado,
+  com a mensagem de como ligar o simulador: no envio feito por pessoa, antes da reserva; nos jobs de alerta de
+  segurança e de cobrança de certidões, a marca do job é gravada e solta, sem chamar o Graph (nada sai, nada fica
+  preso). Para um teste deliberado com e-mail de verdade, suba
   também com `DASH_EMAIL_REAL_EM_DEV=1`. Sem `DASH_DEV` (produção) a variável não é lida e nada muda.
 - `DASH_CADASTRO_DIR` aponta a pasta do cadastro (YAML) que `python -m app.cli cadastro validar|aplicar` lê; em
   produção é `C:\DashboardLotufo\cadastro`, clone do repositório privado `lotufo-cadastro`. `--raiz` vence a variável.
