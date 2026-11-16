@@ -75,12 +75,32 @@ describe("Contador", () => {
 
   it("neutro sem glifo; com situação, o glifo dela e o rótulo para o leitor de tela", () => {
     render(<><Contador rotulo="14 avisos">14</Contador><Contador situacao="critico" rotulo="5 vencidos">5</Contador></>);
-    const neutro = screen.getByLabelText("14 avisos");
+    const neutro = screen.getByText("14 avisos").closest(".contador")!;
     expect(neutro.className).toBe("contador");
     expect(neutro.querySelector(".glifo")).toBeNull();
-    const critico = screen.getByLabelText("5 vencidos");
+    const critico = screen.getByText("5 vencidos").closest(".contador")!;
     expect(critico.className).toBe("contador contador--critico");
     expect(critico.querySelector(".glifo--critico")).not.toBeNull();
-    expect(critico.textContent).toBe("5");
+    expect(critico.querySelector("[aria-hidden='true']:not(.glifo)")!.textContent).toBe("5");
+  });
+
+  // #721: `aria-label` num <span> sem papel o leitor de tela costuma ignorar. O rotulo vai como texto so' de leitor
+  // de tela e o numero desenhado sai da leitura, para nao ser dito duas vezes ("14 14 avisos").
+  it("o rótulo é texto só de leitor de tela, sem aria-label no span; o número desenhado fica fora da leitura", () => {
+    render(<Contador situacao="breve" rotulo="4 avisos">4</Contador>);
+    const rotulo = screen.getByText("4 avisos");
+    expect(rotulo.className).toBe("sr-only");
+    const contador = rotulo.closest(".contador")!;
+    expect(contador.getAttribute("aria-label")).toBeNull();
+    expect(screen.queryByLabelText("4 avisos")).toBeNull();
+    expect([...contador.children].map(c => [c.textContent, c.getAttribute("aria-hidden")])).toEqual(
+      [["", "true"], ["4", "true"], ["4 avisos", null]]);
+  });
+
+  it("sem rótulo o número é o próprio texto do contador", () => {
+    const { container } = render(<Contador situacao="critico">5</Contador>);
+    const contador = container.querySelector(".contador")!;
+    expect(contador.textContent).toBe("5");
+    expect(contador.querySelector(".sr-only")).toBeNull();
   });
 });
