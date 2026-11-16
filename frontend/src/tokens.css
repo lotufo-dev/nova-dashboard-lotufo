@@ -403,6 +403,7 @@ td.col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor
 .contador {
   display: inline-flex; align-items: center; gap: var(--espaco-mini); padding: 0 var(--espaco-pp); min-height: var(--altura-contador);
   border-radius: var(--raio-selo); background: var(--cor-contador-neutro); color: var(--cor-tinta);
+  font-family: var(--fonte-texto); font-stretch: var(--largura-texto); text-transform: none; letter-spacing: normal;
   font-size: var(--texto-meta); font-weight: var(--peso-forte); font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .contador--feito { background: var(--situacao-feito-fundo); color: var(--situacao-feito-texto); }
@@ -957,6 +958,8 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
   border-radius: var(--raio-selo);
   background: var(--cor-contador-neutro);
   color: var(--cor-tinta);
+  /* a letra e' a do texto mesmo dentro de um titulo (que e' condensado, em caixa-alta e espacado) */
+  font-family: var(--fonte-texto); font-stretch: var(--largura-texto); text-transform: none; letter-spacing: normal;
   font-size: var(--texto-meta); font-weight: var(--peso-forte); font-variant-numeric: tabular-nums;
   /* rotulo de tipo DESCONHECIDO (o servidor pode acrescentar um) nao pode estourar a coluna fixa do `.alerta` e
      empurrar a mensagem. O corte mora aqui; as RETICENCIAS moram no `.selo__texto` (ver abaixo). */
@@ -2106,7 +2109,8 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .cart-nota-resumo { margin: 0; font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 .cart-farois { display: flex; flex-wrap: wrap; gap: 8px; }
 .cart-farol-btn { height: 30px; border-radius: var(--raio-selo); padding: 0 12px; font-size: var(--texto-mini); }
-.cart-farol-btn[aria-pressed="true"] { background: var(--cor-papel-sombreado); border-color: var(--cor-borda-controle); color: var(--cor-tinta); }
+/* o filtro escolhido e' o mais forte: tinta cheia com texto papel (como o .sg__chip do SIGA) */
+.cart-farol-btn[aria-pressed="true"], .cart-farol-btn[aria-pressed="true"]:hover:not(:disabled) { background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel); }
 .cart-qdop-lado { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); }
 .cart-qdop-lado p { margin: 0 0 4px; }
 .cart-kpis--quebra { grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); row-gap: 16px; }
