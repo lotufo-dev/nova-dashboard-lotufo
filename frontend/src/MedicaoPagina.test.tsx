@@ -274,6 +274,64 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(textos.filter(t => t.includes(so))).toEqual([`Atenção: Reajuste da 23ª Medição: ${so}`]);
   });
 
+  // #712 (docs/adr/0008): a pendencia sem data da medicao aparece aqui, e nao so' na lista do administrador
+  const pendencia = (tipo: string, mensagem: string, extra: Record<string, unknown> = {}) => ({ tipo, nivel: "acao",
+    publico: ["operacao"], contrato_id: 1, obra: "Hospital", dias: null, valor_centavos: null, mensagem,
+    destino: { tela: "contrato", id: 1, aba: "notas" }, data: null, sentido: null, medicao_id: 5, ...extra });
+
+  it("#712: a nota cancelada no RM avisa na página da medição e leva às notas", async () => {
+    responder({ "/api/inicio": { avisos: [pendencia("nota_cancelada_rm", "nota 101 foi cancelada no RM e nenhuma nota nova foi vinculada")] } });
+    pagina();
+    const link = await screen.findByRole("link", { name: "ver as notas" });
+    expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#passo-4");
+    expect(link.closest(".aviso")!.textContent).toBe("Atenção: Nota 101 foi cancelada no RM e nenhuma nota nova foi vinculada: ver as notas");
+    fireEvent.click(link);
+    expect(await screen.findByRole("heading", { name: "Notas", level: 2 })).toBeTruthy();
+  });
+
+  it("#712: a nota maior que a medição avisa como crítico depois do protocolo", async () => {
+    responder({ "/api/inicio": { avisos: [pendencia("nota_acima_da_medicao", "nota 102 de R$ 20,00 é maior que a medição (R$ 10,00)",
+      { nivel: "critico" })] } });
+    pagina();
+    const link = await screen.findByRole("link", { name: "ver as notas" });
+    const caixa = link.closest(".aviso")!;
+    expect(caixa.classList.contains("aviso--critico")).toBe(true);
+    expect(caixa.textContent).toContain("Nota 102 de R$ 20,00 é maior que a medição (R$ 10,00)");
+  });
+
+  it("#712: com o passo Envio da nota aberto, a nota maior que a medição não se repete no alto", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida" }],
+      "/api/inicio": { avisos: [pendencia("nota_acima_da_medicao", "nota 102 de R$ 20,00 é maior que a medição (R$ 10,00)",
+        { nivel: "critico" })] } });
+    pagina();
+    await screen.findByRole("heading", { name: "Envio da nota", level: 2 });
+    await waitFor(() => expect(leituras("/api/inicio").length).toBeGreaterThan(0));
+    expect(screen.queryByText(/é maior que a medição/)).toBeNull();
+  });
+
+  it("#712: o período fora de ordem avisa e leva à planilha/carta", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_gerada" }],
+      "/api/medicoes/5": detalhePlanilha("planilha_gerada"),
+      "/api/inicio": { avisos: [pendencia("medicao_fora_de_ordem",
+        "23ª Medição: o período se sobrepõe ao da 22ª medição, que vai até 05/09/2026", { nivel: "atencao" })] } });
+    pagina();
+    const link = await screen.findByRole("link", { name: "revise a planilha/carta" });
+    expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#passo-1");
+    expect(link.closest(".aviso")!.textContent).toContain("23ª Medição: o período se sobrepõe ao da 22ª medição");
+  });
+
+  it("#712: só a pendência sem data desta medição, dos tipos que nenhum passo mostra", async () => {
+    responder({ "/api/inicio": { avisos: [
+      pendencia("nota_cancelada_rm", "nota 103 foi cancelada no RM e nenhuma nota nova foi vinculada", { medicao_id: 9 }),
+      pendencia("nota_cancelada_rm", "nota 104 foi cancelada no RM e nenhuma nota nova foi vinculada", { data: "2026-11-01" }),
+      pendencia("nota_divergente", "nota 105 diverge do espelho: valor", { nivel: "critico" }),
+    ] } });
+    pagina();
+    await screen.findByRole("heading", { name: "Hospital", level: 1 });
+    await waitFor(() => expect(leituras("/api/inicio").length).toBeGreaterThan(0));
+    expect(screen.queryByText(/nota 10[345]/i)).toBeNull();
+  });
+
   it("#359: sem o aprovado mudado, nada de aviso do espelho", async () => {
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: null }] });
     pagina();
