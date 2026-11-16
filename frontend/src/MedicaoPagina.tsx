@@ -89,6 +89,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // #508: cada leitura da lista da obra relê tambem a planilha/carta da medicao (a conferencia da revisao)
   const [leituraLista, setLeituraLista] = useState(0);
   const [pendencias, setPendencias] = useState<Aviso[]>([]);
+  const leituraAvisos = useRef(0);
 
   const m = medicoes?.find(x => x.id === medicaoId) ?? null;
   // a execucao e o reajuste do mesmo numero formam a pagina "Nª Medição + Reajuste"
@@ -113,9 +114,11 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       api<ParDaMedicao>(`/api/medicoes/${medicaoId}/par`).catch(() => null),
     ]);
     if (g !== geracao.current) return;
-    // #712: a fila de avisos chega a' parte: a demora ou a falha dela nao segura nem derruba a pagina
+    // #712: a fila de avisos chega a' parte: a demora ou a falha dela nao segura nem derruba a pagina. So' a leitura
+    // mais nova vale: a resposta atrasada de uma recarga anterior nao traz de volta o aviso ja' resolvido
+    const minha = ++leituraAvisos.current;
     void api<{ avisos?: Aviso[] }>("/api/inicio").then(d => {
-      if (g === geracao.current) setPendencias((d?.avisos ?? []).filter(a => !a.data && SEM_DATA_DA_MEDICAO.includes(a.tipo)));
+      if (minha === leituraAvisos.current) setPendencias((d?.avisos ?? []).filter(a => !a.data && SEM_DATA_DA_MEDICAO.includes(a.tipo)));
     }).catch(() => {});
     setMedicoes(lista); setLeituraLista(n => n + 1); setAndamento(abertas); setEspelhos(esp.espelhos ?? []); setRegraAtiva(esp.regra?.situacao === "ativa");
     setPar(duas && Array.isArray(duas.metades) ? duas : null);
@@ -529,8 +532,12 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     3: diaMes(espVigente?.envio?.enviado_em), 4: diaMes(m.nota_emitida_em),
     5: diaMes(m.protocolos.map(p => p.data).sort().at(-1)), 6: diaMes(m.recebida_em),
   };
-  // #712: o passo Envio da nota (antes do protocolo, `EtapaEnvio`) ja' mostra a nota maior que a medicao
+  // #712: a caixa da nota maior que a medicao so' sai do alto quando o passo Envio da nota esta' aberto com a
+  // `ConferenciaNotas` (EtapaEnvio) e os envios CARREGADOS trazem o aviso daquela medicao: a obra sem orgao, a falha da
+  // leitura e a metade do par fora de "a enviar" nao tiram a medicao dos envios sem tirar o aviso da pagina junto
   const envioAberto = aberta === 5 && sit(5) !== "feito" && (sit(5) !== "futuro" || !!pronta);
+  const envioMostraAcima = (medicaoId: number | null | undefined) => envioAberto
+    && (envios.envios ?? []).some(e => (e.acima_da_medicao ?? []).some(x => x.medicao_id === medicaoId));
   // #514: todo passo aberto tem estrutura propria; so' o futuro (sem corpo) fica no cartao "Libera depois do passo N"
   const proprio = sit(aberta) !== "futuro" || (aberta === 5 && !!pronta);
 
@@ -578,15 +585,18 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
 
         {/* #712: a nota cancelada no RM, a nota maior que a medicao e o periodo fora de ordem, com o passo que resolve */}
         {pendencias.filter(a => grupo.some(x => x.id === a.medicao_id)
-          && !(a.tipo === "nota_acima_da_medicao" && envioAberto)).map((a, i) => {
+          && !(a.tipo === "nota_acima_da_medicao" && envioMostraAcima(a.medicao_id))).map((a, i) => {
           const x = grupo.find(g => g.id === a.medicao_id)!;
           const nota = a.tipo !== "medicao_fora_de_ordem";
           const alvo = nota ? 4 : passos.includes(1) ? 1 : 3;
-          const frase = nota && grupo.length > 1 ? `${tituloMedicao(x)}: ${a.mensagem}`
-            : `${a.mensagem.charAt(0).toUpperCase()}${a.mensagem.slice(1)}`;
+          // o periodo fora de ordem ja' vem com o titulo da medicao: sai, e volta so' no par (como nas outras caixas);
+          // "nota 102" vira "NF 102", como o numero da nota no resto da pagina
+          const titulo = `${tituloMedicao(x)}: `;
+          const msg = (a.mensagem.startsWith(titulo) ? a.mensagem.slice(titulo.length) : a.mensagem).replace(/^nota (\S+)/, "NF $1");
+          const comeco = grupo.length > 1 ? `${titulo}${msg}, ` : `${msg.charAt(0).toUpperCase()}${msg.slice(1)}: `;
           return (
             <CaixaAviso key={`pendencia-${a.tipo}-${a.medicao_id}-${i}`} nivel={a.nivel === "critico" ? "critico" : "atencao"}>
-              {frase}: <Link className="link" para={aqui} secao={`passo-${alvo}`}
+              {comeco}<Link className="link" para={aqui} secao={`passo-${alvo}`}
                 ir={(p, o) => { setVendo(alvo); ir(p, o); }}>{nota ? "ver as notas" : "revise a planilha/carta"}</Link>
             </CaixaAviso>
           );
