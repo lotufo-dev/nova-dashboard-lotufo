@@ -283,12 +283,12 @@ def complemento_rm(conn) -> dict[int, dict[str, int]]:
     return out
 
 
-def _complemento_de_execucao(conn, ms: list[dict], compl: dict[int, dict[str, int]], cache: dict) -> dict[int, dict[str, int]]:
-    """O complemento que entra no medido de EXECUCAO (saldo, executado, curva): a nota do RM nao diz se e' execucao ou
-    reajuste, entao o complemento de cada contrato para no que ainda falta executar (vigente de execucao - medido de
-    execucao das medicoes), das competencias mais antigas para as mais novas. Assim uma nota de reajuste de obra ja'
-    toda medida nao deixa o saldo negativo."""
-    medido = _medido_execucao(ms)
+def _complemento_no_medido(conn, ms: list[dict], compl: dict[int, dict[str, int]], cache: dict) -> dict[int, dict[str, int]]:
+    """O complemento que entra no medido da obra (saldo, executado, curva): a nota do RM nao diz se e' execucao, projeto
+    ou reajuste, entao o complemento de cada contrato para no que ainda falta executar (vigente de execucao - medido
+    das medicoes, execucao e projeto, #742), das competencias mais antigas para as mais novas. Assim uma nota de
+    reajuste de obra ja' toda medida nao deixa o saldo negativo."""
+    medido = _medido_por_contrato(ms)
     out: dict[int, dict[str, int]] = {}
     for cid, por_comp in compl.items():
         falta = max(0, _vigente(conn, cid, cache)["valor_vigente_execucao_centavos"] - medido.get(cid, 0))
@@ -510,12 +510,13 @@ def _vigente(conn, contrato_id: int, cache: dict) -> dict:
     return cache[chave]
 
 
-def _medido_execucao(ms: list[dict], compl: dict[int, dict[str, int]] | None = None) -> dict[int, int]:
-    """#262: o medido de execucao CHEIO por contrato (`paineis.mede_execucao`, a regra de `paineis.saldo`), tirado da
-    mesma leitura de medicoes do painel (`ms`), para a carteira e a tabela de obras nao divergirem na mesma resposta."""
+def _medido_por_contrato(ms: list[dict], compl: dict[int, dict[str, int]] | None = None) -> dict[int, int]:
+    """#262: o medido CHEIO por contrato (`paineis.mede_no_medido`, a regra de `paineis.saldo`: execucao e projeto,
+    #742), tirado da mesma leitura de medicoes do painel (`ms`), para a carteira e a tabela de obras nao divergirem na
+    mesma resposta."""
     medido: dict[int, int] = {}
     for m in ms:
-        if paineis.mede_execucao(m):
+        if paineis.mede_no_medido(m):
             valor = m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"] or 0
             medido[m["contrato_id"]] = medido.get(m["contrato_id"], 0) + valor
     # o que o RM mostra e ainda nao foi lancado (`complemento_rm`) conta como medido da obra
@@ -528,11 +529,13 @@ def _carteira(conn, ms: list[dict], hoje: datetime.date, cache: dict, compl: dic
     """Contratos ativos sem encerramento iniciado: o que ainda vai ser executado."""
     ultimos = {_mes(hoje, k) for k in range(-5, 1)}
     linhas, ritmo = [], 0
-    medidos = _medido_execucao(ms, compl)
+    medidos = _medido_por_contrato(ms, compl)
     for c in (x for x in _ativos(conn) if not x["encerramento_iniciado_em"]):
         v = _vigente(conn, c["id"], cache)
-        # #262: o medido e' o de `paineis.saldo` (execucao nos estados que medem), na mesma base do vigente de execucao
-        exe = [m for m in ms if m["contrato_id"] == c["id"] and paineis.mede_execucao(m)]
+        # #262: o medido e' o de `paineis.saldo` (execucao e projeto nos estados que medem, #742), na mesma base do
+        # vigente de execucao. O ritmo fica so' com a execucao (decisao do dono de 16/11/2026, docs/adr/0012): projeto
+        # pago nao e' obra andando; os meses de producao sao o saldo a executar nesse ritmo
+        exe = [m for m in ms if m["contrato_id"] == c["id"] and m["tipo"] == "execucao" and paineis.mede_no_medido(m)]
         medido = medidos.get(c["id"], 0)
         pct = v["percentual_direito_bp"]   # #262: o percentual do mesmo vigente que a tabela de obras reaproveita
         # #262: saldo a precos iniciais -- o aditivo de reajuste fica fora, como no saldo da obra (`paineis.saldo`)
@@ -570,7 +573,8 @@ def _curva_obra(conn, contrato_id: int, cache: dict) -> tuple[dict, str, dict, d
     """A curva S da obra (issue #295), por competencia e em valor CHEIO: o previsto vigente; a linha de base ("anterior"
     quando a obra tem repactuacao, com o previsto anterior a ela; senao "vigente", com o vigente: decisao do dono de
     28/10/2026); e o medido de execucao nos estados que medem (`paineis._medido`). O vigente sai do mesmo `cache` de
-    `_previsto`, para nao ler o cronograma duas vezes."""
+    `_previsto`, para nao ler o cronograma duas vezes. #742: so' a execucao, de proposito: a curva e o desvio comparam
+    o realizado com o cronograma, como `paineis.curva_s`; o projeto entra no medido e no saldo (docs/adr/0012)."""
     chave = ("curva", contrato_id)
     if chave not in cache:
         if contrato_id not in cache:
@@ -616,7 +620,8 @@ def _desvio(conn, contrato_id: int, hoje: datetime.date, cache: dict) -> dict:
 def _a_precos_iniciais(conn, linha: dict, medido: int, cache: dict) -> dict:
     """#262 (gate Sol): a linha da tabela de obras na base do saldo da obra (`paineis.saldo`) e da carteira, logo
     acima na tela: PI+VA, VA, saldo e percentuais com o vigente de execucao, sem o aditivo de reajuste, que fica so'
-    na coluna do reajuste. `medido` e' o de execucao nos estados que medem, CHEIO (`_medido_execucao`, da mesma
+    na coluna do reajuste. `medido` e' o da obra (execucao e projeto, #742) nos estados que medem, CHEIO
+    (`_medido_por_contrato`, da mesma
     leitura de medicoes e do mesmo vigente da carteira); a coluna "faturados" continua a do QDOP. O saldo aplica a
     cota uma vez sobre o saldo cheio, como a carteira; os percentuais sao a razao no cheio (a mesma na cota, sem o
     arredondamento dela). O QDOP exportado continua com o vigente cheio (#352)."""
@@ -631,14 +636,14 @@ def _a_precos_iniciais(conn, linha: dict, medido: int, cache: dict) -> dict:
 
 def _obras(conn, ms: list[dict], hoje: datetime.date, avisos: list[dict], cache: dict,
            compl: dict[int, dict[str, int]] | None = None, faturado_a_mais: dict[int, dict[str, int]] | None = None) -> list[dict]:
-    """`compl`: o complemento de execucao (`_complemento_de_execucao`), que entra no medido e no saldo; `faturado_a_mais`:
+    """`compl`: o complemento do medido (`_complemento_no_medido`), que entra no medido e no saldo; `faturado_a_mais`:
     o complemento inteiro (`complemento_rm`), que entra na coluna "faturados"."""
     por_obra: dict = {}
     for a in avisos:
         if a.get("contrato_id"):
             por_obra.setdefault(a["contrato_id"], []).append(a)
     out = []
-    medido = _medido_execucao(ms, compl)
+    medido = _medido_por_contrato(ms, compl)
     for linha in qdop.linhas(conn, hoje):
         # a nota do RM sem medicao lancada e' faturado por definicao: entra na coluna "faturados" da tela, na cota
         falta = sum((faturado_a_mais or {}).get(linha["contrato_id"], {}).values())
@@ -734,14 +739,14 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
         avisos = _av.listar(conn, hoje, publico="diretoria")
         # 06/11/2026: o que o RM mostra e ainda nao tem medicao lancada entra no medido da diretoria (`complemento_rm`)
         compl = complemento_rm(conn)
-        execucao = _complemento_de_execucao(conn, ms, compl, cache)
+        no_medido = _complemento_no_medido(conn, ms, compl, cache)
         return {"hoje": hoje.isoformat(), "total_a_receber_liberado": liberado,
                 "dinheiro": _dinheiro(conn, ms, hoje, liberado, notas),
                 "mes_ano": _mes_ano(conn, ms, hoje, cache, _complemento_na_cota(conn, compl)),
                 "faturado_rm": _faturado_rm(conn, hoje),
-                "proximos": _proximos(conn, hoje, cache), "carteira": _carteira(conn, ms, hoje, cache, execucao),
-                "curva_carteira": _curva_carteira(conn, hoje, cache, execucao),
-                "obras": _obras(conn, ms, hoje, avisos, cache, execucao, compl), "obras_base": _obras_base(conn),
+                "proximos": _proximos(conn, hoje, cache), "carteira": _carteira(conn, ms, hoje, cache, no_medido),
+                "curva_carteira": _curva_carteira(conn, hoje, cache, no_medido),
+                "obras": _obras(conn, ms, hoje, avisos, cache, no_medido, compl), "obras_base": _obras_base(conn),
                 "avisos": avisos}
 
 

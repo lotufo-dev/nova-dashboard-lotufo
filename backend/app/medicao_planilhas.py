@@ -77,7 +77,9 @@ def _saldo(conn, contrato_id: int, tipo: str, acumulado: int, pedido: int | None
     """saldo = vigente − acumulado anterior (e − pedido, no `saldo_apos_pedido`). O acumulado conta as medicoes
     anteriores pela lista do medido de paineis.saldo mais a planilha gerada (#561, ESTADOS_NO_ACUMULADO; spec §2.1
     passo 1, "soma dos aprovados, senao pedidos").
-    So' a execucao tem saldo contra o valor do contrato (como em paineis.saldo); no projeto, os saldos sao nulos."""
+    So' a execucao tem saldo contra o valor do contrato; no projeto, os saldos sao nulos. E' o saldo da SERIE, o que
+    vai ao orgao na planilha/carta: o acumulado e' so' o da propria serie. O saldo da obra (paineis.saldo) soma
+    execucao e projeto (#742, docs/adr/0012) e nao muda este."""
     c = contratos.vigente(conn, contrato_id)
     vigente = c["valor_vigente_centavos"]
     # a base do saldo e' a da execucao, como a do painel (#262, paineis.saldo): o aditivo de reajuste nao entra
