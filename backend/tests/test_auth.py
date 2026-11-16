@@ -448,7 +448,7 @@ def test_escrita_equivalente_em_paralelo_preserva_os_contadores(tmp_path, monkey
     assert (row["tentativas_falhas"], row["bloqueado_ate"]) == (3, None)
 
 
-# --- #3: limite de tentativas de login por origem (decisao do Leo de 19/10/2026: 20 erradas por IP em 15 min) ---
+# --- #3: limite de tentativas de login por origem (decisao do dono de 19/10/2026: 20 erradas por IP em 15 min) ---
 
 
 def _de(client, ip):

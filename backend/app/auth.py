@@ -114,7 +114,7 @@ def autenticar(conn: sqlite3.Connection, email: str, senha: str) -> dict | None:
                      (row["id"],))
     return dict(row)
 
-# #3 (limite de login por origem; decisao do Leo de 19/10/2026): no maximo 20 tentativas erradas por IP em 15 minutos. Acima disso o
+# #3 (limite de login por origem; decisao do dono de 19/10/2026): no maximo 20 tentativas erradas por IP em 15 minutos. Acima disso o
 # login responde 429 ANTES de conferir a senha, entao a tentativa nao conta contra a conta (o lockout de
 # MAX_FALHAS continua como esta'). Login certo nao gasta a cota.
 LIMITE_ORIGEM = 20

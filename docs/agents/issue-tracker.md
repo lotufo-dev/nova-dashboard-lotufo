@@ -5,8 +5,9 @@ As issues e as especificações deste repositório são issues do GitHub. Todas 
 ## O repositório é público
 
 Tudo o que se escreve em issue, especificação, ticket ou PR sai na hora e não se apaga. Dado real (valor, nota,
-obra, CNPJ, e-mail, nome de pessoa, nome de máquina) não entra no texto: papel no lugar do nome ("o dono", "a
-engenheira da obra"), `<servidor>` no lugar da máquina, exemplo inventado no lugar do valor. Texto em português.
+CNPJ, e-mail, nome de pessoa, nome de máquina) não entra no texto: papel no lugar do nome ("o dono", "a
+engenheira da obra"), `<servidor>` no lugar da máquina, exemplo inventado no lugar do valor. Nome de obra e de
+órgão público pode (`docs/adr/0011`). Texto em português.
 
 Número de issue ou de PR nunca aparece sozinho em resposta, resumo ou comentário: vai com o nome curto ao lado,
 "#231 (ofício no envio por fora)". Toda issue leva um label `area:*` com a etapa do ciclo (`contrato`, `medicao`,

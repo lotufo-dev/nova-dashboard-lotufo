@@ -1,6 +1,6 @@
 # Spike de detecção — padrões de assunto contra o histórico real do Outlook
 
-**Task 2 da Fase 0** · Executado em 2026-08-31, inline na sessão principal, via MCP `outlook_email_search` na caixa do Leonardo.
+**Task 2 da Fase 0** · Executado em 2026-08-31, inline na sessão principal, via MCP `outlook_email_search` na caixa do dono.
 
 ## 1. Amostra usada
 
@@ -9,7 +9,7 @@ Buscas por `"Medição"` (todas as pastas e Itens Enviados), `"Emissão NF"` (to
 | Categoria | Assuntos distintos | Observação |
 |---|---|---|
 | Protocolo de medição | 6 | Volume real de protocolo POR E-MAIL é baixo — parte do fluxo é conduzida pela operadora e o retorno vem de gmails do órgão (três e-mails de superintendências da SINFRA) |
-| Espelho (Emissão NF) | 15 | Enviados por Leonardo e pela operadora |
+| Espelho (Emissão NF) | 15 | Enviados pelo dono e pela operadora |
 | FRC (consórcio) | 8 | Remetente é sempre a controladoria |
 | Ruído (não deve casar) | 17 | NF-e de fornecedores, NF pessoal, DANFE, faturas, DocuSign, ofícios do órgão, envio de NF ao órgão |
 
@@ -84,7 +84,7 @@ Critério do plano: `auto-aplicar` exige precisão ≥ 98% **e** campo completo.
 
 | Categoria | Recomendação | Regra completa (regex + contexto) |
 |---|---|---|
-| **Espelho (Emissão NF)** | **auto-aplicar** quando gate + nº + competência presentes E remetente interno da equipe (o Leonardo e a operadora) E não for `RE:` de terceiro; **sugerir** quando faltar competência (3/15) | Na amostra: 0 FP com a regra completa; extração completa em 80% |
+| **Espelho (Emissão NF)** | **auto-aplicar** quando gate + nº + competência presentes E remetente interno da equipe (o dono e a operadora) E não for `RE:` de terceiro; **sugerir** quando faltar competência (3/15) | Na amostra: 0 FP com a regra completa; extração completa em 80% |
 | **Protocolo de medição** | **auto-aplicar** quando ofício + nº + competência presentes (4/6) E destinatário/remetente é o canal do órgão; **sugerir** sem competência (2/6) | Amostra pequena (n=6) — reavaliar no backfill retroativo da fase 6 antes de confiar o histórico |
 | **FRC** | **somente sugerir** (nunca auto-aplicar por assunto). Detector: remetente da controladoria + `FRC` no corpo; vínculo à medição pelo thread (`internetMessageId`/`conversationId`) do espelho + nº extraído do corpo | Assunto sozinho: 13% de recall — inviável |
 

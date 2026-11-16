@@ -1,7 +1,7 @@
 """Carga do historico de medicoes por CSV (spec 2026-10-20 §2.4, opcao A; issues #258 e #259).
 
 ENSAIO (`ensaiar`): le o CSV de uma obra, confere linha a linha contra o banco e devolve o relatorio, sem gravar.
-GRAVAR (`gravar`): com o OK do Leo no ensaio, numa transacao so' por obra, cria as medicoes `nova` e corrige as
+GRAVAR (`gravar`): com o OK do dono no ensaio, numa transacao so' por obra, cria as medicoes `nova` e corrige as
 que ja' existem sem sobrescrever nada (issue #260): aprovado diferente vira evento novo de atesto com a fonte (o
 vigente e' o ultimo), duplicata (coluna `cancelar`) e' cancelada com motivo e competencia errada (coluna
 `corrige competência`) e' corrigida com a auditoria. O pedido de medicao existente nunca muda: foi congelado no

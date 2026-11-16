@@ -12,7 +12,7 @@ function buscar<T>(caminho: string): Promise<T> {
   return Promise.resolve().then(() => api<T>(caminho));
 }
 
-// Envio de e-mail como no Outlook (pedido do Leonardo em 2026-09-25): "De:" com a conta Microsoft,
+// Envio de e-mail como no Outlook (pedido do dono em 2026-09-25): "De:" com a conta Microsoft,
 // destinatarios em etiquetas com sugestao enquanto digita, botao "Para" que abre "Adicionar Destinatarios",
 // Cc e Cco, "Adicionar um assunto", anexos em cartoes e a assinatura de quem envia no fim do corpo.
 // Sugestoes: GET /api/correio/contatos (cadastro da dashboard + diretorio Microsoft quando a conta permite).

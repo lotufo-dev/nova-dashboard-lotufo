@@ -11,7 +11,7 @@ NF tem o MESMO valor bruto do ledger, cria a alocacao reusando `sincronizacao_rm
 -- o mesmo caminho auditado do casador. Ao final recomputa recebimentos (a baixa do RM
 ja sincronizada faz a medicao virar `recebida` sozinha). Itens SEM IdMovRM (cota de
 consorcio, backfill) NAO criam registro de NF -- ficam como estao (medicao ja e'
-`nf_emitida` = faturada), decisao do Leonardo (2026-09-09: sem acao humana).
+`nf_emitida` = faturada), decisao do dono (2026-09-09: sem acao humana).
 
 Travas contra vinculo errado (gate Sol 2026-09-09):
 - a coligada vem da ChaveIdempotencia `RM:<coligada>:<idmov>` (fullmatch, e o idmov da
@@ -193,7 +193,7 @@ def criar_medicoes_faltantes(conn, usuario_id, itens, cadastro, aplicar: bool = 
     So' materializa um (contrato, numero, tipo) quando o item (a) mapeia a um contrato,
     (b) NAO tem medicao ainda, (c) tem IdMovRM cuja NF esta' em `notas_fiscais`
     (coligada+idmov, ativa) e (d) o bruto do ledger bate com a NF. GUARD (decisao do
-    Leonardo 2026-09-09): a coligada da NF tem que ser a COLIGADA DA ENTIDADE do contrato
+    o dono, 2026-09-09): a coligada da NF tem que ser a COLIGADA DA ENTIDADE do contrato
     -- item cuja NF vive em outra coligada (BR-163: entidade coligada 20, NF na 6 = Arica,
     tomador MCI, valores em milhares x os milhoes do contrato) NAO cria medicao, seria
     pousar faturamento de outra empresa. Varias NFs do mesmo (contrato, numero, tipo)

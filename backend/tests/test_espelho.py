@@ -316,7 +316,7 @@ def test_campo_unico_digitado_igual_passa_e_diferente_recusa_com_os_dois_valores
 
 
 def test_atestado_digitado_sem_boletim_vale_como_aprovado_e_a_mensagem_nao_cita_o_boletim():
-    # decisao do Leo de 03/11/2026: o atestado digitado (sem PDF) vale como aprovado no espelho
+    # decisao do dono de 03/11/2026: o atestado digitado (sem PDF) vale como aprovado no espelho
     with pytest.raises(ValueError) as e:
         espelho.entradas_pela_medicao(regra_simples(), {"medicao": 1}, {"execucao": (2, "atestado")})
     assert "o aprovado (R$ 0,02)" in str(e.value) and "boletim" not in str(e.value)
@@ -360,7 +360,7 @@ def test_tipo_sem_valor_ou_que_a_regra_nao_gera_fica_como_esta():
 # --- issue #589: reajuste negativo abate na nota da medicao do mesmo emissor e municipio ---------------------------
 
 def test_reajuste_negativo_abate_na_nota_da_medicao_com_o_sinal():
-    """Decisao do Leo de 08/11/2026: a nota nao sai negativa. O reajuste negativo (centavo impar) soma com o sinal na
+    """Decisao do dono de 08/11/2026: a nota nao sai negativa. O reajuste negativo (centavo impar) soma com o sinal na
     nota de medicao, que sai com o valor liquido e os tributos sobre ele; a saida de reajuste nao vira nota."""
     r = regra_simples()
     s = espelho.calcular(r, {"medicao": 1_000_01, "reajuste": -10_01})

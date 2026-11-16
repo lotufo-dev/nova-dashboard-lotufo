@@ -1,6 +1,6 @@
 """Custo lancado no RM por grupo da planilha, medicao a medicao (issue #491, aba Custo da Carteira; piloto MT-388).
 
-Decisao do Leo de 06/11/2026: a tela mostra "custo lançado no RM", nunca margem nem lucro (a razao custo por receita
+Decisao do dono de 06/11/2026: a tela mostra "custo lançado no RM", nunca margem nem lucro (a razao custo por receita
 so' existe com fechamento mensal, que o RM ainda nao tem). Tudo no valor cheio. So' entram as obras com cadastro de
 custo (secao `custo:` do yaml, issue #489); obra de consorcio fica fora do piloto (o custo esta' na coligada dele).
 

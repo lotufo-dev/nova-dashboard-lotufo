@@ -1,10 +1,10 @@
 # Spike — Extração por IA no corpus real: resultados
 
-**Executado em 2026-08-31**, pós-merge da fase 2, por ordem do Leonardo ("usar IA para extrair, sem inserção manual"). Protocolo em `2026-08-spike-extracao-ia-protocolo.md`. Método: extração CEGA por Claude **Sonnet** (o tier realista de produção), julgada pelo controller contra gabaritos independentes; dinheiro re-verificado por busca literal na fonte.
+**Executado em 2026-08-31**, pós-merge da fase 2, por ordem do dono ("usar IA para extrair, sem inserção manual"). Protocolo em `2026-08-spike-extracao-ia-protocolo.md`. Método: extração CEGA por Claude **Sonnet** (o tier realista de produção), julgada pelo controller contra gabaritos independentes; dinheiro re-verificado por busca literal na fonte.
 
 ## Corpus
 
-- **86 e-mails reais** (2026-05..08, caixa do Leonardo): 21 protocolos, 16 espelhos, 9 FRC, 8 NF-ao-órgão, 32 ruídos difíceis (DocuSign com "CT-…-Protocolo", a controladoria não-FRC, supervisora devolvendo medição etc.). 34 com corpo coletado.
+- **86 e-mails reais** (2026-05..08, caixa do dono): 21 protocolos, 16 espelhos, 9 FRC, 8 NF-ao-órgão, 32 ruídos difíceis (DocuSign com "CT-…-Protocolo", a controladoria não-FRC, supervisora devolvendo medição etc.). 34 com corpo coletado.
 - **5 documentos reais**: 3 espelhos de NF (MTPAR, SES/reajuste-sem-INSS, SEMOP), cláusulas de valor/prazo do Contrato 019/2024 SINFRA, 1º Termo Aditivo 082/2025 (valor).
 - Gabaritos com **armadilhas deliberadas**: nota de empenho imitando valor global; espelho declarando NÃO-retenção de INSS; apostilamento imitando nº de contrato; data vigente citada num aditivo só-valor; e 3 casos de **assunto mentindo o nº da medição** (assunto reaproveitado de e-mail anterior).
 
@@ -36,7 +36,7 @@
 
 Por e-mail (assunto+corpo+prompt ≈ 1,5-3k tokens): **≈ R$ 0,05-0,10 com Sonnet**. Por documento (espelho/aditivo): ≈ R$ 0,15-0,40. Volume real (dezenas de e-mails relevantes/mês): **unidades de reais por mês**. Custo não é fator de decisão.
 
-## Recomendação (modelo híbrido c, decidido pelo Leonardo)
+## Recomendação (modelo híbrido c, decidido pelo dono)
 
 1. **Gate determinístico continua na frente** (barato, sem egress): remetente+prefixo triam o ruído óbvio e identificam o candidato. O que passa o gate vai à IA.
 2. **IA como extrator de campos de tudo que passa o gate** — substitui as regex de extração (frágeis) e resolve o que elas estruturalmente não alcançam: FRC (13%→100%), retorno do órgão (data confirmada no corpo), multi-medição, formatos variantes.
@@ -44,7 +44,7 @@ Por e-mail (assunto+corpo+prompt ≈ 1,5-3k tokens): **≈ R$ 0,05-0,10 com Sonn
 4. **Auto-aplicar** (fase 6) exige: confiança alta + campos completos + fonte coerente (sem divergência assunto×corpo). Resto = sugestão de 1 clique.
 5. **Documentos** (fases 4 e 7): extração IA + validador de código obrigatório — todo valor de dinheiro re-localizado literalmente na fonte antes de entrar em payload (o passo que este spike executou via grep); aditivos ganham conferência aritmética (novo = anterior + delta).
 6. **Consórcios**: dicionário fixo no prompt.
-7. **Custo/permissão**: extração automática roda nos workers (fase 6); disparo MANUAL de extração pela dashboard é **admin-only** (regra do Leonardo, 2026-08-31).
+7. **Custo/permissão**: extração automática roda nos workers (fase 6); disparo MANUAL de extração pela dashboard é **admin-only** (regra do dono, 2026-08-31).
 
 ## Próximo passo
 

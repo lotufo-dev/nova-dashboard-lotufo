@@ -1,6 +1,6 @@
 # Comparação: dashboard antiga × nova (2026-09-03)
 
-Levantamento autorizado pelo Leonardo em 2026-09-03. A antiga é `~/dev/lotufo-dashboard`
+Levantamento autorizado pelo dono em 2026-09-03. A antiga é `~/dev/lotufo-dashboard`
 (site estático HTML/CSS/JS + Cloudflare Worker, ~9.500 linhas de JS, 9 páginas). A leitura
 foi feita por 25 subagentes sobre o código real, mais conferência visual rodando a antiga
 (`python -m http.server 4173` + `?mock=1`).
