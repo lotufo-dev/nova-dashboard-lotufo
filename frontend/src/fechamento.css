@@ -54,7 +54,10 @@
 .fch-tabela th, .fch-tabela td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
 .fch-tabela th:first-child, .fch-tabela td:first-child { padding-left: var(--espaco-g); }
 .fch-tabela th:last-child, .fch-tabela td:last-child { padding-right: var(--espaco-g); }
-.fch-tabela tbody th { text-align: left; font-weight: var(--peso-normal); vertical-align: top; }
+.fch-tabela tbody th {
+  padding-top: var(--espaco-p); padding-bottom: var(--espaco-p); border-bottom: var(--borda-linha);
+  text-align: left; font-weight: var(--peso-normal); vertical-align: top;
+}
 .fch-tabela tbody td { vertical-align: top; }
 .fch-tabela .fch-primeira { position: sticky; left: 0; z-index: 1; background: var(--cor-superficie); }
 .fch-tabela tfoot .fch-primeira { background: var(--cor-superficie); }
@@ -77,10 +80,11 @@
 
 /* variante A: obra e medicao como linhas da mesma tabela, recuadas */
 .fch-linha--mes > th, .fch-linha--mes > td { font-weight: var(--peso-forte); }
-.fch-linha--obra > th, .fch-linha--obra > td, .fch-linha--medicao > th, .fch-linha--medicao > td { background: var(--cor-papel-sombreado); }
-.fch-linha--obra > th { padding-left: calc(var(--espaco-g) + var(--espaco-m)); }
+.fch-tabela .fch-linha--obra > th, .fch-tabela .fch-linha--obra > td,
+.fch-tabela .fch-linha--medicao > th, .fch-tabela .fch-linha--medicao > td { background: var(--cor-papel-sombreado); }
+.fch-tabela tbody .fch-linha--obra > th[scope="row"]:first-child { padding-left: calc(var(--espaco-g) + var(--espaco-m)); }
 .fch-linha--obra .fch-abre { font-weight: var(--peso-medio); }
-.fch-linha--medicao > th { padding-left: calc(var(--espaco-g) + var(--espaco-gg) + var(--espaco-pp)); }
+.fch-tabela tbody .fch-linha--medicao > th[scope="row"]:first-child { padding-left: calc(var(--espaco-g) + var(--espaco-gg) + var(--espaco-pp)); }
 .fch-linha--medicao > td { font-weight: var(--peso-normal); }
 
 .fch-notas { list-style: none; margin: var(--espaco-mini) 0 0; padding: 0; display: grid; gap: var(--espaco-mini); }
@@ -109,6 +113,11 @@
 .fch-aparte dd { margin: 0; font-weight: var(--peso-forte); }
 
 @media (max-width: 760px) {
+  .fch-painel__cab { padding: 0 var(--espaco-p); }
   .fch-painel__cab .fch-botoes { margin-left: 0; }
+  .fch-tabela th:first-child, .fch-tabela td:first-child { padding-left: var(--espaco-p); }
+  .fch-tabela th:last-child, .fch-tabela td:last-child { padding-right: var(--espaco-p); }
+  .fch-tabela tbody .fch-linha--obra > th[scope="row"]:first-child { padding-left: var(--espaco-g); }
+  .fch-tabela tbody .fch-linha--medicao > th[scope="row"]:first-child { padding-left: var(--espaco-xg); }
   .fch-quadro__corpo { padding: var(--espaco-p); }
 }

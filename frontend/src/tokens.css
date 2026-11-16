@@ -1769,6 +1769,9 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .tabela--grade col.c-valor { width: 152px; }
 .tabela--grade col.c-ha { width: 96px; }
 .tabela--grade col.c-marcas { width: 148px; }
+/* #748: com a coluna "Custo lançado no RM" (aba Medicoes da obra com cadastro de custo), a coluna livre (proximo passo,
+   notas) ainda precisa de lugar: a tabela cresce e rola dentro da caixa, em vez de espremer a coluna livre a zero. */
+.tabela--grade.tabela--com-custo { min-width: calc(var(--alvo-minimo) * 31); }
 .tabela--grade col.c-nivel { width: 112px; }
 .tabela--grade col.c-quando { width: 150px; }
 .tabela--grade col.c-valor-aviso { width: 136px; }

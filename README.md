@@ -45,7 +45,7 @@ No app do Claude, as mesmas duas coisas estão em `.claude/launch.json` (`backen
 
 Telas: `/inicio`, `/medicoes` (com abas), `/obras`, `/obras/N` (abas Medições, Prazos, Reajuste, Documentos
 exigidos, Contrato; as notas moram na medição), `/obras/N/medicoes/M` (Espelho, Faturamento, Nota, Envio, Pagamento), `/documentos`,
-`/diretoria`, `/admin`, `/conta`.
+`/fechamento`, `/admin`, `/conta`.
 
 ## Testar
 

@@ -190,7 +190,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
         ) : (
           <Rolagem rotulo="Medições em andamento da obra">
             {/* grade comum com "Anteriores", logo abaixo (F-47): o dinheiro das duas tabelas cai na mesma coluna */}
-            <table className="tabela tabela--grade">
+            <table className={`tabela tabela--grade${comCusto ? " tabela--com-custo" : ""}`}>
               <colgroup>
                 <col className="c-medicao-obra" /><col className="c-comp" /><col className="c-estado" />
                 <col className="c-valor" /><col className="c-valor" />{comCusto && <col className="c-valor" />}<col /><col className="c-marcas" />
@@ -243,7 +243,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
         </div>
         {anteriores.length > 0 && (
           <Rolagem rotulo="Medições anteriores da obra" alta>
-            <table className="tabela tabela--grade">
+            <table className={`tabela tabela--grade${comCusto ? " tabela--com-custo" : ""}`}>
               <colgroup>
                 <col className="c-medicao-obra" /><col className="c-comp" /><col className="c-estado" />
                 <col className="c-valor" /><col className="c-valor" />{comCusto && <col className="c-valor" />}<col /><col className="c-data" />
