@@ -2,9 +2,13 @@
 
 **Em redesenho desde 15/11/2026.** O dono pediu uma refatoração geral de cores, logo e design, porque o sistema
 não parece da empresa e a execução ficou inconsistente entre as telas. A marca da empresa (laranja, preto e branco)
-passa a ser a inspiração, o símbolo passa a ser o L dela, e a direção nova é escolhida por teste comparativo. Até a
-direção ser aplicada, este arquivo descreve o que está no ar. O que já está decidido para a direção nova: as quatro
-situações mantêm o significado; a cor da marca nunca indica situação; tabela e número ficam em primeiro plano.
+passa a ser a inspiração e o símbolo passa a ser o L dela. A fundação foi escolhida pelo dono em 15/11/2026 e é
+construída na branch de integração `redesenho` (#717). Lá, as variáveis da fundação (nomes por papel), as letras
+(Archivo no texto, nos números e nos títulos condensados; Barlow no nome da marca) e o símbolo L já estão no código
+(`frontend/src/tokens.css`, `frontend/public/fonts/`, `Simbolo.tsx`, favicon); as variáveis antigas apontam para as
+novas até as próximas etapas. As regras de design completas são escritas aqui no fim do redesenho; até lá, o resto
+deste arquivo descreve o que está no ar (o master). Já decidido: as quatro situações mantêm o significado; a cor da
+marca nunca indica situação nem ação; tabela e número ficam em primeiro plano.
 
 O que está no ar foi decidido em 06/10/2026 a partir do painel de marca "opção 2" (claro, índigo, dados em primeiro
 plano).
