@@ -5,7 +5,7 @@
 > código divergem, vale o código.
 
 **Data:** 2026-08-28 (v3 — modelo de observação automática; v2 incorporou 4 revisões externas; §15 de 2026-09-01 revoga a §14: produto sem custo de API)
-**Autor:** Leonardo Praeiro (com Claude)
+**Autor:** o dono (com Claude)
 **Status:** Aprovado em brainstorming + revisão externa + reestruturação de automação; aguardando plano de implementação
 
 ## 0. Filosofia (v3)
