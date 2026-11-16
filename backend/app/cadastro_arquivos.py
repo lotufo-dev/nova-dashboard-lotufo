@@ -7,6 +7,7 @@ acumulados (um cadastro com tres problemas mostra os tres) e levantados de uma v
 import datetime
 import hashlib
 import json
+import math
 import re
 import unicodedata
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -45,6 +46,8 @@ TIPOS_PLEITO = ("reajuste", "prazo", "conclusao", "valor")   # valor: pedido de 
 PECAS_PLEITO = ("falencia", "contrato_social", "documento_representante", "balanco")
 _CICLO = re.compile(r"^([0-9]{4})(-[0-9]{2})?$")
 _CICLO_ADITIVO = re.compile(r"^[0-9]{4}$")       # o aditivo de reajuste (issue #390) diz so' o ano: 2025-99 e' erro
+# O percentual do apostilamento de reajuste: so' o numero, com virgula ou ponto decimal ("6,76"); o "%" no fim passa
+_PERCENTUAL_TERMO = re.compile(r"^[+-]?[0-9]+([.,][0-9]+)?\s*%?$")
 # Issue #256 (spec 2026-10-20 §2.4): de que documento veio cada versao do cronograma.
 ORIGENS_CRONOGRAMA = ("contratual", "aditivo", "carta", "smo")
 # Mesmo teto de itens por versao da rota do cronograma (api_cronograma.MAX_ITENS): 50 anos de competencias.
@@ -185,6 +188,19 @@ def _bp(v) -> int:
     if not 0 < bp <= 10000:
         raise ValueError(f"percentual fora de 0–100: {v!r}")
     return bp
+
+
+def _percentual_do_termo_vale(v) -> bool:
+    """O `percentual` do apostilamento de reajuste e' um numero que a tela consegue mostrar: texto como "6,76"
+    (tambem "6.76" e "6,76%") ou numero do YAML. So' confere: o valor fica guardado como foi escrito."""
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, (int, float)):
+        try:
+            return math.isfinite(v)
+        except OverflowError:       # inteiro do YAML grande demais para float
+            return False
+    return isinstance(v, str) and bool(_PERCENTUAL_TERMO.match(v.strip()))
 
 
 def _instrumento(bruto: dict, onde: str, erros: list[str]) -> dict | None:
@@ -386,6 +402,11 @@ def _dados_instrumentos(c: dict, falha, avisos: list[str]) -> None:
                         raise ValueError("vazia")
                 except ValueError:
                     falha(f"{onde}.eficacia", f"use a data da eficácia (AAAA-MM-DD): {d['eficacia']!r}")
+            # o reajuste trata qualquer `percentual` preenchido como termo por percentual (`reajuste._percentuais`) e
+            # a tela mostra o numero: texto que nao e' numero ficaria no banco para sempre (instrumento aplicado nao
+            # muda). Vazio e' ausencia, como no reajuste.
+            if d.get("percentual") not in (None, "") and not _percentual_do_termo_vale(d["percentual"]):
+                falha(f"{onde}.percentual", f"use só o número do percentual do termo (ex.: 6,76): {d['percentual']!r}")
             # Issue #391: sem `ciclo` o termo cai no ano da eficacia (ou da data) e instrumento aplicado nao muda
             if d.get("ciclo") is None:
                 ano = reajuste.ciclo_do_apostilamento(d, inst["data"])
