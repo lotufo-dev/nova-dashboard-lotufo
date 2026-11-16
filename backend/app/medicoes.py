@@ -1045,6 +1045,12 @@ def mudar_estado(conn, usuario_id: int, medicao_id: int, novo: str, motivo: str 
             # `nota_emitida` nao tem checagem de ordem: a nota vem ANTES do protocolo (spec §2).
         extra_sql = f", {col_data}=?" if col_data else ""
         extra_par = [data] if col_data else []
+        # Issue #743 (segunda revisao): a nota emitida recebida sem protocolo (obra sem o passo "Envio da nota") congela
+        # aqui, como a protocolada congela no protocolo: o pedido nao muda mais a mao e o valor original do contrato
+        # so' muda por aditivo. `alcancaveis` so' deixa `nota_emitida -> recebida` nessa obra
+        congela = atual == "nota_emitida" and novo == "recebida"
+        if congela:
+            extra_sql += ", congelada=1"
         cur = conn.execute(
             "UPDATE medicoes SET estado=?, motivo_represamento=COALESCE(?, motivo_represamento)"
             f"{extra_sql} WHERE id=? AND estado=?", (novo, motivo, *extra_par, medicao_id, atual))
@@ -1056,6 +1062,8 @@ def mudar_estado(conn, usuario_id: int, medicao_id: int, novo: str, motivo: str 
         depois = {"estado": novo, "motivo": motivo_final}
         if col_data:
             depois[col_data] = data
+        if congela:
+            depois["congelada"] = 1
         if origem is not None:
             depois["origem"] = origem
         auditoria.registrar(conn, usuario_id, "medicao.estado", "medicao", medicao_id,

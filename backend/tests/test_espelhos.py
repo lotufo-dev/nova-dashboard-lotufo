@@ -1149,8 +1149,9 @@ def test_reajuste_absorvido_recebe_com_a_execucao_na_obra_sem_envio_da_nota(ambi
     with pytest.raises(ValueError, match="Este reajuste acompanha a execução"):
         medicoes.mudar_estado(conn, u["id"], rid, "recebida", "baixa conferida no extrato", "2026-03-10", "manual")
     medicoes.mudar_estado(conn, u["id"], xid, "recebida", "baixa conferida no extrato", "2026-03-10", "manual")
-    r = medicoes.detalhe(conn, rid)
-    assert (r["estado"], r["recebida_em"]) == ("recebida", "2026-03-10")
+    r, x = medicoes.detalhe(conn, rid), medicoes.detalhe(conn, xid)
+    assert (r["estado"], r["recebida_em"], r["congelada"]) == ("recebida", "2026-03-10", 1)
+    assert x["congelada"] == 1
 
 
 def test_reajuste_absorvido_nao_tem_marco_proprio(ambiente_projeto):

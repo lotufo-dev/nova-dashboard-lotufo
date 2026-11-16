@@ -1429,6 +1429,26 @@ def test_baixa_recebe_a_nota_emitida_na_obra_sem_envio_da_nota(conn, cid, tmp_pa
     assert auditoria.verificar_cadeia(conn)
 
 
+def test_nota_emitida_recebida_pela_baixa_congela_como_a_protocolada(conn, cid, tmp_path):
+    """Issue #743 (segunda revisao): o pedido digitado a' mao (sem espelho nem planilha) nao muda mais depois do
+    recebimento pela baixa, com a mesma mensagem da protocolada, e o valor original do contrato so' muda por aditivo."""
+    mid = _nota_emitida(conn, cid, 1000_01, SEM_ENVIO_DA_NOTA)
+    contratos.atualizar(conn, 1, cid, {"valor_original_centavos": 9_000_000_00})      # antes do recebimento: livre
+    nfs = [_nf(100, 1000.01)]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    if not _tem_nf(conn, mid):
+        _ligar(conn, mid, 100)
+    paga = [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-01T00:00:00-04:00")]
+    assert sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, paga))["recebimentos"] == 1
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["congelada"]) == ("recebida", 1)
+    with pytest.raises(ValueError, match="Medição congelada: valor protocolado não pode mais mudar"):
+        medicoes.definir_valor(conn, 1, mid, "protocolado", 5000_00, "manual")
+    assert medicoes.detalhe(conn, mid)["valor_protocolado_centavos"] == 1000_01
+    with pytest.raises(ValueError, match="Valor original congelado"):
+        contratos.atualizar(conn, 1, cid, {"valor_original_centavos": 8_000_000_00})
+
+
 @pytest.mark.parametrize("passos", [None, ["espelhos", "notas", "envio_nota", "pagamento"], []])
 def test_baixa_nao_recebe_a_nota_emitida_na_obra_com_envio_da_nota(conn, cid, tmp_path, passos):
     """Sem a chave, com o passo "Envio da nota" ou sem fluxo (lista vazia: vale a familia): a nota emitida espera o

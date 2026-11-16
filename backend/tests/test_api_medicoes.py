@@ -2812,7 +2812,11 @@ def test_recebimento_manual_da_nota_emitida_na_obra_sem_envio_da_nota(client_adm
                           json={"estado": "recebida", "motivo": MOTIVO_RM, "data": "2026-10-20"})
     assert r.status_code == 200, r.text
     d = client_admin.get(f"/api/medicoes/{mid}").json()
-    assert (d["estado"], d["recebida_em"], d["protocolos"]) == ("recebida", "2026-10-20", [])
+    assert (d["estado"], d["recebida_em"], d["protocolos"], d["congelada"]) == ("recebida", "2026-10-20", [], 1)
+    # congelada como a protocolada: o pedido digitado a' mao nao muda mais
+    r = client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "5.000,00"})
+    assert r.status_code == 422 and "Medição congelada" in r.json()["detail"]
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_protocolado_centavos"] == 100001
 
 
 @pytest.mark.parametrize("passos", [None, ["espelhos", "notas", "envio_nota", "pagamento"], []])

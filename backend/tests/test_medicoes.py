@@ -389,7 +389,11 @@ def test_nota_emitida_vai_a_recebida_sem_protocolo_na_obra_sem_envio_da_nota(con
         medicoes.mudar_estado(conn, 1, mid, "recebida", "baixa conferida", "2026-09-13", origem="manual")
     medicoes.mudar_estado(conn, 1, mid, "recebida", "baixa conferida", "2026-09-30", origem="manual")
     m = medicoes.detalhe(conn, mid)
-    assert (m["estado"], m["recebida_em"], m["protocolos"], m["congelada"]) == ("recebida", "2026-09-30", [], 0)
+    # segunda revisao: congela no recebimento, como a protocolada no protocolo
+    assert (m["estado"], m["recebida_em"], m["protocolos"], m["congelada"]) == ("recebida", "2026-09-30", [], 1)
+    ultimo = conn.execute("SELECT depois FROM audit_log WHERE acao='medicao.estado' AND entidade_id=? "
+                          "ORDER BY id DESC LIMIT 1", (str(mid),)).fetchone()[0]
+    assert json.loads(ultimo)["congelada"] == 1
     assert auditoria.verificar_cadeia(conn)
 
 
