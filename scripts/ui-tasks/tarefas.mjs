@@ -11,7 +11,7 @@
 // custos-propostos.md: passar da base é regressão e falha; passar do proposto × 1,3 é aviso).
 export const ENG = { id: 2, nome: "Engenheira", perfil: "engenharia" };
 export const DIR = { id: 3, nome: "Diretoria", perfil: "diretoria" };
-export const ADM = { id: 1, nome: "Ana Exemplo", perfil: "admin" };
+export const ADM = { id: 1, nome: "Admin Exemplo", perfil: "admin" };
 
 // Entrada de cada perfil no mapa e a fatia que a põe no lugar (a engenharia e o admin entram pelo Início
 // até a S6, quando a fila de Medições absorve os números do mês).

@@ -13,7 +13,7 @@ vi.mock("./IniciarProxima", () => ({
   default: ({ aoCriar }: { aoCriar: () => void }) => <button type="button" onClick={aoCriar}>Gerar espelho (teste)</button>,
 }));
 
-const usuario = { id: 1, nome: "Ana Exemplo", email: "ana@exemplo.com.br", perfil: "admin" } as Usuario;
+const usuario = { id: 1, nome: "Admin Exemplo", email: "admin@exemplo.com.br", perfil: "admin" } as Usuario;
 const CABECALHO = { id: 1, obra: "Hospital", orgao: "SES", instrumento: "CT 1/2026", valor_vigente_centavos: 100000,
   cota_vigente_centavos: null, percentual_lotufo_bp: 10000, execucao_fim: null, dias_execucao: null,
   vigencia_fim: null, dias_vigencia: null, status: "ativo" };

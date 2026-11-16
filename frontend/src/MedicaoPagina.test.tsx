@@ -41,7 +41,7 @@ vi.mock("./Protocolo", async () => {
   };
 });
 
-const usuario = { id: 1, nome: "Ana Exemplo", email: "ana@exemplo.com.br", perfil: "admin" } as Usuario;
+const usuario = { id: 1, nome: "Admin Exemplo", email: "admin@exemplo.com.br", perfil: "admin" } as Usuario;
 const MEDICAO = { id: 5, numero: 23, tipo: "execucao", competencia: "2026-09", estado: "protocolada",
   valor_protocolado_centavos: 1000000, valor_protocolado_origem: null, valor_atestado_centavos: null,
   valor_atestado_origem: null, atestado_em: null, nf_emitida_em: null, recebida_em: null, congelada: 0,
