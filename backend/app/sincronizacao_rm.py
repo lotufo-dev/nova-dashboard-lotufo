@@ -38,8 +38,8 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
    Alocar nao muda o estado de `protocolada`; em medicao nascida do espelho fecha `nota_emitida`
    quando nao falta nota. A medicao recebida a' mao que ainda falta nota tambem e' candidata (issue #713):
    a nota liga e o estado e a data do recebimento ficam.
-5. Recebimentos: medicao `protocolada` cujas NFs alocadas DA COLIGADA DA ENTIDADE DO CONTRATO
-   cobrem o valor dela (issue #714) e ja' tem baixa (status 1, 3 ou 4) cobrindo o titulo vira
+5. Recebimentos: medicao `protocolada` (ou com nota emitida na obra sem o passo "Envio da nota", issue #743)
+   cujas NFs alocadas DA COLIGADA DA ENTIDADE DO CONTRATO cobrem o valor dela (issue #714) e ja' tem baixa (status 1, 3 ou 4) cobrindo o titulo vira
    `recebida`, com a maior data de baixa. Issue #35: titulo pago ate' R$ 1,00 a menos tambem fecha, com a diferenca auditada em
    `medicao.recebida_com_diferenca`. Parcial fica visivel no detalhe da medicao (recebido por NF), sem mudar de estado.
 
@@ -737,11 +737,17 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
         return 0                        # "IN ()" nem e' SQL valido
     filtro = f" AND m.id IN ({','.join('?' * len(medicao_ids))})" if medicao_ids is not None else ""
     cobranca = ",".join("?" * len(diretoria.CODTMV_COBRANCA))
-    for m in conn.execute("""SELECT m.id, e.coligada_rm,
+    passos_de = medicoes.passos_das_medicoes(conn)
+    for m in conn.execute("""SELECT m.id, m.contrato_id, m.tipo, m.estado, m.planilha_enviada_em, e.coligada_rm,
                                     COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
                              FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
                              JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
-                             WHERE m.estado IN ('protocolada','nf_emitida')""" + filtro, medicao_ids or ()).fetchall():
+                             WHERE m.estado IN ('protocolada','nf_emitida','nota_emitida')""" + filtro,
+                          medicao_ids or ()).fetchall():
+        # Issue #743: a nota emitida so' na obra sem o passo "Envio da nota" (recebida sem protocolo); na obra com
+        # ele, a medicao espera o protocolo, como sempre. As regras abaixo (#714, #584, #35) valem igual
+        if m["estado"] == "nota_emitida" and not medicoes.recebe_sem_protocolo(m["estado"], passos_de(m)):
+            continue
         # Bloco 3 (decisao 13 do plano): so' as notas da COLIGADA DA ENTIDADE DO CONTRATO decidem o
         # recebimento. Em obra de consorcio a medicao tambem tem a NFS-e da Lotufo ao orgao
         # (coligada 1, cota, titulo que o consorcio repassa depois): ela nao segura a medicao.

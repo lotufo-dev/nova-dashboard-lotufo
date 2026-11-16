@@ -345,6 +345,8 @@ def a_enviar(conn, hoje: datetime.date | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
     por_contrato: dict[int, list[dict]] = {}
     for m in medicoes.em_andamento(conn, estado="nota_emitida"):
+        if m["recebe_sem_protocolo"]:
+            continue                          # #743: a obra sem o passo "Envio da nota" nao envia a nota ao orgao
         por_contrato.setdefault(m["contrato_id"], []).append(m)
     envios = []
     for cid, ms in por_contrato.items():

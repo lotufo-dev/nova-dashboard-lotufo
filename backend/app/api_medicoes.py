@@ -190,7 +190,9 @@ def listar(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
         # issue #290: os boletins do orgao, que a pagina da medicao le daqui (achado do gate Sol na PR #358)
         return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"]),
                  "boletins": medicoes.boletins(conn, m["id"]), **_envio_ao_orgao(conn, m),
-                 "com_envio_planilha": com_envio, "passos": list(passos_de(m))} for m in lista]
+                 "com_envio_planilha": com_envio, "passos": list(passos_de(m)),
+                 # issue #743: a nota emitida da obra sem o passo "Envio da nota" e' recebida sem protocolo
+                 "recebe_sem_protocolo": medicoes.recebe_sem_protocolo(m["estado"], passos_de(m))} for m in lista]
 
 
 @router.post("/api/contratos/{contrato_id}/medicoes", status_code=201)

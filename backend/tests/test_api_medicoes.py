@@ -2773,3 +2773,70 @@ def test_comparacao_uma_versao_so_outra_medicao_e_permissao(client_admin):
     assert _comparar(client_admin, outra).status_code == 200
     client_admin.cookies.clear()
     assert _comparar(client_admin, outra).status_code in (401, 403)
+
+
+# --- issue #743: obra sem o passo "Envio da nota" recebe a nota emitida sem protocolo ---------------------------
+
+def _nota_emitida_com_passos(client_admin, passos):
+    """Medicao de R$ 1.000,01 com nota emitida em 2026-09-14, na obra com a lista `passos` no cadastro (None: sem a
+    chave, vale a familia do orgao)."""
+    import json
+    from app import db
+    cid = _contrato(client_admin)
+    mid = client_admin.post(f"/api/contratos/{cid}/medicoes",
+                            json={"numero": 1, "tipo": "execucao", "competencia": "2026-08"}).json()["id"]
+    conn = db.get_conn()
+    try:
+        conn.execute("UPDATE contratos SET passos_medicao=? WHERE id=?",
+                     (None if passos is None else json.dumps(passos), cid))
+        conn.execute("UPDATE medicoes SET estado='nota_emitida', nota_emitida_em='2026-09-14', "
+                     "valor_protocolado_centavos=100001, valor_protocolado_origem='manual' WHERE id=?", (mid,))
+        conn.commit()
+    finally:
+        conn.close()
+    return cid, mid
+
+
+def test_recebimento_manual_da_nota_emitida_na_obra_sem_envio_da_nota(client_admin):
+    cid, mid = _nota_emitida_com_passos(client_admin, ["espelhos", "notas", "pagamento"])
+    [item] = client_admin.get(f"/api/contratos/{cid}/medicoes").json()
+    assert item["recebe_sem_protocolo"] is True and item["passos"] == [3, 4, 6]
+    # a baixa nao vem antes da emissao da nota, como na protocolada
+    r = client_admin.post(f"/api/medicoes/{mid}/estado",
+                          json={"estado": "recebida", "motivo": MOTIVO_RM, "data": "2026-09-13"})
+    assert r.status_code == 422 and "anterior à emissão da nota" in r.json()["detail"]
+    # o motivo continua obrigatorio
+    r = client_admin.post(f"/api/medicoes/{mid}/estado", json={"estado": "recebida"})
+    assert r.status_code == 422 and "motivo" in r.json()["detail"]
+    r = client_admin.post(f"/api/medicoes/{mid}/estado",
+                          json={"estado": "recebida", "motivo": MOTIVO_RM, "data": "2026-10-20"})
+    assert r.status_code == 200, r.text
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["recebida_em"], d["protocolos"], d["congelada"]) == ("recebida", "2026-10-20", [], 1)
+    # congelada como a protocolada: o pedido digitado a' mao nao muda mais
+    r = client_admin.put(f"/api/medicoes/{mid}/valor", json={"campo": "protocolado", "valor": "5.000,00"})
+    assert r.status_code == 422 and "Medição congelada" in r.json()["detail"]
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["valor_protocolado_centavos"] == 100001
+
+
+@pytest.mark.parametrize("passos", [None, ["espelhos", "notas", "envio_nota", "pagamento"], []])
+def test_recebimento_manual_da_nota_emitida_continua_recusado_com_envio_da_nota(client_admin, passos):
+    """Obra sem a chave, com o passo "Envio da nota" ou sem fluxo (lista vazia: vale a familia): nada muda."""
+    cid, mid = _nota_emitida_com_passos(client_admin, passos)
+    [item] = client_admin.get(f"/api/contratos/{cid}/medicoes").json()
+    assert item["recebe_sem_protocolo"] is False
+    r = client_admin.post(f"/api/medicoes/{mid}/estado", json={"estado": "recebida", "motivo": MOTIVO_RM})
+    assert r.status_code == 422 and "Transição inválida" in r.json()["detail"]
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "nota_emitida"
+
+
+def test_recebimento_manual_sem_envio_da_nota_continua_so_do_admin(client_admin):
+    from app import auth, db
+    _, mid = _nota_emitida_com_passos(client_admin, ["espelhos", "notas", "pagamento"])
+    conn = db.get_conn()
+    auth.criar_usuario(conn, "Eng", "eng@lotufo.com", "senha-forte-123", "engenharia")
+    conn.close()
+    _entrar(client_admin, "eng@lotufo.com")
+    r = client_admin.post(f"/api/medicoes/{mid}/estado", json={"estado": "recebida", "motivo": MOTIVO_RM})
+    assert r.status_code == 403
+    assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "nota_emitida"

@@ -39,6 +39,7 @@ TRANSICOES = {
     # declaracao com justificativa); o protocolo continua sendo registrar_protocolo.
     "espelho_gerado": {"nota_emitida", "cancelada"},
     "espelho_enviado": {"nota_emitida", "cancelada"},
+    # Issue #743: na obra sem o passo "Envio da nota", a nota emitida tambem vai a `recebida` (`alcancaveis`)
     "nota_emitida": {"cancelada"},
     # `nf_emitida` deixou de ser alvo: a NF entra pela nota (bloco 3), nao por botao. Fica
     # como ORIGEM ate' o remapeamento do legado zerar as linhas (app/legado.py).
@@ -1018,7 +1019,7 @@ def mudar_estado(conn, usuario_id: int, medicao_id: int, novo: str, motivo: str 
         motivo_antes = m["motivo_represamento"]
         if origem != ACOMPANHA_A_EXECUCAO:
             _recusar_marco_proprio(conn, m)
-        if novo not in TRANSICOES.get(atual, set()):
+        if novo not in alcancaveis(conn, m):
             dica = ""
             if atual == "prevista" and novo == "protocolada":
                 dica = " (protocolar é pelo registro de protocolo, que congela o valor)"
@@ -1044,6 +1045,12 @@ def mudar_estado(conn, usuario_id: int, medicao_id: int, novo: str, motivo: str 
             # `nota_emitida` nao tem checagem de ordem: a nota vem ANTES do protocolo (spec §2).
         extra_sql = f", {col_data}=?" if col_data else ""
         extra_par = [data] if col_data else []
+        # Issue #743 (segunda revisao): a nota emitida recebida sem protocolo (obra sem o passo "Envio da nota") congela
+        # aqui, como a protocolada congela no protocolo: o pedido nao muda mais a mao e o valor original do contrato
+        # so' muda por aditivo. `alcancaveis` so' deixa `nota_emitida -> recebida` nessa obra
+        congela = atual == "nota_emitida" and novo == "recebida"
+        if congela:
+            extra_sql += ", congelada=1"
         cur = conn.execute(
             "UPDATE medicoes SET estado=?, motivo_represamento=COALESCE(?, motivo_represamento)"
             f"{extra_sql} WHERE id=? AND estado=?", (novo, motivo, *extra_par, medicao_id, atual))
@@ -1055,6 +1062,8 @@ def mudar_estado(conn, usuario_id: int, medicao_id: int, novo: str, motivo: str 
         depois = {"estado": novo, "motivo": motivo_final}
         if col_data:
             depois[col_data] = data
+        if congela:
+            depois["congelada"] = 1
         if origem is not None:
             depois["origem"] = origem
         auditoria.registrar(conn, usuario_id, "medicao.estado", "medicao", medicao_id,
@@ -1064,8 +1073,26 @@ def mudar_estado(conn, usuario_id: int, medicao_id: int, novo: str, motivo: str 
             # encerramento dela (cancelada, desistida) tambem o encerra, senao ele ficaria sem nota e sem saida.
             # O motivo dele (represamento) fica: quem diz que acompanhou a execucao e' a origem na auditoria
             for r in absorvidas(conn, medicao_id):
-                if novo in TRANSICOES.get(r["estado"], set()):
+                linha = conn.execute("SELECT * FROM medicoes WHERE id=?", (r["id"],)).fetchone()
+                if novo in alcancaveis(conn, linha):
                     mudar_estado(conn, usuario_id, r["id"], novo, None, data, ACOMPANHA_A_EXECUCAO)
+
+
+def recebe_sem_protocolo(estado: str, passos) -> bool:
+    """Issue #743 (decisao do dono de 16/11/2026, docs/adr/0006): na obra sem o passo "Envio da nota" (a empresa nao
+    envia a nota ao orgao), a medicao com nota emitida ja' espera o pagamento e e' recebida sem protocolo, pela baixa
+    do RM ou pelo registro do administrador. `passos` sao os da medicao (`passos_das_medicoes`): a obra sem a chave
+    `passos_medicao`, ou com a lista vazia, segue os passos da familia, que tem o envio da nota, e nada muda."""
+    return estado == "nota_emitida" and PASSO_ENVIO_NOTA not in passos
+
+
+def alcancaveis(conn, m) -> set[str]:
+    """Os estados que `mudar_estado` aceita a partir do estado da medicao: os de TRANSICOES e, na medicao com nota
+    emitida da obra sem o passo "Envio da nota" (#743), tambem `recebida`."""
+    destinos = TRANSICOES.get(m["estado"], set())
+    if m["estado"] == "nota_emitida" and recebe_sem_protocolo(m["estado"], passos_das_medicoes(conn)(m)):
+        return destinos | {"recebida"}
+    return destinos
 
 
 def valor_travado(m) -> tuple[int, str] | None:
@@ -1227,7 +1254,8 @@ def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None
     linhas = conn.execute(sql + " ORDER BY c.nome_curto, c.id, m.numero DESC, m.tipo", args).fetchall()
     passos_de = passos_das_medicoes(conn)
     for r in linhas:
-        passo = passo_do_estado(r["estado"], passos_de(r))
+        passos = passos_de(r)
+        passo = passo_do_estado(r["estado"], passos)
         # dia de Cuiaba (`_dia`) nos marcos e no criado_em: carimbo UTC das 20h as 24h cairia no dia seguinte
         brutos = [r["espelho_em"], r["nota_emitida_em"], r["protocolado_em"]]
         # marcos do motor so' no estado deles: atesto/glosa posterior numa medicao adiante nao rebaixa o "desde"
@@ -1248,7 +1276,9 @@ def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None
                     # os marcos crus, para quem precisa do marco da SITUACAO e nao do mais recente (resumo abaixo)
                     "espelho_em": r["espelho_em"], "nota_emitida_em": r["nota_emitida_em"],
                     "protocolado_em": r["protocolado_em"], "planilha_enviada_em": r["planilha_enviada_em"],
-                    "atestado_em": r["atestado_em"]})
+                    "atestado_em": r["atestado_em"],
+                    # #743: a nota emitida na obra sem o passo "Envio da nota" ja' espera o pagamento
+                    "recebe_sem_protocolo": recebe_sem_protocolo(r["estado"], passos)})
     return out
 
 
@@ -1314,7 +1344,8 @@ def linhas_em_andamento(conn, hoje: datetime.date | None = None, obras: dict[int
 
     "Parada ha'" conta do marco da SITUACAO ATUAL, nunca do criado_em (lancar a medicao nao e' marco de nada):
     enviar ao faturamento = o espelho vigente gerado; aguardando nota = o e-mail ao faturamento; enviar nota = a
-    emissao da nota; aguardando pagamento = o envio ao orgao (o protocolo). Sem marco, `dias` nulo ("—").
+    emissao da nota; aguardando pagamento = o envio ao orgao (o protocolo) ou, na obra sem o passo "Envio da nota"
+    (#743), a emissao da nota. Sem marco, `dias` nulo ("—").
 
     Medicao e reajuste da mesma obra, numero e competencia, na mesma situacao, viram UMA linha ("24ª Medição +
     Reajuste") com o valor somado e o marco mais antigo dos dois; o resto (projeto, reajuste em outra situacao)
@@ -1350,7 +1381,10 @@ def linhas_em_andamento(conn, hoje: datetime.date | None = None, obras: dict[int
 
     grupos: dict[tuple, list[dict]] = {}
     for m in andamento:
-        grupos.setdefault((m["contrato_id"], m["numero"], m["competencia"], SITUACAO[m["estado"]]), []).append(m)
+        # #743: a nota emitida na obra sem o passo "Envio da nota" esta' com o orgao, aguardando o pagamento desde a
+        # emissao da nota (o marco do estado, acima)
+        situacao = "aguardando-pagamento" if m.get("recebe_sem_protocolo") else SITUACAO[m["estado"]]
+        grupos.setdefault((m["contrato_id"], m["numero"], m["competencia"], situacao), []).append(m)
     linhas = []
     for (cid, _numero, _comp, situacao), ms in grupos.items():
         tipos = {m["tipo"]: m for m in ms}
@@ -1508,6 +1542,7 @@ _ORDEM_TIPO = ("execucao", "projeto", "reajuste")
 # Issue #660: os nomes dos passos na chave `passos_medicao` do contrato no cadastro, na ordem de `PASSOS` (o passo N
 # e' o de indice N-1).
 CHAVES_PASSO = ("planilha", "analise", "espelhos", "notas", "envio_nota", "pagamento")
+PASSO_ENVIO_NOTA = CHAVES_PASSO.index("envio_nota") + 1
 
 
 def passo_do_estado(estado: str, passos) -> int:
