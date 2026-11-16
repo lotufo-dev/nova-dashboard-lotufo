@@ -274,6 +274,125 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(textos.filter(t => t.includes(so))).toEqual([`Atenção: Reajuste da 23ª Medição: ${so}`]);
   });
 
+  // #712 (docs/adr/0008): a pendencia sem data da medicao aparece aqui, e nao so' na lista do administrador
+  const pendencia = (tipo: string, mensagem: string, extra: Record<string, unknown> = {}) => ({ tipo, nivel: "acao",
+    publico: ["operacao"], contrato_id: 1, obra: "Hospital", dias: null, valor_centavos: null, mensagem,
+    destino: { tela: "contrato", id: 1, aba: "notas" }, data: null, sentido: null, medicao_id: 5, ...extra });
+
+  it("#712: a nota cancelada no RM avisa na página da medição e leva às notas", async () => {
+    responder({ "/api/inicio": { avisos: [pendencia("nota_cancelada_rm", "nota 101 foi cancelada no RM e nenhuma nota nova foi vinculada")] } });
+    pagina();
+    const link = await screen.findByRole("link", { name: "ver as notas" });
+    expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#passo-4");
+    expect(link.closest(".aviso")!.textContent).toBe("Atenção: NF 101 foi cancelada no RM e nenhuma nota nova foi vinculada: ver as notas");
+    fireEvent.click(link);
+    expect(await screen.findByRole("heading", { name: "Notas", level: 2 })).toBeTruthy();
+  });
+
+  it("#712: a nota maior que a medição avisa como crítico depois do protocolo", async () => {
+    responder({ "/api/inicio": { avisos: [pendencia("nota_acima_da_medicao", "nota 102 de R$ 20,00 é maior que a medição (R$ 10,00)",
+      { nivel: "critico" })] } });
+    pagina();
+    const link = await screen.findByRole("link", { name: "ver as notas" });
+    const caixa = link.closest(".aviso")!;
+    expect(caixa.classList.contains("aviso--critico")).toBe(true);
+    expect(caixa.textContent).toContain("NF 102 de R$ 20,00 é maior que a medição (R$ 10,00)");
+  });
+
+  const ACIMA = pendencia("nota_acima_da_medicao", "nota 102 de R$ 20,00 é maior que a medição (R$ 10,00)", { nivel: "critico" });
+  const acimaDe = (medicaoId: number) => ({ medicao_id: medicaoId, nota_id: 7, numero: 102, alocado_centavos: 2000, medicao_centavos: 1000 });
+  const caixasAcima = () => [...document.querySelectorAll(".aviso")].filter(x => /é maior que a medição/.test(x.textContent ?? ""));
+
+  it("#712: com o passo Envio da nota mostrando a nota maior que a medição, a caixa do alto não se repete", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida" }], "/api/inicio": { avisos: [ACIMA] },
+      "/api/notas/a-enviar": { envios: [{ ...ENVIO_COMECADO, envio_reservado_em: null, acima_da_medicao: [acimaDe(5)] }], contadores: {} } });
+    pagina();
+    // a caixa da conferencia do passo Envio da nota, e so' ela
+    await waitFor(() => expect(caixasAcima()).toHaveLength(1));
+    await waitFor(() => expect(leituras("/api/inicio").length).toBeGreaterThan(0));
+    expect(caixasAcima()).toHaveLength(1);
+    expect(screen.queryByRole("link", { name: "ver as notas" })).toBeNull();
+  });
+
+  it("#712: com o passo Envio da nota aberto e a medição fora dos envios (obra sem órgão), a caixa do alto aparece", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida" }], "/api/inicio": { avisos: [ACIMA] } });
+    pagina();
+    await screen.findByRole("heading", { name: "Envio da nota", level: 2 });
+    const link = await screen.findByRole("link", { name: "ver as notas" });
+    expect(link.closest(".aviso")!.textContent).toBe("Crítico: NF 102 de R$ 20,00 é maior que a medição (R$ 10,00): ver as notas");
+  });
+
+  it("#712: com a leitura dos envios falhando, a caixa do alto aparece", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida" }], "/api/inicio": { avisos: [ACIMA] } });
+    const base = api.getMockImplementation()!;
+    api.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/notas/a-enviar") throw new Error("falhou");
+      return base(url, init);
+    });
+    pagina();
+    expect(await screen.findByRole("link", { name: "ver as notas" })).toBeTruthy();
+    expect(caixasAcima()).toHaveLength(1);
+  });
+
+  it("#712: no par, a nota maior que a medição da metade fora dos envios aparece no alto, com o título dela", async () => {
+    const REAJ = { ...MEDICAO, id: 6, tipo: "reajuste", estado: "espelho_enviado" };
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida" }, REAJ],
+      "/api/inicio": { avisos: [ACIMA, { ...ACIMA, medicao_id: 6, mensagem: "nota 103 de R$ 30,00 é maior que a medição (R$ 10,00)" }] },
+      "/api/notas/a-enviar": { envios: [{ ...ENVIO_COMECADO, envio_reservado_em: null, acima_da_medicao: [acimaDe(5)] }], contadores: {} } });
+    pagina();
+    const link = await screen.findByRole("link", { name: "ver as notas" });
+    expect(link.closest(".aviso")!.textContent)
+      .toBe("Crítico: Reajuste da 23ª Medição: NF 103 de R$ 30,00 é maior que a medição (R$ 10,00), ver as notas");
+    // a da execucao, que o passo Envio da nota ja' mostra, nao se repete
+    expect(screen.getAllByRole("link", { name: "ver as notas" })).toHaveLength(1);
+  });
+
+  it("#712: a resposta atrasada de uma recarga anterior não traz de volta o aviso resolvido", async () => {
+    abrirEtapa(3);
+    responder();
+    const base = api.getMockImplementation()!;
+    let soltarPrimeira: (v: unknown) => void = () => {};
+    let chamadas = 0;
+    api.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url !== "/api/inicio") return base(url, init);
+      chamadas += 1;
+      if (chamadas === 1) return new Promise(r => { soltarPrimeira = r; });
+      return { avisos: [] };
+    });
+    pagina();
+    await waitFor(() => expect(chamadas).toBe(1));
+    fireEvent.click(await screen.findByRole("button", { name: "Anexar nota (teste)" }));
+    await waitFor(() => expect(chamadas).toBe(2));
+    soltarPrimeira({ avisos: [pendencia("nota_cancelada_rm", "nota 101 foi cancelada no RM e nenhuma nota nova foi vinculada")] });
+    await new Promise(r => setTimeout(r, 0));
+    expect(screen.queryByText(/foi cancelada no RM/)).toBeNull();
+  });
+
+  it("#712: o período fora de ordem avisa e leva à planilha/carta", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "planilha_gerada" }],
+      "/api/medicoes/5": detalhePlanilha("planilha_gerada"),
+      "/api/inicio": { avisos: [pendencia("medicao_fora_de_ordem",
+        "23ª Medição: o período se sobrepõe ao da 22ª medição, que vai até 05/09/2026", { nivel: "atencao" })] } });
+    pagina();
+    const link = await screen.findByRole("link", { name: "revise a planilha/carta" });
+    expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#passo-1");
+    // o titulo da medicao, que o cabecalho ja' diz, sai da frase; um so' dois-pontos, antes do link
+    expect(link.closest(".aviso")!.textContent)
+      .toBe("Atenção: O período se sobrepõe ao da 22ª medição, que vai até 05/09/2026: revise a planilha/carta");
+  });
+
+  it("#712: só a pendência sem data desta medição, dos tipos que nenhum passo mostra", async () => {
+    responder({ "/api/inicio": { avisos: [
+      pendencia("nota_cancelada_rm", "nota 103 foi cancelada no RM e nenhuma nota nova foi vinculada", { medicao_id: 9 }),
+      pendencia("nota_cancelada_rm", "nota 104 foi cancelada no RM e nenhuma nota nova foi vinculada", { data: "2026-11-01" }),
+      pendencia("nota_divergente", "nota 105 diverge do espelho: valor", { nivel: "critico" }),
+    ] } });
+    pagina();
+    await screen.findByRole("heading", { name: "Hospital", level: 1 });
+    await waitFor(() => expect(leituras("/api/inicio").length).toBeGreaterThan(0));
+    expect(screen.queryByText(/nota 10[345]/i)).toBeNull();
+  });
+
   it("#359: sem o aprovado mudado, nada de aviso do espelho", async () => {
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "espelho_enviado", espelho_desatualizado: null }] });
     pagina();
