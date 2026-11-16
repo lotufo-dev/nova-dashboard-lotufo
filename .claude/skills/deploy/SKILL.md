@@ -80,6 +80,8 @@ $atual = (git -C C:\DashboardLotufo\app rev-parse HEAD).Trim()
 git log --oneline "$atual..origin/master"
 git diff --name-only "$atual" origin/master -- backend/migrations
 git diff --name-only "$atual" origin/master -- frontend
+git -C C:\DashboardLotufo\app ls-tree --name-only "$atual" backend/app/instalacao.py
+git -C C:\DashboardLotufo\app grep -c soltarWatchdog "$atual" -- scripts/deploy.ps1
 ```
 
 Na VM, sem pasta de dev, os comandos `git` que ainda não têm `-C` levam `git -C C:\DashboardLotufo\app` e antes deles
@@ -87,9 +89,25 @@ Na VM, sem pasta de dev, os comandos `git` que ainda não têm `-C` levam `git -
 
 - **Arquivo da instalação** (issue #417, runbook "Instalação assinada"): o `Test-Path` tem que dar `True`. Se der `False`,
   parar e avisar o dono, que assina e copia o arquivo; sem ele a produção sobe em modo cópia, sem e-mail e sem RM.
+- **Primeiro deploy com a #417**: o `ls-tree` volta vazio, porque o commit no ar ainda não tem `instalacao.py`. Então
+  o `deploy.ps1` do diretório pinado é o antigo, que só confere o 200. Seguir o item "Deploy da issue #417" de
+  "Subir e derrubar": rodar o `deploy.ps1` novo copiado para `C:\Temp\deploy`, pelo Mac num `.ps1` com `-File`, e
+  conferir `instalacao: autorizada` logo depois.
 - **Pinado sem `scripts\comum_agendador.ps1`** (commit no ar anterior à #386): o bloco acima lê a tarefa direto por
   `schtasks.exe /Query /XML`, sem tempo limite. Se a chamada não imprimir nada em 2 minutos, o agendador está sem
   responder: abortar e avisar o dono (issue #446).
+- **Primeiro deploy com a #443** (rollback sem fetch; sentinela só sai com a produção conferida): o `git grep` de
+  `soltarWatchdog` volta vazio, porque o `deploy.ps1` do pinado ainda é o antigo, cujo rollback faz `fetch` e cujo
+  `finally` sempre apaga o sentinela. Seguir o item "Deploy da issue #443" de "Subir e derrubar": rodar o `deploy.ps1`
+  novo copiado para `C:\Temp\deploy`, como na #417 (pelo Mac num `.ps1` com `-File`). O commit no ar ainda não tem o
+  campo `commit` no health: o script avisa `producao NAO conferida no inicio` e só solta o watchdog com `DEPLOY OK`.
+  Antes, conferir o `git` no PATH da máquina, como diz o mesmo item do runbook (issue #481): sem ele o servidor, que
+  roda como SYSTEM, sobe com `commit: null` e o script avisa `o servidor nao conseguiu ler o proprio commit: confira
+  o git no PATH da maquina` (não é servidor fora do ar: corrigir o PATH antes de tentar de novo). Na volta do build
+  deste primeiro deploy o commit anterior não tem o campo e o script pede para intervir à mão: o sentinela fica, e a
+  recuperação é a manual completa do item 5 do runbook (parada comprovada e porta livre, reconstrução do
+  `<anterior>`, `git status` limpo, reinício controlado, processo da porta nascido depois do reinício e health 200).
+  `rev-parse HEAD` e health 200 sozinhos não bastam (um processo órfão antigo também responde 200).
 
 - **Corte para HTTPS** (issue #425): é um passo à parte, depois de um deploy normal do commit com a #425, e só quando o
   dono pedir. Seguir o runbook, "HTTP ou HTTPS", subseção "Corte para HTTPS", na ordem (certificado, PCs da operação,
