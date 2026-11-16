@@ -368,6 +368,9 @@ def test_prazo_do_orgao_exige_cinco_recebimentos_em_365_dias(cenario):
     assert diretoria.prazos_do_orgao(diretoria._medicoes(c), HOJE) == {}
     _recebidas(c, cid, [50], recebida_em="2025-10-08", primeiro_numero=200)     # ha' 366 dias: nao conta
     _medicao(c, cid, 300, "2026-01-01 10:00:00", 1_000, estado="recebida", recebida_em="2026-09-30")   # sem protocolo
+    _recebidas(c, cid, [50], recebida_em="2026-10-10", primeiro_numero=600)     # recebida amanha: nao conta
+    futuro = _medicao(c, cid, 700, "2026-01-01 10:00:00", 1_000, estado="recebida", recebida_em="2026-09-30")
+    _protocolar(c, futuro, "2026-10-01")                                         # protocolo depois do recebimento: nao conta
     assert diretoria.prazos_do_orgao(diretoria._medicoes(c), HOJE) == {}
     _protocolada(c, cid, 400, "2026-08-29", 7_000)
     assert _previsao(c) == {**VAZIA, "sem_previsao": (7_000, 1)}                # sem prazo, sem data esperada
@@ -421,11 +424,13 @@ def test_previsao_do_inicio_e_previsto_do_a_receber_usam_o_mesmo_prazo(cenario):
     c, cid = cenario
     c.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', '{\"total_a_receber_liberado\": true}')")
     c.commit()
+    c.execute("UPDATE contratos SET percentual_direito_bp=5000")   # consorcio a 50%: 100.001 -> 50.001 na cota
+    c.commit()
     _recebidas(c, cid, [10, 20, 30, 70, 80])                       # terceiro quartil 70 (a mediana seria 30)
-    _protocolada(c, cid, 1, "2026-09-20", 5_001)                   # + 70 dias = 29/11: no proximo mes
-    assert _previsao(c) == {**VAZIA, "proximo_mes": (5_001, 1)}    # com a mediana (20/10) seria "neste mes"
+    _protocolada(c, cid, 1, "2026-09-20", 100_001)                 # + 70 dias = 29/11: no proximo mes
+    assert _previsao(c) == {**VAZIA, "proximo_mes": (50_001, 1)}   # com a mediana (20/10) seria "neste mes"
     meses = {m["competencia"]: m["previsto_centavos"] for m in diretoria.a_receber(c, HOJE)["meses"]}
-    assert (meses["2026-10"], meses["2026-11"]) == (0, 5_001)      # com 30 dias de padrao cairia em outubro
+    assert (meses["2026-10"], meses["2026-11"]) == (0, 50_001)     # com 30 dias de padrao cairia em outubro
 
 
 def test_a_receber_nao_preve_contratante_sem_prazo(cenario):

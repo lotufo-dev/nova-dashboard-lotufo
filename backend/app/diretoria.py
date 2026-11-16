@@ -65,13 +65,15 @@ def _cota(m: dict) -> int:
 
 def prazos_do_orgao(ms: list[dict], hoje: datetime.date) -> dict[str, int]:
     """O prazo de pagamento de cada contratante, em dias (docs/adr/0007; a UNICA conta de prazo do sistema: a previsao
-    de entrada e o "Atrasado" do Inicio, a matriz e o previsto da tela A receber saem daqui).
+    de entrada e o "Atrasado" do Inicio, a matriz e o campo `previsto_centavos` de `a_receber` saem daqui).
 
     E' o terceiro quartil (`_quantil`: o elemento de posicao ceil(0,75 * n) dos dias em ordem, sempre um prazo que
     aconteceu, sem interpolar) dos dias entre o primeiro protocolo da nota e o recebimento, das medicoes recebidas nos
     ultimos 365 dias. O contratante e' a sigla de `_contratante` (a SINFRA inteira, nao cada superintendencia).
-    Recebimento com data anterior ao protocolo nao e' prazo. Contratante com menos de PRAZO_MINIMO_CASOS recebimentos
-    fica FORA do dicionario: e' "sem previsao", e ninguem preenche com numero padrao."""
+    Cada medicao recebida e' um caso (execucao e reajuste pagos juntos contam dois). Nao e' caso a recebida sem data
+    de protocolo ou sem `recebida_em` (o corte de 25/09/2026), a de recebimento anterior ao protocolo nem a de
+    recebimento com data depois de hoje. Contratante com menos de PRAZO_MINIMO_CASOS recebimentos fica FORA do
+    dicionario: e' "sem previsao", e ninguem preenche com numero padrao."""
     desde = hoje - datetime.timedelta(days=PRAZO_JANELA_DIAS)
     dias: dict[str, list[int]] = {}
     for m in ms:
@@ -747,11 +749,13 @@ def a_receber(conn, hoje: datetime.date | None = None) -> dict:
     esperando pagamento (medicoes protocoladas e, como no painel da diretoria, as notas do RM em aberto que nenhuma
     medicao representa), por obra. Antes da conciliacao o valor e' None e as notas do RM ficam fora (como no painel).
 
-    Regra do "previsto": o previsto de um mes e' a soma, na cota, das medicoes protocoladas (hoje em aberto ou ja'
-    recebidas) cuja data esperada (`esperada`: protocolo + prazo do contratante, docs/adr/0007) cai naquele mes. A
-    medicao de contratante sem prazo (menos de cinco recebimentos em doze meses) nao tem data esperada e fica fora de
-    todos os meses (issue #711: o padrao de trinta dias saiu). O recebido do mes e' a soma, na cota, das medicoes com
-    `recebida_em` no mes. Seis meses ate o atual e tres a frente."""
+    Regra do `previsto_centavos` (nenhuma tela o mostra desde 06/11/2026, quando a tela A receber foi enxugada; a
+    tela usa o `recebido_real_centavos`): o previsto de um mes e' a soma, na cota, das medicoes protocoladas (hoje em
+    aberto ou ja' recebidas) cuja data esperada (`esperada`: protocolo + prazo do contratante, docs/adr/0007) cai
+    naquele mes. A medicao de contratante sem prazo (menos de cinco recebimentos em doze meses) nao tem data esperada
+    e fica fora de todos os meses, sem linha "sem previsao" (issue #711: o padrao de trinta dias saiu). O
+    `recebido_centavos` do mes e' a soma, na cota, das medicoes com `recebida_em` no mes. Seis meses ate o atual e
+    tres a frente."""
     hoje = hoje or tempo.hoje_local()
     liberado = _liberado(conn)
     ms = _medicoes(conn)

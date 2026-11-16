@@ -622,8 +622,10 @@ def test_a_receber_previsto_pelo_vencimento_e_recebido_pelo_mes_do_recebimento(c
     por = {m["competencia"]: m for m in r["meses"]}
     # julho: a 15 (protocolo 01/07 + 10 dias da SINFRA, o terceiro quartil dos doze recebimentos). A 2 do consorcio
     # nao entra em mes nenhum: o MTPAR tem dois recebimentos, fica sem prazo, e o padrao de 30 dias saiu (issue #711)
-    assert por["2026-07"]["previsto_centavos"] == 300_000
-    assert all(m["previsto_centavos"] < 200_000_000 for m in r["meses"])
+    # abril a junho: duas recebidas da SINFRA por mes (protocolo + 10 dias); nenhum mes leva os 205 milhoes do consorcio
+    assert {m["competencia"]: m["previsto_centavos"] for m in r["meses"]} == {
+        "2026-04": 200_000, "2026-05": 200_000, "2026-06": 200_000, "2026-07": 300_000, "2026-08": 0,
+        "2026-09": 700_000, "2026-10": 0, "2026-11": 0, "2026-12": 0}
     assert por["2026-09"]["previsto_centavos"] == 700_000                       # a 14: protocolo 10/09 + 10 dias
     assert (r["mes"]["competencia"], r["mes"]["atual"], r["mes"]["previsto_centavos"]) == ("2026-09", True, 700_000)
     assert r["mes"]["recebido_centavos"] == 125_001                              # 250.001 x 50%, arredondado uma vez

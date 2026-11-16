@@ -1128,10 +1128,13 @@ maior número de dias).
 
 **Prazo do órgão (`docs/adr/0007`, issue #711):** uma conta só, `diretoria.prazos_do_orgao`. É o terceiro quartil dos
 dias entre o primeiro protocolo da nota e o recebimento, das medições recebidas nos últimos 365 dias, por contratante
-(a SINFRA inteira, não cada superintendência), com no mínimo cinco recebimentos. Usam essa conta a previsão de entrada
-e a linha "Atrasado" do Início, a matriz obra por competência e o "previsto" da tela A receber. Contratante com menos
-de cinco recebimentos fica "Sem previsão" no Início e fora do "previsto" da tela A receber: não há número padrão (os
-30 dias saíram).
+(a SINFRA inteira, não cada superintendência), com no mínimo cinco recebimentos. O quartil é o prazo de posição
+⌈0,75 × n⌉ entre os dias em ordem (com cinco recebimentos, o quarto): sempre um prazo que aconteceu, sem interpolar.
+Cada medição recebida é um caso (execução e reajuste pagos juntos contam dois); não conta a recebida sem data de
+protocolo ou de recebimento, nem a de recebimento anterior ao protocolo. Usam essa conta a previsão de entrada e a
+linha "Atrasado" do Início e a matriz obra por competência. Contratante com menos de cinco recebimentos fica "Sem
+previsão" no Início: não há número padrão (os 30 dias saíram). O campo `previsto_centavos` de `/api/a-receber` segue a
+mesma conta (a medição de contratante sem prazo fica fora dele), mas nenhuma tela o mostra desde 06/11/2026.
 
 **Total a receber:** enquanto `geral.yaml` tiver `diretoria.total_a_receber_liberado: false`, a tela mostra
 quantidade e dias do protocolado, sem valor ("a conciliar"). Depois da conciliação com a controladoria: trocar para `true`, `cadastro
