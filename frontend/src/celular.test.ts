@@ -39,8 +39,10 @@ describe("celular", () => {
     expect(em).toBeGreaterThanOrEqual(EM_MEDIDO);
     const vao = Number(/\.ini-faixa\s*\{[^}]*gap:\s*(\d+)px/.exec(inicioCss)?.[1]);
     const respiro = Number(/\.ini-faixa__etapa\s*\{[^}]*padding:\s*\d+px (\d+)px/.exec(inicioCss)?.[1]);
-    const fonte = /\.ini-faixa__valor\s*\{[^}]*font-size:\s*clamp\((\d+)px, calc\(\(100cqi - (\d+)px\) \/ \(5 \* var\(--ini-faixa-valor-em\)\)\), (\d+)px\)/.exec(inicioCss);
-    const [minima, folga, maxima] = [Number(fonte?.[1]), Number(fonte?.[2]), Number(fonte?.[3])];
+    // as pontas do clamp sao passos da escala de tokens.css (#719), em rem: 1rem = 16 px
+    const px = (nome?: string) => 16 * Number(new RegExp(`${nome}:\\s*([\\d.]+)rem`).exec(tokensCss)?.[1]);
+    const fonte = /\.ini-faixa__valor\s*\{[^}]*font-size:\s*clamp\(var\((--[\w-]+)\), calc\(\(100cqi - (\d+)px\) \/ \(5 \* var\(--ini-faixa-valor-em\)\)\), var\((--[\w-]+)\)\)/.exec(inicioCss);
+    const [minima, folga, maxima] = [px(fonte?.[1]), Number(fonte?.[2]), px(fonte?.[3])];
     expect(folga).toBe(5 * 2 * respiro + 4 * vao);            // o que nao e' valor: respiros dos cinco trechos e vaos
     expect(inicioCss).toMatch(/\.ini-faixa__valor\s*\{[^}]*white-space:\s*nowrap/);
     expect(ler("Inicio.tsx")).toContain("minmax(min-content, ");

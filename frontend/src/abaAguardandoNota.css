@@ -12,7 +12,7 @@
 .aba-nota__tabela th {
   padding: 12px 12px; text-align: left;
   background: var(--cor-papel-sombreado); border-bottom: 1px solid var(--cor-linha); border-top: 1px solid var(--cor-linha);
-  color: var(--cor-texto-secundario); font-size: 12px; line-height: 16px; font-weight: 600;
+  color: var(--cor-texto-secundario); font-size: var(--texto-mini); line-height: 16px; font-weight: 600;
 }
 .aba-nota__tabela th.col-num, .aba-nota__tabela td.col-num { text-align: right; white-space: nowrap; }
 .aba-nota__tabela td { padding: 12px 12px; height: 44px; border-bottom: 1px solid var(--cor-linha); vertical-align: middle; overflow-wrap: anywhere; }
@@ -37,7 +37,7 @@
   .aba-nota__tabela tbody tr:last-child { border-bottom: 0; }
   .aba-nota__tabela td { height: auto; padding: 0; border: 0; }
   .aba-nota__tabela td + td { margin-top: 4px; }
-  .aba-nota__tabela td[data-rotulo]::before { content: attr(data-rotulo) " "; color: var(--cor-texto-secundario); font-size: 12px; font-family: var(--fonte-texto); }
+  .aba-nota__tabela td[data-rotulo]::before { content: attr(data-rotulo) " "; color: var(--cor-texto-secundario); font-size: var(--texto-mini); font-family: var(--fonte-texto); }
   .aba-nota__tabela td.col-num { text-align: left; }
   .aba-nota__tabela td.aba-nota__ir { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); margin: 0; width: auto; }
 }

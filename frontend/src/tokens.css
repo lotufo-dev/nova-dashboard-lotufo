@@ -264,7 +264,7 @@ body {
   background: var(--cor-papel);
   color: var(--cor-tinta);
   font-family: var(--fonte-texto);
-  font-size: 14px;
+  font-size: var(--texto-meta);
   line-height: 20px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -312,7 +312,7 @@ button, .btn {
   border-radius: var(--raio-controle);
   background: var(--cor-superficie);
   color: var(--cor-tinta);
-  font-size: 13px; font-weight: 500;
+  font-size: var(--texto-meta); font-weight: 500;
   cursor: pointer;
   /* controle nao tem sombra (nivel 2, D1): a borda `--linha-forte` ja' separa do cartao */
   transition: background .12s ease, border-color .12s ease;
@@ -327,7 +327,7 @@ input, select, textarea {
   border: 1px solid var(--cor-borda-controle);
   border-radius: var(--raio-controle);
   background: var(--cor-superficie);
-  font-size: 13px;
+  font-size: var(--texto-meta);
   transition: border-color .12s ease;
 }
 /* textarea sai da altura fixa de 32px: com ela o `rows` era ignorado e a carta do protocolo
@@ -351,7 +351,7 @@ a:hover { color: var(--cor-menu-realce); }
 /* formato literal ("AAAA-MM;valor") */
 code {
   font-family: var(--fonte-numero);
-  font-size: .92em;
+  font-size: var(--texto-mini);
   padding: 1px 5px;
   border: 1px solid var(--cor-linha);
   border-radius: var(--raio-canto);
@@ -385,7 +385,7 @@ td.col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor
 .info--critico { color: var(--situacao-critico-texto); }
 .pilula-info {
   display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px;
-  border-radius: var(--raio-selo); font-size: 13px; line-height: 20px; font-weight: 600; white-space: nowrap;
+  border-radius: var(--raio-selo); font-size: var(--texto-meta); line-height: 20px; font-weight: 600; white-space: nowrap;
 }
 .pilula-info--feito { background: var(--situacao-feito-fundo); color: var(--situacao-feito-texto); }
 .pilula-info--andamento { background: var(--situacao-andamento-fundo); color: var(--situacao-andamento-texto); }
@@ -397,7 +397,7 @@ td.col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor
 .ponto--breve, .pilula-info--breve .pilula-info__ponto { background: var(--situacao-breve-ponto); }
 .ponto--critico, .pilula-info--critico .pilula-info__ponto { background: var(--situacao-critico-ponto); }
 .legenda-cor { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; margin: 0; padding: 0; list-style: none;
-  font-size: 12px; line-height: 16px; color: var(--cor-texto-secundario); }
+  font-size: var(--texto-mini); line-height: 16px; color: var(--cor-texto-secundario); }
 .legenda-cor li { display: inline-flex; align-items: center; gap: 6px; }
 
 /* colunas de valor e data: algarismos de mesma largura em toda tabela */
@@ -476,7 +476,7 @@ td, th { font-variant-numeric: tabular-nums; }
   position: sticky; bottom: 0; z-index: 35;
   margin: 0; padding: 10px 16px;
   background: var(--situacao-critico-texto); color: #fff;
-  font-size: 14px; line-height: 20px; font-weight: 600; text-align: center;
+  font-size: var(--texto-meta); line-height: 20px; font-weight: 600; text-align: center;
 }
 
 /* Aviso flutuante "o orgao respondeu" (issue #654, AvisoRespostas.tsx): preso ao canto de baixo, a' direita, em
@@ -498,7 +498,7 @@ td, th { font-variant-numeric: tabular-nums; }
   border: 1px solid var(--cor-linha); border-radius: var(--raio-canto);
   box-shadow: var(--sombra-painel);
 }
-.aviso-resposta__texto { margin: 0; grid-column: 1; font-size: 14px; line-height: 20px; color: var(--cor-tinta); overflow-wrap: anywhere; }
+.aviso-resposta__texto { margin: 0; grid-column: 1; font-size: var(--texto-meta); line-height: 20px; color: var(--cor-tinta); overflow-wrap: anywhere; }
 .aviso-resposta > .btn { grid-column: 1; justify-self: start; }
 .aviso-resposta__fechar {
   grid-column: 2; grid-row: 1; width: 28px; height: 28px; padding: 0; justify-content: center;
@@ -507,7 +507,7 @@ td, th { font-variant-numeric: tabular-nums; }
 .aviso-respostas__mais {
   pointer-events: auto; align-self: flex-end; margin: 0; padding: 2px 10px;
   background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: var(--raio-selo);
-  font-size: 12.5px; color: var(--cor-texto-secundario);
+  font-size: var(--texto-mini); color: var(--cor-texto-secundario);
 }
 .trilho {
   position: fixed; top: 0; bottom: 0; left: 0; z-index: 40;
@@ -524,13 +524,13 @@ td, th { font-variant-numeric: tabular-nums; }
 .trilho__marca { display: flex; align-items: center; width: var(--trilho-largo); height: 40px; margin-bottom: 24px; flex: none; }
 /* o L da empresa: a haste herda a cor do texto do menu, o bloco e' o laranja da marca (Simbolo.tsx) */
 .trilho__simbolo { width: var(--simbolo-marca-largura); height: var(--simbolo-marca-altura); color: var(--cor-menu-texto); }
-.trilho__nome { font-size: 16px; line-height: 20px; font-weight: 700; }
+.trilho__nome { font-size: var(--texto-titulo-sub); line-height: 20px; font-weight: 700; }
 /* item: pilula de 12px de folga nas laterais; a pilula tem a largura do menu menos a folga */
 .trilho__item, .trilho__alternar {
   display: flex; align-items: center; flex: none;
   width: calc(var(--trilho-largo) - 24px); height: 44px; margin: 0 12px 4px; padding: 0;
   border: 0; border-radius: 12px; background: none;
-  color: #fff; text-decoration: none; font-size: 15px; font-weight: 500; text-align: left;
+  color: #fff; text-decoration: none; font-size: var(--texto-corpo); font-weight: 500; text-align: left;
   transition: background .15s ease;
 }
 .trilho__item:hover:not(:disabled), .trilho__alternar:hover:not(:disabled) { background: var(--cor-menu-realce); color: #fff; }
@@ -566,14 +566,14 @@ td, th { font-variant-numeric: tabular-nums; }
 }
 .barra__titulo {
   margin: 0; min-width: 0;
-  font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -.3px;
+  font-size: var(--texto-valor); line-height: 28px; font-weight: 600; letter-spacing: -.3px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .conta { position: relative; flex: none; }
 .conta__botao {
   height: 44px; padding: 0 8px; gap: 8px;
   border: 0; background: none; color: var(--cor-texto-secundario);
-  font-size: 14px; font-weight: 500;
+  font-size: var(--texto-meta); font-weight: 500;
 }
 .conta__botao:hover:not(:disabled), .conta__botao[aria-expanded="true"] { background: var(--cor-contador-neutro); color: var(--cor-tinta); }
 /* avatar de iniciais na tinta clara do indigo */
@@ -582,7 +582,7 @@ td, th { font-variant-numeric: tabular-nums; }
   border-radius: var(--raio-selo);
   background: var(--cor-papel-sombreado); color: var(--cor-tinta);
   display: grid; place-items: center;
-  font-size: 12px; font-weight: 600;
+  font-size: var(--texto-mini); font-weight: 600;
 }
 .conta__nome { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conta__seta { transform: rotate(90deg); }
@@ -597,11 +597,11 @@ td, th { font-variant-numeric: tabular-nums; }
 .conta__item {
   display: flex; align-items: center; width: 100%; height: 36px; padding: 0 10px;
   border: 0; border-radius: 6px; background: none;
-  color: var(--cor-texto-secundario); font-size: 14px; font-weight: 400; text-decoration: none; text-align: left;
+  color: var(--cor-texto-secundario); font-size: var(--texto-meta); font-weight: 400; text-decoration: none; text-align: left;
 }
 .conta__item:hover:not(:disabled) { background: var(--cor-contador-neutro); color: var(--cor-tinta); }
 /* erro do proprio shell (falha ao encerrar a sessao): so' no desfecho raro em que o POST de logout falha */
-.conta__erro { margin: 6px 0 0; padding: 8px 10px; font-size: 12px; }
+.conta__erro { margin: 6px 0 0; padding: 8px 10px; font-size: var(--texto-mini); }
 @media (max-width: 767px) {
   /* Rede de seguranca do celular: com o trilho de 64px sobram ~311px, e telas ainda nao redesenhadas (Carteira,
      Documentos, a medicao) tem pecas mais largas que isso. O que passar rola DENTRO da area da tela, e a pagina
@@ -614,7 +614,7 @@ td, th { font-variant-numeric: tabular-nums; }
   .abas { overflow-x: auto; scrollbar-width: none; }
   .abas > .aba { flex: none; white-space: nowrap; }
   .barra { padding: 0 8px 0 16px; }
-  .barra__titulo { font-size: 18px; line-height: 24px; }
+  .barra__titulo { font-size: var(--texto-titulo-bloco); line-height: 24px; }
   /* no celular fica o avatar; o nome esta' no rotulo acessivel do botao */
   .conta__nome { display: none; }
   /* aviso de resposta do orgao (#654): mais perto da borda, e acima da faixa da instalacao, que aqui quebra em linhas */
@@ -635,12 +635,12 @@ td, th { font-variant-numeric: tabular-nums; }
 }
 /* Titulo longo (consorcio com o nome inteiro) corta com reticencias; o nome inteiro vai no `title` do h1. */
 .topbar__titulo {
-  margin: 0; font-size: 24px; line-height: 32px; letter-spacing: -.01em;
+  margin: 0; font-size: var(--texto-valor); line-height: 32px; letter-spacing: -.01em;
   max-width: 100%; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* A descricao, embaixo do titulo, quebra linha em vez de cortar. */
-.topbar__meta { color: var(--cor-texto-secundario); font-size: 14px; line-height: 20px; max-width: 100%; }
+.topbar__meta { color: var(--cor-texto-secundario); font-size: var(--texto-meta); line-height: 20px; max-width: 100%; }
 .topbar > .topbar__meta { max-width: 110ch; }
 .topbar > .selo, .topbar > .btn--voltar { flex: none; }
 .topbar__acoes { margin-left: auto; display: flex; gap: 8px; }
@@ -652,7 +652,7 @@ td, th { font-variant-numeric: tabular-nums; }
 .topbar__linha { align-items: baseline; }
 .topbar__linha > .topbar__titulo { flex: 0 1 auto; }
 .topbar__trilha > .topbar__meta, .topbar__linha > .topbar__meta { flex: 0 3 auto; min-width: 12ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.topbar__trilha > .topbar__meta { font-size: 13px; }
+.topbar__trilha > .topbar__meta { font-size: var(--texto-meta); }
 /* fora da aba Medicoes da obra, o essencial dela na linha do breadcrumb, a direita; e a base dos valores ao
    lado do orgao. Os dois cedem com reticencias (o texto inteiro no `title`) antes de a faixa estourar a
    largura na tela estreita: a meta comum e' `flex: none`. */
@@ -677,7 +677,7 @@ a.topbar__avisos { color: var(--cor-tinta); text-decoration: underline; text-und
 a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 .topbar__linha > .selo, .topbar__trilha > .btn--voltar { flex: none; }
 
-.migalhas { min-width: 0; font-size: 13px; color: var(--cor-texto-secundario); }
+.migalhas { min-width: 0; font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 /* uma linha so' (F-50): os ancestrais ficam inteiros e o ultimo item, onde se esta', corta com reticencias */
 .migalhas ol { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
 /* o ancestral cede so' depois do item atual e tem teto (nome de obra longo no meio da trilha) */
@@ -711,8 +711,8 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
   padding: 16px 20px;
   border-bottom: 1px solid var(--cor-linha);
 }
-.cartao__titulo { margin: 0; font-size: 16px; line-height: 24px; }
-.cartao__dica { font-size: 13px; color: var(--cor-texto-secundario); }
+.cartao__titulo { margin: 0; font-size: var(--texto-titulo-sub); line-height: 24px; }
+.cartao__dica { font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 .cartao__acoes { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 /* faixa avulsa dentro do cartao (mensagem de erro acima da tabela) */
 .cartao__corpo { padding: 16px 20px; }
@@ -738,13 +738,13 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 .btn--destrutivo { background: var(--situacao-critico-texto); border-color: var(--situacao-critico-texto); color: #fff; }
 .btn--destrutivo:hover:not(:disabled) { background: var(--acao-forte); border-color: var(--acao-forte); color: #fff; }
 .btn--destrutivo:active:not(:disabled) { background: var(--acao-forte); border-color: var(--acao-forte); color: #fff; }
-.btn--pequeno { height: 28px; padding: 0 10px; font-size: 12.5px; }
+.btn--pequeno { height: 28px; padding: 0 10px; font-size: var(--texto-mini); }
 .btn--voltar {
   /* botao ou link ("← Medicoes" e' um <a>, volta para a tela de onde se veio) */
   display: inline-flex; align-items: center; gap: 4px; text-decoration: none; border-radius: var(--raio-controle);
   height: 26px; padding: 0 8px 0 6px;
   border: 0; background: none; box-shadow: none;
-  color: var(--cor-texto-secundario); font-size: 12.5px;
+  color: var(--cor-texto-secundario); font-size: var(--texto-mini);
 }
 .btn--voltar:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
 
@@ -765,14 +765,14 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 .tabela-wrap--alta thead th { position: sticky; top: 0; z-index: 2; }
 .tabela-wrap--alta thead th.col-fixa, .tabela-wrap--alta thead th.col-acoes--fixa { z-index: 3; }
 
-.tabela { width: 100%; font-size: 14px; }
+.tabela { width: 100%; font-size: var(--texto-meta); }
 /* cabecalho em cinza frio 12px, sem caixa alta (identidade) */
 .tabela thead th {
   padding: 10px 12px;
   background: var(--cor-superficie);
   border-bottom: 1px solid var(--cor-linha);
   color: var(--cor-texto-secundario);
-  font-size: 12px; line-height: 16px; font-weight: 500;
+  font-size: var(--texto-mini); line-height: 16px; font-weight: 500;
   text-align: left; white-space: nowrap;
 }
 /* 12px + 20px de linha = os 44px de altura de linha da identidade */
@@ -805,7 +805,7 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
   border-top: 1px solid var(--cor-linha);
   border-bottom: 1px solid var(--cor-linha);
   color: var(--cor-tinta);
-  font-size: 14px; font-weight: 600;
+  font-size: var(--texto-meta); font-weight: 600;
   text-align: left; white-space: nowrap;
 }
 
@@ -881,7 +881,7 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
   height: auto; padding: 2px 6px; margin: -2px -6px;
   border: 0; box-shadow: none; background: none;
   border-radius: var(--raio-canto);
-  color: var(--cor-tinta); font-size: 14px; font-weight: 400;
+  color: var(--cor-tinta); font-size: var(--texto-meta); font-weight: 400;
 }
 .valor-btn:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-menu-realce); }
 .valor-btn--vazio { color: var(--cor-texto-secundario); }
@@ -895,7 +895,7 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
   height: auto; padding: 2px 6px; margin: -2px -6px;
   border: 0; box-shadow: none; background: none;
   border-radius: var(--raio-canto);
-  color: var(--cor-tinta); font-size: 14px; font-weight: 600;
+  color: var(--cor-tinta); font-size: var(--texto-meta); font-weight: 600;
 }
 .nome-btn:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-menu-realce); }
 .tabela tbody tr.abrivel:hover .nome-btn { color: var(--cor-menu-realce); }
@@ -948,7 +948,7 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
   border-radius: var(--raio-selo);
   background: var(--cor-contador-neutro);
   color: var(--cor-tinta);
-  font-size: 12px; line-height: 18px; font-weight: 500;
+  font-size: var(--texto-mini); line-height: 18px; font-weight: 500;
   /* rotulo de tipo DESCONHECIDO (o servidor pode acrescentar um) nao pode
      estourar a coluna fixa de 152px do `.alerta` e empurrar a mensagem. O corte
      mora aqui; as RETICENCIAS moram no `.selo__texto` (ver abaixo). */
@@ -1002,7 +1002,7 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
   width: 100%; height: auto;
   padding: 9px 20px;
   border: 0; border-radius: 0; box-shadow: none; background: none;
-  font-size: 13.5px; font-weight: 400; text-align: left;
+  font-size: var(--texto-meta); font-weight: 400; text-align: left;
 }
 .alerta:hover:not(:disabled) { background: var(--cor-papel-sombreado); }
 .alerta:focus-visible { outline-offset: -2px; border-radius: 0; }
@@ -1025,7 +1025,7 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
   border-radius: var(--raio-controle) var(--raio-controle) 0 0;
   margin-bottom: -1px;
   background: none; box-shadow: none;
-  color: var(--cor-texto-secundario); font-size: 14px;
+  color: var(--cor-texto-secundario); font-size: var(--texto-meta);
 }
 .aba:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
 .aba[aria-selected="true"], .aba[aria-current="page"] { color: var(--cor-tinta); border-bottom-color: var(--cor-tinta); font-weight: 600; }
@@ -1044,11 +1044,11 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
    os controles de 168px continuam cada um na sua linha (o flex so' encolhe o item
    que sozinho nao cabe). */
 .form-inline > .campo { min-width: 0; }
-.campo__rotulo { font-size: 12px; font-weight: 500; color: var(--cor-texto-secundario); }
+.campo__rotulo { font-size: var(--texto-mini); font-weight: 500; color: var(--cor-texto-secundario); }
 /* Medida de corpo: 78ch e' o mesmo teto do `.aviso`. Sem ele a
    nota de 12px do formulario de certidao corria ~170ch numa tela larga. */
-.campo__nota { font-size: 12px; color: var(--cor-texto-secundario); max-width: 78ch; }
-.campo__erro { margin: 0; font-size: 12px; color: var(--situacao-critico-texto); }
+.campo__nota { font-size: var(--texto-mini); color: var(--cor-texto-secundario); max-width: 78ch; }
+.campo__erro { margin: 0; font-size: var(--texto-mini); color: var(--situacao-critico-texto); }
 .entrada--curta { width: 84px; max-width: 100%; }
 .entrada--media { width: 168px; max-width: 100%; }
 .entrada--num { text-align: right; font-variant-numeric: tabular-nums lining-nums; }
@@ -1091,7 +1091,7 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
   border: 1px solid var(--atencao-linha);
   border-radius: var(--raio-controle);
   background: var(--situacao-breve-fundo);
-  font-size: 12.5px; color: var(--situacao-breve-texto);
+  font-size: var(--texto-mini); color: var(--situacao-breve-texto);
 }
 .aviso .icone { margin-top: 2px; }
 /* Atencao leva o ponto (D2), com a mesma geometria do ponto do selo; o triangulo e' do critico (CaixaAviso.tsx) */
@@ -1109,7 +1109,7 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
   border-bottom: 1px solid var(--cor-linha);
   box-shadow: inset 0 1px 0 var(--cor-borda-controle);
 }
-.painel__titulo { font-size: 12.5px; font-weight: 600; color: var(--cor-tinta); margin: 0 0 10px; }
+.painel__titulo { font-size: var(--texto-mini); font-weight: 600; color: var(--cor-tinta); margin: 0 0 10px; }
 .painel__rodape { margin: 12px 0 0; }
 
 /* dois cartoes empilhados no mesmo painel de aba (espelho + medicoes) */
@@ -1161,8 +1161,8 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 
 .g-grade { stroke: var(--cor-linha); }
 .g-base  { stroke: var(--cor-borda-controle); }
-.g-eixo   { fill: var(--cor-texto-secundario); font-size: 11px; }
-.g-eixo-x { fill: var(--cor-texto-secundario); font-size: 11.5px; }
+.g-eixo   { fill: var(--cor-texto-secundario); font-size: var(--texto-mini); }
+.g-eixo-x { fill: var(--cor-texto-secundario); font-size: var(--texto-mini); }
 .g-eixo--pendente, .g-eixo-x--pendente { fill: var(--situacao-breve-texto); font-weight: 600; }
 
 /* D14 (F-101): a barra prevista leva contorno de 1px em --linha-hover para passar de 3:1 (o #cbd5e1 sozinho da' 1,5:1) */
@@ -1186,7 +1186,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
   display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
   padding: 10px 20px 14px;
   border-top: 1px solid var(--cor-linha);
-  font-size: 12.5px; color: var(--cor-texto-secundario);
+  font-size: var(--texto-mini); color: var(--cor-texto-secundario);
 }
 .legenda__item { display: inline-flex; align-items: center; gap: 7px; }
 /* 4px e' o degrau Micro. Era 3px de uso unico: a 11px de lado a diferenca e'
@@ -1213,9 +1213,9 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
   border-bottom: 1px solid var(--cor-linha);
 }
 .saldo__parcela { display: grid; gap: 2px; }
-.saldo__valor { font-size: 15px; font-weight: 600; color: var(--cor-tinta); }
-.saldo__parcela--total .saldo__valor { font-size: 22px; letter-spacing: -.02em; line-height: 1.2; }
-.saldo__op { color: var(--cor-texto-secundario); font-size: 15px; padding-bottom: 2px; }
+.saldo__valor { font-size: var(--texto-corpo); font-weight: 600; color: var(--cor-tinta); }
+.saldo__parcela--total .saldo__valor { font-size: var(--texto-valor); letter-spacing: -.02em; line-height: 1.2; }
+.saldo__op { color: var(--cor-texto-secundario); font-size: var(--texto-corpo); padding-bottom: 2px; }
 .saldo--negativo .saldo__parcela--total .saldo__valor { color: var(--situacao-critico-texto); }
 /* #262: o aditivo de reajuste fica fora da conta; separado por um filete, nao por um operador */
 .saldo__parcela--aparte { padding-left: 14px; border-left: 1px solid var(--cor-linha); }
@@ -1231,7 +1231,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
   border-top: 1px solid var(--cor-linha);
 }
 .totais__item { display: grid; gap: 1px; }
-.totais__valor { font-size: 15px; font-weight: 600; color: var(--cor-tinta); }
+.totais__valor { font-size: var(--texto-corpo); font-weight: 600; color: var(--cor-tinta); }
 
 /* --------------------------------------------------------- erro e vazio */
 
@@ -1242,7 +1242,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
   border-radius: var(--raio-controle);
   background: var(--situacao-critico-fundo);
   color: var(--situacao-critico-texto);
-  font-size: 13px;
+  font-size: var(--texto-meta);
 }
 .erro .icone { margin-top: 1px; }
 /* relatorio de erro POR LINHA (importacao de CSV): o mesmo bloco de erro, com a
@@ -1252,7 +1252,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 .erro__titulo { margin: 0; font-weight: 600; }
 .erro__linhas { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 2px; }
 
-.vazio { padding: 32px 20px; text-align: center; color: var(--cor-texto-secundario); font-size: 13.5px; }
+.vazio { padding: 32px 20px; text-align: center; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 /* Vazio que e' BOA noticia (nenhum alerta): a mesma linguagem, sem o palco de 32px —
    o painel nao pode gastar meia tela anunciando que nao ha nada de errado. */
 .vazio--curto { padding: 14px 20px; text-align: left; }
@@ -1265,7 +1265,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 .resumo { display: flex; align-items: flex-start; gap: 32px; padding: 16px 20px; }
 .resumo__rotulo {
   display: block;
-  font-size: 12px; font-weight: 500;
+  font-size: var(--texto-mini); font-weight: 500;
   color: var(--cor-texto-secundario);
   margin-bottom: 3px;
 }
@@ -1296,7 +1296,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
    para o trabalho de "numero grande" que Display (22px) e Numero (15px) ja cobrem.
    Display fica com o total do saldo, que mora na mesma pagina (aba Medicoes) e e' o
    maior numero da tela; o valor vigente e' uma grandeza entre outras. */
-.resumo__valor strong { font-size: 15px; font-weight: 600; }
+.resumo__valor strong { font-size: var(--texto-corpo); font-weight: 600; }
 
 /* Pagina com coluna lateral (medicao: o ciclo no principal, a linha do tempo ao lado). Abaixo de 1400px
    a lateral desce para depois do principal: a 1366 as duas colunas deixavam as tabelas do espelho e das
@@ -1356,7 +1356,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 .tabela.matriz th:first-child, .tabela.matriz td:first-child { padding-left: 20px; }
 .tabela.matriz th:last-child, .tabela.matriz td:last-child { padding-right: 16px; }
 .matriz__empresa > * + * { margin-top: 4px; }
-.matriz__acoes { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; font-size: 13px; }
+.matriz__acoes { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; font-size: var(--texto-meta); }
 .matriz__cnpj { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .matriz__cnpj .num { user-select: all; }
 /* o CNPJ ocupa a linha inteira em qualquer largura (N4-02); o Copiar e o ZIP ficam lado a lado embaixo dele, e a nota da copia (N04-06) tambem tem linha propria */
@@ -1371,7 +1371,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 .fila__cabeca { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 24px; }
 .fila__titulo { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .fila__zero { margin: 0; }
-.lateral__mes { margin: 0; font-size: 13px; }
+.lateral__mes { margin: 0; font-size: var(--texto-meta); }
 .faltam { display: grid; gap: 12px; }
 /* O que a lateral mostra ganha, na tela estreita, uma versao curta logo depois do que falta. */
 .so-estreito { display: none; }
@@ -1385,7 +1385,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 }
 @media (max-width: 1100px) { .com-lateral.com-lateral--fila { grid-template-columns: minmax(0, 1fr); } }
 /* "Ver os N acontecimentos": o summary e' um controle, com a seta que diz se esta' aberto */
-.detalhes > summary { cursor: pointer; color: var(--cor-tinta); font-size: 13px; width: fit-content; }
+.detalhes > summary { cursor: pointer; color: var(--cor-tinta); font-size: var(--texto-meta); width: fit-content; }
 .detalhes > summary:hover { color: var(--cor-menu-realce); text-decoration: underline; }
 .detalhes[open] > summary { margin-bottom: 10px; }
 /* Cartao que abre inteiro (Novo protocolo com varias medicoes): o `display: flex` do cabecalho tira o
@@ -1409,9 +1409,9 @@ a.resumo__rotulo { color: var(--cor-tinta); text-decoration: underline; }
 a.resumo__rotulo:hover { color: var(--cor-menu-realce); }
 
 
-.linha-tempo { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; font-size: 13px; }
+.linha-tempo { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; font-size: var(--texto-meta); }
 .linha-tempo li { display: grid; gap: 2px; padding-left: 12px; border-left: 2px solid var(--cor-linha); min-width: 0; overflow-wrap: anywhere; }
-.linha-tempo__data { color: var(--cor-texto-secundario); font-size: 12px; }
+.linha-tempo__data { color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
 
 /* -------------------------------------------------------------- certidoes */
 
@@ -1426,7 +1426,7 @@ a.resumo__rotulo:hover { color: var(--cor-menu-realce); }
   /* borda 1 + 2 + botao de 26 + 2 + borda 1 = os mesmos 32px do resto da linha
      (o `box-sizing: border-box` global faz a borda contar na altura) */
   padding: 2px 10px 2px 2px;
-  font-size: 13px; color: var(--cor-texto-secundario);
+  font-size: var(--texto-meta); color: var(--cor-texto-secundario);
 }
 /* Degrau Controle (13px, herdado do campo) e altura 26px — o mesmo degrau do botao
    voltar. A escala de controles do sistema e' 32 / 28 / 26 e nao tem 24. */
@@ -1506,9 +1506,9 @@ a.resumo__rotulo:hover { color: var(--cor-menu-realce); }
 .kpi:first-child { padding-left: 20px; }
 /* Degrau Display (DESIGN.md › Typography) em TODO KPI, inclusive o de dinheiro: o valor do mes em
    15px ao lado de uma contagem em 22px invertia a hierarquia da tela inicial. */
-.kpi__valor { font-size: 22px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2; white-space: nowrap; }
-.kpi__rotulo { font-size: 12.5px; color: var(--cor-texto-secundario); }
-.kpi__acao { font-size: 12px; color: var(--cor-tinta); font-weight: 600; margin-top: 4px; }
+.kpi__valor { font-size: var(--texto-valor); font-weight: 600; letter-spacing: -.02em; line-height: 1.2; white-space: nowrap; }
+.kpi__rotulo { font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
+.kpi__acao { font-size: var(--texto-mini); color: var(--cor-tinta); font-weight: 600; margin-top: 4px; }
 
 /* Link de identificacao numa celula (nº do instrumento): o mesmo destino do `.nome-btn`
    das tabelas, so' que como ancora (a URL existe desde a fase 3,5). */
@@ -1522,22 +1522,22 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 /* Tela de falha do ErrorBoundary: a ultima rede do app, fora do shell (o shell pode
    ser justamente o que quebrou). Uma coluna de leitura, o botao que sempre funciona. */
 .falha { max-width: 56ch; margin: 64px auto; padding: 0 24px; display: grid; gap: 12px; justify-items: start; }
-.falha__titulo { margin: 0; font-size: 20px; letter-spacing: -.018em; }
+.falha__titulo { margin: 0; font-size: var(--texto-titulo-bloco); letter-spacing: -.018em; }
 .falha p { margin: 0; color: var(--cor-texto-secundario); }
-.falha__detalhe { font-size: 12.5px; color: var(--cor-texto-terciario); word-break: break-word; }
+.falha__detalhe { font-size: var(--texto-mini); color: var(--cor-texto-terciario); word-break: break-word; }
 
 /* Rodape do painel de protocolo com o checklist acoplado: os blocos (veredito,
    assumir a pendencia, justificativa, aviso do congelamento) empilham. */
 .checklist-ato { display: grid; gap: 8px; justify-items: start; }
 /* Caixa de marcar com o rotulo na mesma linha; o controle nu herda 32px de altura
    da base `input`, o que empurrava o texto para baixo. */
-.marcar { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.marcar { display: inline-flex; align-items: center; gap: 8px; font-size: var(--texto-meta); cursor: pointer; }
 .marcar input { height: auto; width: 15px; accent-color: var(--cor-tinta); margin: 0; }
 
 /* Listas de conferencia (reconciliacao RM x dashboard): texto corrido, sem tabela. */
 .reconciliacao { display: grid; gap: 10px; }
-.reconciliacao .cartao__titulo { font-size: 14px; }
-.lista-simples { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
+.reconciliacao .cartao__titulo { font-size: var(--texto-meta); }
+.lista-simples { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--texto-meta); }
 
 /* Painel Notas (bloco 3): sob a linha da medicao, mesmo ritmo dos outros paineis. */
 .notas { display: grid; gap: 10px; }
@@ -1547,9 +1547,9 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
    celulas, inclusive a primeira e a ultima: a tabela cai para 854 px, sem rolagem */
 .tabela.tabela--densa thead th, .tabela.tabela--densa tbody td { padding-left: 8px; padding-right: 8px; }
 .notas__conferencia { display: inline-flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
-.notas__ok { color: var(--situacao-feito-texto); font-size: 12px; }
+.notas__ok { color: var(--situacao-feito-texto); font-size: var(--texto-mini); }
 /* divergencia e' CRITICO (D10): mesma cor do selo "Diverge do espelho" da aba Notas */
-.notas__diverge { color: var(--situacao-critico-texto); font-size: 12px; }
+.notas__diverge { color: var(--situacao-critico-texto); font-size: var(--texto-mini); }
 /* G3-11: na tabela das esperadas, so' a celula do campo que diverge; sublinhado alem da cor (nao so' cor) */
 .notas__celula--diverge { color: var(--situacao-critico-texto); font-weight: 600; text-decoration: underline wavy; text-underline-offset: 3px; }
 .notas__feito { color: var(--cor-texto-secundario); }
@@ -1561,7 +1561,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .documentos { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .documentos__fila { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
 .documentos__item { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--cor-linha);
-  border-radius: 8px; font-size: 13px; }
+  border-radius: 8px; font-size: var(--texto-meta); }
 .documentos__arquivo { font-weight: 600; overflow-wrap: anywhere; }
 
 /* ---- Envio de e-mail como no Outlook (2026-09-25, pedido do Leonardo) -------------------------------------
@@ -1571,7 +1571,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
   --foco: var(--ol-azul);
   font-family: "Aptos", "Segoe UI", "Segoe UI Web (West European)", -apple-system, sans-serif; color: var(--ol-texto);
   background: #fff; border: 1px solid var(--ol-linha); border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,.08);
-  font-size: 14px; }
+  font-size: var(--texto-meta); }
 .ol-topo { display: flex; align-items: center; gap: 16px; padding: 12px 12px 8px; }
 .ol-enviar { display: inline-flex; align-items: center; gap: 6px; background: var(--ol-azul, #0f6cbd); color: #fff; border: 0;
   border-radius: 4px; padding: 6px 16px; font: inherit; font-weight: 600; cursor: pointer; }
@@ -1580,7 +1580,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-botao { background: #fff; border: 1px solid #d1d1d1; border-radius: 4px; padding: 6px 16px; font: inherit; cursor: pointer; }
 .ol-de { color: var(--ol-texto); }
 .ol-icone { border: 0; background: none; color: #616161; cursor: pointer; padding: 4px; border-radius: 4px;
-  font-size: 20px; line-height: 1; display: inline-flex; }
+  font-size: var(--texto-valor-menor); line-height: 1; display: inline-flex; }
 .ol-icone:hover { background: #f5f5f5; color: #242424; }
 .ol-descartar { margin-left: auto; }
 .ol-confirmar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 4px 12px 8px; }
@@ -1593,8 +1593,8 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-campo:focus-within { border-bottom: 2px solid var(--ol-azul); }
 .ol-chip { display: inline-flex; align-items: center; gap: 4px; background: #f5f5f5; border: 1px solid #e0e0e0;
   border-radius: 4px; padding: 1px 4px 1px 6px; white-space: nowrap; }
-.ol-chip__icone { color: #616161; font-size: 12px; }
-.ol-chip button { border: 0; background: none; cursor: pointer; color: #242424; font-size: 16px; line-height: 1; padding: 0 2px; }
+.ol-chip__icone { color: #616161; font-size: var(--texto-mini); }
+.ol-chip button { border: 0; background: none; cursor: pointer; color: #242424; font-size: var(--texto-corpo); line-height: 1; padding: 0 2px; }
 .ol-entrada { flex: 1; min-width: 140px; border: 0; outline: 0; font: inherit; padding: 4px 0; background: transparent; }
 .ol-cco { border: 0; background: none; color: var(--ol-texto); font: inherit; cursor: pointer; padding: 4px 6px; border-radius: 4px; }
 .ol-cco:hover { background: #f5f5f5; }
@@ -1604,8 +1604,8 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-sugestao--ativa { background: #f5f5f5; outline: 2px solid #242424; outline-offset: -2px; border-radius: 4px; }
 .ol-sugestao__texto { display: grid; }
 .ol-sugestao__nome { color: #242424; }
-.ol-sugestao__email { color: #616161; font-size: 12px; }
-.ol-avatar { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 11px;
+.ol-sugestao__email { color: #616161; font-size: var(--texto-mini); }
+.ol-avatar { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: var(--texto-mini);
   font-weight: 600; color: #424242; }
 .ol-assunto { padding: 4px 12px; }
 .ol-assunto input { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--ol-linha); outline: 0;
@@ -1614,7 +1614,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-anexos { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 8px 12px 0; list-style: none; }
 .ol-anexo { display: flex; align-items: center; gap: 8px; max-width: 360px; border: 1px solid var(--ol-linha);
   border-radius: 4px; padding: 6px 10px; }
-.ol-anexo__tipo { flex: none; min-width: 32px; padding: 3px 4px; border-radius: 3px; font-size: 10px; font-weight: 700;
+.ol-anexo__tipo { flex: none; min-width: 32px; padding: 3px 4px; border-radius: 3px; font-size: var(--texto-mini); font-weight: 700;
   text-align: center; color: #fff; background: #616161; }
 .ol-anexo__tipo--docx, .ol-anexo__tipo--doc { background: #185abd; }
 .ol-anexo__tipo--pdf { background: #c43e1c; }
@@ -1625,7 +1625,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
    "… - Reajuste Cuiabá"), e com uma linha e reticencias os tres cartoes ficavam iguais. */
 .ol-anexo__nome { overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical;
   -webkit-line-clamp: 2; line-clamp: 2; }
-.ol-anexo__tamanho { color: #616161; font-size: 12px; }
+.ol-anexo__tamanho { color: #616161; font-size: var(--texto-mini); }
 .ol-corpo { padding: 12px 12px 16px; }
 .ol-corpo .ol-editor { width: 100%; box-sizing: border-box; border: 0; min-height: 160px; overflow-wrap: anywhere;
   font: 11pt "Aptos", "Calibri", "Segoe UI", sans-serif; color: #000; line-height: 1.35; background: transparent; }
@@ -1651,17 +1651,17 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-paleta__cores { position: absolute; z-index: 21; top: calc(100% + 4px); left: 0; display: flex; gap: 4px; padding: 6px;
   background: #fff; border: 1px solid #d1d1d1; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.14); }
 .ol-cor { width: 22px; height: 22px; padding: 0; border: 1px solid #c7c7c7; border-radius: 3px; background: #fff;
-  cursor: pointer; font-size: 11px; color: #616161; }
+  cursor: pointer; font-size: var(--texto-mini); color: #616161; }
 .ol-cor:focus-visible { outline: 2px solid #0f6cbd; outline-offset: 1px; }
 .ol-assinatura img { display: block; max-width: 600px; width: 100%; height: auto; margin-top: 8px; }
-.ol-sem-assinatura { color: #616161; font-size: 12px; border: 1px dashed var(--ol-linha); border-radius: 4px;
+.ol-sem-assinatura { color: #616161; font-size: var(--texto-mini); border: 1px dashed var(--ol-linha); border-radius: 4px;
   padding: 8px 10px; max-width: 60ch; }
 .ol-modal-fundo { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.4); display: grid; place-items: center; }
 .ol-modal { width: min(1100px, 94vw); height: min(640px, 88vh); display: grid; grid-template-rows: auto 1fr auto;
   background: #fff; border-radius: 8px; box-shadow: 0 25px 60px rgba(0,0,0,.3); font-family: "Aptos", "Segoe UI", sans-serif;
-  color: #242424; font-size: 14px; overflow: hidden; }
+  color: #242424; font-size: var(--texto-meta); overflow: hidden; }
 .ol-modal__cabeca { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px;
-  background: #f0f0f0; font-size: 15px; }
+  background: #f0f0f0; font-size: var(--texto-titulo-sub); }
 .ol-modal__corpo { display: grid; grid-template-rows: auto 1fr auto; gap: 8px; padding: 12px 16px; min-height: 0; }
 .ol-busca { border: 1px solid #d1d1d1; border-radius: 4px; padding: 6px 10px; font: inherit; }
 .ol-busca:focus { outline: 2px solid #0f6cbd; outline-offset: -1px; }
@@ -1689,7 +1689,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
   padding: 20px; background: var(--cor-superficie); border: 1px solid var(--atencao-linha); border-radius: var(--raio-canto);
   box-shadow: var(--sombra-painel); color: var(--cor-tinta); }
 .confirmar-faltas p { margin: 0; }
-.confirmar-faltas__titulo { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 16px; color: var(--situacao-breve-texto); }
+.confirmar-faltas__titulo { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--texto-titulo-sub); color: var(--situacao-breve-texto); }
 .confirmar-faltas__lista { margin: 8px 0; padding-left: 20px; display: grid; gap: 4px; overflow-wrap: anywhere; }
 .confirmar-faltas__pergunta { font-weight: 600; }
 .confirmar-faltas__acoes { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
@@ -1709,7 +1709,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-janela .ol-campo { gap: 6px; min-height: 32px; padding: 2px 0 6px; border-bottom: 1px solid #949494; }
 .ol-janela .ol-campo:focus-within { border-bottom: 2px solid #0f6cbd; padding-bottom: 5px; }
 .ol-janela .ol-chip { background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; height: 26px; box-sizing: border-box;
-  padding: 0 4px 0 6px; gap: 4px; color: #242424; font-size: 14px; }
+  padding: 0 4px 0 6px; gap: 4px; color: #242424; font-size: var(--texto-meta); }
 .ol-janela .ol-chip:hover { background: #f5f5f5; }
 .ol-janela .ol-chip__icone { color: #616161; flex: none; }
 .ol-janela .ol-chip__nome { line-height: 24px; }
@@ -1726,7 +1726,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .login { min-height: 100vh; display: grid; place-items: start center; padding: 12vh 16px 24px; background: var(--cor-papel); }
 .login__cartao { width: min(360px, 100%); padding: 24px; display: grid; gap: 16px; }
 .login__cartao > .btn { justify-self: start; }
-.login__titulo { margin: 0; font-size: 20px; line-height: 1.3; }
+.login__titulo { margin: 0; font-size: var(--texto-titulo-bloco); line-height: 1.3; }
 
 /* --------------------------------------------------------- pendencias (F-46) */
 /* Lista de pendencias com o nivel no selo: o selo numa coluna, o texto ao lado, alinhados pela linha
@@ -1765,7 +1765,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 /* Documentos da obra (#661): o que falta para protocolar, uma linha por documento; o documento a esquerda e a
    empresa (link para Documentos) a direita; no celular a empresa desce para a linha de baixo, sem cortar o nome */
 .docs-falta { list-style: none; margin: 0; padding: 4px 20px 8px; }
-.docs-falta li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 16px; padding: 8px 0; font-size: 14px; }
+.docs-falta li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 16px; padding: 8px 0; font-size: var(--texto-meta); }
 .docs-falta li + li { border-top: 1px solid var(--cor-linha); }
 .docs-falta__item { font-weight: 600; }
 .docs-falta li > a { min-width: 0; overflow-wrap: anywhere; }
@@ -1786,8 +1786,8 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 
 /* A receber (F-60): o total e' o numero principal da tela, em Display 22/600 na cabeca do cartao "Por orgao", com o
    rotulo embaixo e uma linha de apoio (quanto passa de 60 dias, quantas medicoes e notas). */
-.total-receber__valor { font-size: 22px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2; color: var(--cor-tinta); white-space: nowrap; }
-.total-receber__rotulo, .total-receber__apoio { font-size: 12.5px; color: var(--cor-texto-secundario); }
+.total-receber__valor { font-size: var(--texto-valor); font-weight: 600; letter-spacing: -.02em; line-height: 1.2; color: var(--cor-tinta); white-space: nowrap; }
+.total-receber__rotulo, .total-receber__apoio { font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
 .total-receber__apoio { margin-top: 2px; }
 .total-receber__nota { margin: 10px 0 0; }
 
@@ -1805,10 +1805,10 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .resumo-grade__par { display: grid; gap: 14px; align-content: start; min-width: 0; }
 .dado { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
 .dado .resumo__rotulo { margin-bottom: 1px; }
-.dado__valor { font-size: 15px; font-weight: 600; line-height: 1.3; color: var(--cor-tinta); overflow-wrap: anywhere; }
+.dado__valor { font-size: var(--texto-corpo); font-weight: 600; line-height: 1.3; color: var(--cor-tinta); overflow-wrap: anywhere; }
 /* .negativo sozinho empata em especificidade com .dado__valor: este repoe o vermelho do saldo negativo */
 .dado__valor.negativo { color: var(--situacao-critico-texto); }
-.dado__valor--principal { font-size: 22px; letter-spacing: -.02em; line-height: 1.2; }
+.dado__valor--principal { font-size: var(--texto-valor); letter-spacing: -.02em; line-height: 1.2; }
 .dado .campo__nota { margin-top: 2px; }
 /* o botao de editar o valor fica logo abaixo dele, com um respiro */
 .dado .btn { margin-top: 6px; }
@@ -1839,7 +1839,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .faltam__obra > a { font-weight: 600; }
 .faltam__medicoes { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; }
 .faltam__medicoes li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-.faltam__ha { flex: none; white-space: nowrap; font-size: 13px; color: var(--cor-texto-secundario); }
+.faltam__ha { flex: none; white-space: nowrap; font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 .faltam__nota { display: block; margin-top: 2px; }
 
 /* Resumo da medicao (N04-01): o 4o par (valor + atestado) ocupa 2 linhas da coluna 4 e os atos ficam na linha 2,
@@ -1864,7 +1864,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .matriz__cnpj .btn--pequeno { padding-left: 8px; padding-right: 8px; }
 
 /* A receber (N04-10): antes da conciliacao o Display mostra "—" e esta frase, em corpo, diz o motivo */
-.total-receber__conciliar { font-size: 14px; line-height: 1.4; color: var(--cor-texto-secundario); margin-top: 4px; }
+.total-receber__conciliar { font-size: var(--texto-meta); line-height: 1.4; color: var(--cor-texto-secundario); margin-top: 4px; }
 
 /* F-36a: trecho de code que quebra de linha mantem a borda e o raio nas duas pontas */
 code { -webkit-box-decoration-break: clone; box-decoration-break: clone; }
@@ -1887,7 +1887,7 @@ a.contagem .dado__valor { color: var(--cor-tinta); }
 a.contagem:hover .dado__valor { color: var(--cor-menu-realce); text-decoration: underline; }
 
 /* Sucesso generico (F-90): confirmacao de acao e "confere"; mesmo visual de notas__ok, sem o nome de Notas */
-.feito { color: var(--situacao-feito-texto); font-size: 12px; }
+.feito { color: var(--situacao-feito-texto); font-size: var(--texto-mini); }
 /* Lista de arquivos com icone de download: sem marcador para nao somar bullet e icone (G2-19) */
 .lista-simples--arquivos { list-style: none; padding-left: 0; }
 /* Icone do "diverge do espelho" (Critico): forma alem da cor, alinhado ao texto de 12px */
@@ -1920,7 +1920,7 @@ a.contagem:hover .dado__valor { color: var(--cor-menu-realce); text-decoration: 
   background: var(--cor-superficie);
   border-bottom: 1px solid var(--cor-linha);
   color: var(--cor-texto-secundario);
-  font-size: 12px; font-weight: 500;
+  font-size: var(--texto-mini); font-weight: 500;
   text-align: left; white-space: nowrap;
 }
 .checklist-pecas tbody th, .checklist-pecas tbody td {
@@ -1931,8 +1931,8 @@ a.contagem:hover .dado__valor { color: var(--cor-menu-realce); text-decoration: 
 .checklist-pecas tbody tr:last-child > * { border-bottom: 0; }
 .checklist-pecas thead th:nth-child(2), .checklist-pecas tbody td:nth-child(2) { width: 112px; }
 .checklist-pecas thead th.checklist-pecas__acao, .checklist-pecas tbody td.checklist-pecas__acao { width: 176px; text-align: right; }
-.checklist-pecas__nome { display: block; font-size: 13px; font-weight: 600; color: var(--cor-tinta); }
-.checklist-pecas__arquivo { display: block; font-size: 12px; color: var(--cor-texto-secundario); }
+.checklist-pecas__nome { display: block; font-size: var(--texto-meta); font-weight: 600; color: var(--cor-tinta); }
+.checklist-pecas__arquivo { display: block; font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
 .checklist-pecas__arquivo { overflow-wrap: anywhere; }
 .checklist-pecas__botoes { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 
@@ -2003,7 +2003,7 @@ a.contagem:hover .dado__valor { color: var(--cor-menu-realce); text-decoration: 
 /* N07-02: a nota do prazo ("vence em 9 dias") volta a nao quebrar; so' "o orgao prorroga junto" e "Paralisada desde" quebram */
 
 /* Resumo da obra (N04-12): a curva falhou; a palavra "indisponivel" no lugar do valor, sem o peso nem o tamanho do Display */
-.dado__valor.dado__valor--indisponivel { font-size: 15px; font-weight: 400; letter-spacing: 0; color: var(--cor-texto-secundario); }
+.dado__valor.dado__valor--indisponivel { font-size: var(--texto-corpo); font-weight: 400; letter-spacing: 0; color: var(--cor-texto-secundario); }
 
 /* F-81: "‹ Medicoes" (de onde se veio) e o breadcrumb (onde se esta') nao se leem mais como uma trilha so': o voltar vira botao pequeno com contorno */
 .topbar__trilha > .btn--voltar {
@@ -2080,8 +2080,8 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .cart-numeros { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); list-style: none; margin: 0; padding: 0; }
 .cart-numero { position: relative; padding: 18px 20px 16px 28px; display: grid; gap: 4px; }
 .cart-numero::before { content: ""; position: absolute; left: 14px; top: 18px; bottom: 18px; width: 4px; border-radius: var(--raio-selo); background: var(--cor-menu); }
-.cart-numero__rotulo { font-size: 14px; font-weight: 500; color: var(--cor-texto-secundario); }
-.cart-numero__valor { font-size: 32px; line-height: 40px; font-weight: 500; letter-spacing: -.02em; color: var(--cor-tinta); white-space: nowrap; }
+.cart-numero__rotulo { font-size: var(--texto-meta); font-weight: 500; color: var(--cor-texto-secundario); }
+.cart-numero__valor { font-size: var(--texto-titulo-pagina); line-height: 40px; font-weight: 500; letter-spacing: -.02em; color: var(--cor-tinta); white-space: nowrap; }
 .cart-curva { padding: 8px 20px 4px; }
 .cart-curva svg { display: block; width: 100%; }
 .cart-c-prev { fill: none; stroke: var(--cor-tinta); stroke-width: 2; }
@@ -2092,29 +2092,29 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .cart-c-ponto-prev { fill: var(--cor-superficie); stroke: var(--cor-tinta); stroke-width: 2; }
 .cart-c-ponto-med { fill: var(--cor-tinta); stroke: var(--cor-superficie); stroke-width: 1.5; }
 .cart-c-guia { stroke: var(--cor-borda-controle); stroke-dasharray: 3 3; }
-.cart-leitura { font-size: 12.5px; color: var(--cor-texto-secundario); padding-top: 4px; margin: 0; }
+.cart-leitura { font-size: var(--texto-mini); color: var(--cor-texto-secundario); padding-top: 4px; margin: 0; }
 .cart-leitura .num { color: var(--cor-tinta); }
-.cart-titulo-secao { margin: 8px 0 0; font-size: 16px; line-height: 24px; }
+.cart-titulo-secao { margin: 8px 0 0; font-size: var(--texto-titulo-sub); line-height: 24px; }
 .cart-contratantes { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); list-style: none; margin: 0; padding: 0; }
 .cart-contratante { display: grid; gap: 6px; padding: 16px 20px 18px; text-align: left; text-decoration: none; color: var(--cor-tinta); height: 100%; box-sizing: border-box; }
 .cart-contratante:hover { border-color: var(--cor-borda-controle); }
-.cart-contratante__nome { margin: 0 0 6px; font-size: 15px; font-weight: 600; color: var(--cor-tinta); }
-.cart-contratante__rotulo { font-size: 12.5px; color: var(--cor-texto-secundario); }
-.cart-contratante__valor { font-size: 22px; line-height: 28px; font-weight: 500; color: var(--cor-tinta); }
+.cart-contratante__nome { margin: 0 0 6px; font-size: var(--texto-titulo-sub); font-weight: 600; color: var(--cor-tinta); }
+.cart-contratante__rotulo { font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
+.cart-contratante__valor { font-size: var(--texto-valor); line-height: 28px; font-weight: 500; color: var(--cor-tinta); }
 .cart-progresso { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; margin-top: 8px; }
-.cart-progresso__rotulo { grid-column: 1 / -1; font-size: 12.5px; color: var(--cor-texto-secundario); }
+.cart-progresso__rotulo { grid-column: 1 / -1; font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
 .cart-progresso__trilho { height: 8px; border-radius: var(--raio-selo); background: var(--cor-contador-neutro); overflow: hidden; }
 .cart-progresso__feito { display: block; height: 100%; border-radius: var(--raio-selo); background: var(--cor-menu); }
-.cart-progresso__pct { font-size: 12.5px; color: var(--cor-tinta); }
-.cart-nota-resumo { margin: 0; font-size: 13px; color: var(--cor-texto-secundario); }
+.cart-progresso__pct { font-size: var(--texto-mini); color: var(--cor-tinta); }
+.cart-nota-resumo { margin: 0; font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 .cart-farois { display: flex; flex-wrap: wrap; gap: 8px; }
-.cart-farol-btn { height: 30px; border-radius: var(--raio-selo); padding: 0 12px; font-size: 12.5px; }
+.cart-farol-btn { height: 30px; border-radius: var(--raio-selo); padding: 0 12px; font-size: var(--texto-mini); }
 .cart-farol-btn[aria-pressed="true"] { background: var(--cor-papel-sombreado); border-color: var(--cor-borda-controle); color: var(--cor-tinta); }
 .cart-qdop-lado { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); }
 .cart-qdop-lado p { margin: 0 0 4px; }
 .cart-kpis--quebra { grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); row-gap: 16px; }
 @media (max-width: 767px) {
-  .cart-numero__valor { font-size: 28px; line-height: 36px; }
+  .cart-numero__valor { font-size: var(--texto-numero); line-height: 36px; }
   .cart-topo { border-bottom: 0; }
   .cart-topo .btn { margin-bottom: 0; width: 100%; justify-content: center; order: -1; }
   .cart-topo .abas { border-bottom: 1px solid var(--cor-linha); flex-basis: 100%; }
@@ -2128,7 +2128,7 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
    Pagina unica (#646): o resumo da ficha no alto; abaixo, o cartao "Ritmo e prazo" (#655) e as secoes em abas; a
    direita, os avisos e a execucao do contrato. Abaixo de 1280px a lateral desce para depois das abas
    (display: contents desfaz as duas colunas; `order` ordena). */
-.topbar__titulo--grande { font-size: 28px; line-height: 36px; }
+.topbar__titulo--grande { font-size: var(--texto-numero); line-height: 36px; }
 .topbar__linha--quebra { flex-wrap: wrap; }
 .topbar__linha--quebra > .selo { margin-left: auto; }
 .topbar__meta--obra { margin: 0; }
@@ -2155,22 +2155,22 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .linhas-tempo { display: grid; }
 .lt { padding: 18px 20px 16px; }
 .lt + .lt { border-top: 1px solid var(--cor-linha); }
-.lt__titulo { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 30px; font-size: 15px; font-weight: 600; }
+.lt__titulo { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 30px; font-size: var(--texto-titulo-sub); font-weight: 600; }
 .lt__titulo .selo { font-weight: 500; }
 .lt__trilho { position: relative; height: 8px; border-radius: var(--raio-selo); background: var(--cor-contador-neutro); }
 .lt__feito { position: absolute; left: 0; top: 0; bottom: 0; border-radius: var(--raio-selo); background: var(--cor-menu); }
 .lt__hoje {
   position: absolute; top: -26px; white-space: nowrap;
   padding: 1px 8px; border-radius: var(--raio-selo); background: var(--cor-papel-sombreado); color: var(--cor-tinta);
-  font-size: 11.5px; line-height: 16px; font-weight: 600;
+  font-size: var(--texto-mini); line-height: 16px; font-weight: 600;
 }
 .lt__hoje::after { content: ""; position: absolute; left: var(--p, 50%); top: 100%; width: 1px; height: 12px; background: var(--cor-tinta); }
 .lt__marca {
   position: absolute; top: 50%; width: 14px; height: 14px; transform: translate(-50%, -50%);
   border: 2px solid var(--cor-superficie); border-radius: var(--raio-selo); background: var(--cor-menu); box-shadow: 0 0 0 1px var(--cor-borda-controle);
 }
-.lt__datas { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 12.5px; color: var(--cor-texto-secundario); }
-.lt__nota { margin: 4px 0 0; font-size: 12px; color: var(--cor-texto-secundario); text-align: right; }
+.lt__datas { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
+.lt__nota { margin: 4px 0 0; font-size: var(--texto-mini); color: var(--cor-texto-secundario); text-align: right; }
 .lt__nota--esq { text-align: left; }
 
 /* Minha conta (#165, opcao A): uma coluna centralizada de cartoes */
@@ -2187,20 +2187,20 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .form-senha p { margin: 0; }
 .coluna-conta .botao-largo + .campo__nota { margin-top: 10px; }
 .senha { position: relative; }
-.senha input { width: 100%; height: 40px; padding-right: 44px; font-size: 14px; box-sizing: border-box; }
+.senha input { width: 100%; height: 40px; padding-right: 44px; font-size: var(--texto-meta); box-sizing: border-box; }
 .senha input[aria-invalid="true"] { border-color: var(--situacao-critico-texto); }
 .olho { position: absolute; right: 4px; top: 4px; width: 32px; height: 32px; padding: 0; justify-content: center; border: 0; background: none; color: var(--cor-texto-secundario); }
 .olho:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-tinta); border: 0; }
-.botao-largo { width: 100%; height: 40px; justify-content: center; font-size: 14px; }
+.botao-largo { width: 100%; height: 40px; justify-content: center; font-size: var(--texto-meta); }
 .par-botoes { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); margin-top: 16px; }
-.par-botoes > .btn { height: 40px; justify-content: center; font-size: 14px; }
-.feito-caixa { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 12px; border: 1px solid var(--ok-linha); border-radius: var(--raio-controle); background: var(--situacao-feito-fundo); color: var(--situacao-feito-texto); font-size: 13px; }
+.par-botoes > .btn { height: 40px; justify-content: center; font-size: var(--texto-meta); }
+.feito-caixa { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 12px; border: 1px solid var(--ok-linha); border-radius: var(--raio-controle); background: var(--situacao-feito-fundo); color: var(--situacao-feito-texto); font-size: var(--texto-meta); }
 .coluna-conta .cartao__corpo > .feito-caixa { margin-top: 12px; }
 .codigo { display: grid; gap: 6px; padding: 14px 16px; border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); background: var(--cor-papel-sombreado); margin-bottom: 12px; }
-.codigo__valor { font-family: var(--fonte-numero); font-size: 24px; letter-spacing: .12em; color: var(--cor-tinta); }
+.codigo__valor { font-family: var(--fonte-numero); font-size: var(--texto-valor); letter-spacing: .12em; color: var(--cor-tinta); }
 .coluna-conta .assinatura-alvo { display: grid; place-items: center; gap: 8px; min-height: 120px; padding: 16px; background: var(--cor-papel-sombreado); border-radius: var(--raio-controle); cursor: default; }
 .coluna-conta .assinatura-alvo p { margin: 0; }
 .coluna-conta .assinatura-alvo.arrastando { border-color: var(--cor-tinta); background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
 .coluna-conta .assinatura-alvo img { max-width: 100%; max-height: 160px; border: 1px solid var(--cor-linha); border-radius: var(--raio-canto); background: var(--cor-superficie); }
-.assinatura-alvo__dica { font-size: 12.5px; color: var(--cor-texto-secundario); }
+.assinatura-alvo__dica { font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
 .caminho { word-break: break-all; }

@@ -3,7 +3,7 @@
 
 .medicoes { gap: 20px; }
 .medicoes__acoes { display: flex; justify-content: flex-end; }
-.medicoes__iniciar { height: 44px; padding: 0 20px; gap: 8px; font-size: 15px; font-weight: 600; box-shadow: 0 1px 2px rgba(15, 23, 42, .1); }
+.medicoes__iniciar { height: 44px; padding: 0 20px; gap: 8px; font-size: var(--texto-corpo); font-weight: 600; box-shadow: 0 1px 2px rgba(15, 23, 42, .1); }
 .medicoes__iniciar .icone { stroke-width: 2.2; }
 
 /* ponto e pilula da situacao */
@@ -17,7 +17,7 @@
 .sit-pilula {
   display: inline-block; padding: 1px 9px;
   border: 1px solid transparent; border-radius: var(--raio-selo);
-  font-size: 12px; line-height: 18px; font-weight: 500; white-space: nowrap;
+  font-size: var(--texto-mini); line-height: 18px; font-weight: 500; white-space: nowrap;
 }
 .sit-pilula--sem-medicao { background: var(--cor-contador-neutro); color: var(--cor-texto-secundario); border-color: var(--cor-linha); }
 .sit-pilula--planilha-gerada, .sit-pilula--planilha-enviada, .sit-pilula--boletim-recebido { background: var(--situacao-andamento-fundo); color: var(--situacao-andamento-texto); }
@@ -34,7 +34,7 @@
   overflow: hidden;
 }
 .medicoes__quadro-cabeca { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 16px 16px 14px; }
-.medicoes__quadro-cabeca h2 { margin: 0; font-size: 17px; line-height: 24px; }
+.medicoes__quadro-cabeca h2 { margin: 0; font-size: var(--texto-titulo-sub); line-height: 24px; }
 
 /* Tabela de largura fixa (as colunas caem no mesmo x da tabela de cima e de cada grupo). Abaixo de 820px a caixa
    rola na horizontal por dentro: a faixa e os grupos tem a mesma largura minima da tabela. */
@@ -49,7 +49,7 @@
 .medicoes__tabela th {
   padding: 12px 16px; text-align: left;
   background: var(--cor-papel-sombreado); border-bottom: 1px solid var(--cor-linha);
-  color: var(--cor-texto-secundario); font-size: 12px; line-height: 16px; font-weight: 600; white-space: nowrap;
+  color: var(--cor-texto-secundario); font-size: var(--texto-mini); line-height: 16px; font-weight: 600; white-space: nowrap;
 }
 .medicoes__tabela td { padding: 12px 16px; border-bottom: 1px solid var(--cor-linha); vertical-align: middle; overflow-wrap: anywhere; }
 .medicoes__tabela tr:last-child td { border-bottom: 0; }
@@ -60,7 +60,7 @@
 .medicoes__obra-repete { color: var(--cor-texto-secundario); padding-left: 4px; }
 .medicoes__medicao { color: var(--cor-tinta); text-decoration: none; }
 .medicoes__medicao:hover { color: var(--cor-menu-realce); text-decoration: underline; }
-.medicoes__sub { display: block; font-size: 12px; line-height: 16px; color: var(--cor-texto-secundario); }
+.medicoes__sub { display: block; font-size: var(--texto-mini); line-height: 16px; color: var(--cor-texto-secundario); }
 .medicoes__traco { color: var(--cor-texto-terciario); }
 /* "Parada há": ambar e vermelho so' com o limiar passado (resumoMedicoes.nivelParada) */
 .medicoes__parada { color: var(--cor-texto-secundario); white-space: nowrap; }
@@ -77,21 +77,21 @@
 .iniciar::backdrop { background: rgba(15, 23, 42, .45); }
 .iniciar__caixa { display: flex; flex-direction: column; min-height: 0; max-height: inherit; flex: 1 1 auto; }
 .iniciar__cabeca { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 22px 24px 12px; }
-.iniciar__titulo { margin: 0; font-size: 20px; line-height: 28px; }
+.iniciar__titulo { margin: 0; font-size: var(--texto-titulo-bloco); line-height: 28px; }
 .iniciar__fechar { width: 36px; height: 36px; flex: none; padding: 0; justify-content: center; border: 0; background: none; color: var(--cor-texto-secundario); border-radius: var(--raio-controle); cursor: pointer; display: inline-flex; align-items: center; }
 .iniciar__fechar:hover { background: var(--cor-papel-sombreado); }
 .iniciar__busca { height: 44px; flex: none; margin: 0 24px 12px; width: auto; }
 .iniciar__lista { flex: 1 1 auto; min-height: 120px; overflow-y: auto; border-top: 1px solid var(--cor-linha); padding: 0 12px 8px; }
 .iniciar__contratante {
   position: sticky; top: 0; z-index: 1; margin: 0; padding: 12px 12px 8px; background: var(--cor-superficie); box-shadow: 0 -1px 0 var(--cor-superficie);
-  font-size: 12px; line-height: 16px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--cor-texto-secundario);
+  font-size: var(--texto-mini); line-height: 16px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--cor-texto-secundario);
 }
 .iniciar__obra { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 12px; align-items: start; padding: 10px 12px; border-radius: var(--raio-controle); cursor: pointer; }
 .iniciar__obra:hover { background: var(--cor-papel-sombreado); }
 .iniciar__obra:has(input:checked) { background: var(--cor-papel-sombreado); }
 .iniciar__obra input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--cor-tinta); }
 .iniciar__obra-nome { font-weight: 600; }
-.iniciar__obra-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; line-height: 18px; color: var(--cor-texto-secundario); }
+.iniciar__obra-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: var(--texto-meta); line-height: 18px; color: var(--cor-texto-secundario); }
 .iniciar__vazio { margin: 0; padding: 24px 12px; color: var(--cor-texto-secundario); text-align: center; }
 
 .iniciar__rodape { flex: none; display: flex; flex-direction: column; gap: 14px; border-top: 1px solid var(--cor-linha); padding: 16px 24px 20px; overflow-y: auto; max-height: 55%; }
@@ -101,7 +101,7 @@
 .iniciar__aviso--atencao .icone { color: var(--situacao-breve-texto); }
 .iniciar__aviso--info { background: var(--cor-papel-sombreado); border-color: var(--cor-borda-controle); }
 .iniciar__aviso--info .icone { color: var(--cor-tinta); }
-.iniciar__rotulo { font-size: 13px; font-weight: 500; color: var(--cor-texto-secundario); }
+.iniciar__rotulo { font-size: var(--texto-meta); font-weight: 500; color: var(--cor-texto-secundario); }
 .iniciar__tipo-grupo { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .iniciar__tipo-grupo legend { padding: 0; margin-bottom: 6px; }
 .iniciar__tipo { display: inline-flex; width: fit-content; padding: 3px; gap: 3px; border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); }
@@ -111,7 +111,7 @@
 .iniciar__tipo label:has(input:focus-visible) { outline: 2px solid var(--cor-foco); outline-offset: 2px; }
 .iniciar__campos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .iniciar__campo { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.iniciar__campo > span, .iniciar__campo label > span { font-size: 13px; font-weight: 500; color: var(--cor-texto-secundario); }
+.iniciar__campo > span, .iniciar__campo label > span { font-size: var(--texto-meta); font-weight: 500; color: var(--cor-texto-secundario); }
 .iniciar__campo input { height: 40px; width: 100%; min-width: 0; padding: 0 10px; border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); font-family: var(--fonte-numero); }
 .iniciar__campo input[readonly] { background: var(--cor-papel-sombreado); color: var(--cor-texto-secundario); }
 .iniciar__botoes { display: flex; justify-content: flex-end; gap: 10px; }
@@ -140,7 +140,7 @@
 .quadro__tabela th, .quadro__tabela td { padding: 10px 4px; border-bottom: 1px solid var(--cor-linha); vertical-align: middle; overflow-wrap: anywhere; }
 .quadro__tabela thead th {
   background: var(--cor-papel-sombreado); border-bottom: 1px solid var(--cor-linha); vertical-align: bottom;
-  color: var(--cor-texto-secundario); font-size: 11px; line-height: 14px; font-weight: 600; text-align: left;
+  color: var(--cor-texto-secundario); font-size: var(--texto-mini); line-height: 14px; font-weight: 600; text-align: left;
 }
 .quadro__tabela thead th.quadro__th-passo, .quadro__tabela td.quadro__passo { text-align: center; padding-left: 2px; padding-right: 2px; }
 /* o nome do passo quebra entre palavras, nunca no meio de uma */
@@ -149,21 +149,21 @@
 .quadro__tabela th:last-child, .quadro__tabela td:last-child { padding-right: 10px; }
 .quadro__tabela tbody tr:last-child > * { border-bottom: 0; }
 .quadro__tabela tbody tr:hover > * { background: var(--cor-papel-sombreado); }
-.quadro__tabela .col-num { text-align: right; white-space: nowrap; font-size: 12px; }
-.quadro__tabela thead .col-num { font-size: 11px; }
+.quadro__tabela .col-num { text-align: right; white-space: nowrap; font-size: var(--texto-mini); }
+.quadro__tabela thead .col-num { font-size: var(--texto-mini); }
 /* o nome da obra quebra entre palavras, nunca no meio de uma */
 .quadro__tabela tbody th.quadro__obra { text-align: left; font-weight: 400; overflow-wrap: normal; word-break: normal; }
-.quadro__medicao { display: block; font-size: 12px; line-height: 16px; color: var(--cor-texto-secundario); text-decoration: none; }
+.quadro__medicao { display: block; font-size: var(--texto-mini); line-height: 16px; color: var(--cor-texto-secundario); text-decoration: none; }
 .quadro__medicao:hover { color: var(--cor-tinta); text-decoration: underline; }
-.quadro__passo { font-size: 12px; line-height: 16px; white-space: nowrap; }
+.quadro__passo { font-size: var(--texto-mini); line-height: 16px; white-space: nowrap; }
 .quadro__check { width: 12px; height: 12px; margin-right: 2px; vertical-align: -1px; stroke-width: 3; }
-.quadro__passo--futuro { color: var(--cor-texto-terciario); font-size: 11px; }
-.quadro__atual { padding: 2px 8px; font-size: 12px; text-decoration: none; }
+.quadro__passo--futuro { color: var(--cor-texto-terciario); font-size: var(--texto-mini); }
+.quadro__atual { padding: 2px 8px; font-size: var(--texto-mini); text-decoration: none; }
 .quadro__atual:hover { text-decoration: underline; }
 /* #664: a posição do processo no SIGA, em linhas pequenas sob a situação do passo: a sigla do setor e, embaixo, o tempo
    no setor. A coluna não alarga: o bloco usa também o respiro lateral da célula e o tempo quebra entre palavras, nunca
    no meio. A cor do tempo é a da tela SIGA (siga.css, .sg__dias). */
-.quadro__siga { display: block; margin: 3px -2px 0; font-size: 10px; line-height: 13px; white-space: normal; overflow-wrap: normal; color: var(--cor-texto-secundario); font-weight: 400; }
+.quadro__siga { display: block; margin: 3px -2px 0; font-size: var(--texto-mini); line-height: 13px; white-space: normal; overflow-wrap: normal; color: var(--cor-texto-secundario); font-weight: 400; }
 .quadro__siga-setor { display: block; font-weight: 600; overflow-wrap: anywhere; }
 .quadro__siga-tempo { color: var(--cor-tinta); }
 .quadro__siga-tempo--hoje { color: var(--situacao-feito-texto); font-weight: 600; }
@@ -185,16 +185,16 @@
   }
   .quadro__tabela tbody th.quadro__obra { display: block; padding: 0 0 6px; text-align: left; }
   .quadro__tabela tbody td::before, .quadro__anteriores td[data-rotulo]::before {
-    content: attr(data-rotulo); flex: none; color: var(--cor-texto-secundario); font-size: 12px; text-align: left;
+    content: attr(data-rotulo); flex: none; color: var(--cor-texto-secundario); font-size: var(--texto-mini); text-align: left;
   }
   .quadro__tabela td.quadro__passo--sem { display: none; }
   /* o nome do passo à esquerda; a situação e a posição do SIGA à direita, a posição inteira numa linha (se não couber ao
      lado da situação, desce para a linha de baixo) */
   .quadro__tabela tbody td.quadro__passo:has(.quadro__siga) { flex-wrap: wrap; justify-content: flex-end; row-gap: 2px; }
   .quadro__tabela td.quadro__passo:has(.quadro__siga)::before { margin-right: auto; }
-  .quadro__siga { display: inline; margin: 0; font-size: 12px; line-height: 16px; white-space: nowrap; }
+  .quadro__siga { display: inline; margin: 0; font-size: var(--texto-mini); line-height: 16px; white-space: nowrap; }
   .quadro__siga-setor { display: inline; overflow-wrap: normal; }
-  .quadro__tabela .col-num { font-size: 14px; }
+  .quadro__tabela .col-num { font-size: var(--texto-meta); }
   .quadro__anteriores.medicoes__tabela .quadro__acao { justify-content: flex-end; padding-top: 8px; }
 }
 

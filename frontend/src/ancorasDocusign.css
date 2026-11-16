@@ -7,4 +7,4 @@
 .ancoras__nomes { display: grid; gap: 12px; border: 0; padding: 0; margin: 0; }
 .ancoras__nomes legend { padding: 0; margin-bottom: 8px; font-weight: 500; }
 .ancoras__acoes { display: flex; flex-wrap: wrap; gap: 8px; }
-.ancoras__paginas h2 { font-size: 16px; margin: 16px 0 8px; }
+.ancoras__paginas h2 { font-size: var(--texto-titulo-sub); margin: 16px 0 8px; }

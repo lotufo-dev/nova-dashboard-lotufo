@@ -34,6 +34,6 @@
   gap: 8px 32px;
   margin: 0;
 }
-.planilha__saldo dt { color: var(--cor-texto-secundario); font-size: 13px; }
+.planilha__saldo dt { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .planilha__saldo dd { margin: 2px 0 0; font-weight: 600; white-space: nowrap; }
 .planilha__negativo { color: var(--situacao-critico-texto); }

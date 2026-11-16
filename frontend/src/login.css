@@ -7,7 +7,7 @@
   --entrar-borda: #CBD5E1;
   display: flex;
   min-height: 100vh;
-  font-size: 14px;
+  font-size: var(--texto-meta);
   line-height: 20px;
   color: var(--entrar-texto);
   background: #fff;
@@ -48,14 +48,14 @@
 .entrar__simbolo i { height: 12px; border-radius: 3px; background: var(--entrar-indigo); }
 .entrar__simbolo i.v { background: transparent; }
 .entrar__nome { display: flex; flex-direction: column; }
-.entrar__marca-nome { font-size: 18px; line-height: 24px; font-weight: 600; }
+.entrar__marca-nome { font-size: var(--texto-titulo-bloco); line-height: 24px; font-weight: 600; }
 
 .entrar__bloco { display: flex; flex-direction: column; gap: 24px; }
 .entrar__cabeca { display: flex; flex-direction: column; gap: 4px; }
-.entrar__titulo { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; }
+.entrar__titulo { margin: 0; font-size: var(--texto-valor); line-height: 32px; font-weight: 600; }
 
 .entrar__form { display: flex; flex-direction: column; gap: 16px; }
-.entrar__campo { display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 16px; font-weight: 500; }
+.entrar__campo { display: flex; flex-direction: column; gap: 6px; font-size: var(--texto-meta); line-height: 16px; font-weight: 500; }
 .entrar__campo input {
   height: 44px;
   box-sizing: border-box;
@@ -63,7 +63,7 @@
   border: 1px solid var(--entrar-borda);
   border-radius: 8px;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--texto-meta);
   font-weight: 400;
   color: var(--entrar-texto);
   background: #fff;
@@ -77,7 +77,7 @@
   background: var(--entrar-indigo);
   color: #fff;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--texto-meta);
   font-weight: 600;
   cursor: pointer;
 }

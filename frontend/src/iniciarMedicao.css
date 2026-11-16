@@ -9,7 +9,7 @@
 }
 .iniciar-med__mes-seta {
   width: 40px; height: 40px; flex: none; border: 0; border-radius: var(--raio-controle); background: none; color: var(--cor-texto-secundario);
-  font-size: 22px; line-height: 1; cursor: pointer;
+  font-size: var(--texto-valor); line-height: 1; cursor: pointer;
 }
 .iniciar-med__mes-seta:hover { background: var(--cor-papel-sombreado); }
 

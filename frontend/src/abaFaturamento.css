@@ -1,7 +1,7 @@
 /* Aba "Enviar ao faturamento" (#155, prototipo aprovado pelo Leo em 14/10/2026; AbaFaturamento.tsx).
    Cores so' dos tokens; o quadro e o "Parada há" vem de medicoes.css. */
 .fat-grupos { display: flex; flex-direction: column; gap: 16px; }
-.fat-grupo__cabeca { margin: 0; padding: 16px; border-bottom: 1px solid var(--cor-linha); font-size: 17px; line-height: 24px; font-weight: 600; }
+.fat-grupo__cabeca { margin: 0; padding: 16px; border-bottom: 1px solid var(--cor-linha); font-size: var(--texto-titulo-sub); line-height: 24px; font-weight: 600; }
 .fat-lista { list-style: none; margin: 0; padding: 0; }
 .fat-linha {
   display: grid; grid-template-columns: minmax(0, 1fr) 170px 150px auto; align-items: center; gap: 24px;
@@ -9,17 +9,17 @@
 }
 .fat-linha:last-child { border-bottom: 0; }
 .fat-linha:hover { background: var(--cor-papel-sombreado); }
-.fat-linha__obra { color: var(--cor-tinta); font-size: 15px; font-weight: 600; text-decoration: none; }
+.fat-linha__obra { color: var(--cor-tinta); font-size: var(--texto-corpo); font-weight: 600; text-decoration: none; }
 .fat-linha__obra:hover { color: var(--cor-tinta); text-decoration: underline; }
 .fat-linha__detalhe { display: block; margin-top: 2px; color: var(--cor-texto-secundario); }
 .fat-linha__detalhe a { color: inherit; text-decoration: none; }
 .fat-linha__detalhe a:hover { color: var(--cor-tinta); text-decoration: underline; }
-.fat-linha__valor { text-align: right; font-size: 15px; }
+.fat-linha__valor { text-align: right; font-size: var(--texto-corpo); }
 .fat-parada { white-space: nowrap; }
 .fat-parada__rot { color: var(--cor-texto-secundario); }
 
 @media (max-width: 767px) {
-  .fat-grupo__cabeca { font-size: 15px; }
+  .fat-grupo__cabeca { font-size: var(--texto-titulo-sub); }
 }
 /* ate' 900px as quatro colunas deixariam o nome da obra sem espaco: valor, parada e botao descem */
 @media (max-width: 900px) {

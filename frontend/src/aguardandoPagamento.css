@@ -1,13 +1,13 @@
 /* Medicoes > Aguardando pagamento (#158). Tirado do prototipo aprovado pelo Leo (14/10/2026): lista em faixas pelo atraso
    e painel da nota escolhida. Tokens de tokens.css; tudo debaixo de `.ap`/`.ap__*`. */
 
-.ap__total { margin: 0; color: var(--cor-texto-secundario); font-size: 15px; }
+.ap__total { margin: 0; color: var(--cor-texto-secundario); font-size: var(--texto-corpo); }
 .ap__total .dinheiro { color: var(--cor-tinta); }
 .ap { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
 .ap__quadro { background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: var(--raio-canto); box-shadow: 0 1px 2px rgba(15, 23, 42, .04); overflow: hidden; }
 
 .ap__tabela { width: 100%; table-layout: fixed; border-collapse: collapse; }
-.ap__tabela th { padding: 12px 16px; text-align: left; background: var(--cor-papel-sombreado); border-bottom: 1px solid var(--cor-linha); color: var(--cor-texto-secundario); font-size: 12px; line-height: 16px; font-weight: 600; white-space: nowrap; }
+.ap__tabela th { padding: 12px 16px; text-align: left; background: var(--cor-papel-sombreado); border-bottom: 1px solid var(--cor-linha); color: var(--cor-texto-secundario); font-size: var(--texto-mini); line-height: 16px; font-weight: 600; white-space: nowrap; }
 .ap__tabela td { padding: 12px 16px; height: 44px; border-bottom: 1px solid var(--cor-linha); vertical-align: middle; overflow-wrap: anywhere; }
 .ap__tabela tbody:last-child tr:last-child td { border-bottom: 0; }
 .ap__tabela .col-num { text-align: right; }
@@ -26,7 +26,7 @@
 .ap__linha[aria-selected="true"] td { background: var(--cor-papel-sombreado); }
 .ap__linha[aria-selected="true"] td:first-child { box-shadow: inset 3px 0 0 var(--cor-tinta); }
 .ap__obra { color: var(--cor-tinta); font-weight: 600; }
-.ap__origem { display: block; font-size: 12px; line-height: 16px; color: var(--cor-texto-secundario); font-family: var(--fonte-texto); }
+.ap__origem { display: block; font-size: var(--texto-mini); line-height: 16px; color: var(--cor-texto-secundario); font-family: var(--fonte-texto); }
 .ap__traco { color: var(--cor-texto-terciario); }
 .ap__parada-caixa { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .ap__parada { color: var(--cor-texto-secundario); }
@@ -34,9 +34,9 @@
 .ap__parada--acao { color: var(--situacao-critico-texto); font-weight: 600; }
 
 .ap__painel { position: sticky; top: 16px; background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: var(--raio-canto); box-shadow: var(--sombra-painel); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
-.ap__painel h2 { margin: 0; font-size: 18px; line-height: 24px; }
+.ap__painel h2 { margin: 0; font-size: var(--texto-titulo-bloco); line-height: 24px; }
 .ap__painel-orgao { color: var(--cor-texto-secundario); margin-top: -10px; }
-.ap__painel-valor { font-family: var(--fonte-numero); font-size: 28px; line-height: 36px; font-weight: 500; white-space: nowrap; }
+.ap__painel-valor { font-family: var(--fonte-numero); font-size: var(--texto-numero); line-height: 36px; font-weight: 500; white-space: nowrap; }
 .ap__painel-envio { color: var(--cor-texto-secundario); }
 .ap__fraco { color: var(--cor-texto-secundario); }
 .ap__campo label, .ap__rotulo { display: block; font-weight: 500; margin-bottom: 6px; }
@@ -52,7 +52,7 @@
 
 .ap__vazio { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 16px; text-align: center; color: var(--cor-texto-secundario); }
 .ap__vazio .icone { width: 32px; height: 32px; color: var(--cor-texto-secundario); stroke-width: 1.5; }
-.ap__vazio p { margin: 0; font-size: 15px; }
+.ap__vazio p { margin: 0; font-size: var(--texto-corpo); }
 
 @media (max-width: 1180px) {
   .ap { grid-template-columns: minmax(0, 1fr); }
@@ -66,12 +66,12 @@
   .ap__tabela tr.ap__linha { padding: 12px 16px; border-bottom: 1px solid var(--cor-linha); }
   .ap__tabela td { height: auto; padding: 0; border: 0; }
   .ap__tabela td + td { margin-top: 4px; }
-  .ap__tabela td[data-rotulo]::before { content: attr(data-rotulo) " "; color: var(--cor-texto-secundario); font-size: 12px; font-family: var(--fonte-texto); }
+  .ap__tabela td[data-rotulo]::before { content: attr(data-rotulo) " "; color: var(--cor-texto-secundario); font-size: var(--texto-mini); font-family: var(--fonte-texto); }
   .ap__tabela td.col-num { text-align: left; }
   .ap__faixa td { padding: 8px 16px; }
   .ap__linha[aria-selected="true"] { background: var(--cor-papel-sombreado); box-shadow: inset 3px 0 0 var(--cor-tinta); }
   .ap__linha[aria-selected="true"] td, .ap__linha[aria-selected="true"] td:first-child { background: none; box-shadow: none; }
-  .ap__painel-valor { font-size: 24px; line-height: 32px; }
+  .ap__painel-valor { font-size: var(--texto-valor); line-height: 32px; }
 }
 
 @media (prefers-reduced-motion: reduce) { .ap__painel { transition: none; } }
