@@ -735,8 +735,10 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
             continue
         # Issue #714 (docs/adr/0006): a medicao so' vira recebida quando as notas VIGENTES cobrem o valor dela. Faturada
         # em mais de uma nota, com uma cancelada no RM (o vinculo e' desfeito), desfeita a' mao (gate Sol S1, PR #202)
-        # ou ainda nao ligada, a quitacao das que ficaram nao basta. A cobertura tolera a mesma diferenca pequena do
-        # titulo (R$ 1,00, #35), para a nota que difere da medicao por centavos continuar recebendo.
+        # ou ainda nao ligada, a quitacao das que ficaram nao basta. A cobertura e' exata, como na correcao de cadastro
+        # (`correcao_medicoes._ligar_nf`) e na carga do historico: a tolerancia de R$ 1,00 (#35) e' do pagamento do
+        # titulo, nao da nota que fatura a medicao. Soma o valor ATUAL de cada nota (o RM pode te-lo corrigido depois
+        # do vinculo, como na nota do PDF confirmada com outro valor), nao o congelado em `valor_alocado_centavos`.
         # issue #589: a execucao que absorveu reajuste negativo e' coberta pelo valor do par (o da nota)
         valor = medicoes.valor_do_par(conn, m["id"], m["valor"])
         if valor is None:
@@ -744,7 +746,7 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
             if conn.execute("SELECT 1 FROM nf_alocacoes WHERE medicao_id=? AND desfeita_em IS NOT NULL "
                             "AND motivo_desfazer LIKE ?", (m["id"], MOTIVO_A_MAO + "%")).fetchone():
                 continue
-        elif sum(x["valor_alocado_centavos"] for x in notas) < valor - tolerancia:
+        elif sum(x["valor_centavos"] for x in notas) < valor:
             continue
         # Recebida quando os TITULOS de CADA NF alocada estao quitados (cada um pelo seu valor liquido; ver
         # issue #251 abaixo). Comparar com o bruto da NF nunca fechava por causa das retencoes. NF sem titulo

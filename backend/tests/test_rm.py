@@ -1314,21 +1314,53 @@ def test_uma_nota_so_do_valor_da_medicao_continua_recebendo(conn, cid, tmp_path)
 
 @pytest.mark.parametrize("nota, recebe", [
     (1000.00, True),     # a nota cobre a medicao inteira
-    (999.99, True),      # 1 centavo a menos (centavo impar): dentro da diferenca pequena
-    (999.00, True),      # R$ 1,00 a menos: no limite
-    (998.99, False),     # R$ 1,01 a menos: as notas nao cobrem a medicao
+    (999.99, False),     # 1 centavo a menos (centavo impar): nao cobre
     (1000.01, True),     # nota acima da medicao cobre
 ])
-def test_cobertura_tolera_a_mesma_diferenca_pequena_do_titulo(conn, cid, tmp_path, nota, recebe):
-    """Issue #714: a cobertura do valor usa a tolerancia que o recebimento ja' tinha (R$ 1,00, #35), sem percentual."""
+def test_cobertura_do_valor_e_exata_e_a_tolerancia_continua_no_titulo(conn, cid, tmp_path, nota, recebe):
+    """Issue #714: a cobertura e' exata, como na correcao de cadastro e na carga do historico. A tolerancia de R$ 1,00
+    (#35) continua valendo onde ja' valia, no pagamento do titulo: o de R$ 920,00 pago com R$ 919,00 fecha."""
     mid = _medicao(conn, cid, 12, 1000_00)
     nfs = [_nf(100, nota)]
     sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
     if not _tem_nf(conn, mid):
         _ligar(conn, mid, 100)
-    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 100, 920.0, 920.0, 1,
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 100, 920.0, 919.0, 1,
                                                                              "2026-09-01T00:00:00-04:00")]))
     assert (r["recebimentos"], medicoes.detalhe(conn, mid)["estado"]) == ((1, "recebida") if recebe else (0, "protocolada"))
+
+
+def test_cobertura_usa_o_valor_atual_da_nota_e_nao_o_do_dia_do_vinculo(conn, cid, tmp_path):
+    """Issue #714 (segunda revisao): a nota entrou e foi ligada com R$ 1.500,01 e o RM a corrige para R$ 1.000,01 (a
+    nota do PDF confirmada com outro valor). O vinculo guarda o valor antigo; a cobertura olha o atual, e a medicao de
+    R$ 1.500,01 nao fecha com o titulo dessa nota quitado."""
+    mid = _medicao(conn, cid, 12, 1500_01)
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(100, 1500.01)], []))
+    assert _tem_nf(conn, mid)
+    paga = [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-01T00:00:00-04:00")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(100, 1000.01)], paga))
+    assert r["recebimentos"] == 0, r
+    n = medicoes.detalhe(conn, mid)["notas"][0]
+    assert (n["valor_alocado_centavos"], n["valor_centavos"]) == (1500_01, 1000_01)
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+
+
+def test_medicao_rateada_em_tres_notas_com_residuo_recebe_com_as_tres(conn, cid, tmp_path):
+    """Issue #714, rateio com residuo: R$ 1.000,00 em tres notas (333,34 + 333,33 + 333,33). Duas pagas nao cobrem;
+    com as tres, recebe na maior data de baixa, que aqui e' a da primeira nota e nao a da ultima ligada."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    nfs = [_nf(100, 333.34), _nf(101, 333.33), _nf(102, 333.33)]
+    baixas = [_baixa(1, 100, 306.67, 306.67, 1, "2026-09-20T00:00:00-04:00"),
+              _baixa(2, 101, 306.66, 306.66, 1, "2026-09-03T00:00:00-04:00"),
+              _baixa(3, 102, 306.66, 306.66, 1, "2026-09-05T00:00:00-04:00")]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    _ligar(conn, mid, 100, 101)
+    assert sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, baixas))["recebimentos"] == 0
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+    _ligar(conn, mid, 102)
+    assert sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, baixas))["recebimentos"] == 1
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-20")
 
 
 def test_cobertura_em_consorcio_conta_so_as_notas_da_coligada_do_contrato(conn, cid, tmp_path):
