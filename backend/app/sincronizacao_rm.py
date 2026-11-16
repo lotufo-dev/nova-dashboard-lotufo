@@ -34,7 +34,8 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
    sem centro cadastrado (consorcio, ja' isolada 1:1) mantem o antigo: exato unico -> 0.8
    `valor_exato`; proximos ate' 5% -> log, sem alocacao. Sem candidato -> so' reconciliacao.
    Alocar nao muda o estado de `protocolada`; em medicao nascida do espelho fecha `nota_emitida`
-   quando nao falta nota.
+   quando nao falta nota. A medicao recebida a' mao que ainda falta nota tambem e' candidata (issue #713):
+   a nota liga e o estado e a data do recebimento ficam.
 5. Recebimentos: medicao `protocolada` cujas NFs alocadas DA COLIGADA DA ENTIDADE DO CONTRATO
    cobrem o valor dela (issue #714) e ja' tem baixa (status 1, 3 ou 4) cobrindo o titulo vira
    `recebida`, com a maior data de baixa. Issue #35: titulo pago ate' R$ 1,00 a menos tambem fecha, com a diferenca auditada em
@@ -185,7 +186,8 @@ def alocar(conn, usuario_id, nota_id: int, medicao_id: int, origem: str, confian
         m = medicoes.detalhe(conn, medicao_id)
         if m is None:
             raise ValueError("Medição não encontrada")
-        # `aceita_recebida`: so' a correcao de cadastro, para a medicao paga cujo vinculo com a nota faltou
+        # `aceita_recebida`: a correcao de cadastro, para a medicao paga cujo vinculo com a nota faltou, e o casador
+        # do RM, para a recebida a' mao cuja nota chega depois (issue #713)
         if m["estado"] in ("cancelada", "desistida") or (m["estado"] == "recebida" and not aceita_recebida):
             raise ValueError(f"Medição em estado {m['estado']} não recebe NF")
         if conn.execute("SELECT 1 FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL",
@@ -395,12 +397,27 @@ def _recebido_da_nota(conn, nota_id: int) -> tuple[int, int, str | None]:
 # elas seria o cenario das 29 sugestoes de 2026-09-04 (backlog), com 422 alvos.
 COMPETENCIA_CORTE_RM = "2026-07"
 ESTADOS_CANDIDATOS = ("espelho_gerado", "espelho_enviado", "nota_emitida", "protocolada")
+_A_MAO = "recebidas a mao"      # chave do cache da rodada (as demais sao coligadas)
+
+
+def _recebidas_a_mao(conn, cache: dict | None) -> set[int]:
+    """Issue #713: as medicoes recebidas a' mao (`conciliacao.recebidas_a_mao`), lidas uma vez por rodada: o casador
+    nao muda o estado de nenhuma, entao a lista nao envelhece com as alocacoes."""
+    from app import conciliacao   # import local: conciliacao importa este modulo
+    if cache is None:
+        return conciliacao.recebidas_a_mao(conn)
+    if _A_MAO not in cache:
+        cache[_A_MAO] = conciliacao.recebidas_a_mao(conn)
+    return cache[_A_MAO]
 
 
 def _candidatas(conn, coligada: int, cache: dict | None = None) -> list[dict]:
     """Medicoes em andamento que ainda FALTAM nota: (a) dos contratos da entidade desta coligada; (b) para a
     coligada da Lotufo, tambem as de contratos de CONSORCIO cujo espelho espera nota da Lotufo (a NFS-e da
-    Lotufo ao orgao fica na coligada 1, centro 5.001.x, e o contrato e' do consorcio). Cada uma traz
+    Lotufo ao orgao fica na coligada 1, centro 5.001.x, e o contrato e' do consorcio). Issue #713 (docs/adr/0006):
+    entra tambem a medicao RECEBIDA A' MAO que ainda falta nota, pelas mesmas regras (a nota que chega depois do
+    registro do administrador liga a ela sem mudar o estado; solta, somaria no a receber um dinheiro que ja' entrou);
+    a recebida pelo RM ou pelo corte nao entra. Cada uma traz
     `esperadas` (valores das saidas do espelho sem nota; vazio sem espelho) e `espelho_enviado_em` (o dia do
     primeiro envio do espelho ao faturamento; None sem envio). Calculado uma vez por coligada por rodada
     (`cache`, limpo a cada alocacao)."""
@@ -413,12 +430,15 @@ def _candidatas(conn, coligada: int, cache: dict | None = None) -> list[dict]:
                COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
         FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
         JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
-        WHERE m.estado IN ({marcas})
+        WHERE (m.estado IN ({marcas}) OR m.estado='recebida')
           AND (m.valor_protocolado_origem='espelho' OR m.competencia >= ?)
           AND (e.coligada_rm=? OR EXISTS (SELECT 1 FROM espelho_medicoes em WHERE em.medicao_id=m.id))
         ORDER BY c.numero_instrumento, m.tipo, m.numero""", (*ESTADOS_CANDIDATOS, COMPETENCIA_CORTE_RM, coligada)).fetchall()
+    a_mao = _recebidas_a_mao(conn, cache)
     out = []
     for r in linhas:
+        if r["estado"] == "recebida" and r["id"] not in a_mao:
+            continue
         d = dict(r)
         # issue #589: o reajuste negativo absorvido pelo espelho da execucao nao tem nota propria (a nota e' a da
         # execucao, com o valor liquido): nao e' candidato, e a execucao casa pelo valor do par (execucao + reajuste)
@@ -588,13 +608,15 @@ def _casar(conn, nota_id: int, coligadas_com_centro: set, cache: dict | None = N
         return None
 
     def _aloca(mid, confianca, regra, irma=None):
-        alocar(conn, None, nota_id, mid, "detectado", confianca, regra)
+        # Issue #713: so' a recebida a' mao chega aqui como candidata; o vinculo nao muda o estado nem a data dela
+        alocar(conn, None, nota_id, mid, "detectado", confianca, regra, aceita_recebida=mid in recebidas)
         if irma is not None:
-            alocar(conn, None, irma, mid, "detectado", confianca, regra)
+            alocar(conn, None, irma, mid, "detectado", confianca, regra, aceita_recebida=mid in recebidas)
         cache.pop(nf["coligada"], None)
         return "alocada"
 
     candidatas = _candidatas(conn, nf["coligada"], cache)
+    recebidas = {m["id"] for m in candidatas if m["estado"] == "recebida"}
     alvo = _contrato_por_centro_custo(conn, nf["coligada"], nf["centro_custo"])
     # Bloco 3: saida esperada do espelho com o valor EXATO da NF -- a chave mais forte por valor (docs/adr/0005).
     # Com centro mapeado, dentro da obra; sem centro (NF Lotufo -> orgao em obra de consorcio,
