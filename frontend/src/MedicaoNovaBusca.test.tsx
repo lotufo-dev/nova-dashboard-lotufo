@@ -12,7 +12,7 @@ vi.mock("./PlanilhaCarta", () => ({
     <div data-nova-planilha data-tipo={tipo} data-numero={inicial?.numero ?? ""} data-competencia={inicial?.competencia ?? ""} />,
 }));
 
-const usuario = { id: 1, nome: "Leonardo Praeiro", email: "l@l.com", perfil: "admin" } as Usuario;
+const usuario = { id: 1, nome: "Admin Exemplo", email: "admin@exemplo.com.br", perfil: "admin" } as Usuario;
 
 function montar(busca: Record<string, string>) {
   api.mockImplementation(async (caminho: string) => caminho.includes("/cabecalho")

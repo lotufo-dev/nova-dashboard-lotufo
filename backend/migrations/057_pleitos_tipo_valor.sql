@@ -71,7 +71,7 @@ DROP TABLE pleitos;
 ALTER TABLE pleitos_nova RENAME TO pleitos;
 
 CREATE INDEX IF NOT EXISTS pleitos_contrato ON pleitos(contrato_id, tipo);
--- um oficio pode cobrir duas datas-base (5 Bairros, CT/234/LT/2026: SINAPI jan e SICRO mar)
+-- um oficio pode cobrir duas datas-base (obra com dois indices: SINAPI em janeiro e SICRO em marco)
 CREATE UNIQUE INDEX IF NOT EXISTS pleitos_cadastro
     ON pleitos(contrato_id, tipo, numero_oficio, COALESCE(data_base_mes, '')) WHERE origem = 'cadastro';
 CREATE TRIGGER IF NOT EXISTS reajuste_previsoes_fonte_do_contrato BEFORE INSERT ON reajuste_previsoes
