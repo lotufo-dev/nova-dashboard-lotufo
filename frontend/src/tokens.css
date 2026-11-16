@@ -4,8 +4,8 @@
    casca escura (nunca situacao nem acao); quatro situacoes com tom e forma; Archivo no texto e nos numeros, titulos
    condensados; cantos retos, regua de tinta e sombra dura nos paineis. Modo unico claro.
 
-   Este arquivo tem tres partes: (1) as variaveis da fundacao, com nome por papel; (2) o que ainda nao tem par na
-   fundacao (misturas e medidas do menu); (3) elementos e componentes. Cor, familia e tamanho de letra so' por var():
+   Este arquivo tem tres partes: (1) as variaveis da fundacao, com nome por papel; (2) as medidas derivadas que a
+   fundacao nao traz (menu recolhido, faixas de aviso); (3) elementos, pecas de base e componentes. Cor, familia e tamanho de letra so' por var():
    o teste literais.test.ts barra o literal fora dos blocos :root. Se faltar um tom, ele nasce aqui.
    --------------------------------------------------------------------------- */
 
@@ -230,26 +230,28 @@
   color-scheme: light;
 }
 
-/* ============================================================================ (2) SEM PAR NA FUNDACAO
-   Os apelidos antigos sairam na etapa 1b (#719): os CSS usam os nomes da fundacao. Ficam aqui so' o que nao e' apelido:
-   misturas de tons da fundacao que a fundacao nao tem (contorno de caixa de situacao, vermelho do botao destrutivo no
-   passar o mouse) e as medidas do menu e da pagina, que mudam com a casca nova (1c) e com a disposicao (etapa 2). */
+/* ============================================================================ (2) DERIVADAS
+   Medidas que a fundacao nao traz, todas derivadas das variaveis dela (etapa 1c, #720). O contorno das caixas de
+   situacao e' o tom de texto da propria situacao, em fio fino; as misturas antigas de contorno e o vermelho escurecido
+   do botao destrutivo sairam. */
 :root {
-  /* vermelho do destrutivo no passar o mouse; contorno de caixa de situacao: o ponto no papel (40%; 60% no ambar) */
-  --acao-forte:    color-mix(in srgb, var(--situacao-critico-texto) 80%, var(--cor-tinta));
-  --acao-linha:    color-mix(in srgb, var(--situacao-critico-ponto) 40%, var(--cor-papel));
-  --atencao-linha: color-mix(in srgb, var(--situacao-breve-ponto) 60%, var(--cor-papel));
-  --ok-linha:      color-mix(in srgb, var(--situacao-feito-ponto) 40%, var(--cor-papel));
+  /* menu lateral (Casca.tsx): a fundacao so' tem o menu aberto (--largura-menu). Recolhido fica a coluna do icone;
+     no celular o menu aberto cobre a tela. */
+  --largura-menu-recolhido: 64px;
+  --menu-duracao: 200ms;
+  --menu-curva: cubic-bezier(.65, 0, .35, 1);
+  --menu-sombra-sobreposto: 8px 0 0 var(--cor-veu);
 
-  /* menu lateral (Casca.tsx): larguras e animacao continuam ate' a casca nova (etapa 1c) */
-  --trilho:        64px;
-  --trilho-largo:  240px;
-  --trilho-duracao: 200ms;
-  --trilho-curva:  cubic-bezier(.65, 0, .35, 1);
-  --trilho-sombra-sobreposto: 8px 0 24px var(--cor-veu);
-
-  /* D3: 1600 no monitor de 1920 da equipe; a largura da pagina muda so' quando a disposicao for refeita */
-  --conteudo:      1600px;
+  /* avisos (CaixaAviso.tsx): trava em bloco cheio, justificativa em moldura grossa de tinta */
+  --borda-trava: var(--borda-grossa) solid var(--situacao-critico-ponto);
+  --borda-justificativa: var(--borda-grossa) solid var(--cor-tinta);
+  --borda-situacao-breve: var(--borda-fina) solid var(--situacao-breve-texto);
+  --borda-situacao-critico: var(--borda-fina) solid var(--situacao-critico-texto);
+  --borda-situacao-feito: var(--borda-fina) solid var(--situacao-feito-texto);
+  --borda-erro: var(--borda-grossa) solid var(--situacao-critico-texto);   /* campo com erro de validacao */
+  --altura-area-texto: calc(var(--alvo-minimo) * 2.4);                     /* area de texto da justificativa: 96px */
+  --tamanho-icone: var(--tamanho-icone-conta);                             /* icone de traco em botao e em faixa */
+  --altura-controle-menor: 28px;                                           /* botao dentro de linha de tabela */
 }
 
 /* --------------------------------------------------------------- elementos */
@@ -282,8 +284,8 @@ h2, h3 { text-transform: var(--caixa-titulo); letter-spacing: var(--espacamento-
 ::selection { background: var(--cor-selecao); color: var(--cor-tinta); }
 
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--cor-foco);
-  outline-offset: 2px;
+  outline: var(--largura-foco) solid var(--cor-foco);
+  outline-offset: var(--afastamento-foco);
   border-radius: var(--raio-controle);
 }
 
@@ -298,55 +300,61 @@ h2, h3 { text-transform: var(--caixa-titulo); letter-spacing: var(--espacamento-
 }
 *::-webkit-scrollbar-thumb:hover { background: var(--cor-tinta); }
 
-/* Controles nus herdam o mundo: as telas da fase 1 (Contratos/Admin) ainda nao
-   usam as classes abaixo e mesmo assim entram no shell sem parecer outro app.
-   As classes .btn/.entrada apenas MODIFICAM o que ja vale aqui. */
+/* ------------------------------------------------------------ pecas de base: botao, campo e link (#720)
+   As pecas da fundacao: o elemento nu ja' e' a peca e as classes (.btn--primario, .entrada--num) so' a modificam.
+   Todas so' com variaveis, e com os estados de foco (contorno comum, acima), desabilitado e erro. */
 button, input, select, textarea { font: inherit; color: inherit; }
 
-/* `.btn` repete a base para que ANCORA tambem possa ser um botao (link de
-   download do CSV): o seletor de elemento sozinho nao alcanca <a>. */
+/* BOTAO. O padrao e' o secundario: borda grossa de tinta, como o painel. O principal (.btn--primario) e' tinta
+   cheia: o laranja da marca nao indica acao. `.btn` repete a base para que ANCORA tambem possa ser um botao (link
+   de download do CSV): o seletor de elemento sozinho nao alcanca <a>. */
 button, .btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  height: 32px; padding: 0 12px;
-  border: 1px solid var(--cor-borda-controle);
+  display: inline-flex; align-items: center; gap: var(--espaco-pp);
+  height: var(--alvo-minimo); padding: 0 var(--espaco-m);
+  border: var(--borda-painel);
   border-radius: var(--raio-controle);
   background: var(--cor-superficie);
   color: var(--cor-tinta);
-  font-size: var(--texto-meta); font-weight: 500;
+  font-size: var(--texto-corpo); font-weight: var(--peso-forte); line-height: var(--entrelinha-justa);
   cursor: pointer;
-  /* controle nao tem sombra (nivel 2, D1): a borda `--linha-forte` ja' separa do cartao */
   transition: background .12s ease, border-color .12s ease;
 }
-button:hover:not(:disabled), .btn:hover:not(:disabled) { background: var(--cor-papel-sombreado); border-color: var(--cor-tinta); color: var(--cor-tinta); }
+button:hover:not(:disabled), .btn:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
 button:active:not(:disabled), .btn:active:not(:disabled) { background: var(--cor-papel-escuro); box-shadow: none; }
+/* Desabilitado: sai a tinta e fica o papel escuro, com o texto apagado. O fundo vem em :where() para o botao sem
+   moldura (item de menu, nome clicavel) continuar sem fundo: a classe dele vence. */
+:where(button, .btn):disabled { background: var(--cor-papel-escuro); border-color: var(--cor-papel-escuro); }
 button:disabled, .btn:disabled { color: var(--cor-texto-terciario); cursor: not-allowed; box-shadow: none; }
 
+/* CAMPO: borda fina na cor de controle, cantos retos; o foco usa o contorno comum. */
 input, select, textarea {
-  height: 32px; padding: 0 10px;
-  /* sem sombra: e' o contorno (#CBD5E1 da identidade) que localiza o campo */
-  border: 1px solid var(--cor-borda-controle);
+  height: var(--alvo-minimo); padding: 0 var(--espaco-p);
+  border: var(--borda-campo);
   border-radius: var(--raio-controle);
   background: var(--cor-superficie);
-  font-size: var(--texto-meta);
+  font-size: var(--texto-corpo);
   transition: border-color .12s ease;
 }
-/* textarea sai da altura fixa de 32px: com ela o `rows` era ignorado e a carta do protocolo
-   aparecia com uma linha e meia. */
-textarea { height: auto; padding: 8px 10px; line-height: 1.55; resize: vertical; max-width: 78ch; }
-/* Medida da prosa na BASE (DESIGN.md › Typography, 78ch), e nao classe a classe: com a pagina de
-   1600px o historico do contrato e a carta passavam de 200 caracteres por linha. O paragrafo que
-   E' o estado vazio (`p.vazio`) fica de fora: ele centraliza na largura toda do cartao. */
+/* caixa de marcar e de opcao: o tamanho do proprio controle, sem a altura do campo de texto */
+input[type="checkbox"], input[type="radio"] { height: auto; padding: 0; accent-color: var(--cor-tinta); }
+/* textarea sai da altura fixa: com ela o `rows` era ignorado e a carta do protocolo aparecia com uma linha e meia. */
+textarea { height: auto; padding: var(--espaco-pp) var(--espaco-p); line-height: var(--entrelinha); resize: vertical; max-width: 78ch; }
+/* Medida da prosa na BASE (78ch), e nao classe a classe. O paragrafo que E' o estado vazio (`p.vazio`) fica de
+   fora: ele centraliza na largura toda do cartao. */
 p, dd { max-width: 78ch; }
 p.vazio { max-width: none; }
-/* hover do campo escurece o contorno */
-input:hover, select:hover, textarea:hover { border-color: var(--cor-texto-secundario); }
-input:focus-visible, select:focus-visible, textarea:focus-visible {
-  border-color: var(--cor-tinta); outline-offset: 1px;
-}
+input:hover, select:hover, textarea:hover { border-color: var(--cor-tinta); }
+input:focus-visible, select:focus-visible, textarea:focus-visible { border-color: var(--cor-tinta); }
 input::placeholder, textarea::placeholder { color: var(--cor-texto-terciario); }
+/* erro de validacao (aria-invalid, posto junto com a mensagem do ErroCampo): moldura grossa no critico */
+input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"] { border: var(--borda-erro); }
+/* desabilitado: papel sombreado e texto apagado; em :where() para o campo sem moldura continuar como e' */
+:where(input, select, textarea):disabled { background: var(--cor-papel-sombreado); border-color: var(--cor-linha); color: var(--cor-texto-terciario); cursor: not-allowed; }
 
-a { color: var(--cor-tinta); text-underline-offset: 3px; }
-a:hover { color: var(--cor-menu-realce); }
+/* LINK: a cor do texto em volta, sublinhado; o traco engrossa ao passar o mouse. Menu, aba, botao e linha
+   clicavel tiram o sublinhado na propria peca. */
+a { color: inherit; text-underline-offset: var(--afastamento-sublinhado); }
+a:hover { text-decoration-thickness: var(--borda-grossa); }
 
 /* formato literal ("AAAA-MM;valor") */
 code {
@@ -375,30 +383,32 @@ td.col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor
   font-family: var(--fonte-numero); font-stretch: var(--largura-numero);
 }
 
-/* Cor da informacao (redesenho de 11/2026; docs/identidade-visual.md, "Regra de cor da informacao"): texto preto por
-   padrao; a cor entra so' no dado que tem situacao. `.info--*` pinta o texto (numero, data, frase curta);
-   `.pilula-info--*` e' a pilula (fundo tingido + texto escuro); `.pilula-info__ponto` e' o ponto vivo. O que nao e'
-   urgente nao leva classe e fica preto. A legenda do topo direito e' o componente LegendaCor. */
+/* SITUACAO (#720): um sistema so', com as quatro situacoes da fundacao: feito, andamento, breve (vence em breve) e
+   critico. Toda situacao aparece com cor E forma: o glifo (--situacao-*-forma) diz a situacao sem depender da cor.
+   `.info--*` pinta um texto solto (numero, data, frase curta); o selo e o contador sao as pecas Selo.tsx e
+   Contador.tsx; a legenda e' LegendaCor.tsx. O que nao tem situacao nao leva classe e fica em tinta. */
 .info--feito { color: var(--situacao-feito-texto); }
 .info--andamento { color: var(--situacao-andamento-texto); }
 .info--breve { color: var(--situacao-breve-texto); }
 .info--critico { color: var(--situacao-critico-texto); }
-.pilula-info {
-  display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px;
-  border-radius: var(--raio-selo); font-size: var(--texto-meta); line-height: 20px; font-weight: 600; white-space: nowrap;
+.glifo { display: inline-block; flex: none; width: var(--tamanho-glifo); height: var(--tamanho-glifo); background: center / contain no-repeat; }
+.glifo--feito { background-image: var(--situacao-feito-forma); }
+.glifo--andamento { background-image: var(--situacao-andamento-forma); }
+.glifo--breve { background-image: var(--situacao-breve-forma); }
+.glifo--critico { background-image: var(--situacao-critico-forma); }
+.legenda-cor { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--espaco-mini) var(--espaco-m); margin: 0; padding: 0; list-style: none;
+  font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
+.legenda-cor li { display: inline-flex; align-items: center; gap: var(--espaco-mini); }
+/* CONTADOR: quantidade ao lado de um titulo. Neutro sem glifo; com situacao, traz o glifo dela. */
+.contador {
+  display: inline-flex; align-items: center; gap: var(--espaco-mini); padding: 0 var(--espaco-pp); min-height: var(--altura-contador);
+  border-radius: var(--raio-selo); background: var(--cor-contador-neutro); color: var(--cor-tinta);
+  font-size: var(--texto-meta); font-weight: var(--peso-forte); font-variant-numeric: tabular-nums; white-space: nowrap;
 }
-.pilula-info--feito { background: var(--situacao-feito-fundo); color: var(--situacao-feito-texto); }
-.pilula-info--andamento { background: var(--situacao-andamento-fundo); color: var(--situacao-andamento-texto); }
-.pilula-info--breve { background: var(--situacao-breve-fundo); color: var(--situacao-breve-texto); }
-.pilula-info--critico { background: var(--situacao-critico-fundo); color: var(--situacao-critico-texto); }
-.pilula-info__ponto { width: 8px; height: 8px; flex: none; border-radius: var(--raio-selo); background: currentColor; }
-.ponto--feito, .pilula-info--feito .pilula-info__ponto { background: var(--situacao-feito-ponto); }
-.ponto--andamento, .pilula-info--andamento .pilula-info__ponto { background: var(--situacao-andamento-ponto); }
-.ponto--breve, .pilula-info--breve .pilula-info__ponto { background: var(--situacao-breve-ponto); }
-.ponto--critico, .pilula-info--critico .pilula-info__ponto { background: var(--situacao-critico-ponto); }
-.legenda-cor { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; margin: 0; padding: 0; list-style: none;
-  font-size: var(--texto-mini); line-height: 16px; color: var(--cor-texto-secundario); }
-.legenda-cor li { display: inline-flex; align-items: center; gap: 6px; }
+.contador--feito { background: var(--situacao-feito-fundo); color: var(--situacao-feito-texto); }
+.contador--andamento { background: var(--situacao-andamento-fundo); color: var(--situacao-andamento-texto); }
+.contador--breve { background: var(--situacao-breve-fundo); color: var(--situacao-breve-texto); }
+.contador--critico { background: var(--situacao-critico-fundo); color: var(--situacao-critico-texto); }
 
 /* colunas de valor e data: algarismos de mesma largura em toda tabela */
 td, th { font-variant-numeric: tabular-nums; }
@@ -416,13 +426,13 @@ td, th { font-variant-numeric: tabular-nums; }
 }
 
 /* "Pular para o conteudo": fora da tela ate' receber o foco do teclado, e entao aparece por cima do
-   trilho, no canto, como um botao. O <main> alvo tem tabIndex -1 so' para receber esse foco. */
+   menu, no canto, como um botao. O <main> alvo tem tabIndex -1 so' para receber esse foco. */
 .pular {
   position: absolute; left: 16px; top: -48px; z-index: 50;
   padding: 8px 12px;
   background: var(--cor-superficie); color: var(--cor-tinta);
-  border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle);
-  font-weight: 600; text-decoration: none;
+  border: var(--borda-painel); border-radius: var(--raio-controle);
+  font-weight: var(--peso-forte); text-decoration: none;
 }
 .pular:focus-visible { top: 12px; }
 .principal:focus { outline: none; }
@@ -463,10 +473,11 @@ td, th { font-variant-numeric: tabular-nums; }
 
 /* --------------------------------------------------------------------- shell */
 
-/* Casca (Casca.tsx): o menu e' FIXO. Largo (padrao no computador) ocupa 240px do fluxo da pagina; recolhido, 64px.
-   No celular so' existe a folga de 64px: o menu largo abre POR CIMA da tela e a pagina nunca reflui. */
-.shell { min-height: 100vh; padding-left: var(--trilho); }
-.shell:has(.trilho[data-estado="largo"]) { padding-left: var(--trilho-largo); }
+/* Casca (Casca.tsx, #720): o menu lateral escuro e' FIXO a' esquerda e a pagina fica na coluna ao lado. Aberto (o
+   padrao no computador) ocupa --largura-menu do fluxo da pagina; recolhido, a coluna do icone. No celular so' existe
+   a folga do menu recolhido: o menu aberto abre POR CIMA da tela e a pagina nunca reflui. */
+.casca { min-height: 100vh; padding-left: var(--largura-menu-recolhido); }
+.casca:has(.menu[data-estado="largo"]) { padding-left: var(--largura-menu); }
 .coluna { min-width: 0; min-height: 100vh; display: flex; flex-direction: column; }
 
 /* Instalacao nao autorizada (issue #417, App.tsx): faixa vermelha presa ao pe da janela em toda tela. Fica no fluxo
@@ -485,11 +496,11 @@ td, th { font-variant-numeric: tabular-nums; }
    vazia nao pega clique (so' os cartoes pegam). */
 .aviso-respostas {
   position: fixed; right: 16px; bottom: 16px; z-index: 38;
-  width: min(360px, calc(100vw - var(--trilho) - 32px));
+  width: min(360px, calc(100vw - var(--largura-menu-recolhido) - 32px));
   display: flex; flex-direction: column; gap: 8px;
   pointer-events: none;
 }
-.shell:has(.faixa-instalacao) .aviso-respostas { bottom: 76px; }
+.casca:has(.faixa-instalacao) .aviso-respostas { bottom: 76px; }
 .aviso-resposta {
   pointer-events: auto;
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 8px; align-items: start;
@@ -509,117 +520,125 @@ td, th { font-variant-numeric: tabular-nums; }
   background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: var(--raio-selo);
   font-size: var(--texto-mini); color: var(--cor-texto-secundario);
 }
-.trilho {
+/* MENU LATERAL: o simbolo e o nome da marca em dois pesos, um item por tela e o botao de recolher no pe'. O item
+   ativo (aria-current="page") leva fundo realcado, texto claro e forte e o icone no laranja da marca. */
+.menu {
   position: fixed; top: 0; bottom: 0; left: 0; z-index: 40;
-  width: var(--trilho);
+  width: var(--largura-menu-recolhido);
   overflow-x: hidden; overflow-y: auto;
   background: var(--cor-menu); color: var(--cor-menu-texto);
-  transition: width var(--trilho-duracao) var(--trilho-curva);
+  transition: width var(--menu-duracao) var(--menu-curva);
 }
-.trilho[data-estado="largo"] { width: var(--trilho-largo); }
+.menu[data-estado="largo"] { width: var(--largura-menu); }
+/* dentro do menu escuro o contorno de foco e' o laranja da marca, por dentro do item (o menu corta o que sai dele) */
+.menu :focus-visible { outline: var(--largura-foco) solid var(--cor-menu-foco); outline-offset: calc(-1 * var(--afastamento-foco)); }
 /* bloco de largura fixa: o corte da animacao descobre os rotulos sem refluxo */
-.trilho__bloco { width: var(--trilho-largo); min-height: 100%; display: flex; flex-direction: column; padding: 16px 0 20px; }
-/* a celula do icone tem a largura do menu recolhido: o icone fica centrado nos dois estados */
-.trilho__celula { width: var(--trilho); flex: none; display: flex; align-items: center; justify-content: center; }
-.trilho__marca { display: flex; align-items: center; width: var(--trilho-largo); height: 40px; margin-bottom: 24px; flex: none; }
-/* o L da empresa: a haste herda a cor do texto do menu, o bloco e' o laranja da marca (Simbolo.tsx) */
-.trilho__simbolo { width: var(--simbolo-marca-largura); height: var(--simbolo-marca-altura); color: var(--cor-menu-texto); }
-.trilho__nome { font-size: var(--texto-titulo-sub); line-height: 20px; font-weight: 700; }
-/* item: pilula de 12px de folga nas laterais; a pilula tem a largura do menu menos a folga */
-.trilho__item, .trilho__alternar {
-  display: flex; align-items: center; flex: none;
-  width: calc(var(--trilho-largo) - 24px); height: 44px; margin: 0 12px 4px; padding: 0;
-  border: 0; border-radius: 12px; background: none;
-  color: var(--cor-menu-texto); text-decoration: none; font-size: var(--texto-corpo); font-weight: 500; text-align: left;
+.menu__bloco { width: var(--largura-menu); min-height: 100%; display: flex; flex-direction: column; padding: var(--espaco-m) var(--espaco-p); }
+/* marca: o L (a haste herda a cor do texto do menu, o bloco e' o laranja; Simbolo.tsx) e o nome escrito */
+.menu__marca {
+  display: flex; align-items: center; gap: var(--espaco-p); flex: none;
+  min-height: var(--alvo-minimo); padding: 0 var(--espaco-pp); margin-bottom: var(--espaco-g);
+  color: var(--cor-menu-texto);
+}
+.menu__simbolo { width: var(--simbolo-marca-largura); height: var(--simbolo-marca-altura); flex: none; }
+.menu__nome { font-family: var(--fonte-marca); font-weight: var(--peso-marca); font-size: var(--texto-marca); line-height: var(--entrelinha-justa); }
+.menu__nome-apoio { font-family: var(--fonte-marca-apoio); font-weight: var(--peso-normal); }
+.menu__lista { display: flex; flex-direction: column; gap: var(--espaco-mini); margin: 0; padding: 0; list-style: none; }
+.menu__item, .menu__recolher {
+  display: flex; align-items: center; gap: var(--espaco-p); flex: none;
+  width: 100%; height: auto; padding: var(--espaco-pp) var(--espaco-p);
+  border: 0; border-radius: var(--raio-controle); background: none;
+  color: var(--cor-menu-texto-secundario); text-decoration: none;
+  font-size: var(--texto-menu); font-weight: var(--peso-medio); line-height: var(--entrelinha); text-align: left;
   transition: background .15s ease;
 }
-.trilho__item:hover:not(:disabled), .trilho__alternar:hover:not(:disabled) { background: var(--cor-menu-realce); color: var(--cor-menu-texto); }
-.trilho__item[aria-current="page"] { background: var(--cor-menu-texto); color: var(--cor-tinta); font-weight: 600; }
-/* dentro do menu escuro o anel de foco e' o da casca (--cor-menu-foco); sobre a pilula clara, o foco do conteudo */
-.trilho__item:focus-visible, .trilho__alternar:focus-visible { outline: 2px solid var(--cor-menu-foco); outline-offset: -2px; border-radius: 12px; }
-.trilho__item[aria-current="page"]:focus-visible { outline-color: var(--cor-tinta); }
-.trilho__celula { width: calc(var(--trilho) - 24px); }
-.trilho__marca .trilho__celula { width: var(--trilho); }
-.trilho__icone { width: 20px; height: 20px; stroke-width: 1.8; }
-.trilho__alternar { margin-top: auto; }
-/* recolhido: a pilula e' o quadrado do icone, centrada com 12px de cada lado dentro dos 64px */
-.trilho[data-estado="recolhido"] .trilho__item, .trilho[data-estado="recolhido"] .trilho__alternar { width: calc(var(--trilho) - 24px); }
-.trilho__seta { transition: transform var(--trilho-duracao) var(--trilho-curva); }
-.trilho[data-estado="recolhido"] .trilho__seta { transform: rotate(180deg); }
-.trilho__rotulo { white-space: nowrap; }
+.menu__item:hover, .menu__recolher:hover:not(:disabled) { background: var(--cor-menu-realce); color: var(--cor-menu-texto); }
+.menu__item[aria-current="page"] { background: var(--cor-menu-realce); color: var(--cor-menu-texto); font-weight: var(--peso-forte); }
+.menu__item[aria-current="page"] .menu__icone { color: var(--cor-marca); }
+.menu__icone { width: var(--tamanho-icone-menu); height: var(--tamanho-icone-menu); stroke-width: 1.75; }
+.menu__recolher { margin-top: auto; }
+/* recolhido: o item e' o quadrado do icone, e a marca fica so' com o simbolo, centrado */
+.menu[data-estado="recolhido"] .menu__lista,
+.menu[data-estado="recolhido"] .menu__recolher { width: calc(var(--largura-menu-recolhido) - 2 * var(--espaco-p)); }
+.menu[data-estado="recolhido"] .menu__item,
+.menu[data-estado="recolhido"] .menu__recolher { padding-left: calc((var(--largura-menu-recolhido) - 2 * var(--espaco-p) - var(--tamanho-icone-menu)) / 2); padding-right: 0; }
+.menu[data-estado="recolhido"] .menu__marca { padding: 0 calc((var(--largura-menu-recolhido) - 2 * var(--espaco-p) - var(--simbolo-marca-largura)) / 2); }
+.menu__seta { transition: transform var(--menu-duracao) var(--menu-curva); }
+.menu[data-estado="recolhido"] .menu__seta { transform: rotate(180deg); }
+.menu__rotulo { white-space: nowrap; }
 /* recolhido: o nome sai da vista mas continua sendo o nome acessivel do link */
-.trilho[data-estado="recolhido"] .trilho__rotulo {
+.menu[data-estado="recolhido"] .menu__rotulo {
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
 }
 @media (prefers-reduced-motion: reduce) {
-  .trilho, .trilho__seta { transition: none; }
+  .menu, .menu__seta { transition: none; }
 }
 
-/* Barra superior branca (56px): o titulo da secao e a conta. A linha de baixo e' sombra, nao borda: numa pagina com
-   faixa de abas (Medicoes) a faixa, que vem depois, a cobre e as duas viram um bloco branco so', como no prototipo. */
-.barra {
-  height: 56px; flex: none;
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  padding: 0 32px;
-  background: var(--cor-superficie);
-  box-shadow: 0 1px 0 var(--cor-linha);
+/* TOPO (56px): o titulo da secao e a conta, sobre o papel, com um fio embaixo. O titulo tem a letra do texto (nao
+   a condensada dos titulos de bloco), seja ele o h1 da pagina ou um paragrafo. */
+.topo {
+  height: var(--altura-topo); flex: none;
+  display: flex; align-items: center; gap: var(--espaco-p);
+  padding: 0 var(--pagina-margem-lado);
+  background: var(--cor-papel); color: var(--cor-tinta);
+  border-bottom: var(--borda-linha);
 }
-.barra__titulo {
-  margin: 0; min-width: 0;
-  font-size: var(--texto-valor); line-height: 28px; font-weight: 600; letter-spacing: -.3px;
+.topo__titulo {
+  margin: 0 auto 0 0; min-width: 0;
+  font-family: var(--fonte-texto); font-stretch: var(--largura-texto);
+  font-size: var(--texto-topo); line-height: var(--entrelinha); font-weight: var(--peso-forte);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .conta { position: relative; flex: none; }
 .conta__botao {
-  height: 44px; padding: 0 8px; gap: 8px;
-  border: 0; background: none; color: var(--cor-texto-secundario);
-  font-size: var(--texto-meta); font-weight: 500;
+  height: auto; min-height: var(--alvo-minimo); padding: var(--espaco-mini) var(--espaco-pp); gap: var(--espaco-pp);
+  border: 0; background: none; color: inherit;
+  font-size: var(--texto-conta); font-weight: var(--peso-medio); white-space: nowrap;
 }
-.conta__botao:hover:not(:disabled), .conta__botao[aria-expanded="true"] { background: var(--cor-contador-neutro); color: var(--cor-tinta); }
-/* avatar de iniciais na tinta clara do indigo */
+.conta__botao:hover:not(:disabled), .conta__botao[aria-expanded="true"] { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
+/* avatar de iniciais: a unica forma redonda do sistema */
 .conta__avatar {
-  width: 32px; height: 32px; flex: none;
-  border-radius: var(--raio-selo);
-  background: var(--cor-papel-sombreado); color: var(--cor-tinta);
+  width: var(--tamanho-avatar); height: var(--tamanho-avatar); flex: none;
+  border-radius: var(--raio-avatar);
+  background: var(--cor-papel-escuro); color: var(--cor-tinta);
   display: grid; place-items: center;
-  font-size: var(--texto-mini); font-weight: 600;
+  font-size: var(--texto-avatar); font-weight: var(--peso-forte);
 }
 .conta__nome { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conta__seta { transform: rotate(90deg); }
+.conta__seta { width: var(--tamanho-icone-conta); height: var(--tamanho-icone-conta); transform: rotate(90deg); }
 .conta__menu {
-  position: absolute; right: 0; top: calc(100% + 6px); z-index: 45;
-  width: 220px; padding: 6px;
+  position: absolute; right: 0; top: calc(100% + var(--espaco-mini)); z-index: 45;
+  width: 220px; padding: var(--espaco-mini);
   background: var(--cor-superficie);
-  border: 1px solid var(--cor-linha); border-radius: var(--raio-canto);
+  border: var(--borda-painel); border-radius: var(--raio-canto);
   box-shadow: var(--sombra-painel);
 }
 .conta__menu[hidden] { display: none; }
 .conta__item {
-  display: flex; align-items: center; width: 100%; height: 36px; padding: 0 10px;
-  border: 0; border-radius: 6px; background: none;
-  color: var(--cor-texto-secundario); font-size: var(--texto-meta); font-weight: 400; text-decoration: none; text-align: left;
+  display: flex; align-items: center; width: 100%; height: var(--alvo-minimo); padding: 0 var(--espaco-p);
+  border: 0; border-radius: var(--raio-controle); background: none;
+  color: var(--cor-tinta); font-size: var(--texto-corpo); font-weight: var(--peso-normal); text-decoration: none; text-align: left;
 }
-.conta__item:hover:not(:disabled) { background: var(--cor-contador-neutro); color: var(--cor-tinta); }
-/* erro do proprio shell (falha ao encerrar a sessao): so' no desfecho raro em que o POST de logout falha */
-.conta__erro { margin: 6px 0 0; padding: 8px 10px; font-size: var(--texto-mini); }
+.conta__item:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
+/* erro do proprio topo (falha ao encerrar a sessao): so' no desfecho raro em que o POST de logout falha */
+.conta__erro { margin: var(--espaco-mini) 0 0; padding: var(--espaco-pp); font-size: var(--texto-meta); }
 @media (max-width: 767px) {
-  /* Rede de seguranca do celular: com o trilho de 64px sobram ~311px, e telas ainda nao redesenhadas (Carteira,
+  /* Rede de seguranca do celular: com o menu recolhido de 64px sobram ~311px, e telas ainda nao redesenhadas (Carteira,
      Documentos, a medicao) tem pecas mais largas que isso. O que passar rola DENTRO da area da tela, e a pagina
      (trilho e barra) nunca rola de lado. So' aqui: no desktop um overflow no <main> prenderia os menus suspensos. */
   .principal { overflow-x: auto; }
   /* menu largo no celular: cobre a tela (a pagina fica com a folga de 64px) */
-  .shell:has(.trilho[data-estado="largo"]) { padding-left: var(--trilho); }
-  .trilho[data-estado="largo"] { box-shadow: var(--trilho-sombra-sobreposto); }
+  .casca:has(.menu[data-estado="largo"]) { padding-left: var(--largura-menu-recolhido); }
+  .menu[data-estado="largo"] { box-shadow: var(--menu-sombra-sobreposto); }
   /* abas da obra e da Administracao: rolam na horizontal em vez de alargar a pagina */
   .abas { overflow-x: auto; scrollbar-width: none; }
   .abas > .aba { flex: none; white-space: nowrap; }
-  .barra { padding: 0 8px 0 16px; }
-  .barra__titulo { font-size: var(--texto-titulo-bloco); line-height: 24px; }
+  .topo { padding: 0 var(--espaco-pp) 0 var(--espaco-m); }
   /* no celular fica o avatar; o nome esta' no rotulo acessivel do botao */
   .conta__nome { display: none; }
   /* aviso de resposta do orgao (#654): mais perto da borda, e acima da faixa da instalacao, que aqui quebra em linhas */
-  .aviso-respostas { right: 8px; bottom: 8px; width: min(360px, calc(100vw - var(--trilho) - 16px)); }
-  .shell:has(.faixa-instalacao) .aviso-respostas { bottom: 96px; }
+  .aviso-respostas { right: 8px; bottom: 8px; width: min(360px, calc(100vw - var(--largura-menu-recolhido) - 16px)); }
+  .casca:has(.faixa-instalacao) .aviso-respostas { bottom: 96px; }
 }
 
 /* -------------------------------------------------------------- area central */
@@ -630,7 +649,7 @@ td, th { font-variant-numeric: tabular-nums; }
    em cinza frio embaixo. */
 .topbar {
   display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
-  width: 100%; max-width: var(--conteudo);
+  width: 100%; max-width: var(--pagina-largura-max);
   padding: 32px 32px 0;
 }
 /* Titulo longo (consorcio com o nome inteiro) corta com reticencias; o nome inteiro vai no `title` do h1. */
@@ -692,7 +711,7 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 .migalhas li[aria-current="page"] { color: var(--cor-tinta); }
 
 .pagina {
-  width: 100%; max-width: var(--conteudo);
+  width: 100%; max-width: var(--pagina-largura-max);
   padding: 24px 32px 40px;
   display: flex; flex-direction: column; gap: 24px;
 }
@@ -700,18 +719,18 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 
 /* ------------------------------------------------------------------- cartao */
 
+/* PAINEL: caixa com borda grossa de tinta e sombra dura. O titulo fica dentro, sem regua embaixo. */
 .cartao {
   background: var(--cor-superficie);
-  border: 1px solid var(--cor-linha);
+  border: var(--borda-painel);
   border-radius: var(--raio-canto);
   box-shadow: var(--sombra-painel);
 }
 .cartao__cabeca {
-  display: flex; align-items: center; gap: 12px;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--cor-linha);
+  display: flex; align-items: center; gap: var(--espaco-p);
+  padding: var(--espaco-m) 20px var(--espaco-p);
 }
-.cartao__titulo { margin: 0; font-size: var(--texto-titulo-sub); line-height: 24px; }
+.cartao__titulo { margin: 0; font-size: var(--texto-titulo-bloco); }
 .cartao__dica { font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 .cartao__acoes { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 /* faixa avulsa dentro do cartao (mensagem de erro acima da tabela) */
@@ -725,20 +744,19 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 
 /* ------------------------------------------------------------------ botoes */
 
-.btn { text-decoration: none; white-space: nowrap; }
+.btn { text-decoration: none; white-space: nowrap; justify-content: center; }
+/* PRINCIPAL: tinta cheia. O texto repete a cor no hover e no :active (a base pintaria de tinta sobre tinta). */
 .btn--primario { background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel); }
-/* Botao CHEIO repete a cor do texto no hover e no :active: a base `button:hover` pinta o texto de
-   `--texto` (escuro) e, sem isto, o rotulo ficava escuro sobre o indigo. */
 .btn--primario:hover:not(:disabled) { background: var(--cor-menu-realce); border-color: var(--cor-menu-realce); color: var(--cor-papel); }
 .btn--primario:active:not(:disabled) { background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel); }
-/* Desabilitado volta ao neutro: a base `.btn:disabled` so' apagava o texto, e o
-   indigo cheio com letra cinza continuava gritando "clique" — justamente no botao que
-   o checklist de protocolo trava ate' a pendencia ser assumida. */
-.btn--primario:disabled { background: var(--cor-papel-sombreado); border-color: var(--cor-borda-controle); color: var(--cor-texto-terciario); }
+/* DESTRUTIVO (apagar, revogar): o critico cheio; no passar o mouse, o tom do ponto */
 .btn--destrutivo { background: var(--situacao-critico-texto); border-color: var(--situacao-critico-texto); color: var(--cor-sobre-ponto); }
-.btn--destrutivo:hover:not(:disabled) { background: var(--acao-forte); border-color: var(--acao-forte); color: var(--cor-sobre-ponto); }
-.btn--destrutivo:active:not(:disabled) { background: var(--acao-forte); border-color: var(--acao-forte); color: var(--cor-sobre-ponto); }
-.btn--pequeno { height: 28px; padding: 0 10px; font-size: var(--texto-mini); }
+.btn--destrutivo:hover:not(:disabled), .btn--destrutivo:active:not(:disabled) { background: var(--situacao-critico-ponto); border-color: var(--situacao-critico-ponto); color: var(--cor-sobre-ponto); }
+/* Desabilitado volta ao papel escuro: tinta ou vermelho cheio com letra apagada continuaria dizendo "clique",
+   justamente no botao que a trava desliga. */
+.btn--primario:disabled, .btn--destrutivo:disabled { background: var(--cor-papel-escuro); border-color: var(--cor-papel-escuro); color: var(--cor-texto-terciario); }
+/* dentro de linha de tabela: uma linha de tabela vale uma linha de altura */
+.btn--pequeno { height: var(--altura-controle-menor); padding: 0 var(--espaco-p); font-size: var(--texto-meta); }
 .btn--voltar {
   /* botao ou link ("← Medicoes" e' um <a>, volta para a tela de onde se veio) */
   display: inline-flex; align-items: center; gap: 4px; text-decoration: none; border-radius: var(--raio-controle);
@@ -765,30 +783,28 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 .tabela-wrap--alta thead th { position: sticky; top: 0; z-index: 2; }
 .tabela-wrap--alta thead th.col-fixa, .tabela-wrap--alta thead th.col-acoes--fixa { z-index: 3; }
 
+/* TABELA: linhas separadas por fio, cabecalho discreto sobre uma regua de tinta, coluna de valor a' direita com
+   algarismos tabulares. Tabela larga rola dentro do `.tabela-wrap`, nunca a pagina. */
 .tabela { width: 100%; font-size: var(--texto-meta); }
-/* cabecalho em cinza frio 12px, sem caixa alta (identidade) */
 .tabela thead th {
-  padding: 10px 12px;
+  padding: var(--espaco-pp) var(--espaco-p);
   background: var(--cor-superficie);
-  border-bottom: 1px solid var(--cor-linha);
+  border-bottom: var(--regua-secao);
   color: var(--cor-texto-secundario);
-  font-size: var(--texto-mini); line-height: 16px; font-weight: 500;
-  text-align: left; white-space: nowrap;
+  font-size: var(--texto-meta); font-weight: var(--peso-normal);
+  text-align: left; vertical-align: bottom; white-space: nowrap;
 }
-/* 12px + 20px de linha = os 44px de altura de linha da identidade */
 .tabela tbody td {
-  padding: 12px 12px;
-  border-bottom: 1px solid var(--cor-linha);
-  color: var(--cor-texto-secundario);
+  padding: var(--espaco-p) var(--espaco-p);
+  border-bottom: var(--borda-linha);
+  color: var(--cor-tinta);
   vertical-align: middle;
 }
 .tabela th:first-child, .tabela td:first-child { padding-left: 20px; }
 .tabela th:last-child,  .tabela td:last-child  { padding-right: 20px; }
 .tabela tbody tr:last-child td { border-bottom: 0; }
 
-/* zebra por classe, nao por :nth-child: as linhas de painel expandido entram
-   no meio do tbody e embaralhariam a contagem. */
-.tabela tbody tr.par > td { background: var(--cor-papel-sombreado); }
+/* sem zebra (#720): as linhas se separam pelo fio; a linha clicavel escurece ao passar o mouse */
 .tabela tbody tr.linha { transition: background .12s ease; }
 .tabela tbody tr.linha:hover > td { background: var(--cor-papel-sombreado); }
 
@@ -814,10 +830,9 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
    dado): o `th` entra aqui junto do `td` para que o default do navegador
    (bold 700 + centralizado) nao mude a aparencia da linha. */
 .tabela tfoot td, .tabela tfoot th {
-  padding: 12px 12px;
-  border-top: 1px solid var(--cor-borda-controle);
-  background: var(--cor-papel-sombreado);
-  color: var(--cor-tinta); font-weight: 600;
+  padding: var(--espaco-p) var(--espaco-p);
+  border-top: var(--regua-secao);
+  color: var(--cor-tinta); font-weight: var(--peso-forte);
 }
 /* so no th: aplicar em `td` tambem venceria `.col-num` e desalinharia os numeros. */
 .tabela tfoot th { text-align: left; }
@@ -829,7 +844,7 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
    coluna de dinheiro ficava a esquerda e os valores a direita, em toda tabela. */
 .tabela thead th.col-num { text-align: right; }
 /* o valor em dinheiro na cor principal (F-61): `.tabela tbody td` (--texto-2) vencia `.dinheiro` sozinho */
-.dinheiro, .tabela tbody td.dinheiro { color: var(--cor-tinta); }
+.dinheiro, .tabela tbody td.dinheiro { color: var(--cor-tinta); font-weight: var(--peso-numero); }
 .forte { color: var(--cor-tinta); font-weight: 600; }
 
 /* uma linha de protocolo nunca quebra no meio: "08/04/2026 · of. 1042/2026"
@@ -863,7 +878,6 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
    `.tabela thead th` (`text-align: left`), e o rotulo ficava a' esquerda enquanto as
    celulas da coluna alinhavam a' direita. */
 .tabela thead th.col-acoes--fixa, .tabela thead th.col-fixa { background: var(--cor-superficie); text-align: right; }
-.tabela tbody tr.par > td.col-acoes--fixa, .tabela tbody tr.par > td.col-fixa { background: var(--cor-papel-sombreado); }
 .tabela tbody tr.linha:hover > td.col-acoes--fixa, .tabela tbody tr.linha:hover > td.col-fixa { background: var(--cor-papel-sombreado); }
 /* A linha so' aparece com coluna escondida (classe posta pelo React ao medir
    `scrollWidth > clientWidth`): numa tabela que cabe inteira ela seria uma divisoria
@@ -935,52 +949,31 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 
 /* --------------------------------------------------------- alertas do painel */
 
-/* Selo semantico: mesma gramatica do `.estado` (nunca so cor — o selo CARREGA o
-   rotulo do tipo). Tres niveis, e nada alem deles: vencido usa a cor de acao,
-   pendencia usa o chip ambar do `.aviso`, informativo fica neutro. */
-/* Pilula de situacao (identidade): fundo tingido claro + ponto colorido + texto em ardosia. A cor viva
-   do nivel mora em --selo-cor (ponto, icone e o contorno do --forte). */
+/* SELO (Selo.tsx): a situacao de uma linha (prazo, documento, medicao). Fundo claro da situacao, texto no tom dela e
+   o glifo antes do rotulo; sem situacao, neutro e sem glifo. */
 .selo {
-  --selo-cor: var(--cor-texto-terciario);
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 1px 10px;
-  border: 1px solid transparent;
+  display: inline-flex; align-items: center; gap: var(--espaco-mini);
+  padding: var(--espaco-fio) var(--espaco-pp);
   border-radius: var(--raio-selo);
   background: var(--cor-contador-neutro);
   color: var(--cor-tinta);
-  font-size: var(--texto-mini); line-height: 18px; font-weight: 500;
-  /* rotulo de tipo DESCONHECIDO (o servidor pode acrescentar um) nao pode
-     estourar a coluna fixa de 152px do `.alerta` e empurrar a mensagem. O corte
-     mora aqui; as RETICENCIAS moram no `.selo__texto` (ver abaixo). */
+  font-size: var(--texto-meta); font-weight: var(--peso-forte); font-variant-numeric: tabular-nums;
+  /* rotulo de tipo DESCONHECIDO (o servidor pode acrescentar um) nao pode estourar a coluna fixa do `.alerta` e
+     empurrar a mensagem. O corte mora aqui; as RETICENCIAS moram no `.selo__texto` (ver abaixo). */
   white-space: nowrap; overflow: hidden; max-width: 100%;
 }
-.selo--acao    { --selo-cor: var(--situacao-critico-ponto);    background: var(--situacao-critico-fundo); }
-.selo--atencao { --selo-cor: var(--situacao-breve-ponto); background: var(--situacao-breve-fundo); }
-/* Quarto nivel, aberto na T8 para o semaforo de certidao: "em dia" e' uma
-   afirmacao positiva que o painel precisa fazer (o verde ja existia declarado e
-   reservado em `--ok-fundo`/`--ok-linha`). Continua chip claro, como os outros —
-   nenhuma semantica ganha fundo solido. */
-.selo--ok      { --selo-cor: var(--situacao-feito-ponto);      background: var(--situacao-feito-fundo); }
+.selo--feito { background: var(--situacao-feito-fundo); color: var(--situacao-feito-texto); }
+.selo--andamento { background: var(--situacao-andamento-fundo); color: var(--situacao-andamento-texto); }
+.selo--breve { background: var(--situacao-breve-fundo); color: var(--situacao-breve-texto); }
+.selo--critico { background: var(--situacao-critico-fundo); color: var(--situacao-critico-texto); }
 
-/* Ponto DENTRO do chip. O semaforo de certidao junta as duas gramaticas da casa: o
-   chip carrega o rotulo ("Vence em 9 dias") e o ponto repete a semantica em forma —
-   quem nao distingue as cores le a mesma coisa, e ninguem depende so' da cor. Cor por
-   `currentColor`: o ponto acompanha o modificador do chip sem uma regra por nivel. */
-.selo__ponto { width: 6px; height: 6px; border-radius: var(--raio-selo); flex: none; background: var(--selo-cor, currentColor); }
-
-/* Reticencias DE VERDADE. `text-overflow` so' funciona em caixa de bloco, e o `.selo`
-   e' `inline-flex`: declarado la', ele nunca desenhava o "…" — o rotulo era cortado
-   no meio da letra e o corte parecia defeito de renderizacao. O texto vem para um
-   filho de bloco proprio, com o `min-width: 0` que destrava o encolhimento do item
-   flex (o padrao `auto` o impede de ficar menor que o conteudo, e ai' nao ha o que
-   cortar). O ponto e o icone ficam de fora, inteiros. */
+/* Reticencias DE VERDADE. `text-overflow` so' funciona em caixa de bloco, e o `.selo` e' `inline-flex`: o texto vem
+   para um filho de bloco proprio, com o `min-width: 0` que destrava o encolhimento do item flex. O glifo fica de
+   fora, inteiro. */
 .selo__texto { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A caixa do rotulo varia com a origem ("pleito não enviado", "Em dia"): a maiuscula inicial e'
    do selo, e o texto fica como o servidor manda. */
 .selo__texto::first-letter { text-transform: uppercase; }
-.selo > .icone { flex: none; color: var(--selo-cor); }
-/* Contorno cheio: nivel "Acao" dos avisos (D2). Divide o ambar com "Atencao" e se separa pela forma. */
-.selo--forte { border-color: var(--selo-cor); }
 
 /* Chip de VEREDITO na cabeca do cartao (T9: "Pronto para protocolar?"). O truncamento
    do `.selo` existe para a coluna fixa de 152px da lista de alertas; na cabeca do
@@ -1044,11 +1037,11 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
    os controles de 168px continuam cada um na sua linha (o flex so' encolhe o item
    que sozinho nao cabe). */
 .form-inline > .campo { min-width: 0; }
-.campo__rotulo { font-size: var(--texto-mini); font-weight: 500; color: var(--cor-texto-secundario); }
+.campo__rotulo { font-size: var(--texto-meta); font-weight: var(--peso-medio); color: var(--cor-tinta); }
 /* Medida de corpo: 78ch e' o mesmo teto do `.aviso`. Sem ele a
    nota de 12px do formulario de certidao corria ~170ch numa tela larga. */
 .campo__nota { font-size: var(--texto-mini); color: var(--cor-texto-secundario); max-width: 78ch; }
-.campo__erro { margin: 0; font-size: var(--texto-mini); color: var(--situacao-critico-texto); }
+.campo__erro { margin: 0; font-size: var(--texto-meta); font-weight: var(--peso-forte); color: var(--situacao-critico-texto); }
 .entrada--curta { width: 84px; max-width: 100%; }
 .entrada--media { width: 168px; max-width: 100%; }
 .entrada--num { text-align: right; font-variant-numeric: tabular-nums lining-nums; }
@@ -1081,24 +1074,29 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 .resultado { display: grid; gap: 8px; justify-items: start; max-width: 100%; }
 .resultado p { margin: 0; }
 
-/* Chip de atencao — tratamento UNICO da casa (fundo ambar claro + texto escuro,
-   nunca ambar solido: ambar e' so' de situacao). Serve tanto solto no rodape de um formulario quanto dentro do
-   painel de uma linha de tabela; ate a T9 havia um `.painel__aviso` quase igual
-   e as duas versoes ja divergiam em padding. */
+/* AVISO (CaixaAviso.tsx, #720): tres formas que se distinguem de relance, mais a caixa da justificativa.
+   - trava (.aviso--trava): bloco cheio no critico, texto claro e o sinal de proibido; o botao da acao fica desligado.
+   - confirmacao e atencao (.aviso): faixa clara do "vence em breve" com o triangulo; a acao segue, com o botao ativo.
+   - critico que nao trava (.aviso--critico): faixa clara do critico com o octogono (divergencia, vencido).
+   - justificativa (.justificativa): moldura grossa de tinta com o campo obrigatorio dentro, junto do botao que a pede. */
 .aviso {
-  display: inline-flex; align-items: flex-start; gap: 6px;
-  max-width: 78ch; margin: 0; padding: 4px 9px;
-  border: 1px solid var(--atencao-linha);
-  border-radius: var(--raio-controle);
+  display: flex; align-items: flex-start; gap: var(--espaco-pp);
+  max-width: none; margin: 0; padding: var(--espaco-p) var(--espaco-m);
+  border: var(--borda-situacao-breve);
+  border-radius: var(--raio-canto);
   background: var(--situacao-breve-fundo);
-  font-size: var(--texto-mini); color: var(--situacao-breve-texto);
+  color: var(--cor-tinta);
+  font-size: var(--texto-corpo); font-weight: var(--peso-forte); text-wrap: pretty;
 }
-.aviso .icone { margin-top: 2px; }
-/* Atencao leva o ponto (D2), com a mesma geometria do ponto do selo; o triangulo e' do critico (CaixaAviso.tsx) */
-.aviso__ponto { width: 6px; height: 6px; margin-top: 7px; flex: none; border-radius: var(--raio-selo); background: var(--situacao-breve-ponto); }
-/* Aviso de fato CRITICO (saldo negativo, travado): a mesma caixa na cor do critico, para o aviso e o
-   numero que ele explica falarem a mesma cor. Ambar fica para o que pede atencao e nao trava. */
-.aviso--critico { border-color: var(--acao-linha); background: var(--situacao-critico-fundo); color: var(--situacao-critico-texto); }
+.aviso + .aviso { margin-top: var(--espaco-pp); }
+/* dentro de uma linha (ao lado de um botao ou de um valor): do tamanho do texto */
+span.aviso { display: inline-flex; }
+.aviso > .glifo, .aviso > .icone { width: var(--tamanho-icone); height: var(--tamanho-icone); margin-top: var(--espaco-traco); }
+.aviso a { color: inherit; }
+.aviso--critico { border: var(--borda-situacao-critico); background: var(--situacao-critico-fundo); color: var(--situacao-critico-texto); }
+.aviso--trava { border: var(--borda-trava); background: var(--situacao-critico-ponto); color: var(--cor-sobre-ponto); }
+.justificativa { display: grid; gap: var(--espaco-mini); padding: var(--espaco-m); border: var(--borda-justificativa); background: var(--cor-papel-sombreado); }
+.justificativa textarea { width: 100%; max-width: none; min-height: var(--altura-area-texto); }
 
 /* linha expandida com o formulario da acao — substitui prompt()/confirm().
    Prefixada com `.tabela tbody` de proposito: sem isso `.tabela tbody td` (que e'
@@ -1177,8 +1175,8 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 /* provisorio (protocolado sem atestado): hachura CLARA por cima da barra, que fica
    com a cor da propria serie — sobre o indigo, ambar escuro seria invisivel;
    o ambar de sinal aparece no selo e no rotulo do eixo, sobre branco. */
-.g-hachura { stroke: var(--atencao-linha); stroke-width: 2; }
-.g-provisorio { stroke: var(--atencao-linha); stroke-width: 1.25; stroke-dasharray: 4 3; }
+.g-hachura { stroke: var(--situacao-breve-ponto); stroke-width: 2; }
+.g-provisorio { stroke: var(--situacao-breve-ponto); stroke-width: 1.25; stroke-dasharray: 4 3; }
 .g-selo { fill: var(--situacao-breve-fundo); stroke: var(--situacao-breve-texto); stroke-width: 1.25; }
 .g-selo__marca { stroke: var(--situacao-breve-texto); stroke-width: 1.6; stroke-linecap: round; fill: none; }
 
@@ -1198,9 +1196,9 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 .legenda__chave--anterior { background: repeating-linear-gradient(90deg, var(--cor-texto-secundario) 0 4px, transparent 4px 7px); }
 .legenda__chave--provisorio {
   background:
-    repeating-linear-gradient(45deg, var(--atencao-linha) 0 2px, transparent 2px 6px),
+    repeating-linear-gradient(45deg, var(--situacao-breve-ponto) 0 2px, transparent 2px 6px),
     var(--cor-tinta);
-  border: 1px dashed var(--atencao-linha);
+  border: 1px dashed var(--situacao-breve-texto);
 }
 
 /* ------------------------------------------------------------------ saldo */
@@ -1238,7 +1236,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 .erro {
   display: flex; align-items: flex-start; gap: 8px;
   margin: 0; padding: 10px 12px;
-  border: 1px solid var(--acao-linha);
+  border: var(--borda-situacao-critico);
   border-radius: var(--raio-controle);
   background: var(--situacao-critico-fundo);
   color: var(--situacao-critico-texto);
@@ -1313,11 +1311,10 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 /* Cabecalho de LINHA (F-59): mesmo respiro e mesma divisoria da celula. `.tabela tbody td` so' alcanca td, e a
    matriz de Documentos e o A receber tinham cada um um remendo (ou nenhum): o nome de uma empresa encostava no
    da proxima sem divisoria. */
-.tabela tbody th[scope="row"] { padding: 10px 12px; border-bottom: 1px solid var(--cor-linha);
+.tabela tbody th[scope="row"] { padding: var(--espaco-p) var(--espaco-p); border-bottom: var(--borda-linha);
   text-align: left; font-weight: 400; color: var(--cor-tinta); vertical-align: middle; }
 .tabela tbody th[scope="row"]:first-child { padding-left: 20px; }
 .tabela tbody tr:last-child > th[scope="row"] { border-bottom: 0; }
-.tabela tbody tr.par > th[scope="row"] { background: var(--cor-papel-sombreado); }
 /* Carteira › Resumo: os blocos pequenos (Terminam, Avisos da diretoria) lado a lado; a obra com problema numa
    linha (farol, obra, o primeiro motivo, "mais N") */
 .cartoes-lado { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
@@ -1575,7 +1572,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-enviar { display: inline-flex; align-items: center; gap: 6px; background: var(--cor-tinta); color: var(--cor-papel); border: 0;
   border-radius: 4px; padding: 6px 16px; font: inherit; font-weight: 600; cursor: pointer; }
 .ol-enviar:hover:not(:disabled), .ol-enviar:active:not(:disabled) { background: var(--cor-menu-realce); color: var(--cor-papel); }
-.ol-enviar:disabled { background: var(--cor-papel-sombreado); color: var(--cor-texto-terciario); cursor: default; }
+.ol-enviar:disabled { background: var(--cor-papel-escuro); color: var(--cor-texto-terciario); cursor: not-allowed; }
 .ol-botao { background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: 4px; padding: 6px 16px; font: inherit; cursor: pointer; }
 .ol-de { color: var(--cor-tinta); }
 .ol-icone { border: 0; background: none; color: var(--cor-texto-secundario); cursor: pointer; padding: 4px; border-radius: 4px;
@@ -1682,13 +1679,14 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
   .ol-sugestoes { width: 100%; }
   .ol-topo { flex-wrap: wrap; }
 }
-.ol-pendencias { padding: 12px; border-bottom: 1px solid var(--cor-linha); background: var(--situacao-breve-fundo); border-radius: 8px 8px 0 0; }
+.ol-pendencias { padding: var(--espaco-p) var(--espaco-m); border-bottom: var(--borda-situacao-breve); background: var(--situacao-breve-fundo); }
+.ol-janela > .justificativa { margin: var(--espaco-p); }
 /* Issue #213: aviso "ATENÇÃO" do envio com documento faltando (ConfirmarFaltas.tsx) */
 .confirmar-faltas { width: min(520px, calc(100vw - 32px)); max-height: 88vh; overflow: auto; display: grid; gap: 12px;
-  padding: 20px; background: var(--cor-superficie); border: 1px solid var(--atencao-linha); border-radius: var(--raio-canto);
+  padding: 20px; background: var(--cor-superficie); border: var(--borda-painel); border-radius: var(--raio-canto);
   box-shadow: var(--sombra-painel); color: var(--cor-tinta); }
 .confirmar-faltas p { margin: 0; }
-.confirmar-faltas__titulo { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--texto-titulo-sub); color: var(--situacao-breve-texto); }
+.confirmar-faltas__titulo { align-items: center; font-size: var(--texto-titulo-sub); }
 .confirmar-faltas__lista { margin: 8px 0; padding-left: 20px; display: grid; gap: 4px; overflow-wrap: anywhere; }
 .confirmar-faltas__pergunta { font-weight: 600; }
 .confirmar-faltas__acoes { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
@@ -2193,7 +2191,7 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .botao-largo { width: 100%; height: 40px; justify-content: center; font-size: var(--texto-meta); }
 .par-botoes { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); margin-top: 16px; }
 .par-botoes > .btn { height: 40px; justify-content: center; font-size: var(--texto-meta); }
-.feito-caixa { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 12px; border: 1px solid var(--ok-linha); border-radius: var(--raio-controle); background: var(--situacao-feito-fundo); color: var(--situacao-feito-texto); font-size: var(--texto-meta); }
+.feito-caixa { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 12px; border: var(--borda-situacao-feito); border-radius: var(--raio-controle); background: var(--situacao-feito-fundo); color: var(--situacao-feito-texto); font-size: var(--texto-meta); }
 .coluna-conta .cartao__corpo > .feito-caixa { margin-top: 12px; }
 .codigo { display: grid; gap: 6px; padding: 14px 16px; border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); background: var(--cor-papel-sombreado); margin-bottom: 12px; }
 .codigo__valor { font-family: var(--fonte-numero); font-size: var(--texto-valor); letter-spacing: .12em; color: var(--cor-tinta); }

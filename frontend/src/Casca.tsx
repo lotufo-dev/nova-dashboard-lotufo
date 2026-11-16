@@ -8,9 +8,9 @@ import { type Ir } from "./rota";
 import { Link } from "./Link";
 import Simbolo from "./Simbolo";
 
-// Casca de todas as telas logadas: o MENU LATERAL largo indigo a' esquerda (icone e nome em cada item, item ativo em
-// pilula branca, recolhivel para so' icones) e a BARRA SUPERIOR branca com o titulo da secao e a conta.
-// Redesenho de 11/2026 (#505): substitui o trilho de 64px que abria por cima ao passar o ponteiro.
+// Casca de todas as telas logadas (#720, a casca da fundacao): o MENU LATERAL escuro a' esquerda (o simbolo e o nome
+// da marca em dois pesos; icone e nome em cada item; o item ativo com fundo realcado e o icone no laranja da marca;
+// recolhivel para so' icones) e o TOPO sobre o papel, com o titulo da secao e a conta.
 //
 // Estado: `largo` ou `recolhido`, no atributo `data-estado` da <nav>. No computador a escolha da pessoa fica
 // guardada no navegador (padrao largo); no celular (< 768px) o menu nasce recolhido, abre POR CIMA da tela e fecha
@@ -67,31 +67,35 @@ export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemM
   }
 
   return (
-    <nav className="trilho" ref={caixa} aria-label="Navegação principal" data-estado={estado}
+    <nav className="menu" ref={caixa} aria-label="Navegação principal" data-estado={estado}
       // no celular o menu aberto cobre a tela: navegar o fecha
       onClick={ev => { if (celular() && (ev.target as HTMLElement).closest("a")) setEstado("recolhido"); }}>
-      <div className="trilho__bloco">
-        {/* Marca: identidade, nao destino ("Início" ja' e' o primeiro item). */}
-        <span className="trilho__marca" aria-hidden="true">
-          <span className="trilho__celula"><Simbolo className="trilho__simbolo" /></span>
-          <span className="trilho__rotulo trilho__nome">grupolotufo</span>
+      <div className="menu__bloco">
+        {/* Marca: identidade, nao destino ("Início" ja' e' o primeiro item). O nome em dois pesos, como na marca. */}
+        <span className="menu__marca" aria-hidden="true">
+          <Simbolo className="menu__simbolo" />
+          <span className="menu__rotulo menu__nome"><span className="menu__nome-apoio">grupo</span>lotufo</span>
         </span>
         {/* Links de verdade (<a href>): a URL e' o endereco da tela, e o navegador ganha "abrir em nova aba",
             copiar link e historico de graca. O item fica aceso tambem abaixo dele na hierarquia (navegacao.ts). */}
-        {menuDe(perfil).map(i => {
-          const Icone = ICONES[i];
-          return (
-            <Link key={i} className="trilho__item" para={rotaDoItem(i)} menu ir={ir} title={largo ? undefined : ROTULO[i]}
-              aria-current={marcado === i ? "page" : undefined}>
-              <span className="trilho__celula"><Icone className="icone trilho__icone" /></span>
-              <span className="trilho__rotulo">{ROTULO[i]}</span>
-            </Link>
-          );
-        })}
-        <button type="button" className="trilho__alternar" aria-expanded={largo}
+        <ul className="menu__lista">
+          {menuDe(perfil).map(i => {
+            const Icone = ICONES[i];
+            return (
+              <li key={i}>
+                <Link className="menu__item" para={rotaDoItem(i)} menu ir={ir} title={largo ? undefined : ROTULO[i]}
+                  aria-current={marcado === i ? "page" : undefined}>
+                  <Icone className="icone menu__icone" />
+                  <span className="menu__rotulo">{ROTULO[i]}</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+        <button type="button" className="menu__recolher" aria-expanded={largo}
           aria-label={largo ? "Recolher o menu" : "Expandir o menu"} onClick={alternar}>
-          <span className="trilho__celula"><IconeVoltar className="icone trilho__icone trilho__seta" /></span>
-          <span className="trilho__rotulo" aria-hidden="true">Recolher</span>
+          <IconeVoltar className="icone menu__icone menu__seta" />
+          <span className="menu__rotulo" aria-hidden="true">Recolher</span>
         </button>
       </div>
     </nav>
@@ -150,7 +154,7 @@ function Conta({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
         aria-label={`Conta de ${usuario.nome}`} onClick={() => setAberto(a => !a)}>
         <span className="conta__avatar" aria-hidden="true">{iniciais(usuario.nome)}</span>
         <span className="conta__nome" aria-hidden="true">{usuario.nome}</span>
-        <IconeSeta className="icone icone--p conta__seta" />
+        <IconeSeta className="icone conta__seta" />
       </button>
       <div className="conta__menu" id={id} hidden={!aberto}>
         <Link className="conta__item" para={{ tela: "conta" }} menu
@@ -164,13 +168,13 @@ function Conta({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
   );
 }
 
-/** Barra superior branca (56px): o titulo da SECAO a' esquerda e a conta a' direita. Nas telas de lista o titulo e'
+/** Topo (56px): o titulo da SECAO a' esquerda e a conta a' direita. Nas telas de lista o titulo e'
  *  o h1 da pagina; na obra, na medicao, no envio da nota e no Inicio a pagina tem o proprio h1 (o objeto, ou o "Bom
  *  dia"), e a barra so' diz a secao. */
 export function BarraSuperior({ titulo, ehH1, usuario, ir }: { titulo: string; ehH1: boolean; usuario: Usuario; ir: Ir }) {
   return (
-    <header className="barra">
-      {ehH1 ? <h1 className="barra__titulo">{titulo}</h1> : <p className="barra__titulo">{titulo}</p>}
+    <header className="topo">
+      {ehH1 ? <h1 className="topo__titulo">{titulo}</h1> : <p className="topo__titulo">{titulo}</p>}
       <Conta usuario={usuario} ir={ir} />
     </header>
   );
