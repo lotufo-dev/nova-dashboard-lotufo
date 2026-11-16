@@ -36,8 +36,8 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
    Alocar nao muda o estado de `protocolada`; em medicao nascida do espelho fecha `nota_emitida`
    quando nao falta nota.
 5. Recebimentos: medicao `protocolada` cujas NFs alocadas DA COLIGADA DA ENTIDADE DO CONTRATO
-   ja' tem baixa (status 1, 3 ou 4) cobrindo o titulo vira `recebida`, com a maior data de
-   baixa. Issue #35: titulo pago ate' R$ 1,00 a menos tambem fecha, com a diferenca auditada em
+   cobrem o valor dela (issue #714) e ja' tem baixa (status 1, 3 ou 4) cobrindo o titulo vira
+   `recebida`, com a maior data de baixa. Issue #35: titulo pago ate' R$ 1,00 a menos tambem fecha, com a diferenca auditada em
    `medicao.recebida_com_diferenca`. Parcial fica visivel no detalhe da medicao (recebido por NF), sem mudar de estado.
 
 Toda decisao (alocar, desfazer, mudar estado) e' auditada com usuario NULL = sistema.
@@ -701,14 +701,19 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
                               AND n.coligada=? AND n.codtmv IS NOT NULL AND n.codtmv NOT IN ({cobranca})""",
                         (m["id"], m["coligada_rm"], *diretoria.CODTMV_COBRANCA)).fetchone():
             continue
-        # Gate Sol S1 (PR #202): vinculo desfeito a' mao pode ter levado parte do faturamento (medicao em duas
-        # notas). Ai' so' fecha sozinha se as notas que ficaram cobrem o valor da medicao.
+        # Issue #714 (docs/adr/0006): a medicao so' vira recebida quando as notas VIGENTES cobrem o valor dela. Faturada
+        # em mais de uma nota, com uma cancelada no RM (o vinculo e' desfeito), desfeita a' mao (gate Sol S1, PR #202)
+        # ou ainda nao ligada, a quitacao das que ficaram nao basta. A cobertura tolera a mesma diferenca pequena do
+        # titulo (R$ 1,00, #35), para a nota que difere da medicao por centavos continuar recebendo.
         # issue #589: a execucao que absorveu reajuste negativo e' coberta pelo valor do par (o da nota)
         valor = medicoes.valor_do_par(conn, m["id"], m["valor"])
-        if valor is None or sum(x["valor_alocado_centavos"] for x in notas) < valor:
+        if valor is None:
+            # sem valor na medicao nao ha' o que cobrir: segue pelos titulos, salvo vinculo desfeito a' mao (S1)
             if conn.execute("SELECT 1 FROM nf_alocacoes WHERE medicao_id=? AND desfeita_em IS NOT NULL "
                             "AND motivo_desfazer LIKE ?", (m["id"], MOTIVO_A_MAO + "%")).fetchone():
                 continue
+        elif sum(x["valor_alocado_centavos"] for x in notas) < valor - tolerancia:
+            continue
         # Recebida quando os TITULOS de CADA NF alocada estao quitados (cada um pelo seu valor liquido; ver
         # issue #251 abaixo). Comparar com o bruto da NF nunca fechava por causa das retencoes. NF sem titulo
         # (devido=0: titulo ainda nao existe ou foi cancelado) segura a medicao -- nao da' para concluir
