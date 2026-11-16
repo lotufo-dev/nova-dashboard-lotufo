@@ -670,7 +670,7 @@ def test_a_receber_nota_do_rm_entra_na_lista_e_no_total(cenario):
 
 
 def test_titulo_baixado_sem_valor_fica_fora_do_recebido_e_vira_baixado_sem_caixa(cenario):
-    """Issue #583 (decisao do Leo de 08/11/2026, opcao 2): o titulo do RM com baixa total (status 1) e valor baixado
+    """Issue #583 (decisao do dono de 08/11/2026, opcao 2): o titulo do RM com baixa total (status 1) e valor baixado
     zero fica fora do recebido e do a receber, e o A receber da Diretoria mostra o total dele no ano, pelo valor
     original, na cota, numa linha propria ("baixado sem caixa"). Titulo com baixa de valor, aberto, cancelado ou
     baixado em outro ano nao entra; a medicao ligada continua sem fechar (regra da #574)."""

@@ -200,7 +200,7 @@ def conciliar(conn, usuario_id: int, ensaio: bool, antigas: tuple[list, list] | 
     return rel
 
 
-# --- corte (decisao do Leonardo em 2026-09-25) --------------------------------------------------------------
+# --- corte (decisao do dono em 2026-09-25) --------------------------------------------------------------
 # O faturado ate a data do QDOP conta como pago, menos o que o RM mostra em aberto. As medicoes do legado com
 # protocolo ate o corte que continuam `protocolada` fecham como `recebida` (sem data: ninguem sabe o dia), com o
 # motivo na auditoria. O que o RM ainda cobra dessas obras entra no "a receber" pelas notas
@@ -213,7 +213,7 @@ _MOTIVO_CORTE_RE = re.compile(r"corte de \d{2}/\d{2}/\d{4}:")
 
 
 def recebidas_a_mao(conn) -> set[int]:
-    """Issue #203 (decisao do Leo de 15/10/2026, opcao A): as medicoes que uma pessoa marcou como recebidas
+    """Issue #203 (decisao do dono de 15/10/2026, opcao A): as medicoes que uma pessoa marcou como recebidas
     (o "Registrar recebimento" da medicao), nem pelo RM nem pelo corte. O registro manual vale: a nota ligada a
     elas sai do "a receber" (`diretoria._notas_em_aberto`) e a Saude avisa enquanto o RM nao tiver a baixa
     (`sincronizacao_rm.reconciliacao`).

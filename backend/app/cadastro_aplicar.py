@@ -727,7 +727,7 @@ def _apostilamentos_de_reajuste(conn, usuario_id, contrato_id, c, rel, avisos) -
     _, ads = reajuste.termos_de_reajuste(conn, contrato_id, bases[0] if len(bases) == 1 else None)
 
     def cede_ao_aditivo(p, data_termo, base, ciclo, meus=()) -> str | None:
-        """Issue #453 (decisao do Leo, 08/11/2026): aditivo e apostilamento de reajuste do mesmo ciclo, atende o pleito
+        """Issue #453 (decisao do dono, 08/11/2026): aditivo e apostilamento de reajuste do mesmo ciclo, atende o pleito
         o de data de termo mais antiga (empate: o apostilamento). O aditivo que fica com o pleito `p`: o que ja' o tem
         (ou um elo corrigido da cadeia dele) com data anterior, ou, com `p` livre ou deste termo (`meus`), o de data
         anterior que o atenderia pela data dele (o passo dos aditivos o liga depois). Pleito de outro apostilamento

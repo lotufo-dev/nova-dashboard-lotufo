@@ -2,7 +2,7 @@
 faturado (nota emitida), protocolado, recebido. O total a receber (valor do protocolado) so' aparece com o cadastro
 liberando (`geral.yaml: diretoria.total_a_receber_liberado`), depois da conciliacao com a controladoria.
 
-Corte de 2026-09-25 (decisao do Leonardo): o faturado ate o QDOP de 22/09/2026 conta como pago, menos o que o RM
+Corte de 2026-09-25 (decisao do dono): o faturado ate o QDOP de 22/09/2026 conta como pago, menos o que o RM
 mostra em aberto. O "a receber" soma as medicoes protocoladas e as cobrancas do RM ainda nao pagas que nenhuma
 medicao em aberto representa (`_notas_em_aberto`), com a idade contada da emissao da nota.
 
@@ -227,7 +227,7 @@ def recebido_rm_no_mes(conn, mes: str) -> dict:
 
 
 def baixado_sem_caixa_por_mes(conn) -> dict[str, int]:
-    """Issue #583 (decisao do Leo de 08/11/2026, opcao 2): o titulo do RM com baixa total (status 1) e valor baixado
+    """Issue #583 (decisao do dono de 08/11/2026, opcao 2): o titulo do RM com baixa total (status 1) e valor baixado
     zero, pelo mes da baixa, na cota, pelo valor original. Ele nao entra no recebido (`rm_por_mes`: nao entrou caixa;
     pode ser glosa, compensacao ou encontro de contas) nem no a receber (`_notas_em_aberto`, #563); a Diretoria o
     mostra numa linha propria, para faturado - recebido - a receber fechar com a diferenca nomeada. A obra de cada nota
@@ -469,7 +469,7 @@ def _medido(ms: list[dict], mes: str, compl: dict[str, int] | None = None) -> in
 
 
 def _faturado_mes(conn, mes: str) -> dict:
-    """Faturado no mes (decisao do Leo de 16/10/2026, opcao b): as medicoes que receberam a nota no mes, pelo valor
+    """Faturado no mes (decisao do dono de 16/10/2026, opcao b): as medicoes que receberam a nota no mes, pelo valor
     atestado (senao o protocolado), na cota. E' a regra da coluna "Faturado" do QDOP (`qdop._faturado`), so'
     fatiada pelo mes da nota (`nota_emitida_em`, data da nota). So' leitura."""
     total, quantidade = 0, 0
@@ -571,7 +571,7 @@ def _carteira(conn, ms: list[dict], hoje: datetime.date, cache: dict, compl: dic
 
 def _curva_obra(conn, contrato_id: int, cache: dict) -> tuple[dict, str, dict, dict]:
     """A curva S da obra (issue #295), por competencia e em valor CHEIO: o previsto vigente; a linha de base ("anterior"
-    quando a obra tem repactuacao, com o previsto anterior a ela; senao "vigente", com o vigente: decisao do Leo de
+    quando a obra tem repactuacao, com o previsto anterior a ela; senao "vigente", com o vigente: decisao do dono de
     28/10/2026); e o medido de execucao nos estados que medem (`paineis._medido`). O vigente sai do mesmo `cache` de
     `_previsto`, para nao ler o cronograma duas vezes. #742: so' a execucao, de proposito: a curva e o desvio comparam
     o realizado com o cronograma, como `paineis.curva_s`; o projeto entra no medido e no saldo (docs/adr/0012)."""
@@ -589,7 +589,7 @@ def _curva_obra(conn, contrato_id: int, cache: dict) -> tuple[dict, str, dict, d
 def _curva_carteira(conn, hoje: datetime.date, cache: dict, compl: dict[int, dict[str, int]] | None = None) -> list[dict]:
     """Issue #296 (spec 2026-10-20 §4 item 5): a curva S da carteira, a soma das curvas das obras ativas nos ultimos
     12 meses, cada obra na sua cota (D8). A obra sem repactuacao entra na linha anterior com o previsto vigente
-    (decisao do Leo de 28/10/2026), para as duas linhas somarem as mesmas obras."""
+    (decisao do dono de 28/10/2026), para as duas linhas somarem as mesmas obras."""
     meses = [_mes(hoje, k) for k in range(-11, 1)]
     out = {m: {"competencia": m, "previsto_centavos": 0, "previsto_anterior_centavos": 0, "medido_centavos": 0} for m in meses}
     for c in _ativos(conn):
@@ -603,7 +603,7 @@ def _curva_carteira(conn, hoje: datetime.date, cache: dict, compl: dict[int, dic
 
 
 def _desvio(conn, contrato_id: int, hoje: datetime.date, cache: dict) -> dict:
-    """Issue #296, decisoes do Leo de 28/10/2026: desvio em p.p. = (medido acumulado - previsto acumulado) / valor
+    """Issue #296, decisoes do dono de 28/10/2026: desvio em p.p. = (medido acumulado - previsto acumulado) / valor
     vigente de execucao do contrato x 100 (#262: sem o aditivo de reajuste, a mesma base do medido), ate' a ultima competencia fechada (o mes anterior ao atual), contra a linha anterior a
     ultima repactuacao quando a obra tem uma, senao contra a vigente. Em valor cheio (a razao e' a mesma na cota, sem
     o arredondamento dela); uma casa decimal, meio para cima. Sem cronograma ou sem valor vigente, None."""

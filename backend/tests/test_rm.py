@@ -333,7 +333,7 @@ def _eventos_diferenca(conn, mid) -> list[dict]:
     (779.04, False),   # R$ 144,96 a menos
 ])
 def test_tolerancia_de_recebimento_ate_um_real(conn, cid, tmp_path, pago, recebe):
-    """Issue #35 (decisao do Leo, 19/10/2026): titulo pago ate' R$ 1,00 abaixo do devido fecha a medicao como
+    """Issue #35 (decisao do dono, 19/10/2026): titulo pago ate' R$ 1,00 abaixo do devido fecha a medicao como
     recebida; acima disso fica aberta para conferencia. Sem tolerancia percentual."""
     mid = _medicao(conn, cid, 12, 1000_00)
     cli = _simulador(tmp_path, [_nf(100, 1000.0)],
@@ -656,7 +656,7 @@ def _vinculo_antigo_fora_da_cobranca(conn, cid, tmp_path, baixas=()):
 
 def test_recebimento_nao_fecha_medicao_pelo_vinculo_automatico_fora_da_cobranca(conn, cid, tmp_path):
     """Issue #584: vinculo automatico antigo com nota fora da cobranca nao fecha a medicao como recebida sozinho;
-    fica para o Leo decidir pelo relato (o vinculo nao e' desfeito)."""
+    fica para o dono decidir pelo relato (o vinculo nao e' desfeito)."""
     m, nfs = _vinculo_antigo_fora_da_cobranca(conn, cid, tmp_path)
     r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 7, 500.0, 500.0, 1,
                                                                              "2026-09-01T00:00:00-04:00")]))

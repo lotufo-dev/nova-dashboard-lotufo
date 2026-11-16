@@ -1,4 +1,4 @@
-"""Avisos do motor de medicao (issue #288; spec 2026-10-20 §2.1 "Avisos gerados" e §2.1.1; E4; decisao do Leo de
+"""Avisos do motor de medicao (issue #288; spec 2026-10-20 §2.1 "Avisos gerados" e §2.1.1; E4; decisao do dono de
 08/11/2026). Uma fonte do registro unico de `app/avisos.py`, que a tela le sem saber de onde o aviso vem.
 
 - `planilha_nao_enviada` (operacao): obra ativa, nao paralisada, fora da MT-PAR (onde nao ha' o passo) e da obra

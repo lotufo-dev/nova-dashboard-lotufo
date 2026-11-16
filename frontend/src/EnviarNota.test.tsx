@@ -61,7 +61,7 @@ describe("Enviar a nota", () => {
     expect(screen.queryByRole("button", { name: /Juntar outra nota/ })).toBeNull();
   });
 
-  // issue #213 (decisão do Leo de 16/10/2026): documento faltando não bloqueia; o Enviar abre o aviso com a lista
+  // issue #213 (decisão do dono de 16/10/2026): documento faltando não bloqueia; o Enviar abre o aviso com a lista
   describe("aviso do que falta", () => {
     const FALTAM = ["FRC assinada não anexada", "Falta a certidão federal"];
     const enviados = () => api.mock.calls.filter(c => c[0] === "/api/notas/envio/3/enviar");

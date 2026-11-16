@@ -314,7 +314,7 @@ def test_boletim_recusado_com_revisao_registrada_e_nao_enviada(client_admin, amb
 
 
 def test_planilha_gerada_vai_ao_espelho_sem_o_envio_so_com_justificativa(client_admin, ambiente_api):
-    """Issue #460 (decisao do Leo de 07/11/2026): a planilha/carta gerada, sem envio registrado, segue ao espelho por
+    """Issue #460 (decisao do dono de 07/11/2026): a planilha/carta gerada, sem envio registrado, segue ao espelho por
     "seguir sem boletim" com justificativa, em todas as obras; a recusa de antes (PR #382, rodada 2) saiu."""
     from tests.test_api_medicoes import _arquivos_planilha
     cid = ambiente_api

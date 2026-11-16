@@ -529,7 +529,7 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                               f"{rot} vence em {s['dias']} dia{'s' if s['dias'] > 1 else ''}")
                 validades.append(s["certidao"]["validade"])
         if partes:
-            # D10 (Leonardo, 2026-09-26): certidao vencida ou faltando e' CRITICO, no aviso e na tela
+            # D10 (o dono, 2026-09-26): certidao vencida ou faltando e' CRITICO, no aviso e na tela
             # (a matriz de Documentos e o checklist ja' a mostram em vermelho, como pendencia que trava).
             # `data` (A8): a validade mais antiga entre as que venceram ou vencem (a que pesa primeiro).
             # A11 (mapa de 2026-09-28): o nome da empresa, para a tela de Avisos agrupar e rotular por ela

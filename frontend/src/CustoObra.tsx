@@ -7,7 +7,7 @@ import Rolagem from "./Rolagem";
 import { fmtCompetencia, fmtData, fmtHora } from "./tempo";
 
 // Aba Custo da Carteira (issue #491, piloto MT-388): por competencia, o medido por grupo da planilha ao lado do custo
-// lancado no RM (apontado nas tarefas do grupo + rateado do centro), com o acumulado da obra. Decisao do Leo de
+// lancado no RM (apontado nas tarefas do grupo + rateado do centro), com o acumulado da obra. Decisao do dono de
 // 06/11/2026: "custo lançado no RM", nunca margem nem lucro. As regras moram em `app/custo_obra.py`.
 
 type ObraCusto = { contrato_id: number; obra: string };

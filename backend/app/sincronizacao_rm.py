@@ -755,7 +755,7 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
         if not notas:
             continue
         # Issue #584: vinculo automatico antigo com nota de tipo fora da cobranca ao orgao (2.2.15, 2.2.10) nao fecha
-        # a medicao sozinho; fica no relato `vinculos_fora_da_cobranca` para o Leo decidir.
+        # a medicao sozinho; fica no relato `vinculos_fora_da_cobranca` para o dono decidir.
         if conn.execute(f"""SELECT 1 FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
                             WHERE a.medicao_id=? AND a.desfeita_em IS NULL AND a.origem='detectado'
                               AND n.coligada=? AND n.codtmv IS NOT NULL AND n.codtmv NOT IN ({cobranca})""",
@@ -787,7 +787,7 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
         # num titulo nao quitam outro titulo aberto da mesma nota. Falta zero ja' implica recebido >= devido.
         faltas = [(x, _falta_por_titulo(conn, x["nota_id"])) for x in notas]
         if not all(f == 0 for _, f in faltas):
-            # Issue #35 (decisao do Leo, 19/10/2026): medicao paga ate' R$ 1,00 abaixo, SOMANDO a falta de
+            # Issue #35 (decisao do dono, 19/10/2026): medicao paga ate' R$ 1,00 abaixo, SOMANDO a falta de
             # todas as notas dela, fecha como recebida; sem percentual. A falta e' contada titulo a titulo
             # (juros num titulo nao cobrem outro) e todo titulo precisa de baixa. A diferenca vai para a
             # auditoria como evento proprio.
@@ -810,7 +810,7 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
 def vinculos_fora_da_cobranca(conn) -> list[dict]:
     """Issue #584: vinculos automaticos vigentes (origem `detectado`) cuja nota tem tipo de movimento do RM fora de
     `diretoria.CODTMV_COBRANCA` (os mesmos que `_recebimentos` nao fecha sozinho; nota sem tipo nao veio do RM).
-    So' le: o Leo decide cada um (correcao e' evento novo)."""
+    So' le: o dono decide cada um (correcao e' evento novo)."""
     from app import diretoria   # import local: diretoria importa este modulo
     cobranca = ",".join("?" * len(diretoria.CODTMV_COBRANCA))
     return [dict(r) for r in conn.execute(f"""
