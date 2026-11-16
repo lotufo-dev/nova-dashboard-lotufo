@@ -33,7 +33,9 @@ Os termos (pedido, aprovado, faturado, medido, cota, valor cheio, vínculo) est�
 - **Nada financeiro se apaga.** A auditoria só acrescenta e grava quem fez; sem usuário, "pelo sistema".
 - **Fontes de valor.** O documento assinado manda; a nota fiscal desempata; a planilha é insumo.
 - **Vínculo nota ↔ medição** segue a força da prova (`docs/adr/0005`): o documento antes do valor; valor só
-  exato, dentro da obra e com candidata única; nunca em carga de histórico nem em fechamento.
+  exato, dentro da obra, com medição candidata única; pela saída do espelho, só nota emitida depois do envio do
+  espelho e sem outra nota ativa de mesmo valor; nunca por campo preenchido por terceiros no RM, nem em carga de
+  histórico ou em fechamento.
 - **Recebimento** vem da baixa no RM; à mão, só o administrador, com motivo (`docs/adr/0006`).
 - **O servidor valida** a transição de estado e o valor; a tela só reflete.
 - Teste de dinheiro leva caso de centavo ímpar e de rateio com resíduo.

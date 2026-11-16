@@ -14,11 +14,14 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
 4. Casamento NF -> medicao (spec §4 e §7.1), do mais forte para o mais fraco, so' entre
    medicoes em andamento que ainda faltam nota e NAO sao legado (nascidas do espelho ou de
    competencia >= COMPETENCIA_CORTE_RM):
-   a. `CAMPOLIVRE1` no formato instituido "<instrumento> - <nº>[ <tipo>]": chave forte,
-      auto-aplica (origem `detectado`, confianca 1.0).
+   (Issue #708, docs/adr/0005: a chave do `CAMPOLIVRE1` saiu do casador; o campo continua guardado na nota.)
    b. valor EXATO de uma saida esperada do espelho vigente, unica entre as candidatas (na obra
       do centro de custo, ou na carteira inteira quando o centro nao mapeia: NF da Lotufo ao
-      orgao em obra de consorcio) -> auto-aplica `saida_espelho` (0.95).
+      orgao em obra de consorcio) -> auto-aplica `saida_espelho` (0.95). Duas travas (#708): a nota foi
+      emitida no dia do primeiro envio do espelho da medicao ao faturamento ou depois (nota mais antiga, ou
+      medicao sem envio registrado, nao liga a ela por valor nenhum); e nao ha' outra nota ativa, livre, do
+      mesmo valor e da mesma obra candidata a' mesma saida (havendo, nenhuma liga sozinha e as duas contam
+      como ambiguas na rodada).
    O CODCCUSTO da NF estreita as candidatas a' obra certa (o contrato com aquele centro,
    quando ha' exatamente um na coligada). COM esse alvo:
    c. valor exato unico dentro da obra -> auto-aplica `centro_custo_valor` (0.9).
@@ -40,10 +43,10 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
 Toda decisao (alocar, desfazer, mudar estado) e' auditada com usuario NULL = sistema.
 As linhas de NF/baixa nao entram na cadeia (espelho de outro sistema, ver migracao 012).
 """
+import datetime
 import itertools
 import json
 import logging
-import re
 import sqlite3
 import threading
 import time
@@ -68,32 +71,6 @@ PRAZO_RODADA_SEG = 30 * 60
 # Ultima rodada, para o health e para o carimbo de frescor das telas.
 ESTADO: dict = {"configurado": False, "ultima_sincronizacao": None, "ultimo_erro": None,
                 "em_andamento": False}
-
-# "IC 082/2025 - 12", "CT-271-LT-2026 - 12ª", "IC 082/2025 - 3 REAJ", "IC 082/2025 / 3 PROJ".
-# O instrumento e' tudo antes do separador " - " (ou " / "); o numero vem depois; o
-# sufixo opcional diz a serie (execucao e' o padrao).
-_CAMPO_LIVRE = re.compile(
-    r"^\s*(?P<instrumento>.+?)\s+[-–/]\s+(?:med(?:i[cç][aã]o)?\.?\s*)?(?P<numero>\d{1,3})\s*[ªa°º]?"
-    r"(?:\s+(?P<tipo>reaj\w*|proj\w*|exec\w*))?\s*$", re.IGNORECASE)
-_TIPO_POR_PREFIXO = {"reaj": "reajuste", "proj": "projeto", "exec": "execucao"}
-
-
-def _normalizar(texto: str) -> str:
-    return re.sub(r"\s+", " ", (texto or "").strip()).upper()
-
-
-def interpretar_campo_livre(texto) -> tuple[str, int, str] | None:
-    """'IC 082/2025 - 12 REAJ' -> ('IC 082/2025', 12, 'reajuste'); fora do formato -> None."""
-    if not texto:
-        return None
-    m = _CAMPO_LIVRE.match(str(texto))
-    if not m:
-        return None
-    tipo = "execucao"
-    if m.group("tipo"):
-        tipo = _TIPO_POR_PREFIXO[m.group("tipo")[:4].lower()]
-    return _normalizar(m.group("instrumento")), int(m.group("numero")), tipo
-
 
 # ------------------------------------------------------------------ upserts
 
@@ -424,8 +401,9 @@ def _candidatas(conn, coligada: int, cache: dict | None = None) -> list[dict]:
     """Medicoes em andamento que ainda FALTAM nota: (a) dos contratos da entidade desta coligada; (b) para a
     coligada da Lotufo, tambem as de contratos de CONSORCIO cujo espelho espera nota da Lotufo (a NFS-e da
     Lotufo ao orgao fica na coligada 1, centro 5.001.x, e o contrato e' do consorcio). Cada uma traz
-    `esperadas` (valores das saidas do espelho sem nota; vazio sem espelho). Calculado uma vez por coligada
-    por rodada (`cache`, limpo a cada alocacao)."""
+    `esperadas` (valores das saidas do espelho sem nota; vazio sem espelho) e `espelho_enviado_em` (o dia do
+    primeiro envio do espelho ao faturamento; None sem envio). Calculado uma vez por coligada por rodada
+    (`cache`, limpo a cada alocacao)."""
     if cache is not None and coligada in cache:
         return cache[coligada]
     from app import notas
@@ -449,6 +427,7 @@ def _candidatas(conn, coligada: int, cache: dict | None = None) -> list[dict]:
         d["valor"] = medicoes.valor_do_par(conn, d["id"], d["valor"])
         esp = notas.esperadas(conn, r["id"])
         d["esperadas"] = [e["valor"] for e in esp if e["nota_id"] is None]
+        d["espelho_enviado_em"] = _dia_do_envio_do_espelho(conn, r["id"])
         if esp and notas.coligada_esperada(conn, r["id"]) == coligada:
             # lado da Lotufo: entra enquanto alguma saida esperada estiver sem nota
             if not d["esperadas"]:
@@ -489,23 +468,39 @@ def _contrato_por_centro_custo(conn, coligada: int, centro_custo) -> int | None:
     return achados[0] if len(achados) == 1 else None
 
 
-def _por_campo_livre(conn, nf) -> int | None:
-    """Medicao apontada pelo CAMPOLIVRE1, so' entre contratos da entidade DESTA coligada
-    e so' quando ha' exatamente uma (instrumento repetido entre entidades nao casa
-    sozinho -- gate Sol da fase 5)."""
-    chave = interpretar_campo_livre(nf["campo_livre1"])
-    if chave is None:
+def _dia_do_envio_do_espelho(conn, medicao_id: int) -> str | None:
+    """Issue #708 (docs/adr/0005): o dia, em Cuiaba, do PRIMEIRO envio do espelho desta medicao ao faturamento. E' a
+    partir dele que o sistema pediu a nota: reenvio e versao nova do espelho nao empurram a data, porque a nota
+    emitida entre um envio e outro responde ao primeiro pedido. None quando nenhum espelho dela saiu pelo sistema."""
+    r = conn.execute("""SELECT MIN(v.enviado_em) FROM envio_medicoes en JOIN envios v ON v.id=en.envio_id
+                        WHERE en.medicao_id=? AND v.tipo='espelho'""", (medicao_id,)).fetchone()
+    if r is None or r[0] is None:
         return None
-    instrumento, numero, tipo = chave
-    achadas = [r["id"] for r in conn.execute("""
-            SELECT m.id, c.numero_instrumento FROM medicoes m
-            JOIN contratos c ON c.id=m.contrato_id
-            JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
-            WHERE e.coligada_rm=? AND m.numero=? AND m.tipo=?
-              AND m.estado IN ('espelho_gerado','espelho_enviado','nota_emitida','protocolada','nf_emitida')
-            ORDER BY m.id""", (nf["coligada"], numero, tipo))
-               if _normalizar(r["numero_instrumento"]) == instrumento]
-    return achadas[0] if len(achadas) == 1 else None
+    return tempo.para_local(datetime.datetime.fromisoformat(r[0])).date().isoformat()
+
+
+def _depois_do_espelho(emissao, m: dict) -> bool:
+    """A nota e' do dia do envio do espelho ou posterior. A emissao do RM e' so' o dia, entao a nota do mesmo dia do
+    envio vale; nota sem data de emissao legivel e medicao sem envio registrado nao tem como provar a ordem."""
+    return bool(emissao) and bool(m.get("espelho_enviado_em")) and emissao >= m["espelho_enviado_em"]
+
+
+def _nota_repetida(conn, nf, alvo, m: dict) -> bool:
+    """Issue #708 (docs/adr/0005): existe OUTRA nota que o casador tambem ligaria a esta saida -- ativa, de cobranca
+    ao orgao, livre (sem vinculo vigente nem vinculo desfeito a' mao), da mesma coligada, do mesmo valor, da mesma
+    obra (o centro de custo aponta o mesmo contrato, ou tambem nao aponta nenhum) e emitida depois do envio do
+    espelho. E' o caso da nota cancelada na pratica e reemitida, que o RM mantem ativa: nenhuma das duas liga
+    sozinha, e a pessoa decide pelo PDF. Nao depende da ordem em que as notas sao processadas."""
+    from app import diretoria   # import local: diretoria importa este modulo
+    outras = conn.execute("""
+        SELECT id, centro_custo, emissao, codtmv FROM notas_fiscais
+        WHERE coligada=? AND id<>? AND situacao='ativa' AND valor_centavos=?
+          AND NOT EXISTS (SELECT 1 FROM nf_alocacoes a WHERE a.nota_id=notas_fiscais.id AND a.desfeita_em IS NULL)
+          AND NOT """ + _SQL_DESFEITA_A_MAO.format(nota="notas_fiscais.id"),
+        (nf["coligada"], nf["id"], nf["valor_centavos"], MOTIVO_A_MAO + "%")).fetchall()
+    return any(r["codtmv"] in diretoria.CODTMV_COBRANCA
+               and _contrato_por_centro_custo(conn, nf["coligada"], r["centro_custo"]) == alvo
+               and _depois_do_espelho(r["emissao"], m) for r in outras)
 
 
 def _coligadas_com_centro(conn) -> set:
@@ -537,13 +532,13 @@ def _casar_soma_dia(conn, nf, candidatas) -> tuple[int, int] | None:
       basta ser unico entre os pares que contem esta NF: dois pares disjuntos podem fechar
       a mesma medicao, e ai' quem ganha dependeria de quem foi processado primeiro).
     - ELEGIBILIDADE: uma irma so' entra num par se NAO tiver destino proprio mais forte
-      (campo livre valido, ou valor que casa exato com uma medicao candidata) -- senao o
-      par a roubaria de um casamento individual que valeria mais."""
+      (valor que casa exato com uma medicao candidata) -- senao o par a roubaria de um
+      casamento individual que valeria mais."""
     from app import diretoria   # import local: diretoria importa este modulo
     if not nf["emissao"]:
         return None
     grupo = conn.execute("""
-        SELECT id, valor_centavos, campo_livre1, codtmv FROM notas_fiscais
+        SELECT id, valor_centavos, codtmv FROM notas_fiscais
         WHERE coligada=? AND centro_custo IS NOT NULL AND TRIM(centro_custo)=TRIM(?)
           AND emissao=? AND situacao='ativa'
           AND NOT EXISTS (SELECT 1 FROM nf_alocacoes a WHERE a.nota_id=notas_fiscais.id AND a.desfeita_em IS NULL)
@@ -558,8 +553,7 @@ def _casar_soma_dia(conn, nf, candidatas) -> tuple[int, int] | None:
             med_por_valor.setdefault(m["valor"], set()).add(m["id"])
 
     def elegivel(r) -> bool:
-        return (interpretar_campo_livre(r["campo_livre1"]) is None
-                and r["valor_centavos"] not in med_por_valor)
+        return r["valor_centavos"] not in med_por_valor
 
     if not elegivel(nf):
         return None
@@ -600,17 +594,25 @@ def _casar(conn, nota_id: int, coligadas_com_centro: set, cache: dict | None = N
         cache.pop(nf["coligada"], None)
         return "alocada"
 
-    mid = _por_campo_livre(conn, nf)
-    if mid is not None:
-        return _aloca(mid, 1.0, "campo_livre1")
     candidatas = _candidatas(conn, nf["coligada"], cache)
     alvo = _contrato_por_centro_custo(conn, nf["coligada"], nf["centro_custo"])
-    # Bloco 3: saida esperada do espelho com o valor EXATO da NF -- chave mais forte depois do campo
-    # livre. Com centro mapeado, dentro da obra; sem centro (NF Lotufo -> orgao em obra de consorcio,
+    # Bloco 3: saida esperada do espelho com o valor EXATO da NF -- a chave mais forte por valor (docs/adr/0005).
+    # Com centro mapeado, dentro da obra; sem centro (NF Lotufo -> orgao em obra de consorcio,
     # centro 5.001.x), na carteira inteira: o valor da cota e' praticamente unico.
     universo = [m for m in candidatas if m["contrato_id"] == alvo] if alvo is not None else candidatas
     por_saida = [m for m in universo if nf["valor_centavos"] in m["esperadas"]]
+    # Issue #708, trava de data: a saida so' vale para a nota emitida depois do envio do espelho. A medicao cuja
+    # saida a nota mais antiga "atenderia" tambem nao a recebe pelas regras mais fracas abaixo (o valor da saida
+    # unica e' o da medicao: sem isto a nota antiga ligaria do mesmo jeito, por `centro_custo_valor`).
+    antigas = {m["id"] for m in por_saida if not _depois_do_espelho(nf["emissao"], m)}
+    por_saida = [m for m in por_saida if m["id"] not in antigas]
+    candidatas = [m for m in candidatas if m["id"] not in antigas]
     if len(por_saida) == 1:
+        # Issue #708, trava de nota repetida: duas notas para a mesma saida, nenhuma liga sozinha.
+        if _nota_repetida(conn, nf, alvo, por_saida[0]):
+            log.info("NF %s/%s da coligada %s (R$ %.2f) repetida para a mesma saida do espelho: sem alocacao automatica",
+                     nf["numero"], nf["serie"] or "", nf["coligada"], nf["valor_centavos"] / 100)
+            return "ambigua"
         return _aloca(por_saida[0]["id"], 0.95, "saida_espelho")
     # Centro de custo estreita as candidatas a' obra certa antes do valor desempatar.
     if alvo is not None:
