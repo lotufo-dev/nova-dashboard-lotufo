@@ -22,6 +22,8 @@ Closes #
 
 ## Conferência
 
+<!-- Se a PR altera arquivo dos caminhos de .claude/rules/dinheiro.md, envio.md ou banco.md, a CI só passa com o
+     item da segunda revisão marcado ([x]) e com texto depois dos dois-pontos. Fora disso, o item fica como está. -->
 - [ ] Suíte verde: 
 - [ ] Revisão do código: 
 - [ ] Segunda revisão independente, por quem não escreveu o código (obrigatória quando a PR toca dinheiro, envio ou banco): quem revisou e o que achou: 
