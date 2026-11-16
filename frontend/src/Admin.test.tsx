@@ -1,3 +1,6 @@
+/// <reference types="node" />
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import Admin from "./Admin";
@@ -230,6 +233,15 @@ test("Saúde: 'Reenviar cópia do dono' pede o reenvio, relê a Saúde e confirm
   expect(await screen.findByText("Cópia do dono enviada por e-mail (2 e-mails).")).toBeTruthy();
   expect(api).toHaveBeenCalledWith("/api/admin/copia-dono/reenviar", expect.objectContaining({ method: "POST" }));
   await waitFor(() => expect(screen.queryByText(/Envio da cópia do dono: a última tentativa/)).toBeNull());
+});
+
+// Issue #515: a cópia do dono por e-mail mostra erro em português operacional, sem arquivo de configuração,
+// chave, variável de ambiente nem classe de exceção
+test("Saúde: a tela não traz código interno do envio da cópia do dono", () => {
+  const admin = readFileSync(join(process.cwd(), "src", "Admin.tsx"), "utf8");
+  const literais = admin.match(/"[^"\n]*"|`[^`\n]*`/g) ?? [];
+  const proibidos = /geral\.yaml|copia_dono\.|enviada_por|DASH_[A-Z_]+|TimeoutError|\bGraph\b/;
+  expect(literais.filter(l => proibidos.test(l))).toEqual([]);
 });
 
 test("Saúde: 'Reenviar cópia do dono' com reserva presa mostra a liberação da linha do 409", async () => {
