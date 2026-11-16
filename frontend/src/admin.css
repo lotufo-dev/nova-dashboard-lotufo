@@ -2,20 +2,20 @@
    Reconciliacao + Backup. So' o que falta na base (tokens.css), sempre com os tokens. */
 .situacoes { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); list-style: none; margin: 0; padding: 0; }
 .situacao { padding: 18px 20px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: baseline; }
-.situacao__ponto { width: 10px; height: 10px; border-radius: var(--raio-pilula); background: var(--ok-ponto); align-self: center; }
-.situacao--atencao .situacao__ponto { background: var(--atencao-ponto); }
-.situacao--acao .situacao__ponto { background: var(--acao-ponto); }
-.situacao--neutra .situacao__ponto { background: var(--texto-2); }
+.situacao__ponto { width: 10px; height: 10px; border-radius: var(--raio-selo); background: var(--situacao-feito-ponto); align-self: center; }
+.situacao--atencao .situacao__ponto { background: var(--situacao-breve-ponto); }
+.situacao--acao .situacao__ponto { background: var(--situacao-critico-ponto); }
+.situacao--neutra .situacao__ponto { background: var(--cor-texto-secundario); }
 .situacao__titulo { margin: 0; font-size: 15px; font-weight: 600; }
-.situacao__valor { grid-column: 2; font-family: var(--fonte-num); font-size: 16px; color: var(--texto-2); }
-.situacao__nota { grid-column: 2; font-size: 12.5px; color: var(--texto-2); }
-.situacao--acao .situacao__valor { color: var(--acao); }
-.situacao--atencao .situacao__valor { color: var(--atencao); }
+.situacao__valor { grid-column: 2; font-family: var(--fonte-numero); font-size: 16px; color: var(--cor-texto-secundario); }
+.situacao__nota { grid-column: 2; font-size: 12.5px; color: var(--cor-texto-secundario); }
+.situacao--acao .situacao__valor { color: var(--situacao-critico-texto); }
+.situacao--atencao .situacao__valor { color: var(--situacao-breve-texto); }
 .situacao__erro { white-space: normal; min-width: 32ch; }
 
 .acoes-saude { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
 .acoes-saude .btn--primario { height: 40px; padding: 0 20px; font-size: 14px; }
-.acoes-saude p { margin: 0; color: var(--texto-2); font-size: 13px; }
+.acoes-saude p { margin: 0; color: var(--cor-texto-secundario); font-size: 13px; }
 
 .saude-lado { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); align-items: start; }
 .pilha--curta { gap: 8px; }

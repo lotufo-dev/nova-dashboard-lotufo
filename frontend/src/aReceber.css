@@ -2,40 +2,40 @@
 /* Os numeros do alto: lado a lado enquanto o valor inteiro cabe; abaixo disso, um por linha. */
 .ar-numeros { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; list-style: none; margin: 0; padding: 0; }
 .ar-numero { position: relative; padding: 18px 20px; display: grid; gap: 4px; align-content: start; min-width: 0; }
-.ar-numero--destaque { border-color: var(--acento-linha); background: var(--acento-fundo); }
-.ar-numero__rotulo { font-size: 14px; color: var(--texto-2); }
-.ar-numero__valor { font-family: var(--fonte-num); font-variant-numeric: tabular-nums; font-size: 28px; line-height: 36px; font-weight: 500;
+.ar-numero--destaque { border-color: var(--cor-borda-controle); background: var(--cor-papel-sombreado); }
+.ar-numero__rotulo { font-size: 14px; color: var(--cor-texto-secundario); }
+.ar-numero__valor { font-family: var(--fonte-numero); font-variant-numeric: tabular-nums; font-size: 28px; line-height: 36px; font-weight: 500;
   letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 560px) { .ar-numero__valor { font-size: 21px; line-height: 28px; } }
 
 .ar-grafico { padding: 8px 20px 4px; }
 .ar-grafico svg { display: block; width: 100%; height: auto; overflow: visible; }
-.ar-grafico text { font-family: var(--fonte-num); font-size: 11px; fill: var(--texto-2); }
-.ar-grafico .g-mes { font-family: var(--fonte); font-size: 12px; }
-.ar-grafico .g-valor { fill: var(--texto); }
-.ar-grafico .g-mes--atual { fill: var(--acento); font-weight: 600; }
-.ar-grafico .g-grade { stroke: var(--linha-suave); }
-.ar-grafico .g-base { stroke: var(--linha); }
-.ar-grafico .b-recebido { fill: var(--ok-ponto); }
-.ar-grafico .g-atual { fill: var(--hover); }
+.ar-grafico text { font-family: var(--fonte-numero); font-size: 11px; fill: var(--cor-texto-secundario); }
+.ar-grafico .g-mes { font-family: var(--fonte-texto); font-size: 12px; }
+.ar-grafico .g-valor { fill: var(--cor-tinta); }
+.ar-grafico .g-mes--atual { fill: var(--cor-tinta); font-weight: 600; }
+.ar-grafico .g-grade { stroke: var(--cor-linha); }
+.ar-grafico .g-base { stroke: var(--cor-linha); }
+.ar-grafico .b-recebido { fill: var(--situacao-feito-ponto); }
+.ar-grafico .g-atual { fill: var(--cor-papel-sombreado); }
 .ar-grafico .g-alvo { fill: transparent; cursor: pointer; }
 .ar-grafico .g-grupo:focus { outline: none; }
-.ar-grafico .g-grupo:focus-visible .g-alvo, .ar-grafico .g-grupo.selecionado .g-alvo { stroke: var(--acento); stroke-width: 1.5; }
-.ar-grafico .g-grupo:hover .g-alvo { fill: var(--hover); fill-opacity: .5; }
-.ar-detalhe { margin: 0; padding: 10px 20px 14px; font-size: 13px; color: var(--texto-2); max-width: none; border-top: 1px solid var(--linha); }
-.ar-detalhe strong { color: var(--texto); font-weight: 500; }
-.ar-detalhe .dinheiro { font-family: var(--fonte-num); }
+.ar-grafico .g-grupo:focus-visible .g-alvo, .ar-grafico .g-grupo.selecionado .g-alvo { stroke: var(--cor-tinta); stroke-width: 1.5; }
+.ar-grafico .g-grupo:hover .g-alvo { fill: var(--cor-papel-sombreado); fill-opacity: .5; }
+.ar-detalhe { margin: 0; padding: 10px 20px 14px; font-size: 13px; color: var(--cor-texto-secundario); max-width: none; border-top: 1px solid var(--cor-linha); }
+.ar-detalhe strong { color: var(--cor-tinta); font-weight: 500; }
+.ar-detalhe .dinheiro { font-family: var(--fonte-numero); }
 
 .ar-obras { list-style: none; margin: 0; padding: 4px 0; }
 .ar-obra { display: grid; grid-template-columns: minmax(0, 22rem) minmax(60px, 1fr) 9rem; align-items: center; gap: 4px 16px;
   padding: 10px 20px; font-size: 14px; }
-.ar-obra__nome { color: var(--texto); min-width: 0; overflow-wrap: anywhere; }
-.ar-obra__trilho { height: 8px; border-radius: var(--raio-pilula); background: var(--linha-suave); overflow: hidden; }
-.ar-obra__barra { display: block; height: 100%; border-radius: var(--raio-pilula); background: var(--marca); }
-.ar-obra__valor { font-family: var(--fonte-num); font-variant-numeric: tabular-nums; color: var(--texto); text-align: right; white-space: nowrap; }
-.ar-obras__total { display: flex; justify-content: space-between; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--linha);
-  background: var(--superficie-2); border-radius: 0 0 var(--raio) var(--raio); font-weight: 600; }
-.ar-obras__total .dinheiro { font-family: var(--fonte-num); }
+.ar-obra__nome { color: var(--cor-tinta); min-width: 0; overflow-wrap: anywhere; }
+.ar-obra__trilho { height: 8px; border-radius: var(--raio-selo); background: var(--cor-linha); overflow: hidden; }
+.ar-obra__barra { display: block; height: 100%; border-radius: var(--raio-selo); background: var(--cor-menu); }
+.ar-obra__valor { font-family: var(--fonte-numero); font-variant-numeric: tabular-nums; color: var(--cor-tinta); text-align: right; white-space: nowrap; }
+.ar-obras__total { display: flex; justify-content: space-between; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--cor-linha);
+  background: var(--cor-papel-sombreado); border-radius: 0 0 var(--raio-canto) var(--raio-canto); font-weight: 600; }
+.ar-obras__total .dinheiro { font-family: var(--fonte-numero); }
 @media (max-width: 560px) {
   .ar-obra { grid-template-columns: minmax(0, 1fr) auto; }
   .ar-obra__trilho { grid-column: 1 / -1; grid-row: 2; }
