@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS pleitos (
     criado_em TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS pleitos_contrato ON pleitos(contrato_id, tipo);
--- um oficio pode cobrir duas datas-base (5 Bairros, CT/234/LT/2026: SINAPI jan e SICRO mar)
+-- um oficio pode cobrir duas datas-base (obra com dois indices: SINAPI em janeiro e SICRO em marco)
 CREATE UNIQUE INDEX IF NOT EXISTS pleitos_cadastro
     ON pleitos(contrato_id, tipo, numero_oficio, COALESCE(data_base_mes, '')) WHERE origem = 'cadastro';
 

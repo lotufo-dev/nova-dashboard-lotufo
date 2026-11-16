@@ -5,7 +5,7 @@
 > código divergem, vale o código.
 
 **Data:** 2026-09-21
-**Autor:** Leonardo Praeiro (com Claude)
+**Autor:** o dono (com Claude)
 **Status:** Decisões aprovadas tópico a tópico entre 2026-09-16 e 2026-09-21; aguardando revisão desta spec e plano de implementação.
 **Substitui** como autoridade de produto a spec `2026-08-28-dashboard-contratos-medicoes-design.md` (v3, "sistema que observa"). O que aquela spec define e esta não contradiz continua valendo (dinheiro em centavos, auditoria, histórico, segurança, hospedagem).
 **Fontes:** diário `docs/decisoes-reestruturacao-2026-09-16.md` (cada decisão com a justificativa do Leonardo e a verificação feita) e os levantamentos em `docs/`: `inventario-fica-ou-sai`, `espelho-regras-por-obra`, `mapeamento-emails-medicao`, `nomes-arquivo-por-obra`, `reajuste-pleitos`, `prazos-vigencia-execucao`.

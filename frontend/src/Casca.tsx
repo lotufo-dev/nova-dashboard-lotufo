@@ -98,7 +98,7 @@ export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemM
   );
 }
 
-/** Avatar da conta: a primeira letra do primeiro e do ultimo nome ("Leonardo Praeiro" → "LP"). */
+/** Avatar da conta: a primeira letra do primeiro e do ultimo nome ("Ana Exemplo" → "AE"). */
 function iniciais(nome: string): string {
   const partes = nome.trim().split(/\s+/).filter(Boolean);
   if (partes.length === 0) return "";

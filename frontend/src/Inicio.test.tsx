@@ -7,7 +7,7 @@ import Inicio, { saudacao, type PainelInicio } from "./Inicio";
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
 
-const USUARIO = { id: 1, nome: "Leonardo Praeiro", email: "leonardo@lotufo.com", perfil: "admin" };
+const USUARIO = { id: 1, nome: "Ana Exemplo", email: "ana@exemplo.com.br", perfil: "admin" };
 
 const MESES_12 = ["2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08",
   "2026-09", "2026-10"];
@@ -64,7 +64,7 @@ describe("Início", () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     expect(api).toHaveBeenCalledWith("/api/inicio/painel");
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/, Leonardo$/);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/, Ana$/);
     const regiao = await screen.findByRole("region", { name: CICLO });
     const etapas = [...regiao.querySelectorAll(".ini-faixa__etapa")];
     expect(etapas.map(e => [...e.children].map(limpo))).toEqual([
