@@ -1138,6 +1138,22 @@ def test_cancelar_a_execucao_encerra_o_reajuste_absorvido(ambiente_projeto):
     assert medicoes.detalhe(conn, rid)["estado"] == "cancelada"
 
 
+def test_reajuste_absorvido_recebe_com_a_execucao_na_obra_sem_envio_da_nota(ambiente_projeto):
+    """Issue #743: na obra sem o passo "Envio da nota", a execucao com nota emitida recebida sem protocolo leva o
+    reajuste negativo absorvido junto, na mesma data; so' ele continua recusado."""
+    conn, u, cid = ambiente_projeto
+    conn.execute("UPDATE contratos SET passos_medicao=? WHERE id=?", (json.dumps(["espelhos", "notas", "pagamento"]), cid))
+    conn.commit()
+    xid, rid = _absorvido_com_nota(conn, u, cid)
+    assert (medicoes.detalhe(conn, xid)["estado"], medicoes.detalhe(conn, rid)["estado"]) == ("nota_emitida",) * 2
+    with pytest.raises(ValueError, match="Este reajuste acompanha a execução"):
+        medicoes.mudar_estado(conn, u["id"], rid, "recebida", "baixa conferida no extrato", "2026-03-10", "manual")
+    medicoes.mudar_estado(conn, u["id"], xid, "recebida", "baixa conferida no extrato", "2026-03-10", "manual")
+    r, x = medicoes.detalhe(conn, rid), medicoes.detalhe(conn, xid)
+    assert (r["estado"], r["recebida_em"], r["congelada"]) == ("recebida", "2026-03-10", 1)
+    assert x["congelada"] == 1
+
+
 def test_reajuste_absorvido_nao_tem_marco_proprio(ambiente_projeto):
     """Revisor da PR #608 (critico 1): cancelar, desistir, receber ou protocolar so' o reajuste absorvido e' recusado;
     a execucao segue contando com ele (faturado R$ 990,00 = a nota), e a acao feita na execucao o leva junto."""

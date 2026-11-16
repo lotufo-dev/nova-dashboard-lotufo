@@ -85,7 +85,8 @@ A nota e o pacote foram enviados formalmente ao órgão. A data do protocolo com
 _Avoid_: protocolada para a planilha enviada (isso é "em análise")
 
 **Recebido**:
-O órgão pagou: há baixa no RM, ou registro do administrador com motivo.
+O órgão pagou: há baixa no RM, ou registro do administrador com motivo. Parte do protocolado; na obra sem o passo
+"Envio da nota", parte da nota emitida, sem protocolo, e a espera conta da emissão da nota.
 _Avoid_: pago, quitado
 
 **Pedido**:
@@ -156,6 +157,7 @@ O registro no RM de que um título foi pago. A data da baixa é o dia do pagamen
 **Prazo do órgão**:
 Quantos dias o órgão costuma levar do protocolo ao pagamento: o terceiro quartil dos dias entre o protocolo e o
 recebimento, das medições recebidas nos últimos 365 dias, com no mínimo cinco. Com menos, o órgão fica sem previsão.
+A medição recebida sem protocolo (obra sem o passo "Envio da nota") fica fora da conta.
 A SINFRA conta inteira, não cada superintendência.
 
 **Custo lançado no RM**:
