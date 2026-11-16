@@ -1,3 +1,4 @@
+import contextlib
 import re
 import shutil
 import sqlite3
@@ -179,14 +180,20 @@ def test_migracao_010_remove_ia_chamadas_e_e_idempotente(tmp_path, monkeypatch):
 # --- Reconstrucao de tabela nao perde linha (docs/adr/0010, issue #705) ----------------------------------------------
 #
 # A receita do SQLite para mudar CHECK ou tipo e' criar a tabela nova, copiar tudo, apagar a antiga e renomear. O teste
-# acha sozinho toda migracao com DROP TABLE, monta o banco como ele estava logo antes dela, poe linhas na tabela, roda
+# acha sozinho toda migracao com DROP TABLE, monta o banco como ele estava logo antes dela, poe linhas nas tabelas, roda
 # a migracao pelo runner de verdade e compara a contagem. Migracao nova que reconstroi tabela entra sem ninguem editar
 # lista nenhuma; se a tabela ainda nao tem como ser semeada, o caso falha dizendo o que falta.
+#
+# Quem decide quais tabelas conferir e' o banco, nao o nome: das tabelas que o script apaga ou renomeia, valem as que
+# ja' existiam antes dele. Assim a tabela de passagem da receita (`_nova`) fica de fora sem regra de sufixo, e a
+# receita invertida (renomear a antiga, criar a nova, copiar, apagar a antiga) cai na tabela de verdade.
 
 _MIGRACOES = sorted(db.MIGRATIONS_DIR.glob("*.sql"))
-_DROP_TABLE = re.compile(r"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?[\"'`\[]?([\w.]+)", re.IGNORECASE)
-_CREATE_TEMP = re.compile(
-    r"\bCREATE\s+(?:TEMP|TEMPORARY)\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[\"'`\[]?(\w+)", re.IGNORECASE)
+_NOME = r"(?:[\"'`\[]?(\w+)[\"'`\]]?\s*\.\s*)?[\"'`\[]?(\w+)"            # [esquema.]tabela, com ou sem aspas
+_DROP_TABLE = re.compile(r"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?" + _NOME, re.IGNORECASE)
+_RENAME = re.compile(r"\bALTER\s+TABLE\s+" + _NOME + r"[\"'`\]]?\s+RENAME\s+TO\s+[\"'`\[]?(\w+)", re.IGNORECASE)
+_CREATE_TABLE = re.compile(r"\bCREATE\s+(TEMP\s+|TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?" + _NOME, re.IGNORECASE)
+_COMENTARIO_DE_BLOCO = re.compile(r"/\*.*?\*/", re.DOTALL)
 
 # Tabela apagada de vez, sem recriar: so' com decisao registrada aqui, com o motivo. Qualquer outra faz o teste falhar.
 _REMOCOES_DECIDIDAS = {
@@ -196,29 +203,47 @@ _REMOCOES_DECIDIDAS = {
 _LINHAS = 3
 
 
-def _tabelas_apagadas() -> list[tuple[str, str]]:
-    """(migracao, tabela) de cada DROP TABLE que nao e' de tabela temporaria nem da `_nova` da propria receita."""
-    casos = []
-    for arquivo in _MIGRACOES:
-        sql = db._mascarar_comentarios(arquivo.read_text(encoding="utf-8"))
-        temporarias = {m.group(1).lower() for m in _CREATE_TEMP.finditer(sql)}
-        tabelas = []
-        for m in _DROP_TABLE.finditer(sql):
-            tabela = m.group(1).lower()
-            if tabela.startswith("temp.") or tabela in temporarias or tabela.endswith("_nova"):
-                continue
-            if tabela not in tabelas:
-                tabelas.append(tabela)
-        casos += [(arquivo.name, tabela) for tabela in tabelas]
-    return casos
+def _arquivo(migracao: str):
+    return next(a for a in _MIGRACOES if a.name == migracao)
 
 
-_RECONSTRUCOES = [caso for caso in _tabelas_apagadas() if caso not in _REMOCOES_DECIDIDAS]
+def _sql(migracao: str) -> str:
+    """O script sem os comentarios (de linha e de bloco): a busca nao pode casar com a prosa do cabecalho."""
+    return _COMENTARIO_DE_BLOCO.sub(" ", db._mascarar_comentarios(_arquivo(migracao).read_text(encoding="utf-8")))
+
+
+def _temporarias(sql: str) -> set[str]:
+    return {nome.lower() for temp, esquema, nome in _CREATE_TABLE.findall(sql) if temp or esquema.lower() == "temp"}
+
+
+def _apagadas(migracao: str) -> list[str]:
+    """Nomes em DROP TABLE, fora os de tabela temporaria. A `_nova` da receita entra aqui; sai pelo banco, no teste."""
+    sql = _sql(migracao)
+    temporarias = _temporarias(sql)
+    nomes = [nome.lower() for esquema, nome in _DROP_TABLE.findall(sql)
+             if esquema.lower() != "temp" and nome.lower() not in temporarias]
+    return list(dict.fromkeys(nomes))
+
+
+def _mexidas(migracao: str) -> list[str]:
+    """Nomes que o script apaga ou renomeia (a origem e o destino de cada RENAME), fora os de tabela temporaria."""
+    renomeadas = [nome.lower() for _, de, para in _RENAME.findall(_sql(migracao)) for nome in (de, para)]
+    return list(dict.fromkeys(_apagadas(migracao) + renomeadas))
+
+
+_COM_DROP_TABLE = [a.name for a in _MIGRACOES if _apagadas(a.name)]
 
 
 def _contrato(conn) -> int:
+    n = conn.execute("SELECT COUNT(*) FROM contratos").fetchone()[0] + 1
     return conn.execute("INSERT INTO contratos (orgao, numero_instrumento, objeto, valor_original_centavos) "
-                        "VALUES ('S','IC 1','X',100)").lastrowid
+                        "VALUES ('S',?,'X',100)", (f"IC {n}",)).lastrowid
+
+
+def _usuario(conn) -> int:
+    n = conn.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] + 1
+    return conn.execute("INSERT INTO usuarios (nome, email, senha_hash, perfil) VALUES ('Teste',?,'x','engenharia')",
+                        (f"teste{n}@exemplo.com.br",)).lastrowid
 
 
 def _medicoes(conn) -> list[int]:
@@ -238,12 +263,6 @@ def _notas_fiscais(conn) -> None:
     for n in range(1, _LINHAS + 1):
         conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos) VALUES (1,?,?,100)",
                      (n, f"{n:09d}"))
-
-
-def _usuario(conn) -> int:
-    n = conn.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] + 1
-    return conn.execute("INSERT INTO usuarios (nome, email, senha_hash, perfil) VALUES ('Teste',?,'x','engenharia')",
-                        (f"teste{n}@exemplo.com.br",)).lastrowid
 
 
 def _protocolo_pecas(conn) -> None:
@@ -282,8 +301,10 @@ def _espelhos(conn) -> None:
                      (contrato, n, usuario))
 
 
-# Como por _LINHAS linhas em cada tabela que alguma migracao reconstroi, so' com as colunas obrigatorias: assim a mesma
-# receita serve para todas as migracoes que reconstroem a mesma tabela, em qualquer ponto da historia do esquema.
+# Como por linhas em cada tabela que alguma migracao reconstroi, so' com as colunas obrigatorias: a mesma receita serve
+# em qualquer ponto da historia do esquema. Cada caso semeia TODAS as daqui que ja' existem no banco, nao so' a que a
+# migracao mexe: a tabela reconstruida fica com linhas filhas apontando para ela (medicao_documentos -> medicoes,
+# pleito_anexos -> pleitos), e a reconstrucao que esquecer de desligar as chaves estrangeiras falha aqui.
 _SEMEAR = {
     "medicoes": _medicoes,
     "medicao_documentos": _medicao_documentos,
@@ -296,13 +317,16 @@ _SEMEAR = {
 }
 
 
-def _contagem(conn, tabela: str) -> int:
-    return conn.execute(f"SELECT COUNT(*) FROM {tabela}").fetchone()[0]
+def _contagens(conn) -> dict[str, int]:
+    """Linhas de cada tabela do banco, fora as internas do SQLite e o registro das migracoes."""
+    tabelas = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' "
+                                          "AND name NOT LIKE 'sqlite_%' AND name <> 'schema_migrations'")]
+    return {tabela.lower(): conn.execute(f'SELECT COUNT(*) FROM "{tabela}"').fetchone()[0] for tabela in tabelas}
 
 
 def _banco_antes_de(migracao: str, tmp_path, monkeypatch):
-    """Banco como estava logo antes de `migracao`: so' as anteriores, numa copia da pasta, pelo runner de verdade.
-    Devolve a conexao e a pasta, que passa a ser a `db.MIGRATIONS_DIR` do teste."""
+    """Banco como estava logo antes de `migracao`: so' as anteriores, numa copia da pasta, pelo runner de verdade (na
+    ordem dos nomes, como numa instalacao nova). Devolve a conexao e a pasta, que vira a `db.MIGRATIONS_DIR` do teste."""
     monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
     pasta = tmp_path / "migrations"
     pasta.mkdir()
@@ -316,42 +340,68 @@ def _banco_antes_de(migracao: str, tmp_path, monkeypatch):
 
 
 def _aplicar(conn, pasta, migracao: str) -> None:
-    shutil.copy(next(a for a in _MIGRACOES if a.name == migracao), pasta / migracao)
+    shutil.copy(_arquivo(migracao), pasta / migracao)
     db.migrate(conn)
+    assert conn.execute("SELECT 1 FROM schema_migrations WHERE nome=?", (migracao,)).fetchone(), (
+        f"{migracao} nao foi registrada: a migracao nao rodou")
+
+
+def _conferir_que_nada_se_perdeu(conn, migracao: str, antes: dict[str, int], reconstruidas: list[str]) -> None:
+    depois = _contagens(conn)
+    for tabela, linhas in antes.items():
+        if (migracao, tabela) in _REMOCOES_DECIDIDAS:
+            continue
+        assert tabela in depois, (
+            f"{migracao} apaga `{tabela}` e nao recria: migracao nao perde dado (docs/adr/0010). Se a tabela sai de "
+            f"vez por decisao, registre em _REMOCOES_DECIDIDAS com o motivo")
+        if tabela in reconstruidas:
+            assert depois[tabela] == linhas, f"{migracao} mudou a contagem de `{tabela}`: {linhas} -> {depois[tabela]}"
+        else:
+            assert depois[tabela] >= linhas, f"{migracao} perdeu linha de `{tabela}`: {linhas} -> {depois[tabela]}"
 
 
 def test_descoberta_acha_as_migracoes_que_apagam_tabela():
     """Guarda da propria descoberta: se a regex parar de casar, os casos abaixo sumiriam em silencio."""
-    apagadas = _tabelas_apagadas()
-    assert {("020_espelho.sql", "medicoes"), ("020_espelho.sql", "medicao_documentos"),
-            ("022_leitura_danfse.sql", "notas_fiscais"), ("010_remove_ia_chamadas.sql", "ia_chamadas")} <= set(apagadas)
-    assert not [tabela for _, tabela in apagadas if tabela.endswith("_nova")]
-    assert _REMOCOES_DECIDIDAS <= set(apagadas)       # remocao registrada que nao existe mais e' lixo na lista
+    assert {"010_remove_ia_chamadas.sql", "020_espelho.sql", "022_leitura_danfse.sql", "078_reajuste_negativo.sql"} \
+        <= set(_COM_DROP_TABLE)
+    assert _apagadas("020_espelho.sql") == ["medicoes_nova", "medicoes", "medicao_documentos_nova",
+                                            "medicao_documentos"]
+    assert set(_mexidas("020_espelho.sql")) == set(_apagadas("020_espelho.sql"))
+    for migracao, tabela in _REMOCOES_DECIDIDAS:       # remocao registrada que nao existe mais e' lixo na lista
+        assert migracao in _COM_DROP_TABLE and tabela in _apagadas(migracao)
 
 
-@pytest.mark.parametrize("migracao,tabela", _RECONSTRUCOES, ids=[f"{m}:{t}" for m, t in _RECONSTRUCOES])
-def test_reconstrucao_de_tabela_preserva_a_contagem_de_linhas(migracao, tabela, tmp_path, monkeypatch):
-    assert tabela in _SEMEAR, (
-        f"{migracao} apaga a tabela `{tabela}` e o teste nao sabe por linhas nela: acrescente em _SEMEAR como semear "
-        f"`{tabela}` (ou, se a tabela sai de vez por decisao, registre em _REMOCOES_DECIDIDAS com o motivo)")
+@pytest.mark.parametrize("migracao", _COM_DROP_TABLE)
+def test_reconstrucao_de_tabela_preserva_a_contagem_de_linhas(migracao, tmp_path, monkeypatch):
     conn, pasta = _banco_antes_de(migracao, tmp_path, monkeypatch)
-    _SEMEAR[tabela](conn)
-    conn.commit()
-    assert _contagem(conn, tabela) == _LINHAS
+    with contextlib.closing(conn):
+        existiam = _contagens(conn)
+        mexidas = [tabela for tabela in _mexidas(migracao) if tabela in existiam]
+        assert mexidas, (
+            f"{migracao} tem DROP TABLE, mas nenhuma tabela que ela apaga ou renomeia existia antes dela: o teste nao "
+            f"entendeu o script (nomes lidos: {_mexidas(migracao)})")
+        reconstruidas = [tabela for tabela in mexidas if (migracao, tabela) not in _REMOCOES_DECIDIDAS]
+        sem_receita = [tabela for tabela in reconstruidas if tabela not in _SEMEAR]
+        assert not sem_receita, (
+            f"{migracao} apaga ou renomeia {sem_receita} e o teste nao sabe por linhas nela: acrescente em _SEMEAR "
+            f"como semear a tabela (ou, se ela sai de vez por decisao, registre em _REMOCOES_DECIDIDAS com o motivo)")
 
-    _aplicar(conn, pasta, migracao)
+        for tabela, semear in _SEMEAR.items():
+            if tabela in existiam:
+                semear(conn)
+        conn.commit()
+        antes = _contagens(conn)
+        assert all(antes[tabela] >= _LINHAS for tabela in reconstruidas)
 
-    existe = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (tabela,)).fetchone()
-    assert existe, f"{migracao} apaga `{tabela}` e nao recria: migracao nao perde dado (docs/adr/0010)"
-    assert _contagem(conn, tabela) == _LINHAS
+        _aplicar(conn, pasta, migracao)
+        _conferir_que_nada_se_perdeu(conn, migracao, antes, reconstruidas)
 
-    # A migracao roda sozinha ao subir e pode ser reaplicada inteira (executescript interrompido antes do registro):
-    # a segunda passada tambem nao pode perder linha.
-    conn.execute("DELETE FROM schema_migrations WHERE nome=?", (migracao,))
-    conn.commit()
-    db.migrate(conn)
-    assert _contagem(conn, tabela) == _LINHAS
-    conn.close()
+        # A migracao roda sozinha ao subir e pode ser reaplicada inteira (executescript interrompido antes do
+        # registro): a segunda passada tambem nao pode perder linha.
+        conn.execute("DELETE FROM schema_migrations WHERE nome=?", (migracao,))
+        conn.commit()
+        _aplicar(conn, pasta, migracao)
+        _conferir_que_nada_se_perdeu(conn, migracao, antes, reconstruidas)
 
 
 # --- Medicao, nota fiscal, envio e espelho nao se apagam (issue #706) ------------------------------------------------
@@ -366,12 +416,14 @@ def _esquema(conn) -> dict:
 
 
 def _dados(conn) -> dict:
-    return {tabela: [tuple(r) for r in conn.execute(f"SELECT * FROM {tabela} ORDER BY id")] for tabela in _SEM_DELETE}
+    """Todas as linhas de todas as tabelas, fora o registro das migracoes."""
+    return {tabela: sorted(repr(tuple(r)) for r in conn.execute(f'SELECT * FROM "{tabela}"'))
+            for tabela in _contagens(conn)}
 
 
 def _gatilho_sem_delete(tabela: str) -> str:
     """O CREATE TRIGGER de `tabela`, como esta' escrito no arquivo da migracao."""
-    sql = next(a for a in _MIGRACOES if a.name == _MIGRACAO_SEM_DELETE).read_text(encoding="utf-8")
+    sql = _arquivo(_MIGRACAO_SEM_DELETE).read_text(encoding="utf-8")
     return re.search(rf"CREATE TRIGGER IF NOT EXISTS {tabela}_sem_delete\b.*?\bEND;", sql, re.DOTALL).group(0)
 
 
@@ -384,6 +436,8 @@ def test_medicao_nota_envio_e_espelho_nao_se_apagam(tabela, tmp_path, monkeypatc
     db.migrate(conn)
     _SEMEAR[tabela](conn)
     conn.commit()
+    antes = _contagens(conn)[tabela]
+    assert antes >= _LINHAS
 
     with pytest.raises(sqlite3.IntegrityError, match=_SEM_DELETE[tabela]):
         conn.execute(f"DELETE FROM {tabela}")
@@ -391,7 +445,7 @@ def test_medicao_nota_envio_e_espelho_nao_se_apagam(tabela, tmp_path, monkeypatc
         conn.execute(f"DELETE FROM {tabela} WHERE id = (SELECT MIN(id) FROM {tabela})")
     conn.rollback()
 
-    assert _contagem(conn, tabela) == _LINHAS
+    assert _contagens(conn)[tabela] == antes
     conn.close()
 
 
@@ -410,6 +464,9 @@ def test_gatilhos_contra_exclusao_so_acrescentam_e_podem_ser_reaplicados(tmp_pat
     esquema = _esquema(conn)
     assert {chave: esquema[chave] for chave in esquema_antes} == esquema_antes
     assert set(esquema) - set(esquema_antes) == {("trigger", f"{tabela}_sem_delete") for tabela in _SEM_DELETE}
+    for tabela in _SEM_DELETE:
+        dono, sql = esquema[("trigger", f"{tabela}_sem_delete")]
+        assert dono == tabela and f"BEFORE DELETE ON {tabela}" in sql
     assert _dados(conn) == dados_antes
 
     # Reaplicacao de verdade (executescript interrompido antes do registro), e depois a subida normal, que pula.
@@ -422,7 +479,8 @@ def test_gatilhos_contra_exclusao_so_acrescentam_e_podem_ser_reaplicados(tmp_pat
     conn.close()
 
 
-_RECONSTRUCOES_DAS_PROTEGIDAS = [(m, t) for m, t in _RECONSTRUCOES if t in _SEM_DELETE and m < _MIGRACAO_SEM_DELETE]
+_RECONSTRUCOES_DAS_PROTEGIDAS = [(migracao, tabela) for migracao in _COM_DROP_TABLE if migracao < _MIGRACAO_SEM_DELETE
+                                 for tabela in _mexidas(migracao) if tabela in _SEM_DELETE]
 
 
 def test_ha_reconstrucao_de_medicoes_e_de_notas_fiscais_para_conferir():
@@ -438,6 +496,8 @@ def test_reconstrucao_roda_com_o_gatilho_contra_exclusao_presente(migracao, tabe
     conn, pasta = _banco_antes_de(migracao, tmp_path, monkeypatch)
     _SEMEAR[tabela](conn)
     conn.commit()
+    antes = _contagens(conn)[tabela]
+    assert antes >= _LINHAS
     conn.executescript(_gatilho_sem_delete(tabela))
     with pytest.raises(sqlite3.IntegrityError, match=_SEM_DELETE[tabela]):      # o gatilho esta' mesmo la'
         conn.execute(f"DELETE FROM {tabela}")
@@ -445,5 +505,5 @@ def test_reconstrucao_roda_com_o_gatilho_contra_exclusao_presente(migracao, tabe
 
     _aplicar(conn, pasta, migracao)
 
-    assert _contagem(conn, tabela) == _LINHAS
+    assert _contagens(conn)[tabela] == antes
     conn.close()
