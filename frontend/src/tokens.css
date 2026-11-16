@@ -252,6 +252,9 @@
   --altura-area-texto: calc(var(--alvo-minimo) * 2.4);                     /* area de texto da justificativa: 96px */
   --tamanho-icone: var(--tamanho-icone-conta);                             /* icone de traco em botao e em faixa */
   --altura-controle-menor: 28px;                                           /* botao dentro de linha de tabela */
+
+  /* telas de leitura no celular (Inicio, #721): o titulo da pagina desce um passo da escala */
+  --texto-titulo-pagina-estreito: 1.728rem;
 }
 
 /* --------------------------------------------------------------- elementos */
