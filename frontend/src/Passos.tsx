@@ -1,4 +1,4 @@
-import { IconeCheck } from "./NotasAEnviar";
+import { Glifo } from "./Selo";
 import { fmtData, fmtDataPura } from "./tempo";
 import "./passos.css";
 
@@ -55,8 +55,9 @@ export function diaMes(iso: string | null | undefined): string | null {
   return /^\d{2}\/\d{2}\//.test(longa) ? longa.slice(0, 5) : null;
 }
 
-/** A barra: feito = check indigo com a data; atual = circulo maior com o numero; futuro = cinza. `espera` (#188): o
- *  passo da vez parado esperando a outra metade (execucao x reajuste no mesmo e-mail). */
+/** A barra (#722): seis abas ligadas ao painel do passo aberto. Cada aba traz o numero do passo na barra da obra, o
+ *  nome e a situacao: feito = o visto com a data; atual = em andamento; futuro = sem sinal. `espera` (#188): o passo
+ *  da vez parado esperando a outra metade (execucao x reajuste no mesmo e-mail) leva o sinal de atencao. */
 export function Passos({ passos, atual, vendo, datas, espera = false, aoIr }: {
   passos: number[]; atual: number; vendo: number; datas: Record<number, string | null>; espera?: boolean;
   aoIr: (n: number) => void;
@@ -75,9 +76,12 @@ export function Passos({ passos, atual, vendo, datas, espera = false, aoIr }: {
             <li key={n} className={classes.join(" ")} aria-current={s === "atual" ? "step" : undefined}>
               <button type="button" aria-label={`Passo ${i + 1}: ${nome}${data ? `, feito em ${data}` : ""}${parada ? " · em espera" : ""}`}
                 onClick={() => aoIr(n)}>
-                <span className="passo__marca" aria-hidden="true">{s === "feito" ? <IconeCheck /> : i + 1}</span>
+                <span className="passo__num num" aria-hidden="true">{i + 1}</span>
                 <span className="passo__nome">{nome}</span>
-                {data && <span className="passo__data num" aria-hidden="true">{data}</span>}
+                <span className="passo__estado" aria-hidden="true">
+                  {s !== "futuro" && <Glifo situacao={parada ? "breve" : s === "feito" ? "feito" : "andamento"} />}
+                  {data && <span className="passo__data num">{data}</span>}
+                </span>
               </button>
             </li>
           );
@@ -101,17 +105,17 @@ export function FaixaPasso({ vendo, atual, passos, aoVoltar }: {
   );
 }
 
-/** O cartao do passo aberto (passos 3 a 6): "Passo N", o nome e a situacao. */
+/** O passo que ainda nao abriu: o nome e "Libera depois do passo N", dentro do painel do passo. */
 export function PassoCartao({ n, atual, passos, selo, children }: {
   n: number; atual: number; passos: number[]; selo?: React.ReactNode; children?: React.ReactNode;
 }) {
   const s = situacaoDoPasso(n, atual);
   const pos = passos.indexOf(n) + 1;
   return (
-    <section className="cartao med-etapa" id={`passo-${n}`} aria-labelledby={`passo-${n}-titulo`}>
-      <div className="med-etapa__cabeca">
+    <section className="med-passo med-etapa" id={`passo-${n}`} aria-labelledby={`passo-${n}-titulo`}>
+      <div className="med-quadro__cab">
         <span className="med-etapa__n">Passo {pos}</span>
-        <h2 className="med-etapa__titulo" id={`passo-${n}-titulo`}>{PASSOS[n - 1]}</h2>
+        <h2 className="med-quadro__titulo" id={`passo-${n}-titulo`}>{PASSOS[n - 1]}</h2>
         {selo ?? (atual !== 0 && s === "feito" ? <span className="selo selo--feito"><span className="glifo glifo--feito" aria-hidden="true" /><span className="selo__texto">Feito</span></span>
           : s === "futuro" ? <span className="selo"><span className="selo__texto">Libera depois do passo {pos - 1}</span></span> : null)}
       </div>

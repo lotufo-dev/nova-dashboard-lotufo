@@ -1,142 +1,96 @@
-/* Pagina da medicao (#152, opcao B, aprovada em 16/10/2026): trilho de setas no alto, so' a etapa da vez aberta,
-   Resumo e Linha do tempo a direita. Cores so' dos tokens (tokens.css). */
+/* Pagina da medicao (#152) e a da medicao que ainda nao existe (MedicaoNova): o que as duas dividem e as pecas
+   pequenas dos passos. A disposicao da pagina (identificacao, resumo, abas, painel do passo, linha do tempo) mora em
+   passos.css desde a #722. Cores so' dos tokens (tokens.css). */
 
-.med { gap: 16px; }
-.med-cabeca { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; }
-.med-cabeca h1 { margin: 0; font-size: var(--texto-valor); line-height: 32px; }
-.med-meta { margin: 4px 0 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); max-width: none; }
-.med-meta span + span::before { content: " · "; font-family: var(--fonte-texto); }
+.med { gap: var(--espaco-m); }
+.med-cabeca { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--espaco-p) var(--espaco-g); }
+.med-cabeca h1 { margin: 0; font-size: var(--texto-titulo-pagina); line-height: var(--entrelinha-titulo); }
+/* a linha da medicao sob o titulo: os dados separados por um fio */
+.med-meta { display: flex; flex-wrap: wrap; row-gap: var(--espaco-mini); margin: var(--espaco-mini) 0 0; max-width: none;
+  color: var(--cor-texto-secundario); font-size: var(--texto-corpo); }
+.med-meta span + span { margin-left: var(--espaco-p); padding-left: var(--espaco-p); border-left: var(--borda-linha); }
 
 /* Mais acoes */
 .med-mais { position: relative; }
-.med-mais > .btn { height: 40px; padding: 0 16px; gap: 6px; border-color: var(--cor-tinta); color: var(--cor-tinta); font-weight: 600; font-size: var(--texto-meta); }
-.med-mais > .btn:hover:not(:disabled) { color: var(--cor-tinta); }
-.med-mais .conta__menu { width: 300px; max-width: calc(100vw - 96px); }
-.med-mais .conta__item { height: auto; min-height: 36px; padding: 6px 10px; }
+.med-mais > .btn { height: var(--alvo-minimo); padding: 0 var(--espaco-m); gap: var(--espaco-pp); font-size: var(--texto-corpo); font-weight: var(--peso-forte); }
+.med-mais > .btn .icone { width: var(--tamanho-icone); height: var(--tamanho-icone); }
+.med-mais .conta__menu { width: auto; min-width: max-content; max-width: calc(100vw - 96px); padding: var(--espaco-mini) 0; }
+.med-mais .conta__item { height: auto; min-height: var(--alvo-minimo); padding: 0 var(--espaco-m); white-space: nowrap; }
 .med-mais .conta__item--perigo { color: var(--situacao-critico-texto); }
-.med-mais hr { border: 0; border-top: 1px solid var(--cor-linha); margin: 6px 0; }
+.med-mais hr { border: 0; border-top: var(--borda-linha); margin: var(--espaco-mini) 0; }
 
-.med-grade { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
-.med-grade--so-principal { grid-template-columns: minmax(0, 1fr); }
-.med-principal { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.med-lateral { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+/* a pagina da medicao que ainda nao existe usa uma coluna so' */
+.med-grade { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-g); align-items: start; }
+.med-principal { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.med-lateral { display: flex; flex-direction: column; gap: var(--espaco-m); min-width: 0; }
 
-/* "Voltar a' etapa atual", com outra etapa aberta */
-.med-faixa { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; padding: 12px 16px; border-radius: var(--raio-canto);
-  background: var(--cor-papel-sombreado); color: var(--cor-tinta); font-size: var(--texto-meta); }
-.med-faixa .botao-link { font-weight: 600; color: var(--cor-tinta); font-size: var(--texto-meta); }
-
-/* a etapa aberta */
-.med-etapa { padding: 24px; display: flex; flex-direction: column; gap: 20px; scroll-margin-top: 16px; }
-.med-etapa__corpo { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-.med-etapa__cabeca { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
-.med-etapa__n { padding: 4px 12px; border-radius: var(--raio-selo); background: var(--cor-papel-sombreado); color: var(--cor-tinta); font-size: var(--texto-meta); font-weight: 600; }
-.med-etapa__titulo { margin: 0; font-size: var(--texto-titulo-bloco); line-height: 28px; }
-.med-sub { margin: 0 0 8px; font-size: var(--texto-titulo-sub); line-height: 22px; font-weight: 600; }
-.med-bloco { display: flex; flex-direction: column; gap: 12px; padding-top: 20px; border-top: 1px solid var(--cor-linha); }
+.med-etapa__corpo { display: flex; flex-direction: column; gap: var(--espaco-g); min-width: 0; }
+.med-sub { margin: 0 0 var(--espaco-pp); font-size: var(--texto-titulo-sub); line-height: var(--entrelinha); font-weight: var(--peso-forte); }
+.med-bloco { display: flex; flex-direction: column; gap: var(--espaco-p); padding-top: var(--espaco-g); border-top: var(--borda-linha); }
 /* tabela mais larga que a caixa rola dentro dela, em vez de ser cortada */
-.med-caixa { border: 1px solid var(--cor-linha); border-radius: var(--raio-canto); overflow-x: auto; }
+.med-caixa { border: var(--borda-linha); border-radius: var(--raio-canto); overflow-x: auto; }
 .med-caixa .tabela thead th { background: var(--cor-papel-sombreado); }
 .med-caixa .tabela-wrap { overflow-x: auto; }
-.med-acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.med-acoes { display: flex; flex-wrap: wrap; gap: var(--espaco-pp); align-items: center; }
 .med-linhas { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
-.med-linhas li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--cor-linha); }
+.med-linhas li { display: flex; justify-content: space-between; gap: var(--espaco-p); padding: var(--espaco-pp) var(--espaco-p); border-bottom: var(--borda-linha); }
 .med-linhas li:last-child { border-bottom: 0; }
 .med-linhas--caixa { border-radius: var(--raio-canto); background: var(--cor-papel-sombreado); }
 
-/* o espelho dentro da etapa (sem a moldura propria do cartao) */
+/* o espelho dentro do passo (sem a moldura propria do cartao) */
 .espelho-etapa .cartao__corpo { padding: 0; }
-.espelho-etapa .espelho__item { gap: 16px; }
+.espelho-etapa .espelho__item { gap: var(--espaco-m); }
 .espelho-etapa .espelho__notas { min-width: 0; }
 
-/* tabela de envios (etapa 4) e de pagamentos (etapa 5) */
-.tabela.envios tbody td { color: var(--cor-tinta); vertical-align: top; }
-.envios td.col-num { font-family: var(--fonte-numero); }
-/* a 1024 px as cinco colunas cabem na caixa sem rolar: 8 px de respiro entre elas (as pontas mantem o recuo). So'
-   acima do celular, onde a tabela vira pilha de cartoes com o respiro proprio. */
-@media (min-width: 768px) {
-  .tabela.envios thead th, .tabela.envios tbody td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
-  .tabela.envios thead th:first-child, .tabela.envios tbody td:first-child { padding-left: 20px; }
-  .tabela.envios thead th:last-child, .tabela.envios tbody td:last-child { padding-right: 20px; }
-}
-.envios__nfs { display: flex; flex-direction: column; gap: 2px; }
+/* tabela de envios (passo 5) */
+.envios__nfs { display: flex; flex-direction: column; gap: var(--espaco-traco); }
 .envios__nfs span { white-space: nowrap; }
-.envios__acao { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 12px; }
+.envios__acao { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--espaco-mini) var(--espaco-p); }
 .envios__motivo { font-size: var(--texto-mini); color: var(--cor-texto-secundario); max-width: 26ch; text-align: right; }
 .envios__motivo--atencao { color: var(--situacao-breve-texto); }
-/* o motivo do envio bloqueado e' a trava (CaixaAviso), compacta, junto do botao desligado */
-.envios__motivo.aviso--trava { max-width: 34ch; padding: var(--espaco-mini) var(--espaco-pp); color: var(--cor-sobre-ponto); font-size: var(--texto-meta); text-align: left; }
-.envios tr.envios--aberto > td { background: var(--cor-papel-sombreado); }
-.envios__receber { margin-top: 8px; }
-.btn.btn--envio { height: 38px; padding: 0 var(--espaco-p); font-size: var(--texto-meta); font-weight: var(--peso-forte); }
+.envios__receber { margin-top: var(--espaco-pp); }
 
 /* certidoes, com a validade de cada uma */
-.certidoes-bloco { display: flex; flex-direction: column; gap: 10px; }
-.certidoes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.certidoes li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.certidoes-bloco { display: flex; flex-direction: column; gap: var(--espaco-pp); }
+.certidoes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--espaco-pp); }
+.certidoes li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-pp); }
 .certidoes small { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
-.certidoes__empresa { margin: 4px 0; font-weight: 600; }
+.certidoes__empresa { margin: var(--espaco-mini) 0; font-weight: var(--peso-forte); }
 .certidoes__nota { margin: 0; }
 
-/* envio aberto (o e-mail montado sob a linha) */
-.med-envio { display: flex; flex-direction: column; gap: 16px; padding: 20px; border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-canto); background: var(--cor-papel-sombreado); }
-.med-envio__cabeca { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
-.med-envio__cabeca h3 { margin: 0; font-size: var(--texto-titulo-sub); line-height: 24px; }
-.med-envio .nota-envio--embutido { padding: 0; max-width: none; }
-.notas-v3 .nota-rodape .btn--primario, .med-envio .ol-janela .ol-enviar { height: 48px; padding: 0 24px; font-size: var(--texto-corpo); font-weight: 600; }
+/* o compositor de e-mail dentro do envio aberto: as etiquetas cabem na linha */
 .notas-v3 .ol-campo { flex-wrap: wrap; min-width: 0; }
 .notas-v3 .ol-chip { max-width: 100%; min-width: 0; }
 .notas-v3 .ol-chip__nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* notas por bloco (execucao x reajuste) na etapa 3 */
-.notas-blocos { display: flex; flex-direction: column; gap: 20px; }
-.notas-bloco + .notas-bloco { border-top: 1px solid var(--cor-linha); padding-top: 16px; }
+/* notas por bloco (execucao x reajuste) no passo 4 */
+.notas-blocos { display: flex; flex-direction: column; gap: var(--espaco-g); }
+.notas-bloco + .notas-bloco { border-top: var(--borda-linha); padding-top: var(--espaco-m); }
 
-/* resumo e linha do tempo */
-.res-lista { margin: 0; display: flex; flex-direction: column; }
-.res-lista > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--cor-linha); }
-.res-lista > div:last-child { border-bottom: 0; }
-.res-lista dt { color: var(--cor-texto-secundario); }
-.res-lista dd { margin: 0; text-align: right; color: var(--cor-tinta); }
-.res-lista .res-total dt, .res-lista .res-total dd { color: var(--cor-tinta); font-weight: 600; font-size: var(--texto-corpo); }
-.res-lista .res-total { border-top: 1px solid var(--cor-linha); }
+/* resumo: as linhas de apoio */
 .res-nota { display: block; font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
 .res-nota--link { font-size: var(--texto-meta); }
-.tempo { margin: 0; padding: 0; list-style: none; }
-.tempo li { position: relative; padding: 0 0 16px 22px; }
-.tempo li::before { content: ""; position: absolute; left: 4px; top: 6px; width: 8px; height: 8px; border-radius: var(--raio-selo); background: var(--situacao-feito-ponto); }
-.tempo li::after { content: ""; position: absolute; left: 7px; top: 18px; bottom: 0; width: 2px; background: var(--cor-linha); }
-.tempo li:last-child { padding-bottom: 0; }
-.tempo li:last-child::after { display: none; }
-.tempo time { display: block; color: var(--cor-texto-secundario); font-size: var(--texto-mini); font-family: var(--fonte-numero); }
 
 /* janelas (atestado, medicao final, cancelar, registrar fora...) */
 .janela .iniciar__caixa { overflow-y: auto; }
 .janela .painel__titulo { display: none; }
 .janela .form-inline { align-items: flex-end; }
 .janela textarea, .janela input[type="text"], .janela input[type="date"] { max-width: 100%; }
-.iniciar__rodape { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+.iniciar__rodape { display: flex; flex-wrap: wrap; gap: var(--espaco-pp); padding-top: var(--espaco-mini); }
 
 .btn--grande { height: 44px; padding: 0 22px; font-size: var(--texto-corpo); }
 
-@media (max-width: 1180px) {
-  .med-grade { grid-template-columns: minmax(0, 1fr); }
-}
 @media (max-width: 767px) {
-  .pagina.med { padding: 16px 16px 32px; }
+  .pagina.med { padding: var(--espaco-m) var(--espaco-m) var(--espaco-gg); }
   .med-cabeca { flex-direction: column; }
-  .med-etapa { padding: 16px 12px; }
   /* a tabela de envios vira uma pilha de cartoes */
   .envios, .envios tbody, .envios tr, .envios td { display: block; width: 100%; }
   .envios thead { display: none; }
-  .envios tr { padding: 12px 0; border-bottom: 1px solid var(--cor-linha); }
+  .envios tr { padding: var(--espaco-p) 0; border-bottom: var(--borda-linha); }
   .envios tr:last-child { border-bottom: 0; }
-  .envios tbody td { padding: 4px 16px; border: 0; text-align: left; }
+  .med .tabela.envios tbody td { padding: var(--espaco-mini) 0; border: 0; text-align: left; }
   .envios td[data-rotulo]::before { content: attr(data-rotulo); display: block; font-size: var(--texto-mini); color: var(--cor-texto-secundario); font-family: var(--fonte-texto); }
   .envios__acao { justify-content: flex-start; }
   .envios__motivo { text-align: left; max-width: none; }
-  .med-envio { padding: 12px 0 0; border: 0; border-top: 2px solid var(--cor-tinta); border-radius: 0; background: none; }
-  .notas-v3 .nota-secao { flex-direction: column; padding: 12px; gap: 8px; }
   .notas-v3 .nota-item { flex-wrap: wrap; }
-  .res-lista dd { white-space: normal; }
 }
