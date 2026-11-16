@@ -52,8 +52,30 @@ class EnvioDesligado(ValueError):
     """Envio de e-mail numa instalacao nao autorizada. ValueError de proposito: as rotas de envio ja' respondem 422
     com a mensagem (e desfazem a transacao); a rota que nao captura ValueError cai no tratador de main.py."""
 
+    def __init__(self, mensagem: str = MSG_ENVIO):
+        super().__init__(mensagem)
+
+
+# Issue #707 (decisao do dono, 15/11/2026): em dev o e-mail real so' sai com liberacao explicita.
+LIBERAR_EMAIL_REAL_EM_DEV = "DASH_EMAIL_REAL_EM_DEV"
+MSG_EMAIL_REAL_EM_DEV = (
+    "Envio recusado: em desenvolvimento (DASH_DEV=1) o e-mail de verdade está travado. Ligue o simulador "
+    "(DASH_GRAPH_SIMULADOR=dados/correio-simulado) ou, para um teste deliberado com e-mail real, suba com "
+    f"{LIBERAR_EMAIL_REAL_EM_DEV}=1. Nada foi enviado.")
+
+
+class EmailRealTravadoEmDev(EnvioDesligado):
+    """Envio pelo Microsoft Graph real com `DASH_DEV=1`, sem simulador e sem a liberacao. Herda de EnvioDesligado
+    para seguir o mesmo caminho: recusa antes da reserva, 422 com a mensagem, nada fica preso."""
+
     def __init__(self):
-        super().__init__(MSG_ENVIO)
+        super().__init__(MSG_EMAIL_REAL_EM_DEV)
+
+
+def email_real_travado_em_dev() -> bool:
+    """Dev sem simulador e sem liberacao: o envio iria ao Graph de verdade. Fora de dev (producao) e' sempre False."""
+    return (os.environ.get("DASH_DEV") == "1" and not os.environ.get("DASH_GRAPH_SIMULADOR")
+            and os.environ.get(LIBERAR_EMAIL_REAL_EM_DEV) != "1")
 
 
 def maquina_atual() -> str:
@@ -174,9 +196,11 @@ def ligada() -> bool:
 
 def exigir_envio() -> None:
     """Chamada no ponto central do envio, antes da reserva (`envio_reserva.reservar`) e antes do e-mail
-    (`correio.enviar_e_registrar`)."""
+    (`correio.enviar_e_registrar`). Em dev, recusa tambem o e-mail real sem liberacao (issue #707)."""
     if not ligada():
         raise EnvioDesligado()
+    if email_real_travado_em_dev():
+        raise EmailRealTravadoEmDev()
 
 
 # --- linha de comando (no Mac do dono) ------------------------------------------------------------------------
