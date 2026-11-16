@@ -3,7 +3,6 @@ import { type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
 import AvisosPagina from "./AvisosPagina";
 import { IconeAlerta } from "./icones";
-import Selo from "./Selo";
 import {
   ehDoContratante, escopoDaUrl, filtrarObras, gruposPorContratante, nomeDaObra, pctExecutado, posicaoDe, totaisDe,
   type ObraLista,
@@ -152,7 +151,7 @@ export default function Contratos({ ir, busca = {} }: { ir: Ir; busca?: Busca })
                                 <div className="progresso progresso--feito" role="img" aria-label={pct === null ? "sem valor vigente" : `${pct}% executado`}>
                                   <span className="progresso__barra" style={{ width: `${Math.min(100, Math.max(0, pct ?? 0))}%` }} />
                                 </div>
-                                <Selo situacao="feito" className="obras-exec__pct num">{pct === null ? "—" : `${pct}%`}</Selo>
+                                <span className="obras-exec__pct num">{pct === null ? "—" : `${pct}%`}</span>
                               </div>
                             </td>
                             <td data-rotulo="A receber" className="col-num dinheiro num">{p.a_receber_centavos == null ? "—" : brl(p.a_receber_centavos)}</td>

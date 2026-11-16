@@ -106,6 +106,9 @@ describe("Obras: posição financeira na cota da Lotufo, por contratante", () =>
     expect(limpo(brt.textContent)).toContain("R$ 750,00");
     expect(brt.textContent).toContain("25%");
     expect(brt.querySelector(".progresso--feito")).toBeTruthy();
+    // #720: o percentual e' numero ao lado da barra, sem selo nem simbolo de situacao (0% nao se le como "feito")
+    expect(brt.querySelector(".obras-exec__pct")!.textContent).toBe("25%");
+    expect(brt.querySelector(".obras-exec .selo, .obras-exec .glifo")).toBeNull();
   });
 
   it("os totais do topo somam as linhas na cota e o a receber vira traço sem o total liberado", async () => {
