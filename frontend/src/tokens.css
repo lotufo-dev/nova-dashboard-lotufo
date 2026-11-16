@@ -1,123 +1,321 @@
 /* ---------------------------------------------------------------------------
-   grupolotufo — mundo visual (identidade de 06/10/2026, docs/identidade-visual.md)
-   Claro, indigo como unica cor de marca, tabela como elemento principal.
-   Modo unico claro. Sem dark mode.
+   grupolotufo — mundo visual. Redesenho de 11/2026 (#717), fundacao escolhida pelo dono em 15/11/2026.
+   Neutros quentes com tinta quase preta; o laranja da marca so' no simbolo, no item ativo do menu e no foco sobre a
+   casca escura (nunca situacao nem acao); quatro situacoes com tom e forma; Archivo no texto e nos numeros, titulos
+   condensados; cantos retos, regua de tinta e sombra dura nos paineis. Modo unico claro.
 
-   Nomes em portugues, como o resto do codigo. Tokens primeiro, elementos
-   depois, componentes por ultimo. NENHUMA tela deve declarar cor propria:
-   se faltar um tom, ele nasce aqui.
+   Este arquivo tem tres partes: (1) as variaveis da fundacao, com nome por papel; (2) as variaveis antigas, que so'
+   apontam para as da fundacao enquanto os outros CSS ainda as usam (saem na etapa 1b); (3) elementos e componentes.
+   NENHUMA tela deve declarar cor propria: se faltar um tom, ele nasce aqui.
    --------------------------------------------------------------------------- */
 
 /* ------------------------------------------------------------------- fontes
 
-   Lexend (redesenho de 11/2026, #505): sem serifa geometrica, larga e arredondada, titulos e valores em negrito.
-   Servida pelo proprio app em /fonts (frontend/public/fonts, licenca OFL ao lado): rede interna, sem nuvem.
-   Valores em reais usam a MESMA fonte do texto, com algarismos tabulares (font-variant-numeric) nas colunas.
+   Servidas pelo proprio app em /fonts (frontend/public/fonts, licencas OFL ao lado): rede interna, sem nuvem.
+   Archivo e' variavel (peso 100-900, largura 62-125%): o texto, os numeros e os titulos saem do mesmo arquivo,
+   mudando so' a largura (font-stretch). Barlow so' no nome escrito ao lado do simbolo.
    ------------------------------------------------------------------------- */
 
-@font-face { font-family: "Lexend"; font-weight: 400; font-style: normal; font-display: swap;
-  src: url("/fonts/lexend-latin-400-normal.woff2") format("woff2"); }
-@font-face { font-family: "Lexend"; font-weight: 500; font-style: normal; font-display: swap;
-  src: url("/fonts/lexend-latin-500-normal.woff2") format("woff2"); }
-@font-face { font-family: "Lexend"; font-weight: 600; font-style: normal; font-display: swap;
-  src: url("/fonts/lexend-latin-600-normal.woff2") format("woff2"); }
-@font-face { font-family: "Lexend"; font-weight: 700; font-style: normal; font-display: swap;
-  src: url("/fonts/lexend-latin-700-normal.woff2") format("woff2"); }
+@font-face {
+  font-family: "Archivo";
+  src: url("/fonts/archivo-var.woff2") format("woff2-variations"), url("/fonts/archivo-var.woff2") format("woff2");
+  font-weight: 100 900; font-stretch: 62% 125%; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Barlow Condensed";
+  src: url("/fonts/barlow-condensed-latin-700-normal.woff2") format("woff2");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Barlow Semi Condensed";
+  src: url("/fonts/barlow-semi-condensed-latin-400-normal.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
 
+/* ============================================================================ (1) FUNDACAO */
 :root {
-  --fonte:         "Lexend", system-ui, "Segoe UI", Roboto, sans-serif;
-  /* valores e datas: a mesma fonte do texto (nao ha mais mono); o nome fica para os seletores existentes */
-  --fonte-num:     var(--fonte);
+  /* ------------------------------------------------------------ neutros */
+  --cor-papel: #faf8f6;              /* fundo da pagina */
+  --cor-superficie: #faf8f6;         /* fundo de painel e campo (igual ao papel: o painel se separa pela borda e sombra) */
+  --cor-papel-sombreado: #f2efec;    /* passar o mouse em linha, item e botao discreto */
+  --cor-papel-escuro: #e9e5e2;       /* contador neutro, avatar, sombra do painel */
+  --cor-tinta: #13100d;              /* texto principal, bordas de painel, reguas, botao principal */
+  --cor-texto-secundario: #514c49;   /* rotulos, mensagens, meses */
+  --cor-texto-terciario: #6b6562;    /* informacao de apoio (quantidade, idade, ano) */
+  --cor-linha: #dcd7d3;              /* divisoria entre linhas */
+  --cor-borda-controle: #8d8885;     /* borda de campo de formulario */
+  --cor-contador-neutro: var(--cor-papel-escuro);
+  --cor-foco: #13100d;               /* contorno de foco no conteudo */
+  --cor-selecao: #ffe3d4;            /* texto selecionado */
+  --cor-veu: rgb(19 16 13 / 0.45);   /* veu atras de gaveta ou dialogo */
 
-  /* superficies */
-  --bg:            #F6F8FB;
-  --superficie:    #FFFFFF;
-  --superficie-2:  #F8FAFC;   /* zebra da tabela, rodape de cartao */
-  --neutro-fundo:  #F1F5F9;   /* pilula neutra, contador neutro */
-  /* hover e selecionado: a tinta clara do indigo (identidade: "fundo de destaque suave, hover, selecionado") */
-  --hover:         #EEF0FF;
-  --pressionado:   #E0E7FF;   /* :active de controle neutro */
-  --linha:         #E2E8F0;
-  --linha-suave:   #F1F5F9;   /* divisoria entre linhas da tabela */
-  --linha-forte:   #CBD5E1;
-  --linha-hover:   #94A3B8;
-  --linha-campo:   #CBD5E1;   /* contorno de campo */
-  /* serie "previsto" dos graficos (T8/T9): cinza, para o acento marcar o medido */
-  --previsto:      #CBD5E1;
+  /* ------------------------------------------------------------ marca e menu
+     O laranja so' aparece no simbolo, no icone do item ativo do menu e no foco dentro do menu. Nunca indica situacao
+     nem acao. */
+  --cor-marca: #ff6501;
+  --cor-sobre-ponto: #fffdfb;        /* sinal claro sobre ponto de cor (o "!" do atrasado, o visto do feito) */
+  --cor-menu: #171310;
+  --cor-menu-texto: #f5f1ee;         /* item ativo e marca */
+  --cor-menu-texto-secundario: #b5b0ac; /* itens e "Recolher" */
+  --cor-menu-realce: #2a2522;        /* item ativo e passar o mouse */
+  --cor-menu-foco: #ff6501;          /* contorno de foco dentro do menu */
 
-  /* texto — dois tons de leitura; para hierarquia use peso e tamanho */
-  --texto:         #0F172A;   /* ardosia: titulos e valores */
-  --texto-2:       #64748B;   /* cinza frio: legendas, rotulos de coluna */
-  --texto-menu:    #334155;   /* itens do menu lateral */
-  --texto-fraco:   #94A3B8;   /* SO para controle desabilitado e traco de riscado */
+  /* ------------------------------------------------------------ situacoes
+     Quatro situacoes. Cada uma tem: texto (sobre o fundo ou sobre o papel), fundo (selo e contador), ponto (cor cheia
+     do simbolo e da celula) e forma (o simbolo, que diz a situacao sem depender da cor). As formas repetem os tons
+     escritos por extenso (%23 = #): mudou o tom, mude tambem a forma. */
+  --situacao-feito-texto: #176938;
+  --situacao-feito-fundo: #e1f8e6;
+  --situacao-feito-ponto: #24914f;
+  /* circulo cheio com visto */
+  --situacao-feito-forma: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Ccircle cx='7' cy='7' r='6.25' fill='%2324914f'/%3E%3Cpath d='m4.2 7.2 2 2 3.8-4' fill='none' stroke='%23fffdfb' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 
-  /* MARCA — indigo, a unica cor da marca (simbolo L, barras de progresso, serie "medido"). */
-  --marca:         #4F46E5;
+  --situacao-andamento-texto: #1b589e;
+  --situacao-andamento-fundo: #e8f2ff;
+  --situacao-andamento-ponto: #3180de;
+  /* circulo vazado, meio cheio */
+  --situacao-andamento-forma: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Ccircle cx='7' cy='7' r='5.75' fill='%23faf8f6' stroke='%233180de' stroke-width='1.5'/%3E%3Cpath d='M7 1.25a5.75 5.75 0 0 1 0 11.5z' fill='%233180de'/%3E%3C/svg%3E");
 
-  /* acento interativo — o mesmo indigo (6,3:1 sobre branco). Botao primario, link, nav ativa, foco. */
-  --acento:        #4F46E5;
-  --acento-forte:  #4338CA;   /* hover */
-  --acento-mais:   #3730A3;   /* :active e texto sobre tinta clara do acento */
-  --acento-fundo:  #EEF0FF;   /* tinta clara */
-  --acento-linha:  #C7D2FE;
-  /* derivado do proprio token: trocar --acento leva o anel de foco junto */
-  --foco:          var(--acento);
+  --situacao-breve-texto: #6f5803;   /* vence em breve */
+  --situacao-breve-fundo: #fff1cc;
+  --situacao-breve-ponto: #f1c11b;
+  /* triangulo com exclamacao */
+  --situacao-breve-forma: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M7 1.2 13.2 12.4H.8z' fill='%23f1c11b' stroke='%236f5803' stroke-width='1.3' stroke-linejoin='round'/%3E%3Cpath d='M7 5.4v3.3' stroke='%236f5803' stroke-width='1.4' stroke-linecap='round'/%3E%3Ccircle cx='7' cy='10.4' r='.8' fill='%236f5803'/%3E%3C/svg%3E");
 
-  /* semanticas — verde, ambar e vermelho SO para situacao (a marca nao as usa).
-     O tom de TEXTO e' escuro (legivel sobre branco e sobre o fundo tingido); o
-     tom vivo (-ponto) e' para ponto, icone e contorno. */
-  --acao:          #B91C1C;   /* critico, vencido, acao destrutiva */
-  --acao-forte:    #991B1B;
-  --acao-fundo:    #FEF2F2;
-  --acao-linha:    #FECACA;
-  --acao-ponto:    #EF4444;
-  --atencao:       #B45309;   /* pendencia, prazo se aproximando */
-  --atencao-fundo: #FFFBEB;
-  --atencao-linha: #FDE68A;
-  --atencao-ponto: #F59E0B;
-  --ok:            #047857;   /* em dia, concluido, dinheiro recebido */
-  --ok-fundo:      #ECFDF5;
-  --ok-linha:      #A7F3D0;
-  --ok-ponto:      #10B981;
+  --situacao-critico-texto: #a51c34;
+  --situacao-critico-fundo: #ffecec;
+  --situacao-critico-ponto: #c81f40;
+  /* octogono cheio com exclamacao */
+  --situacao-critico-forma: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M4.4.9h5.2l3.5 3.5v5.2l-3.5 3.5H4.4L.9 9.6V4.4z' fill='%23c81f40'/%3E%3Cpath d='M7 3.9v3.8' stroke='%23fffdfb' stroke-width='1.6' stroke-linecap='round'/%3E%3Ccircle cx='7' cy='10' r='.9' fill='%23fffdfb'/%3E%3C/svg%3E");
 
-  /* REGRA DE COR DA INFORMACAO (redesenho de 11/2026; docs/identidade-visual.md): numero e data em preto por padrao;
-     a cor so' vai na informacao. feito = verde (--ok), em andamento = azul, vence em breve = ambar (--atencao),
-     critico = vermelho (--acao). O que nao e' urgente fica preto. */
-  --andamento:       #1D4ED8;
-  --andamento-fundo: #EFF6FF;
-  --andamento-linha: #BFDBFE;
-  --andamento-ponto: #3B82F6;
+  /* ------------------------------------------------------------ etapas do ciclo e previsao */
+  --etapa-analise: #b7d4f9;          /* em analise: claro com contorno */
+  --etapa-analise-borda: #3180de;
+  --etapa-borda-largura: 1px;
+  --etapa-boletim: #77abec;
+  --etapa-nota: #3180de;
+  --etapa-protocolado: #1b589e;
+  --etapa-recebido: #24914f;
+  --etapa-atrasado: var(--situacao-critico-ponto); /* o atrasado e' sempre o critico */
+  --etapa-atrasado-marca: "!";       /* sinal dentro da celula atrasada */
+  --etapa-vazia: #ece7e3;            /* competencia sem medicao */
 
-  /* forma: raio 8 em cartao e botao, pilula 999; pagina sem raio nem sombra; sobreposicao
-     (janela, menu, lista de sugestoes) com raio 10 e sombra propria. */
-  --raio-micro:    4px;       /* code, chave de legenda, alvo de clique dentro de celula */
-  --raio-ctrl:     8px;       /* controles */
-  --raio:          8px;       /* superficies */
-  --raio-sobreposicao: 10px;
-  --raio-pilula:   999px;     /* selo, ponto, avatar */
-  --sombra:        0 1px 2px rgba(15, 23, 42, .06), 0 4px 12px rgba(15, 23, 42, .06);
-  --sombra-sobreposicao: 0 12px 32px rgba(15, 23, 42, .16), 0 2px 6px rgba(15, 23, 42, .08);
-  /* Menu lateral (Casca.tsx, redesenho de 11/2026): 240px largo, 64px recolhido (so' icones). Fundo = --marca; item
-     ativo = pilula branca com texto indigo; hover = um degrau mais claro que o fundo. */
-  --trilho:        64px;
-  --trilho-largo:  240px;
-  --trilho-hover:  #5B54E8;
-  --trilho-duracao: 200ms;
-  --trilho-curva:  cubic-bezier(.65, 0, .35, 1);
-  --trilho-sombra-sobreposto: 8px 0 24px rgba(15, 23, 42, .2);
+  --previsao-neste-mes: #120f0d;
+  --previsao-proximo-mes: #5f5a57;
+  --previsao-depois: #a39e9a;
+  --previsao-sem: #d9d3ce;           /* sem previsao */
+  --previsao-atrasado: var(--situacao-critico-ponto);
 
-  /* situacao da medicao (pagina Medicoes, 09/10/2026, prototipo aprovado): fundo e texto da pilula; o texto e' o
-     ponto do cartao. "Enviar nota" usa o indigo da marca (--pressionado / --acento-mais). */
-  --sit-sem-fundo: var(--neutro-fundo);  --sit-sem-texto: #475569;  --sit-sem-linha: var(--linha);
-  --sit-fat-fundo: #FEF3C7;  --sit-fat-texto: #92400E;
-  --sit-nota-fundo: #CCFBF1; --sit-nota-texto: #115E59;
-  --sit-envio-fundo: var(--pressionado); --sit-envio-texto: var(--acento-mais);
-  --sit-pag-fundo: #F3E8FF;  --sit-pag-texto: #6B21A8;
-  /* D3: 1600 no monitor de 1920 da equipe (era 1200: sobrava uma faixa de ~500px vazia enquanto
-     as tabelas rolavam por dentro); a 1366 a pagina ocupa a largura toda de qualquer jeito. */
-  --conteudo:      1600px;
+  --cor-barra-recebido: #302d2b;     /* colunas do recebido em 12 meses */
+
+  /* ------------------------------------------------------------ tipografia */
+  --fonte-texto: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --fonte-numero: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --fonte-titulo: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --fonte-marca: "Barlow Condensed", "Arial Narrow", sans-serif;     /* so' no nome escrito ao lado do simbolo */
+  --fonte-marca-apoio: "Barlow Semi Condensed", sans-serif;          /* a palavra "grupo" do nome */
+
+  /* larguras (eixo de largura da Archivo) */
+  --largura-texto: 100%;
+  --largura-numero: 92%;             /* valores em reais, um pouco estreitos */
+  --largura-titulo: 72%;             /* titulos condensados */
+
+  /* pesos */
+  --peso-normal: 400;
+  --peso-medio: 500;
+  --peso-forte: 620;
+  --peso-sinal: 600;                 /* o "!" da celula atrasada */
+  --peso-numero: 620;
+  --peso-titulo: 760;
+  --peso-marca: 700;
+
+  /* estilo dos titulos */
+  --caixa-titulo: uppercase;         /* titulos de bloco em caixa-alta; o titulo da pagina nao */
+  --espacamento-titulo: 0.03em;
+
+  /* entrelinhas */
+  --entrelinha: 1.4;
+  --entrelinha-titulo: 1.15;
+  --entrelinha-valor: 1.15;
+  --entrelinha-numero: 1.15;
+  --entrelinha-justa: 1;
+
+  /* tamanhos */
+  --texto-corpo: 1rem;
+  --texto-meta: 0.875rem;            /* rotulo de apoio, selo, contador, legenda */
+  --texto-mini: 0.75rem;             /* mes, ano, valor das colunas, nome de grupo na grade */
+  --texto-rotulo: 1rem;              /* rotulo de linha (etapa, prazo) */
+  --texto-valor: 1.44rem;            /* valor em reais de uma linha */
+  --texto-valor-menor: 1.2rem;       /* o mesmo valor em caixa apertada */
+  --texto-numero: 1.728rem;          /* numero de destaque (numeros do mes) */
+  --texto-titulo-pagina: 2.074rem;   /* h1 */
+  --texto-titulo-bloco: 1.2rem;      /* h2 de bloco e de grupo */
+  --texto-titulo-sub: 1rem;          /* h2 de bloco dentro de grupo, h3 */
+  --texto-topo: 1.2rem;              /* titulo na barra do topo */
+  --texto-menu: 1rem;
+  --texto-conta: 1rem;
+  --texto-avatar: 0.75rem;
+  --texto-marca: 1.375rem;
+
+  /* ------------------------------------------------------------ espacos */
+  --espaco-fio: 1px;
+  --espaco-traco: 2px;
+  --espaco-grade: 3px;               /* vao entre celulas da grade de medicoes */
+  --espaco-mini: 4px;
+  --espaco-pp: 8px;
+  --espaco-p: 12px;
+  --espaco-m: 16px;
+  --espaco-g: 24px;
+  --espaco-gg: 32px;
+  --espaco-xg: 40px;
+  --espaco-xxg: 64px;
+
+  /* espacos da pagina */
+  --espaco-entre-blocos: 24px;
+  --espaco-topo-grupo: 24px;         /* antes do titulo de um grupo de blocos */
+  --espaco-entre-colunas: 40px;
+  --pagina-margem-topo: 24px;
+  --pagina-margem-lado: 32px;
+  --pagina-margem-base: 64px;
+  --pagina-largura-max: 1320px;
+
+  /* ------------------------------------------------------------ medidas */
+  --largura-menu: 232px;
+  --altura-topo: 56px;
+  --alvo-minimo: 40px;               /* altura minima de botao, campo e conta */
+  --tamanho-avatar: 32px;
+  --tamanho-icone-menu: 18px;
+  --tamanho-icone-conta: 18px;
+  --tamanho-glifo: 0.875rem;         /* simbolo de situacao */
+  --simbolo-marca-largura: 28px;
+  --simbolo-marca-altura: 29px;
+  --tamanho-chave: 12px;             /* quadradinho de cor das legendas */
+  --altura-contador: 24px;
+  --altura-faixa: 14px;              /* faixa proporcional */
+  --largura-min-segmento: 6px;
+  --altura-barra-etapa: 6px;
+  --altura-grafico: 168px;           /* colunas dos 12 meses */
+  --largura-max-coluna: 24px;
+  --altura-celula: 26px;             /* celula da grade de medicoes */
+  --largura-min-celula: 28px;
+  --largura-nome-obra: 232px;
+  --largura-min-tela: 1024px;        /* a casca e' de computador */
+
+  /* ------------------------------------------------------------ raios (cantos retos) */
+  --raio-canto: 0px;                 /* amostras, celulas, barras */
+  --raio-controle: 0px;              /* botoes, itens do menu, campo */
+  --raio-selo: 0px;                  /* selo e contador */
+  --raio-avatar: 999px;              /* o avatar e' a unica forma redonda */
+
+  /* ------------------------------------------------------------ bordas */
+  --borda-fina: 1px;
+  --borda-grossa: 2px;
+  --borda-painel: 2px solid var(--cor-tinta);
+  --borda-linha: 1px solid var(--cor-linha);
+  --borda-campo: 1px solid var(--cor-borda-controle);
+  --largura-foco: 2px;
+  --afastamento-foco: 2px;
+  --afastamento-sublinhado: 3px;
+
+  /* ------------------------------------------------------------ reguas (fio acima de titulo) */
+  --regua-grupo: 2px solid var(--cor-tinta);    /* acima do titulo de um grupo de blocos */
+  --regua-grupo-respiro: 12px;
+  --regua-secao: 1px solid var(--cor-tinta);    /* acima de subtitulo dentro de painel, da grade e da base do grafico */
+  --regua-secao-respiro: 8px;
+  --titulo-margem-base: 16px;                   /* entre o titulo do painel e o conteudo */
+
+  /* ------------------------------------------------------------ sombras (dura, sem desfoque) */
+  --sombra-painel: 8px 8px 0 var(--cor-papel-escuro);
 
   color-scheme: light;
+}
+
+/* ============================================================================ (2) VARIAVEIS ANTIGAS
+   Cada nome antigo aponta para a fundacao pelo papel que tinha; nenhum guarda cor propria. Os outros CSS continuam
+   usando estes nomes ate' a etapa 1b, que troca cada uso pela variavel da fundacao e apaga este bloco.
+   Regra do dono: o laranja nao entra aqui. O que era "cor primaria" de botao, link e selecionado passa a ser a tinta;
+   o que era a cor da marca pintando superficie (o menu, as barras de progresso) passa a ser o escuro do menu. */
+:root {
+  --fonte:         var(--fonte-texto);
+  --fonte-num:     var(--fonte-numero);   /* valores e datas */
+
+  /* superficies */
+  --bg:            var(--cor-papel);
+  --superficie:    var(--cor-superficie);
+  --superficie-2:  var(--cor-papel-sombreado);   /* zebra da tabela, rodape de cartao */
+  --neutro-fundo:  var(--cor-contador-neutro);   /* pilula neutra, contador neutro */
+  --hover:         var(--cor-papel-sombreado);
+  --pressionado:   var(--cor-papel-escuro);      /* :active de controle neutro */
+  --linha:         var(--cor-linha);
+  --linha-suave:   var(--cor-linha);             /* divisoria entre linhas da tabela */
+  --linha-forte:   var(--cor-borda-controle);    /* contorno de botao */
+  --linha-hover:   var(--cor-tinta);             /* contorno no passar o mouse */
+  --linha-campo:   var(--cor-borda-controle);    /* contorno de campo */
+  --previsto:      var(--previsao-sem);          /* serie "previsto" dos graficos: cinza, o medido e' que marca */
+
+  /* texto (o antigo --texto-menu, cor, virou --texto-2: o nome agora e' o tamanho do item do menu da fundacao) */
+  --texto:         var(--cor-tinta);
+  --texto-2:       var(--cor-texto-secundario);
+  --texto-fraco:   var(--cor-texto-terciario);   /* controle desabilitado, traco, placeholder */
+
+  /* a cor da marca pintava o menu e as barras de progresso: vira o escuro do menu (o laranja nao pinta superficie) */
+  --marca:         var(--cor-menu);
+
+  /* acento interativo: botao primario, link, selecionado. Vira a tinta (o laranja nunca indica acao). */
+  --acento:        var(--cor-tinta);
+  --acento-forte:  var(--cor-menu-realce);       /* hover */
+  --acento-mais:   var(--cor-tinta);             /* :active e texto sobre a tinta clara do acento */
+  --acento-fundo:  var(--cor-papel-sombreado);   /* tinta clara: selecionado, destaque suave */
+  --acento-linha:  var(--cor-borda-controle);    /* contorno do selecionado e da area de soltar arquivo */
+  --foco:          var(--cor-foco);
+
+  /* situacoes: critico (acao), vence em breve (atencao), feito (ok), em andamento. Texto = tom escuro de leitura,
+     fundo = tinta clara, ponto = tom vivo. A fundacao nao tem contorno de situacao: o -linha mistura o ponto no papel. */
+  --acao:          var(--situacao-critico-texto);   /* critico, vencido, acao destrutiva */
+  --acao-forte:    color-mix(in srgb, var(--situacao-critico-texto) 80%, var(--cor-tinta));
+  --acao-fundo:    var(--situacao-critico-fundo);
+  --acao-linha:    color-mix(in srgb, var(--situacao-critico-ponto) 40%, var(--cor-papel));
+  --acao-ponto:    var(--situacao-critico-ponto);
+  --atencao:       var(--situacao-breve-texto);     /* pendencia, prazo se aproximando */
+  --atencao-fundo: var(--situacao-breve-fundo);
+  --atencao-linha: color-mix(in srgb, var(--situacao-breve-ponto) 60%, var(--cor-papel));
+  --atencao-ponto: var(--situacao-breve-ponto);
+  --ok:            var(--situacao-feito-texto);     /* em dia, concluido, dinheiro recebido */
+  --ok-fundo:      var(--situacao-feito-fundo);
+  --ok-linha:      color-mix(in srgb, var(--situacao-feito-ponto) 40%, var(--cor-papel));
+  --ok-ponto:      var(--situacao-feito-ponto);
+  --andamento:       var(--situacao-andamento-texto);
+  --andamento-fundo: var(--situacao-andamento-fundo);
+  --andamento-linha: var(--etapa-analise);
+  --andamento-ponto: var(--situacao-andamento-ponto);
+
+  /* forma: cantos retos e sombra dura */
+  --raio-micro:    var(--raio-canto);
+  --raio-ctrl:     var(--raio-controle);
+  --raio:          var(--raio-canto);
+  --raio-sobreposicao: var(--raio-canto);
+  --raio-pilula:   var(--raio-selo);
+  --sombra:        var(--sombra-painel);
+  --sombra-sobreposicao: var(--sombra-painel);
+
+  /* menu lateral (Casca.tsx): larguras e animacao continuam ate' a casca nova (etapa 1c) */
+  --trilho:        64px;
+  --trilho-largo:  240px;
+  --trilho-hover:  var(--cor-menu-realce);
+  --trilho-duracao: 200ms;
+  --trilho-curva:  cubic-bezier(.65, 0, .35, 1);
+  --trilho-sombra-sobreposto: 8px 0 24px var(--cor-veu);
+
+  /* situacao da medicao (pagina Medicoes): a etapa em que a medicao esta' nao e' situacao. Sem medicao fica neutra;
+     qualquer etapa em curso e' "em andamento". O texto tambem e' o ponto do cartao. */
+  --sit-sem-fundo: var(--cor-contador-neutro);  --sit-sem-texto: var(--cor-texto-secundario);  --sit-sem-linha: var(--cor-linha);
+  --sit-fat-fundo: var(--situacao-andamento-fundo);   --sit-fat-texto: var(--situacao-andamento-texto);
+  --sit-nota-fundo: var(--situacao-andamento-fundo);  --sit-nota-texto: var(--situacao-andamento-texto);
+  --sit-envio-fundo: var(--situacao-andamento-fundo); --sit-envio-texto: var(--situacao-andamento-texto);
+  --sit-pag-fundo: var(--situacao-andamento-fundo);   --sit-pag-texto: var(--situacao-andamento-texto);
+
+  /* D3: 1600 no monitor de 1920 da equipe; a largura da pagina muda so' quando a disposicao for refeita */
+  --conteudo:      1600px;
 }
 
 /* --------------------------------------------------------------- elementos */
@@ -139,10 +337,15 @@ body {
   caret-color: var(--acento);
 }
 
-h1, h2, h3 { font-weight: 700; letter-spacing: -.01em; }
+/* titulos: Archivo condensada; os de bloco (h2, h3) em caixa-alta, o da pagina (h1) nao */
+h1, h2, h3 {
+  font-family: var(--fonte-titulo); font-stretch: var(--largura-titulo); font-weight: var(--peso-titulo);
+  line-height: var(--entrelinha-titulo); letter-spacing: 0;
+}
+h2, h3 { text-transform: var(--caixa-titulo); letter-spacing: var(--espacamento-titulo); }
 
 /* superficies do navegador: selecao, foco e barra de rolagem tambem sao do mundo */
-::selection { background: var(--acento-linha); color: var(--acento-mais); }
+::selection { background: var(--cor-selecao); color: var(--cor-tinta); }
 
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--foco);
@@ -235,7 +438,7 @@ table { border-collapse: collapse; }
    de mesma largura. A largura fixa vai so' no valor: celula numerica da tabela, campo numerico e os valores de KPI. */
 td.col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor,
 .total-receber__valor, .alerta__valor {
-  font-family: var(--fonte-num);
+  font-family: var(--fonte-num); font-stretch: var(--largura-numero);
 }
 
 /* Cor da informacao (redesenho de 11/2026; docs/identidade-visual.md, "Regra de cor da informacao"): texto preto por
@@ -370,7 +573,7 @@ td, th { font-variant-numeric: tabular-nums; }
 .aviso-respostas__mais {
   pointer-events: auto; align-self: flex-end; margin: 0; padding: 2px 10px;
   background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio-pilula);
-  font-size: 12.5px; color: var(--texto-menu);
+  font-size: 12.5px; color: var(--texto-2);
 }
 .trilho {
   position: fixed; top: 0; bottom: 0; left: 0; z-index: 40;
@@ -385,7 +588,8 @@ td, th { font-variant-numeric: tabular-nums; }
 /* a celula do icone tem a largura do menu recolhido: o icone fica centrado nos dois estados */
 .trilho__celula { width: var(--trilho); flex: none; display: flex; align-items: center; justify-content: center; }
 .trilho__marca { display: flex; align-items: center; width: var(--trilho-largo); height: 40px; margin-bottom: 24px; flex: none; }
-.trilho__simbolo { width: 15px; height: auto; color: #fff; }
+/* o L da empresa: a haste herda a cor do texto do menu, o bloco e' o laranja da marca (Simbolo.tsx) */
+.trilho__simbolo { width: var(--simbolo-marca-largura); height: var(--simbolo-marca-altura); color: var(--cor-menu-texto); }
 .trilho__nome { font-size: 16px; line-height: 20px; font-weight: 700; }
 /* item: pilula de 12px de folga nas laterais; a pilula tem a largura do menu menos a folga */
 .trilho__item, .trilho__alternar {
@@ -434,7 +638,7 @@ td, th { font-variant-numeric: tabular-nums; }
 .conta { position: relative; flex: none; }
 .conta__botao {
   height: 44px; padding: 0 8px; gap: 8px;
-  border: 0; background: none; color: var(--texto-menu);
+  border: 0; background: none; color: var(--texto-2);
   font-size: 14px; font-weight: 500;
 }
 .conta__botao:hover:not(:disabled), .conta__botao[aria-expanded="true"] { background: var(--neutro-fundo); color: var(--texto); }
@@ -459,7 +663,7 @@ td, th { font-variant-numeric: tabular-nums; }
 .conta__item {
   display: flex; align-items: center; width: 100%; height: 36px; padding: 0 10px;
   border: 0; border-radius: 6px; background: none;
-  color: var(--texto-menu); font-size: 14px; font-weight: 400; text-decoration: none; text-align: left;
+  color: var(--texto-2); font-size: 14px; font-weight: 400; text-decoration: none; text-align: left;
 }
 .conta__item:hover:not(:disabled) { background: var(--neutro-fundo); color: var(--texto); }
 /* erro do proprio shell (falha ao encerrar a sessao): so' no desfecho raro em que o POST de logout falha */

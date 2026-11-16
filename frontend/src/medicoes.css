@@ -63,7 +63,7 @@
 .medicoes__sub { display: block; font-size: 12px; line-height: 16px; color: var(--texto-2); }
 .medicoes__traco { color: var(--texto-fraco); }
 /* "Parada há": ambar e vermelho so' com o limiar passado (resumoMedicoes.nivelParada) */
-.medicoes__parada { color: var(--texto-menu); white-space: nowrap; }
+.medicoes__parada { color: var(--texto-2); white-space: nowrap; }
 .medicoes__parada--atencao { color: var(--atencao); font-weight: 600; }
 .medicoes__parada--acao { color: var(--acao); font-weight: 600; }
 
@@ -101,19 +101,19 @@
 .iniciar__aviso--atencao .icone { color: var(--atencao); }
 .iniciar__aviso--info { background: var(--acento-fundo); border-color: var(--acento-linha); }
 .iniciar__aviso--info .icone { color: var(--acento); }
-.iniciar__rotulo { font-size: 13px; font-weight: 500; color: var(--texto-menu); }
+.iniciar__rotulo { font-size: 13px; font-weight: 500; color: var(--texto-2); }
 .iniciar__tipo-grupo { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .iniciar__tipo-grupo legend { padding: 0; margin-bottom: 6px; }
 .iniciar__tipo { display: inline-flex; width: fit-content; padding: 3px; gap: 3px; border: 1px solid var(--linha-campo); border-radius: var(--raio-ctrl); }
-.iniciar__tipo label { display: inline-flex; align-items: center; height: 32px; padding: 0 14px; border-radius: 6px; cursor: pointer; font-weight: 500; color: var(--texto-menu); }
+.iniciar__tipo label { display: inline-flex; align-items: center; height: 32px; padding: 0 14px; border-radius: 6px; cursor: pointer; font-weight: 500; color: var(--texto-2); }
 .iniciar__tipo input { position: absolute; opacity: 0; pointer-events: none; }
 .iniciar__tipo label:has(input:checked) { background: var(--acento); color: #fff; }
 .iniciar__tipo label:has(input:focus-visible) { outline: 2px solid var(--foco); outline-offset: 2px; }
 .iniciar__campos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .iniciar__campo { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.iniciar__campo > span, .iniciar__campo label > span { font-size: 13px; font-weight: 500; color: var(--texto-menu); }
+.iniciar__campo > span, .iniciar__campo label > span { font-size: 13px; font-weight: 500; color: var(--texto-2); }
 .iniciar__campo input { height: 40px; width: 100%; min-width: 0; padding: 0 10px; border: 1px solid var(--linha-campo); border-radius: var(--raio-ctrl); font-family: var(--fonte-num); }
-.iniciar__campo input[readonly] { background: var(--superficie-2); color: var(--texto-menu); }
+.iniciar__campo input[readonly] { background: var(--superficie-2); color: var(--texto-2); }
 .iniciar__botoes { display: flex; justify-content: flex-end; gap: 10px; }
 /* o rótulo do botão leva o nome da obra: no celular passa da largura, então quebra em vez de vazar */
 .iniciar__botoes .btn { white-space: normal; height: auto; min-height: 32px; padding-block: 5px; line-height: 20px; }

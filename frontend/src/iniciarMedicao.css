@@ -8,7 +8,7 @@
   border: 1px solid var(--linha-campo); border-radius: var(--raio-ctrl); background: var(--superficie); font-weight: 600;
 }
 .iniciar-med__mes-seta {
-  width: 40px; height: 40px; flex: none; border: 0; border-radius: var(--raio-ctrl); background: none; color: var(--texto-menu);
+  width: 40px; height: 40px; flex: none; border: 0; border-radius: var(--raio-ctrl); background: none; color: var(--texto-2);
   font-size: 22px; line-height: 1; cursor: pointer;
 }
 .iniciar-med__mes-seta:hover { background: var(--hover); }

@@ -19,7 +19,7 @@
    trecho e' o proprio conteudo (`min-content`: o valor inteiro, que nao quebra), e a proporcao pelo valor vale para o
    que sobra; antes o trecho de maior valor espremia os outros e o valor vazava para o vizinho. A fonte do valor sai da
    largura do painel para cinco valores de 11 digitos caberem lado a lado: um valor desses mede --ini-faixa-valor-em
-   vezes a fonte no maximo (no navegador, "R$ 800.000.000,00" mede 9,81: o zero e' o algarismo mais largo), e 76px
+   vezes a fonte no maximo (no navegador, "R$ 800.000.000,00" em Archivo 700 tabular mede 8,98), e 76px
    sao os respiros (5 x 2 x 6) mais os vaos (4 x 4). A 1024px, com o menu lateral aberto (240px), o painel tem 688px
    por dentro e a fonte fica em 12px; em painel onde nem a 12px os cinco cabem (5 x (10 x 12 + 12) + 4 x 4 = 676), a
    faixa vira lista vertical, sem rolagem. */

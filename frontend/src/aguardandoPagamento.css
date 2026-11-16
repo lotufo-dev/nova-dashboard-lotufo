@@ -29,7 +29,7 @@
 .ap__origem { display: block; font-size: 12px; line-height: 16px; color: var(--texto-2); font-family: var(--fonte); }
 .ap__traco { color: var(--texto-fraco); }
 .ap__parada-caixa { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.ap__parada { color: var(--texto-menu); }
+.ap__parada { color: var(--texto-2); }
 .ap__parada--atencao { color: var(--atencao); font-weight: 600; }
 .ap__parada--acao { color: var(--acao); font-weight: 600; }
 
@@ -37,7 +37,7 @@
 .ap__painel h2 { margin: 0; font-size: 18px; line-height: 24px; }
 .ap__painel-orgao { color: var(--texto-2); margin-top: -10px; }
 .ap__painel-valor { font-family: var(--fonte-num); font-size: 28px; line-height: 36px; font-weight: 500; white-space: nowrap; }
-.ap__painel-envio { color: var(--texto-menu); }
+.ap__painel-envio { color: var(--texto-2); }
 .ap__fraco { color: var(--texto-2); }
 .ap__campo label, .ap__rotulo { display: block; font-weight: 500; margin-bottom: 6px; }
 .ap__form { display: flex; gap: 8px; }
@@ -50,7 +50,7 @@
 .ap__link { color: var(--acento); text-decoration: none; font-weight: 500; }
 .ap__link:hover { color: var(--acento-forte); text-decoration: underline; }
 
-.ap__vazio { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 16px; text-align: center; color: var(--texto-menu); }
+.ap__vazio { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 16px; text-align: center; color: var(--texto-2); }
 .ap__vazio .icone { width: 32px; height: 32px; color: var(--texto-2); stroke-width: 1.5; }
 .ap__vazio p { margin: 0; font-size: 15px; }
 
