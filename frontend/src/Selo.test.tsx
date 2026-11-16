@@ -59,7 +59,9 @@ describe("Selo: as quatro situações", () => {
     expect(container.innerHTML).toBe('<span class="glifo glifo--breve" aria-hidden="true"></span>');
   });
 
-  it("nenhuma tela guarda o selo de três níveis, o contorno do nível Ação nem a pílula de situação", () => {
+  // So' as classes GLOBAIS removidas. Os pontos proprios de tela (documentos, SIGA, abas de Medicoes) seguem com as
+  // classes de tres niveis de cada tela e ficam para a etapa de cada uma: este teste nao os cobre.
+  it("as classes globais antigas do selo, do ponto e da pílula não voltam", () => {
     const velho = /selo--(?:ok|atencao|acao|forte)\b|selo__ponto|pilula-info|aviso__ponto/;
     const restos = readdirSync(SRC)
       .filter(f => /\.(?:tsx?|css)$/.test(f) && !/\.test\.tsx?$/.test(f))
