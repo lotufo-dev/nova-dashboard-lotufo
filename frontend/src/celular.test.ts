@@ -33,8 +33,8 @@ describe("celular", () => {
     // #659: a 1440 px o trecho de maior valor espremia os outros e o valor em reais vazava para o trecho vizinho. A
     // regra: o minimo de cada trecho e' o conteudo dele (o valor nao quebra), e a fonte do valor sai da largura do
     // painel de modo que cinco valores de 11 digitos caibam lado a lado. O jsdom nao mede layout: aqui a conta, com a
-    // largura de "R$ 100.000.000,00" em Lexend 700 medida no Chrome.
-    const EM_MEDIDO = 9.81;
+    // largura de "R$ 100.000.000,00" em Archivo 700 (algarismos tabulares) medida no Chrome.
+    const EM_MEDIDO = 8.98;
     const em = Number(/--ini-faixa-valor-em:\s*([\d.]+)/.exec(inicioCss)?.[1]);
     expect(em).toBeGreaterThanOrEqual(EM_MEDIDO);
     const vao = Number(/\.ini-faixa\s*\{[^}]*gap:\s*(\d+)px/.exec(inicioCss)?.[1]);

@@ -11,12 +11,12 @@
 .fat-linha:hover { background: var(--superficie-2); }
 .fat-linha__obra { color: var(--texto); font-size: 15px; font-weight: 600; text-decoration: none; }
 .fat-linha__obra:hover { color: var(--acento); text-decoration: underline; }
-.fat-linha__detalhe { display: block; margin-top: 2px; color: var(--texto-menu); }
+.fat-linha__detalhe { display: block; margin-top: 2px; color: var(--texto-2); }
 .fat-linha__detalhe a { color: inherit; text-decoration: none; }
 .fat-linha__detalhe a:hover { color: var(--acento); text-decoration: underline; }
 .fat-linha__valor { text-align: right; font-size: 15px; }
 .fat-parada { white-space: nowrap; }
-.fat-parada__rot { color: var(--texto-menu); }
+.fat-parada__rot { color: var(--texto-2); }
 
 @media (max-width: 767px) {
   .fat-grupo__cabeca { font-size: 15px; }
