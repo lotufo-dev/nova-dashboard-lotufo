@@ -544,8 +544,8 @@ def _ligar_nf(conn, uid, m, op, fonte):
     else:
         # Cobertura parcial nao fecha a medicao como recebida: a nota que falta ainda nao entrou (revisor da #259)
         detalhes.append(f"AVISO: parcial, as notas somam {dinheiro.format_brl(soma)} de {dinheiro.format_brl(valor)}; "
-                        "não passa a recebida agora (a sincronização com o RM pode fechá-la quando os títulos destas notas forem "
-                        "pagos)")
+                        "fica protocolada até a nota que falta ser ligada e paga, ou o recebimento ser registrado à mão (a "
+                        "sincronização com o RM não fecha medição com notas que não cobrem o valor)")
     op["_forcado"] = [{"nf": n["numero"], "problema": p} for n, p in novas if p]
     return detalhes
 
