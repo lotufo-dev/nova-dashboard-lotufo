@@ -6,11 +6,11 @@ labels: []
 
 ## Objetivo
 
-<!-- Uma frase: o que o Leo vai conseguir fazer quando isto estiver pronto. -->
+<!-- Uma frase: o que o dono vai conseguir fazer quando isto estiver pronto. -->
 
 ## Regra de negócio
 
-<!-- A regra em português, com a fonte: spec, linha do backlog, decisão do Leo e data (DD/MM/AAAA). -->
+<!-- A regra em português, com a fonte: ADR, regra, linha do backlog, decisão do dono e data (DD/MM/AAAA). -->
 
 ## Critérios de aceite
 

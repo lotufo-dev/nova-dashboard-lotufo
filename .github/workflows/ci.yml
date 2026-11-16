@@ -27,10 +27,10 @@ concurrency:
 jobs:
   # Dado real no repositorio publico (issue #106): CNPJ/CPF validos, e-mail de dominio real, chave de NFS-e/NF-e e o
   # nome da maquina (scripts/vazamento.py) e segredo tecnico (gitleaks). O log e' publico: o script so' mostra
-  # o dado mascarado. A lista de nomes de pessoas e' local do Leo, entao aqui essa parte e' pulada. O nome da
+  # o dado mascarado. A lista de nomes de pessoas e' local do dono, entao aqui essa parte e' pulada. O nome da
   # maquina vem do secret DASH_SERVIDOR (sem ele, ex. PR de fork, a checagem e' pulada com aviso). Na PR, o
   # script tambem varre cada commit da PR (dado que entra e sai continua no historico), e um passo proprio falha
-  # se ela altera o script, a lista de excecoes ou os hooks: essas mudancas exigem merge do Leo.
+  # se ela altera o script, a lista de excecoes ou os hooks: essas mudancas exigem merge do dono.
   vazamento:
     runs-on: ubuntu-latest
     permissions:
@@ -89,14 +89,14 @@ jobs:
       # mudaram e' este passo (o ci.yml e' protegido por `.github/`), nao o script. Arquivo novo nao conta.
       # Fica por ultimo e os passos acima usam `!cancelled()`: um passo vermelho nao pode esconder a varredura
       # nem o gitleaks justamente nas PRs que mexem no script ou nos hooks.
-      - name: Script, lista de excecoes e hooks so mudam com merge do Leo
+      - name: Script, lista de excecoes e hooks so mudam com merge do dono
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
           mudou=$(git diff --name-only --no-renames --diff-filter=MDT "origin/$BASE_REF...HEAD" -- scripts/vazamento.py scripts/vazamento-excecoes.txt .githooks)
           if [ -n "$mudou" ]; then
-            echo "::error::Esta PR altera arquivos que decidem o que a varredura de dado real deixa passar. Isso exige merge do Leo."
+            echo "::error::Esta PR altera arquivos que decidem o que a varredura de dado real deixa passar. Isso exige merge do dono."
             echo "$mudou"
             exit 1
           fi

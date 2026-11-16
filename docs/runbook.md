@@ -24,8 +24,8 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
   `<tarefa>` e `<tarefa-do-watchdog>`. Os valores reais vêm de variável de ambiente (`DASH_SERVIDOR`, `DASH_RM_ENDERECO`) ou de arquivo
   local em `C:\DashboardLotufo\segredos` (`rm-endereco.txt`); ver `scripts\rodar_producao.ps1`.
   O nome real das tarefas sai de `schtasks /Query /FO CSV | Select-String Dashboard` (pelo `schtasks.exe`, não pelos cmdlets `*-ScheduledTask`: ver "Agendador sem CIM" abaixo).
-- **Produção roda de um diretório PINADO** (mitigação [16], 2026-09-10): a tarefa agendada executa `C:\DashboardLotufo\app\scripts\rodar_producao.ps1` — um **worktree git dedicado** (detached HEAD num commit), com seu próprio `backend\.venv` e `frontend\dist`. O tree de dev (`C:\Users\...\Nova Dashboard Lotufo`) é **só para desenvolver**; editar/trocar branch lá NÃO muda a produção, e um reboot no meio de uma edição também não. Os dados (banco/logs/backups) ficam em `-Raiz` (`C:\DashboardLotufo`), fora do código.
-- **Deploy** (após commit+push no dev): `scripts\deploy.ps1 [-Ref origin/master] [-SemFrontend] [-Porta 8080]` (elevado; sem `-Porta`, usa a porta registrada na tarefa agendada, e com `-Porta` diferente dela aborta antes do checkout) — pausa o watchdog, atualiza o diretório pinado (git checkout + `requirements.lock` + build), reinicia, confere a saúde e faz **rollback automático** para o commit anterior se não voltar. Se o build (`pip`/`npm`/`vite`) falhar depois do checkout, o script volta o diretório pinado para o commit anterior (checkout direto, sem `git fetch`, e reconstrução sempre que o checkout do alvo terminou, mesmo num deploy do mesmo commit), confere a árvore limpa (`git status --porcelain --untracked-files=no`) e o health 200 do processo no ar, imprime que a produção segue nele e sai com código 1 (issue #78, #443); se a volta ou a conferência falhar, avisa para intervir à mão e mantém o sentinela. Setup inicial do diretório pinado: `git worktree add --detach C:\DashboardLotufo\app <commit>`, depois `python -m venv` + `pip install -r backend\requirements.lock` e `npm ci && npm run build` em `frontend`.
+- **Produção roda de um diretório PINADO** (mitigação [16], 2026-09-10): a tarefa agendada executa `C:\DashboardLotufo\app\scripts\rodar_producao.ps1` — um **clone git dedicado** (HEAD destacado num commit), com seu próprio `backend\.venv` e `frontend\dist`. O tree de dev (`C:\Users\...\Nova Dashboard Lotufo`) é **só para desenvolver**; editar/trocar branch lá NÃO muda a produção, e um reboot no meio de uma edição também não. Os dados (banco/logs/backups) ficam em `-Raiz` (`C:\DashboardLotufo`), fora do código.
+- **Deploy** (após commit+push no dev): `scripts\deploy.ps1 [-Ref origin/master] [-SemFrontend] [-Porta 8080]` (elevado; sem `-Porta`, usa a porta registrada na tarefa agendada, e com `-Porta` diferente dela aborta antes do checkout) — pausa o watchdog, atualiza o diretório pinado (git checkout + `requirements.lock` + build), reinicia, confere a saúde e faz **rollback automático** para o commit anterior se não voltar. Se o build (`pip`/`npm`/`vite`) falhar depois do checkout, o script volta o diretório pinado para o commit anterior (checkout direto, sem `git fetch`, e reconstrução sempre que o checkout do alvo terminou, mesmo num deploy do mesmo commit), confere a árvore limpa (`git status --porcelain --untracked-files=no`) e o health 200 do processo no ar, imprime que a produção segue nele e sai com código 1 (issue #78, #443); se a volta ou a conferência falhar, avisa para intervir à mão e mantém o sentinela. Setup inicial do diretório pinado: `git clone <url do repositório> C:\DashboardLotufo\app` e `git -C C:\DashboardLotufo\app checkout --detach <commit>`, depois `python -m venv` + `pip install -r backend\requirements.lock` e `npm ci && npm run build` em `frontend`.
 - **Backup pré-migração** (automático no deploy, desde a issue #75): antes de trocar o código, o `deploy.ps1` compara o commit atual do diretório pinado com o novo (`git diff --name-only <atual> <novo> -- backend/migrations`). Sem mudança em migrações, imprime `sem migracao nova; sem backup pre-migracao` e segue. Com mudança, chama `scripts\backup_pre_migracao.ps1`, que tira um snapshot do banco de produção com o servidor ainda no ar (API de backup do SQLite, pelo Python do diretório pinado; nunca cópia do `.db`, que perderia o `-wal`), confere o `integrity_check` e grava `C:\DashboardLotufo\dados\backups\dashboard-PRE-<7 caracteres do commit novo>-<AAAAMMDD-HHMMSS>.db`. O caminho sai em `BACKUP PRE-MIGRACAO: <caminho>` e de novo na linha final `DEPLOY OK`. Se o snapshot falhar, sai `BACKUP PRE-MIGRACAO FALHOU: <motivo>`, o deploy para **antes** do checkout (produção segue no commit anterior, código e banco intactos), o watchdog só é solto se a produção estava provada no início (senão a linha final diz `sentinela ... MANTIDO`) e o script sai com código 1. **O rollback automático só volta o código, não o banco**: se a versão nova migrou o banco e for preciso voltar também os dados, restaurar à mão o arquivo `dashboard-PRE-...` impresso no deploy, pela seção "Restaurar o banco a partir de um snapshot". Se o mesmo deploy foi tentado mais de uma vez (rollback e nova tentativa), o banco já pode ter migrado na primeira: o arquivo certo é o `dashboard-PRE-<commit>` **mais antigo** daquele commit.
 - **Deploy da issue #110 (FRC e cobrança de certidão pelo cadastro): `cadastro aplicar` no mesmo passo.** Logo depois do `deploy.ps1`, `cadastro aplicar --ensaio` e real com `--raiz` do cadastro real (seção "Cadastro versionado"); o relatório deve trazer `frc: 0 criados, 2 alterados` e `cobranca_certidoes` criado no geral. Sem isso, a FRC do Integra BRT é recusada ("Logo da FRC não encontrado na pasta de dados: aplique o cadastro") e a cobrança de certidões só registra no log.
 - **Deploy da issue #271 (apostilamento com competências; pleito atendido pelo termo): `cadastro aplicar` no mesmo passo.** Logo depois do `deploy.ps1`, `cadastro aplicar --ensaio` e real com `--raiz` do cadastro real (seção "Cadastro versionado"); o relatório deve trazer, em pleitos alterados, `<obra>/reajuste <ofício>: atendido por <chave>` para cada apostilamento de reajuste já aplicado com pleito enviado no ciclo. Sem isso, o ciclo desse pleito aparece como "apostilamento pendente" (com aviso, que vai à diretoria depois de 90 dias) até o próximo `aplicar`. O termo só liga o pleito enviado até a data dele: se o pleito de produção (pedido original ou reemissão do cronograma) tiver data posterior à do termo, ele não é ligado e o ciclo fica pendente; a reiteração posterior não atrapalha (o termo do pedido que ela reitera fecha o ciclo).
@@ -35,7 +35,7 @@ Uma vez só, como administrador, com o servidor de dev e qualquer uvicorn parado
   2. Rodar o `deploy.ps1` de `origin/master` copiado para `C:\Temp\deploy`, não o do diretório pinado. O PowerShell lê o script inteiro antes do checkout, e o antigo só confere o 200: sem o arquivo, ele terminaria em `DEPLOY OK` com a produção em modo cópia, sem e-mail e sem RM. Os comandos estão na seção "Instalação assinada", item "Primeiro deploy".
   3. Pelo Mac, esses comandos vão num `.ps1` temporário copiado para a VM com `scp` e rodado com `powershell -NoProfile -ExecutionPolicy Bypass -File`. No `-Command -` o `git fetch` consome o resto do script pelo stdin, e o script para no meio.
   4. Logo depois, `/api/health` com `instalacao: autorizada`. Se não vier, voltar à mão como diz o "Primeiro deploy".
-- **Deploy da issue #443 (rollback sem `git fetch`; sentinela só sai com a produção conferida): `deploy.ps1` novo, uma vez só.** O PowerShell lê o script inteiro antes do checkout, então o deploy que leva esta mudança à produção roda o `deploy.ps1` antigo do diretório pinado, com o rollback que faz `fetch` e o `finally` que sempre apaga o sentinela. Nesta vez, rodar o `deploy.ps1` de `origin/master` copiado para `C:\Temp\deploy`, com os mesmos comandos do item "Primeiro deploy" da seção "Instalação assinada" (pelo Mac, o `.ps1` temporário com `scp` e `-File`, nunca `-Command -`). Os deploys seguintes rodam do pinado, como sempre. Neste primeiro, o commit no ar (anterior à #421) não tem o campo `commit` no health: o script avisa `producao NAO conferida no inicio`, um aborto antes do checkout mantém o sentinela e um rollback termina em `ROLLBACK TAMBEM FALHOU` (recuperação manual, item 5 de "Deploy a partir do Mac"). **Antes desse primeiro deploy, conferir que o servidor lê o próprio commit** (issue #481): o servidor roda como SYSTEM e lê o commit com `git rev-parse` na subida; sem o `git` no PATH da máquina, o commit novo sobe saudável com `commit: null`, o `DEPLOY OK` nunca sai e todo deploy volta em rollback. Na própria máquina: `[Environment]::GetEnvironmentVariable('Path','Machine') -split ';' | Where-Object { $_ -and (Test-Path (Join-Path $_ 'git.exe')) }` tem que listar a pasta do `git.exe` (o PATH da máquina é o que o SYSTEM vê, não o da sua sessão). Se a lista vier vazia, pôr a pasta do Git no PATH da máquina antes do deploy (pedir ao Leo; mudança de sistema). Depois de qualquer subida de um commit com a #421 (este primeiro deploy inclusive), `scripts\saude_local.ps1 -Porta <porta>` tem que trazer o campo `commit` preenchido com os 7 primeiros caracteres de `git -C C:\DashboardLotufo\app rev-parse HEAD`. Se vier vazio, o `deploy.ps1` avisa `o servidor nao conseguiu ler o proprio commit: confira o git no PATH da maquina` (diferente de `health sem 200: servidor fora do ar`): corrigir o PATH da máquina e reiniciar a tarefa (com o sentinela criado, item "Watchdog") antes de qualquer novo deploy. Na volta do build deste primeiro deploy o commit anterior não tem o campo, então o script não prova a volta e pede para intervir à mão: o sentinela fica, e a recuperação é a manual completa do item 5 de "Deploy a partir do Mac" (parada comprovada e porta livre, reconstrução do `<anterior>`, `git status` limpo, reinício controlado, processo da porta nascido depois do reinício e health 200). `rev-parse HEAD` igual ao `<anterior>` e health 200 sozinhos não bastam: um processo órfão de um commit antigo também responde 200. Só depois dessas provas remover o sentinela.
+- **Deploy da issue #443 (rollback sem `git fetch`; sentinela só sai com a produção conferida): `deploy.ps1` novo, uma vez só.** O PowerShell lê o script inteiro antes do checkout, então o deploy que leva esta mudança à produção roda o `deploy.ps1` antigo do diretório pinado, com o rollback que faz `fetch` e o `finally` que sempre apaga o sentinela. Nesta vez, rodar o `deploy.ps1` de `origin/master` copiado para `C:\Temp\deploy`, com os mesmos comandos do item "Primeiro deploy" da seção "Instalação assinada" (pelo Mac, o `.ps1` temporário com `scp` e `-File`, nunca `-Command -`). Os deploys seguintes rodam do pinado, como sempre. Neste primeiro, o commit no ar (anterior à #421) não tem o campo `commit` no health: o script avisa `producao NAO conferida no inicio`, um aborto antes do checkout mantém o sentinela e um rollback termina em `ROLLBACK TAMBEM FALHOU` (recuperação manual, item 5 de "Deploy a partir do Mac"). **Antes desse primeiro deploy, conferir que o servidor lê o próprio commit** (issue #481): o servidor roda como SYSTEM e lê o commit com `git rev-parse` na subida; sem o `git` no PATH da máquina, o commit novo sobe saudável com `commit: null`, o `DEPLOY OK` nunca sai e todo deploy volta em rollback. Na própria máquina: `[Environment]::GetEnvironmentVariable('Path','Machine') -split ';' | Where-Object { $_ -and (Test-Path (Join-Path $_ 'git.exe')) }` tem que listar a pasta do `git.exe` (o PATH da máquina é o que o SYSTEM vê, não o da sua sessão). Se a lista vier vazia, pôr a pasta do Git no PATH da máquina antes do deploy (pedir ao dono; mudança de sistema). Depois de qualquer subida de um commit com a #421 (este primeiro deploy inclusive), `scripts\saude_local.ps1 -Porta <porta>` tem que trazer o campo `commit` preenchido com os 7 primeiros caracteres de `git -C C:\DashboardLotufo\app rev-parse HEAD`. Se vier vazio, o `deploy.ps1` avisa `o servidor nao conseguiu ler o proprio commit: confira o git no PATH da maquina` (diferente de `health sem 200: servidor fora do ar`): corrigir o PATH da máquina e reiniciar a tarefa (com o sentinela criado, item "Watchdog") antes de qualquer novo deploy. Na volta do build deste primeiro deploy o commit anterior não tem o campo, então o script não prova a volta e pede para intervir à mão: o sentinela fica, e a recuperação é a manual completa do item 5 de "Deploy a partir do Mac" (parada comprovada e porta livre, reconstrução do `<anterior>`, `git status` limpo, reinício controlado, processo da porta nascido depois do reinício e health 200). `rev-parse HEAD` igual ao `<anterior>` e health 200 sozinhos não bastam: um processo órfão de um commit antigo também responde 200. Só depois dessas provas remover o sentinela.
 - Dev: ver README ("Rodar em desenvolvimento").
 - Produção (manual, avançado): `scripts\rodar_producao.ps1 [-SemTls] [-Porta 8080] [-Raiz C:\DashboardLotufo] [-BackupExterno \\servidor\backups\dashboard]` (elevado, a partir do diretório pinado). Hoje: HTTPS na 8080 (sem `-SemTls`, decisão de 05/11/2026, issue #425; até o corte da seção "HTTP ou HTTPS", `-SemTls`), sem cópia externa.
 - **Porta** (issue #361): os quatro scripts (`rodar_producao.ps1`, `instalar_autostart.ps1`, `instalar_watchdog.ps1`, `deploy.ps1`) aceitam `-Porta`; sem ela vale o padrão do modo (80 em HTTP com `-SemTls`, 8443 em HTTPS). Numa máquina em que a 80 é de outro serviço (IIS na VM nova), passar a mesma porta nos quatro (ex.: `-Porta 8080`) e liberar essa porta no firewall (seção "HTTP ou HTTPS"). Neste documento a saúde nessa porta é `scripts\saude_local.ps1 -Porta <porta>` (com `-SemTls` na produção em HTTP), rodado na própria máquina: imprime o `/api/health` e sai com 1 se não vier 200.
@@ -89,14 +89,14 @@ próprio servidor. O resto do deploy (`scripts\deploy.ps1`, rollback automático
    nunca imprimiria nada; issue #446): antes de tudo, `segredos\instalacao.json` na raiz que a tarefa agendada passa em `-Raiz`
    (lida do `schtasks /Query /XML` pelo `Agendador` de `scripts\comum_agendador.ps1`, com tempo limite, como no
    `deploy.ps1`; se o pinado ainda não tem esse arquivo, anterior à #386, direto por `schtasks.exe /Query /XML`;
-   o `-Raiz` sai só de `<Arguments>`; sem ele, `C:\DashboardLotufo`) dando `True` (senão avisar o Leo, seção "Instalação assinada"); `Set-Location` na pasta principal do projeto; `git switch master`;
+   o `-Raiz` sai só de `<Arguments>`; sem ele, `C:\DashboardLotufo`) dando `True` (senão avisar o dono, seção "Instalação assinada"); `Set-Location` na pasta principal do projeto; `git switch master`;
    `git pull --ff-only`; `git rev-parse master origin/master` iguais (senão `exit 1`); conferir administrador numa linha
    (`if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 1 }`);
    e imprimir o que vai subir: `git log --oneline "$atual..origin/master"` e `git diff --name-only` de `backend/migrations` e de `frontend`,
-   com `$atual` = `git -C C:\DashboardLotufo\app rev-parse HEAD`. Com isso a sessão avisa o Leo de migração nova (número e o que faz)
+   com `$atual` = `git -C C:\DashboardLotufo\app rev-parse HEAD`. Com isso a sessão avisa o dono de migração nova (número e o que faz)
    e escolhe `-SemFrontend` se nada em `frontend/` mudou.
 4. **Segunda chamada, o deploy**: conferir `Test-Path C:\DashboardLotufo\watchdog.pause` (`True` = execução anterior que não
-   terminou provada ou recuperação à mão em andamento: avisar o Leo antes de seguir) e, **sem criar o sentinela** (o
+   terminou provada ou recuperação à mão em andamento: avisar o dono antes de seguir) e, **sem criar o sentinela** (o
    `deploy.ps1` o cria sozinho; um sentinela anterior faz a produção não contar como provada no início),
    `& .\scripts\deploy.ps1` (ou com `-SemFrontend`, que o script ignora se o sentinela já existia; a porta vem da tarefa agendada, `-Porta <porta>` só para conferir), **sem redirecionar stderr** dentro do PowerShell, e ler a linha final:
    `DEPLOY OK`, `ROLLBACK OK`, `ROLLBACK TAMBEM FALHOU`, `BACKUP PRE-MIGRACAO FALHOU` seguido de `deploy abortado antes do
@@ -174,7 +174,7 @@ três trocas:
 1. **O `deploy.ps1` roda da cópia pinada**: `powershell -NoProfile -ExecutionPolicy Bypass -File C:\DashboardLotufo\app\scripts\deploy.ps1 [-SemFrontend]`,
    direto como comando do `ssh` (um `-File`, sem aspas nem `&`, dispensa o script pelo stdin; e no `-Command -` um comando nativo
    consumiria o resto do stdin, seção "Mudar de servidor"). **Sem criar o sentinela antes**: só conferir
-   `Test-Path C:\DashboardLotufo\watchdog.pause` numa chamada curta (`True` = avisar o Leo, como no item 4 de "Deploy a partir do
+   `Test-Path C:\DashboardLotufo\watchdog.pause` numa chamada curta (`True` = avisar o dono, como no item 4 de "Deploy a partir do
    Mac") e deixar o script criá-lo; um sentinela anterior faz a produção não contar como provada no início. **A cópia pinada é a do commit que está no ar**: uma mudança no próprio `deploy.ps1` só vale a
    partir do deploy seguinte. Para subir uma correção do próprio script, copiar antes `deploy.ps1` e os scripts que ele chama de
    `origin/master` para uma pasta fora do pinado e rodar de lá (`New-Item -ItemType Directory -Force C:\Temp\deploy | Out-Null`,
@@ -369,7 +369,7 @@ reinstalar o watchdog.
 New-NetFirewallRule -DisplayName "Dashboard Lotufo 8080" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow -Profile Domain,Private -RemoteAddress 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
 ```
 
-### Corte para HTTPS (uma vez, pelo Leo, depois do merge da #425)
+### Corte para HTTPS (uma vez, pelo dono, depois do merge da #425)
 Feito pela skill `deploy`, avisando a operação do endereço novo. Parada de um a dois minutos. **Fazer os passos 5 a 7 antes do
 expediente, com 12 horas sem ninguém entrar por HTTP**: a sessão dura 12 horas no servidor (`SESSAO_HORAS`) e o cookie de quem
 entrou por HTTP passou em claro pela rede; com o corte depois desse intervalo, nenhuma sessão aberta em HTTP sobrevive e todos
@@ -414,7 +414,7 @@ de antes. Para ir a um commit desses: "Voltar atrás" primeiro, depois o deploy.
 estava no ar, que já tem a #425. À mão (`git checkout` no pinado sem o `deploy.ps1`), vale o mesmo cuidado.
 
 ## Certificado nos navegadores
-O certificado é autoassinado: cada PC da operação precisa confiar nele uma vez. Instalação à mão pelo Leo, sem GPO
+O certificado é autoassinado: cada PC da operação precisa confiar nele uma vez. Instalação à mão pelo dono, sem GPO
 (decisão de 05/11/2026):
 1. Copiar `C:\DashboardLotufo\segredos\tls\cert.pem` da VM (só o `cert.pem`, que é público; nunca a `chave.pem`) para o PC,
    pelo Mac (`scp`) ou por RDP.
@@ -424,7 +424,7 @@ O certificado é autoassinado: cada PC da operação precisa confiar nele uma ve
 3. Fechar e abrir o navegador e abrir `https://<vm>:8080`: sem aviso. Chrome e Edge usam o repositório do Windows; Firefox
    precisa de `security.enterprise_roots.enabled = true` em `about:config` ou da importação em Configurações › Certificados.
 4. No Mac (fora do domínio, pelo IP ou por linha no `hosts`): **o Safari não abre**. O macOS recusa certificado TLS com validade
-   acima de 825 dias mesmo confiado à mão, e o da dashboard tem 5 anos (decisão do Leo). Conferido em 05/11/2026 com
+   acima de 825 dias mesmo confiado à mão, e o da dashboard tem 5 anos (decisão do dono). Conferido em 05/11/2026 com
    `security verify-cert -c cert.pem -r cert.pem -p ssl -s <nome>`, que deu `CSSMERR_TP_CERT_SUSPENDED` para 5 anos e passou
    para 800 dias. No Mac, usar o Firefox, com o `cert.pem` importado em Configurações › Privacidade e Segurança › Certificados ›
    Autoridades, marcando "Confiar nesta CA para identificar sites". O Chrome do Mac não foi conferido.
@@ -529,12 +529,12 @@ A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_US
 
    As duas são o retrato do RM: cada carga troca o conteúdo inteiro das duas tabelas numa transação só (o agregado não tem chave estável). A rodada **agendada** traz custo e estoque uma vez por dia (a `DASH25` passa de 50 mil linhas); **"Sincronizar agora" sempre traz**. Falha numa das duas (consulta ausente, rede, linha ilegível) não derruba a rodada das notas: o retrato anterior fica, a mensagem aparece na coluna "Resultado" da rodada e as colunas "Custo por tarefa" e "Baixa de estoque" ficam com "—". Códigos configuráveis por `DASH_RM_CONSULTA_CUSTO` (padrão `DASH25`) e `DASH_RM_CONSULTA_ESTOQUE` (padrão `DASH26`); o simulador lê `DASH25.json` e `DASH26.json`. Leitura por obra: `GET /api/contratos/{id}/custo-rm` (pelo centro de custo atual e pelos anteriores do contrato, na coligada da entidade).
 4. **Coligada por entidade**: campo `coligada_rm` de `cadastro/entidades.yaml`, aplicado por `cadastro aplicar` (Lotufo = 1; consórcios têm a própria coligada: Oriundi 12, Leblon 17, Integra BRT 18). Entidade sem coligada fica fora do casamento automático.
-5. **Casamento NF → medição**: automático quando `CAMPOLIVRE1` da NF traz `<instrumento> - <nº>[ REAJ|PROJ]` (ex.: `IC 082/2025 - 12`) — instituir isso com o faturamento — ou quando há uma única medição protocolada, sem NF, com o mesmo valor. Com mais de uma medição candidata a NF fica sem vínculo automático (só uma linha no log `app.rm`; coluna "Ambíguas" das rodadas) e a pessoa anexa o PDF da nota na medição; o aviso "nota ausente do RM" cobre a medição que ficou sem nota. Recebimento: quando as baixas (status 1, 3 ou 4) somam o valor alocado, a medição vira "recebida" com a maior data de baixa; data implausível do RM (ano fora da faixa) fica guardada como bruta e não conta.
+5. **Casamento NF → medição**: automático quando `CAMPOLIVRE1` da NF traz `<instrumento> - <nº>[ REAJ|PROJ]` (ex.: `IC 082/2025 - 12`) ou quando há uma única medição protocolada, sem NF, com o mesmo valor. Com mais de uma medição candidata a NF fica sem vínculo automático (só uma linha no log `app.rm`; coluna "Ambíguas" das rodadas) e a pessoa anexa o PDF da nota na medição; o aviso "nota ausente do RM" cobre a medição que ficou sem nota. Recebimento: quando as baixas (status 1, 3 ou 4) somam o valor alocado, a medição vira "recebida" com a maior data de baixa; data implausível do RM (ano fora da faixa) fica guardada como bruta e não conta.
 6. **Primeira rodada**: Administração → Sincronizar agora; conferir a reconciliação (NFs sem medição, medições sem NF, divergências) e o `dashboard.log` (`app.rm`).
 
 ## Cadastro versionado
 
-O cadastro de obras mora em `cadastro/` (YAML), é editado pelo Leonardo com o Claude e entra no banco por comando. Não há tela.
+O cadastro de obras mora em `cadastro/` (YAML), é editado pelo dononardo com o Claude e entra no banco por comando. Não há tela.
 
 A pasta vem de `DASH_CADASTRO_DIR` (produção: `C:\DashboardLotufo\cadastro`, clone do repositório privado `lotufo-cadastro`, atualizado com `git pull --ff-only` antes do `cadastro aplicar`; `rodar_producao.ps1` a exporta só para o servidor: na sessão do `cadastro aplicar` ela precisa ser definida à mão, `$env:DASH_CADASTRO_DIR = "C:\DashboardLotufo\cadastro"`); `--raiz` vence a variável. Sem nenhuma das duas, o comando lê `cadastro-exemplo/` (fictício, para testes e CI), que o `aplicar` recusa em banco com contratos, órgãos ou entidades de outro cadastro. `validar` e `aplicar` imprimem na primeira linha a pasta que leram: conferir antes de confiar no resultado.
 
@@ -599,7 +599,7 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
    - `erro`: a linha não se lê (valor, data, meio, competência); o relatório traz o número da linha do arquivo.
 
    Qualquer `erro` ou `conflito` faz a gravação recusar o arquivo inteiro, sem gravar nada.
-3. **OK do Leo** sobre o relatório do ensaio, antes de qualquer gravação.
+3. **OK do dono** sobre o relatório do ensaio, antes de qualquer gravação.
 4. **Produção, pela VM, em dois scripts**: o `--ensaio` sai com 0 mesmo com linhas `correção` ou `valor diferente`, então o código de saída não substitui a leitura do relatório. Por isso o ensaio de produção e a gravação nunca ficam no mesmo script: primeiro o script 1 (atualizar o clone e ensaiar), depois a leitura do relatório e a conferência do `planilha_enviada_em`, e só com o OK o script 2 (gravar). A sessão `ssh` abre na pasta do perfil da conta, não em `C:\DashboardLotufo\app\backend`; por isso os dois começam com `Set-Location`. Comando nativo não encontrado não altera `$LASTEXITCODE`, então o `Set-Location` vem antes e cada comando nativo é seguido da checagem.
 
    **Script 1, pull e ensaio** (não grava nada):
@@ -702,7 +702,7 @@ pastas vão pela cópia dos arquivos do backup (issues #55 e #441). O caminho gr
    "Emissão NF" na caixa) ou do último modelo preenchido. Suíte verde ao centavo; 1 centavo de diferença
    é política de arredondamento errada, nunca se ajusta o gabarito.
 5. Gerar o `.docx` no scratchpad com a regra real e abrir no Word contra o espelho real.
-6. Trocar para `situacao: ativa`, commit, merge com OK do Leonardo, `deploy.ps1 -SemFrontend`,
+6. Trocar para `situacao: ativa`, commit, merge com OK do dono, `deploy.ps1 -SemFrontend`,
    `cadastro aplicar --ensaio` (espera `espelho: 1 alterados`) e `aplicar` em produção.
 7. Avisar as operadoras; desligar o fluxo do Power Automate daquela obra só depois do primeiro
    espelho real sair pelo sistema e o faturamento emitir a nota sem ressalva.
@@ -791,8 +791,8 @@ para `nota_emitida_em`), `recebida` continua, `prevista` sem valor → `cancelad
 ```
 cd C:\DashboardLotufo\app\backend
 $env:DASH_DB_PATH = "C:\DashboardLotufo\dados\dashboard.db"
-.venv\Scripts\python -m app.cli legado remapear --usuario <e-mail do Leonardo> --ensaio
-.venv\Scripts\python -m app.cli legado remapear --usuario <e-mail do Leonardo>
+.venv\Scripts\python -m app.cli legado remapear --usuario <e-mail do dono> --ensaio
+.venv\Scripts\python -m app.cli legado remapear --usuario <e-mail do dono>
 ```
 
 Ensaio sobre a cópia da produção de 2026-09-22: 426 → protocolada, 0 previstas canceladas, 201 recebidas
@@ -836,7 +836,7 @@ e os alertas "Documentos da empresa" e "Regularidade do mês" seguem o cadastro.
 **DepartamentodeEngenharia** (`/sites/DepartamentodeEngenharia/Certidoes`, uma pasta por empresa; o endereço
 antigo no site GestaoContratosFaturamento dá 404 desde set/2026) para uma pasta local (o sistema não lê
 SharePoint) → backup do banco →
-`python -m app.cli documentos importar <pasta> --usuario <e-mail do Leonardo> --ensaio` → conferir o
+`python -m app.cli documentos importar <pasta> --usuario <e-mail do dono> --ensaio` → conferir o
 relatório (gravadas, repetidas, vencidas, positivas, sem leitura) → rodar sem `--ensaio` → a operação digita os
 `sem_leitura` pela tela. Ensaio de 2026-09-23 sobre cópia da produção com o backup de 04/08: 20 gravadas,
 27 vencidas, 2 positivas (estaduais das consorciadas A e B), 14 sem texto. **Carga real em 2026-09-24 08:36** (backup
@@ -941,7 +941,7 @@ dele (o pedido feito para o processo é atendido mesmo com ele encerrado). Na te
    dele roda, pelo `salvar-token-dashboard.bat` da pasta do robô (cola o token uma vez; rodar de novo substitui),
    como já faz com a senha do MT Login e a conta Microsoft. Ele fala com a dashboard pelo endereço configurado no
    repositório dele (hoje em `<servidor>`, apontando para a VM). **Desde o corte para HTTPS (issue #425)** o endereço é
-   `https://<vm>:8080` e o robô precisa confiar no certificado da dashboard; a mudança no robô é do Leo:
+   `https://<vm>:8080` e o robô precisa confiar no certificado da dashboard; a mudança no robô é do dono:
    - trocar o endereço da dashboard de `http://<vm>:8080` para `https://<vm>:8080` (o nome tem que ser um dos do
      certificado: nome curto, nome DNS completo ou IP);
    - na máquina em que o robô roda, importar o `cert.pem` em `Cert:\LocalMachine\Root` (seção "Certificado nos
@@ -1166,7 +1166,7 @@ no YAML (Alta Floresta 6.004.003, Região Oeste 6.003.001), e só a conciliaçã
 O que não casa fica `protocolada`: consórcio que fatura em parcelas que não batem com a medição (Leblon,
 Deciolândia, BR-163) e medição cuja nota não bate com o valor protocolado.
 
-### Corte de 22/09/2026 (decisão do Leonardo em 25/09/2026)
+### Corte de 22/09/2026 (decisão do dono em 25/09/2026)
 
 O faturado até o QDOP de 22/09/2026 conta como pago, menos o que o RM mostra em aberto.
 `python -m app.cli conciliacao corte --data 2026-09-22 --usuario <e-mail> [--ensaio]` fecha como `recebida`
@@ -1189,7 +1189,7 @@ Para consultar, abrir uma cópia do banco (ou o próprio, só leitura:
 
 A dashboard antiga e seus fluxos do Power Automate continuam ligados (decisão de 2026-09-24); nada do
 sistema novo depende deles. Ficam dois itens externos, só do sistema novo, feitos depois do bloco 9 em
-produção e com OK do Leonardo para cada um:
+produção e com OK do dono para cada um:
 
 | # | Item | Prova antes |
 |---|---|---|
@@ -1209,7 +1209,7 @@ nem túnel na VM.
 
 **O que a VM tem (preparo feito em 03/11/2026, sem tocar a produção).** Python 3.12, Git, Tesseract 5.4 (instaladores
 oficiais, hash conferido), Node 24. `C:\DashboardLotufo` com a mesma estrutura e ACL da produção (`app` é um **clone** em
-detached HEAD, não worktree; `deploy.ps1` funciona igual), `dados\tessdata\por.traineddata`, `segredos\rm.txt`, venv e
+HEAD destacado, como no resto deste runbook), `dados\tessdata\por.traineddata`, `segredos\rm.txt`, venv e
 `frontend\dist` construídos, tarefa `DashboardLotufo` (com `-Porta 8080`), `DashboardLotufoWatchdog` (`-Porta 8080`) e a regra
 de firewall `New-NetFirewallRule -DisplayName "Dashboard Lotufo HTTP 8080" -Direction Inbound -Protocol TCP -LocalPort 8080
 -Action Allow -Profile Domain,Private -RemoteAddress 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`. O RM responde da VM pelo mesmo
