@@ -275,7 +275,7 @@ def test_sem_medicao_nos_6_meses_nao_sugere_e_diz_por_que(cenario):
     _medicao(c, cid, 2, "2026-10", atestado=100_00)   # mes corrente, fora da janela
     s = prazos.sugestao_dias(c, cid, D(2026, 10, 15))
     assert (s["dias"], s["ritmo_centavos"], s["saldo_centavos"]) == (None, None, 500_00)
-    assert s["motivo"] == "Sem medição de execução ou projeto de 04/2026 a 09/2026: sem ritmo para sugerir os dias."
+    assert s["motivo"] == "Sem medição de execução de 04/2026 a 09/2026: sem ritmo para sugerir os dias."
 
 
 def test_ritmo_que_arredonda_a_zero_nao_sugere(cenario):

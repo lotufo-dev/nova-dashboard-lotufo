@@ -532,8 +532,9 @@ def _carteira(conn, ms: list[dict], hoje: datetime.date, cache: dict, compl: dic
     for c in (x for x in _ativos(conn) if not x["encerramento_iniciado_em"]):
         v = _vigente(conn, c["id"], cache)
         # #262: o medido e' o de `paineis.saldo` (execucao e projeto nos estados que medem, #742), na mesma base do
-        # vigente de execucao; o ritmo, da mesma lista, para os meses de producao dividirem saldo e ritmo na mesma base
-        exe = [m for m in ms if m["contrato_id"] == c["id"] and paineis.mede_no_medido(m)]
+        # vigente de execucao. O ritmo fica so' com a execucao (decisao do dono de 16/11/2026, docs/adr/0012): projeto
+        # pago nao e' obra andando; os meses de producao sao o saldo a executar nesse ritmo
+        exe = [m for m in ms if m["contrato_id"] == c["id"] and m["tipo"] == "execucao" and paineis.mede_no_medido(m)]
         medido = medidos.get(c["id"], 0)
         pct = v["percentual_direito_bp"]   # #262: o percentual do mesmo vigente que a tabela de obras reaproveita
         # #262: saldo a precos iniciais -- o aditivo de reajuste fica fora, como no saldo da obra (`paineis.saldo`)

@@ -108,6 +108,10 @@ conta (`docs/adr/0012`).
 O valor vigente de execução (sem o aditivo de reajuste) menos o medido da obra.
 _Avoid_: saldo do contrato
 
+**Ritmo**:
+O medido de execução por mês, numa janela de seis meses. O projeto fica fora: projeto pago não é obra
+andando. A conclusão estimada é o saldo a executar nesse ritmo (`docs/adr/0012`).
+
 **Medição final**:
 A última medição do contrato, marcada pela engenharia; põe o contrato em encerramento.
 

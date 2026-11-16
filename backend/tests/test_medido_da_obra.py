@@ -1,6 +1,7 @@
 """Issue #742 (decisao do dono de 16/11/2026, #670; docs/adr/0012): o medido da obra soma execucao e projeto; o
-reajuste fica fora; cancelada, desistida, prevista e planilha gerada nao contam. Cada numero que parte do medido
-(saldo, lista de Obras, topo e ritmo da pagina da obra) segue a regra; a curva S continua so' com a execucao.
+reajuste fica fora; cancelada, desistida, prevista e planilha gerada nao contam. O medido e o saldo a executar (saldo,
+lista de Obras, topo da pagina da obra) seguem a regra; o ritmo e a curva S continuam so' com a execucao (decisao do
+dono de 16/11/2026: projeto pago nao e' obra andando). O ritmo de execucao divide o saldo a executar da obra.
 
 Dado sintetico: contrato de 1.000.000,01 com cota de 49% (rateio com residuo) e valores de centavo impar."""
 import datetime
@@ -90,13 +91,19 @@ def test_projeto_cancelado_desistido_ou_nao_enviado_nao_conta(conn, cid):
     assert _numeros(conn, cid) == ANTES_SO_EXECUCAO
 
 
-def test_obra_so_com_projeto_tem_medido_e_saldo(conn, cid):
+def test_obra_so_com_projeto_tem_medido_e_saldo_mas_nao_tem_ritmo(conn, cid):
     # antes da #742 esta obra aparecia com medido zero e saldo igual ao contrato inteiro
     _m(conn, cid, 1, "projeto", "2026-05", "recebida", 200_000_01, 199_999_99)
     _m(conn, cid, 2, "projeto", "2026-06", "planilha_enviada", 50_000_00)
     medido = 199_999_99 + 50_000_00
-    assert _numeros(conn, cid) == _esperado(medido, medido, 41_666_67)     # 24.999.999 / 6 = 4.166.666,5 -> meio para cima
+    assert _numeros(conn, cid) == _esperado(medido, 0, None)              # sem execucao na janela: sem ritmo
     assert _numeros(conn, cid)["saldo"] == 750_000_02
+    sug = prazos.sugestao_dias(conn, cid, HOJE)
+    assert sug["dias"] is None
+    assert sug["motivo"] == "Sem medição de execução de 03/2026 a 08/2026: sem ritmo para sugerir os dias."
+    r = prazos.ritmo_e_prazo(conn, cid, HOJE)
+    assert (r["ritmo_centavos"], r["conclusao"], r["situacao"], r["dias_alem"]) == (None, None, None, None)
+    assert ficha_obra.da_obra(conn, cid, HOJE)["ritmo"]["ritmo_centavos"] is None
     # a curva S compara o realizado de execucao com o cronograma: o projeto nao entra nela
     assert all(p["medido_centavos"] is None for p in paineis.curva_s(conn, cid))
 
@@ -108,9 +115,13 @@ def test_obra_com_execucao_projeto_e_reajuste(conn, cid):
     _m(conn, cid, 1, "reajuste", "2026-07", "protocolada", 20_000_01, 20_000_01)
     _m(conn, cid, 2, "reajuste", "2026-08", "recebida", 9_999_99)
     medido = 350_000_03 + 120_000_01 + 29_999_97                      # 500.000,01; reajuste fora
-    janela = 350_000_03 + 29_999_97                                   # 380.000,00
-    assert _numeros(conn, cid) == _esperado(medido, janela, 63_333_33)    # 38.000.000 / 6 = 6.333.333,33
+    # o ritmo e' o da execucao, o mesmo da obra so' com execucao: o projeto da janela (08/2026) nao entra nele
+    assert _numeros(conn, cid) == _esperado(medido, ANTES_SO_EXECUCAO["medido_periodo"], ANTES_SO_EXECUCAO["ritmo"])
     assert _numeros(conn, cid)["saldo"] == 500_000_00
+    # a conclusao estimada: o saldo a executar da obra (que ja' desconta o projeto medido) no ritmo da execucao
+    sug = prazos.sugestao_dias(conn, cid, HOJE)
+    assert (sug["saldo_centavos"], sug["ritmo_centavos"]) == (500_000_00, 58_333_34)
+    assert sug["novo_fim"] is not None
     # o reajuste contratado continua a parte e a serie de reajuste continua propria
     s = paineis.saldo(conn, cid)
     assert s["vigente_execucao_centavos"] - s["medido_centavos"] == s["saldo_centavos"]

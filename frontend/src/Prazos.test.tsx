@@ -81,7 +81,7 @@ describe("Prazos", () => {
   });
 
   it("obra sem medição recente não sugere, diz por quê e deixa o campo vazio", async () => {
-    const motivo = "Sem medição de execução ou projeto de 04/2026 a 09/2026: sem ritmo para sugerir os dias.";
+    const motivo = "Sem medição de execução de 04/2026 a 09/2026: sem ritmo para sugerir os dias.";
     api.mockResolvedValue({ situacao: situacao(), historico: "",
       sugestao: sugestao({ dias: null, ritmo_centavos: null, medido_periodo_centavos: 0, novo_fim: null, motivo }), pleitos: [] });
     render(<Prazos contratoId={1} podeEditar={true} />);

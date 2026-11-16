@@ -174,9 +174,9 @@ def test_carteira_saldo_ritmo_e_termino(cenario):
 
 
 def test_carteira_mede_execucao_e_projeto_nos_estados_que_medem(cenario):
-    """#262 (gate Sol S2): saldo, medido e ritmo da carteira contam o que `paineis.saldo` conta: execucao e projeto
-    (#742) a partir do envio da planilha/carta (#561). Planilha gerada (ainda nao enviada), projeto cancelado ou
-    desistido e reajuste nao reduzem o saldo nem entram no ritmo."""
+    """#262 (gate Sol S2): saldo e medido da carteira contam o que `paineis.saldo` conta: execucao e projeto (#742) a
+    partir do envio da planilha/carta (#561); o ritmo, so' a execucao (decisao do dono de 16/11/2026). Planilha gerada
+    (ainda nao enviada), projeto cancelado ou desistido e reajuste nao reduzem o saldo nem entram no ritmo."""
     c, ids = cenario
     antes = diretoria.painel(c, HOJE)["carteira"]
     for numero, tipo, estado in ((51, "execucao", "planilha_gerada"), (53, "projeto", "cancelada"),
@@ -189,13 +189,15 @@ def test_carteira_mede_execucao_e_projeto_nos_estados_que_medem(cenario):
     assert depois["ritmo_mensal_centavos"] == antes["ritmo_mensal_centavos"]
     assert ({o["orgao"]: o["medido_centavos"] for o in depois["por_orgao"]}
             == {o["orgao"]: o["medido_centavos"] for o in antes["por_orgao"]})
-    # o projeto recebido conta (#742): 30.000,01 (centavo impar) a menos no saldo e a mais no medido e no ritmo
+    # o projeto recebido conta no medido e no saldo (#742): 30.000,01 (centavo impar); o ritmo e' o da execucao
     c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
               "VALUES (?, 50, 'projeto', '2026-08', 'recebida', 3000001)", (ids["propria"],))
     c.commit()
     com_projeto = diretoria.painel(c, HOJE)["carteira"]
     assert com_projeto["saldo_centavos"] == antes["saldo_centavos"] - 3_000_001
-    assert com_projeto["ritmo_mensal_centavos"] == 34_333_334     # (203.000.000 + 3.000.001) / 6, meio para cima
+    assert com_projeto["ritmo_mensal_centavos"] == antes["ritmo_mensal_centavos"] == 33_833_333
+    # os meses de producao: o saldo a executar (que ja' desconta o projeto) no ritmo da execucao
+    assert com_projeto["meses_de_producao"] == round(com_projeto["saldo_centavos"] / 33_833_333, 1)
     medido = {o["orgao"]: o["medido_centavos"] for o in com_projeto["por_orgao"]}
     assert medido["SINFRA"] == {o["orgao"]: o["medido_centavos"] for o in antes["por_orgao"]}["SINFRA"] + 3_000_001
     antes = com_projeto
