@@ -17,9 +17,13 @@ def hoje(monkeypatch):
     monkeypatch.setattr(tempo, "hoje_local", lambda: datetime.date(2026, 9, 23))
 
 
+_FIXTURES = {p.stem for p in FIX.glob("*.txt")}
+
+
 def _texto(monkeypatch, nome_ou_texto):
-    arq = FIX / f"{nome_ou_texto}.txt"
-    texto = arq.read_text(encoding="utf-8") if nome_ou_texto and arq.exists() else nome_ou_texto
+    # o nome do fixture se reconhece pela lista: perguntar ao disco se o texto inteiro de uma certidao e' um arquivo
+    # estoura o limite de caminho do macOS ("File name too long"); no Linux da CI a mesma pergunta so' devolve "nao"
+    texto = (FIX / f"{nome_ou_texto}.txt").read_text(encoding="utf-8") if nome_ou_texto in _FIXTURES else nome_ou_texto
     monkeypatch.setattr(leitura_pdf, "texto_de_pdf_com_limite", lambda pdf: texto)
     monkeypatch.setattr(leitura_pdf, "primeira_pagina_com_limite", lambda pdf: texto)
 
