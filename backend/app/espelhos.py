@@ -99,14 +99,14 @@ def _travados(conn, existentes: dict[str, dict]) -> dict[str, tuple[int, str]]:
             v = medicoes.valor_travado(m)
             if v is not None:
                 # a fonte diz de onde veio o aprovado: do boletim (com o PDF) ou do atestado digitado, que tambem
-                # vale (decisao do Leo de 03/11/2026)
+                # vale (decisao do dono de 03/11/2026)
                 fonte = v[1] if v[1] != "aprovado" else ("boletim" if medicoes.tem_boletim(conn, m["id"]) else "atestado")
                 out[tipo] = (v[0], fonte)
     return out
 
 
 def _sem_boletim(conn, existentes: dict[str, dict], tipos) -> list[dict]:
-    """Medicoes geradas agora que ja' existiam antes do espelho e nao tem o boletim do orgao (decisao do Leo de
+    """Medicoes geradas agora que ja' existiam antes do espelho e nao tem o boletim do orgao (decisao do dono de
     03/11/2026): so' seguem com justificativa. Gerar de novo um espelho ja' gerado nao pede nada."""
     return [m for t, m in sorted(existentes.items())
             if t in tipos and m["estado"] in medicoes.ESTADOS_SEM_BOLETIM and not medicoes.tem_boletim(conn, m["id"])]
@@ -438,7 +438,7 @@ def listar(conn, contrato_id: int) -> list[dict]:
 
 # --- issue #359: o aprovado mudou depois do espelho ----------------------------------------------------------
 
-# Decisao do Leo de 03/11/2026: o boletim novo com outro valor pode ser glosa, correcao ou reemissao do orgao; o aviso
+# Decisao do dono de 03/11/2026: o boletim novo com outro valor pode ser glosa, correcao ou reemissao do orgao; o aviso
 # so' diz que o aprovado mudou, nunca que e' glosa. Situacoes de `desatualizadas`, com o texto do aviso:
 APROVADO_MUDOU = "aprovado_mudou"           # espelho gerado ou enviado: gerar de novo
 NOTA_EMITIDA = "nota_emitida"               # nota emitida: o espelho nao se gera mais (revisor, PR #474)

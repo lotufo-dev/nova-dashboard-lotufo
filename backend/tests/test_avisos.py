@@ -505,7 +505,7 @@ def test_medicao_protocolada_nao_avisa_espelho_desatualizado(ambiente):
     assert _desatualizados(conn) == []
 
 
-# --- issue #288: avisos do motor de medicao (spec 2026-10-20 §2.1 e §2.1.1; decisao do Leo de 08/11/2026) ----------
+# --- issue #288: avisos do motor de medicao (spec 2026-10-20 §2.1 e §2.1.1; decisao do dono de 08/11/2026) ----------
 
 @pytest.fixture
 def motor(tmp_path, monkeypatch):
@@ -767,7 +767,7 @@ def test_periodo_contiguo_ou_anterior_sem_periodo_nao_avisa_fora_de_ordem(motor)
     assert _do_tipo(c, "medicao_fora_de_ordem", D(2026, 11, 8)) == []
 
 
-# ---- Avisos do motor de apostilamento (issue #274; spec 2026-10-20 §2.2, decisao do Leo de 08/11/2026) ----
+# ---- Avisos do motor de apostilamento (issue #274; spec 2026-10-20 §2.2, decisao do dono de 08/11/2026) ----
 
 @pytest.fixture
 def obra_reajuste(tmp_path, monkeypatch):
@@ -1129,7 +1129,7 @@ def test_indeferimento_registrado_por_engano_fica_sem_efeito_e_os_avisos_voltam(
     assert reajuste.ciclos(c, cid, hoje)[0]["resposta"] is None
 
 
-# --- issue #286: capa do SMO contra o cadastro (decisao do Leo de 08/11/2026) ---------------------------------------
+# --- issue #286: capa do SMO contra o cadastro (decisao do dono de 08/11/2026) ---------------------------------------
 
 TIPOS_CAPA = ("capa_prazo_divergente", "capa_instrumento_ausente", "capa_valor_contrato_divergente",
               "capa_acumulado_divergente")

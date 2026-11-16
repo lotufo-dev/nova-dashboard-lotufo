@@ -1,6 +1,6 @@
 """Leitura, validacao e normalizacao do cadastro versionado (spec 2026-09-21 §8).
 
-O cadastro e' editado pelo Leonardo com o Claude, em YAML, no repositorio. Este modulo
+O cadastro e' editado pelo dono com o Claude, em YAML, no repositorio. Este modulo
 NAO toca o banco: devolve a estrutura que `cadastro_aplicar` grava. Todos os erros sao
 acumulados (um cadastro com tres problemas mostra os tres) e levantados de uma vez.
 """
@@ -907,7 +907,7 @@ def _passos_medicao(bruto, falha) -> list[str] | None:
 
 
 # Issue #489: custo por obra. Naturezas orcamentarias fora do custo quando o yaml nao diz: 2.02 (nao operacional) e
-# 2.01.22 (adiantamento a fornecedor). Regra do custo sem tarefa: so' `proporcional` (decisao do Leo de 06/11/2026).
+# 2.01.22 (adiantamento a fornecedor). Regra do custo sem tarefa: so' `proporcional` (decisao do dono de 06/11/2026).
 NAO_E_CUSTO_PADRAO = ("2.02", "2.01.22")
 REGRAS_SEM_TAREFA = ("proporcional",)
 _PREFIXOS = 'use uma lista de códigos entre aspas (ex.: "001.03"); sem aspas o YAML lê o código como número'

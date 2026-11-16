@@ -341,7 +341,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // issue #289: a planilha/carta vem antes do espelho (execucao e projeto, na obra com regra de espelho ativa; o
   // reajuste continua pelo espelho). A prevista abre o formulario dela; registrada, o cartao dela (#508: pacote do
   // envio e e-mail ao orgao) e' o passo 1 -- na MT-PAR, sem os passos 1 e 2, fica no alto do passo 3. O espelho segue
-  // a planilha enviada (com ou sem o boletim da #284) ou so' gerada, sem o envio registrado (#460, decisao do Leo de
+  // a planilha enviada (com ou sem o boletim da #284) ou so' gerada, sem o envio registrado (#460, decisao do dono de
   // 07/11/2026: a operacao ainda envia ao orgao por fora; segue sem boletim, com justificativa).
   // quem so' consulta continua vendo o espelho da prevista, so' para ler (sem formulario)
   const novaPlanilha = podeEditar && regraAtiva && comPlanilha && m.estado === "prevista" && !espVigente;

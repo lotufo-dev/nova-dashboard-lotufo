@@ -437,7 +437,7 @@ def _atestos(conn, mid):
 
 
 def test_duas_edicoes_de_atesto_geram_dois_eventos_e_o_vigente_e_o_ultimo(conn, contrato_id):
-    """Issue #61 (decisao do Leo, 15/10/2026): atesto e' evento append-only, com autor e data; vale o ultimo."""
+    """Issue #61 (decisao do dono, 15/10/2026): atesto e' evento append-only, com autor e data; vale o ultimo."""
     mid = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 1, "tipo": "execucao", "competencia": "2026-07"})
     medicoes.definir_valor(conn, 1, mid, "atestado", 1_234_57, "manual", "2026-08-20")
     medicoes.definir_valor(conn, 1, mid, "atestado", 1_234_56, "manual")      # glosa de um centavo, sem data nova
@@ -918,7 +918,7 @@ def test_duas_datas_base_pre_escolhe_a_que_tem_previsao(conn, contrato_id):
 
 
 def test_planilha_com_reajuste_cria_a_medicao_de_reajuste_prevista(conn, contrato_id):
-    """Issue #276 (decisao do Leo, 08/11/2026): a planilha/carta com o campo Reajuste faz nascer a medicao de reajuste
+    """Issue #276 (decisao do dono, 08/11/2026): a planilha/carta com o campo Reajuste faz nascer a medicao de reajuste
     de mesmo nº e competencia, em `prevista`, com o pedido, a data-base e o ciclo; a aba Reajuste a ve' pedida."""
     from app import medicao_planilhas, reajuste
     _base(conn, contrato_id)
@@ -1082,7 +1082,7 @@ def test_prevista_do_numero_com_pedido_sugere_o_proprio_pedido(conn, contrato_id
 
 
 def test_previsao_negativa_vira_sugestao_com_o_sinal(conn, contrato_id):
-    """Issue #589 (decisao do Leo de 08/11/2026): o apostilamento negativo (indice deflacionario) pre-preenche o
+    """Issue #589 (decisao do dono de 08/11/2026): o apostilamento negativo (indice deflacionario) pre-preenche o
     Reajuste com o sinal, com a origem, e a medicao de reajuste nasce com o pedido negativo (centavo impar)."""
     from app import medicao_planilhas, reajuste
     _base(conn, contrato_id)

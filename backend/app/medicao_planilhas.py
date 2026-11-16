@@ -13,7 +13,7 @@ from app import arquivos, auditoria, contratos, db, espelho, medicoes, reajuste,
 from app.medicoes import ESTADOS_NO_MEDIDO, LOTE_AUDITORIA, _data_br, _json_dict, nome_medicao, rotulo_estado
 
 # o reajuste nao entra pela planilha/carta: nasce pelo campo "Reajuste" do formulario da execucao, em prevista,
-# com data-base e ciclo (decisao do Leo na #276, 08/11/2026)
+# com data-base e ciclo (decisao do dono na #276, 08/11/2026)
 TIPOS = ("execucao", "projeto")
 ESTADOS_REVISAO = ("planilha_gerada", "planilha_enviada")
 FORA_DO_ACUMULADO = ("prevista", "cancelada", "desistida")
@@ -206,7 +206,7 @@ def reajuste_do_numero(conn, contrato_id: int, numero: int, competencia: str):
 
 
 def _conferir_reajuste(conn, contrato_id: int, dados: dict):
-    """Issue #276 (decisao do Leo, 08/11/2026): com o campo "Reajuste" preenchido, a planilha/carta de execucao faz
+    """Issue #276 (decisao do dono, 08/11/2026): com o campo "Reajuste" preenchido, a planilha/carta de execucao faz
     nascer a medicao de reajuste de mesmo nº e competencia, em `prevista`, com o pedido, a data-base e o ciclo. Ja'
     existindo a prevista de reajuste desse nº (`reajuste_do_numero`), ela recebe os valores; sem data-base escolhida,
     vale a que ela ja' tem. Devolve (data-base, ciclo, medicao de reajuste existente ou None); sem o campo, None."""

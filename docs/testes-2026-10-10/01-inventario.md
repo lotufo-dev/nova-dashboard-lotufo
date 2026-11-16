@@ -425,7 +425,7 @@ Invariantes: `protocolada` só por `registrar_protocolo` (nunca por `/estado`); 
 
 - Espelho: `vigente` → `substituido` ao gerar de novo o mesmo número (`espelhos.py:122-128`).
 - Nota fiscal: `confirmacao` `aguardando_rm` → `confirmada`|`divergente` pelo RM; alocação desfeita quando cancelada no RM.
-- E-mails enviados por `correio.enviar_e_registrar`: espelho (#40), protocolo (#70, #98), pleito (#83), teste (#26), e a cobrança agendada de certidões só para o e-mail do Leonardo (`cobranca_certidoes.py:18,73`).
+- E-mails enviados por `correio.enviar_e_registrar`: espelho (#40), protocolo (#70, #98), pleito (#83), teste (#26), e a cobrança agendada de certidões só para o e-mail do dono (`cobranca_certidoes.py:18,73`).
 
 ---
 

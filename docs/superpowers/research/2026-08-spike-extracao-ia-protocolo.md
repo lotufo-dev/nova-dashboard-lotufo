@@ -1,6 +1,6 @@
 # Spike — Extração por IA no corpus real (protocolo do experimento)
 
-**Ordem do Leonardo (2026-08-31, pós-merge da fase 2):** usar IA para extrair informações no lugar de digitação manual. Modelo decidido: **híbrido (c)** — regras determinísticas onde bastam, IA só no ambíguo. Regra de produto: **ações com custo externo são exclusivas do perfil admin**.
+**Ordem do dono (2026-08-31, pós-merge da fase 2):** usar IA para extrair informações no lugar de digitação manual. Modelo decidido: **híbrido (c)** — regras determinísticas onde bastam, IA só no ambíguo. Regra de produto: **ações com custo externo são exclusivas do perfil admin**.
 
 ## Pergunta do spike
 
@@ -8,7 +8,7 @@ A extração por LLM supera o baseline de regex v2 (spike da fase 0) o suficient
 
 ## Corpus
 
-1. **E-mails** (caixa do Leonardo via MCP, acesso verificado em 2026-08-31): os 46 assuntos rotulados do spike da fase 0 (2026-05..08: 6 protocolos, 15 espelhos, 8 FRC, 17 ruído) + amostra nova de 2026-08 (fluxo vivo confirmado). Ground truth: os rótulos da fase 0.
+1. **E-mails** (caixa do dono via MCP, acesso verificado em 2026-08-31): os 46 assuntos rotulados do spike da fase 0 (2026-05..08: 6 protocolos, 15 espelhos, 8 FRC, 17 ruído) + amostra nova de 2026-08 (fluxo vivo confirmado). Ground truth: os rótulos da fase 0.
 2. **Documentos**: 3-5 espelhos de NF (docx, OneDrive NOTAS FISCAIS — caminho conhecido), 2-3 ofícios protocolados (PDF), 1 termo aditivo assinado (PDF, SharePoint DEPARTAMENTO DE ENGENHARIA), 1 instrumento contratual (ex.: Contrato 019.2024 SINFRA, localizado no SharePoint).
 
 ## Método

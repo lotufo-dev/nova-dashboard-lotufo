@@ -26,9 +26,9 @@ pouco e confere; regra, cadastro e instrumento são do dono, em arquivo versiona
   `C:\DashboardLotufo\app`, com os dados em `C:\DashboardLotufo`. Ela é tratada como em uso: muda só por deploy
   pedido pelo dono (skill `deploy`) ou por gravação que ele autoriza na hora. A máquina onde se desenvolve não é a
   produção.
-- **Repositório público**: cada push sai na hora e não se apaga. Dado real (cadastro, NF, certidão, e-mail, CNPJ,
-  fato de domínio com nome de obra) mora no repositório privado `lotufo-cadastro` (lido via `DASH_CADASTRO_DIR`) e
-  na produção; nesta árvore, não. Nos textos, papel no lugar do nome da pessoa ("o dono", "o faturamento") e
+- **Repositório público**: cada push sai na hora e não se apaga. Dado real (cadastro, pessoa, NF, valor, certidão,
+  e-mail, CNPJ) mora no repositório privado `lotufo-cadastro` (lido via `DASH_CADASTRO_DIR`) e na produção; nesta
+  árvore, não. Nome de obra e de órgão público não conta como dado real (`docs/adr/0011`). Nos textos, papel no lugar do nome da pessoa ("o dono", "o faturamento") e
   `<servidor>` no lugar do nome da máquina. O detalhe está em `.claude/rules/dados-de-teste.md`.
 - **Banco de dev.** `backend/dados/dashboard.db` só com `DASH_DEV=1`. Servidor de revisão, seed e teste
   exploratório usam `DASH_DB_PATH` apontando para a pasta temporária da sessão (`DASH_DEV=1`, `DASH_SEM_JOBS=1`),

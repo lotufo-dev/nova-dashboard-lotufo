@@ -1,4 +1,4 @@
-/* Aba Aguardando nota (#156, prototipo aprovado pelo Leo em 14/10/2026; AbaAguardandoNota.tsx). Reaproveita o quadro,
+/* Aba Aguardando nota (#156, prototipo aprovado pelo dono em 14/10/2026; AbaAguardandoNota.tsx). Reaproveita o quadro,
    a obra, o sub-orgao e a "parada ha'" de medicoes.css; aqui so' a tabela propria. Cores so' dos tokens. */
 
 .aba-nota__tabela { width: 100%; table-layout: fixed; border-collapse: collapse; }

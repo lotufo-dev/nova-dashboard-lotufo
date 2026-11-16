@@ -80,7 +80,7 @@ risco (link de outro site no e-mail oficial ao órgão) merece ser olhado junto 
 
 ## Fechamento da fase 4 (10/10/2026, 19h47 a ~23h50)
 
-Cinco pacotes, cinco branches, cinco gates Sol, cinco deploys com OK do Leonardo. Cada pacote: testes que falhavam
+Cinco pacotes, cinco branches, cinco gates Sol, cinco deploys com OK do dono. Cada pacote: testes que falhavam
 antes da correção, revisão do coordenador (Fable), reprodução dos scripts da fase 3 contra a branch, gate Sol
 (GPT-5.6 via codex), merge em master, backup consistente da produção e `deploy.ps1` com rollback automático.
 

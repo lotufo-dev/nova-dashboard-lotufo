@@ -44,7 +44,7 @@ YAML o que tem instrumento ou fato documentado.
 
 Datas e valores: nada mudou. As diferenças acima não têm instrumento no repositório e ficam como pendência.
 
-## P2 (Leonardo)
+## P2 (o dono)
 
 - Deciolândia: instrumento que levou a execução a 30/11/2026 e a vigência a 01/03/2027.
 - MT-388: início da execução pela ordem de serviço (01/08/2025) ou pela assinatura (16/07/2025); vigência 05 ou

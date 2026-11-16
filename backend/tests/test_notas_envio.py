@@ -21,7 +21,7 @@ D = datetime.date
 HOJE = D(2026, 9, 16)
 
 
-# Cobranca de certidao (geral.yaml, issue #110): conta do Outlook do Leo e os logins dele, ficticios
+# Cobranca de certidao (geral.yaml, issue #110): conta do Outlook do dono e os logins dele, ficticios
 COBRANCA = {"para": ["leo.outlook@exemplo.com.br"], "enviada_por": ["leo.outlook@exemplo.com.br", "leo@exemplo.com.br"]}
 
 
