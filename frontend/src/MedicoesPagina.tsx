@@ -5,6 +5,7 @@ import { IconeAlerta, IconeCheck } from "./icones";
 import IniciarMedicao from "./IniciarMedicao";
 import Janela from "./Janela";
 import LegendaCor from "./LegendaCor";
+import Selo from "./Selo";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import { diaMes, PASSOS } from "./Passos";
@@ -55,9 +56,9 @@ function CelulaPasso({ n, passo, linha }: { n: number; passo: PassoQuadro | unde
     const medicao = linha.medicoes.find(m => m.id === passo.medicao_id);
     return (
       <td className="quadro__passo" data-rotulo={nome} aria-current="step">
-        <Link className="pilula-info pilula-info--andamento quadro__atual" para={{ tela: "medicao", obra: linha.contrato_id, id: passo.medicao_id }}
+        <Link className="link-selo quadro__atual" para={{ tela: "medicao", obra: linha.contrato_id, id: passo.medicao_id }}
           secao={`passo-${n}`}
-          aria-label={`Abrir ${medicao?.titulo ?? "a medição"} de ${linha.obra}: ${nome}`}>Atual</Link>
+          aria-label={`Abrir ${medicao?.titulo ?? "a medição"} de ${linha.obra}: ${nome}`}><Selo situacao="andamento">Atual</Selo></Link>
         <PosicaoSiga siga={passo.siga} />
       </td>
     );
@@ -105,7 +106,7 @@ function Anteriores({ linhas }: { linhas: LinhaAnterior[] }) {
                 <td data-rotulo="Obra"><Link className="medicoes__obra" para={{ tela: "obra", id: l.contrato_id, aba: "medicoes" }}>{l.obra}</Link></td>
                 <td data-rotulo="Medição">{l.titulo}</td>
                 <td data-rotulo="Competência" className="num">{fmtCompetencia(l.competencia)}</td>
-                <td data-rotulo="Passo atual"><span className="pilula-info pilula-info--andamento">{l.passo.nome}</span></td>
+                <td data-rotulo="Passo atual"><Selo situacao="andamento">{l.passo.nome}</Selo></td>
                 <td className="quadro__acao">
                   <Link className="btn btn--pequeno" para={{ tela: "medicao", obra: l.contrato_id, id: l.medicao_id }} secao={`passo-${l.passo.numero}`}
                     aria-label={`Abrir ${l.titulo} de ${l.obra}`}>Abrir</Link>

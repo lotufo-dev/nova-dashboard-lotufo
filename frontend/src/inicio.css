@@ -83,7 +83,7 @@
   font-size: clamp(var(--texto-meta), 1.6cqi, var(--texto-valor-menor)); line-height: 28px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .ini-previsao__conta { font-size: var(--texto-meta); line-height: 18px; color: var(--cor-texto-secundario); }
-.ini-previsao__linha--critico { border-color: var(--acao-linha); background: var(--situacao-critico-fundo); }
+.ini-previsao__linha--critico { border-color: var(--situacao-critico-texto); background: var(--situacao-critico-fundo); }
 .ini-previsao__linha--critico .ini-previsao__rotulo, .ini-previsao__linha--critico .ini-previsao__valor { color: var(--situacao-critico-texto); }
 @container (max-width: 899px) {
   .ini-previsao__linhas { grid-template-columns: minmax(0, 1fr); }
@@ -154,7 +154,7 @@ a.ini-matriz__celula:focus-visible { outline: 2px solid var(--cor-foco); outline
 }
 .ini-aviso--acao .ini-aviso__conta { background: var(--situacao-critico-fundo); color: var(--situacao-critico-texto); }
 .ini-aviso--atencao .ini-aviso__conta { background: var(--situacao-breve-fundo); color: var(--situacao-breve-texto); }
-.ini-ver-todos { margin-left: auto; font-size: var(--texto-meta); text-decoration: none; color: var(--cor-tinta); }
+.ini-ver-todos { margin-left: auto; font-size: var(--texto-meta); color: var(--cor-tinta); }
 .ini-ver-todos:hover { color: var(--cor-menu-realce); text-decoration: underline; }
 .ini-aviso__lista { list-style: none; margin: 0; padding: 0; }
 .ini-aviso__linha {
@@ -167,8 +167,8 @@ a.ini-matriz__celula:focus-visible { outline: 2px solid var(--cor-foco); outline
 .ini-pilula {
   flex: none; padding: 2px 10px; border-radius: var(--raio-selo); font-size: var(--texto-meta); line-height: 20px; white-space: nowrap; font-weight: 500;
 }
-.ini-pilula--acao { background: var(--situacao-critico-fundo); color: var(--acao-forte); border: 1px solid var(--acao-linha); }
-.ini-pilula--atencao { background: var(--situacao-breve-fundo); color: var(--situacao-breve-texto); border: 1px solid var(--atencao-linha); }
+.ini-pilula--acao { background: var(--situacao-critico-fundo); color: var(--situacao-critico-texto); border: var(--borda-situacao-critico); }
+.ini-pilula--atencao { background: var(--situacao-breve-fundo); color: var(--situacao-breve-texto); border: var(--borda-situacao-breve); }
 
 @media (max-width: 560px) {
   .ini-numero__valor { font-size: clamp(var(--texto-corpo), 5.8vw, var(--texto-valor)); }

@@ -46,8 +46,8 @@ describe("celular", () => {
     expect(folga).toBe(5 * 2 * respiro + 4 * vao);            // o que nao e' valor: respiros dos cinco trechos e vaos
     expect(inicioCss).toMatch(/\.ini-faixa__valor\s*\{[^}]*white-space:\s*nowrap/);
     expect(ler("Inicio.tsx")).toContain("minmax(min-content, ");
-    // com o menu lateral aberto (240), o respiro da pagina (2 x 32) e o do painel (2 x 16)
-    const painel = (largura: number) => largura - Number(/--trilho-largo:\s*(\d+)px/.exec(tokensCss)?.[1]) - 2 * 32 - 2 * 16;
+    // com o menu lateral aberto (232), o respiro da pagina (2 x 32) e o do painel (2 x 16)
+    const painel = (largura: number) => largura - Number(/--largura-menu:\s*(\d+)px/.exec(tokensCss)?.[1]) - 2 * 32 - 2 * 16;
     const cinco = (f: number) => 5 * (em * f + 2 * respiro) + 4 * vao;
     for (const largura of [1024, 1280, 1440, 1920]) {
       const f = Math.min(maxima, Math.max(minima, (painel(largura) - folga) / (5 * em)));
@@ -88,9 +88,9 @@ describe("celular", () => {
     expect(tokensCss).toMatch(/\.topbar__resumo\s*\{[^}]*min-width:\s*0/);
     expect(tokensCss).toMatch(/\.topbar\s*\{[^}]*width:\s*100%/);
     // listas (Medições, Documentos, Obras): o topo é a barra de seção, cujo título cede com reticências
-    expect(tokensCss).toMatch(/\.barra__titulo\s*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/);
+    expect(tokensCss).toMatch(/\.topo__titulo\s*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/);
     expect(blocoMedia(tokensCss, 767)).toMatch(/\.abas\s*\{[^}]*overflow-x:\s*auto/);
-    expect(blocoMedia(tokensCss, 767)).toMatch(/\.barra\s*\{[^}]*padding:\s*0 8px 0 16px/);
+    expect(blocoMedia(tokensCss, 767)).toMatch(/\.topo\s*\{[^}]*padding:\s*0 var\(--espaco-pp\) 0 var\(--espaco-m\)/);
     // no celular o respiro lateral encolhe para 16 px
     expect(blocoMedia(tokensCss, 900)).toMatch(/\.topbar, \.pagina\s*\{[^}]*padding-left:\s*16px/);
   });

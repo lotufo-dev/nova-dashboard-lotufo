@@ -9,10 +9,10 @@
 }
 .fat-linha:last-child { border-bottom: 0; }
 .fat-linha:hover { background: var(--cor-papel-sombreado); }
-.fat-linha__obra { color: var(--cor-tinta); font-size: var(--texto-corpo); font-weight: 600; text-decoration: none; }
+.fat-linha__obra { color: var(--cor-tinta); font-size: var(--texto-corpo); font-weight: 600; }
 .fat-linha__obra:hover { color: var(--cor-tinta); text-decoration: underline; }
 .fat-linha__detalhe { display: block; margin-top: 2px; color: var(--cor-texto-secundario); }
-.fat-linha__detalhe a { color: inherit; text-decoration: none; }
+.fat-linha__detalhe a { color: inherit; }
 .fat-linha__detalhe a:hover { color: var(--cor-tinta); text-decoration: underline; }
 .fat-linha__valor { text-align: right; font-size: var(--texto-corpo); }
 .fat-parada { white-space: nowrap; }

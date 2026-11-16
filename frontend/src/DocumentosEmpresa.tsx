@@ -176,7 +176,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                               <td className="doc-data" data-rotulo="Válida até">
                                 {l.certidao ? fmtDataPura(l.certidao.validade) : "—"}
                                 {/* A-19 (10/10/2026): a data digitada a mao nao veio do documento; o selo diz isso a quem confere */}
-                                {l.certidao?.leitura === "manual" && <> <Selo classe="">digitada</Selo></>}
+                                {l.certidao?.leitura === "manual" && <> <Selo>digitada</Selo></>}
                               </td>
                               <td className="doc-sit col-largo" data-rotulo="Situação">
                                 <SituacaoSelo nivel={s.nivel} texto={s.texto} />
@@ -263,7 +263,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                         <h3>Situação</h3>
                         {/* fora do dia, a regularidade e' de acao (como o aviso dela) */}
                         {e.regularidade.situacao === "ok" ? <EmDia texto={REG_TEXTO.ok} />
-                          : <Selo classe="selo--atencao" forte>{REG_TEXTO[e.regularidade.situacao]}</Selo>}
+                          : <Selo situacao="breve">{REG_TEXTO[e.regularidade.situacao]}</Selo>}
                         <dl className="doc-pares">
                           <dt>Competência anexada</dt><dd className="num">{mesBR(e.regularidade.competencia)}</dd>
                           <dt>Competência esperada</dt><dd className="num">{mesBR(e.regularidade.esperada)}</dd>
@@ -347,7 +347,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                                   <Link para={{ tela: "obra", id: k.contrato_id, aba: "documentos" }}>{k.obra}</Link>
                                 </th>
                                 <td data-rotulo="Garantia">
-                                  <SituacaoSelo nivel={g.nivel} texto={g.texto} forte={g.forte} />
+                                  <SituacaoSelo nivel={g.nivel} texto={g.texto} />
                                   {g.nota && <div className="campo__nota num">{g.nota}</div>}
                                 </td>
                               </tr>

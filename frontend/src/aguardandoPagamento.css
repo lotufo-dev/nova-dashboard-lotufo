@@ -47,7 +47,7 @@
 .ap__gravado { margin: 6px 0 0; color: var(--situacao-feito-texto); font-weight: 500; min-height: 20px; }
 .ap__sem-numero { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .ap__links { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--cor-linha); }
-.ap__link { color: var(--cor-tinta); text-decoration: none; font-weight: 500; }
+.ap__link { color: var(--cor-tinta); font-weight: 500; }
 .ap__link:hover { color: var(--cor-menu-realce); text-decoration: underline; }
 
 .ap__vazio { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 16px; text-align: center; color: var(--cor-texto-secundario); }

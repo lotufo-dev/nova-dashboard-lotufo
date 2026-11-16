@@ -415,7 +415,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
           <section className="cartao med-painel" aria-labelledby="espelhos-titulo">
             <h3 className="med-painel__titulo" id="espelhos-titulo">Espelhos
               {/* a data do espelho vigente (a versao mais nova desta medicao) */}
-              {(espVigente || m.espelho_em) && <Selo classe="selo--ok">Gerado em {fmtDataHora(espVigente?.criado_em ?? m.espelho_em!)}</Selo>}</h3>
+              {(espVigente || m.espelho_em) && <Selo situacao="feito">Gerado em {fmtDataHora(espVigente?.criado_em ?? m.espelho_em!)}</Selo>}</h3>
             {formEspelho}
           </section>
           {!antesDoEspelho && (

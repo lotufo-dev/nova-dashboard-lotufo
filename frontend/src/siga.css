@@ -38,7 +38,7 @@
 .sg__nome { color: var(--cor-tinta); font-weight: 600; }
 .sg__fraco { display: block; font-size: var(--texto-mini); line-height: 16px; color: var(--cor-texto-secundario); }
 .sg__traco { color: var(--cor-texto-terciario); }
-.sg__link { color: var(--cor-tinta); text-decoration: none; font-weight: 500; }
+.sg__link { color: var(--cor-tinta); font-weight: 500; }
 .sg__link:hover { color: var(--cor-menu-realce); text-decoration: underline; }
 
 .sg__ponto { width: 8px; height: 8px; flex: none; border-radius: var(--raio-selo); display: inline-block; }
@@ -69,7 +69,7 @@
 .sg__chip:focus-visible { outline: 2px solid var(--cor-foco); outline-offset: 2px; }
 .sg__chip[aria-pressed="true"] { background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel); }
 .sg__chip .num { font-weight: 600; }
-.sg__abrir { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.sg__abrir { display: inline-flex; align-items: center; gap: 6px; }
 .sg__mov--atual td { background: var(--cor-papel-sombreado); }
 .sg__rodape { margin: 0; padding: 12px 16px; background: var(--cor-papel-sombreado); color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .sg__mais { padding: 0; border: 0; background: none; color: var(--cor-tinta); font-weight: 600; cursor: pointer; }

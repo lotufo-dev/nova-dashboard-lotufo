@@ -1,22 +1,22 @@
-import { IconeAlerta, IconeProximo } from "./icones";
+import type { Situacao } from "./situacao";
 
-// Selo de status unico (DESIGN.md › Components): SEMPRE forma + rotulo, para o estado nunca depender
-// so' da cor. `classe` e' o nivel no vocabulario do tokens.css: "" neutro, "selo--ok" em dia,
-// "selo--atencao" atencao, "selo--acao" critico. `forte` e' o nivel "Acao" do D2 (ambar com contorno
-// cheio). A FORMA sai do nivel, e nao de quem chama: critico leva o triangulo, "Acao" leva a seta em
-// circulo, o resto leva o ponto — o mesmo nivel tem a mesma cara em qualquer tela. A maiuscula
-// inicial vem do CSS; o texto fica como o servidor manda.
-export default function Selo({ classe = "", forte = false, icone, sufixo, title, children }: {
-  classe?: string; forte?: boolean; icone?: React.ReactNode; sufixo?: React.ReactNode; title?: string;
-  children: React.ReactNode;
+// Situacao (#720): cada uma das quatro tem cor E forma (o glifo): feito = circulo com visto, andamento = circulo
+// meio cheio, breve (vence em breve) = triangulo com exclamacao, critico = octogono com exclamacao. A forma sai da
+// situacao, e nao de quem chama: a mesma situacao tem a mesma cara em qualquer tela (situacao.ts, tokens.css).
+
+/** O simbolo da situacao, solto (legenda, lista, faixa de aviso). Decorativo: o rotulo ao lado diz a situacao. */
+export function Glifo({ situacao }: { situacao: Situacao }) {
+  return <span className={`glifo glifo--${situacao}`} aria-hidden="true" />;
+}
+
+/** Selo: a situacao de uma linha (prazo, documento, medicao), sempre glifo + rotulo. Sem `situacao` e' neutro e nao
+ *  leva glifo. A maiuscula inicial vem do CSS; o texto fica como o servidor manda. */
+export default function Selo({ situacao, className, sufixo, title, children }: {
+  situacao?: Situacao; className?: string; sufixo?: React.ReactNode; title?: string; children: React.ReactNode;
 }) {
-  const forma = icone
-    ?? (classe === "selo--acao" ? <IconeAlerta className="icone icone--p" />
-      : forte ? <IconeProximo className="icone icone--p" />
-      : <span className="selo__ponto" aria-hidden="true" />);
   return (
-    <span className={`selo${classe ? ` ${classe}` : ""}${forte ? " selo--forte" : ""}`} title={title}>
-      {forma}
+    <span className={`selo${situacao ? ` selo--${situacao}` : ""}${className ? ` ${className}` : ""}`} title={title}>
+      {situacao && <Glifo situacao={situacao} />}
       <span className="selo__texto">{children}</span>
       {sufixo}
     </span>
@@ -26,7 +26,7 @@ export default function Selo({ classe = "", forte = false, icone, sufixo, title,
 // Selo do nivel de uma pendencia (F-46): a palavra e' o proprio nivel, no vocabulario dos avisos.
 // O neutro e' o passo do ciclo ("Passo"), que nao trava nem atrasa.
 export function SeloNivel({ nivel }: { nivel: "critico" | "atencao" | "neutro" }) {
-  return nivel === "critico" ? <Selo classe="selo--acao">Crítico</Selo>
-    : nivel === "atencao" ? <Selo classe="selo--atencao">Atenção</Selo>
+  return nivel === "critico" ? <Selo situacao="critico">Crítico</Selo>
+    : nivel === "atencao" ? <Selo situacao="breve">Atenção</Selo>
     : <Selo>Passo</Selo>;
 }

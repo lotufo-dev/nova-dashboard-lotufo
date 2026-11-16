@@ -41,7 +41,7 @@
 /* o aviso do cartao vira linha de texto com o "!" em circulo (sem a caixa) */
 .notas-v3 .nota-cartao .aviso { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding: 0; border: 0; background: none;
   font-size: var(--texto-meta); font-weight: 500; max-width: none; }
-.notas-v3 .nota-cartao .aviso > .icone, .notas-v3 .nota-cartao .aviso > .aviso__ponto { display: none; }
+.notas-v3 .nota-cartao .aviso > .icone, .notas-v3 .nota-cartao .aviso > .glifo { display: none; }
 .notas-v3 .nota-cartao .aviso::before { content: "!"; flex: none; width: 16px; height: 16px; box-sizing: border-box; display: grid;
   place-items: center; border: 2px solid currentColor; border-radius: var(--raio-selo); font-size: var(--texto-mini); line-height: 1; font-weight: 600; }
 
@@ -89,7 +89,7 @@
   border: 3px solid var(--situacao-feito-texto); border-radius: var(--raio-selo); color: var(--situacao-feito-texto); }
 .notas-v3 .nota-vazia .vazio__titulo { font-size: var(--texto-titulo-sub); line-height: 24px; margin-bottom: 8px; }
 .notas-v3 .nota-vazia .vazio p + p { margin-top: 12px; }
-.notas-v3 .nota-vazia .vazio a { font-weight: 500; text-decoration: none; }
+.notas-v3 .nota-vazia .vazio a { font-weight: 500; }
 
 /* ---------------------------------------------------------- enviar a nota */
 .notas-v3.nota-envio__topo .topbar__titulo { font-size: var(--texto-valor); line-height: 32px; font-weight: 600; letter-spacing: -.01em; }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IconeAlerta, IconeCheck, IconeClipe, IconeEnviarNuvem, IconeLinkExterno, IconeRelogio, IconeTraco } from "./icones";
+import LegendaCor, { type ItemLegenda } from "./LegendaCor";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import {
@@ -298,18 +299,14 @@ function GrupoGarantias({ orgao, obras }: { orgao: string; obras: ObraDoc[] }) {
   );
 }
 
-const LEGENDAS: Record<IdAba, { classe: string; texto: string }[]> = {
-  certidoes: [{ classe: "feito", texto: "em dia" }, { classe: "breve", texto: "vence antes do próximo protocolo" }, { classe: "critico", texto: "vencida" }],
-  regularidade: [{ classe: "feito", texto: "anexada" }, { classe: "andamento", texto: "aguardando o DP" }, { classe: "breve", texto: "faltando" }],
-  garantias: [{ classe: "feito", texto: "em dia" }, { classe: "breve", texto: "não cobre" }, { classe: "critico", texto: "sem registro" }],
+const LEGENDAS: Record<IdAba, ItemLegenda[]> = {
+  certidoes: [{ situacao: "feito", texto: "em dia" }, { situacao: "breve", texto: "vence antes do próximo protocolo" }, { situacao: "critico", texto: "vencida" }],
+  regularidade: [{ situacao: "feito", texto: "anexada" }, { situacao: "andamento", texto: "aguardando o DP" }, { situacao: "breve", texto: "faltando" }],
+  garantias: [{ situacao: "feito", texto: "em dia" }, { situacao: "breve", texto: "não cobre" }, { situacao: "critico", texto: "sem registro" }],
 };
 
 function LegendaAba({ aba }: { aba: IdAba }) {
-  return (
-    <ul className="legenda-cor" aria-label="Legenda das cores">
-      {LEGENDAS[aba].map(i => <li key={i.texto}><span className={`pilula-info__ponto ponto--${i.classe}`} />{i.texto}</li>)}
-    </ul>
-  );
+  return <LegendaCor itens={LEGENDAS[aba]} />;
 }
 
 export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; busca?: Busca }) {

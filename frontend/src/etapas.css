@@ -34,7 +34,8 @@
 .med-etapa__titulo { margin: 0; font-size: var(--texto-titulo-bloco); line-height: 28px; }
 .med-sub { margin: 0 0 8px; font-size: var(--texto-titulo-sub); line-height: 22px; font-weight: 600; }
 .med-bloco { display: flex; flex-direction: column; gap: 12px; padding-top: 20px; border-top: 1px solid var(--cor-linha); }
-.med-caixa { border: 1px solid var(--cor-linha); border-radius: var(--raio-canto); overflow: hidden; }
+/* tabela mais larga que a caixa rola dentro dela, em vez de ser cortada */
+.med-caixa { border: 1px solid var(--cor-linha); border-radius: var(--raio-canto); overflow-x: auto; }
 .med-caixa .tabela thead th { background: var(--cor-papel-sombreado); }
 .med-caixa .tabela-wrap { overflow-x: auto; }
 .med-acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -51,23 +52,28 @@
 /* tabela de envios (etapa 4) e de pagamentos (etapa 5) */
 .tabela.envios tbody td { color: var(--cor-tinta); vertical-align: top; }
 .envios td.col-num { font-family: var(--fonte-numero); }
+/* a 1024 px as cinco colunas cabem na caixa sem rolar: 8 px de respiro entre elas (as pontas mantem o recuo). So'
+   acima do celular, onde a tabela vira pilha de cartoes com o respiro proprio. */
+@media (min-width: 768px) {
+  .tabela.envios thead th, .tabela.envios tbody td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
+  .tabela.envios thead th:first-child, .tabela.envios tbody td:first-child { padding-left: 20px; }
+  .tabela.envios thead th:last-child, .tabela.envios tbody td:last-child { padding-right: 20px; }
+}
 .envios__nfs { display: flex; flex-direction: column; gap: 2px; }
 .envios__nfs span { white-space: nowrap; }
 .envios__acao { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 12px; }
 .envios__motivo { font-size: var(--texto-mini); color: var(--cor-texto-secundario); max-width: 26ch; text-align: right; }
 .envios__motivo--atencao { color: var(--situacao-breve-texto); }
-.envios__motivo--bloqueio { color: var(--situacao-critico-texto); }
+/* o motivo do envio bloqueado e' a trava (CaixaAviso), compacta, junto do botao desligado */
+.envios__motivo.aviso--trava { max-width: 34ch; padding: var(--espaco-mini) var(--espaco-pp); color: var(--cor-sobre-ponto); font-size: var(--texto-meta); text-align: left; }
 .envios tr.envios--aberto > td { background: var(--cor-papel-sombreado); }
 .envios__receber { margin-top: 8px; }
-.btn.btn--envio { height: 38px; padding: 0 16px; font-size: var(--texto-meta); font-weight: 600; }
+.btn.btn--envio { height: 38px; padding: 0 var(--espaco-p); font-size: var(--texto-meta); font-weight: var(--peso-forte); }
 
 /* certidoes, com a validade de cada uma */
 .certidoes-bloco { display: flex; flex-direction: column; gap: 10px; }
 .certidoes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
 .certidoes li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
-.certidoes .ponto { width: 8px; height: 8px; border-radius: var(--raio-selo); background: var(--situacao-feito-ponto); flex: none; }
-.certidoes .ponto--atencao { background: var(--situacao-breve-ponto); }
-.certidoes .ponto--acao { background: var(--situacao-critico-ponto); }
 .certidoes small { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .certidoes__empresa { margin: 4px 0; font-weight: 600; }
 .certidoes__nota { margin: 0; }

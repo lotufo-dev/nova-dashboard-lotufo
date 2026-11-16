@@ -116,7 +116,7 @@ export function seloDoPrazo(restantes: number | null): { classe: string; texto: 
   if (restantes === null || Number.isNaN(restantes) || restantes > 60) return null;
   const texto = restantes < 0 ? "vencida" : restantes === 0 ? "vence hoje"
     : `vence em ${restantes} ${restantes === 1 ? "dia" : "dias"}`;
-  return { classe: restantes <= 30 ? "selo--acao" : "selo--atencao", texto };
+  return { classe: restantes <= 30 ? "critico" : "breve", texto };
 }
 
 /** Rótulo curto da marca do aditivo na curva: "2º TA" para "TA 2º Termo Aditivo ao Contrato …"; sem número, "TA". */

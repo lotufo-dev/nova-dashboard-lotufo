@@ -404,7 +404,7 @@ export default function Cronograma({ contratoId, podeEditar }:
             <tbody>
               {versoes.map((v, i) => (
                 <tr key={v.numero} className={`linha${i % 2 === 1 ? " par" : ""}`}>
-                  <td className="forte num">{v.numero}{v.vigente && <>{" "}<Selo classe="selo--ok">Vigente</Selo></>}
+                  <td className="forte num">{v.numero}{v.vigente && <>{" "}<Selo situacao="feito">Vigente</Selo></>}
                     {v.superada_em && <>{" "}<Selo>Superada em {fmtData(v.superada_em)}</Selo></>}</td>
                   <td className="num">{v.data_documento ? fmtDataPura(v.data_documento) : fmtData(v.criado_em)}</td>
                   <td>{documentoDaVersao(v)}</td>

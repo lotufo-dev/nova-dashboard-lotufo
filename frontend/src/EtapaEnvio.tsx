@@ -10,6 +10,7 @@ import { IconeCheck, iniciarEnvio, ListaCertidoes, mensagem, naturezaDoEnvio, pe
          type Envio, type ItemCertidao, type ListaEnvios } from "./NotasAEnviar";
 import RegistrarFora from "./RegistrarFora";
 import Selo from "./Selo";
+import { situacaoDoNivel } from "./situacao";
 
 // Etapa 4 da pagina da medicao (#152, opcao B): o envio ao orgao numa tabela de uma linha por envio -- um so' na
 // SINFRA e na Pref. VG (medicao e reajuste no mesmo e-mail), dois lado a lado na MTPAR e na SES --, com o motivo ao
@@ -41,8 +42,8 @@ export function useEnvios(ids: number[]) {
 
 function SeloDocs({ e }: { e: Envio }) {
   const r = resumoDe(e);
-  if (r.situacao === "pronto" && notasDivergentes(e).length > 0) return <Selo classe="selo--acao">Nota divergente</Selo>;
-  return <Selo classe={r.nivel}>{r.situacao === "pronto" ? "Completo" : r.selo}</Selo>;
+  if (r.situacao === "pronto" && notasDivergentes(e).length > 0) return <Selo situacao="critico">Nota divergente</Selo>;
+  return <Selo situacao={situacaoDoNivel(r.nivel)}>{r.situacao === "pronto" ? "Completo" : r.selo}</Selo>;
 }
 
 // Issue #562: o nome do campo conferido, o mesmo de notas.NOME_CAMPO no servidor
@@ -127,8 +128,9 @@ export function faltasDo(e: Envio): string[] {
   return [r.selo.charAt(0).toLowerCase() + r.selo.slice(1)];
 }
 
-/** #514: a faixa do passo Envio da nota: verde "Tudo pronto para enviar" ou vermelha com o que falta (a certidao
- *  vencida e' o que desliga o botao; o motivo vem aqui). */
+/** #514: a faixa do passo Envio da nota: verde "Tudo pronto para enviar" ou o que falta. #720: a forma diz se trava.
+ *  Com algum envio bloqueado (a certidao vencida desliga o botao) e' a trava, em bloco cheio; quando so' falta algo
+ *  que nao impede o envio e' a faixa amarela de atencao, e o botao segue ativo. */
 export function FaixaEnvio({ envios }: { envios: Envio[] }) {
   const faltas = envios.map(e => ({ e, f: faltasDo(e) })).filter(x => x.f.length > 0);
   // #562: com nota divergente nada esta' "pronto": a caixa da conferencia (logo abaixo) diz qual nota diverge
@@ -138,11 +140,11 @@ export function FaixaEnvio({ envios }: { envios: Envio[] }) {
   }
   const total = faltas.reduce((t, x) => t + x.f.length, 0);
   const lista = faltas.map(x => `${envios.length > 1 ? `${x.e.descricao}: ` : ""}${x.f.join(", ")}`).join("; ");
+  const travado = envios.some(e => e.situacao === "bloqueado");
   return (
-    <div className="envio-faixa envio-faixa--falta" role="status">
-      <IconeAlerta className="icone" />
-      <span>Falta{total === 1 ? "" : "m"} {total} {total === 1 ? "item" : "itens"} para enviar: {lista}</span>
-    </div>
+    <CaixaAviso nivel={travado ? "trava" : "atencao"} como="div" role="status" className="envio-faixa envio-faixa--falta">
+      Falta{total === 1 ? "" : "m"} {total} {total === 1 ? "item" : "itens"} para enviar: {lista}
+    </CaixaAviso>
   );
 }
 
@@ -153,7 +155,7 @@ function Cartao({ titulo, linhas, children }: { titulo: string; linhas: Linha[];
   return (
     <section className="cartao med-painel envio-cartao" aria-label={titulo}>
       <h3 className="med-painel__titulo">{titulo}
-        {linhas.length > 0 && <Selo classe={ok === linhas.length ? "selo--ok" : "selo--acao"}>{`${ok} de ${linhas.length}`}</Selo>}</h3>
+        {linhas.length > 0 && <Selo situacao={ok === linhas.length ? "feito" : "critico"}>{`${ok} de ${linhas.length}`}</Selo>}</h3>
       {children ?? (linhas.length === 0 ? <p>—</p> : (
         <ul className="envio-itens">
           {linhas.map(l => (
@@ -264,7 +266,10 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
                   <td data-rotulo="Documentos"><SeloDocs e={e} /></td>
                   <td>
                     <div className="envios__acao">
-                      {r.motivo && <span className={`envios__motivo envios__motivo--${r.tom}`}>{r.motivo}</span>}
+                      {/* #720: o motivo do envio bloqueado e' a trava, ao lado do botao desligado */}
+                      {r.motivo && (r.tom === "bloqueio"
+                        ? <CaixaAviso nivel="trava" como="span" className="envios__motivo envios__motivo--bloqueio">{r.motivo}</CaixaAviso>
+                        : <span className={`envios__motivo envios__motivo--${r.tom}`}>{r.motivo}</span>)}
                       {podeEditar && (esperando
                         ? (pronta && <button type="button" className="btn btn--pequeno" onClick={aoSemAOutra}>
                             {pronta.tipo === "execucao" ? "Enviar a medição sem o reajuste…" : "Enviar o reajuste sem a medição…"}</button>)

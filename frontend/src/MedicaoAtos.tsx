@@ -202,7 +202,7 @@ export function FormProtocoloManual({ contratoId, m, salvando, agir, aoFechar, e
           </CaixaAviso>
         )}
         {checklist && pendentes.length === 0 && (
-          <Selo classe="selo--ok">Documentos em dia</Selo>
+          <Selo situacao="feito">Documentos em dia</Selo>
         )}
         {divergentes.length > 0 && (
           <CaixaAviso nivel="critico" como="span">NF {divergentes.join(", ")} diverge{divergentes.length > 1 ? "m" : ""} do espelho</CaixaAviso>

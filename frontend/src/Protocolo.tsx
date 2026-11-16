@@ -108,7 +108,7 @@ function Cartao({ p, pecasCfg, podeEditar, aoMudar, marcado, aoMarcar }: {
         <h3 className="cartao__titulo" id={`prot-${p.id}`}>
           {p.etapa_rotulo}: {p.medicoes.map(m => m.titulo).join(" e ")}{p.numero_oficio ? ` · ${p.numero_oficio}` : ""}
         </h3>
-        <Selo classe={p.situacao === "enviado" ? "selo--ok" : ""}>{SITUACAO[p.situacao] ?? p.situacao}</Selo>
+        <Selo situacao={p.situacao === "enviado" ? "feito" : undefined}>{SITUACAO[p.situacao] ?? p.situacao}</Selo>
         {p.situacao !== "enviado" && (
           <label className="campo--linha">
             <input type="checkbox" name={`incluir-${p.id}`} checked={marcado} onChange={e => aoMarcar(e.target.checked)} /> Incluir neste e-mail
@@ -198,8 +198,8 @@ function NoSiga({ siga }: { siga?: SigaDoProtocolo | null }) {
   const dias = siga.dias_uteis;
   const partes = [siga.setor, siga.com_quem && `com ${siga.com_quem}`,
     dias === null ? null : dias === 0 ? "hoje" : `há ${dias} ${dias === 1 ? "dia útil" : "dias úteis"}`].filter(Boolean);
-  const selo = dias === null ? null : dias >= DIAS_CRITICO ? <Selo classe="selo--acao">Crítico</Selo>
-    : dias >= DIAS_ATENCAO ? <Selo classe="selo--atencao">Atenção</Selo> : null;
+  const selo = dias === null ? null : dias >= DIAS_CRITICO ? <Selo situacao="critico">Crítico</Selo>
+    : dias >= DIAS_ATENCAO ? <Selo situacao="breve">Atenção</Selo> : null;
   return (
     <p className="form-inline">
       {partes.length > 0 && <span>No SIGA: {partes.join(" · ")}</span>}

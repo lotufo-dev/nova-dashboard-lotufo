@@ -348,8 +348,8 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
                   <td>{x.municipio}</td>
                   <td className="col-num dinheiro num">{brl(x.valor)}</td>
                   <td>{arq
-                    ? <a className="selo selo--ok espelho__gerado" href={`/api/espelhos/${esp.id}/arquivos/${arq.documento_id}`}
-                        aria-label={`Baixar o espelho ${arq.nome}`}><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">gerado</span></a>
+                    ? <a className="selo selo--feito espelho__gerado" href={`/api/espelhos/${esp.id}/arquivos/${arq.documento_id}`}
+                        aria-label={`Baixar o espelho ${arq.nome}`}><span className="glifo glifo--feito" aria-hidden="true" /><span className="selo__texto">gerado</span></a>
                     : "—"}</td>
                 </tr>
               );
@@ -477,7 +477,7 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
               return (
                 <li key={m.tipo}>Medição {form.numero} de {TIPO[m.tipo] ?? m.tipo}
                   {trav ? ` (${ORIGEM_TRAVADO[trav.fonte] ?? "pedido"})` : ""}: {brl(m.valor_centavos)}
-                  {m.existente && ESTADOS_ESPELHO.includes(m.existente) && <> <Selo classe="selo--atencao">Versão nova</Selo></>}</li>
+                  {m.existente && ESTADOS_ESPELHO.includes(m.existente) && <> <Selo situacao="breve">Versão nova</Selo></>}</li>
               );
             })}
           </ul>
@@ -555,14 +555,14 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
             <strong>Nº {esp.numero} · {competenciaBR(esp.competencia)}</strong>
             {/* o estado do envio e' SELO (nao texto de apoio): e' o que diz se falta um passo */}
             {esp.envio
-              ? <Selo classe="selo--ok">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
-              : <Selo classe="selo--atencao" forte>Não enviado ao faturamento</Selo>}
+              ? <Selo situacao="feito">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
+              : <Selo situacao="breve">Não enviado ao faturamento</Selo>}
           </div>
           )}
           {parte === "faturamento" && (
             <p>{esp.envio
-              ? <Selo classe="selo--ok">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
-              : <Selo classe="selo--atencao" forte>Não enviado ao faturamento</Selo>}</p>
+              ? <Selo situacao="feito">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
+              : <Selo situacao="breve">Não enviado ao faturamento</Selo>}</p>
           )}
           {parte === "espelho" && tabelaResumo(esp)}
           {parte === "espelho" && (

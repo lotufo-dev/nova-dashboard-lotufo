@@ -109,7 +109,7 @@ export default function App() {
     || (rota.tela === "siga" && /^\d+$/.test(busca.processo ?? ""));   // o historico do processo tem o h1 dele
 
   return (
-    <div className="shell">
+    <div className="casca">
       {/* Primeira parada de Tab: pula o trilho e a barra (menu, conta) direto para a tela. So' move o foco: a
           navegacao por fragmento empilharia historico sem a origem e poria "conteudo" como secao na URL. */}
       <a className="pular" href="#conteudo" onClick={ev => {

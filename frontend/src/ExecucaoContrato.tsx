@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { diasEntre, linhaDoTempo, seloDoPrazo } from "./obra";
 import Selo from "./Selo";
 import { fmtDataPura, hojeLocal } from "./tempo";
+import { situacaoDoNivel } from "./situacao";
 
 // "Execucao do contrato" (#160, prototipo aprovado): duas linhas do tempo, Execucao e Vigencia. Cada uma mostra a
 // data de inicio, o marcador "Hoje" (calculado pela data do dia em Cuiaba: anda sozinho, e a tela o refaz na virada
@@ -40,8 +41,8 @@ function Linha({ titulo, inicio, fim, status, hoje, paralisada, soData }:
   const pos = posicao ?? 0;
   return (
     <div className="lt">
-      <p className="lt__titulo"><span>{titulo}</span>{paralisada && <Selo classe="selo--atencao">paralisada</Selo>}
-        {selo && <Selo classe={selo.classe}>{selo.texto}</Selo>}</p>
+      <p className="lt__titulo"><span>{titulo}</span>{paralisada && <Selo situacao="breve">paralisada</Selo>}
+        {selo && <Selo situacao={situacaoDoNivel(selo.classe)}>{selo.texto}</Selo>}</p>
       {posicao === null ? (
         <p className="lt__nota lt__nota--esq">—</p>
       ) : (

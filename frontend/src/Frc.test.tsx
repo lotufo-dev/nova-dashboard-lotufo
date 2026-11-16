@@ -46,7 +46,7 @@ describe("FRC do consórcio (etapa 3)", () => {
   it("FRC assinada no envio ganha o selo", async () => {
     api.mockResolvedValue({ ...gerada(false), assinada: true });
     render(<FrcConsorcio medicaoId={7} podeEditar versao={0} aoMudar={() => {}} />);
-    expect((await screen.findByText("Assinada")).closest(".selo")?.className).toContain("selo--ok");
+    expect((await screen.findByText("Assinada")).closest(".selo")?.className).toContain("selo--feito");
   });
 
   const gerada = (desatualizada: boolean) => ({

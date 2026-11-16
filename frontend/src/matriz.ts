@@ -158,11 +158,11 @@ export function pendenciaMaisUrgente(e: EmpresaDoc): LinhaCertidao | null {
 }
 
 /** A garantia de uma obra como a tela a diz (texto do selo, nota embaixo e nivel). `ate` ja' vem em dd/mm/aaaa. */
-export function situacaoGarantia(g: Garantia | null, ate: string): { texto: string; nota: string; nivel: Nivel; forte?: boolean } {
+export function situacaoGarantia(g: Garantia | null, ate: string): { texto: string; nota: string; nivel: Nivel } {
   if (!g) return { texto: "sem vigência no cadastro", nota: "", nivel: "neutro" };
   const nota = `${g.dias < 0 ? `venceu em ${ate}` : `até ${ate}`}${g.origem === "endosso" ? " (endosso)" : ""}${g.apolice ? ` · apólice ${g.apolice}` : ""}`;
   if (g.situacao === "baixada") return { texto: "baixada", nota, nivel: "neutro" };
-  if (g.situacao === "vencida") return { texto: "vencida", nota, nivel: "acao", forte: true };
+  if (g.situacao === "vencida") return { texto: "vencida", nota, nivel: "acao" };
   if (g.situacao === "vencendo") return { texto: venceEm(g.dias), nota, nivel: g.dias <= 15 ? "acao" : "atencao" };
   return { texto: "em dia", nota, nivel: "ok" };
 }

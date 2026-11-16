@@ -166,7 +166,7 @@ describe("Página da obra: o desenho novo", () => {
     const ritmo = await screen.findByRole("region", { name: "Ritmo e prazo" });
     await waitFor(() => expect(within(ritmo).getByText(/110,00/)).toBeTruthy());
     expect(within(ritmo).getByText("15/03/2027")).toBeTruthy();
-    expect(ritmo.querySelector(".selo--acao")!.textContent).toBe("74\u00a0dias além do prazo");
+    expect(ritmo.querySelector(".selo--critico")!.textContent).toBe("74\u00a0dias além do prazo");
     // o cartao vem antes das abas, na coluna principal
     const secoes = screen.getByRole("region", { name: "Seções da obra" });
     expect(ritmo.compareDocumentPosition(secoes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

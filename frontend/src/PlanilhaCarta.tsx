@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { api, apiForm, ApiErro, mensagemDeErro } from "./api";
-import CaixaAviso from "./CaixaAviso";
+import CaixaAviso, { CaixaJustificativa } from "./CaixaAviso";
 import CampoCompetencia from "./CampoCompetencia";
 import CampoReajuste, { type ValorReajuste } from "./CampoReajuste";
 import CampoValor from "./CampoValor";
@@ -555,7 +555,7 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
         <h3 className="med-painel__titulo" id={`${base}-titulo`}>
           Pacote do envio
           {editavel && <span className="med-contagem">{2 + prontas.length} de {2 + pedidas.length}</span>}
-          {selo ? <Selo classe="selo--ok">{selo}</Selo> : <Selo>Gerada</Selo>}
+          {selo ? <Selo situacao="feito">{selo}</Selo> : <Selo>Gerada</Selo>}
           {d.planilha_envio_origem === "externo" && <Selo>Fora do sistema</Selo>}
         </h3>
         {d.leitura_planilha?.aviso && <CaixaAviso nivel="atencao">{d.leitura_planilha.aviso}</CaixaAviso>}
@@ -688,13 +688,13 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
               }}
               inicial={{ para: previa.para, copia: previa.copia, cco: [], assunto: previa.assunto, corpo: previa.corpo }}
               antes={precisaJustificativa && (
-                <div className="campo ol-pendencias">
+                <CaixaJustificativa>
                   <label className="campo__rotulo" htmlFor={`${base}-just`}>Justificativa (obrigatória para enviar com pendência)</label>
                   <textarea id={`${base}-just`} name="justificativa" autoComplete="off" rows={2} maxLength={2000} value={justificativa}
                     aria-invalid={erroJustificativa ? true : undefined} aria-describedby={erroJustificativa ? `${base}-just-erro` : undefined}
                     onChange={e => setJustificativa(e.target.value)} />
                   <ErroCampo id={`${base}-just-erro`} erro={erroJustificativa} />
-                </div>
+                </CaixaJustificativa>
               )}
               aoEnviar={m => void enviar(m)} aoDescartar={() => { setPrevia(null); setPainel(null); }} />
             {previa.total > previa.limite && (

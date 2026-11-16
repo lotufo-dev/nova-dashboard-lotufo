@@ -5,6 +5,7 @@ import { semRSOrfao } from "./avisos";
 import { brl } from "./Medicoes";
 import { type AbaObra, type Busca, type Ir, type Rota } from "./rota";
 import { Link } from "./Link";
+import { situacaoDoNivel } from "./situacao";
 
 // Cartao de avisos (spec §11). Bloco 6: o servidor manda o aviso PRONTO (`app/avisos.py`): nivel,
 // mensagem de uma linha, obra, dias, valor e destino do clique. Esta tela so' desenha — nao ha mais
@@ -81,10 +82,10 @@ export function avisosDaObra(avisos: Aviso[], contratoId: number): Aviso[] {
 // O nivel vira palavra no selo: estado nunca e' so' cor. D2 (DESIGN.md › Colors): vermelho so' no
 // Critico, como o farol da Diretoria; Acao e Atencao dividem o ambar e se separam pela FORMA — Acao
 // com contorno cheio e o icone de proximo passo, Atencao com o ponto.
-export const SELO: Record<Nivel, { rotulo: string; classe: string; forte?: boolean }> = {
-  critico: { rotulo: "Crítico", classe: "selo--acao" },
-  acao: { rotulo: "Ação", classe: "selo--atencao", forte: true },
-  atencao: { rotulo: "Atenção", classe: "selo--atencao" },
+export const SELO: Record<Nivel, { rotulo: string; classe: string }> = {
+  critico: { rotulo: "Crítico", classe: "critico" },
+  acao: { rotulo: "Ação", classe: "breve" },
+  atencao: { rotulo: "Atenção", classe: "breve" },
 };
 
 // Quantos avisos cabem antes de a lista virar "mostrar os outros": a tela inicial e' lida em
@@ -131,7 +132,7 @@ export default function Alertas({ itens, ir, titulo = "Avisos", limite = LIMITE,
             // F-96: a linha inteira e' o link; o chevron no fim diz isso.
             const conteudo = (
               <>
-                <Selo classe={selo.classe} forte={selo.forte}>{selo.rotulo}</Selo>
+                <Selo situacao={situacaoDoNivel(selo.classe)}>{selo.rotulo}</Selo>
                 <span className="alerta__msg">{semRSOrfao(a.mensagem)}</span>
                 {/* valor em coluna propria, alinhado a' direita: da' para varrer os valores da lista */}
                 <span className="alerta__valor num">{a.valor_centavos !== null ? brl(a.valor_centavos) : ""}</span>

@@ -112,14 +112,14 @@ describe("Ritmo e prazo (#655)", () => {
   it("conclusão depois do fim da execução: selo vermelho com os dias", () => {
     render(<RitmoEPrazo ficha={FICHA} />);
     const selo = cartao("Ritmo e prazo").querySelector(".selo")!;
-    expect(selo.className).toContain("selo--acao");
+    expect(selo.className).toContain("selo--critico");
     expect(selo.textContent).toBe("110\u00a0dias além do prazo");
   });
 
   it("conclusão até o fim da execução: selo verde", () => {
     comRitmo({ conclusao: "2026-11-10", situacao: "no_prazo", dias_alem: null });
     const selo = cartao("Ritmo e prazo").querySelector(".selo")!;
-    expect(selo.className).toContain("selo--ok");
+    expect(selo.className).toContain("selo--feito");
     expect(selo.textContent).toBe("No prazo");
   });
 

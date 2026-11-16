@@ -112,8 +112,8 @@ export function PassoCartao({ n, atual, passos, selo, children }: {
       <div className="med-etapa__cabeca">
         <span className="med-etapa__n">Passo {pos}</span>
         <h2 className="med-etapa__titulo" id={`passo-${n}-titulo`}>{PASSOS[n - 1]}</h2>
-        {selo ?? (atual !== 0 && s === "feito" ? <span className="selo selo--ok"><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">Feito</span></span>
-          : s === "futuro" ? <span className="selo"><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">Libera depois do passo {pos - 1}</span></span> : null)}
+        {selo ?? (atual !== 0 && s === "feito" ? <span className="selo selo--feito"><span className="glifo glifo--feito" aria-hidden="true" /><span className="selo__texto">Feito</span></span>
+          : s === "futuro" ? <span className="selo"><span className="selo__texto">Libera depois do passo {pos - 1}</span></span> : null)}
       </div>
       {children}
     </section>

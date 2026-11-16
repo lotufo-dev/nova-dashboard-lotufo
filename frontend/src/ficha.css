@@ -20,14 +20,14 @@
 .ficha__rodape { margin: auto 0 0; padding-top: 6px; border-top: 1px solid var(--cor-linha); font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 .ficha__rodape.info--feito { color: var(--situacao-feito-texto); }
 .ficha__medicao { margin: 0; font-family: var(--fonte-numero); font-size: var(--texto-corpo); line-height: 24px; font-weight: 600; }
-.ficha__medicao a { color: var(--cor-tinta); text-decoration: none; }
+.ficha__medicao a { color: var(--cor-tinta); }
 .ficha__medicao a:hover { color: var(--cor-tinta); text-decoration: underline; }
 .ficha__nota { margin: 0; font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 .ficha__venc { display: grid; gap: 6px; margin: 4px 0 0; padding: 0; list-style: none; font-size: var(--texto-meta); }
-.ficha__venc li { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 8px; }
+.ficha__venc li { display: grid; grid-template-columns: var(--tamanho-glifo) 1fr auto; align-items: center; gap: 8px; }
+.ficha__venc li > span:first-child { display: flex; }
 .ficha__venc-rotulo { color: var(--cor-texto-secundario); }
 .ficha__venc-data { font-family: var(--fonte-numero); font-variant-numeric: tabular-nums; font-weight: 600; }
-.ponto--normal { background: var(--cor-tinta); }
 .ficha__ritmo { display: grid; gap: 10px; padding: 14px 18px; }
 .ficha__ritmo .ficha__cabeca { align-items: center; flex-wrap: wrap; }
 .ficha__ritmo-dados { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px 20px; margin: 0; }

@@ -17,6 +17,7 @@ import { Link } from "./Link";
 import { Abas, destinoDeHref, Migalhas, VoltarOrigem } from "./Topo";
 import { baseDosValores } from "./formato";
 import Selo from "./Selo";
+import { situacaoDoNivel } from "./situacao";
 
 // Bloco 6 (spec §10.3): cabecalho da obra, montado no servidor (`contratos.cabecalho`).
 type Cabecalho = {
@@ -35,8 +36,8 @@ export type StatusObra = "ativo" | "suspenso" | "em_encerramento" | "encerrado" 
 export const STATUS: Record<StatusObra, { rotulo: string; classe: string }> = {
   // Ativo e' o normal da carteira: neutro. Verde e' "concluido/recebido" (DESIGN.md › Colors) e 19
   // selos verdes abafavam os poucos que pedem atencao.
-  ativo: { rotulo: "Ativo", classe: "" }, suspenso: { rotulo: "Suspenso", classe: "selo--atencao" },
-  em_encerramento: { rotulo: "Em encerramento", classe: "selo--atencao" },
+  ativo: { rotulo: "Ativo", classe: "" }, suspenso: { rotulo: "Suspenso", classe: "breve" },
+  em_encerramento: { rotulo: "Em encerramento", classe: "breve" },
   encerrado: { rotulo: "Encerrado", classe: "" }, rescindido: { rotulo: "Rescindido", classe: "" },
 };
 
@@ -145,7 +146,7 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
         </div>
         <div className="topbar__linha topbar__linha--quebra">
           <h1 className="topbar__titulo topbar__titulo--grande" title={c?.obra}>{c ? c.obra : "Obra"}</h1>
-          {c && c.status !== "ativo" && <Selo classe={STATUS[c.status]?.classe ?? ""}>{STATUS[c.status]?.rotulo ?? c.status}</Selo>}
+          {c && c.status !== "ativo" && <Selo situacao={situacaoDoNivel(STATUS[c.status]?.classe)}>{STATUS[c.status]?.rotulo ?? c.status}</Selo>}
           {/* a base dos numeros do resumo entra uma vez, aqui: a cota da Lotufo, so' onde ela nao tem 100% */}
           {c && <p className="topbar__meta topbar__meta--obra">{[c.orgao, `Contrato ${c.instrumento}`, cotaDaObra(c)].filter(Boolean).join(" · ")}</p>}
         </div>

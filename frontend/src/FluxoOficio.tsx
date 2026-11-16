@@ -1,6 +1,6 @@
 import { useRascunho } from "./rascunho";
 import { useEffect, useState } from "react";
-import CaixaAviso from "./CaixaAviso";
+import CaixaAviso, { CaixaJustificativa } from "./CaixaAviso";
 import Checklist, { CartaRecolhivel, type ItemChecklist } from "./Checklist";
 import ComporEmail, { type Mensagem } from "./ComporEmail";
 import ErroCampo from "./ErroCampo";
@@ -227,7 +227,7 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
         <h3 className="cartao__titulo" id={`pleito-${p.id}`}>
           {p.rotulo}{contexto ? ` (${contexto})` : ""}{p.numero_oficio ? ` · ${p.numero_oficio}` : ""}
         </h3>
-        <Selo classe={p.situacao === "enviado" ? "selo--ok" : ""}>
+        <Selo situacao={p.situacao === "enviado" ? "feito" : undefined}>
           {p.situacao === "enviado" ? `enviado ${p.enviado_em ? fmtDataPura(p.enviado_em.slice(0, 10)) : ""}` : p.situacao}
         </Selo>
         {p.origem === "cadastro" && <Selo>Antes do sistema</Selo>}
@@ -321,10 +321,12 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
                 validarAntes={validarAntes}
                 inicial={{ para: previa.para, copia: previa.copia, cco: [], assunto: previa.assunto, corpo: previa.corpo }}
                 antes={previa.pendencias.length > 0 && (
+                  <>
                   <div className="campo ol-pendencias">
                     {/* issue #447: o motivo vem antes do pedido de justificativa */}
                     <Pendencias itens={previa.pendencias} />
-                    {precisaJustificativa && <>
+                  </div>
+                    {precisaJustificativa && <CaixaJustificativa>
                     <label className="campo__rotulo" htmlFor={`pl-just-${p.id}`}>
                       Justificativa (obrigatória para enviar com pendência)
                     </label>
@@ -333,8 +335,8 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
                       onChange={e => setJustificativa(e.target.value)} />
                     {/* F-69: a condicao do Enviar aparece no erro do campo, quando o Enviar e' clicado sem ela */}
                     <ErroCampo id={`pl-just-${p.id}-erro`} erro={erroJustificativa} />
-                    </>}
-                  </div>
+                    </CaixaJustificativa>}
+                  </>
                 )}
                 aoEnviar={enviar} aoDescartar={() => setPrevia(null)} />
               {previa.total > previa.limite && (

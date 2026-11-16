@@ -1,6 +1,6 @@
 import { brl, fmtDias, fmtPercentual } from "./formato";
 import { Link } from "./Link";
-import Selo from "./Selo";
+import Selo, { Glifo } from "./Selo";
 import { fmtDataPura } from "./tempo";
 import "./ficha.css";
 
@@ -33,7 +33,6 @@ export function mesAno(c: string): string {
 const diaMes = (iso: string) => { const m = /^\d{4}-(\d{2})-(\d{2})/.exec(iso); return m ? `${m[2]}/${m[1]}` : iso; };
 const data = (iso: string | null) => (iso ? fmtDataPura(iso.slice(0, 10)) : "—");
 const INFO: Record<Nivel, string> = { critico: "info--critico", atencao: "info--breve", normal: "" };
-const PONTO: Record<Nivel, string> = { critico: "ponto--critico", atencao: "ponto--breve", normal: "ponto--normal" };
 const INDISPONIVEL = <p className="erro" role="alert">indisponível agora</p>;
 const CARREGANDO = <p className="ficha__nota">Carregando…</p>;
 
@@ -54,8 +53,8 @@ export function RitmoEPrazo({ ficha }: { ficha: Ficha | null | undefined }) {
     <section className="cartao ficha__ritmo" aria-label="Ritmo e prazo">
       <div className="ficha__cabeca">
         <h2 className="ficha__titulo">Ritmo e prazo</h2>
-        {r?.situacao === "no_prazo" && <Selo classe="selo--ok">No prazo</Selo>}
-        {r?.situacao === "atrasa" && r.dias_alem !== null && <Selo classe="selo--acao">{fmtDias(r.dias_alem)} além do prazo</Selo>}
+        {r?.situacao === "no_prazo" && <Selo situacao="feito">No prazo</Selo>}
+        {r?.situacao === "atrasa" && r.dias_alem !== null && <Selo situacao="critico">{fmtDias(r.dias_alem)} além do prazo</Selo>}
       </div>
       {ficha === undefined ? CARREGANDO : !r ? INDISPONIVEL : (
         <dl className="ficha__ritmo-dados">
@@ -142,8 +141,8 @@ export default function FichaObra({ contratoId, prazos, ficha }:
                 <Link para={{ tela: "medicao", obra: contratoId, id: ficha.em_andamento.id }}>
                   {ficha.em_andamento.rotulo} · {mesAno(ficha.em_andamento.competencia)} · {brl(ficha.em_andamento.valor_centavos)}</Link></p>
               <p className="ficha__rodape">
-                <span className="pilula-info pilula-info--andamento">
-                  {ficha.em_andamento.etapa}{ficha.em_andamento.desde && ` desde ${diaMes(ficha.em_andamento.desde)}`}</span>
+                <Selo situacao="andamento">
+                  {ficha.em_andamento.etapa}{ficha.em_andamento.desde && ` desde ${diaMes(ficha.em_andamento.desde)}`}</Selo>
               </p>
             </>
           )}
@@ -154,7 +153,7 @@ export default function FichaObra({ contratoId, prazos, ficha }:
           <ul className="ficha__venc">
             {ficha.vencimentos.map(v => (
               <li key={v.chave}>
-                <span className={`ponto ${PONTO[v.nivel]}`} aria-hidden="true" />
+                <span aria-hidden="true">{v.nivel !== "normal" && <Glifo situacao={v.nivel === "critico" ? "critico" : "breve"} />}</span>
                 <span className="ficha__venc-rotulo">{v.rotulo}</span>
                 <span className={`ficha__venc-data ${INFO[v.nivel]}`}>{data(v.data)}</span>
               </li>
