@@ -14,14 +14,15 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
 4. Casamento NF -> medicao (spec §4 e §7.1), do mais forte para o mais fraco, so' entre
    medicoes em andamento que ainda faltam nota e NAO sao legado (nascidas do espelho ou de
    competencia >= COMPETENCIA_CORTE_RM):
-   (Issue #708, docs/adr/0005: a chave do `CAMPOLIVRE1` saiu do casador; o campo continua guardado na nota.)
+   a. (saiu na issue #708, docs/adr/0005: o `CAMPOLIVRE1` nao e' mais chave; o campo continua guardado na nota.)
    b. valor EXATO de uma saida esperada do espelho vigente, unica entre as candidatas (na obra
       do centro de custo, ou na carteira inteira quando o centro nao mapeia: NF da Lotufo ao
-      orgao em obra de consorcio) -> auto-aplica `saida_espelho` (0.95). Duas travas (#708): a nota foi
-      emitida no dia do primeiro envio do espelho da medicao ao faturamento ou depois (nota mais antiga, ou
-      medicao sem envio registrado, nao liga a ela por valor nenhum); e nao ha' outra nota ativa, livre, do
-      mesmo valor e da mesma obra candidata a' mesma saida (havendo, nenhuma liga sozinha e as duas contam
-      como ambiguas na rodada).
+      orgao em obra de consorcio) -> auto-aplica `saida_espelho` (0.95). Duas travas (#708):
+      - de data: a medicao que espera nota do espelho so' recebe, por esta regra e pelas mais fracas abaixo, a
+        nota emitida no dia do primeiro envio do espelho dela ao faturamento ou depois (nota mais antiga, nota
+        sem data, ou medicao sem envio registrado: nao liga a ela por valor nenhum);
+      - de nota repetida: havendo mais notas ativas e livres daquele valor, candidatas a' mesma medicao, do que
+        saidas daquele valor esperando nota, nenhuma liga sozinha e todas contam como ambiguas na rodada.
    O CODCCUSTO da NF estreita as candidatas a' obra certa (o contrato com aquele centro,
    quando ha' exatamente um na coligada). COM esse alvo:
    c. valor exato unico dentro da obra -> auto-aplica `centro_custo_valor` (0.9).
@@ -485,12 +486,15 @@ def _depois_do_espelho(emissao, m: dict) -> bool:
     return bool(emissao) and bool(m.get("espelho_enviado_em")) and emissao >= m["espelho_enviado_em"]
 
 
-def _nota_repetida(conn, nf, alvo, m: dict) -> bool:
-    """Issue #708 (docs/adr/0005): existe OUTRA nota que o casador tambem ligaria a esta saida -- ativa, de cobranca
-    ao orgao, livre (sem vinculo vigente nem vinculo desfeito a' mao), da mesma coligada, do mesmo valor, da mesma
-    obra (o centro de custo aponta o mesmo contrato, ou tambem nao aponta nenhum) e emitida depois do envio do
-    espelho. E' o caso da nota cancelada na pratica e reemitida, que o RM mantem ativa: nenhuma das duas liga
-    sozinha, e a pessoa decide pelo PDF. Nao depende da ordem em que as notas sao processadas."""
+def _nota_repetida(conn, nf, m: dict) -> bool:
+    """Issue #708 (docs/adr/0005): ha' mais notas para as saidas deste valor do que saidas esperando nota. Conta como
+    concorrente a OUTRA nota que o casador tambem ligaria a' mesma saida -- ativa, de cobranca ao orgao, livre (sem
+    vinculo vigente nem vinculo desfeito a' mao), da mesma coligada, do mesmo valor, emitida depois do envio do
+    espelho e que alcanca esta medicao: o centro de custo dela aponta a obra, ou nao aponta obra nenhuma (a nota sem
+    obra concorre na carteira inteira). Nota de OUTRA obra nao concorre. E' o caso da nota cancelada na pratica e
+    reemitida, que o RM mantem ativa: nenhuma liga sozinha, e a pessoa decide pelo PDF. Medicao com duas saidas do
+    mesmo valor (parcelas iguais) e duas notas: cada nota tem a sua saida, as duas ligam; com tres, nenhuma. Nao
+    depende da ordem em que as notas sao processadas."""
     from app import diretoria   # import local: diretoria importa este modulo
     outras = conn.execute("""
         SELECT id, centro_custo, emissao, codtmv FROM notas_fiscais
@@ -498,9 +502,10 @@ def _nota_repetida(conn, nf, alvo, m: dict) -> bool:
           AND NOT EXISTS (SELECT 1 FROM nf_alocacoes a WHERE a.nota_id=notas_fiscais.id AND a.desfeita_em IS NULL)
           AND NOT """ + _SQL_DESFEITA_A_MAO.format(nota="notas_fiscais.id"),
         (nf["coligada"], nf["id"], nf["valor_centavos"], MOTIVO_A_MAO + "%")).fetchall()
-    return any(r["codtmv"] in diretoria.CODTMV_COBRANCA
-               and _contrato_por_centro_custo(conn, nf["coligada"], r["centro_custo"]) == alvo
-               and _depois_do_espelho(r["emissao"], m) for r in outras)
+    concorrentes = sum(1 for r in outras if r["codtmv"] in diretoria.CODTMV_COBRANCA
+                       and _contrato_por_centro_custo(conn, nf["coligada"], r["centro_custo"]) in (None, m["contrato_id"])
+                       and _depois_do_espelho(r["emissao"], m))
+    return concorrentes + 1 > m["esperadas"].count(nf["valor_centavos"])
 
 
 def _coligadas_com_centro(conn) -> set:
@@ -601,15 +606,20 @@ def _casar(conn, nota_id: int, coligadas_com_centro: set, cache: dict | None = N
     # centro 5.001.x), na carteira inteira: o valor da cota e' praticamente unico.
     universo = [m for m in candidatas if m["contrato_id"] == alvo] if alvo is not None else candidatas
     por_saida = [m for m in universo if nf["valor_centavos"] in m["esperadas"]]
-    # Issue #708, trava de data: a saida so' vale para a nota emitida depois do envio do espelho. A medicao cuja
-    # saida a nota mais antiga "atenderia" tambem nao a recebe pelas regras mais fracas abaixo (o valor da saida
-    # unica e' o da medicao: sem isto a nota antiga ligaria do mesmo jeito, por `centro_custo_valor`).
-    antigas = {m["id"] for m in por_saida if not _depois_do_espelho(nf["emissao"], m)}
+    # Issue #708, trava de data: a medicao que espera nota do espelho so' recebe a nota emitida depois do envio dele.
+    # Vale para a saida e para as regras mais fracas abaixo: a nota mais antiga que o pedido nao e' a nota daquela
+    # medicao por valor nenhum (sem isto ela ligaria por `centro_custo_valor`, quando a saida unica tem o valor da
+    # medicao, ou pelo par da soma do dia).
+    antigas = {m["id"] for m in universo if m["esperadas"] and not _depois_do_espelho(nf["emissao"], m)}
+    if any(m["id"] in antigas for m in por_saida):
+        log.info("NF %s/%s da coligada %s (R$ %.2f) com o valor de uma saida de espelho, mas anterior ao envio dele (ou "
+                 "sem envio registrado): sem alocacao automatica a essa medicao",
+                 nf["numero"], nf["serie"] or "", nf["coligada"], nf["valor_centavos"] / 100)
     por_saida = [m for m in por_saida if m["id"] not in antigas]
     candidatas = [m for m in candidatas if m["id"] not in antigas]
     if len(por_saida) == 1:
-        # Issue #708, trava de nota repetida: duas notas para a mesma saida, nenhuma liga sozinha.
-        if _nota_repetida(conn, nf, alvo, por_saida[0]):
+        # Issue #708, trava de nota repetida: mais notas do que saidas daquele valor, nenhuma liga sozinha.
+        if _nota_repetida(conn, nf, por_saida[0]):
             log.info("NF %s/%s da coligada %s (R$ %.2f) repetida para a mesma saida do espelho: sem alocacao automatica",
                      nf["numero"], nf["serie"] or "", nf["coligada"], nf["valor_centavos"] / 100)
             return "ambigua"

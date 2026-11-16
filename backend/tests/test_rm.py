@@ -1104,17 +1104,116 @@ def test_duas_notas_do_mesmo_valor_para_a_mesma_saida_ficam_sem_vinculo(conn, tm
 
 @pytest.mark.parametrize("outra", [
     {"emissao": "2026-07-30"},                 # mais antiga que o envio do espelho: nao e' candidata a' saida
-    {"centro_custo": "0.000.000"},             # centro que nao aponta a obra
+    {"emissao": None},                         # sem data de emissao legivel: tambem nao
+    {"centro_custo": "2.001.012"},             # centro de OUTRA obra
     {"codtmv": "2.2.15"},                      # nota contra fornecedor, fora da cobranca ao orgao
     {"coligada": 90},                          # outra coligada
 ])
 def test_nota_de_mesmo_valor_que_nao_concorre_a_saida_nao_segura_o_vinculo(conn, tmp_path, espelho_mt402, outra):
-    """Issue #708: so' conta como repetida a nota que o casador tambem ligaria a' mesma saida."""
+    """Issue #708: so' conta como repetida a nota que o casador tambem ligaria a' mesma saida. Nas duas ordens."""
     _, mid = espelho_mt402
+    _obra_com_centro(conn)                     # a outra obra, com o centro 2.001.012
     nfs = [_nota_da_27a(910), _nota_da_27a(911, **outra)]
-    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    if outra.get("emissao", "") is None:
+        del nfs[1]["DATAEMISSAO"]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs[::-1], []))
     assert r["alocacoes"] == 1, r
     assert [n["idmov"] for n in medicoes.detalhe(conn, mid)["notas"]] == [910]
+
+
+def test_nota_sem_obra_no_centro_de_custo_concorre_a_mesma_saida(conn, tmp_path, espelho_mt402):
+    """Issue #708 (segunda revisao): a nota cujo centro de custo nao aponta obra nenhuma liga pela saida na carteira
+    inteira, entao concorre com a nota da obra. Nenhuma liga, em qualquer ordem."""
+    _, mid = espelho_mt402
+    nfs = [_nota_da_27a(910), _nota_da_27a(911, centro_custo="0.000.000")]
+    for ordem in (nfs, nfs[::-1]):
+        r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, ordem, []))
+        assert (r["alocacoes"], r["sugestoes"]) == (0, 2), r
+        assert not _tem_nf(conn, mid)
+
+
+def test_nota_sem_data_de_emissao_nao_liga_pela_saida(conn, tmp_path, espelho_mt402):
+    """Issue #708: sem a data de emissao nao ha' como provar que a nota veio depois do envio do espelho."""
+    _, mid = espelho_mt402
+    nf = _nota_da_27a(910)
+    del nf["DATAEMISSAO"]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [nf], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0), r
+    assert not _tem_nf(conn, mid)
+
+
+def _duplicar_saida(conn, mid):
+    """O espelho da medicao passa a pedir DUAS notas do mesmo valor (parcelas iguais), a segunda em outro municipio."""
+    esp = conn.execute("SELECT e.id, e.saidas FROM espelhos e JOIN espelho_medicoes em ON em.espelho_id=e.id "
+                       "WHERE em.medicao_id=?", (mid,)).fetchone()
+    saidas = json.loads(esp["saidas"])
+    saidas.append({**saidas[0], "chave": saidas[0]["chave"] + "-2", "municipio": "Outro Município"})
+    conn.execute("UPDATE espelhos SET saidas=? WHERE id=?", (json.dumps(saidas), esp["id"])); conn.commit()
+
+
+@pytest.mark.parametrize("notas, esperado", [(2, (2, 0)), (3, (0, 3))])
+def test_duas_saidas_do_mesmo_valor_ligam_duas_notas_e_nao_tres(conn, tmp_path, espelho_mt402, notas, esperado):
+    """Issue #708 (segunda revisao): repetida e' a nota A MAIS para as saidas daquele valor. Espelho que pede duas notas
+    de R$ 719.190,72: duas notas ligam (cada uma tem a sua saida); com tres, nenhuma liga e as tres ficam ambiguas."""
+    from app import notas as _notas
+    _, mid = espelho_mt402
+    _duplicar_saida(conn, mid)
+    assert len(_notas.esperadas(conn, mid)) == 2
+    nfs = [_nota_da_27a(910 + i) for i in range(notas)]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    assert (r["alocacoes"], r["sugestoes"]) == esperado, r
+    assert len(medicoes.detalhe(conn, mid)["notas"]) == esperado[0]
+    assert medicoes.detalhe(conn, mid)["estado"] == ("nota_emitida" if esperado[0] else "espelho_enviado")
+
+
+@pytest.mark.parametrize("emissao, liga", [("2026-07-30", False), ("2026-08-06", True)])
+def test_par_de_notas_anterior_ao_envio_do_espelho_nao_liga_pela_soma_do_dia(conn, tmp_path, espelho_mt402, emissao, liga):
+    """Issue #708 (segunda revisao): a medicao que espera nota do espelho nao recebe nota mais antiga que o envio por
+    regra nenhuma. O par do mesmo dia que soma o valor dela (R$ 700.000,00 + R$ 19.190,72) so' liga se for posterior."""
+    _, mid = espelho_mt402
+    nfs = [_nota_da_27a(910, emissao=emissao, valor=700000.00), _nota_da_27a(911, emissao=emissao, valor=19190.72)]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    assert r["alocacoes"] == (1 if liga else 0), r
+    regras = [n["regra"] for n in medicoes.detalhe(conn, mid)["notas"]]
+    assert regras == (["centro_custo_soma_dia"] * 2 if liga else [])
+
+
+def _segunda_medicao_com_a_mesma_saida(conn, cid):
+    """A 28a da mesma obra, com a mesma saida de R$ 719.190,72, espelho enviado em 05/09/2026."""
+    from app import espelhos
+    eid = espelhos.gerar(conn, {"id": 1, "email": "u@l.com"}, cid, 28, "2026-09", {"medicao": 71919072})
+    m28 = conn.execute("SELECT m.id FROM espelho_medicoes em JOIN medicoes m ON m.id=em.medicao_id "
+                       "WHERE em.espelho_id=? AND m.tipo='execucao'", (eid,)).fetchone()[0]
+    _enviar_espelho(conn, eid, [m28], em="2026-09-05 14:00:00")
+    return m28
+
+
+def test_data_do_envio_desempata_duas_medicoes_com_a_mesma_saida(conn, tmp_path, espelho_mt402):
+    """Issue #708 (segunda revisao): duas medicoes da obra esperam nota do mesmo valor, com espelhos enviados em 05/08 e
+    05/09. A nota de 10/08 so' pode ser da primeira (e' anterior ao pedido da segunda) e liga a ela; a de 10/09, que
+    chega depois, liga a' segunda, a unica que ainda espera."""
+    cid, m27 = espelho_mt402
+    m28 = _segunda_medicao_com_a_mesma_saida(conn, cid)
+    nfs = [_nota_da_27a(910, emissao="2026-08-10")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    assert r["alocacoes"] == 1, r
+    assert [n["idmov"] for n in medicoes.detalhe(conn, m27)["notas"]] == [910] and not _tem_nf(conn, m28)
+    nfs.append(_nota_da_27a(911, emissao="2026-09-10"))
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    assert r["alocacoes"] == 1, r
+    assert [n["idmov"] for n in medicoes.detalhe(conn, m28)["notas"]] == [911]
+
+
+def test_duas_medicoes_com_a_mesma_saida_e_as_duas_notas_juntas_ficam_sem_vinculo(conn, tmp_path, espelho_mt402):
+    """Issue #708: chegando juntas, a nota de 10/09 serve as duas medicoes e tambem concorre a' saida da primeira com a
+    de 10/08. Nenhuma liga sozinha, em qualquer ordem; a pessoa decide pelo PDF."""
+    cid, m27 = espelho_mt402
+    m28 = _segunda_medicao_com_a_mesma_saida(conn, cid)
+    nfs = [_nota_da_27a(910, emissao="2026-08-10"), _nota_da_27a(911, emissao="2026-09-10")]
+    for ordem in (nfs, nfs[::-1]):
+        r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, ordem, []))
+        assert (r["alocacoes"], r["sugestoes"]) == (0, 2), r
+        assert not _tem_nf(conn, m27) and not _tem_nf(conn, m28)
 
 
 def test_nota_com_vinculo_desfeito_a_mao_nao_conta_como_repetida(conn, tmp_path, espelho_mt402):
@@ -1192,6 +1291,41 @@ def test_nota_lotufo_em_obra_de_consorcio_casa_pela_saida_e_nao_segura_recebimen
     # issue #514: so' a NFS-e da Lotufo e' da cota dela; a fatura do consorcio (coligada 90) nao
     assert {n["numero"]: n["da_lotufo"] for n in m["notas"]} == {"000003102": True, "000000021": False}
     assert m["notas_faltam"] == esperadas_lotufo - 1       # a nota da Lotufo de VG casou; a fatura nao conta
+
+
+@pytest.fixture
+def espelho_consorcio(conn):
+    """Cadastro de exemplo aplicado; espelho da 12a da Obra Consorcio gerado e enviado ao faturamento em 01/07/2026. A
+    saida da Lotufo e' de R$ 2.000.000,02 e a nota dela chega na coligada 1 com centro 5.001.x, que nao aponta obra."""
+    from app import auth, cadastro_aplicar, cadastro_arquivos, espelhos
+    auth.criar_usuario(conn, "U", "u@l.com", "senha-forte-123", "engenharia")
+    cadastro_aplicar.aplicar(conn, 1, cadastro_arquivos.preparar(RAIZ), ensaio=False)
+    cid = conn.execute("SELECT id FROM contratos WHERE nome_curto='Obra Consórcio'").fetchone()[0]
+    eid = espelhos.gerar(conn, {"id": 1, "email": "u@l.com"}, cid, 12, "2026-06", {"medicao": 1000000007})
+    mid = conn.execute("SELECT m.id FROM espelho_medicoes em JOIN medicoes m ON m.id=em.medicao_id "
+                       "WHERE em.espelho_id=? AND m.tipo='execucao'", (eid,)).fetchone()[0]
+    _enviar_espelho(conn, eid, [mid], em="2026-07-01 14:00:00")
+    return mid
+
+
+def _nota_propria_no_consorcio(idmov, emissao="2026-08-10"):
+    return _nf(idmov, 2000000.02, coligada=1, centro_custo="5.001.011", emissao=f"{emissao}T00:00:00-04:00")
+
+
+def test_travas_valem_para_a_nota_da_lotufo_em_obra_de_consorcio(conn, tmp_path, espelho_consorcio):
+    """Issue #708 no caminho sem obra (o centro 5.001.x nao aponta contrato e a saida e' procurada na carteira
+    inteira): a nota anterior ao envio do espelho nao liga; duas posteriores do mesmo valor ficam ambiguas; uma so' liga."""
+    mid = espelho_consorcio
+    antiga = _nota_propria_no_consorcio(939, emissao="2026-06-20")
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [antiga], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0) and not _tem_nf(conn, mid), r
+    duas = [antiga, _nota_propria_no_consorcio(940), _nota_propria_no_consorcio(942, emissao="2026-08-12")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, duas, []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 2) and not _tem_nf(conn, mid), r
+    duas[2]["STATUS"] = "C"
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, duas, []))
+    assert r["alocacoes"] == 1, r
+    assert [(n["idmov"], n["regra"]) for n in medicoes.detalhe(conn, mid)["notas"]] == [(940, "saida_espelho")]
 
 
 # --- desalocacao manual (issue #71) ---
