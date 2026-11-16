@@ -255,6 +255,14 @@
 
   /* telas de leitura no celular (Inicio, #721): o titulo da pagina desce um passo da escala */
   --texto-titulo-pagina-estreito: 1.728rem;
+
+  /* pagina da medicao (#722): medidas que a pagina montada pelo dono usa e a fundacao nao traz */
+  --alvo-menor: 32px;                                                      /* botao de linha (tabela, envio aberto) */
+  --largura-coluna-lado: calc(var(--largura-menu) + var(--espaco-xxg) + var(--espaco-g));   /* linha do tempo ao lado do passo: 320px */
+  --largura-rotulo-email: 64px;                                            /* rotulo Para / Cc / Assunto do e-mail */
+  --largura-medida: 75ch;                                                  /* medida do texto corrido (corpo do e-mail) */
+  --largura-aviso-resposta: calc(var(--largura-menu) + var(--espaco-xxg) * 2);              /* aviso de resposta do orgao: 360px */
+  --borda-tracejada: var(--borda-fina) dashed var(--cor-borda-controle);   /* area de soltar arquivo */
 }
 
 /* --------------------------------------------------------------- elementos */
@@ -1610,6 +1618,8 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-avatar { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: var(--texto-mini);
   font-weight: 600; color: var(--cor-tinta); }
 .ol-assunto { padding: 4px 12px; }
+/* o nome do campo a' vista so' onde a pagina o pede (a da medicao, #722): o campo ja' se chama "Assunto" */
+.ol-assunto__rotulo { display: none; }
 .ol-assunto input { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--cor-linha); outline: 0;
   font: inherit; padding: 8px 0; background: transparent; }
 .ol-assunto input:focus { border-bottom: 2px solid var(--cor-foco); }

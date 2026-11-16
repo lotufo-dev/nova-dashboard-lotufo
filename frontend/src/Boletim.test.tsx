@@ -145,6 +145,8 @@ describe("AceiteDiferenca (issue #288)", () => {
     const agir = agirReal();
     render(<AceiteDiferenca m={COM_BOLETIM} podeEditar salvando={false} agir={agir} />);
     fireEvent.click(screen.getByRole("button", { name: "Aceitar a diferença" }));
+    // #722: a justificativa obrigatoria fica na caixa propria (CaixaJustificativa)
+    expect(screen.getByLabelText("Justificativa").closest(".justificativa")).not.toBeNull();
     fireEvent.change(screen.getByLabelText("Justificativa"), { target: { value: "curta" } });
     fireEvent.click(screen.getByRole("button", { name: "Aceitar a diferença" }));
     expect(screen.getByText("Informe a justificativa (ao menos 10 caracteres).")).toBeTruthy();

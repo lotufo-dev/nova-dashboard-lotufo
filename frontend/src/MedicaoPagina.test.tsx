@@ -122,15 +122,18 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(within(caminho).getByRole("link", { name: "Hospital" }).getAttribute("href")).toBe("/obras/1");
   });
 
-  it("título “Nª Medição + Reajuste”, valores somados e a coluna com Resumo e Linha do tempo", async () => {
+  it("título “Nª Medição + Reajuste”, o total somado no alto, o Resumo em faixa e a Linha do tempo ao lado", async () => {
     const REAJ = { ...MEDICAO, id: 6, tipo: "reajuste", valor_protocolado_centavos: 50000 };
     responder({ "/api/contratos/1/medicoes": [MEDICAO, REAJ] });
     pagina();
     expect(await screen.findByRole("heading", { name: "Hospital", level: 1 })).toBeTruthy();
-    const lateral = screen.getByRole("complementary", { name: "Resumo e linha do tempo" });
-    expect(within(lateral).getByText("Resumo da medição")).toBeTruthy();
-    expect(within(lateral).getByText("Linha do tempo")).toBeTruthy();
-    expect(within(lateral).getByText("Total").closest("div")!.textContent).toContain("10.500,00");
+    // #722: o Resumo sobe para a faixa logo abaixo da identificacao; ao lado do passo fica so' a Linha do tempo
+    const resumo = screen.getByRole("region", { name: "Resumo da medição" });
+    expect(within(resumo).getByText("Reajuste").closest("div")!.textContent).toContain("500,00");
+    expect(within(screen.getByRole("complementary")).getByRole("region", { name: "Linha do tempo" })).toBeTruthy();
+    // o total dos dois e' o valor grande do alto, com o rotulo dele
+    expect(screen.getByText("Total").closest("div")!.textContent).toContain("10.500,00");
+    expect(screen.getByLabelText(/^Valor: R\$\s10\.500,00$/).className).toContain("med-valor");
   });
 
   it("“Mais ações” só tem atestado, boletim, assinatura, medição final, cancelar, desistir e liberar envio preso", async () => {
@@ -405,12 +408,12 @@ describe("Página da medição: as etapas se atualizam entre si", () => {
       siga: { codigo: "AbCdEf1234", link: null, setor: null, com_quem: null, dias_uteis: null, lido_em: null, registrado_em: "2026-10-20 12:00:00" } };
     responder({ "/api/contratos/1/protocolos": { ...LISTA, protocolos: [ENVIADO] } });
     pagina();
-    const lateral = await screen.findByRole("complementary", { name: "Resumo e linha do tempo" });
+    const lateral = await screen.findByRole("region", { name: "Linha do tempo" });
     await waitFor(() => expect(within(lateral).getByText("Processo no SIGA registrado")).toBeTruthy());
     cleanup();
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, protocolos: [REGISTRADO], siga_registrado_em: "2026-10-21 12:00:00" }] });
     pagina();
-    expect(within(await screen.findByRole("complementary", { name: "Resumo e linha do tempo" })).getByText("Processo no SIGA registrado")).toBeTruthy();
+    expect(within(await screen.findByRole("region", { name: "Linha do tempo" })).getByText("Processo no SIGA registrado")).toBeTruthy();
   });
 
   it("quem só consulta não vê “Registrar protocolo feito fora”", async () => {
@@ -547,6 +550,8 @@ describe("Página da medição: medição e reajuste", () => {
     fireEvent.click(botao);
     const enviar = screen.getByRole("button", { name: "Liberar o envio só da medição" }) as HTMLButtonElement;
     expect(enviar.disabled).toBe(true);
+    // #722: a justificativa obrigatoria fica na caixa propria (CaixaJustificativa)
+    expect(screen.getByLabelText("Justificativa (obrigatória)").closest(".justificativa")).not.toBeNull();
     fireEvent.change(screen.getByLabelText("Justificativa (obrigatória)"), { target: { value: "notas do reajuste presas no faturamento" } });
     fireEvent.click(enviar);
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/medicoes/5/envio-sem-a-outra",
@@ -854,8 +859,7 @@ describe("Boletim do órgão na página da medição (issue #290)", () => {
   it("a linha do tempo mostra Planilha/carta, Boletim (pedido, aprovado, diferença e o PDF) e Assinatura", async () => {
     responder({ "/api/contratos/1/medicoes": [COM_BOLETIM] });
     pagina();
-    const lateral = await screen.findByRole("complementary", { name: "Resumo e linha do tempo" });
-    const tempo = within(lateral).getByText("Linha do tempo").closest("section")!;
+    const tempo = await screen.findByRole("region", { name: "Linha do tempo" });
     await waitFor(() => expect(tempo.textContent).toContain("Boletim nº 7"));
     const itens = [...tempo.querySelectorAll("li")].map(li => li.textContent ?? "").reverse();
     expect(itens.findIndex(t => t.includes("Planilha/carta enviada"))).toBeLessThan(itens.findIndex(t => t.includes("Boletim nº 7")));

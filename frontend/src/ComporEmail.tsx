@@ -313,7 +313,10 @@ export default function ComporEmail({ inicial, anexos, ocupado, bloqueado, antes
       {campo("copia")}
       {comCco && campo("cco")}
       <div className="ol-assunto">
-        <input id={`${base}-assunto`} value={m.assunto} maxLength={300} placeholder="Adicionar um assunto…" aria-label="Assunto"
+        {/* o nome do campo a' vista so' na pagina da medicao (#722); o campo ja' se chama "Assunto" para o leitor de tela */}
+        <span className="ol-assunto__rotulo" aria-hidden="true">Assunto</span>
+        {/* o `title` mostra o assunto inteiro quando o campo esconde o fim dele (o numero do oficio fica no fim) */}
+        <input id={`${base}-assunto`} value={m.assunto} title={m.assunto || undefined} maxLength={300} placeholder="Adicionar um assunto…" aria-label="Assunto"
           aria-invalid={erroAssunto ? true : undefined} aria-describedby={erroAssunto ? `${base}-assunto-erro` : undefined}
           onChange={e => setM({ ...m, assunto: e.target.value })} />
         <ErroCampo id={`${base}-assunto-erro`} erro={erroAssunto} />

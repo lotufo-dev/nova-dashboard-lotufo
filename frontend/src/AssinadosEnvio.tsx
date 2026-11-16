@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CaixaJustificativa } from "./CaixaAviso";
 import { ApiErro, apiForm, mensagemDeErro } from "./api";
 import ComporEmail, { type Mensagem } from "./ComporEmail";
 import ConfirmarFaltas from "./ConfirmarFaltas";
@@ -228,14 +229,14 @@ export function FormEnviarAssinados({ medicaoId: idDoAto, s: sDoAto, salvando, a
                     value={data} onChange={ev => setData(ev.target.value)} />
                 </div>
                 {previa.reenvio && (
-                  <div className="campo">
+                  <CaixaJustificativa>
                     <label className="campo__rotulo" htmlFor="assinados-motivo">Motivo do reenvio</label>
                     <input id="assinados-motivo" name="motivo" autoComplete="off" className="entrada--larga" maxLength={1000}
                       value={motivo} aria-invalid={tentouMotivo && faltaMotivo ? true : undefined}
                       aria-describedby={tentouMotivo && faltaMotivo ? "assinados-motivo-erro" : undefined}
                       onChange={ev => setMotivo(ev.target.value)} />
                     <ErroCampo id="assinados-motivo-erro" erro={tentouMotivo ? faltaMotivo : undefined} />
-                  </div>
+                  </CaixaJustificativa>
                 )}
               </div>
             }

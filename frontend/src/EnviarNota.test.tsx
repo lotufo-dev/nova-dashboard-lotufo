@@ -433,4 +433,45 @@ describe("Enviar a nota", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remover justificativa.pdf" }));
     expect(screen.getByText("O texto do e-mail que você editou será montado de novo.")).toBeTruthy();
   });
+
+  // #722: o pacote e o oficio em etapas, como o dono montou
+  it("com carta: três etapas (feita, feita, a da vez), o nº do ofício ao lado do título, o pacote e “O que falta” em lista", async () => {
+    const comCarta = { ...det, familia: "prefeitura", etapa: "unico", situacao_protocolo: "assinado",
+      envio: { ...det.envio, familia: "prefeitura", grupo: "Prefeitura de Vale Verde",
+        itens: [{ chave: "notas", rotulo: "Notas fiscais (2)", detalhe: "NFS 1187, 342 (medição)", estado: "ok" },
+          { chave: "certidoes:beta", rotulo: "Certidões Beta (5)", detalhe: "Trabalhista vence em 5 dias", estado: "aviso", entidade_id: 4 },
+          { chave: "certidoes:gama", rotulo: "Certidões Gama (5)", detalhe: "FGTS vencida em 10/11", estado: "vencida", entidade_id: 5 },
+          { chave: "regularidade:beta", rotulo: "Regularidade mensal", detalhe: "O DP ainda não enviou o arquivo de 10/2026", estado: "falta",
+            acao: "anexar_regularidade", entidade_id: 5, competencia: "2026-10" }] },
+      carta: { oficio: "061/2026", paginas: ["Ofício 061/2026", "NF 1187"] },
+      pendencias: ["Regularidade mensal sem validade hoje", "Relatório fotográfico assinado: não anexada"] };
+    api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? comCarta : {}));
+    render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
+    const oficio = (await screen.findByRole("heading", { name: "Ofício" })).closest("section")!;
+    const assinar = screen.getByRole("heading", { name: "Assinar a carta" }).closest("section")!;
+    const enviar = screen.getByRole("heading", { name: "Enviar ao protocolo da Prefeitura de Vale Verde" }).closest("section")!;
+    // a etapa feita leva o sinal de feito; a da vez, o numero
+    expect([oficio, assinar, enviar].map(s => s.className)).toEqual(["nota-secao nota-secao--feito", "nota-secao nota-secao--feito", "nota-secao nota-secao--atual"]);
+    expect(oficio.querySelector(".nota-passo .glifo--feito")).not.toBeNull();
+    expect(enviar.querySelector(".nota-passo")!.textContent).toBe("3");
+    expect(oficio.querySelector(".nota-secao__lado")!.textContent).toBe("Ofício 061/2026");
+    // o pacote: as paginas e o que vai junto, cada item com o sinal da situacao dele
+    const pacote = oficio.querySelector(".envio-pacote")!;
+    expect([...pacote.querySelectorAll(".nota-paginas li")].map(li => li.textContent)).toEqual(["Ofício 061/2026", "NF 1187"]);
+    const item = (rotulo: string) => within(pacote as HTMLElement).getByText(rotulo).closest("li")!;
+    expect(item("Notas fiscais (2)").querySelector(".glifo--feito")).not.toBeNull();
+    expect(item("Certidões Beta (5)").querySelector(".glifo--breve")).not.toBeNull();
+    expect(item("Certidões Gama (5)").querySelector(".glifo--critico")).not.toBeNull();
+    expect(item("Regularidade mensal").querySelector(".glifo--breve")).not.toBeNull();
+    expect(within(item("Regularidade mensal")).getByText("Falta")).toBeTruthy();          // a palavra para o leitor de tela
+    expect(within(item("Regularidade mensal")).getByLabelText("Anexar Regularidade mensal")).toBeTruthy();
+    // "O que falta" continua no fim do oficio, um item por linha
+    const falta = within(oficio as HTMLElement).getByText("O que falta").parentElement!;
+    expect([...falta.querySelectorAll("li")].map(li => li.textContent)).toEqual(comCarta.pendencias);
+    expect(falta.querySelectorAll("li .glifo--critico")).toHaveLength(2);
+    // assinar e enviar seguem com os mesmos botoes
+    expect(within(assinar as HTMLElement).getByRole("link", { name: "Baixar para assinar" }).getAttribute("href")).toBe("/api/protocolos/3/pacote");
+    expect(within(assinar as HTMLElement).getByText("Trocar o assinado")).toBeTruthy();
+    expect((within(enviar as HTMLElement).getByRole("button", { name: "Enviar o e-mail" }) as HTMLButtonElement).disabled).toBe(false);
+  });
 });

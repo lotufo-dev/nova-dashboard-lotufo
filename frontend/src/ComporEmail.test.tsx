@@ -16,6 +16,25 @@ function escrever(corpo: HTMLElement, html: string) {
 describe("ComporEmail", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
+  it("#722: o assunto leva o nome do campo à vista sem mudar o nome que o leitor de tela lê nem o que é enviado", async () => {
+    api.mockResolvedValue({ remetente: "eu@lotufo.com" });
+    const aoEnviar = vi.fn();
+    render(<ComporEmail ocupado={false} anexos={[]} aoEnviar={aoEnviar} aoDescartar={() => {}}
+      inicial={{ para: ["orgao@exemplo.com.br"], copia: [], cco: [], assunto: "Contrato 018/2026 · 5ª Medição", corpo: "Prezados," }} />);
+    const assunto = screen.getByLabelText("Assunto") as HTMLInputElement;
+    expect(assunto.tagName).toBe("INPUT");
+    const rotulo = assunto.parentElement!.querySelector(".ol-assunto__rotulo")!;
+    expect(rotulo.textContent).toBe("Assunto");
+    expect(rotulo.getAttribute("aria-hidden")).toBe("true");
+    // o campo de uma linha pode esconder o fim do assunto (o numero do oficio): o `title` traz o assunto inteiro
+    expect(assunto.title).toBe("Contrato 018/2026 · 5ª Medição");
+    fireEvent.change(assunto, { target: { value: "Contrato 018/2026 · 5ª Medição · Ofício 061/2026" } });
+    expect(assunto.title).toBe("Contrato 018/2026 · 5ª Medição · Ofício 061/2026");
+    fireEvent.change(assunto, { target: { value: "Contrato 018/2026 · 5ª Medição" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+    expect(aoEnviar).toHaveBeenCalledWith({ para: ["orgao@exemplo.com.br"], copia: [], cco: [], assunto: "Contrato 018/2026 · 5ª Medição", corpo: "Prezados," });
+  });
+
   it("sem a imagem da assinatura: uma frase com o link para Minha conta, só quando falta", async () => {
     api.mockResolvedValue({ remetente: "eu@lotufo.com" });
     render(<ComporEmail ocupado={false} anexos={[]} aoEnviar={() => {}} aoDescartar={() => {}}

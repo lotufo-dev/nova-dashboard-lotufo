@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { CaixaJustificativa } from "./CaixaAviso";
 import { brl } from "./formato";
 import { api, apiForm, mensagemDeErro } from "./api";
 import CampoValor from "./CampoValor";
@@ -351,11 +352,11 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
 
       {justificar && (
         <form className="form-inline" onSubmit={enviarJustificativa}>
-          <div className="campo">
+          <CaixaJustificativa>
             <label className="campo__rotulo" htmlFor={`nota-justificativa-${medicao.id}`}>Justificativa da divergência</label>
             <input id={`nota-justificativa-${medicao.id}`} name="justificativa" autoComplete="off" className="entrada--larga" required maxLength={1000} autoFocus
               value={justificar.texto} onChange={ev => setJustificar({ ...justificar, texto: ev.target.value })} />
-          </div>
+          </CaixaJustificativa>
           <button type="submit" className="btn btn--primario" disabled={ocupado}>{acao === "justificar" ? "Gravando…" : "Gravar justificativa"}</button>
           <button type="button" className="btn" onClick={() => setJustificar(null)}>Voltar</button>
         </form>
@@ -363,13 +364,13 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
 
       {desfazer && (
         <form className="form-inline" onSubmit={enviarDesfazer}>
-          <div className="campo">
+          <CaixaJustificativa>
             <label className="campo__rotulo" htmlFor={`nota-desfazer-${medicao.id}`}>
               Motivo para desfazer o vínculo da nota {Number(desfazer.numero) || desfazer.numero}
             </label>
             <input id={`nota-desfazer-${medicao.id}`} name="motivo" autoComplete="off" className="entrada--larga" required maxLength={1000} autoFocus
               value={desfazer.motivo} onChange={ev => setDesfazer({ ...desfazer, motivo: ev.target.value })} />
-          </div>
+          </CaixaJustificativa>
           <button type="submit" className="btn btn--primario" disabled={ocupado}>{acao === "desfazer" ? "Desfazendo…" : "Desfazer o vínculo"}</button>
           <button type="button" className="btn" onClick={() => setDesfazer(null)}>Voltar</button>
         </form>
@@ -440,11 +441,11 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
 
       {podeEditar && dados && dados.pode_declarar && dados.faltam > 0 && dados.notas.length > 0 && (
         <form className="form-inline" onSubmit={enviarDeclaracao}>
-          <div className="campo">
+          <CaixaJustificativa>
             <label className="campo__rotulo" htmlFor={`nota-declarar-${medicao.id}`}>Declarar as notas completas — justificativa</label>
             <input id={`nota-declarar-${medicao.id}`} name="declaracao" autoComplete="off" className="entrada--larga" required maxLength={1000}
               value={declarar} onChange={ev => setDeclarar(ev.target.value)} />
-          </div>
+          </CaixaJustificativa>
           <button type="submit" className="btn btn--pequeno" disabled={ocupado}>{acao === "declarar" ? "Gravando…" : "Declarar completas"}</button>
         </form>
       )}

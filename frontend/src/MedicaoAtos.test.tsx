@@ -107,6 +107,8 @@ describe("FormProtocoloManual", () => {
     fireEvent.click(screen.getByRole("button", { name: "Registrar protocolo" }));
     expect(agir).not.toHaveBeenCalled();
     fireEvent.click(apesar);
+    // #722: a justificativa obrigatoria fica na caixa propria (CaixaJustificativa)
+    expect(screen.getByLabelText("Justificativa").closest(".justificativa")).not.toBeNull();
     fireEvent.change(screen.getByLabelText("Justificativa"), { target: { value: "NF substituta a caminho" } });
     fireEvent.click(screen.getByRole("button", { name: "Registrar protocolo" }));
     expect(agir).toHaveBeenCalledTimes(1);
@@ -193,6 +195,8 @@ describe("FormRecebimento", () => {
     const agir = vi.fn(async (fn: () => Promise<unknown>) => { await fn(); return true; });
     render(<FormRecebimento m={protocolada} salvando={false} agir={agir} aoFechar={() => {}} />);
     fireEvent.change(screen.getByLabelText("Data da baixa (opcional)"), { target: { value: "2026-09-30" } });
+    // #722: a justificativa obrigatoria fica na caixa propria (CaixaJustificativa)
+    expect(screen.getByLabelText("Motivo").closest(".justificativa")).not.toBeNull();
     fireEvent.change(screen.getByLabelText("Motivo"), { target: { value: " a baixa não entrou no RM " } });
     fireEvent.click(screen.getByRole("button", { name: "Registrar recebimento" }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/medicoes/631/estado", {

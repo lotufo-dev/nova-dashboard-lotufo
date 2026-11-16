@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import CaixaAviso from "./CaixaAviso";
+import CaixaAviso, { CaixaJustificativa } from "./CaixaAviso";
 import CampoValor from "./CampoValor";
 import ErroCampo from "./ErroCampo";
 import { api, apiForm, mensagemDeErro } from "./api";
@@ -68,13 +68,13 @@ export function AceiteDiferenca({ m, podeEditar, salvando, agir, aoFechar, erro 
           {(m.capa_divergencias ?? []).map(frase => <li key={frase}>{frase}</li>)}
         </ul>
       )}
-      <div className="campo">
+      <CaixaJustificativa>
         <label className="campo__rotulo" htmlFor="dif-justificativa">Justificativa</label>
         <textarea id="dif-justificativa" name="justificativa" className="entrada--larga" rows={2} maxLength={1000} autoFocus
           value={justificativa} onChange={ev => setJustificativa(ev.target.value)}
           {...(tentou && falta ? { "aria-invalid": true as const, "aria-describedby": "dif-erro" } : {})} />
         <ErroCampo id="dif-erro" erro={tentou ? falta : undefined} />
-      </div>
+      </CaixaJustificativa>
       <div className="form-inline">
         <button type="submit" className="btn btn--primario" disabled={salvando}>{salvando ? "Aceitando…" : "Aceitar a diferença"}</button>
         <button type="button" className="btn" onClick={fechar}>Cancelar</button>

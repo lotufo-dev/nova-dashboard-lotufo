@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CaixaJustificativa } from "./CaixaAviso";
 import { api, apiForm, ApiErro } from "./api";
 import ConfirmarFaltas from "./ConfirmarFaltas";
 import { IconeAlerta } from "./icones";
@@ -148,11 +149,11 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
             onChange={e => setObs(e.target.value)} />
         </div>
         {diverge && (
-          <div className="campo">
+          <CaixaJustificativa>
             <label className="campo__rotulo" htmlFor="porfora-motivo">Motivo do registro com a nota divergente (obrigatório)</label>
             <textarea id="porfora-motivo" name="motivo_divergencia" rows={2} maxLength={2000} required value={motivo}
               onChange={e => setMotivo(e.target.value)} />
-          </div>
+          </CaixaJustificativa>
         )}
         <fieldset className="opcoes">
           <legend className="campo__rotulo">O que saiu neste envio</legend>

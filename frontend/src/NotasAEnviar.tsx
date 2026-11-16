@@ -19,6 +19,7 @@ export type ItemEnvio = {
   chave: string; rotulo: string; detalhe?: string | null; estado: "ok" | "aviso" | "falta" | "vencida";
   acao?: string | null; entidade_id?: number | null; competencia?: string | null; medicao_id?: number | null;
   frc_gerada?: number | null;   // issue #148: numero da FRC gerada (sem assinatura) vigente, no item da FRC
+  bloqueia?: boolean;           // o item trava o envio sem ser certidao vencida (FRC assinada recusada, notas_envio._itens)
 };
 export type NotaEnvio = { numero: string; natureza: string; municipio?: string | null; arquivo?: string | null; valor_centavos: number };
 export type Envio = {
@@ -76,12 +77,13 @@ export function IconeCheck() {
   );
 }
 
-/** Estado do item: a forma (check verde, "!" ambar ou vermelho) e a palavra (leitor de tela e title). */
+/** Estado do item: o sinal da situacao (feito no pronto, vence em breve na atencao e na falta, critico na vencida)
+ *  e a palavra (leitor de tela e title). */
 function EstadoItem({ estado }: { estado: ItemEnvio["estado"] }) {
   const e = ESTADO_ITEM[estado] ? estado : "aviso";
   return (
     <span className={`nota-estado nota-estado--${e}`} title={ESTADO_ITEM[e]}>
-      {e === "ok" ? <IconeCheck /> : <span aria-hidden="true">!</span>}
+      <Glifo situacao={e === "ok" ? "feito" : e === "vencida" ? "critico" : "breve"} />
       <span className="sr-only">{ESTADO_ITEM[e]}</span>
     </span>
   );
@@ -225,7 +227,11 @@ function textoCertidao(i: ItemCertidao): string | null {
 
 /** Uma linha por certidao: o ponto (verde, ambar, vermelho) e a validade so' da que vence, por empresa quando ha mais de uma. O
  *  caminho para emitir a nova so' aparece com certidao vencida. */
-export function ListaCertidoes({ itens, semTitulo = false }: { itens: ItemCertidao[]; semTitulo?: boolean }) {
+export function ListaCertidoes({ itens, semTitulo = false, semNota = false }: {
+  itens: ItemCertidao[]; semTitulo?: boolean;
+  /** quem chama ja' diz, na trava do alto, "Certidão vencida: emita a nova em Documentos." */
+  semNota?: boolean;
+}) {
   const empresas = [...new Map(itens.map(i => [i.entidade_id, i.entidade] as const)).entries()];
   const vencida = itens.some(i => i.situacao === "pendente");
   return (
@@ -238,13 +244,14 @@ export function ListaCertidoes({ itens, semTitulo = false }: { itens: ItemCertid
             {itens.filter(i => i.entidade_id === eid).map(i => (
               <li key={`${i.entidade_id}-${i.tipo}`}>
                 <Glifo situacao={i.situacao === "pendente" ? "critico" : i.situacao === "vencendo" ? "breve" : "feito"} />
-                <span>{i.tipo}</span>{textoCertidao(i) && <> <small>· {textoCertidao(i)}</small></>}
+                <span>{i.tipo}</span>
+                {textoCertidao(i) && <small className={i.situacao === "pendente" ? "info--critico" : undefined}>{textoCertidao(i)}</small>}
               </li>
             ))}
           </ul>
         </div>
       ))}
-      {vencida && <p className="campo__nota certidoes__nota">Certidão vencida: emita a nova em{" "}
+      {vencida && !semNota && <p className="campo__nota certidoes__nota">Certidão vencida: emita a nova em{" "}
         <Link para={{ tela: "documentos" }}>Documentos</Link>.</p>}
     </div>
   );
@@ -261,7 +268,7 @@ const FILTROS: { id: FiltroId; rotulo: string }[] = [
   { id: "todas", rotulo: "Todas" }, { id: "prontas", rotulo: "Prontas" }, { id: "pendencia", rotulo: "Com pendência" },
 ];
 
-type Resumo = { situacao: Situacao; selo: string; nivel: "" | "feito" | "breve" | "critico";
+type Resumo = { situacao: Situacao; selo: string; nivel: "" | "andamento" | "breve" | "critico";
   motivo: string; tom: "neutro" | "atencao" | "bloqueio" };
 
 /** O selo do cartao e a frase do rodape. So' o bloqueio apaga o botao; a frase (`motivo`) so' existe quando o envio
@@ -280,13 +287,14 @@ export function resumoDe(e: Envio): Resumo {
   // certidao a menos de 15 dias do vencimento so' avisa: o envio segue pronto, com o aviso ao lado
   const aviso = e.itens.find(i => i.estado === "aviso");
   const falta = e.itens.find(i => i.estado === "falta");
-  if (!falta && aviso) return { situacao: "pronto", selo: "Pronto", nivel: "feito", motivo: "", tom: "atencao" };
+  // #722: pronto para enviar ainda nao e' feito: o envio esta' por fazer, em andamento
+  if (!falta && aviso) return { situacao: "pronto", selo: "Pronto", nivel: "andamento", motivo: "", tom: "atencao" };
   if (falta) {
     const rotulo = /^[A-ZÀ-Ý]{2}/.test(falta.rotulo) ? falta.rotulo : falta.rotulo.charAt(0).toLowerCase() + falta.rotulo.slice(1);
     return { situacao: "pendencia", selo: falta.estado === "falta" ? `Falta ${rotulo}` : falta.rotulo, nivel: "breve",
       motivo: "", tom: "atencao" };
   }
-  return { situacao: "pronto", selo: "Pronto", nivel: "feito", motivo: "", tom: "neutro" };
+  return { situacao: "pronto", selo: "Pronto", nivel: "andamento", motivo: "", tom: "neutro" };
 }
 
 /** O que vai junto, so' para ler: cada item com o estado e, onde falta algo, o link para resolver. */

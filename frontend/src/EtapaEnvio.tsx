@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import CaixaAviso from "./CaixaAviso";
+import Contador from "./Contador";
 import EnviarNota from "./EnviarNota";
 import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
 import Janela from "./Janela";
+import { Link } from "./Link";
 import type { Metade } from "./medicao";
 import { IconeCheck, iniciarEnvio, ListaCertidoes, mensagem, naturezaDoEnvio, pedeOficio, resumoDe, useCertidoes,
          type Envio, type ItemCertidao, type ListaEnvios } from "./NotasAEnviar";
 import RegistrarFora from "./RegistrarFora";
-import Selo from "./Selo";
+import Selo, { Glifo } from "./Selo";
 import { situacaoDoNivel } from "./situacao";
 
 // Etapa 4 da pagina da medicao (#152, opcao B): o envio ao orgao numa tabela de uma linha por envio -- um so' na
@@ -66,9 +68,9 @@ export function ConferenciaNotas({ envios }: { envios: Envio[] }) {
   if (graves.length === 0 && leves.length === 0 && acima.length === 0) return null;
   const numeros = [...new Set(graves.map(d => String(d.numero)))];
   return (
-    <div className="pilha" aria-label="Conferência das notas com o espelho">
+    <div className="pilha envio-diverge" aria-label="Conferência das notas com o espelho">
       {numeros.length > 0 && (
-        <CaixaAviso nivel="critico" role="status">
+        <CaixaAviso nivel="critico" role="status" className="envio-diverge__titulo">
           NF {numeros.join(", ")} diverge{numeros.length > 1 ? "m" : ""} do espelho
         </CaixaAviso>
       )}
@@ -82,7 +84,8 @@ export function ConferenciaNotas({ envios }: { envios: Envio[] }) {
                   <td data-rotulo="Nota">NF {d.numero}</td>
                   <td data-rotulo="Campo">{CAMPO_NOTA[d.campo] ?? d.campo}</td>
                   <td data-rotulo="Espelho" className="col-num num">{valorConferido(d.espelho)}</td>
-                  <td data-rotulo="Nota" className="col-num num">{valorConferido(d.nota)}</td>
+                  {/* o valor da nota e' o que diverge: no tom do critico */}
+                  <td data-rotulo="Nota" className="col-num num info--critico">{valorConferido(d.nota)}</td>
                 </tr>
               ))}
             </tbody>
@@ -131,7 +134,22 @@ export function faltasDo(e: Envio): string[] {
 /** #514: a faixa do passo Envio da nota: verde "Tudo pronto para enviar" ou o que falta. #720: a forma diz se trava.
  *  Com algum envio bloqueado (a certidao vencida desliga o botao) e' a trava, em bloco cheio; quando so' falta algo
  *  que nao impede o envio e' a faixa amarela de atencao, e o botao segue ativo. */
+/** O envio esta' bloqueado POR certidao vencida: a causa se le no proprio envio (item `vencida`, o estado com que o
+ *  servidor trava o pacote, notas_envio._envio). Certidao que so' falta no checklist nao trava, e o bloqueio pode ter
+ *  outra causa (FRC assinada recusada, pacote a montar de novo): ai' a faixa nao fala em certidao. */
+export const travadoPorCertidao = (envios: Envio[]) =>
+  envios.some(e => e.situacao === "bloqueado" && e.itens.some(i => i.estado === "vencida"));
+
 export function FaixaEnvio({ envios }: { envios: Envio[] }) {
+  // #722: com o envio travado por certidao vencida, a faixa do alto e' a trava com o caminho para resolver; o que
+  // mais falta continua dito no motivo do envio bloqueado, abaixo da linha, e nas listas do que vai junto
+  if (travadoPorCertidao(envios)) {
+    return (
+      <CaixaAviso nivel="trava" como="div" role="status" className="envio-faixa envio-faixa--falta">
+        Certidão vencida: emita a nova em <Link para={{ tela: "documentos" }}>Documentos</Link>.
+      </CaixaAviso>
+    );
+  }
   const faltas = envios.map(e => ({ e, f: faltasDo(e) })).filter(x => x.f.length > 0);
   // #562: com nota divergente nada esta' "pronto": a caixa da conferencia (logo abaixo) diz qual nota diverge
   if (faltas.length === 0 && envios.some(e => notasDivergentes(e).length > 0)) return null;
@@ -148,20 +166,29 @@ export function FaixaEnvio({ envios }: { envios: Envio[] }) {
   );
 }
 
-type Linha = { chave: string; texto: React.ReactNode; ok: boolean; detalhe?: string | null; valor?: number | null };
+/** `trava`: a linha que trava o envio (certidao vencida, ou item que o servidor marca com `bloqueia`, como a FRC
+ *  assinada recusada); a que so' falta pede atencao e nao trava. `apoio`: o dado secundario da linha (o municipio da
+ *  nota), na linha de baixo. */
+type Linha = { chave: string; texto: React.ReactNode; ok: boolean; trava?: boolean; apoio?: string | null;
+  detalhe?: string | null; valor?: number | null };
+const travaDoItem = (i: { estado: string; bloqueia?: boolean | null }) => i.estado === "vencida" || !!i.bloqueia;
 
-function Cartao({ titulo, linhas, children }: { titulo: string; linhas: Linha[]; children?: React.ReactNode }) {
+/** #722: um bloco do que vai junto, com o contador "N de M". A situacao diz a verdade: tudo ali = feito; alguma
+ *  linha que trava o envio = critico; so' faltando (nao trava) = vence em breve. */
+function Cartao({ titulo, linhas, classe, children }: { titulo: string; linhas: Linha[]; classe: string; children?: React.ReactNode }) {
   const ok = linhas.filter(l => l.ok).length;
+  const situacao = linhas.some(l => l.trava) ? "critico" : ok === linhas.length ? "feito" : "breve";
   return (
-    <section className="cartao med-painel envio-cartao" aria-label={titulo}>
+    <section className={`cartao med-painel envio-cartao ${classe}`} aria-label={titulo}>
       <h3 className="med-painel__titulo">{titulo}
-        {linhas.length > 0 && <Selo situacao={ok === linhas.length ? "feito" : "critico"}>{`${ok} de ${linhas.length}`}</Selo>}</h3>
+        {linhas.length > 0 && <Contador situacao={situacao}>{`${ok} de ${linhas.length}`}</Contador>}</h3>
       {children ?? (linhas.length === 0 ? <p>—</p> : (
         <ul className="envio-itens">
           {linhas.map(l => (
-            <li key={l.chave} className={l.ok ? "envio-item--ok" : "envio-item--falta"}>
-              <span className="envio-item__marca" aria-hidden="true">{l.ok ? <IconeCheck /> : "!"}</span>
-              <span className="envio-item__texto">{l.texto}{!l.ok && l.detalhe && <small>{l.detalhe}</small>}</span>
+            <li key={l.chave} className={l.trava ? "envio-item--critico" : undefined}>
+              <Glifo situacao={l.trava ? "critico" : l.ok ? "feito" : "breve"} />
+              <span className="envio-item__texto">{l.texto}{l.apoio && <small className="envio-item__apoio">{l.apoio}</small>}
+                {!l.ok && l.detalhe && <small>{l.detalhe}</small>}</span>
               {l.valor !== undefined && l.valor !== null && <span className="num">{brl(l.valor)}</span>}
             </li>
           ))}
@@ -173,29 +200,34 @@ function Cartao({ titulo, linhas, children }: { titulo: string; linhas: Linha[];
 
 /** #514: os tres cartoes do que vai junto: Notas fiscais (as NFs, a FRC assinada e as notas das consorciadas),
  *  Certidoes (por empresa no consorcio, com a validade de cada uma) e Documentos (a regularidade e o resto). */
-export function CartoesEnvio({ envios, certidoes }: { envios: Envio[]; certidoes: ItemCertidao[] | null }) {
+export function CartoesEnvio({ envios, certidoes, semNotaDaVencida = false }: {
+  envios: Envio[]; certidoes: ItemCertidao[] | null;
+  /** a faixa do alto do passo ja' diz "Certidão vencida: emita a nova em Documentos." */
+  semNotaDaVencida?: boolean;
+}) {
   const itens = envios.flatMap(e => e.itens.map(i => ({ ...i, chave: `${e.chave}|${i.chave}` })));
   const base = (c: string) => c.split("|")[1];
   const mistura = new Set(envios.flatMap(e => e.notas.map(n => n.natureza === "reajuste"))).size > 1;
   const notas: Linha[] = [
     ...envios.flatMap(e => e.notas.map(n => ({ chave: `${e.chave}|nf-${n.numero}-${n.natureza}`, ok: true, valor: n.valor_centavos,
-      texto: <>NF {n.numero}{mistura ? ` · ${n.natureza === "reajuste" ? "reajuste" : "medição"}` : ""}{n.municipio ? ` · ${n.municipio}` : ""}</> }))),
+      texto: <>NF {n.numero}{mistura ? ` · ${n.natureza === "reajuste" ? "reajuste" : "medição"}` : ""}</>, apoio: n.municipio }))),
     // sem o detalhe do servidor: ele fala em etapa antiga e "anexe aqui", e a acao mora no e-mail aberto (revisor, PR #555)
     ...itens.filter(i => (base(i.chave) === "notas" && i.estado !== "ok") || base(i.chave).startsWith("frc:") || base(i.chave) === "consorcio")
-      .map(i => ({ chave: i.chave, ok: i.estado === "ok", texto: base(i.chave) === "notas" ? "Falta a nota fiscal" : i.rotulo })),
+      .map(i => ({ chave: i.chave, ok: i.estado === "ok", trava: travaDoItem(i), texto: base(i.chave) === "notas" ? "Falta a nota fiscal" : i.rotulo })),
   ];
   const certs = itens.filter(i => base(i.chave).startsWith("certidoes:"));
-  const certLinhas: Linha[] = certs.map(i => ({ chave: i.chave, ok: i.estado === "ok" || i.estado === "aviso", texto: i.rotulo, detalhe: i.detalhe }));
+  const certLinhas: Linha[] = certs.map(i => ({ chave: i.chave, ok: i.estado === "ok" || i.estado === "aviso", trava: travaDoItem(i), texto: i.rotulo, detalhe: i.detalhe }));
   const docs = itens.filter(i => !["notas", "consorcio"].includes(base(i.chave)) && !base(i.chave).startsWith("frc:") && !base(i.chave).startsWith("certidoes:"))
-    .map(i => ({ chave: i.chave, ok: i.estado === "ok" || i.estado === "aviso", texto: <>{i.rotulo}{i.estado === "ok" && i.detalhe ? ` de ${i.detalhe}` : ""}</>, detalhe: i.detalhe }));
+    .map(i => ({ chave: i.chave, ok: i.estado === "ok" || i.estado === "aviso", trava: travaDoItem(i),
+      texto: <>{i.rotulo}{i.estado === "ok" && i.detalhe ? ` de ${i.detalhe}` : ""}</>, detalhe: i.detalhe }));
   const varias = new Set(certs.map(i => i.entidade_id)).size > 1 || new Set((certidoes ?? []).map(i => i.entidade_id)).size > 1;
   return (
     <div className="envio-cartoes">
-      <Cartao titulo="Notas fiscais" linhas={notas} />
-      <Cartao titulo={varias ? "Certidões por empresa" : "Certidões"} linhas={certLinhas}>
-        {certidoes && certidoes.length > 0 ? <ListaCertidoes itens={certidoes} semTitulo /> : undefined}
+      <Cartao titulo="Notas fiscais" linhas={notas} classe="envio-cartao--notas" />
+      <Cartao titulo={varias ? "Certidões por empresa" : "Certidões"} linhas={certLinhas} classe="envio-cartao--certidoes">
+        {certidoes && certidoes.length > 0 ? <ListaCertidoes itens={certidoes} semTitulo semNota={semNotaDaVencida} /> : undefined}
       </Cartao>
-      <Cartao titulo="Documentos" linhas={docs} />
+      <Cartao titulo="Documentos" linhas={docs} classe="envio-cartao--docs" />
     </div>
   );
 }
@@ -241,12 +273,17 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
   const pidAberto = envioAberto?.protocolo_id ?? null;
 
   return (
-    <div className="pilha">
+    <div className="pilha envio-passo">
       <FaixaEnvio envios={envios} />
       <ConferenciaNotas envios={envios} />
-      <CartoesEnvio envios={envios} certidoes={certidoes} />
+      <CartoesEnvio envios={envios} certidoes={certidoes} semNotaDaVencida={travadoPorCertidao(envios)} />
       <section className="cartao med-painel" aria-labelledby="email-orgao-titulo">
-      <h3 className="med-painel__titulo" id="email-orgao-titulo">E-mail ao órgão</h3>
+      <div className="envio-email__cab">
+        <h3 className="med-painel__titulo" id="email-orgao-titulo">E-mail ao órgão</h3>
+        {podeEditar && registraveis.length > 0 && (
+          <button type="button" className="botao-link" onClick={() => setFora(true)}>Já enviei por fora</button>
+        )}
+      </div>
       {erroAcao && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroAcao}</p>}
       <div className="med-caixa">
         <table className="tabela envios">
@@ -258,28 +295,36 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
               const r = resumoDe(e);
               const aberta = e.protocolo_id !== null && e.protocolo_id === pidAberto;
               const esperando = e.situacao === "esperando";
-              return (
-                <tr key={e.chave} className={aberta ? "envios--aberto" : ""}>
+              const bloqueio = !!r.motivo && r.tom === "bloqueio";
+              const idMotivo = `envio-motivo-${e.chave.replace(/[^\w-]/g, "-")}`;
+              return [
+                <tr key={e.chave} className={`${aberta ? "envios--aberto" : ""}${bloqueio ? " envios--travado" : ""}`}>
                   <td data-rotulo="Envio"><strong>{e.descricao}</strong></td>
                   <td data-rotulo="Nota fiscal"><CelulaNotas e={e} /></td>
                   <td data-rotulo="Valor" className="col-num">{brl(e.valor_centavos)}</td>
                   <td data-rotulo="Documentos"><SeloDocs e={e} /></td>
                   <td>
                     <div className="envios__acao">
-                      {/* #720: o motivo do envio bloqueado e' a trava, ao lado do botao desligado */}
-                      {r.motivo && (r.tom === "bloqueio"
-                        ? <CaixaAviso nivel="trava" como="span" className="envios__motivo envios__motivo--bloqueio">{r.motivo}</CaixaAviso>
-                        : <span className={`envios__motivo envios__motivo--${r.tom}`}>{r.motivo}</span>)}
+                      {r.motivo && !bloqueio && <span className={`envios__motivo envios__motivo--${r.tom}`}>{r.motivo}</span>}
                       {podeEditar && (esperando
                         ? (pronta && <button type="button" className="btn btn--pequeno" onClick={aoSemAOutra}>
                             {pronta.tipo === "execucao" ? "Enviar a medição sem o reajuste…" : "Enviar o reajuste sem a medição…"}</button>)
-                        : <button type="button" className="btn btn--primario btn--envio" disabled={e.situacao === "bloqueado" || ocupado}
-                            aria-expanded={aberta} onClick={() => enviar(e)}>
+                        : <button type="button" className={`btn btn--envio${aberta ? "" : " btn--primario"}`} disabled={e.situacao === "bloqueado" || ocupado}
+                            aria-expanded={aberta} aria-describedby={bloqueio ? idMotivo : undefined} onClick={() => enviar(e)}>
                             {aberta ? "Fechar o envio" : ocupado ? "Abrindo…" : "Enviar a nota"}</button>)}
                     </div>
                   </td>
-                </tr>
-              );
+                </tr>,
+                // #722: o motivo do envio bloqueado e' a trava em bloco cheio, na largura inteira logo abaixo da linha
+                // do envio, com o botao desligado na linha
+                bloqueio && (
+                  <tr key={`${e.chave}-trava`} className="envios__trava">
+                    <td colSpan={5} id={idMotivo}>
+                      <CaixaAviso nivel="trava" como="div" className="envios__motivo envios__motivo--bloqueio">{r.motivo}</CaixaAviso>
+                    </td>
+                  </tr>
+                ),
+              ];
             })}
           </tbody>
         </table>
@@ -288,17 +333,11 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
       {envioAberto && pidAberto && (
         <div className="notas-v3 med-envio" id="envio-aberto" aria-label="Envio aberto">
           <div className="med-envio__cabeca">
-            <h3>{envioAberto.descricao} · <span className="nota-mono">{brl(envioAberto.valor_centavos)}</span></h3>
+            <h3><span>{envioAberto.descricao}</span> <span className="nota-mono">{brl(envioAberto.valor_centavos)}</span></h3>
             <button type="button" className="btn btn--pequeno" onClick={() => setAberto(null)}>Fechar</button>
           </div>
           <EnviarNota key={pidAberto} protocoloId={pidAberto} podeEditar={podeEditar} versao={versaoDocs}
             embutido={{ aoConcluir: aoMudar, aoTrocar: pid => { void recarregarEnvios().then(() => setAberto(pid)); }, aoAnexarItem, aoDescartar: () => setAberto(null) }} />
-        </div>
-      )}
-
-      {podeEditar && registraveis.length > 0 && (
-        <div className="nota-porfora">
-          <button type="button" className="botao-link" onClick={() => setFora(true)}>Já enviei por fora</button>
         </div>
       )}
       </section>

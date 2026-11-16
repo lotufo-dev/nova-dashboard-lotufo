@@ -86,7 +86,9 @@ describe("Passo Pagamento (#514)", () => {
     expect(screen.getByLabelText("A receber: R$ 0,00")).toBeTruthy();
     expect(screen.getByText("paga")).toBeTruthy();
     expect(screen.getByText("100%")).toBeTruthy();
-    expect(screen.getByText("Recebido")).toBeTruthy();
+    // #722: a barra leva o rotulo "Recebido" a' vista; o selo da situacao continua o mesmo, com o visto de feito
+    expect(screen.getByText("Recebido", { selector: ".medidor__rotulo" })).toBeTruthy();
+    expect(screen.getByText("Recebido", { selector: ".selo__texto" }).closest(".selo")!.className).toContain("selo--feito");
   });
 
   it("nota sem título no RM: a linha mostra “—”; a nota de outra coligada é marcada na tabela, sem dizer que é a fatura", () => {
@@ -176,5 +178,46 @@ describe("contas do pagamento", () => {
     expect(aReceber([com({ pagamento_cota: cota(0, 0, 0) })])).toEqual({ falta: 0, recebido: 0, total: 0, parcial: false, completo: true });
     expect(aReceber([com({ pagamento_cota: undefined })]).falta).toBeNull();
     expect(aReceber([]).falta).toBeNull();
+  });
+});
+
+// #722: as situacoes do pagamento dizem a verdade a quem opera
+describe("Passo Pagamento: situações (#722)", () => {
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-22T15:00:00Z")); api.mockResolvedValue({ processos: [] }); });
+  afterEach(() => { cleanup(); api.mockReset(); vi.useRealTimers(); });
+  const selo = (texto: string) => screen.getAllByText(texto, { selector: ".selo__texto" }).map(x => x.closest(".selo")!.className);
+
+  it("aguardando o órgão e nota em aberto são andamento, não “vence em breve”", () => {
+    montar();
+    expect(selo("Aguardando o órgão")).toEqual(["selo selo--andamento"]);
+    expect(selo("em aberto")).toEqual(["selo selo--andamento", "selo selo--andamento"]);
+  });
+
+  it("recebido em parte e nota paga em parte são andamento; o visto de feito só com a nota paga e tudo recebido", () => {
+    // centavo impar no recebido e no que falta
+    montar({ grupo: [com({ notas: [nota(1, "2351", 100001, 92401, 30001), nota(2, "2352", 50000, 46000, 46000)],
+      pagamento_cota: cota(138401, 76001, 62400, true) })] });
+    expect(selo("Recebido em parte")).toEqual(["selo selo--andamento"]);
+    expect(selo("paga em parte")).toEqual(["selo selo--andamento"]);
+    expect(selo("paga")).toEqual(["selo selo--feito"]);
+    expect(screen.getByText("R$ 760,01 recebido de R$ 1.384,01")).toBeTruthy();
+    cleanup();
+    montar({ grupo: [com({ estado: "recebida", recebida_em: "2026-11-20", notas: [nota(1, "2351", 100001, 92401, 92401)], pagamento_cota: cota(92401, 92401, 0) })] });
+    expect(selo("Recebida")).toEqual(["selo selo--feito"]);
+  });
+
+  it("os três números ficam no alto do passo, cada um com o rótulo; a barra do recebido diz o que mede", () => {
+    montar();
+    const passo = screen.getByRole("region", { name: "Pagamento" });
+    expect(within(passo).getByRole("heading", { name: "Pagamento", level: 2 })).toBeTruthy();
+    const numeros = passo.querySelector(".pag-numeros")!;
+    expect([...numeros.querySelectorAll(".pag-numeros__rotulo")].map(x => x.textContent)).toEqual(["A receber · cota da Lotufo", "Total da medição", "Aguardando há"]);
+    expect([...numeros.querySelectorAll(".pag-numeros__valor")].map(x => x.textContent)).toEqual(
+      [expect.stringMatching(/^R\$\s4\.465\.335,00$/), expect.stringMatching(/^R\$\s9\.905\.296,48$/), expect.stringMatching(/^8\sdias$/)]);
+    // os numeros vem antes das notas e do processo
+    expect(numeros.compareDocumentPosition(screen.getByRole("region", { name: "Notas e pagamento" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const barra = screen.getByLabelText("Recebido");
+    expect(barra.querySelector(".medidor__rotulo")!.textContent).toBe("Recebido");
+    expect(within(barra).getByText("0%")).toBeTruthy();
   });
 });

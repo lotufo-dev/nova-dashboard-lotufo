@@ -47,6 +47,8 @@ describe("Notas", () => {
     render(<Notas medicao={{ ...medicao, estado: "nota_emitida" }} podeEditar aoMudar={() => {}} />);
     await waitFor(() => expect(screen.getByText(/nº 2288/)).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Justificar" }));
+    // #722: a justificativa obrigatoria fica na caixa propria (CaixaJustificativa)
+    expect(screen.getByLabelText(/Justificativa da divergência/).closest(".justificativa")).not.toBeNull();
     fireEvent.change(screen.getByLabelText(/Justificativa da divergência/), { target: { value: "Arredondamento do município" } });
     api.mockReturnValueOnce(new Promise(() => {}));   // a chamada nunca termina
     fireEvent.click(screen.getByRole("button", { name: "Gravar justificativa" }));
@@ -187,6 +189,8 @@ describe("Notas: só o botão da ação em curso troca o rótulo", () => {
 
   it("declaração em curso: 'Declarar completas' vira 'Gravando…' e desabilita", async () => {
     await abrir();
+    // #722: a justificativa obrigatoria fica na caixa propria (CaixaJustificativa)
+    expect(screen.getByLabelText(/Declarar as notas completas/).closest(".justificativa")).not.toBeNull();
     fireEvent.change(screen.getByLabelText(/Declarar as notas completas/), { target: { value: "Sem serviço no mês" } });
     fireEvent.click(screen.getByRole("button", { name: "Declarar completas" }));
     const botao = await screen.findByRole("button", { name: "Gravando…" }) as HTMLButtonElement;
@@ -284,6 +288,8 @@ describe("Notas: valor da nota manual (CampoValor)", () => {
     const aoMudar = vi.fn();
     render(<Notas medicao={{ ...medicao, estado: "nota_emitida" }} podeEditar={false} podeDesfazer aoMudar={aoMudar} />);
     fireEvent.click(await screen.findByRole("button", { name: /Desfazer vínculo/ }));
+    // #722: a justificativa obrigatoria fica na caixa propria (CaixaJustificativa)
+    expect(screen.getByLabelText(/Motivo para desfazer o vínculo/).closest(".justificativa")).not.toBeNull();
     fireEvent.change(screen.getByLabelText(/Motivo para desfazer o vínculo/), { target: { value: "NF de outra obra" } });
     api.mockResolvedValueOnce({ ok: true, estado: "nota_emitida" });
     api.mockResolvedValueOnce({ ...COM_NOTA, notas: [], faltam: 1, esperadas: DADOS.esperadas });

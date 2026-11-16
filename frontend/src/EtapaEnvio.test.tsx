@@ -51,12 +51,20 @@ describe("Etapa 4: o envio ao órgão", () => {
     api.mockResolvedValue({ itens: [] });
     montar([envio({ chave: "a", itens: [{ chave: "frc:631", rotulo: "FRC assinada", estado: "falta", acao: "anexar_frc" }] }),
       envio({ chave: "b", situacao: "bloqueado", aviso: "certidão trabalhista vencida" })]);
-    const [faltando, bloqueado] = screen.getAllByRole("row").slice(1);
+    // #722: o motivo do bloqueio e' a trava em bloco cheio, numa linha propria logo abaixo da linha do envio
+    const [faltando, bloqueado, trava] = screen.getAllByRole("row").slice(1);
     expect(within(faltando).getByText("Falta FRC assinada")).toBeTruthy();
     expect(faltando.querySelector(".envios__motivo")).toBeNull();
     expect((within(faltando).getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(false);
-    expect(within(bloqueado).getByText(/Envio bloqueado: certidão trabalhista vencida/)).toBeTruthy();
-    expect((within(bloqueado).getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(bloqueado.querySelector(".envios__motivo")).toBeNull();
+    expect(within(trava).getByText(/Envio bloqueado: certidão trabalhista vencida/)).toBeTruthy();
+    expect(trava.querySelector(".aviso--trava")).not.toBeNull();
+    expect(within(trava).getAllByRole("cell")).toHaveLength(1);
+    expect(within(trava).getByRole("cell").getAttribute("colspan")).toBe("5");
+    const desligado = within(bloqueado).getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement;
+    expect(desligado.disabled).toBe(true);
+    // o botao desligado aponta para o motivo dele
+    expect(desligado.getAttribute("aria-describedby")).toBe(within(trava).getByRole("cell").id);
   });
 
   it("“Enviar a nota” de um envio já começado abre o e-mail na mesma página e “Fechar o envio” o fecha", async () => {
@@ -165,6 +173,8 @@ describe("Etapa 4: registrar envio feito fora do sistema", () => {
     const botao = screen.getByRole("button", { name: "Registrar" }) as HTMLButtonElement;
     fireEvent.change(screen.getByLabelText(COMO), { target: { value: "Pelo Outlook, ao fiscal" } });
     expect(botao.disabled).toBe(true);
+    // #722: a justificativa obrigatoria fica na caixa propria (CaixaJustificativa)
+    expect(screen.getByLabelText("Motivo do registro com a nota divergente (obrigatório)").closest(".justificativa")).not.toBeNull();
     fireEvent.change(screen.getByLabelText("Motivo do registro com a nota divergente (obrigatório)"), { target: { value: "curto" } });
     expect(botao.disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("Motivo do registro com a nota divergente (obrigatório)"),
@@ -433,9 +443,11 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
     expect(faixa.className).toContain("aviso--trava");
     expect(faixa.querySelector("svg.icone")).not.toBeNull();
     expect(faixa.querySelector(".glifo")).toBeNull();
-    expect(faixa.textContent).toBe("Crítico: Falta 1 item para enviar: Guaxe: FGTS vencida em 01/11");
+    // #722: travado por certidao vencida (o item `vencida` do proprio envio), a faixa diz o caminho para resolver;
+    // qual certidao venceu continua no motivo, logo abaixo da linha do envio
+    expect(faixa.textContent).toBe("Crítico: Certidão vencida: emita a nova em Documentos.");
     expect((screen.getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(true);
-    // o motivo da linha, ao lado do botao desligado, tambem e' a trava
+    // o motivo do envio, na linha abaixo do botao desligado, tambem e' a trava
     const motivo = document.querySelector(".envios__motivo")!;
     expect(motivo.className).toContain("aviso--trava");
     expect(motivo.textContent).toBe("Crítico: Envio bloqueado: Guaxe: FGTS vencida em 01/11");
@@ -453,7 +465,9 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
     expect(document.querySelector(".envio-faixa")!.textContent).toBe("Tudo pronto para enviar");
     const notas = screen.getByRole("region", { name: "Notas fiscais" });
     expect(within(notas).getByText("2 de 2")).toBeTruthy();
-    expect(within(notas).getByText("NF 2351 · Cuiabá")).toBeTruthy();
+    // #722: o municipio da nota vai na linha de baixo, como dado de apoio
+    expect(within(notas).getByText("NF 2351")).toBeTruthy();
+    expect(within(notas).getByText("Cuiabá").className).toBe("envio-item__apoio");
     expect(within(notas).getByText("R$ 4.183.303,86")).toBeTruthy();
     expect(within(notas).getByText("FRC assinada")).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "Documentos" })).getByText("Regularidade mensal de 09/2026")).toBeTruthy();
@@ -479,7 +493,10 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
     montar([envio({ chave: "a", familia: "mtpar", descricao: "25ª medição" }),
       envio({ chave: "b", familia: "mtpar", descricao: "Reajuste da 25ª medição", medicao_ids: [632], situacao: "bloqueado",
         aviso: "Trabalhista vencida em 02/11", notas: [{ numero: "2361", natureza: "reajuste", valor_centavos: 1 }] })]);
-    expect(screen.getAllByRole("row").slice(1)).toHaveLength(2);
+    // dois envios; o bloqueado ganha a linha da trava logo abaixo dele (#722)
+    const linhas = screen.getAllByRole("row").slice(1);
+    expect(linhas.filter(l => !l.classList.contains("envios__trava"))).toHaveLength(2);
+    expect(linhas.map(l => l.classList.contains("envios__trava"))).toEqual([false, false, true]);
     expect(document.querySelector(".envio-faixa")!.textContent).toBe("Crítico: Falta 1 item para enviar: Reajuste da 25ª medição: Trabalhista vencida em 02/11");
   });
 
@@ -541,5 +558,125 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
     expect(screen.getByText("Tudo pronto para enviar")).toBeTruthy();
     expect(screen.getByText(/NF 2322: ISS com diferença de arredondamento/)).toBeTruthy();
     expect(screen.getByText("Completo")).toBeTruthy();
+  });
+});
+
+// #722: o passo Envio da nota como o dono montou -- a trava em bloco cheio, o que vai junto numa faixa so', as
+// situacoes que dizem a verdade e "Já enviei por fora" junto do titulo
+describe("Envio da nota: a página montada pelo dono (#722)", () => {
+  afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
+
+  const certidao = (entidade_id: number, entidade: string, tipo: string, situacao: string, validade: string | null = "2027-01-10") =>
+    ({ entidade_id, entidade, tipo, chave: tipo.toLowerCase(), situacao, validade, dias: 30 });
+  const VENCIDA = [certidao(1, "Construtora Alfa Ltda", "Federal", "ok"), certidao(4, "Construtora Beta S.A.", "Trabalhista", "pendente", "2026-11-10"),
+    certidao(4, "Construtora Beta S.A.", "FGTS", "vencendo", "2026-11-20")];
+  const BLOQUEADO = { situacao: "bloqueado", aviso: "Beta: Trabalhista vencida em 10/11 · Falta a regularidade",
+    itens: [{ chave: "certidoes:alfa", rotulo: "Certidões Alfa (2)", detalhe: "todas válidas", estado: "ok" as const, entidade_id: 1 },
+      { chave: "certidoes:beta", rotulo: "Certidões Beta (2)", detalhe: "Trabalhista vencida em 10/11", estado: "vencida" as const, entidade_id: 4 },
+      { chave: "regularidade:beta", rotulo: "Regularidade mensal", detalhe: "O DP ainda não enviou o arquivo de 10/2026", estado: "falta" as const }] };
+
+  it("certidão vencida trava: a faixa do alto diz o caminho, com o link, e o motivo inteiro fica na trava abaixo da linha do envio", async () => {
+    api.mockResolvedValue({ itens: VENCIDA });
+    montar([envio(BLOQUEADO)]);
+    const cert = await screen.findByRole("region", { name: "Certidões por empresa" });
+    const faixa = document.querySelector(".envio-faixa")!;
+    expect(faixa.textContent).toBe("Crítico: Certidão vencida: emita a nova em Documentos.");
+    expect(faixa.classList.contains("aviso--trava")).toBe(true);
+    expect(within(faixa as HTMLElement).getByRole("link", { name: "Documentos" }).getAttribute("href")).toBe("/documentos");
+    // a frase nao se repete embaixo da lista de certidoes
+    expect(screen.getAllByText(/Certidão vencida: emita a nova em/)).toHaveLength(1);
+    expect(cert.querySelector(".certidoes__nota")).toBeNull();
+    // o que mais falta continua dito na trava abaixo da linha, com o botao desligado
+    const [linha, trava] = screen.getAllByRole("row").slice(1);
+    expect(within(trava).getByText("Envio bloqueado: Beta: Trabalhista vencida em 10/11 · Falta a regularidade")).toBeTruthy();
+    expect((within(linha).getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(linha).getByText("Certidão vencida").closest(".selo")!.className).toContain("selo--critico");
+    // bloqueado nao se registra por fora
+    expect(screen.queryByRole("button", { name: "Já enviei por fora" })).toBeNull();
+  });
+
+  it("a certidão vencida aparece no crítico e a que vence, em atenção; o contador conta por empresa", async () => {
+    api.mockResolvedValue({ itens: VENCIDA });
+    montar([envio(BLOQUEADO)]);
+    const cert = await screen.findByRole("region", { name: "Certidões por empresa" });
+    expect(within(cert).getByText("1 de 2").closest(".contador")!.className).toBe("contador contador--critico");
+    const linha = (tipo: string) => within(cert).getByText(tipo).closest("li")!;
+    expect(linha("Trabalhista").querySelector(".glifo--critico")).not.toBeNull();
+    expect(within(linha("Trabalhista")).getByText("sem validade hoje").className).toBe("info--critico");
+    expect(linha("FGTS").querySelector(".glifo--breve")).not.toBeNull();
+    expect(within(linha("FGTS")).getByText("vence em 20/11/2026")).toBeTruthy();
+    expect(linha("Federal").querySelector(".glifo--feito")).not.toBeNull();
+    // o que so' falta (nao trava) pede atencao: triangulo, nao o critico
+    const docs = screen.getByRole("region", { name: "Documentos" });
+    expect(within(docs).getByText("0 de 1").closest(".contador")!.className).toBe("contador contador--breve");
+    expect(within(docs).getByText("Regularidade mensal").closest("li")!.querySelector(".glifo--breve")).not.toBeNull();
+    expect(within(docs).getByText("O DP ainda não enviou o arquivo de 10/2026")).toBeTruthy();
+  });
+
+  it("bloqueio que não é de certidão mantém a faixa “Falta N itens”; sem bloqueio, a nota da certidão segue na lista", async () => {
+    api.mockResolvedValue({ itens: [certidao(1, "Construtora Alfa Ltda", "Federal", "ok")] });
+    montar([envio({ situacao: "bloqueado", aviso: "Pacote sem a FRC assinada: monte de novo" })]);
+    await screen.findByRole("region", { name: "Certidões" });
+    expect(document.querySelector(".envio-faixa")!.textContent).toBe("Crítico: Falta 1 item para enviar: pacote sem a FRC assinada: monte de novo");
+    cleanup();
+    // certidao sem validade num envio que nao esta' bloqueado: a frase com o link continua embaixo da lista
+    api.mockResolvedValue({ itens: VENCIDA });
+    montar([envio({ situacao: "pendente", aviso: "Falta a regularidade" })]);
+    const cert = await screen.findByRole("region", { name: "Certidões por empresa" });
+    expect(document.querySelector(".envio-faixa")!.textContent).toBe("Atenção: Falta 1 item para enviar: a regularidade");
+    expect(cert.querySelector(".certidoes__nota")!.textContent).toBe("Certidão vencida: emita a nova em Documentos.");
+  });
+
+  it("bloqueio por FRC recusada, com uma certidão que só falta: a faixa não fala em certidão e a FRC sai no crítico", async () => {
+    // a certidao nunca cadastrada aparece `pendente` no checklist e `falta` no envio: nao trava. Quem trava e' a FRC
+    // assinada recusada, que o servidor marca com `bloqueia` (estado `falta`)
+    api.mockResolvedValue({ itens: [certidao(1, "Construtora Alfa Ltda", "Federal", "ok"), certidao(4, "Construtora Beta S.A.", "Trabalhista", "pendente", null)] });
+    montar([envio({ situacao: "bloqueado", aviso: "FRC assinada não é a da FRC vigente · Beta: Trabalhista sem certidão",
+      itens: [{ chave: "notas", rotulo: "Nota fiscal (1)", estado: "ok" },
+        { chave: "frc:631", rotulo: "FRC assinada", detalhe: "FRC assinada não é a da FRC vigente", estado: "falta", acao: "anexar_frc", bloqueia: true },
+        { chave: "consorcio", rotulo: "Notas das consorciadas", detalhe: "todas anexadas", estado: "ok" },
+        { chave: "certidoes:alfa", rotulo: "Certidões Alfa (2)", detalhe: "todas válidas", estado: "ok", entidade_id: 1 },
+        { chave: "certidoes:beta", rotulo: "Certidões Beta (2)", detalhe: "Trabalhista sem certidão", estado: "falta", entidade_id: 4 }] })]);
+    const cert = await screen.findByRole("region", { name: "Certidões por empresa" });
+    const faixa = document.querySelector(".envio-faixa")!;
+    expect(faixa.textContent).toBe("Crítico: Faltam 2 itens para enviar: FRC assinada não é a da FRC vigente, Beta: Trabalhista sem certidão");
+    expect(faixa.classList.contains("aviso--trava")).toBe(true);
+    expect(within(faixa as HTMLElement).queryByRole("link")).toBeNull();
+    // o item que trava e o contador dele saem criticos
+    const notas = screen.getByRole("region", { name: "Notas fiscais" });
+    const frc = within(notas).getByText("FRC assinada").closest("li")!;
+    expect(frc.className).toBe("envio-item--critico");
+    expect(frc.querySelector(".glifo--critico")).not.toBeNull();
+    expect(within(notas).getByText("2 de 3").closest(".contador")!.className).toBe("contador contador--critico");
+    expect(within(notas).getByText("Notas das consorciadas").closest("li")!.querySelector(".glifo--feito")).not.toBeNull();
+    // a certidao que so' falta pede atencao, e a frase com o link fica sob a lista, onde ja' ficava
+    expect(within(cert).getByText("1 de 2").closest(".contador")!.className).toBe("contador contador--breve");
+    expect(cert.querySelector(".certidoes__nota")!.textContent).toBe("Certidão vencida: emita a nova em Documentos.");
+    // o motivo inteiro do servidor na trava abaixo da linha, com o botao desligado
+    const [linha, trava] = screen.getAllByRole("row").slice(1);
+    expect(within(trava).getByText("Envio bloqueado: FRC assinada não é a da FRC vigente · Beta: Trabalhista sem certidão")).toBeTruthy();
+    expect((within(linha).getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("pronto para enviar ainda não é feito: o selo dos documentos fica em andamento; o contador completo leva o visto", () => {
+    api.mockResolvedValue({ itens: [] });
+    montar([envio({ itens: [{ chave: "notas", rotulo: "Nota fiscal (1)", estado: "ok" }, { chave: "frc:631", rotulo: "FRC assinada", estado: "ok" }] })]);
+    expect(screen.getByText("Completo").closest(".selo")!.className).toBe("selo selo--andamento");
+    expect(within(screen.getByRole("region", { name: "Notas fiscais" })).getByText("2 de 2").closest(".contador")!.className).toBe("contador contador--feito");
+  });
+
+  it("“Já enviei por fora” fica junto do título do bloco; o envio aberto troca o botão por “Fechar o envio”, sem a cor de ação", () => {
+    api.mockResolvedValue({ itens: [] });
+    montar([envio({ protocolo_id: 3 })]);
+    const bloco = screen.getByRole("region", { name: "E-mail ao órgão" });
+    const porFora = within(bloco).getByRole("button", { name: "Já enviei por fora" });
+    expect(porFora.className).toBe("botao-link");
+    expect(porFora.parentElement!.contains(within(bloco).getByRole("heading", { name: "E-mail ao órgão" }))).toBe(true);
+    const enviar = screen.getByRole("button", { name: "Enviar a nota" });
+    expect(enviar.className).toContain("btn--primario");
+    fireEvent.click(enviar);
+    const fechar = screen.getByRole("button", { name: "Fechar o envio" });
+    expect(fechar.className).not.toContain("btn--primario");
+    expect(within(screen.getByLabelText("Envio aberto")).getByRole("heading", { level: 3 }).textContent).toMatch(/^7ª medição R\$\s1\.234,56$/);
   });
 });

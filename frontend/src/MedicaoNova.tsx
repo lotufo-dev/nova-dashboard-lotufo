@@ -51,7 +51,7 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
 
   return (
     <>
-      <header className="topbar topbar--detalhe">
+      <header className="topbar topbar--detalhe med-trilha">
         <div className="topbar__trilha">
           <VoltarOrigem origem={origem} alemDe={["obras", "medicoes"]} />
           <Migalhas origem={origem} itens={[{ rotulo: "Medições", para: { tela: "medicoes" } },
@@ -70,9 +70,11 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
             </p>
           </div>
         </div>
-        <div className="med-grade med-grade--so-principal">
+        <div className="med-grade">
           <div className="med-principal">
             <Passos passos={passos} atual={atual} vendo={aberto} datas={{}} aoIr={n => setVendo(n === atual ? null : n)} />
+            {/* #722: o painel do passo aberto, ligado a' aba dele, como na pagina da medicao */}
+            <div className="med-quadro">
             <FaixaPasso vendo={aberto} atual={atual} passos={passos} aoVoltar={() => setVendo(null)} />
             <PassoCartao key={aberto} n={aberto} atual={atual} passos={passos}>
               {/* os outros passos so' tem o selo "Libera depois do passo N" */}
@@ -88,6 +90,7 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
                 </div>
               )}
             </PassoCartao>
+            </div>
           </div>
         </div>
       </div>
