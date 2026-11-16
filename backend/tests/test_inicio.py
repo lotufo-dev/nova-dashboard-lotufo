@@ -417,10 +417,8 @@ def test_previsao_entre_a_mediana_e_o_terceiro_quartil_nao_e_atrasado(cenario):
     assert sum(q for _, q in _previsao(c).values()) == _etapas(c)["protocolado"][1] == 3
 
 
-def test_previsao_do_inicio_e_previsto_do_a_receber_usam_o_mesmo_prazo(cenario):
-    """Issue #711: uma conta so'. Com cinco recebimentos a tela A receber usava o padrao de 30 dias (exigia dez casos) e
-    o Inicio, a mediana; agora as duas poem a medicao no mes da mesma data esperada."""
-    from app import diretoria
+def test_previsao_do_inicio_usa_o_terceiro_quartil_do_prazo(cenario):
+    """Issue #711: uma conta so' (o previsto da tela A receber, que tambem a usava, saiu na #748)."""
     c, cid = cenario
     c.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', '{\"total_a_receber_liberado\": true}')")
     c.commit()
@@ -429,13 +427,11 @@ def test_previsao_do_inicio_e_previsto_do_a_receber_usam_o_mesmo_prazo(cenario):
     _recebidas(c, cid, [10, 20, 30, 70, 80])                       # terceiro quartil 70 (a mediana seria 30)
     _protocolada(c, cid, 1, "2026-09-20", 100_001)                 # + 70 dias = 29/11: no proximo mes
     assert _previsao(c) == {**VAZIA, "proximo_mes": (50_001, 1)}   # com a mediana (20/10) seria "neste mes"
-    meses = {m["competencia"]: m["previsto_centavos"] for m in diretoria.a_receber(c, HOJE)["meses"]}
-    assert (meses["2026-10"], meses["2026-11"]) == (0, 50_001)     # com 30 dias de padrao cairia em outubro
 
 
-def test_a_receber_nao_preve_contratante_sem_prazo(cenario):
-    """Issue #711: contratante com menos de cinco recebimentos nao tem numero padrao; a protocolada dele fica fora do
-    previsto de todos os meses da tela A receber e em "Sem previsao" no Inicio."""
+def test_contratante_sem_prazo_fica_sem_previsao(cenario):
+    """Issue #711: contratante com menos de cinco recebimentos nao tem numero padrao; a protocolada dele fica em "Sem
+    previsao" no Inicio, e o a receber nao muda."""
     from app import diretoria
     c, cid = cenario
     c.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', '{\"total_a_receber_liberado\": true}')")
@@ -443,10 +439,7 @@ def test_a_receber_nao_preve_contratante_sem_prazo(cenario):
     _recebidas(c, cid, [30] * 4)
     _protocolada(c, cid, 1, "2026-09-20", 5_001)
     assert _previsao(c) == {**VAZIA, "sem_previsao": (5_001, 1)}
-    r = diretoria.a_receber(c, HOJE)
-    # as recebidas do proprio contratante tambem ficam sem data esperada: nada previsto em mes nenhum
-    assert [m["previsto_centavos"] for m in r["meses"]] == [0] * 9
-    assert r["total"]["valor_centavos"] == 5_001                   # o total a receber nao muda
+    assert sum(diretoria.a_receber_por_obra(c, na_cota=True).values()) == 5_001     # o a receber nao muda
 
 
 def test_previsao_vira_o_ano_no_proximo_mes(cenario):
