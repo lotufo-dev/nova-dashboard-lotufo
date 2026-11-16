@@ -71,7 +71,8 @@ def prazos_do_orgao(ms: list[dict], hoje: datetime.date) -> dict[str, int]:
     aconteceu, sem interpolar) dos dias entre o primeiro protocolo da nota e o recebimento, das medicoes recebidas nos
     ultimos 365 dias. O contratante e' a sigla de `_contratante` (a SINFRA inteira, nao cada superintendencia).
     Cada medicao recebida e' um caso (execucao e reajuste pagos juntos contam dois). Nao e' caso a recebida sem data
-    de protocolo ou sem `recebida_em` (o corte de 25/09/2026), a de recebimento anterior ao protocolo nem a de
+    de protocolo ou sem `recebida_em` (o corte de 25/09/2026; e a recebida sem protocolo da obra sem o passo "Envio
+    da nota", issue #743, docs/adr/0007), a de recebimento anterior ao protocolo nem a de
     recebimento com data depois de hoje. Contratante com menos de PRAZO_MINIMO_CASOS recebimentos fica FORA do
     dicionario: e' "sem previsao", e ninguem preenche com numero padrao."""
     desde = hoje - datetime.timedelta(days=PRAZO_JANELA_DIAS)

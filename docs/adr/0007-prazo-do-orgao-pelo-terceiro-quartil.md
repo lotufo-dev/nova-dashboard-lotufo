@@ -10,3 +10,6 @@ padrão, porque seria inventado.
 ## Consequências
 
 - "Atrasado" quer dizer fora do normal daquele órgão, e a previsão de entrada fica conservadora.
+- A medição recebida sem protocolo, na obra sem o passo "Envio da nota" (`docs/adr/0006`, #743), não entra na
+  amostra: o prazo mede do protocolo ao pagamento, e misturar a emissão da nota como início encurtaria ou alongaria o
+  prazo dos outros contratos do mesmo órgão. Enquanto espera, ela também não tem data esperada nem "Atrasado".

@@ -370,6 +370,56 @@ def test_em_andamento_lista_do_espelho_ao_pagamento_com_proximo_passo(conn, cont
     assert [m["titulo"] for m in medicoes.em_andamento(conn, estado="nota_emitida")] == ["3ª Medição"]
 
 
+# --- issue #743: obra sem o passo "Envio da nota" ---------------------------------------------------------------
+
+def _nota_emitida_na_obra(conn, contrato_id, passos, numero=1):
+    conn.execute("UPDATE contratos SET passos_medicao=? WHERE id=?",
+                 (None if passos is None else json.dumps(passos), contrato_id))
+    mid = conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, nota_emitida_em) "
+                       "VALUES (?, ?, 'execucao', '2026-08', 'nota_emitida', '2026-09-14')",
+                       (contrato_id, numero)).lastrowid
+    conn.commit()
+    return mid
+
+
+def test_nota_emitida_vai_a_recebida_sem_protocolo_na_obra_sem_envio_da_nota(conn, contrato_id):
+    mid = _nota_emitida_na_obra(conn, contrato_id, ["espelhos", "notas", "pagamento"])
+    assert medicoes.alcancaveis(conn, medicoes.detalhe(conn, mid)) == {"cancelada", "recebida"}
+    with pytest.raises(ValueError, match="anterior à emissão da nota"):
+        medicoes.mudar_estado(conn, 1, mid, "recebida", "baixa conferida", "2026-09-13", origem="manual")
+    medicoes.mudar_estado(conn, 1, mid, "recebida", "baixa conferida", "2026-09-30", origem="manual")
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"], m["protocolos"], m["congelada"]) == ("recebida", "2026-09-30", [], 0)
+    assert auditoria.verificar_cadeia(conn)
+
+
+@pytest.mark.parametrize("passos", [None, ["espelhos", "notas", "envio_nota", "pagamento"], []])
+def test_nota_emitida_continua_sem_caminho_para_recebida_com_envio_da_nota(conn, contrato_id, passos):
+    mid = _nota_emitida_na_obra(conn, contrato_id, passos)
+    assert medicoes.alcancaveis(conn, medicoes.detalhe(conn, mid)) == {"cancelada"}
+    with pytest.raises(ValueError, match="Transição inválida: nota_emitida → recebida"):
+        medicoes.mudar_estado(conn, 1, mid, "recebida", "baixa conferida", "2026-09-30", origem="manual")
+    assert medicoes.detalhe(conn, mid)["estado"] == "nota_emitida"
+
+
+def test_nota_emitida_sem_envio_da_nota_espera_o_pagamento_desde_a_emissao(conn, contrato_id):
+    """Na lista de em andamento, a nota emitida da obra sem o passo "Envio da nota" aguarda o pagamento, com o orgao,
+    e o "Parada ha'" conta da emissao da nota. Na obra com o passo, continua "enviar nota"."""
+    import datetime
+    outro = contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 2/2026",
+                                      "objeto": "Obra Y", "valor_original_centavos": 100_000_00})
+    sem = _nota_emitida_na_obra(conn, contrato_id, ["espelhos", "notas", "pagamento"])
+    com = _nota_emitida_na_obra(conn, outro, None)
+    [a] = [x for x in medicoes.em_andamento(conn) if x["id"] == sem]
+    [b] = [x for x in medicoes.em_andamento(conn) if x["id"] == com]
+    assert (a["recebe_sem_protocolo"], a["proximo_passo"]) == (True, "Pagamento")
+    assert (b["recebe_sem_protocolo"], b["proximo_passo"]) == (False, "Envio da nota")
+    linhas = {x["medicao_id"]: x for x in medicoes.linhas_em_andamento(conn, datetime.date(2026, 10, 14))}
+    assert (linhas[sem]["situacao"], linhas[sem]["com_quem"], linhas[sem]["marco"], linhas[sem]["dias"]) == (
+        "aguardando-pagamento", "Órgão", "2026-09-14", 30)
+    assert (linhas[com]["situacao"], linhas[com]["com_quem"], linhas[com]["dias"]) == ("enviar-nota", "Lotufo", 30)
+
+
 def test_medicao_final_poe_e_tira_o_contrato_do_encerramento(conn, contrato_id):
     mid = medicoes.criar(conn, 1, {"contrato_id": contrato_id, "numero": 30, "tipo": "execucao", "competencia": "2026-08"})
     medicoes.marcar_final(conn, 1, mid, "2026-09-10")

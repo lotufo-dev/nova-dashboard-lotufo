@@ -74,6 +74,8 @@ export type Medicao = {
   com_envio_planilha?: boolean;
   /** #660: os passos (1 a 6) que a medição tem, decididos no servidor (família do órgão e cadastro da obra) */
   passos?: number[];
+  /** #743: nota emitida na obra sem o passo "Envio da nota": recebida sem protocolo (pela baixa ou pelo admin) */
+  recebe_sem_protocolo?: boolean;
   // #288: a diferenca do boletim VIGENTE aceita com justificativa (tira o aviso "aprovado abaixo do pedido")
   diferenca_aceita?: { atesto_id: number; justificativa: string; usuario: string | null; criado_em: string;
     diferenca_centavos: number } | null;

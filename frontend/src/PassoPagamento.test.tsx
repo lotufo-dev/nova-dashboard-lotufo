@@ -139,6 +139,31 @@ describe("Passo Pagamento (#514)", () => {
     montar({ usuario: { ...admin, perfil: "engenharia" } });
     expect(screen.queryByRole("button")).toBeNull();
   });
+
+  // #743: obra sem o passo "Envio da nota": a nota emitida espera o pagamento sem protocolo
+  const semEnvio = com({ estado: "nota_emitida", nota_emitida_em: "2026-11-02", protocolos: [], recebe_sem_protocolo: true });
+
+  it("obra sem envio da nota: aguardando desde a emissão da nota, e o admin registra o recebimento", () => {
+    const props = montar({ grupo: [semEnvio] });
+    expect(screen.getByText(/^20\sdias$/)).toBeTruthy();
+    expect(screen.getByText("nota emitida em 02/11/2026")).toBeTruthy();
+    expect(screen.queryByText(/nota enviada em/)).toBeNull();
+    expect(screen.getByText("Aguardando o órgão")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Registrar recebimento" }));
+    expect(props.aoReceber).toHaveBeenCalledWith(semEnvio);
+  });
+
+  it("nota emitida na obra com envio da nota: sem botão de recebimento e sem contar a espera", () => {
+    montar({ grupo: [com({ estado: "nota_emitida", nota_emitida_em: "2026-11-02", protocolos: [], recebe_sem_protocolo: false })] });
+    expect(screen.queryByRole("button", { name: "Registrar recebimento" })).toBeNull();
+    expect(screen.queryByText(/nota emitida em/)).toBeNull();
+    expect(screen.queryByText("Aguardando o órgão")).toBeNull();
+  });
+
+  it("obra sem envio da nota: a engenharia não vê o botão de recebimento", () => {
+    montar({ grupo: [semEnvio], usuario: { ...admin, perfil: "engenharia" } });
+    expect(screen.queryByRole("button")).toBeNull();
+  });
 });
 
 describe("Passo Pagamento: nota divergente (#562)", () => {
