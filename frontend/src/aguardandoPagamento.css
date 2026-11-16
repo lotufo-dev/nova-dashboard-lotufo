@@ -41,7 +41,7 @@
 .ap__fraco { color: var(--cor-texto-secundario); }
 .ap__campo label, .ap__rotulo { display: block; font-weight: 500; margin-bottom: 6px; }
 .ap__form { display: flex; gap: 8px; }
-.ap__entrada { flex: 1; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--cor-borda-controle, var(--cor-borda-controle)); border-radius: var(--raio-controle); background: var(--cor-superficie); }
+.ap__entrada { flex: 1; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); background: var(--cor-superficie); }
 .ap__entrada:focus-visible { outline: 2px solid var(--cor-foco); outline-offset: 1px; }
 .ap__form .btn { height: 36px; }
 .ap__gravado { margin: 6px 0 0; color: var(--situacao-feito-texto); font-weight: 500; min-height: 20px; }

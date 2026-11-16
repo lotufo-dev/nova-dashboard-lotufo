@@ -351,7 +351,7 @@ a:hover { color: var(--cor-menu-realce); }
 /* formato literal ("AAAA-MM;valor") */
 code {
   font-family: var(--fonte-numero);
-  font-size: var(--texto-mini);
+  font-size: .92em;
   padding: 1px 5px;
   border: 1px solid var(--cor-linha);
   border-radius: var(--raio-canto);
