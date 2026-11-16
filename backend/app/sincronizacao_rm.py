@@ -11,9 +11,10 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
    Bloco 3: NF que ja' entrou pelo PDF (mesma coligada e numero, emissao ou valor iguais)
    nao vira linha nova -- a linha do PDF e' preenchida e CONFIRMADA (ou marcada divergente).
    Issue #71: o admin desfaz a' mao um vinculo errado (`desalocar`, com motivo); essa NF nao casa mais sozinha.
-4. Casamento NF -> medicao (spec §4 e §7.1), do mais forte para o mais fraco, so' entre
+4. Casamento NF -> medicao (spec §4 e §7.1), do mais forte para o mais fraco, entre as
    medicoes em andamento que ainda faltam nota e NAO sao legado (nascidas do espelho ou de
-   competencia >= COMPETENCIA_CORTE_RM):
+   competencia >= COMPETENCIA_CORTE_RM); a nota que nenhuma delas quis e' tentada, so' por valor exato,
+   nas medicoes recebidas a' mao que ainda faltam nota (issue #713):
    a. (saiu na issue #708, docs/adr/0005: o `CAMPOLIVRE1` nao e' mais chave; o campo continua guardado na nota.)
    b. valor EXATO de uma saida esperada do espelho vigente, unica entre as candidatas (na obra
       do centro de custo, ou na carteira inteira quando o centro nao mapeia: NF da Lotufo ao
@@ -200,7 +201,9 @@ def alocar(conn, usuario_id, nota_id: int, medicao_id: int, origem: str, confian
         auditoria.registrar(conn, usuario_id, "nf.alocar", "medicao", medicao_id, None,
                             {"nota_id": nota_id, "nf": f"{nf['numero']}/{nf['serie'] or ''}",
                              "coligada": nf["coligada"], "valor_centavos": nf["valor_centavos"],
-                             "origem": origem, "confianca": confianca, "regra": regra})
+                             "origem": origem, "confianca": confianca, "regra": regra,
+                             # issue #713: da' para listar os vinculos feitos em medicao ja' recebida
+                             "estado_medicao": m["estado"]})
         notas.fechar_se_completa(conn, usuario_id, medicao_id)
         return cur.lastrowid
 
@@ -239,7 +242,8 @@ def desalocar(conn, usuario_id, medicao_id: int, alocacao_id: int, motivo: str) 
             raise ValueError("Vínculo da nota com esta medição não encontrado")
         if a["desfeita_em"] is not None:
             raise ValueError(f"O vínculo da nota {a['numero']} já foi desfeito")
-        # Como em `alocar`: medicao encerrada nao recebe NF, entao tirar a nota dela nao teria volta.
+        # Medicao encerrada nao recebe NF pela tela, entao tirar a nota dela nao teria volta. A recebida a' mao recebe
+        # nota do casador (issue #713), mas desfazer continua so' pela correcao de cadastro (`desligar_nf`).
         if a["estado"] in ("cancelada", "desistida", "recebida"):
             raise ValueError(f"Medição em estado {a['estado']} não tem o vínculo da nota desfeito")
         # O PDF anexado nesta medicao seguiria no envio ao orgao e na FRC: desfazer o vinculo nao o tira dali.
@@ -418,7 +422,8 @@ def _candidatas(conn, coligada: int, cache: dict | None = None) -> list[dict]:
     Lotufo ao orgao fica na coligada 1, centro 5.001.x, e o contrato e' do consorcio). Issue #713 (docs/adr/0006):
     entra tambem a medicao RECEBIDA A' MAO que ainda falta nota, pelas mesmas regras (a nota que chega depois do
     registro do administrador liga a ela sem mudar o estado; solta, somaria no a receber um dinheiro que ja' entrou);
-    a recebida pelo RM ou pelo corte nao entra. Cada uma traz
+    a recebida pelo RM, pelo corte ou pela correcao de cadastro nao entra, nem a do legado. `_casar` so' recorre a
+    elas quando nenhuma medicao em andamento fica com a nota. Cada uma traz
     `esperadas` (valores das saidas do espelho sem nota; vazio sem espelho) e `espelho_enviado_em` (o dia do
     primeiro envio do espelho ao faturamento; None sem envio). Calculado uma vez por coligada por rodada
     (`cache`, limpo a cada alocacao)."""
@@ -426,20 +431,21 @@ def _candidatas(conn, coligada: int, cache: dict | None = None) -> list[dict]:
         return cache[coligada]
     from app import notas
     marcas = ",".join("?" * len(ESTADOS_CANDIDATOS))
+    # as recebidas a' mao entram pelo id: sem nenhuma (o caso comum), a consulta e' a de sempre
+    a_mao = sorted(_recebidas_a_mao(conn, cache))
+    recebidas = f" OR (m.estado='recebida' AND m.id IN ({','.join('?' * len(a_mao))}))" if a_mao else ""
     linhas = conn.execute(f"""
         SELECT m.*, c.numero_instrumento, c.orgao, e.coligada_rm AS coligada_contrato,
                COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
         FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
         JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
-        WHERE (m.estado IN ({marcas}) OR m.estado='recebida')
+        WHERE (m.estado IN ({marcas}){recebidas})
           AND (m.valor_protocolado_origem='espelho' OR m.competencia >= ?)
           AND (e.coligada_rm=? OR EXISTS (SELECT 1 FROM espelho_medicoes em WHERE em.medicao_id=m.id))
-        ORDER BY c.numero_instrumento, m.tipo, m.numero""", (*ESTADOS_CANDIDATOS, COMPETENCIA_CORTE_RM, coligada)).fetchall()
-    a_mao = _recebidas_a_mao(conn, cache)
+        ORDER BY c.numero_instrumento, m.tipo, m.numero""",
+        (*ESTADOS_CANDIDATOS, *a_mao, COMPETENCIA_CORTE_RM, coligada)).fetchall()
     out = []
     for r in linhas:
-        if r["estado"] == "recebida" and r["id"] not in a_mao:
-            continue
         d = dict(r)
         # issue #589: o reajuste negativo absorvido pelo espelho da execucao nao tem nota propria (a nota e' a da
         # execucao, com o valor liquido): nao e' candidato, e a execucao casa pelo valor do par (execucao + reajuste)
@@ -620,8 +626,22 @@ def _casar(conn, nota_id: int, coligadas_com_centro: set, cache: dict | None = N
         cache.pop(nf["coligada"], None)
         return "alocada"
 
-    candidatas = _candidatas(conn, nf["coligada"], cache)
-    recebidas = {m["id"] for m in candidatas if m["estado"] == "recebida"}
+    todas = _candidatas(conn, nf["coligada"], cache)
+    recebidas = {m["id"] for m in todas if m["estado"] == "recebida"}
+    # Issue #713 (segunda revisao): primeiro so' as medicoes em andamento, como sempre. A recebida a' mao nao disputa
+    # nota com elas (nao as deixa ambiguas nem tira nota de um par do dia) e nao conta "proxima" (sem isso ela faria
+    # toda nota de valor parecido da obra virar ambigua para sempre): so' fica com a nota que NENHUMA medicao em
+    # andamento quis, e so' pelas regras de valor exato.
+    r = _casar_entre(conn, nf, [m for m in todas if m["id"] not in recebidas], coligadas_com_centro, _aloca)
+    if r is None and recebidas:
+        r = _casar_entre(conn, nf, [m for m in todas if m["id"] in recebidas], coligadas_com_centro, _aloca,
+                         so_exato=True)
+    return r
+
+
+def _casar_entre(conn, nf, candidatas: list[dict], coligadas_com_centro: set, _aloca, so_exato: bool = False) -> str | None:
+    """As regras de valor do casador para a nota `nf`, entre `candidatas`. Devolve 'alocada', 'ambigua' ou None.
+    `so_exato`: sem a contagem de medicoes proximas (ate' 5%) como ambiguas."""
     alvo = _contrato_por_centro_custo(conn, nf["coligada"], nf["centro_custo"])
     # Bloco 3: saida esperada do espelho com o valor EXATO da NF -- a chave mais forte por valor (docs/adr/0005).
     # Com centro mapeado, dentro da obra; sem centro (NF Lotufo -> orgao em obra de consorcio,
@@ -670,6 +690,8 @@ def _casar(conn, nota_id: int, coligadas_com_centro: set, cache: dict | None = N
         exatas = [m for m in candidatas if m["valor"] == nf["valor_centavos"]]
         if len(exatas) == 1:
             return _aloca(exatas[0]["id"], 0.8, "valor_exato")
+    if so_exato:
+        return None
     tol = nf["valor_centavos"] * TOLERANCIA_CANDIDATO
     proximas = [m for m in candidatas if m["valor"] is not None and abs(m["valor"] - nf["valor_centavos"]) <= tol]
     if not proximas:
