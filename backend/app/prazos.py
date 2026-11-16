@@ -232,9 +232,9 @@ def _mm_aaaa(comp: str) -> str:
 
 
 def sugestao_dias(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict:
-    """Issue #292 (spec 2026-10-20 §4 item 3): os dias de prorrogacao que a carta de prazo sugere. Ritmo = medido de
-    execucao nas `MESES_RITMO` competencias fechadas (as anteriores ao mes de `hoje`) dividido por elas, arredondado
-    uma vez a centavos (e' esse o ritmo da tela e o da conta); meses que faltam = saldo a executar (o de
+    """Issue #292 (spec 2026-10-20 §4 item 3): os dias de prorrogacao que a carta de prazo sugere. Ritmo = medido
+    (execucao e projeto, #742) nas `MESES_RITMO` competencias fechadas (as anteriores ao mes de `hoje`) dividido por
+    elas, arredondado uma vez a centavos (e' esse o ritmo da tela e o da conta); meses que faltam = saldo a executar (o de
     `paineis.saldo`: vigente de execucao menos o medido, #262) / ritmo; conclusao estimada = `hoje` mais esses meses
     no calendario (a fracao do ultimo mes arredonda para cima); dias = conclusao estimada menos o fim de execucao
     vigente. Sem fim de execucao, sem saldo, sem ritmo, com conclusao ate' o fim vigente ou acima do teto do pedido,
@@ -247,11 +247,14 @@ def sugestao_dias(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
     exe_d = _d(exe)
     primeiro = hoje.replace(day=1)
     meses = [_somar_meses(primeiro, -i).strftime("%Y-%m") for i in range(MESES_RITMO, 0, -1)]
-    # mesma regra do medido de `paineis.saldo` (execucao, estados que medem, atestado ou protocolado); soma em Python
+    # mesma regra do medido de `paineis.saldo` (execucao e projeto, #742; estados que medem; atestado ou protocolado):
+    # o ritmo anda na base do saldo que ele divide. Soma em Python
     medido = sum(r["v"] for r in conn.execute(
         "SELECT COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS v FROM medicoes "
-        f"WHERE contrato_id=? AND tipo='execucao' AND estado IN ({','.join('?' * len(paineis.ESTADOS_VALIDOS))}) "
-        f"AND competencia IN ({','.join('?' * len(meses))})", (contrato_id, *paineis.ESTADOS_VALIDOS, *meses)))
+        f"WHERE contrato_id=? AND tipo IN ({','.join('?' * len(paineis.TIPOS_NO_MEDIDO))}) "
+        f"AND estado IN ({','.join('?' * len(paineis.ESTADOS_VALIDOS))}) "
+        f"AND competencia IN ({','.join('?' * len(meses))})",
+        (contrato_id, *paineis.TIPOS_NO_MEDIDO, *paineis.ESTADOS_VALIDOS, *meses)))
     saldo = sal["saldo_centavos"]
     ritmo = dinheiro._aplicar(Decimal(medido) / MESES_RITMO, "round2") if medido > 0 else None
     out = {"saldo_centavos": saldo, "medido_periodo_centavos": medido, "meses": MESES_RITMO, "de": meses[0],
@@ -263,7 +266,7 @@ def sugestao_dias(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
     if saldo <= 0:
         return {**out, "motivo": "Sem saldo a executar: não há dias a sugerir."}
     if medido <= 0:
-        return {**out, "motivo": f"Sem medição de execução {janela}: sem ritmo para sugerir os dias."}
+        return {**out, "motivo": f"Sem medição de execução ou projeto {janela}: sem ritmo para sugerir os dias."}
     if not ritmo:
         return {**out, "motivo": f"Ritmo {janela} abaixo de R$ 0,01/mês: sem ritmo para sugerir os dias."}
     faltam = Fraction(saldo, ritmo)   # meses, exato (sem float), com o mesmo ritmo que a tela mostra

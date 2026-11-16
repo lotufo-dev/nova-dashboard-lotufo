@@ -100,7 +100,13 @@ _Avoid_: valor atestado
 O valor das notas emitidas para a medição.
 
 **Medido**:
-O aprovado e, enquanto não houver boletim, o pedido.
+O aprovado e, enquanto não houver boletim, o pedido. O medido da obra soma as medições de execução e de projeto
+a partir do envio da planilha/carta; reajuste fica fora, e medição cancelada, desistida ou ainda não enviada não
+conta (`docs/adr/0011`).
+
+**Saldo a executar**:
+O valor vigente de execução (sem o aditivo de reajuste) menos o medido da obra.
+_Avoid_: saldo do contrato
 
 **Medição final**:
 A última medição do contrato, marcada pela engenharia; põe o contrato em encerramento.

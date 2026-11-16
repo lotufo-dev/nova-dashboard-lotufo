@@ -50,10 +50,11 @@ type Ponto = {
   atestado_pendente: boolean;
   pendente_por_tipo?: Record<string, boolean>;
 };
-// #262: o saldo e' a precos iniciais (vigente de execucao); o aditivo de reajuste vem a parte.
+// #262: o saldo e' a precos iniciais (vigente de execucao); o aditivo de reajuste vem a parte. #742: o medido soma
+// execucao e projeto.
 type Saldo = {
   vigente_centavos: number; vigente_execucao_centavos?: number; reajuste_contratado_centavos?: number;
-  atestado_execucao_centavos: number; saldo_centavos: number; formula: string;
+  medido_centavos: number; saldo_centavos: number; formula: string;
 };
 type Curva = { curva: Ponto[]; saldo: Saldo };
 
@@ -287,8 +288,8 @@ export default function Cronograma({ contratoId, podeEditar }:
           </div>
           <span className="saldo__op" aria-hidden="true">−</span>
           <div className="saldo__parcela">
-            <span className="resumo__rotulo">Medido (execução)</span>
-            <span className="saldo__valor num">{brl(saldo.atestado_execucao_centavos)}</span>
+            <span className="resumo__rotulo">Medido (execução e projeto)</span>
+            <span className="saldo__valor num">{brl(saldo.medido_centavos)}</span>
           </div>
           <span className="saldo__op" aria-hidden="true">=</span>
           <div className="saldo__parcela saldo__parcela--total">

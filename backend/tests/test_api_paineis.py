@@ -110,4 +110,4 @@ def test_curva_e_saldo_de_um_retrato_so(client_admin, monkeypatch):
     monkeypatch.setattr(paineis, "saldo", envia_no_meio)
     r = client_admin.get(f"/api/contratos/{cid}/curva").json()
     medido_curva = sum(p["medido_execucao_centavos"] for p in r["curva"])
-    assert medido_curva == r["saldo"]["atestado_execucao_centavos"] == 0
+    assert medido_curva == r["saldo"]["medido_centavos"] == 0
