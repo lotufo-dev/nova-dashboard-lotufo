@@ -336,13 +336,19 @@ def test_recebido_12_meses_vira_o_ano():
     assert inicio._ultimos_12_meses(D(2026, 1, 31)) == [f"2025-{m:02d}" for m in range(2, 13)] + ["2026-01"]
 
 
-def test_prazo_do_orgao_e_a_mediana_amostra_impar_e_par(cenario):
+def test_prazo_do_orgao_e_o_terceiro_quartil_dos_recebimentos(cenario):
+    """Issue #711 (docs/adr/0007): o prazo e' o terceiro quartil, o prazo de posicao ceil(0,75 * n) entre os dias em
+    ordem: sempre um prazo que aconteceu (inteiro), nunca interpolado."""
     from app import diretoria
     c, cid = cenario
-    outro = _obra_de(c, "prefeitura_alfa", "Prefeitura Alfa", "prefeitura", "CT 2/2025")
-    _recebidas(c, cid, [100, 10, 30, 40, 20])                               # impar: o do meio
-    _recebidas(c, outro, [60, 10, 41, 30, 20, 50], primeiro_numero=200)     # par: media dos dois do meio (35,5)
-    assert inicio._prazos_do_orgao(diretoria._medicoes(c), HOJE) == {"MTPAR": 30, "Prefeitura Alfa": 35.5}
+    seis = _obra_de(c, "prefeitura_alfa", "Prefeitura Alfa", "prefeitura", "CT 2/2025")
+    oito = _obra_de(c, "autarquia_beta", "Autarquia Beta", "ses", "CT 5/2025")
+    _recebidas(c, cid, [100, 10, 30, 40, 20])                               # cinco casos: o 4o (a mediana seria 30)
+    _recebidas(c, seis, [60, 10, 41, 30, 20, 50], primeiro_numero=200)      # seis: o 5o (a mediana seria 35,5)
+    _recebidas(c, oito, [80, 10, 70, 20, 60, 30, 50, 40], primeiro_numero=300)   # oito: 0,75 * 8 = 6, o 6o
+    prazos = diretoria.prazos_do_orgao(diretoria._medicoes(c), HOJE)
+    assert prazos == {"MTPAR": 40, "Prefeitura Alfa": 50, "Autarquia Beta": 60}
+    assert all(type(v) is int for v in prazos.values())
 
 
 def test_prazo_do_orgao_agrupa_pelo_contratante_e_nao_pela_superintendencia(cenario):
@@ -352,22 +358,25 @@ def test_prazo_do_orgao_agrupa_pelo_contratante_e_nao_pela_superintendencia(cena
     b = _obra_de(c, "sinfra_b", "SINFRA - SUPU (Pavimentação Urbana)", "sinfra", "CT 4/2025")
     _recebidas(c, a, [10, 20, 30])
     _recebidas(c, b, [40, 50], primeiro_numero=200)
-    assert inicio._prazos_do_orgao(diretoria._medicoes(c), HOJE) == {"SINFRA": 30}
+    assert diretoria.prazos_do_orgao(diretoria._medicoes(c), HOJE) == {"SINFRA": 40}
 
 
 def test_prazo_do_orgao_exige_cinco_recebimentos_em_365_dias(cenario):
     from app import diretoria
     c, cid = cenario
     _recebidas(c, cid, [10, 20, 30, 40])
-    assert inicio._prazos_do_orgao(diretoria._medicoes(c), HOJE) == {}
+    assert diretoria.prazos_do_orgao(diretoria._medicoes(c), HOJE) == {}
     _recebidas(c, cid, [50], recebida_em="2025-10-08", primeiro_numero=200)     # ha' 366 dias: nao conta
     _medicao(c, cid, 300, "2026-01-01 10:00:00", 1_000, estado="recebida", recebida_em="2026-09-30")   # sem protocolo
-    assert inicio._prazos_do_orgao(diretoria._medicoes(c), HOJE) == {}
-    _protocolada(c, cid, 400, "2026-09-01", 7_000)
+    _recebidas(c, cid, [50], recebida_em="2026-10-10", primeiro_numero=600)     # recebida amanha: nao conta
+    futuro = _medicao(c, cid, 700, "2026-01-01 10:00:00", 1_000, estado="recebida", recebida_em="2026-09-30")
+    _protocolar(c, futuro, "2026-10-01")                                         # protocolo depois do recebimento: nao conta
+    assert diretoria.prazos_do_orgao(diretoria._medicoes(c), HOJE) == {}
+    _protocolada(c, cid, 400, "2026-08-29", 7_000)
     assert _previsao(c) == {**VAZIA, "sem_previsao": (7_000, 1)}                # sem prazo, sem data esperada
     _recebidas(c, cid, [50], recebida_em="2025-10-09", primeiro_numero=500)     # ha' 365 dias: o quinto caso
-    assert inicio._prazos_do_orgao(diretoria._medicoes(c), HOJE) == {"MTPAR": 30}
-    assert _previsao(c) == {**VAZIA, "atrasado": (7_000, 1)}
+    assert diretoria.prazos_do_orgao(diretoria._medicoes(c), HOJE) == {"MTPAR": 40}
+    assert _previsao(c) == {**VAZIA, "atrasado": (7_000, 1)}                    # 29/08 + 40 dias = 08/10: ja' passou
 
 
 def test_previsao_classifica_neste_mes_no_proximo_atrasado_e_depois(cenario):
@@ -394,12 +403,50 @@ def test_previsao_classifica_neste_mes_no_proximo_atrasado_e_depois(cenario):
     assert sum(q for _, q in _previsao(c).values()) == _etapas(c)["protocolado"][1] == 8
 
 
-def test_previsao_com_mediana_de_meio_dia_atrasa_quem_passou_da_mediana(cenario):
+def test_previsao_entre_a_mediana_e_o_terceiro_quartil_nao_e_atrasado(cenario):
+    """Issue #711 (docs/adr/0007): com a mediana, metade dos pagamentos normais aparecia como atrasada. Atrasado e' quem
+    passou do terceiro quartil do contratante."""
     c, cid = cenario
-    _recebidas(c, cid, [10, 20, 30, 41, 50, 60])                   # mediana 35,5
-    _protocolada(c, cid, 1, "2026-09-03", 1_000)                   # ha' 36 dias: passou da mediana
-    _protocolada(c, cid, 2, "2026-09-04", 2_000)                   # ha' 35 dias: ainda nao
-    assert _previsao(c) == {**VAZIA, "atrasado": (1_000, 1), "neste_mes": (2_000, 1)}
+    _recebidas(c, cid, [10, 20, 30, 40, 50])                       # mediana 30; terceiro quartil 40
+    _protocolada(c, cid, 1, "2026-09-04", 1_001)                   # ha' 35 dias: passou da mediana, nao do quartil
+    _protocolada(c, cid, 2, "2026-08-30", 2_000)                   # ha' 40 dias: a data esperada e' hoje
+    _protocolada(c, cid, 3, "2026-08-29", 4_000)                   # ha' 41 dias: passou do quartil
+    assert _previsao(c) == {**VAZIA, "neste_mes": (3_001, 2), "atrasado": (4_000, 1)}
+    # as linhas continuam somando o valor e a quantidade da etapa Protocolado
+    assert sum(v for v, _ in _previsao(c).values()) == _etapas(c)["protocolado"][0] == 7_001
+    assert sum(q for _, q in _previsao(c).values()) == _etapas(c)["protocolado"][1] == 3
+
+
+def test_previsao_do_inicio_e_previsto_do_a_receber_usam_o_mesmo_prazo(cenario):
+    """Issue #711: uma conta so'. Com cinco recebimentos a tela A receber usava o padrao de 30 dias (exigia dez casos) e
+    o Inicio, a mediana; agora as duas poem a medicao no mes da mesma data esperada."""
+    from app import diretoria
+    c, cid = cenario
+    c.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', '{\"total_a_receber_liberado\": true}')")
+    c.commit()
+    c.execute("UPDATE contratos SET percentual_direito_bp=5000")   # consorcio a 50%: 100.001 -> 50.001 na cota
+    c.commit()
+    _recebidas(c, cid, [10, 20, 30, 70, 80])                       # terceiro quartil 70 (a mediana seria 30)
+    _protocolada(c, cid, 1, "2026-09-20", 100_001)                 # + 70 dias = 29/11: no proximo mes
+    assert _previsao(c) == {**VAZIA, "proximo_mes": (50_001, 1)}   # com a mediana (20/10) seria "neste mes"
+    meses = {m["competencia"]: m["previsto_centavos"] for m in diretoria.a_receber(c, HOJE)["meses"]}
+    assert (meses["2026-10"], meses["2026-11"]) == (0, 50_001)     # com 30 dias de padrao cairia em outubro
+
+
+def test_a_receber_nao_preve_contratante_sem_prazo(cenario):
+    """Issue #711: contratante com menos de cinco recebimentos nao tem numero padrao; a protocolada dele fica fora do
+    previsto de todos os meses da tela A receber e em "Sem previsao" no Inicio."""
+    from app import diretoria
+    c, cid = cenario
+    c.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', '{\"total_a_receber_liberado\": true}')")
+    c.commit()
+    _recebidas(c, cid, [30] * 4)
+    _protocolada(c, cid, 1, "2026-09-20", 5_001)
+    assert _previsao(c) == {**VAZIA, "sem_previsao": (5_001, 1)}
+    r = diretoria.a_receber(c, HOJE)
+    # as recebidas do proprio contratante tambem ficam sem data esperada: nada previsto em mes nenhum
+    assert [m["previsto_centavos"] for m in r["meses"]] == [0] * 9
+    assert r["total"]["valor_centavos"] == 5_001                   # o total a receber nao muda
 
 
 def test_previsao_vira_o_ano_no_proximo_mes(cenario):
