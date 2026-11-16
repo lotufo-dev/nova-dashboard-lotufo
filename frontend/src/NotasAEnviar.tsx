@@ -19,6 +19,7 @@ export type ItemEnvio = {
   chave: string; rotulo: string; detalhe?: string | null; estado: "ok" | "aviso" | "falta" | "vencida";
   acao?: string | null; entidade_id?: number | null; competencia?: string | null; medicao_id?: number | null;
   frc_gerada?: number | null;   // issue #148: numero da FRC gerada (sem assinatura) vigente, no item da FRC
+  bloqueia?: boolean;           // o item trava o envio sem ser certidao vencida (FRC assinada recusada, notas_envio._itens)
 };
 export type NotaEnvio = { numero: string; natureza: string; municipio?: string | null; arquivo?: string | null; valor_centavos: number };
 export type Envio = {

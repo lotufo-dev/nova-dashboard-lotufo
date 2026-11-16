@@ -134,10 +134,16 @@ export function faltasDo(e: Envio): string[] {
 /** #514: a faixa do passo Envio da nota: verde "Tudo pronto para enviar" ou o que falta. #720: a forma diz se trava.
  *  Com algum envio bloqueado (a certidao vencida desliga o botao) e' a trava, em bloco cheio; quando so' falta algo
  *  que nao impede o envio e' a faixa amarela de atencao, e o botao segue ativo. */
-export function FaixaEnvio({ envios, certidaoVencida = false }: { envios: Envio[]; certidaoVencida?: boolean }) {
+/** O envio esta' bloqueado POR certidao vencida: a causa se le no proprio envio (item `vencida`, o estado com que o
+ *  servidor trava o pacote, notas_envio._envio). Certidao que so' falta no checklist nao trava, e o bloqueio pode ter
+ *  outra causa (FRC assinada recusada, pacote a montar de novo): ai' a faixa nao fala em certidao. */
+export const travadoPorCertidao = (envios: Envio[]) =>
+  envios.some(e => e.situacao === "bloqueado" && e.itens.some(i => i.estado === "vencida"));
+
+export function FaixaEnvio({ envios }: { envios: Envio[] }) {
   // #722: com o envio travado por certidao vencida, a faixa do alto e' a trava com o caminho para resolver; o que
   // mais falta continua dito no motivo do envio bloqueado, abaixo da linha, e nas listas do que vai junto
-  if (certidaoVencida && envios.some(e => e.situacao === "bloqueado")) {
+  if (travadoPorCertidao(envios)) {
     return (
       <CaixaAviso nivel="trava" como="div" role="status" className="envio-faixa envio-faixa--falta">
         Certidão vencida: emita a nova em <Link para={{ tela: "documentos" }}>Documentos</Link>.
@@ -160,16 +166,18 @@ export function FaixaEnvio({ envios, certidaoVencida = false }: { envios: Envio[
   );
 }
 
-/** `vencida`: a linha que trava o envio (certidao vencida); a que so' falta pede atencao e nao trava. `apoio`: o dado
- *  secundario da linha (o municipio da nota), na linha de baixo. */
-type Linha = { chave: string; texto: React.ReactNode; ok: boolean; vencida?: boolean; apoio?: string | null;
+/** `trava`: a linha que trava o envio (certidao vencida, ou item que o servidor marca com `bloqueia`, como a FRC
+ *  assinada recusada); a que so' falta pede atencao e nao trava. `apoio`: o dado secundario da linha (o municipio da
+ *  nota), na linha de baixo. */
+type Linha = { chave: string; texto: React.ReactNode; ok: boolean; trava?: boolean; apoio?: string | null;
   detalhe?: string | null; valor?: number | null };
+const travaDoItem = (i: { estado: string; bloqueia?: boolean | null }) => i.estado === "vencida" || !!i.bloqueia;
 
 /** #722: um bloco do que vai junto, com o contador "N de M". A situacao diz a verdade: tudo ali = feito; alguma
- *  linha vencida (trava o envio) = critico; so' faltando (nao trava) = vence em breve. */
+ *  linha que trava o envio = critico; so' faltando (nao trava) = vence em breve. */
 function Cartao({ titulo, linhas, classe, children }: { titulo: string; linhas: Linha[]; classe: string; children?: React.ReactNode }) {
   const ok = linhas.filter(l => l.ok).length;
-  const situacao = ok === linhas.length ? "feito" : linhas.some(l => l.vencida) ? "critico" : "breve";
+  const situacao = linhas.some(l => l.trava) ? "critico" : ok === linhas.length ? "feito" : "breve";
   return (
     <section className={`cartao med-painel envio-cartao ${classe}`} aria-label={titulo}>
       <h3 className="med-painel__titulo">{titulo}
@@ -177,8 +185,8 @@ function Cartao({ titulo, linhas, classe, children }: { titulo: string; linhas: 
       {children ?? (linhas.length === 0 ? <p>—</p> : (
         <ul className="envio-itens">
           {linhas.map(l => (
-            <li key={l.chave} className={l.ok ? "envio-item--ok" : l.vencida ? "envio-item--vencida" : "envio-item--falta"}>
-              <Glifo situacao={l.ok ? "feito" : l.vencida ? "critico" : "breve"} />
+            <li key={l.chave} className={l.trava ? "envio-item--critico" : undefined}>
+              <Glifo situacao={l.trava ? "critico" : l.ok ? "feito" : "breve"} />
               <span className="envio-item__texto">{l.texto}{l.apoio && <small className="envio-item__apoio">{l.apoio}</small>}
                 {!l.ok && l.detalhe && <small>{l.detalhe}</small>}</span>
               {l.valor !== undefined && l.valor !== null && <span className="num">{brl(l.valor)}</span>}
@@ -205,12 +213,12 @@ export function CartoesEnvio({ envios, certidoes, semNotaDaVencida = false }: {
       texto: <>NF {n.numero}{mistura ? ` · ${n.natureza === "reajuste" ? "reajuste" : "medição"}` : ""}</>, apoio: n.municipio }))),
     // sem o detalhe do servidor: ele fala em etapa antiga e "anexe aqui", e a acao mora no e-mail aberto (revisor, PR #555)
     ...itens.filter(i => (base(i.chave) === "notas" && i.estado !== "ok") || base(i.chave).startsWith("frc:") || base(i.chave) === "consorcio")
-      .map(i => ({ chave: i.chave, ok: i.estado === "ok", vencida: i.estado === "vencida", texto: base(i.chave) === "notas" ? "Falta a nota fiscal" : i.rotulo })),
+      .map(i => ({ chave: i.chave, ok: i.estado === "ok", trava: travaDoItem(i), texto: base(i.chave) === "notas" ? "Falta a nota fiscal" : i.rotulo })),
   ];
   const certs = itens.filter(i => base(i.chave).startsWith("certidoes:"));
-  const certLinhas: Linha[] = certs.map(i => ({ chave: i.chave, ok: i.estado === "ok" || i.estado === "aviso", vencida: i.estado === "vencida", texto: i.rotulo, detalhe: i.detalhe }));
+  const certLinhas: Linha[] = certs.map(i => ({ chave: i.chave, ok: i.estado === "ok" || i.estado === "aviso", trava: travaDoItem(i), texto: i.rotulo, detalhe: i.detalhe }));
   const docs = itens.filter(i => !["notas", "consorcio"].includes(base(i.chave)) && !base(i.chave).startsWith("frc:") && !base(i.chave).startsWith("certidoes:"))
-    .map(i => ({ chave: i.chave, ok: i.estado === "ok" || i.estado === "aviso", vencida: i.estado === "vencida",
+    .map(i => ({ chave: i.chave, ok: i.estado === "ok" || i.estado === "aviso", trava: travaDoItem(i),
       texto: <>{i.rotulo}{i.estado === "ok" && i.detalhe ? ` de ${i.detalhe}` : ""}</>, detalhe: i.detalhe }));
   const varias = new Set(certs.map(i => i.entidade_id)).size > 1 || new Set((certidoes ?? []).map(i => i.entidade_id)).size > 1;
   return (
@@ -264,16 +272,12 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
   const envioAberto = envios.find(e => e.protocolo_id !== null && e.protocolo_id === aberto) ?? null;
   const pidAberto = envioAberto?.protocolo_id ?? null;
 
-  // a mesma conta do "Certidão vencida: emita a nova em Documentos." da lista de certidoes
-  const certidaoVencida = (certidoes ?? []).some(i => i.situacao === "pendente");
-  const travadoPorCertidao = certidaoVencida && envios.some(e => e.situacao === "bloqueado");
-
   return (
     <div className="pilha envio-passo">
-      <FaixaEnvio envios={envios} certidaoVencida={certidaoVencida} />
+      <FaixaEnvio envios={envios} />
       <ConferenciaNotas envios={envios} />
-      <CartoesEnvio envios={envios} certidoes={certidoes} semNotaDaVencida={travadoPorCertidao} />
-      <section className="cartao med-painel envio-email" aria-labelledby="email-orgao-titulo">
+      <CartoesEnvio envios={envios} certidoes={certidoes} semNotaDaVencida={travadoPorCertidao(envios)} />
+      <section className="cartao med-painel" aria-labelledby="email-orgao-titulo">
       <div className="envio-email__cab">
         <h3 className="med-painel__titulo" id="email-orgao-titulo">E-mail ao órgão</h3>
         {podeEditar && registraveis.length > 0 && (
