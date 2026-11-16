@@ -676,10 +676,10 @@ def _vincular_nfs(conn, usuario_id: int, medicao_id: int, d: dict, contrato_id: 
 
     Cada NF precisa estar no RM da empresa do contrato, ser desta obra pelo centro de custo (o atual ou um dos
     anteriores, a mesma chave da diretoria) e estar livre; e as notas juntas precisam cobrir o valor da medicao.
-    Faltando qualquer uma, nenhuma entra: uma nota vinculada que cobre so' parte (medicao em duas notas, padrao
-    MT-388, com uma fora do CSV) seria dada como recebida pela sincronizacao seguinte com o RM, que so' segura
-    cobertura parcial depois de vinculo desfeito a mao (revisor da #259). A medicao fica protocolada sem nota,
-    e a nota segue no a receber pelo centro de custo, como hoje."""
+    Faltando qualquer uma, nenhuma entra (revisor da #259): uma nota vinculada que cobre so' parte (medicao em duas
+    notas, padrao MT-388, com uma fora do CSV) ficaria ligada sem nunca fechar, porque a sincronizacao com o RM so'
+    recebe a medicao cujas notas vigentes cobrem o valor (issue #714). A medicao fica protocolada sem nota, e a nota
+    segue no a receber pelo centro de custo, como hoje."""
     from app import sincronizacao_rm   # import local: importa medicoes e notas
     if not d["nfs"]:
         return "", False
