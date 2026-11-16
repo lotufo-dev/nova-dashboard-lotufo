@@ -35,6 +35,7 @@ paths:
   pessoa logada. Uma consulta só lista mensagem, a da conversa gravada no envio; a caixa de entrada nunca é
   listada nem pesquisada. Grava remetente, data, assunto, trecho e nomes dos anexos; o corpo inteiro e os anexos
   ficam fora.
-- **Dev.** Ligue o simulador (`DASH_GRAPH_SIMULADOR=dados/correio-simulado`): sem a variável, o e-mail sai de
-  verdade.
+- **Dev.** Ligue o simulador (`DASH_GRAPH_SIMULADOR=dados/correio-simulado`). Com `DASH_DEV=1` e sem simulador,
+  todo envio é recusado antes da reserva (`instalacao.exigir_envio`, issue #707); o e-mail real em dev só sai com
+  `DASH_EMAIL_REAL_EM_DEV=1`, para o teste deliberado. Sem `DASH_DEV` (produção) a trava não existe.
 - Toda mudança aqui sai com o teste de concorrência: dois POST simultâneos resultam em 1×200 e 1×409.
