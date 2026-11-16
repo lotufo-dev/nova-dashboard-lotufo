@@ -1251,6 +1251,160 @@ def test_recebimento_fecha_medicao_protocolada(conn, cid, tmp_path):
     assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-01")
 
 
+# --- recebimento so' com as notas vigentes cobrindo o valor (issue #714, docs/adr/0006) ---
+
+def _em_duas_notas(conn, cid, tmp_path):
+    """Medicao de R$ 1.500,01 (centavo impar) faturada nas notas 100 (R$ 1.000,01) e 101 (R$ 500,00)."""
+    mid = _medicao(conn, cid, 12, 1500_01)
+    nfs = [_nf(100, 1000.01), _nf(101, 500.0)]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    _ligar(conn, mid, 100, 101)
+    return mid, nfs
+
+
+def test_nota_cancelada_no_rm_nao_deixa_a_medicao_recebida_pela_outra(conn, cid, tmp_path):
+    """Issue #714: medicao em duas notas, uma cancelada no RM e a outra quitada. As notas vigentes nao cobrem o valor:
+    continua protocolada. Ligada e quitada a nota nova, vira recebida com a maior data de baixa."""
+    mid, nfs = _em_duas_notas(conn, cid, tmp_path)
+    nfs[1]["STATUS"] = "C"
+    paga_a_primeira = [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-01T00:00:00-04:00")]
+    for _ in range(2):                                             # a rodada seguinte tambem nao fecha
+        r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, paga_a_primeira))
+        assert r["recebimentos"] == 0, r
+        m = medicoes.detalhe(conn, mid)
+        assert (m["estado"], m["recebida_em"]) == ("protocolada", None)
+        assert [n["idmov"] for n in m["notas"]] == [100]           # a cancelada saiu; a quitada continua ligada
+    nfs.append(_nf(102, 500.0, emissao="2026-09-05T00:00:00-04:00"))    # a reemitida
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, paga_a_primeira))
+    assert r["recebimentos"] == 0, r
+    _ligar(conn, mid, 102)
+    # ligada, mas ainda com o titulo aberto: cobre o valor e nao esta' paga
+    aberta = [*paga_a_primeira, _baixa(2, 102, 462.0, 0.0, 0)]
+    assert sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, aberta))["recebimentos"] == 0
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+    pagas = [*paga_a_primeira, _baixa(2, 102, 462.0, 462.0, 1, "2026-09-10T00:00:00-04:00")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, pagas))
+    assert r["recebimentos"] == 1, r
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-10")
+    assert auditoria.verificar_cadeia(conn)
+
+
+def test_medicao_com_parte_das_notas_ligada_nao_e_recebida(conn, cid, tmp_path):
+    """Issue #714: a medicao faturada em duas notas com so' uma ligada (a outra ainda nao entrou) nao fecha pela
+    quitacao da primeira, mesmo sem vinculo desfeito nenhum."""
+    mid = _medicao(conn, cid, 12, 1500_01)
+    nfs = [_nf(100, 1000.01)]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    _ligar(conn, mid, 100)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 100, 924.01, 924.01, 1,
+                                                                             "2026-09-01T00:00:00-04:00")]))
+    assert r["recebimentos"] == 0, r
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+
+
+def test_uma_nota_so_do_valor_da_medicao_continua_recebendo(conn, cid, tmp_path):
+    """Issue #714: o caso comum nao muda. Uma nota, do valor da medicao (centavo impar), titulo liquido quitado."""
+    mid = _medicao(conn, cid, 12, 1000_01)
+    cli = _simulador(tmp_path, [_nf(100, 1000.01)], [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-01T00:00:00-04:00")])
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 1
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-01")
+
+
+@pytest.mark.parametrize("nota, recebe", [
+    (1000.00, True),     # a nota cobre a medicao inteira
+    (999.99, False),     # 1 centavo a menos (centavo impar): nao cobre
+    (1000.01, True),     # nota acima da medicao cobre
+])
+def test_cobertura_do_valor_e_exata_e_a_tolerancia_continua_no_titulo(conn, cid, tmp_path, nota, recebe):
+    """Issue #714: a cobertura e' exata, como na correcao de cadastro e na carga do historico. A tolerancia de R$ 1,00
+    (#35) continua valendo onde ja' valia, no pagamento do titulo: o de R$ 920,00 pago com R$ 919,00 fecha."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    nfs = [_nf(100, nota)]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    if not _tem_nf(conn, mid):
+        _ligar(conn, mid, 100)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 100, 920.0, 919.0, 1,
+                                                                             "2026-09-01T00:00:00-04:00")]))
+    assert (r["recebimentos"], medicoes.detalhe(conn, mid)["estado"]) == ((1, "recebida") if recebe else (0, "protocolada"))
+
+
+def test_cobertura_usa_o_valor_atual_da_nota_e_nao_o_do_dia_do_vinculo(conn, cid, tmp_path):
+    """Issue #714 (segunda revisao): a nota entrou e foi ligada com R$ 1.500,01 e o RM a corrige para R$ 1.000,01 (a
+    nota do PDF confirmada com outro valor). O vinculo guarda o valor antigo; a cobertura olha o atual, e a medicao de
+    R$ 1.500,01 nao fecha com o titulo dessa nota quitado."""
+    mid = _medicao(conn, cid, 12, 1500_01)
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(100, 1500.01)], []))
+    assert _tem_nf(conn, mid)
+    paga = [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-01T00:00:00-04:00")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(100, 1000.01)], paga))
+    assert r["recebimentos"] == 0, r
+    n = medicoes.detalhe(conn, mid)["notas"][0]
+    assert (n["valor_alocado_centavos"], n["valor_centavos"]) == (1500_01, 1000_01)
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+
+
+def test_medicao_rateada_em_tres_notas_com_residuo_recebe_com_as_tres(conn, cid, tmp_path):
+    """Issue #714, rateio com residuo: R$ 1.000,00 em tres notas (333,34 + 333,33 + 333,33). Duas pagas nao cobrem;
+    com as tres, recebe na maior data de baixa, que aqui e' a da primeira nota e nao a da ultima ligada."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    nfs = [_nf(100, 333.34), _nf(101, 333.33), _nf(102, 333.33)]
+    baixas = [_baixa(1, 100, 306.67, 306.67, 1, "2026-09-20T00:00:00-04:00"),
+              _baixa(2, 101, 306.66, 306.66, 1, "2026-09-03T00:00:00-04:00"),
+              _baixa(3, 102, 306.66, 306.66, 1, "2026-09-05T00:00:00-04:00")]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    _ligar(conn, mid, 100, 101)
+    assert sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, baixas))["recebimentos"] == 0
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+    _ligar(conn, mid, 102)
+    assert sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, baixas))["recebimentos"] == 1
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-20")
+
+
+def test_cobertura_em_consorcio_conta_so_as_notas_da_coligada_do_contrato(conn, cid, tmp_path):
+    """Issue #714: em obra de consorcio a cobertura compara o valor da medicao com as notas da coligada da entidade do
+    contrato. A nota da Lotufo (coligada 1) ligada a' mesma medicao nao completa a fatura do consorcio que falta."""
+    eid = entidades.criar(conn, 1, {"nome": "Consórcio X", "cnpj": "11444777000161",
+                                    "papel": "consorcio", "coligada_rm": 12})
+    c2 = contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 9", "objeto": "Obra",
+                                   "valor_original_centavos": 100_00, "entidade_id": eid})
+    mid = _medicao(conn, c2, 1, 1000_00)
+    nfs = [_nf(7, 600.0, coligada=12), _nf(8, 400.0, coligada=1)]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    for idmov in (7, 8):
+        nid = conn.execute("SELECT id FROM notas_fiscais WHERE idmov=?", (idmov,)).fetchone()[0]
+        sincronizacao_rm.alocar(conn, 1, nid, mid, "manual", None, "pdf")
+    paga = [_baixa(1, 7, 552.0, 552.0, 1, "2026-09-01T00:00:00-04:00", coligada=12)]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, paga))
+    assert r["recebimentos"] == 0, r
+    assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
+    nfs.append(_nf(9, 400.0, coligada=12))                          # o resto da fatura do consorcio
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, paga))
+    nid = conn.execute("SELECT id FROM notas_fiscais WHERE idmov=9").fetchone()[0]
+    sincronizacao_rm.alocar(conn, 1, nid, mid, "manual", None, "pdf")
+    pagas = [*paga, _baixa(2, 9, 368.0, 368.0, 1, "2026-09-04T00:00:00-04:00", coligada=12)]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, pagas))
+    assert r["recebimentos"] == 1, r
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-04")   # a nota da Lotufo, sem titulo, nao segura
+
+
+def test_medicao_ja_recebida_nao_muda_com_a_regra_da_cobertura(conn, cid, tmp_path):
+    """Issue #714: a regra vale para quem ainda vai receber. A medicao ja' recebida com notas que nao cobrem o valor
+    continua recebida, com a mesma data."""
+    mid, nfs = _em_duas_notas(conn, cid, tmp_path)
+    pagas = [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-01T00:00:00-04:00"),
+             _baixa(2, 101, 462.0, 462.0, 1, "2026-09-03T00:00:00-04:00")]
+    assert sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, pagas))["recebimentos"] == 1
+    nfs[1]["STATUS"] = "C"                                          # cancelada no RM depois do recebimento
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, pagas))
+    assert r["recebimentos"] == 0, r
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-03")
+
+
 def test_legado_protocolada_sem_nf_nao_atrai_casamento(conn, cid, tmp_path):
     """Medicao de competencia anterior ao corte e origem manual (a carga do legado) nao e' candidata:
     24 meses de NFs contra 422 protocoladas seria o cenario das 29 sugestoes de 2026-09-04."""

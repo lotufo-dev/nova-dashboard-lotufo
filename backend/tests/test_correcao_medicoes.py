@@ -173,6 +173,23 @@ def test_ligar_nf_forcar_centro_e_parcial(cenario):
     assert depois["centro_forcado"][0]["nf"] == "507"
 
 
+def test_ligar_nf_parcial_nao_e_fechada_pela_sincronizacao_seguinte(cenario):
+    """Issue #714: a ligacao parcial fica protocolada mesmo com a nota paga, tambem na rodada seguinte do RM (antes a
+    correcao segurava e a sincronizacao fechava); o aviso diz isso. Ligada a nota que falta, recebe."""
+    from app import sincronizacao_rm
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 1, valor=300_001)
+    _nota(c, 507, valor=100_001, paga=True)
+    rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [507], "parcial": True,
+                           "fonte": "a outra nota ainda não veio"}])
+    assert rel["feitos"] == 1 and _estado(c, mid) == "protocolada"
+    assert "fica protocolada até a nota que falta" in json.dumps(rel, ensure_ascii=False)
+    assert sincronizacao_rm._recebimentos(c) == 0 and _estado(c, mid) == "protocolada"
+    _nota(c, 511, valor=200_000, paga=True)
+    rel = _rodar(c, uid, [{"operacao": "ligar_nf", "medicao_id": mid, "nfs": [511], "fonte": "a nota que faltava"}])
+    assert rel["feitos"] == 1 and _estado(c, mid) == "recebida"
+
+
 def test_ligar_nf_em_medicao_recebida_sem_nota(cenario):
     # Paga, mas o vinculo com a nota faltou: a NF entra e o estado continua recebida
     c, cid, uid = cenario
