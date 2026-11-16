@@ -4,9 +4,9 @@
    casca escura (nunca situacao nem acao); quatro situacoes com tom e forma; Archivo no texto e nos numeros, titulos
    condensados; cantos retos, regua de tinta e sombra dura nos paineis. Modo unico claro.
 
-   Este arquivo tem tres partes: (1) as variaveis da fundacao, com nome por papel; (2) as variaveis antigas, que so'
-   apontam para as da fundacao enquanto os outros CSS ainda as usam (saem na etapa 1b); (3) elementos e componentes.
-   NENHUMA tela deve declarar cor propria: se faltar um tom, ele nasce aqui.
+   Este arquivo tem tres partes: (1) as variaveis da fundacao, com nome por papel; (2) o que ainda nao tem par na
+   fundacao (misturas e medidas do menu); (3) elementos e componentes. Cor, familia e tamanho de letra so' por var():
+   o teste literais.test.ts barra o literal fora dos blocos :root. Se faltar um tom, ele nasce aqui.
    --------------------------------------------------------------------------- */
 
 /* ------------------------------------------------------------------- fontes
@@ -475,7 +475,7 @@ td, th { font-variant-numeric: tabular-nums; }
 .faixa-instalacao {
   position: sticky; bottom: 0; z-index: 35;
   margin: 0; padding: 10px 16px;
-  background: var(--situacao-critico-texto); color: #fff;
+  background: var(--situacao-critico-texto); color: var(--cor-sobre-ponto);
   font-size: var(--texto-meta); line-height: 20px; font-weight: 600; text-align: center;
 }
 
@@ -513,7 +513,7 @@ td, th { font-variant-numeric: tabular-nums; }
   position: fixed; top: 0; bottom: 0; left: 0; z-index: 40;
   width: var(--trilho);
   overflow-x: hidden; overflow-y: auto;
-  background: var(--cor-menu); color: #fff;
+  background: var(--cor-menu); color: var(--cor-menu-texto);
   transition: width var(--trilho-duracao) var(--trilho-curva);
 }
 .trilho[data-estado="largo"] { width: var(--trilho-largo); }
@@ -530,13 +530,13 @@ td, th { font-variant-numeric: tabular-nums; }
   display: flex; align-items: center; flex: none;
   width: calc(var(--trilho-largo) - 24px); height: 44px; margin: 0 12px 4px; padding: 0;
   border: 0; border-radius: 12px; background: none;
-  color: #fff; text-decoration: none; font-size: var(--texto-corpo); font-weight: 500; text-align: left;
+  color: var(--cor-menu-texto); text-decoration: none; font-size: var(--texto-corpo); font-weight: 500; text-align: left;
   transition: background .15s ease;
 }
-.trilho__item:hover:not(:disabled), .trilho__alternar:hover:not(:disabled) { background: var(--cor-menu-realce); color: #fff; }
-.trilho__item[aria-current="page"] { background: #fff; color: var(--cor-tinta); font-weight: 600; }
-/* o anel de foco da casa e' indigo, a cor do proprio menu: aqui ele e' branco; sobre a pilula branca fica indigo */
-.trilho__item:focus-visible, .trilho__alternar:focus-visible { outline: 2px solid #fff; outline-offset: -2px; border-radius: 12px; }
+.trilho__item:hover:not(:disabled), .trilho__alternar:hover:not(:disabled) { background: var(--cor-menu-realce); color: var(--cor-menu-texto); }
+.trilho__item[aria-current="page"] { background: var(--cor-menu-texto); color: var(--cor-tinta); font-weight: 600; }
+/* dentro do menu escuro o anel de foco e' o da casca (--cor-menu-foco); sobre a pilula clara, o foco do conteudo */
+.trilho__item:focus-visible, .trilho__alternar:focus-visible { outline: 2px solid var(--cor-menu-foco); outline-offset: -2px; border-radius: 12px; }
 .trilho__item[aria-current="page"]:focus-visible { outline-color: var(--cor-tinta); }
 .trilho__celula { width: calc(var(--trilho) - 24px); }
 .trilho__marca .trilho__celula { width: var(--trilho); }
@@ -726,18 +726,18 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 /* ------------------------------------------------------------------ botoes */
 
 .btn { text-decoration: none; white-space: nowrap; }
-.btn--primario { background: var(--cor-tinta); border-color: var(--cor-tinta); color: #fff; }
+.btn--primario { background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel); }
 /* Botao CHEIO repete a cor do texto no hover e no :active: a base `button:hover` pinta o texto de
    `--texto` (escuro) e, sem isto, o rotulo ficava escuro sobre o indigo. */
-.btn--primario:hover:not(:disabled) { background: var(--cor-menu-realce); border-color: var(--cor-menu-realce); color: #fff; }
-.btn--primario:active:not(:disabled) { background: var(--cor-tinta); border-color: var(--cor-tinta); color: #fff; }
+.btn--primario:hover:not(:disabled) { background: var(--cor-menu-realce); border-color: var(--cor-menu-realce); color: var(--cor-papel); }
+.btn--primario:active:not(:disabled) { background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel); }
 /* Desabilitado volta ao neutro: a base `.btn:disabled` so' apagava o texto, e o
    indigo cheio com letra cinza continuava gritando "clique" — justamente no botao que
    o checklist de protocolo trava ate' a pendencia ser assumida. */
 .btn--primario:disabled { background: var(--cor-papel-sombreado); border-color: var(--cor-borda-controle); color: var(--cor-texto-terciario); }
-.btn--destrutivo { background: var(--situacao-critico-texto); border-color: var(--situacao-critico-texto); color: #fff; }
-.btn--destrutivo:hover:not(:disabled) { background: var(--acao-forte); border-color: var(--acao-forte); color: #fff; }
-.btn--destrutivo:active:not(:disabled) { background: var(--acao-forte); border-color: var(--acao-forte); color: #fff; }
+.btn--destrutivo { background: var(--situacao-critico-texto); border-color: var(--situacao-critico-texto); color: var(--cor-sobre-ponto); }
+.btn--destrutivo:hover:not(:disabled) { background: var(--acao-forte); border-color: var(--acao-forte); color: var(--cor-sobre-ponto); }
+.btn--destrutivo:active:not(:disabled) { background: var(--acao-forte); border-color: var(--acao-forte); color: var(--cor-sobre-ponto); }
 .btn--pequeno { height: 28px; padding: 0 10px; font-size: var(--texto-mini); }
 .btn--voltar {
   /* botao ou link ("← Medicoes" e' um <a>, volta para a tela de onde se veio) */
@@ -1564,126 +1564,125 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
   border-radius: 8px; font-size: var(--texto-meta); }
 .documentos__arquivo { font-weight: 600; overflow-wrap: anywhere; }
 
-/* ---- Envio de e-mail como no Outlook (2026-09-25, pedido do Leonardo) -------------------------------------
-   Replica a janela de nova mensagem do Outlook na web: cores, bordas e fonte dele, e nao as da dashboard,
-   para quem envia reconhecer a tela. O azul e o do botao Enviar do Outlook. */
-.ol-janela { --ol-azul: #0f6cbd; --ol-azul-escuro: #115ea3; --ol-linha: #e1dfdd; --ol-texto: #242424; --ol-suave: #616161;
-  --foco: var(--ol-azul);
-  font-family: "Aptos", "Segoe UI", "Segoe UI Web (West European)", -apple-system, sans-serif; color: var(--ol-texto);
-  background: #fff; border: 1px solid var(--ol-linha); border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,.08);
+/* ---- Envio de e-mail no desenho do Outlook (2026-09-25, pedido do dono) ----------------------------------
+   A janela de nova mensagem guarda a disposicao do Outlook na web (botao Enviar, linhas Para/Cc/Cco, etiquetas),
+   para quem envia reconhecer a tela; cores e letra sao as da fundacao desde #719. */
+.ol-janela {
+  font-family: var(--fonte-texto); color: var(--cor-tinta);
+  background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: 8px; box-shadow: 0 2px 4px color-mix(in srgb, var(--cor-tinta) 8%, transparent);
   font-size: var(--texto-meta); }
 .ol-topo { display: flex; align-items: center; gap: 16px; padding: 12px 12px 8px; }
-.ol-enviar { display: inline-flex; align-items: center; gap: 6px; background: var(--ol-azul, #0f6cbd); color: #fff; border: 0;
+.ol-enviar { display: inline-flex; align-items: center; gap: 6px; background: var(--cor-tinta); color: var(--cor-papel); border: 0;
   border-radius: 4px; padding: 6px 16px; font: inherit; font-weight: 600; cursor: pointer; }
-.ol-enviar:hover:not(:disabled), .ol-enviar:active:not(:disabled) { background: var(--ol-azul-escuro, #115ea3); color: #fff; }
-.ol-enviar:disabled { background: #f0f0f0; color: #bdbdbd; cursor: default; }
-.ol-botao { background: #fff; border: 1px solid #d1d1d1; border-radius: 4px; padding: 6px 16px; font: inherit; cursor: pointer; }
-.ol-de { color: var(--ol-texto); }
-.ol-icone { border: 0; background: none; color: #616161; cursor: pointer; padding: 4px; border-radius: 4px;
+.ol-enviar:hover:not(:disabled), .ol-enviar:active:not(:disabled) { background: var(--cor-menu-realce); color: var(--cor-papel); }
+.ol-enviar:disabled { background: var(--cor-papel-sombreado); color: var(--cor-texto-terciario); cursor: default; }
+.ol-botao { background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: 4px; padding: 6px 16px; font: inherit; cursor: pointer; }
+.ol-de { color: var(--cor-tinta); }
+.ol-icone { border: 0; background: none; color: var(--cor-texto-secundario); cursor: pointer; padding: 4px; border-radius: 4px;
   font-size: var(--texto-valor-menor); line-height: 1; display: inline-flex; }
-.ol-icone:hover { background: #f5f5f5; color: #242424; }
+.ol-icone:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
 .ol-descartar { margin-left: auto; }
 .ol-confirmar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 4px 12px 8px; }
 .ol-linha { display: flex; align-items: center; gap: 10px; padding: 4px 12px; }
-.ol-rotulo { min-width: 42px; background: #fff; border: 1px solid #d1d1d1; border-radius: 4px; padding: 4px 10px;
-  font: inherit; color: var(--ol-texto); cursor: pointer; }
-.ol-rotulo:hover { background: #f5f5f5; }
+.ol-rotulo { min-width: 42px; background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: 4px; padding: 4px 10px;
+  font: inherit; color: var(--cor-tinta); cursor: pointer; }
+.ol-rotulo:hover { background: var(--cor-papel-sombreado); }
 .ol-campo { position: relative; flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 32px;
-  border-bottom: 1px solid var(--ol-linha); cursor: text; }
-.ol-campo:focus-within { border-bottom: 2px solid var(--ol-azul); }
-.ol-chip { display: inline-flex; align-items: center; gap: 4px; background: #f5f5f5; border: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--cor-linha); cursor: text; }
+.ol-campo:focus-within { border-bottom: 2px solid var(--cor-foco); }
+.ol-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--cor-papel-sombreado); border: 1px solid var(--cor-linha);
   border-radius: 4px; padding: 1px 4px 1px 6px; white-space: nowrap; }
-.ol-chip__icone { color: #616161; font-size: var(--texto-mini); }
-.ol-chip button { border: 0; background: none; cursor: pointer; color: #242424; font-size: var(--texto-corpo); line-height: 1; padding: 0 2px; }
+.ol-chip__icone { color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
+.ol-chip button { border: 0; background: none; cursor: pointer; color: var(--cor-tinta); font-size: var(--texto-corpo); line-height: 1; padding: 0 2px; }
 .ol-entrada { flex: 1; min-width: 140px; border: 0; outline: 0; font: inherit; padding: 4px 0; background: transparent; }
-.ol-cco { border: 0; background: none; color: var(--ol-texto); font: inherit; cursor: pointer; padding: 4px 6px; border-radius: 4px; }
-.ol-cco:hover { background: #f5f5f5; }
+.ol-cco { border: 0; background: none; color: var(--cor-tinta); font: inherit; cursor: pointer; padding: 4px 6px; border-radius: 4px; }
+.ol-cco:hover { background: var(--cor-papel-sombreado); }
 .ol-sugestoes { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; width: 300px; margin: 0; padding: 4px 0;
-  list-style: none; background: #fff; border-radius: 4px; box-shadow: 0 8px 16px rgba(0,0,0,.14), 0 0 2px rgba(0,0,0,.12); }
+  list-style: none; background: var(--cor-superficie); border-radius: 4px; box-shadow: 0 8px 16px color-mix(in srgb, var(--cor-tinta) 14%, transparent), 0 0 2px color-mix(in srgb, var(--cor-tinta) 12%, transparent); }
 .ol-sugestao { display: flex; align-items: center; gap: 10px; padding: 6px 10px; cursor: pointer; }
-.ol-sugestao--ativa { background: #f5f5f5; outline: 2px solid #242424; outline-offset: -2px; border-radius: 4px; }
+.ol-sugestao--ativa { background: var(--cor-papel-sombreado); outline: 2px solid var(--cor-tinta); outline-offset: -2px; border-radius: 4px; }
 .ol-sugestao__texto { display: grid; }
-.ol-sugestao__nome { color: #242424; }
-.ol-sugestao__email { color: #616161; font-size: var(--texto-mini); }
+.ol-sugestao__nome { color: var(--cor-tinta); }
+.ol-sugestao__email { color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
 .ol-avatar { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: var(--texto-mini);
-  font-weight: 600; color: #424242; }
+  font-weight: 600; color: var(--cor-tinta); }
 .ol-assunto { padding: 4px 12px; }
-.ol-assunto input { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--ol-linha); outline: 0;
+.ol-assunto input { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--cor-linha); outline: 0;
   font: inherit; padding: 8px 0; background: transparent; }
-.ol-assunto input:focus { border-bottom: 2px solid var(--ol-azul); }
+.ol-assunto input:focus { border-bottom: 2px solid var(--cor-foco); }
 .ol-anexos { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 8px 12px 0; list-style: none; }
-.ol-anexo { display: flex; align-items: center; gap: 8px; max-width: 360px; border: 1px solid var(--ol-linha);
+.ol-anexo { display: flex; align-items: center; gap: 8px; max-width: 360px; border: 1px solid var(--cor-linha);
   border-radius: 4px; padding: 6px 10px; }
 .ol-anexo__tipo { flex: none; min-width: 32px; padding: 3px 4px; border-radius: 3px; font-size: var(--texto-mini); font-weight: 700;
-  text-align: center; color: #fff; background: #616161; }
-.ol-anexo__tipo--docx, .ol-anexo__tipo--doc { background: #185abd; }
-.ol-anexo__tipo--pdf { background: #c43e1c; }
-.ol-anexo__tipo--xlsx, .ol-anexo__tipo--xls { background: #107c41; }
-.ol-anexo__tipo--zip { background: #8a6d00; }
+  text-align: center; color: var(--cor-papel); background: var(--cor-texto-secundario); }
+.ol-anexo__tipo--docx, .ol-anexo__tipo--doc { background: var(--cor-tinta); }
+.ol-anexo__tipo--pdf { background: var(--cor-tinta); }
+.ol-anexo__tipo--xlsx, .ol-anexo__tipo--xls { background: var(--cor-tinta); }
+.ol-anexo__tipo--zip { background: var(--cor-tinta); }
 .ol-anexo__texto { display: grid; min-width: 0; }
 /* Duas linhas, e nao uma: os anexos de um espelho so' diferem no FIM do nome ("… - Execução Cuiabá",
    "… - Reajuste Cuiabá"), e com uma linha e reticencias os tres cartoes ficavam iguais. */
 .ol-anexo__nome { overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical;
   -webkit-line-clamp: 2; line-clamp: 2; }
-.ol-anexo__tamanho { color: #616161; font-size: var(--texto-mini); }
+.ol-anexo__tamanho { color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
 .ol-corpo { padding: 12px 12px 16px; }
 .ol-corpo .ol-editor { width: 100%; box-sizing: border-box; border: 0; min-height: 160px; overflow-wrap: anywhere;
-  font: 11pt "Aptos", "Calibri", "Segoe UI", sans-serif; color: #000; line-height: 1.35; background: transparent; }
-.ol-corpo .ol-editor:focus-visible { outline: 2px solid #0f6cbd; outline-offset: 2px; }
+  font: var(--texto-meta) var(--fonte-texto); color: var(--cor-tinta); line-height: 1.35; background: transparent; }
+.ol-corpo .ol-editor:focus-visible { outline: 2px solid var(--cor-foco); outline-offset: 2px; }
 .ol-corpo .ol-editor p { margin: 0; }
 .ol-corpo .ol-editor ul, .ol-corpo .ol-editor ol { margin: 4px 0; padding-left: 28px; }
 /* barra de formatacao (issue #191): fixa acima do corpo e a mesma, flutuante, perto da selecao */
 .ol-editor-caixa { position: relative; }
 .ol-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 0 0 8px; margin-bottom: 8px;
-  border-bottom: 1px solid var(--ol-linha); }
+  border-bottom: 1px solid var(--cor-linha); }
 .ol-barra--flutuante { position: absolute; z-index: 20; transform: translateY(calc(-100% - 6px)); margin: 0; padding: 4px;
   max-width: 100%; box-sizing: border-box;
-  background: #fff; border: 1px solid #d1d1d1; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.14); }
+  background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: 6px; box-shadow: 0 4px 14px color-mix(in srgb, var(--cor-tinta) 14%, transparent); }
 .ol-formato { min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px;
-  background: transparent; color: #242424; font: 14px "Aptos", "Segoe UI", sans-serif; cursor: pointer;
+  background: transparent; color: var(--cor-tinta); font: var(--texto-meta) var(--fonte-texto); cursor: pointer;
   display: inline-grid; place-items: center; }
-.ol-formato:hover { background: #f0f0f0; }
-.ol-formato:focus-visible { outline: 2px solid #0f6cbd; outline-offset: 1px; }
+.ol-formato:hover { background: var(--cor-papel-sombreado); }
+.ol-formato:focus-visible { outline: 2px solid var(--cor-foco); outline-offset: 1px; }
 .ol-formato__cor { display: grid; line-height: 1; font-weight: 600; }
 .ol-formato__cor > span { display: block; width: 14px; height: 3px; margin-top: 1px; }
 .ol-formato__realce { background: #FFFF00; padding: 0 2px; line-height: 1.2; }
 .ol-paleta { position: relative; display: inline-block; }
 .ol-paleta__cores { position: absolute; z-index: 21; top: calc(100% + 4px); left: 0; display: flex; gap: 4px; padding: 6px;
-  background: #fff; border: 1px solid #d1d1d1; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.14); }
-.ol-cor { width: 22px; height: 22px; padding: 0; border: 1px solid #c7c7c7; border-radius: 3px; background: #fff;
-  cursor: pointer; font-size: var(--texto-mini); color: #616161; }
-.ol-cor:focus-visible { outline: 2px solid #0f6cbd; outline-offset: 1px; }
+  background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: 6px; box-shadow: 0 4px 14px color-mix(in srgb, var(--cor-tinta) 14%, transparent); }
+.ol-cor { width: 22px; height: 22px; padding: 0; border: 1px solid var(--cor-borda-controle); border-radius: 3px; background: var(--cor-superficie);
+  cursor: pointer; font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
+.ol-cor:focus-visible { outline: 2px solid var(--cor-foco); outline-offset: 1px; }
 .ol-assinatura img { display: block; max-width: 600px; width: 100%; height: auto; margin-top: 8px; }
-.ol-sem-assinatura { color: #616161; font-size: var(--texto-mini); border: 1px dashed var(--ol-linha); border-radius: 4px;
+.ol-sem-assinatura { color: var(--cor-texto-secundario); font-size: var(--texto-mini); border: 1px dashed var(--cor-linha); border-radius: 4px;
   padding: 8px 10px; max-width: 60ch; }
-.ol-modal-fundo { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.4); display: grid; place-items: center; }
+.ol-modal-fundo { position: fixed; inset: 0; z-index: 100; background: var(--cor-veu); display: grid; place-items: center; }
 .ol-modal { width: min(1100px, 94vw); height: min(640px, 88vh); display: grid; grid-template-rows: auto 1fr auto;
-  background: #fff; border-radius: 8px; box-shadow: 0 25px 60px rgba(0,0,0,.3); font-family: "Aptos", "Segoe UI", sans-serif;
-  color: #242424; font-size: var(--texto-meta); overflow: hidden; }
+  background: var(--cor-superficie); border-radius: 8px; box-shadow: 0 25px 60px color-mix(in srgb, var(--cor-tinta) 30%, transparent); font-family: var(--fonte-texto);
+  color: var(--cor-tinta); font-size: var(--texto-meta); overflow: hidden; }
 .ol-modal__cabeca { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px;
-  background: #f0f0f0; font-size: var(--texto-titulo-sub); }
+  background: var(--cor-papel-sombreado); font-size: var(--texto-titulo-sub); }
 .ol-modal__corpo { display: grid; grid-template-rows: auto 1fr auto; gap: 8px; padding: 12px 16px; min-height: 0; }
-.ol-busca { border: 1px solid #d1d1d1; border-radius: 4px; padding: 6px 10px; font: inherit; }
-.ol-busca:focus { outline: 2px solid #0f6cbd; outline-offset: -1px; }
+.ol-busca { border: 1px solid var(--cor-borda-controle); border-radius: 4px; padding: 6px 10px; font: inherit; }
+.ol-busca:focus { outline: 2px solid var(--cor-foco); outline-offset: -1px; }
 .ol-tabela-wrap { overflow: auto; min-height: 0; overscroll-behavior: contain; }
 .ol-tabela { width: 100%; border-collapse: collapse; }
-.ol-tabela th { position: sticky; top: 0; background: #fff; text-align: left; font-weight: 400; color: #424242;
-  padding: 6px 8px; border-bottom: 1px solid #e1dfdd; }
-.ol-tabela td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; }
+.ol-tabela th { position: sticky; top: 0; background: var(--cor-superficie); text-align: left; font-weight: 400; color: var(--cor-texto-secundario);
+  padding: 6px 8px; border-bottom: 1px solid var(--cor-linha); }
+.ol-tabela td { padding: 6px 8px; border-bottom: 1px solid var(--cor-papel-sombreado); }
 .ol-tabela tbody tr { cursor: pointer; }
-.ol-tabela tbody tr:hover { background: #f5f5f5; }
+.ol-tabela tbody tr:hover { background: var(--cor-papel-sombreado); }
 .ol-pessoa { display: flex; align-items: center; gap: 10px; }
 .ol-pessoa > span:last-child { display: grid; }
-.ol-vazio { text-align: center; color: #616161; padding: 32px; }
-.ol-escolhidos { border-top: 1px solid #e1dfdd; padding-top: 8px; display: grid; gap: 6px; }
+.ol-vazio { text-align: center; color: var(--cor-texto-secundario); padding: 32px; }
+.ol-escolhidos { border-top: 1px solid var(--cor-linha); padding-top: 8px; display: grid; gap: 6px; }
 .ol-escolhidos > div { display: flex; flex-wrap: wrap; gap: 4px; }
-.ol-escolhidos__rotulo { color: #424242; }
+.ol-escolhidos__rotulo { color: var(--cor-texto-secundario); }
 .ol-modal__rodape { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; }
 @media (max-width: 640px) {
   .ol-sugestoes { width: 100%; }
   .ol-topo { flex-wrap: wrap; }
 }
-.ol-pendencias { padding: 12px; border-bottom: 1px solid #e1dfdd; background: #fffbf0; border-radius: 8px 8px 0 0; }
+.ol-pendencias { padding: 12px; border-bottom: 1px solid var(--cor-linha); background: var(--situacao-breve-fundo); border-radius: 8px 8px 0 0; }
 /* Issue #213: aviso "ATENÇÃO" do envio com documento faltando (ConfirmarFaltas.tsx) */
 .confirmar-faltas { width: min(520px, calc(100vw - 32px)); max-height: 88vh; overflow: auto; display: grid; gap: 12px;
   padding: 20px; background: var(--cor-superficie); border: 1px solid var(--atencao-linha); border-radius: var(--raio-canto);
@@ -1693,32 +1692,32 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .confirmar-faltas__lista { margin: 8px 0; padding-left: 20px; display: grid; gap: 4px; overflow-wrap: anywhere; }
 .confirmar-faltas__pergunta { font-weight: 600; }
 .confirmar-faltas__acoes { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
-.assinatura-previa { display: block; max-width: 600px; width: 100%; height: auto; border: 1px solid var(--cor-linha, #e1dfdd); border-radius: 4px; }
+.assinatura-previa { display: block; max-width: 600px; width: 100%; height: auto; border: 1px solid var(--cor-linha); border-radius: 4px; }
 .ol-corpo .ol-editor { height: auto; padding: 0; border-radius: 0; max-width: none; }
 .ol-janela input, .ol-janela textarea { box-shadow: none; }
 .ol-entrada { height: auto; padding: 4px 0; border-radius: 0; }
 .ol-assunto input { height: auto; border-radius: 0; padding: 8px 0; }
-.assinatura-alvo { border: 1px dashed var(--cor-borda-controle); border-radius: 6px; padding: 14px; text-align: center; color: var(--cor-texto-secundario, #5b6472); cursor: pointer; }
+.assinatura-alvo { border: 1px dashed var(--cor-borda-controle); border-radius: 6px; padding: 14px; text-align: center; color: var(--cor-texto-secundario); cursor: pointer; }
 .assinatura-alvo:focus { outline: 2px solid var(--cor-tinta); outline-offset: 2px; }
 /* Ajuste fino das linhas Para/Cc/Cco contra o print do Outlook (2026-09-25): botao branco com borda e texto
    semibold alinhado a primeira linha, etiqueta branca com borda fina, linha do campo cinza escura. */
 .ol-janela .ol-linha { align-items: flex-start; padding: 6px 12px; }
-.ol-janela .ol-rotulo { background: #fff; border: 1px solid #d1d1d1; border-radius: 4px; min-width: 52px; height: 32px;
-  padding: 0 12px; font-weight: 600; color: #242424; box-shadow: none; }
-.ol-janela .ol-rotulo:hover { background: #f5f5f5; border-color: #c7c7c7; }
-.ol-janela .ol-campo { gap: 6px; min-height: 32px; padding: 2px 0 6px; border-bottom: 1px solid #949494; }
-.ol-janela .ol-campo:focus-within { border-bottom: 2px solid #0f6cbd; padding-bottom: 5px; }
-.ol-janela .ol-chip { background: #fff; border: 1px solid #e0e0e0; border-radius: 4px; height: 26px; box-sizing: border-box;
-  padding: 0 4px 0 6px; gap: 4px; color: #242424; font-size: var(--texto-meta); }
-.ol-janela .ol-chip:hover { background: #f5f5f5; }
-.ol-janela .ol-chip__icone { color: #616161; flex: none; }
+.ol-janela .ol-rotulo { background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: 4px; min-width: 52px; height: 32px;
+  padding: 0 12px; font-weight: 600; color: var(--cor-tinta); box-shadow: none; }
+.ol-janela .ol-rotulo:hover { background: var(--cor-papel-sombreado); border-color: var(--cor-tinta); }
+.ol-janela .ol-campo { gap: 6px; min-height: 32px; padding: 2px 0 6px; border-bottom: 1px solid var(--cor-borda-controle); }
+.ol-janela .ol-campo:focus-within { border-bottom: 2px solid var(--cor-foco); padding-bottom: 5px; }
+.ol-janela .ol-chip { background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: 4px; height: 26px; box-sizing: border-box;
+  padding: 0 4px 0 6px; gap: 4px; color: var(--cor-tinta); font-size: var(--texto-meta); }
+.ol-janela .ol-chip:hover { background: var(--cor-papel-sombreado); }
+.ol-janela .ol-chip__icone { color: var(--cor-texto-secundario); flex: none; }
 .ol-janela .ol-chip__nome { line-height: 24px; }
 .ol-janela .ol-chip button { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
-  margin-left: 6px; border: 0; border-radius: 3px; background: none; color: #424242; padding: 0; }
-.ol-janela .ol-chip button:hover { background: #e0e0e0; }
+  margin-left: 6px; border: 0; border-radius: 3px; background: none; color: var(--cor-texto-secundario); padding: 0; }
+.ol-janela .ol-chip button:hover { background: var(--cor-papel-escuro); }
 .ol-janela .ol-entrada { height: 26px; min-width: 120px; }
 .ol-janela .ol-campo__direita { margin-left: auto; align-self: center; }
-.ol-janela .ol-cco { height: 26px; padding: 0 6px; color: #242424; }
+.ol-janela .ol-cco { height: 26px; padding: 0 6px; color: var(--cor-tinta); }
 
 /* --------------------------------------------------------- login (F-43) */
 /* Mesmo sistema das telas de dentro: cartao de superficie, campo com rotulo visivel e primario que
@@ -1907,8 +1906,8 @@ a.contagem:hover .dado__valor { color: var(--cor-menu-realce); text-decoration: 
 /* F-73: esmaecimento de 24px na borda esquerda do grafico do contrato, SO' quando ele esta rolado (Cronograma.tsx poe data-esq).
    E' sinal funcional de 'ha mais meses a esquerda', nao decoracao: a mascara so' age sobre o conteudo, nao troca cor. */
 .grafico[data-esq] {
-  -webkit-mask-image: linear-gradient(to right, transparent 0, black 24px);
-  mask-image: linear-gradient(to right, transparent 0, black 24px);
+  -webkit-mask-image: linear-gradient(to right, transparent 0, var(--cor-tinta) 24px);
+  mask-image: linear-gradient(to right, transparent 0, var(--cor-tinta) 24px);
 }
 /* a mascara cortaria o anel de foco desenhado por fora da caixa: com ela ligada o anel fica por dentro */
 .grafico[data-esq]:focus-visible { outline-offset: -2px; }

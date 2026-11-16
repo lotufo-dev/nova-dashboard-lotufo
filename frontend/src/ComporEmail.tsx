@@ -22,7 +22,7 @@ type Contato = { nome: string | null; email: string };
 type Campo = "para" | "copia" | "cco";
 const ROTULO: Record<Campo, string> = { para: "Para", copia: "Cc", cco: "Cco" };
 const EMAIL = /^[^\s@;,]+@[^\s@;,]+\.[^\s@;,]{2,}$/;
-const CORES = ["#e8d7f7", "#d6ebd8", "#fde2c8", "#d3e6f5", "#f6d5d8", "#e6e1c6"];
+const CORES = ["var(--cor-papel-escuro)"];   // o avatar da fundacao e' um so' tom neutro (#719)
 
 function iniciais(c: Contato): string {
   const base = (c.nome || c.email.split("@")[0]).replace(/[^A-Za-zÀ-ÿ ]/g, " ").trim();

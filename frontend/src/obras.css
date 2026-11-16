@@ -63,8 +63,8 @@
 .aviso-secao__cabeca { margin: 0; padding: 8px 16px; font-size: var(--texto-titulo-sub); font-weight: 700; letter-spacing: .02em; }
 .aviso-secao__cabeca--vencido { background: var(--situacao-critico-fundo); }
 .aviso-secao__cabeca--vencido .aviso-secao__n { color: var(--situacao-critico-texto); }
-.aviso-secao__cabeca--semana { background: #FFEDD5; }
-.aviso-secao__cabeca--mes { background: #FEF9C3; }
+.aviso-secao__cabeca--semana { background: var(--situacao-breve-fundo); }
+.aviso-secao__cabeca--mes { background: var(--cor-papel-sombreado); }
 .aviso-secao__cabeca--semana .aviso-secao__n, .aviso-secao__cabeca--mes .aviso-secao__n { color: var(--situacao-breve-texto); }
 .aviso-secao__cabeca--depois { background: var(--cor-contador-neutro); }
 .aviso-secao__cabeca--depois .aviso-secao__n { color: var(--cor-texto-terciario); }

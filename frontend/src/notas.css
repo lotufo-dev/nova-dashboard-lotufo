@@ -18,7 +18,7 @@
   border: 1px solid var(--nota-campo); border-radius: var(--raio-selo); background: var(--cor-superficie); color: var(--cor-tinta);
   font-size: var(--texto-meta); text-decoration: none; }
 .notas-v3 a.nota-pilula:hover { border-color: var(--cor-tinta); color: var(--cor-tinta); text-decoration: none; }
-.notas-v3 a.nota-pilula[aria-current="true"] { background: var(--cor-tinta); border-color: var(--cor-tinta); color: #fff; font-weight: 500; }
+.notas-v3 a.nota-pilula[aria-current="true"] { background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel); font-weight: 500; }
 
 .notas-v3 .nota-colunas { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
 .notas-v3 .nota-colunas > .pilha { flex: 3 1 420px; min-width: 0; gap: 16px; }
@@ -48,7 +48,7 @@
 /* painel do envio escolhido */
 .notas-v3 .nota-painel { display: flex; flex-direction: column; gap: 24px; padding: 24px; box-sizing: border-box; background: var(--cor-superficie);
   border: 1px solid var(--cor-linha); border-radius: var(--raio-canto);
-  box-shadow: var(--sombra-painel), 0 4px 12px rgb(15 23 42 / .06); }
+  box-shadow: var(--sombra-painel), 0 4px 12px color-mix(in srgb, var(--cor-tinta) 6%, transparent); }
 .notas-v3 .nota-painel__bloco { display: flex; flex-direction: column; gap: 4px; }
 .notas-v3 .nota-painel__bloco p { margin: 0; }
 .notas-v3 .nota-painel__titulo { margin: 0; font-size: var(--texto-titulo-bloco); line-height: 26px; font-weight: 600; }
@@ -65,7 +65,7 @@
 .notas-v3 .nota-itens > li { display: flex; align-items: flex-start; gap: 12px; }
 .notas-v3 .nota-estado { flex: none; width: 22px; height: 22px; box-sizing: border-box; display: grid; place-items: center;
   border-radius: var(--raio-selo); font-size: var(--texto-meta); line-height: 1; font-weight: 600; }
-.notas-v3 .nota-estado--ok { background: var(--situacao-feito-texto); color: #fff; }
+.notas-v3 .nota-estado--ok { background: var(--situacao-feito-texto); color: var(--cor-sobre-ponto); }
 .notas-v3 .nota-estado--aviso, .notas-v3 .nota-estado--falta { border: 2px solid var(--situacao-breve-texto); color: var(--situacao-breve-texto); }
 .notas-v3 .nota-estado--vencida { border: 2px solid var(--situacao-critico-texto); color: var(--situacao-critico-texto); }
 .notas-v3 .nota-item { flex: 1; min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -97,11 +97,11 @@
 .notas-v3.nota-envio { max-width: 860px; display: flex; flex-direction: column; gap: 16px; }
 
 .notas-v3 .nota-secao { display: flex; gap: 16px; padding: 24px; background: var(--cor-superficie); border: 1px solid var(--cor-linha);
-  border-radius: var(--raio-canto); box-shadow: var(--sombra-painel), 0 4px 12px rgb(15 23 42 / .06); }
+  border-radius: var(--raio-canto); box-shadow: var(--sombra-painel), 0 4px 12px color-mix(in srgb, var(--cor-tinta) 6%, transparent); }
 .notas-v3 .nota-passo { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--raio-selo);
   font-size: var(--texto-meta); font-weight: 600; }
-.notas-v3 .nota-passo--atual { background: var(--cor-tinta); color: #fff; }
-.notas-v3 .nota-passo--feito { background: var(--situacao-feito-texto); color: #fff; }
+.notas-v3 .nota-passo--atual { background: var(--cor-tinta); color: var(--cor-papel); }
+.notas-v3 .nota-passo--feito { background: var(--situacao-feito-texto); color: var(--cor-sobre-ponto); }
 .notas-v3 .nota-passo--futuro { background: var(--cor-linha); color: var(--cor-texto-secundario); }
 .notas-v3 .nota-secao__corpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .notas-v3 .nota-secao__corpo > p { margin: 0; }
@@ -142,12 +142,12 @@
 /* O compositor de e-mail (ComporEmail, compartilhado com outras telas) com a cara do prototipo SO' aqui:
    campos em caixa, rotulo a esquerda, etiquetas em pilula e o botao principal indigo de 48 px. */
 .notas-v3 .ol-janela { font-family: inherit; color: var(--cor-tinta); border: 0; box-shadow: none; background: none; font-size: var(--texto-meta);
-  --cor-foco: var(--cor-tinta); display: flex; flex-direction: column; gap: 10px; }
+  display: flex; flex-direction: column; gap: 10px; }
 .notas-v3 .ol-janela .ol-topo { padding: 0 0 6px; gap: 12px; flex-wrap: wrap; }
 .notas-v3 .ol-janela .ol-enviar { height: 48px; padding: 0 24px; gap: 8px; border-radius: var(--raio-canto); background: var(--cor-tinta);
   font-size: var(--texto-corpo); font-weight: 600; }
-.notas-v3 .ol-janela .ol-enviar:hover:not(:disabled), .notas-v3 .ol-janela .ol-enviar:active:not(:disabled) { background: var(--cor-menu-realce); color: #fff; }
-.notas-v3 .ol-janela .ol-enviar:disabled { background: var(--cor-borda-controle); color: #fff; }
+.notas-v3 .ol-janela .ol-enviar:hover:not(:disabled), .notas-v3 .ol-janela .ol-enviar:active:not(:disabled) { background: var(--cor-menu-realce); color: var(--cor-papel); }
+.notas-v3 .ol-janela .ol-enviar:disabled { background: var(--cor-borda-controle); color: var(--cor-papel); }
 .notas-v3 .ol-janela .ol-de { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .notas-v3 .ol-janela .ol-linha { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; align-items: start; padding: 0; }
 .notas-v3 .ol-janela .ol-rotulo { justify-self: start; height: auto; min-width: 0; margin-top: 10px; padding: 0; border: 0; background: none;

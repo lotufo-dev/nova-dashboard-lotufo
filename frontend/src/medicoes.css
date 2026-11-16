@@ -3,7 +3,7 @@
 
 .medicoes { gap: 20px; }
 .medicoes__acoes { display: flex; justify-content: flex-end; }
-.medicoes__iniciar { height: 44px; padding: 0 20px; gap: 8px; font-size: var(--texto-corpo); font-weight: 600; box-shadow: 0 1px 2px rgba(15, 23, 42, .1); }
+.medicoes__iniciar { height: 44px; padding: 0 20px; gap: 8px; font-size: var(--texto-corpo); font-weight: 600; box-shadow: 0 1px 2px color-mix(in srgb, var(--cor-tinta) 10%, transparent); }
 .medicoes__iniciar .icone { stroke-width: 2.2; }
 
 /* ponto e pilula da situacao */
@@ -30,7 +30,7 @@
 .medicoes__quadro {
   background: var(--cor-superficie);
   border: 1px solid var(--cor-linha); border-radius: var(--raio-canto);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--cor-tinta) 4%, transparent);
   overflow: hidden;
 }
 .medicoes__quadro-cabeca { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 16px 16px 14px; }
@@ -74,7 +74,7 @@
   box-shadow: var(--sombra-painel); color: var(--cor-tinta); overflow: hidden;
 }
 .iniciar[open] { display: flex; flex-direction: column; }
-.iniciar::backdrop { background: rgba(15, 23, 42, .45); }
+.iniciar::backdrop { background: var(--cor-veu); }
 .iniciar__caixa { display: flex; flex-direction: column; min-height: 0; max-height: inherit; flex: 1 1 auto; }
 .iniciar__cabeca { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 22px 24px 12px; }
 .iniciar__titulo { margin: 0; font-size: var(--texto-titulo-bloco); line-height: 28px; }
@@ -107,7 +107,7 @@
 .iniciar__tipo { display: inline-flex; width: fit-content; padding: 3px; gap: 3px; border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); }
 .iniciar__tipo label { display: inline-flex; align-items: center; height: 32px; padding: 0 14px; border-radius: 6px; cursor: pointer; font-weight: 500; color: var(--cor-texto-secundario); }
 .iniciar__tipo input { position: absolute; opacity: 0; pointer-events: none; }
-.iniciar__tipo label:has(input:checked) { background: var(--cor-tinta); color: #fff; }
+.iniciar__tipo label:has(input:checked) { background: var(--cor-tinta); color: var(--cor-papel); }
 .iniciar__tipo label:has(input:focus-visible) { outline: 2px solid var(--cor-foco); outline-offset: 2px; }
 .iniciar__campos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .iniciar__campo { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
