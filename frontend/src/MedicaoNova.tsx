@@ -70,7 +70,7 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
             </p>
           </div>
         </div>
-        <div className="med-grade med-grade--so-principal">
+        <div className="med-grade">
           <div className="med-principal">
             <Passos passos={passos} atual={atual} vendo={aberto} datas={{}} aoIr={n => setVendo(n === atual ? null : n)} />
             {/* #722: o painel do passo aberto, ligado a' aba dele, como na pagina da medicao */}

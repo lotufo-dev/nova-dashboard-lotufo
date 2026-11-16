@@ -131,7 +131,7 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
         </dl>
       </section>
 
-      <div className="med-duas med-duas--iguais">
+      <div className="med-duas">
         <section className="cartao med-painel" aria-labelledby="orgao-onde">
           <h3 className="med-painel__titulo" id="orgao-onde">Onde está o processo</h3>
           {proc ? (

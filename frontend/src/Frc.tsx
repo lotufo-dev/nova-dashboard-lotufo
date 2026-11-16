@@ -4,7 +4,7 @@ import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
 import { IconeCheck, mensagem } from "./NotasAEnviar";
 import "./notas.css";
-import Selo from "./Selo";
+import Selo, { Glifo } from "./Selo";
 import { fmtDataPura } from "./tempo";
 
 // FRC (Fatura de Recebimento de Consorcio) gerada pela dashboard (2026-10-09): na etapa 3 de obra de consorcio, a
@@ -137,7 +137,8 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
             return (
               <li key={i.chave}>
                 <span className={`nota-estado nota-estado--${ok ? "ok" : "falta"}`} title={ok ? "Anexada" : i.problema ? "Atenção" : "Falta"}>
-                  {ok ? <IconeCheck /> : <span aria-hidden="true">!</span>}
+                  {/* #722: o sinal da situacao, como nos outros itens: feito na anexada, vence em breve na que falta */}
+                  <Glifo situacao={ok ? "feito" : "breve"} />
                   <span className="sr-only">{ok ? "Anexada" : i.problema ? "Atenção" : "Falta"}</span>
                 </span>
                 <span className="nota-item">

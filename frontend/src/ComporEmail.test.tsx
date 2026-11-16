@@ -26,6 +26,11 @@ describe("ComporEmail", () => {
     const rotulo = assunto.parentElement!.querySelector(".ol-assunto__rotulo")!;
     expect(rotulo.textContent).toBe("Assunto");
     expect(rotulo.getAttribute("aria-hidden")).toBe("true");
+    // o campo de uma linha pode esconder o fim do assunto (o numero do oficio): o `title` traz o assunto inteiro
+    expect(assunto.title).toBe("Contrato 018/2026 · 5ª Medição");
+    fireEvent.change(assunto, { target: { value: "Contrato 018/2026 · 5ª Medição · Ofício 061/2026" } });
+    expect(assunto.title).toBe("Contrato 018/2026 · 5ª Medição · Ofício 061/2026");
+    fireEvent.change(assunto, { target: { value: "Contrato 018/2026 · 5ª Medição" } });
     fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
     expect(aoEnviar).toHaveBeenCalledWith({ para: ["orgao@exemplo.com.br"], copia: [], cco: [], assunto: "Contrato 018/2026 · 5ª Medição", corpo: "Prezados," });
   });

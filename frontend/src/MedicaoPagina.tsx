@@ -546,7 +546,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
           </div>
         </div>
         <ResumoMedicao m={m} execucao={execucao} reajuste={reajuste} outras={outras} passo={passo} aqui={aqui}
-          contratoId={contratoId} aoAcao={a => abrir(a as Painel)} />
+          contratoId={contratoId} aoAcao={a => abrir(a as Painel)} podeEditar={podeEditar} salvando={salvando} aoEditarValor={() => abrir("protocolado")} />
 
         {/* com uma janela aberta, o erro aparece dentro dela, perto de onde se agiu */}
         {erro && painel === null && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}

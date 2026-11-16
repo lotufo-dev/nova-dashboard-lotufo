@@ -58,6 +58,29 @@ describe("abas dos passos (#722)", () => {
     expect(espera.querySelector(".glifo--breve")).not.toBeNull();
   });
 
+  it("medição cancelada no passo 3: só os passos com data levam o visto; os que não aconteceram ficam sem sinal", () => {
+    // `atual` 0 = encerrada por excecao; a planilha foi enviada e o boletim chegou, e nada mais aconteceu
+    barra({ atual: 0, vendo: 1, datas: { 1: "19/10", 2: "09/11", 3: null, 4: null, 5: null, 6: null } });
+    for (const n of [1, 2]) {
+      const feito = aba(new RegExp(`^Passo ${n}: .*, feito em`));
+      expect(feito.className).toContain("passo--feito");
+      expect(feito.querySelector(".glifo--feito")).not.toBeNull();
+    }
+    for (const nome of ["Espelhos", "Notas", "Envio da nota", "Pagamento"]) {
+      const li = screen.getByRole("button", { name: new RegExp(`^Passo \\d: ${nome}$`) }).closest("li")!;
+      expect(li.className).toBe("passo passo--encerrado");
+      expect(li.querySelector(".glifo")).toBeNull();
+      expect(li.getAttribute("aria-current")).toBeNull();
+    }
+    // nenhum passo e' "o da vez" numa medicao encerrada
+    expect(document.querySelectorAll(".glifo--andamento")).toHaveLength(0);
+    cleanup();
+    // fora da excecao, o passo feito sem data conhecida continua com o visto
+    barra({ atual: 4, vendo: 4, datas: { 1: "19/10" } });
+    expect(aba(/^Passo 2: Análise do órgão$/).className).toBe("passo passo--feito");
+    expect(aba(/^Passo 2: Análise do órgão$/).querySelector(".glifo--feito")).not.toBeNull();
+  });
+
   it("o passo futuro abre dentro do painel com o nome e “Libera depois do passo N”; a faixa oferece voltar ao passo da vez", () => {
     const aoVoltar = vi.fn();
     render(<>
@@ -118,7 +141,7 @@ describe("o valor grande do alto (#722)", () => {
 describe("Resumo em faixa e Linha do tempo (#722)", () => {
   const resumo = (m: Medicao, extra: Partial<Parameters<typeof ResumoMedicao>[0]> = {}) => {
     render(<ResumoMedicao m={m} execucao={null} reajuste={null} outras={[]} passo={{ rotulo: "Envio da nota", secao: "passo-5" }}
-      aqui={aqui} contratoId={12} {...extra} />);
+      aqui={aqui} contratoId={12} podeEditar salvando={false} aoEditarValor={() => {}} {...extra} />);
     return screen.getByRole("region", { name: "Resumo da medição" });
   };
   const celula = (r: HTMLElement, rotulo: string) => within(r).getByText(rotulo).closest("div")!;
@@ -159,12 +182,52 @@ describe("Resumo em faixa e Linha do tempo (#722)", () => {
     const reajuste = com({ id: 6, tipo: "reajuste", valor_protocolado_centavos: 50001 });
     const r = resumo(MEDICAO, { execucao: MEDICAO, reajuste, passo: { rotulo: "Registrar o boletim", secao: "", acao: "boletim" }, aoAcao,
       outras: [com({ id: 9, tipo: "projeto", estado: "prevista" })] });
-    expect(celula(r, "Valor da medição").textContent).toMatch(/^Valor da mediçãoR\$\s1\.284\.500,01$/);
+    // a pagina aberta e' a da execucao, com o valor editavel: o link de editar fica junto do valor dela
+    expect(celula(r, "Valor da medição").textContent).toMatch(/^Valor da mediçãoR\$\s1\.284\.500,01Editar o valor$/);
     expect(celula(r, "Reajuste").textContent).toMatch(/^ReajusteR\$\s500,01$/);
     expect(within(r).queryByText("Total")).toBeNull();
     fireEvent.click(within(r).getByRole("button", { name: "Registrar o boletim" }));
     expect(aoAcao).toHaveBeenCalledWith("boletim");
     expect(within(celula(r, "Da mesma competência")).getByRole("link").getAttribute("href")).toBe("/obras/12/medicoes/9");
+  });
+
+  it("no par, “Editar o valor” fica junto do valor da metade que ele edita, nunca ao lado do Total", () => {
+    const reajuste = com({ id: 6, tipo: "reajuste", valor_protocolado_centavos: 50001 });
+    // a pagina aberta e' a do reajuste: o link fica na celula do reajuste
+    const aoEditarValor = vi.fn();
+    let r = resumo(reajuste, { execucao: MEDICAO, reajuste, aoEditarValor });
+    expect(within(celula(r, "Valor da medição")).queryByRole("button")).toBeNull();
+    fireEvent.click(within(celula(r, "Reajuste")).getByRole("button", { name: "Editar o valor" }));
+    expect(aoEditarValor).toHaveBeenCalledTimes(1);
+    expect(within(r).getAllByRole("button")).toHaveLength(1);
+    cleanup();
+    // a pagina aberta e' a da execucao: o link fica na celula dela
+    r = resumo(MEDICAO, { execucao: MEDICAO, reajuste });
+    expect(within(celula(r, "Valor da medição")).getByRole("button", { name: "Editar o valor" })).toBeTruthy();
+    expect(within(celula(r, "Reajuste")).queryByRole("button")).toBeNull();
+    cleanup();
+    // o valor grande do par (o Total) nao leva o link
+    render(<ValorDaPagina m={MEDICAO} doPar valor={128450001 + 50001} podeEditar salvando={false} aoEditarValor={() => {}} />);
+    expect(screen.getByText("Total")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
+    cleanup();
+    // fora do par o resumo nao repete o link (ele fica ao lado do rotulo do valor grande); quem so' consulta nao ve
+    r = resumo(MEDICAO);
+    expect(within(r).queryByRole("button")).toBeNull();
+    cleanup();
+    r = resumo(MEDICAO, { execucao: MEDICAO, reajuste, podeEditar: false });
+    expect(within(r).queryByRole("button")).toBeNull();
+  });
+
+  it("o sinal da situação fica preso ao nome dela; só o selo “final” e o cadeado ficam fora", () => {
+    const r = resumo(com({ estado: "planilha_enviada", final: 1, congelada: 1 }));
+    const nome = within(r).getByText("Planilha/carta enviada").parentElement!;
+    expect(nome.className).toBe("med-situacao__nome");
+    expect(nome.firstElementChild!.className).toBe("glifo glifo--andamento");
+    expect(nome.children).toHaveLength(2);
+    expect(within(nome).queryByText("final")).toBeNull();
+    expect(within(nome.parentElement!).getByText("final")).toBeTruthy();
+    expect(within(nome.parentElement!).getByRole("img", { name: "Congelada" })).toBeTruthy();
   });
 
   it("a linha do tempo lista do mais novo ao mais antigo, com a data sobre o texto e o link do boletim", () => {

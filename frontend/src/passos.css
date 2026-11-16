@@ -42,10 +42,13 @@
 .med-resumo .res-lista dt { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .med-resumo .res-lista dd { margin: 0; max-width: none; text-align: left; color: var(--cor-tinta); font-weight: var(--peso-forte); overflow-wrap: anywhere; }
 .med-resumo .res-lista dd.res-nota { color: var(--cor-texto-terciario); font-size: var(--texto-meta); font-weight: var(--peso-normal); }
+.med-resumo .res-nota--acao .botao-link { font-size: var(--texto-meta); }
 .med-resumo .res-nota--link { color: var(--cor-tinta); font-size: var(--texto-corpo); font-weight: var(--peso-normal); }
 .med-resumo .res-valor { font-family: var(--fonte-numero); font-stretch: var(--largura-numero); white-space: nowrap; }
-.med-situacao { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-pp); }
-.med-situacao > .glifo { margin-right: calc(var(--espaco-mini) - var(--espaco-pp)); }
+.med-situacao { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-pp); min-width: 0; }
+/* o sinal nao se separa do nome: o nome longo ("Planilha/carta enviada") quebra na coluna dele, ao lado do sinal */
+.med-situacao__nome { display: grid; grid-template-columns: var(--tamanho-glifo) minmax(0, 1fr); column-gap: var(--espaco-mini); align-items: baseline; min-width: 0; }
+.med-situacao__nome > .glifo { align-self: start; margin-top: calc((1em * var(--entrelinha) - var(--tamanho-glifo)) / 2); }
 .med-situacao .cadeado { display: inline-flex; color: var(--cor-texto-secundario); }
 @container (min-width: 1000px) {
   .med-resumo .res-lista { grid-template-columns: repeat(6, minmax(0, 1fr)); }
@@ -88,7 +91,7 @@
 .passo__estado { grid-area: estado; display: flex; align-items: center; gap: var(--espaco-mini); min-height: var(--altura-contador);
   color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .passo__data { line-height: var(--entrelinha); }
-.passo--futuro .passo__nome { color: var(--cor-texto-terciario); font-weight: var(--peso-medio); }
+.passo--futuro .passo__nome, .passo--encerrado .passo__nome { color: var(--cor-texto-terciario); font-weight: var(--peso-medio); }
 .passo--espera .passo__nome { color: var(--situacao-breve-texto); }
 /* a aba aberta cobre a borda de cima do painel: os dois viram uma peca so' */
 .passo--aberto button, .passo--aberto button:hover:not(:disabled) { position: relative; z-index: 1;
@@ -299,7 +302,7 @@
 .envio-item__texto { min-width: 0; display: flex; flex-direction: column; overflow-wrap: anywhere; }
 .envio-item__texto small { font-size: var(--texto-meta); color: var(--situacao-breve-texto); }
 .envio-item__texto small.envio-item__apoio { color: var(--cor-texto-terciario); }
-.envio-item--vencida .envio-item__texto small:not(.envio-item__apoio) { color: var(--situacao-critico-texto); }
+.envio-item--critico .envio-item__texto small:not(.envio-item__apoio) { color: var(--situacao-critico-texto); }
 .envio-itens .num { font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero); white-space: nowrap; }
 .med .certidoes-bloco { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--espaco-m); }
 .med .certidoes__empresa { margin: 0 0 var(--espaco-mini); color: var(--cor-tinta); font-size: var(--texto-meta); font-weight: var(--peso-forte); }
@@ -439,6 +442,8 @@
 .med .med-quadro .ol-janela .ol-chip button { width: var(--altura-contador); height: var(--altura-contador); margin: 0; border-radius: 0; color: var(--cor-texto-secundario); }
 .med .med-quadro .ol-janela .ol-chip button:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
 .med .med-quadro .ol-janela .ol-entrada { height: auto; min-height: var(--alvo-menor); min-width: 120px; padding: 0 var(--espaco-mini); font-size: var(--texto-corpo); }
+.med .med-quadro .ol-janela .ol-entrada:focus-visible, .med .med-quadro .ol-janela .ol-assunto input:focus-visible {
+  outline: var(--largura-foco) solid var(--cor-foco); outline-offset: var(--afastamento-foco); }
 .med .med-quadro .ol-janela .ol-cco { height: auto; padding: 0 var(--espaco-mini); color: var(--cor-tinta); font-size: var(--texto-corpo); font-weight: var(--peso-medio);
   text-decoration: underline; text-underline-offset: var(--afastamento-sublinhado); }
 .med .med-quadro .ol-janela .ol-cco:hover { background: none; text-decoration-thickness: var(--borda-grossa); }
