@@ -32,6 +32,8 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 - 2026-09-09 Casador do RM (revisto em 15/10/2026, #71): restam as NFs órfãs. Decidido pelo dono: Hospital AFL — o valor da medição é o da planilha assinada, a NF de reajuste casa à parte (sem fator no casador: a obra está concluída e não gera medição nova); desalocar manual auditado entrou (admin, #71); nível da NF não vale; a auditoria de divergência campo-livre × centro não será feita.
 - 2026-11-16 #748: com a aba Custo fora, `custo_obra.custo_da_obra` ainda calcula o detalhe por grupo e o item-chave (`itens_chave`) que nenhuma tela mostra; só o custo por competência vira coluna. Enxugar ou dar tela.
 - 2026-11-16 #748: CSS sem uso depois da saída de A receber e Carteira em `tokens.css` (`.tabela.a-receber`, `.custo__*`, `.cart-topo`, `.cart-kpis--quebra`); limpar na etapa das regras de design.
+- 2026-11-16 #748, depois de juntar o master na `redesenho`: a medição com nota emitida da obra sem o passo "Envio da nota" (o órgão não recebe protocolo da nota) tem de entrar no em aberto do Fechamento a partir da emissão da nota; hoje `fechamento.py` só conta a partir do protocolo.
+- 2026-11-16 #748, decisões do dono pendentes no Fechamento: o que fazer com as notas sem vínculo (medição sem nota ligada e nota sem medição ligada) e se "recebido" é bruto por competência (como está, `fechamento._recebimento`) ou líquido pelo mês do pagamento.
 - 2026-11-16 #748: a tabela de medições da obra (`tabela--grade`, larguras fixas) já não cabia na caixa a 1024 e a 1440 antes da coluna de custo; o próximo passo quebra em várias linhas. Rever no redesenho da página da obra.
 
 ## Cadastro (dono)

@@ -28,9 +28,12 @@ type Obra = {
   pi_va: number; faturados: number; saldo: number; status: string; termino: string | null;
   vigencia?: string | null; farol: "verde" | "atencao" | "acao" | "vermelho"; motivo: string; motivos?: Motivo[];
 };
+/** #279: por obra, as competências de reajuste já medidas sem apostilamento e o medido delas, na cota. */
+type ReajusteObra = { contrato_id: number; obra: string; competencias: number; valor_centavos: number };
 export type Painel = {
   hoje: string; medido_ano: { ano: string; valor_centavos: number }; curva_carteira: PontoCarteira[];
   carteira: Carteira; obras: Obra[]; avisos: Aviso[];
+  reajustes_apostilamento?: { competencias: number; valor_centavos: number; obras: ReajusteObra[] };
 };
 
 // O selo diz a palavra do nivel (D12, D10), a mesma do Selo dos avisos: Critico, Acao e Atencao. Acao e Atencao
@@ -252,7 +255,41 @@ export function Resumo({ p, ir }: { p: Painel; ir: Ir }) {
           })}
         </ul>
       )}
+
+      {/* #279 (spec 2026-10-20 §2.2): o reajuste já medido (pedido ou aprovado) das competências sem apostilamento,
+          por obra; a obra leva à aba Reajuste dela, com cada competência. Veio da Produção da Carteira (#748). */}
+      {p.reajustes_apostilamento && <Reajustes r={p.reajustes_apostilamento} ir={ir} />}
     </>
+  );
+}
+
+function Reajustes({ r, ir }: { r: NonNullable<Painel["reajustes_apostilamento"]>; ir: Ir }) {
+  return (
+    <Secao id="dir-reajustes" titulo="Reajustes esperando apostilamento (cota)">
+      {r.obras.length === 0 ? (
+        <div className="vazio vazio--curto"><p>Nenhum reajuste esperando apostilamento.</p></div>
+      ) : (
+        <Rolagem rotulo="Reajustes esperando apostilamento por obra">
+          <table className="tabela tabela--estreita">
+            <caption className="sr-only">Reajustes esperando apostilamento por obra, na cota da Lotufo</caption>
+            <thead><tr><th scope="col">Obra</th><th scope="col" className="col-num">Competências</th>
+              <th scope="col" className="col-num">Medido</th></tr></thead>
+            <tbody>
+              {r.obras.map(o => (
+                <tr key={o.contrato_id}>
+                  <td><Link className="nome-link truncar truncar--nome" title={o.obra}
+                    para={{ tela: "obra", id: o.contrato_id, aba: "reajuste" }} ir={ir}>{o.obra}</Link></td>
+                  <td className="col-num num">{o.competencias}</td>
+                  <td className="col-num dinheiro num">{brl(o.valor_centavos)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot><tr><th scope="row">Total</th><td className="col-num num">{r.competencias}</td>
+              <td className="col-num dinheiro num">{brl(r.valor_centavos)}</td></tr></tfoot>
+          </table>
+        </Rolagem>
+      )}
+    </Secao>
   );
 }
 

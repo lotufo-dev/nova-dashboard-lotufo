@@ -9,12 +9,13 @@ const PAINEL = {
   hoje: "2026-09-24", medido_ano: { ano: "2026", valor_centavos: 1_000_000 },
   curva_carteira: [{ competencia: "2026-08", previsto_centavos: 150_000, previsto_anterior_centavos: 300_000, medido_centavos: 100_000 },
                    { competencia: "2026-09", previsto_centavos: 200_000, previsto_anterior_centavos: 200_000, medido_centavos: 150_000 }],
+  reajustes_apostilamento: { competencias: 0, valor_centavos: 0, obras: [] as { contrato_id: number; obra: string; competencias: number; valor_centavos: number }[] },
   carteira: { saldo_centavos: 5_000_000,
-              por_orgao: [{ orgao: "SINFRA", saldo_centavos: 5_000_000, vigente_centavos: 20_000_000, medido_centavos: 15_000_000 }] },
-  obras: [{ contrato_id: 7, seq: 1, obra: "Cavalaria", contratante: "SINFRA", empreita: "PRÓPRIA", direito: 1,
+              por_orgao: [{ orgao: "Secretaria de Exemplo", saldo_centavos: 5_000_000, vigente_centavos: 20_000_000, medido_centavos: 15_000_000 }] },
+  obras: [{ contrato_id: 7, seq: 1, obra: "Obra Própria", contratante: "Secretaria de Exemplo", empreita: "PRÓPRIA", direito: 1,
             // #262: faturado (QDOP, com projeto) e saldo (execucao - medido de execucao) nao fecham entre si
             pi_va: 1_000_000, faturados: 450_000, saldo: 600_000, pct_recebido: 0.4, status: "EM ANDAMENTO",
-            termino: "2026-12-20", vigencia: "2027-03-20", farol: "vermelho", motivo: "Cavalaria: execução vencida",
+            termino: "2026-12-20", vigencia: "2027-03-20", farol: "vermelho", motivo: "Obra Própria: execução vencida",
             motivos: [{ tipo: "instrumento_pendente", nivel: "critico", dias: -12, valor_centavos: null, texto: "execução vencida" }] }],
   avisos: [],
 };
@@ -48,8 +49,8 @@ describe("Resumo e QDOP da lista de Obras (#748, vieram da Carteira)", () => {
     expect(leitura).not.toContain("do previsto");
     expect(screen.queryByText("acumulado, na cota da Lotufo")).toBeNull();
     // cartão do contratante: saldo, obras, % executado (15 de 20 milhões) e link para as obras dele
-    const cartao = screen.getByRole("link", { name: /SINFRA/ });
-    expect(cartao.getAttribute("href")).toContain("orgao=SINFRA");
+    const cartao = screen.getByRole("link", { name: /Secretaria de Exemplo/ });
+    expect(cartao.getAttribute("href")).toContain("orgao=Secretaria+de+Exemplo");
     expect(within(cartao).getByText("75%")).toBeTruthy();
     expect(within(cartao).queryByText(/obras em execução/)).toBeNull();
     // o que saiu do Resumo não está mais lá
@@ -107,7 +108,7 @@ describe("Resumo e QDOP da lista de Obras (#748, vieram da Carteira)", () => {
     // os botoes do farol so' com o rotulo, sem contagem
     expect(screen.getByRole("button", { name: "Atenção" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /^Atenção/ }));
-    expect(within(tabela).queryByText("Cavalaria")).toBeNull();
+    expect(within(tabela).queryByText("Obra Própria")).toBeNull();
     // total do recorte: só a "Outra" (contratual 5.000,00; faturado 1.500,00; saldo do servidor 4.000,00)
     const total = within(tabela).getByText("Total").closest("tr") as HTMLElement;
     const txt = (total.textContent ?? "").replace(/\s/g, " ");
@@ -140,4 +141,28 @@ describe("Resumo e QDOP da lista de Obras (#748, vieram da Carteira)", () => {
     expect(api.mock.calls.every(c => c[0] !== "/api/diretoria/custo")).toBe(true);
   });
 
+
+  it("Resumo: os reajustes esperando apostilamento listam por obra as competências e o medido, com o total (#279)", async () => {
+    const reajustes = { competencias: 5, valor_centavos: 750_004,
+      obras: [{ contrato_id: 7, obra: "Obra Própria", competencias: 3, valor_centavos: 650_003 },
+              { contrato_id: 8, obra: "Obra Consórcio", competencias: 2, valor_centavos: 100_001 }] };
+    api.mockImplementation((url: string) => Promise.resolve(url === "/api/diretoria" ? { ...PAINEL, reajustes_apostilamento: reajustes } : RESPOSTAS[url]));
+    render(<ObrasCarteira ir={() => {}} vista="resumo" />);
+    const tabela = await screen.findByRole("table", { name: /Reajustes esperando apostilamento/ });
+    expect(within(tabela).getAllByRole("columnheader").map(h => h.textContent)).toEqual(["Obra", "Competências", "Medido"]);
+    const texto = (l: HTMLElement) => within(l).getAllByRole("cell").map(c => (c.textContent ?? "").replace(/\s/g, " "));
+    const [, primeira, segunda, total] = within(tabela).getAllByRole("row");
+    expect(texto(primeira)).toEqual(["Obra Própria", "3", "R$ 6.500,03"]);
+    expect(texto(segunda)).toEqual(["Obra Consórcio", "2", "R$ 1.000,01"]);
+    expect((total.textContent ?? "").replace(/\s/g, " ")).toBe("Total5R$ 7.500,04");
+    expect(within(tabela).getByRole("link", { name: "Obra Própria" }).getAttribute("href")).toBe("/obras/7/reajuste");
+  });
+
+  it("Resumo: sem reajuste esperando apostilamento, uma linha no lugar da tabela", async () => {
+    api.mockImplementation((url: string) => Promise.resolve(RESPOSTAS[url]));
+    render(<ObrasCarteira ir={() => {}} vista="resumo" />);
+    expect(await screen.findByText("Reajustes esperando apostilamento (cota)")).toBeTruthy();
+    expect(screen.getByText("Nenhum reajuste esperando apostilamento.")).toBeTruthy();
+    expect(screen.queryByRole("table", { name: /Reajustes esperando apostilamento/ })).toBeNull();
+  });
 });

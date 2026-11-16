@@ -16,7 +16,7 @@ import datetime
 import json
 import math
 
-from app import avisos as _av, conciliacao, contratos, cronograma, medicoes, paineis, qdop, sincronizacao_rm, tempo
+from app import avisos as _av, conciliacao, contratos, cronograma, medicoes, paineis, qdop, reajuste, sincronizacao_rm, tempo
 
 # Prazo do orgao (docs/adr/0007, issue #711): o terceiro quartil dos dias entre o protocolo e o recebimento, com no
 # minimo cinco recebimentos em doze meses. A conta e' uma so' (`prazos_do_orgao`); nao ha' numero padrao.
@@ -335,6 +335,52 @@ def _medido(ms: list[dict], mes: str, compl: dict[str, int] | None = None) -> in
     return sum(_cota(m) for m in ms if m["competencia"] == mes and m["estado"] not in FORA) + (compl or {}).get(mes, 0)
 
 
+# Issue #279 (spec 2026-10-20 §2.2): a competencia de reajuste ja' medida (pedida, aprovada ou faturada) que nenhum
+# apostilamento cobre (`reajuste.competencias_por_ciclo`)
+ESPERANDO_APOSTILAMENTO = ("pedida", "aprovada", "faturada")
+
+
+def _esperando_apostilamento(conn, contrato_id: int) -> list[dict]:
+    """As competencias de reajuste do contrato ja' medidas e ainda nao recebidas que nenhum termo cobre, pelo criterio
+    unico da aba Reajuste (`reajuste.cobertura_das_competencias` e `reajuste.termo_sem_meses`, issue #275): nem o
+    apostilamento que lista o mes (`apostilada`), nem o termo sem meses que fecha o ciclo, nem o so' com `periodo`
+    no mes do periodo (`reajuste.termo_cobre_o_mes`, issue #444). A medicao sem data-base no
+    contrato de duas (grupo sem data-base de `competencias_por_ciclo`) so' fica coberta quando todas as datas-base em
+    que o mes tem reajuste o cobrem; sem nenhuma (contrato sem data-base, ou mes antes do 1o aniversario de todas,
+    revisor na rodada 2 da PR #431), nenhum termo a cobre e ela espera."""
+    grupos = reajuste.competencias_por_ciclo(conn, contrato_id)
+    if not grupos:
+        return []
+    coberta = reajuste.cobertura_das_competencias(conn, contrato_id, grupos)
+    out = []
+    for g in grupos:
+        for x in g["competencias"]:
+            if x["estado"] not in ESPERANDO_APOSTILAMENTO and x["medido_nao_recebido_centavos"] is None:
+                continue                  # nada medido, ou tudo ja' recebido
+            if not coberta(g["data_base_mes"], g["ciclo"], x):
+                out.append(x)
+    return out
+
+
+def _reajustes_sem_apostilamento(conn) -> dict:
+    """Por obra (todo contrato menos o rescindido, a base do QDOP: o reajuste so' sai com o apostilamento), as
+    competencias de reajuste ja' medidas que esperam apostilamento (`_esperando_apostilamento`) e o valor ja' medido
+    e ainda nao recebido delas (o aprovado de cada medicao, senao o pedido), na cota: o cheio da obra somado e
+    convertido uma vez, como a carteira (arredondamento unico). Obra sem nenhuma nao aparece. As competencias de uma
+    obra sao os meses (a mesma competencia em duas datas-base conta uma vez)."""
+    obras = []
+    for c in conn.execute("SELECT id, COALESCE(nome_curto, numero_instrumento) obra, percentual_direito_bp pct "
+                          "FROM contratos WHERE estado<>'rescindido'"):
+        xs = _esperando_apostilamento(conn, c["id"])
+        if xs:
+            obras.append({"contrato_id": c["id"], "obra": c["obra"], "competencias": len({x["competencia"] for x in xs}),
+                          "valor_centavos": contratos.cota(sum(x["medido_nao_recebido_centavos"] or 0 for x in xs),
+                                                           c["pct"]) or 0})
+    obras.sort(key=lambda o: (-o["valor_centavos"], o["obra"]))
+    return {"competencias": sum(o["competencias"] for o in obras), "valor_centavos": sum(o["valor_centavos"] for o in obras),
+            "obras": obras}
+
+
 def _vigente(conn, contrato_id: int, cache: dict) -> dict:
     """`contratos.vigente` lido uma vez por painel: a carteira e a tabela de obras usam o mesmo (#262)."""
     chave = ("vigente", contrato_id)
@@ -525,8 +571,8 @@ def _leitura_unica(conn):
 
 def painel(conn, hoje: datetime.date | None = None) -> dict:
     """O Resumo e o QDOP da lista de Obras (issue #748: sairam da Carteira, que deixou de existir). O resto da antiga
-    tela da diretoria (faixas do a receber, faturado do RM por mes, proximos meses, reajustes esperando apostilamento,
-    ritmo e desvio) saiu com ela: o backend so' calcula o que alguma tela mostra."""
+    tela da diretoria (faixas do a receber, faturado do RM por mes, proximos meses, ritmo e desvio) saiu com ela; os
+    reajustes esperando apostilamento por obra (#279) foram para o Resumo: o backend so' calcula o que alguma tela mostra."""
     hoje = hoje or tempo.hoje_local()
     with _leitura_unica(conn):
         ms = _medicoes(conn)
@@ -538,4 +584,6 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
         return {"hoje": hoje.isoformat(), "medido_ano": _medido_ano(ms, hoje, _complemento_na_cota(conn, compl)),
                 "carteira": _carteira(conn, ms, cache, execucao),
                 "curva_carteira": _curva_carteira(conn, hoje, cache, execucao),
+                # #279: o reajuste ja' medido das competencias sem apostilamento, por obra (bloco do Resumo de Obras)
+                "reajustes_apostilamento": _reajustes_sem_apostilamento(conn),
                 "obras": _obras(conn, ms, hoje, avisos, cache, execucao, compl), "avisos": avisos}

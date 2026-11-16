@@ -9,6 +9,7 @@ from tests.test_protocolo import _contrato
 
 MODELO = pathlib.Path(__file__).parents[2] / "cadastro-exemplo" / "modelos" / "qdop" / "qdop-modelo.xlsx"
 NUMEROS = fechamento.NUMEROS
+SOMAS = fechamento.SOMAS
 
 
 @pytest.fixture
@@ -83,15 +84,19 @@ def _confere_soma(f):
             for md in o["medicoes"]:
                 assert md["protocolado_centavos"] == sum(n["valor_centavos"] for n in md["notas"])
                 assert md["recebido_centavos"] == sum(n["valor_centavos"] for n in md["notas"] if n["recebida"])
-                assert md["em_aberto_centavos"] == md["protocolado_centavos"] - md["recebido_centavos"]
-            for k in NUMEROS:
+                # em aberto = (a) nota protocolada nao paga + (b) medicao protocolada sem nota ligada
+                assert md["em_aberto_centavos"] == md["protocolado_centavos"] - md["recebido_centavos"] + md["sem_nota_centavos"]
+                assert md["sem_nota_centavos"] == 0 or (md["sem_nota"] and md["notas"] == [])
+            for k in SOMAS:
                 assert o[k] == sum(md[k] for md in o["medicoes"]), (m["competencia"], o["obra"], k)
-        for k in NUMEROS:
+        for k in SOMAS:
             assert m[k] == sum(o[k] for o in m["obras"]), (m["competencia"], k)
     for ano, tot in f["por_ano"].items():
-        for k in NUMEROS:
+        for k in SOMAS:
             assert tot[k] == sum(m[k] for m in f["meses"] if m["competencia"][:4] == ano), (ano, k)
         assert tot["meses"] == sum(1 for m in f["meses"] if m["competencia"][:4] == ano)
+    assert f["em_aberto_centavos"] == f["em_aberto_notas_centavos"] + f["em_aberto_sem_nota_centavos"]
+    assert f["em_aberto_sem_nota_centavos"] == sum(m["sem_nota_centavos"] for m in f["meses"])
     assert f["em_aberto_centavos"] == sum(e["valor_centavos"] for e in f["em_aberto"]) \
         == sum(m["em_aberto_centavos"] for m in f["meses"])
 
@@ -102,7 +107,9 @@ def test_sem_lancamento_a_pagina_vem_vazia_sem_zero_disfarcado(cenario):
     assert f["anos"] == ["2025", "2026"] and f["meses"] == [] and f["em_aberto"] == []
     assert f["acumulado"]["ate_mes"] is None
     assert f["por_ano"]["2025"]["meses"] == f["por_ano"]["2026"]["meses"] == 0
-    assert f["notas_sem_medicao"] == {"quantidade": 0, "valor_centavos": 0}
+    assert f["notas_sem_medicao"] == {"em_aberto": [], "em_aberto_centavos": 0, "pagas": {"quantidade": 0, "valor_centavos": 0}}
+    assert f["cobertura"]["2026"] == {"aprovado_centavos": 0, "com_nota_centavos": 0, "sem_nota_centavos": 0,
+                                      "medicoes_sem_nota": 0, "percentual": None}
 
 
 def test_os_quatro_numeros_pela_competencia_da_medicao(cenario):
@@ -194,12 +201,13 @@ def test_nota_desconsiderada_ou_cancelada_fica_fora(cenario):
     nota(c, 300_000, [mid], situacao="cancelada")
     nota(c, 300_000, [mid], codtmv="2.2.15")                                 # nota do fornecedor: nao cobra o orgao
     f = fechamento.fechamento(c)
-    assert _numeros(_mes(f, "2026-06")) == (300_000, 300_000, 0, 0, 0)
-    assert f["em_aberto"] == []
+    # nenhuma nota conta: a medicao protocolada fica em aberto pelo valor dela, marcada sem nota ligada (b)
+    assert _numeros(_mes(f, "2026-06")) == (300_000, 300_000, 0, 0, 300_000)
+    assert [(e["tipo_aberto"], e["numero"], e["valor_centavos"]) for e in f["em_aberto"]] == [("sem_nota", None, 300_000)]
     vale = nota(c, 300_000, [mid])
     f = fechamento.fechamento(c)
     assert _numeros(_mes(f, "2026-06")) == (300_000, 300_000, 300_000, 0, 300_000)
-    assert [e["numero"] for e in f["em_aberto"]] == [vale]
+    assert [(e["tipo_aberto"], e["numero"]) for e in f["em_aberto"]] == [("nota", vale)]
 
 
 def test_recebida_a_mao_quita_as_notas_e_baixa_sem_valor_nao_quita(cenario):
@@ -236,19 +244,115 @@ def test_nota_ligada_a_duas_medicoes_entra_em_cada_uma_pelo_valor_do_vinculo(cen
     _confere_soma(f)
 
 
-def test_notas_sem_medicao_e_em_aberto_antes_de_2025_ficam_a_parte(cenario):
-    """Sem medicao ligada, a nota nao tem competencia: conta a' parte, na cota, fora dos meses e dos totais. O em aberto
+def test_notas_sem_medicao_em_aberto_e_pagas_e_em_aberto_antes_de_2025_ficam_a_parte(cenario):
+    """(c) Sem medicao ligada, a nota nao tem competencia: a em aberto no RM e' linha propria (com a data da emissao,
+    de qualquer ano), na cota, fora dos meses e do total; a paga so' e' contada (emitidas em 2025 e 2026). O em aberto
     de competencia anterior a 2025 tambem fica a' parte."""
     c, ids = cenario
-    nota(c, 400_001, centro="9.001.001", emissao="2026-02-01")              # obra pelo centro de custo
-    nota(c, 999_999, centro="9.001.001", emissao="2024-12-01")              # emitida antes de 2025: fora
-    nota(c, 600_001, coligada=12, emissao="2025-10-01")                     # consorcio sem centro: pela coligada, 50%
+    a = nota(c, 400_001, centro="9.001.001", emissao="2026-02-01")              # em aberto, obra pelo centro de custo
+    v = nota(c, 999_999, centro="9.001.001", emissao="2024-12-01")              # em aberto de 2024: continua devida
+    k = nota(c, 600_001, coligada=12, emissao="2025-10-01")                     # consorcio sem centro: pela coligada, 50%
+    nota(c, 123_457, centro="9.001.001", emissao="2025-11-01", titulos=PAGO(111_111))     # paga: so' contada
+    nota(c, 7_000, centro="9.001.001", emissao="2024-05-01", titulos=PAGO(6_300))         # paga e de 2024: nem contada
     velha = medir(c, ids["propria"], 1, "2024-11", "protocolada", 50_000, protocolo="2025-01-10")
     nota(c, 50_000, [velha])
     f = fechamento.fechamento(c)
-    assert f["meses"] == [] and f["em_aberto"] == []
-    assert f["notas_sem_medicao"] == {"quantidade": 2, "valor_centavos": 400_001 + 300_001}
+    assert f["meses"] == [] and f["em_aberto"] == [] and f["em_aberto_centavos"] == 0
+    s_m = f["notas_sem_medicao"]
+    assert [(e["numero"], e["emissao"], e["obra"], e["valor_centavos"]) for e in s_m["em_aberto"]] == [
+        (v, "2024-12-01", "Própria", 999_999), (k, "2025-10-01", "Consórcio", 300_001), (a, "2026-02-01", "Própria", 400_001)]
+    assert s_m["em_aberto_centavos"] == 999_999 + 300_001 + 400_001
+    assert s_m["pagas"] == {"quantidade": 1, "valor_centavos": 123_457}
     assert f["em_aberto_anteriores"] == {"quantidade": 1, "valor_centavos": 50_000}
+
+
+def test_medicao_protocolada_sem_nota_ligada_entra_no_em_aberto_pelo_valor_da_medicao(cenario):
+    """(b) A medicao protocolada (e nao recebida) sem nota ligada entra no em aberto pelo aprovado, senao o pedido, na
+    cota, com a data do protocolo; a recebida sem nota nao (ja' entrou). Com nota ligada, conta a nota."""
+    c, ids = cenario
+    medir(c, ids["consorcio"], 1, "2026-04", "protocolada", 2_000_003, aprovado=1_000_001, protocolo="2026-05-04")
+    medir(c, ids["propria"], 2, "2026-04", "nf_emitida", 300_000, protocolo="2026-05-02")
+    medir(c, ids["propria"], 3, "2026-04", "recebida", 900_000, aprovado=900_000, protocolo="2026-05-01")
+    f = fechamento.fechamento(c)
+    m = _mes(f, "2026-04")
+    assert (m["protocolado_centavos"], m["recebido_centavos"], m["sem_nota_centavos"], m["em_aberto_centavos"]) == (
+        0, 0, 500_001 + 300_000, 500_001 + 300_000)                               # 1.000.001 x 50% = 500.001
+    assert [(e["tipo_aberto"], e["obra"], e["medicao_numero"], e["protocolo_em"], e["valor_centavos"]) for e in f["em_aberto"]] == [
+        ("sem_nota", "Própria", 2, "2026-05-02", 300_000), ("sem_nota", "Consórcio", 1, "2026-05-04", 500_001)]
+    assert f["em_aberto_centavos"] == 800_001
+    _confere_soma(f)
+
+
+def test_medicao_sem_nota_e_nota_sem_medicao_nao_se_casam_nem_somam_duas_vezes(cenario):
+    """A mesma cobranca pode aparecer como medicao sem nota (b) e como nota solta (c) enquanto o vinculo nao e' feito.
+    Nao se casa por valor (docs/adr/0005): as duas listas aparecem, o total do em aberto e' (a)+(b) e (c) e' subtotal
+    a' parte. Feito o vinculo, as duas viram uma nota protocolada (a), uma vez so'."""
+    c, ids = cenario
+    mid = medir(c, ids["propria"], 4, "2026-05", "protocolada", 250_000, aprovado=250_000, protocolo="2026-06-01")
+    solta = nota(c, 250_000, centro="9.001.001", emissao="2026-05-28")
+    f = fechamento.fechamento(c)
+    assert [e["tipo_aberto"] for e in f["em_aberto"]] == ["sem_nota"]
+    assert [e["numero"] for e in f["notas_sem_medicao"]["em_aberto"]] == [solta]
+    assert f["em_aberto_centavos"] == 250_000                                   # (c) fora da soma
+    assert f["notas_sem_medicao"]["em_aberto_centavos"] == 250_000
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
+              "SELECT ?, id, 250000, 'manual', 't' FROM notas_fiscais WHERE numero=?", (mid, f"{int(solta):09d}"))
+    c.commit()
+    f = fechamento.fechamento(c)
+    assert [(e["tipo_aberto"], e["numero"]) for e in f["em_aberto"]] == [("nota", solta)]
+    assert f["notas_sem_medicao"]["em_aberto"] == [] and f["em_aberto_centavos"] == 250_000
+    _confere_soma(f)
+
+
+def test_aprovado_sem_valor_do_boletim_so_conta_com_a_nota_emitida(cenario):
+    """GLOSSARY.md, Aprovado: sem o valor do boletim gravado, a medicao so' conta como aprovada (pelo pedido) com a
+    nota emitida ou alem; antes disso fica so' no medido."""
+    c, ids = cenario
+    p = ids["propria"]
+    medir(c, p, 1, "2026-07", "boletim_recebido", 100_001)                      # sem valor do boletim: so' medido
+    medir(c, p, 2, "2026-07", "espelho_enviado", 200_000)
+    medir(c, p, 3, "2026-07", "espelho_gerado", 300_000, aprovado=290_000)      # com o valor: aprovado
+    medir(c, p, 4, "2026-07", "nota_emitida", 400_000)                          # nota emitida: o pedido conta
+    m = _mes(fechamento.fechamento(c), "2026-07")
+    assert (m["medido_centavos"], m["aprovado_centavos"]) == (100_001 + 200_000 + 290_000 + 400_000, 290_000 + 400_000)
+
+
+def test_cobertura_do_vinculo_por_ano(cenario):
+    """Por ano, quanto do aprovado das medicoes com nota emitida (ou alem) tem nota ligada; a aprovada antes da nota
+    nao entra na base."""
+    c, ids = cenario
+    p = ids["propria"]
+    a = medir(c, p, 1, "2025-03", "recebida", 600_000, aprovado=600_000, protocolo="2025-04-01")
+    nota(c, 600_000, [a], titulos=PAGO(540_000))
+    medir(c, p, 2, "2025-04", "recebida", 300_001, aprovado=300_001, protocolo="2025-05-01")      # paga, sem nota ligada
+    medir(c, p, 3, "2025-05", "espelho_gerado", 999_999, aprovado=999_999)                       # antes da nota: fora
+    b = medir(c, p, 4, "2026-01", "protocolada", 100_000, aprovado=100_000, protocolo="2026-02-01")
+    nota(c, 100_000, [b])
+    f = fechamento.fechamento(c)
+    assert f["cobertura"]["2025"] == {"aprovado_centavos": 900_001, "com_nota_centavos": 600_000,
+                                      "sem_nota_centavos": 300_001, "medicoes_sem_nota": 1, "percentual": 66.7}
+    assert f["cobertura"]["2026"]["sem_nota_centavos"] == 0 and f["cobertura"]["2026"]["percentual"] == 100.0
+
+
+def test_em_aberto_escondido_ate_liberar_o_total_a_receber(cenario):
+    """A trava `geral.yaml: diretoria.total_a_receber_liberado` (a da lista de Obras) vale para o em aberto: sem ela,
+    as linhas aparecem e o valor vem nulo; medido, aprovado, protocolado e recebido continuam."""
+    import json
+    c, ids = cenario
+    mid = medir(c, ids["propria"], 1, "2026-03", "protocolada", 500_000, protocolo="2026-04-01")
+    nota(c, 500_000, [mid])
+    medir(c, ids["propria"], 2, "2026-03", "protocolada", 70_000, protocolo="2026-04-02")
+    nota(c, 1_000, centro="9.001.001", emissao="2026-03-02")
+    c.execute("UPDATE cadastro_geral SET valor=? WHERE chave='diretoria'", (json.dumps({"total_a_receber_liberado": False}),))
+    c.commit()
+    f = fechamento.fechamento(c)
+    assert f["total_a_receber_liberado"] is False
+    m = _mes(f, "2026-03")
+    assert (m["protocolado_centavos"], m["em_aberto_centavos"], m["sem_nota_centavos"]) == (500_000, None, None)
+    assert f["por_ano"]["2026"]["em_aberto_centavos"] is None and f["em_aberto_centavos"] is None
+    assert len(f["em_aberto"]) == 2 and all(e["valor_centavos"] is None for e in f["em_aberto"])
+    assert f["notas_sem_medicao"]["em_aberto_centavos"] is None
+    assert [e["valor_centavos"] for e in f["notas_sem_medicao"]["em_aberto"]] == [None]
 
 
 def test_soma_fecha_ao_centavo_em_dois_anos_com_consorcio(cenario):

@@ -24,7 +24,8 @@ def test_painel_e_qdop_para_a_diretoria_e_401_sem_sessao(client):
     _login(client, "dir@l.com")
     r = client.get("/api/diretoria")
     # #748: so' o que o Resumo e o QDOP da lista de Obras mostram
-    assert r.status_code == 200 and set(r.json()) == {"hoje", "medido_ano", "curva_carteira", "carteira", "obras", "avisos"}
+    assert r.status_code == 200 and set(r.json()) == {"hoje", "medido_ano", "curva_carteira", "carteira", "obras", "avisos",
+                                                      "reajustes_apostilamento"}
     x = client.get("/api/diretoria/qdop.xlsx")
     assert x.status_code == 200 and "QDOP" in x.headers["content-disposition"]
     assert openpyxl.load_workbook(io.BytesIO(x.content)).active["S1"].value == "FRM.EXEMPLO.001"
@@ -40,7 +41,9 @@ def test_fechamento_so_leitura_e_401_sem_sessao_e_a_receber_saiu(client, monkeyp
     _login(client, "dir2@l.com")
     r = client.get("/api/fechamento")
     assert r.status_code == 200 and set(r.json()) == {"anos", "meses", "por_ano", "acumulado", "em_aberto",
-                                                      "em_aberto_centavos", "em_aberto_anteriores", "notas_sem_medicao"}
+                                                      "em_aberto_centavos", "em_aberto_anteriores", "notas_sem_medicao",
+                                                      "cobertura", "total_a_receber_liberado", "em_aberto_notas_centavos",
+                                                      "em_aberto_sem_nota_centavos"}
     assert r.json()["anos"] == ["2025", "2026"] and r.json()["meses"] == []
     assert client.get("/api/a-receber").status_code == 404
     assert client.get("/api/diretoria/custo").status_code == 404
@@ -151,7 +154,7 @@ def test_nota_desconsiderada_some_das_rotas_sem_marca_e_aparece_so_na_auditoria(
         assert all(v.status_code == 200 for v in rotas.values()), {r: v.status_code for r, v in rotas.items()}
         j = {r: v.json() for r, v in rotas.items()}
         a_receber = sum(o["posicao"]["a_receber_centavos"] or 0 for o in j["/api/contratos"])
-        numeros = (a_receber, j["/api/fechamento"]["notas_sem_medicao"]["valor_centavos"],
+        numeros = (a_receber, j["/api/fechamento"]["notas_sem_medicao"]["em_aberto_centavos"],
                    j["/api/inicio/painel"]["a_receber"]["valor_centavos"],
                    sorted(n["numero"] for n in j["/api/rm/reconciliacao"]["nfs_sem_medicao"]),
                    j["/api/rm/reconciliacao"]["totais"]["nfs_sem_medicao"], j["/api/inicio"]["avisos"])

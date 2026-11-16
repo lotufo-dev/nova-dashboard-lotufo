@@ -51,16 +51,16 @@
 .fch-painel__cab .fch-botoes { margin-left: auto; }
 
 /* tabela: a da fundacao, com a primeira coluna presa a' esquerda quando a caixa rola (celular) */
-.fch-tabela th, .fch-tabela td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
-.fch-tabela th:first-child, .fch-tabela td:first-child { padding-left: var(--espaco-g); }
-.fch-tabela th:last-child, .fch-tabela td:last-child { padding-right: var(--espaco-g); }
-.fch-tabela tbody th {
+.fch .fch-tabela th, .fch .fch-tabela td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
+.fch .fch-tabela th:first-child, .fch .fch-tabela td:first-child { padding-left: var(--espaco-g); }
+.fch .fch-tabela th:last-child, .fch .fch-tabela td:last-child { padding-right: var(--espaco-g); }
+.fch .fch-tabela tbody th {
   padding-top: var(--espaco-p); padding-bottom: var(--espaco-p); border-bottom: var(--borda-linha);
   text-align: left; font-weight: var(--peso-normal); vertical-align: top;
 }
-.fch-tabela tbody td { vertical-align: top; }
-.fch-tabela .fch-primeira { position: sticky; left: 0; z-index: 1; background: var(--cor-superficie); }
-.fch-tabela tfoot .fch-primeira { background: var(--cor-superficie); }
+.fch .fch-tabela tbody td { vertical-align: top; }
+.fch .fch-tabela .fch-primeira { position: sticky; left: 0; z-index: 1; background: var(--cor-superficie); }
+.fch .fch-tabela tfoot .fch-primeira { background: var(--cor-superficie); }
 .fch-rolagem { margin: 0; }
 
 /* abrir o mes e a obra: o nome e' o botao (teclado e leitor de tela), com a seta que gira */
@@ -80,11 +80,11 @@
 
 /* variante A: obra e medicao como linhas da mesma tabela, recuadas */
 .fch-linha--mes > th, .fch-linha--mes > td { font-weight: var(--peso-forte); }
-.fch-tabela .fch-linha--obra > th, .fch-tabela .fch-linha--obra > td,
-.fch-tabela .fch-linha--medicao > th, .fch-tabela .fch-linha--medicao > td { background: var(--cor-papel-sombreado); }
-.fch-tabela tbody .fch-linha--obra > th[scope="row"]:first-child { padding-left: calc(var(--espaco-g) + var(--espaco-m)); }
+.fch .fch-tabela .fch-linha--obra > th, .fch .fch-tabela .fch-linha--obra > td,
+.fch .fch-tabela .fch-linha--medicao > th, .fch .fch-tabela .fch-linha--medicao > td { background: var(--cor-papel-sombreado); }
+.fch .fch-tabela tbody .fch-linha--obra > th[scope="row"]:first-child { padding-left: calc(var(--espaco-g) + var(--espaco-m)); }
 .fch-linha--obra .fch-abre { font-weight: var(--peso-medio); }
-.fch-tabela tbody .fch-linha--medicao > th[scope="row"]:first-child { padding-left: calc(var(--espaco-g) + var(--espaco-gg) + var(--espaco-pp)); }
+.fch .fch-tabela tbody .fch-linha--medicao > th[scope="row"]:first-child { padding-left: calc(var(--espaco-g) + var(--espaco-gg) + var(--espaco-pp)); }
 .fch-linha--medicao > td { font-weight: var(--peso-normal); }
 
 .fch-notas { list-style: none; margin: var(--espaco-mini) 0 0; padding: 0; display: grid; gap: var(--espaco-mini); }
@@ -104,20 +104,51 @@
 .fch-outro { display: block; margin-top: var(--espaco-traco); color: var(--cor-texto-secundario); font-size: var(--texto-mini); font-weight: var(--peso-normal); }
 .fch-acumulado > th, .fch-acumulado > td { font-weight: var(--peso-medio); color: var(--cor-texto-secundario); border-top: var(--borda-linha); }
 
-/* em aberto */
+/* a base dos numeros, uma vez, sob o titulo do grupo */
+.fch-base { margin: calc(var(--espaco-entre-blocos) * -0.5) 0 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.fch-aviso { margin: 0; }
+.fch-soltas .fch-aviso { margin: 0 var(--espaco-g) var(--espaco-p); }
+
+.fch .fch-mes-curto { display: none; }
+
+/* em aberto: as duas partes que somam o total, cada uma com o seu subtotal na linha do grupo */
+.fch .fch-tabela tbody tr.fch-grupo > th, .fch .fch-tabela tbody tr.fch-grupo > td {
+  background: var(--cor-papel-sombreado); font-weight: var(--peso-forte); border-top: var(--borda-linha);
+}
+.fch-soltas { border-top: var(--regua-secao); margin-top: var(--espaco-m); padding-top: var(--espaco-m); }
+.fch-soltas__titulo { margin: 0 var(--espaco-g) var(--espaco-p); font-size: var(--texto-meta); }
 .fch-sub { display: block; color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
-.fch-tabela--aberto td, .fch-tabela--aberto tbody th { white-space: nowrap; }
+.fch .fch-tabela--aberto td, .fch .fch-tabela--aberto tbody th { white-space: nowrap; }
 .fch-aparte { display: grid; gap: var(--espaco-mini); margin: 0; padding: var(--espaco-m) var(--espaco-g) var(--espaco-m); border-top: var(--borda-linha); font-size: var(--texto-meta); }
 .fch-aparte > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--espaco-mini) var(--espaco-m); }
 .fch-aparte dt { color: var(--cor-texto-secundario); }
 .fch-aparte dd { margin: 0; font-weight: var(--peso-forte); }
 
 @media (max-width: 760px) {
+  /* no celular a tabela do mes mostra o medido e o recebido; os outros numeros estao no alto e no em aberto */
+  .fch .fch-tabela--meses .fch-col-opcional { display: none; }
+  .fch .fch-tabela { font-size: var(--texto-mini); }
+  .fch .fch-tabela .fch-abre { font-size: var(--texto-mini); gap: var(--espaco-mini); }
+  /* colunas mais juntas: o mes e os dois numeros cabem nos 294 px do conteudo, sem rolar */
+  .fch .fch-tabela th, .fch .fch-tabela td { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
+  .fch .fch-tabela tbody th[scope="row"]:first-child, .fch .fch-tabela thead th:first-child, .fch .fch-tabela tfoot th:first-child {
+    padding-left: var(--espaco-pp);
+  }
+  .fch .fch-tabela th:last-child, .fch .fch-tabela td:last-child { padding-right: var(--espaco-pp); }
+  .fch .fch-tabela--meses td:nth-child(5) { padding-right: var(--espaco-pp); }
+  /* o nome da obra e da medicao quebra em vez de alargar a primeira coluna */
+  .fch .fch-tabela--meses .fch-primeira { width: 5.25rem; max-width: 5.25rem; white-space: normal; hyphens: auto; }
+  .fch .fch-mes-longo { display: none; }
+  .fch .fch-mes-curto { display: inline; }
+  .fch .fch-tabela .fch-abre { white-space: normal; text-align: left; }
+  .fch .fch-tabela tbody .fch-linha--obra > th[scope="row"]:first-child { padding-left: var(--espaco-p); }
+  .fch .fch-tabela tbody .fch-linha--medicao > th[scope="row"]:first-child { padding-left: var(--espaco-m); }
+  .fch-soltas .fch-aviso, .fch-soltas__titulo { margin-left: var(--espaco-p); margin-right: var(--espaco-p); }
   .fch-painel__cab { padding: 0 var(--espaco-p); }
   .fch-painel__cab .fch-botoes { margin-left: 0; }
-  .fch-tabela th:first-child, .fch-tabela td:first-child { padding-left: var(--espaco-p); }
-  .fch-tabela th:last-child, .fch-tabela td:last-child { padding-right: var(--espaco-p); }
-  .fch-tabela tbody .fch-linha--obra > th[scope="row"]:first-child { padding-left: var(--espaco-g); }
-  .fch-tabela tbody .fch-linha--medicao > th[scope="row"]:first-child { padding-left: var(--espaco-xg); }
+  .fch .fch-tabela th:first-child, .fch .fch-tabela td:first-child { padding-left: var(--espaco-p); }
+  .fch .fch-tabela th:last-child, .fch .fch-tabela td:last-child { padding-right: var(--espaco-p); }
+  .fch .fch-tabela tbody .fch-linha--obra > th[scope="row"]:first-child { padding-left: var(--espaco-g); }
+  .fch .fch-tabela tbody .fch-linha--medicao > th[scope="row"]:first-child { padding-left: var(--espaco-xg); }
   .fch-quadro__corpo { padding: var(--espaco-p); }
 }

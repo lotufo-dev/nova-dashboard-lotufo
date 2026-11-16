@@ -93,7 +93,8 @@ O valor que a planilha/carta pede ao órgão.
 _Avoid_: valor protocolado
 
 **Aprovado**:
-O valor que o órgão fixa no boletim.
+O valor que o órgão fixa no boletim. Sem o valor do boletim gravado, a medição só conta como aprovada depois da nota
+emitida (a nota prova que o órgão aprovou), pelo valor do pedido; antes disso fica só no medido.
 _Avoid_: valor atestado
 
 **Faturado**:
