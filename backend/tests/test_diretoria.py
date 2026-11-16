@@ -857,7 +857,8 @@ def test_desvio_por_obra_no_qdop_pela_linha_anterior_ate_a_ultima_competencia_fe
               "VALUES (?, 40, 'execucao', '2026-09', 'protocolada', 5000000)", (ids["propria"],))
     c.commit()
     assert {o["contrato_id"]: o for o in diretoria.painel(c, HOJE)["obras"]}[ids["propria"]]["desvio_pp"] == 2.9
-    c.execute("DELETE FROM medicoes WHERE contrato_id=? AND numero=40", (ids["propria"],))
+    # medicao nao se apaga (migracao 087): a cancelada fica fora do medido
+    c.execute("UPDATE medicoes SET estado='cancelada' WHERE contrato_id=? AND numero=40", (ids["propria"],))
     c.commit()
     # em outubro, 09/2026 fecha: o previsto de 20 mil e o espelho de 10 mil entram (39 - 20 mil = 1,9)
     assert {o["contrato_id"]: o for o in diretoria.painel(c, D(2026, 10, 1))["obras"]}[ids["propria"]]["desvio_pp"] == 1.9
