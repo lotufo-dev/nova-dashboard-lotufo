@@ -102,7 +102,7 @@ function Erro({ texto, id }: { texto: string; id?: string }) {
 // F-65: o resultado de uma rodada ou de um servico no vocabulario unico OK / Falhou / Rodando (cabeca do cartao e tabela)
 function SeloRodada({ estado }: { estado: string }) {
   return (
-    <Selo classe={estado === "success" ? "selo--ok" : estado === "failed" ? "selo--acao" : ""}>
+    <Selo situacao={estado === "success" ? "feito" : estado === "failed" ? "critico" : undefined}>
       {ROTULO_ESTADO_RODADA[estado] ?? estado}
     </Selo>
   );
@@ -415,7 +415,7 @@ function Seguranca({ itens, fora, aviso, alertas }: { itens: ItemSeguranca[] | n
     <section className="cartao" aria-labelledby="titulo-seguranca">
       <div className="cartao__cabeca cartao__cabeca--quebra">
         <h2 className="cartao__titulo" id="titulo-seguranca">Segurança</h2>
-        {itens?.length === 0 && <Selo classe="selo--ok">nenhum alerta</Selo>}
+        {itens?.length === 0 && <Selo situacao="feito">nenhum alerta</Selo>}
       </div>
       {aviso && <p className="campo__nota">{aviso}</p>}
       {/* issue #424: por que os alertas por e-mail ao dono nao saem */}
@@ -882,8 +882,8 @@ function Usuarios({ eu }: { eu?: number }) {
                         </span>
                       ) : "—"}</td>
                       <td>{!u.ativo || contas === null ? "—" : c?.conectada ? (
-                        <Selo classe="selo--ok">conectada</Selo>
-                      ) : contas === undefined ? "…" : <Selo classe="">não conectada</Selo>}</td>
+                        <Selo situacao="feito">conectada</Selo>
+                      ) : contas === undefined ? "…" : <Selo>não conectada</Selo>}</td>
                       <td><div className="form-inline">
                         <button type="button" className="btn btn--pequeno" aria-expanded={aberto}
                                 aria-controls={aberto ? `acessos-${u.id}` : undefined}
@@ -1025,7 +1025,7 @@ function Auditoria({ busca }: { busca: Busca }) {
     <section className="cartao" aria-labelledby="titulo-auditoria">
       <div className="cartao__cabeca">
         <h2 className="cartao__titulo" id="titulo-auditoria">Auditoria</h2>
-        {audit && <Selo classe={audit.cadeia_integra ? "selo--ok" : "selo--acao"}>{audit.cadeia_integra ? "cadeia íntegra" : "cadeia violada"}</Selo>}
+        {audit && <Selo situacao={audit.cadeia_integra ? "feito" : "critico"}>{audit.cadeia_integra ? "cadeia íntegra" : "cadeia violada"}</Selo>}
       </div>
       {erro && <Erro texto={erro} />}
       {!audit && !erro && <div className="vazio"><p>Carregando…</p></div>}

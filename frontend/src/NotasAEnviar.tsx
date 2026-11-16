@@ -5,10 +5,11 @@ import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
 import { trocarBusca, type Busca } from "./rota";
 import { Link } from "./Link";
-import Selo from "./Selo";
+import Selo, { Glifo } from "./Selo";
 import { fmtDataPura } from "./tempo";
 import "./notas.css";
 import "./enviarNota.css";
+import { situacaoDoNivel } from "./situacao";
 
 // Notas a enviar (2026-10-09; plano docs/superpowers/plans/2026-10-09-notas-envio.md): as notas emitidas que
 // ainda nao foram ao contratante, por grupo de orgao, e o painel do envio escolhido. As regras (o que vai junto,
@@ -236,7 +237,7 @@ export function ListaCertidoes({ itens, semTitulo = false }: { itens: ItemCertid
           <ul className="certidoes">
             {itens.filter(i => i.entidade_id === eid).map(i => (
               <li key={`${i.entidade_id}-${i.tipo}`}>
-                <span className={`ponto${i.situacao === "pendente" ? " ponto--acao" : i.situacao === "vencendo" ? " ponto--atencao" : ""}`} aria-hidden="true" />
+                <Glifo situacao={i.situacao === "pendente" ? "critico" : i.situacao === "vencendo" ? "breve" : "feito"} />
                 <span>{i.tipo}</span>{textoCertidao(i) && <> <small>· {textoCertidao(i)}</small></>}
               </li>
             ))}
@@ -260,7 +261,7 @@ const FILTROS: { id: FiltroId; rotulo: string }[] = [
   { id: "todas", rotulo: "Todas" }, { id: "prontas", rotulo: "Prontas" }, { id: "pendencia", rotulo: "Com pendência" },
 ];
 
-type Resumo = { situacao: Situacao; selo: string; nivel: "" | "selo--ok" | "selo--atencao" | "selo--acao";
+type Resumo = { situacao: Situacao; selo: string; nivel: "" | "feito" | "breve" | "critico";
   motivo: string; tom: "neutro" | "atencao" | "bloqueio" };
 
 /** O selo do cartao e a frase do rodape. So' o bloqueio apaga o botao; a frase (`motivo`) so' existe quando o envio
@@ -268,24 +269,24 @@ type Resumo = { situacao: Situacao; selo: string; nivel: "" | "selo--ok" | "selo
 export function resumoDe(e: Envio): Resumo {
   if (e.situacao === "bloqueado") {
     const venc = e.itens.find(i => i.estado === "vencida");
-    return { situacao: "pendencia", selo: venc ? "Certidão vencida" : "Bloqueado", nivel: "selo--acao",
+    return { situacao: "pendencia", selo: venc ? "Certidão vencida" : "Bloqueado", nivel: "critico",
       motivo: e.aviso ? (/^bloque/i.test(e.aviso) ? e.aviso : `Envio bloqueado: ${e.aviso}`) : "Envio bloqueado.", tom: "bloqueio" };
   }
   if (e.situacao === "esperando") {
     const qual = e.espera?.tipo === "execucao" ? "a medição" : "o reajuste";
-    return { situacao: "pendencia", selo: `Esperando ${qual}`, nivel: "selo--atencao",
+    return { situacao: "pendencia", selo: `Esperando ${qual}`, nivel: "breve",
       motivo: `Esperando as notas d${qual}.`, tom: "atencao" };
   }
   // certidao a menos de 15 dias do vencimento so' avisa: o envio segue pronto, com o aviso ao lado
   const aviso = e.itens.find(i => i.estado === "aviso");
   const falta = e.itens.find(i => i.estado === "falta");
-  if (!falta && aviso) return { situacao: "pronto", selo: "Pronto", nivel: "selo--ok", motivo: "", tom: "atencao" };
+  if (!falta && aviso) return { situacao: "pronto", selo: "Pronto", nivel: "feito", motivo: "", tom: "atencao" };
   if (falta) {
     const rotulo = /^[A-ZÀ-Ý]{2}/.test(falta.rotulo) ? falta.rotulo : falta.rotulo.charAt(0).toLowerCase() + falta.rotulo.slice(1);
-    return { situacao: "pendencia", selo: falta.estado === "falta" ? `Falta ${rotulo}` : falta.rotulo, nivel: "selo--atencao",
+    return { situacao: "pendencia", selo: falta.estado === "falta" ? `Falta ${rotulo}` : falta.rotulo, nivel: "breve",
       motivo: "", tom: "atencao" };
   }
-  return { situacao: "pronto", selo: "Pronto", nivel: "selo--ok", motivo: "", tom: "neutro" };
+  return { situacao: "pronto", selo: "Pronto", nivel: "feito", motivo: "", tom: "neutro" };
 }
 
 /** O que vai junto, so' para ler: cada item com o estado e, onde falta algo, o link para resolver. */
@@ -466,7 +467,7 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
                         </span>
                         <span className="en-direita">
                           <span className={`nota-cartao__valor nota-mono${e.a_pedido ? " nota-cartao__valor--espera" : ""}`}>{brl(e.valor_centavos)}</span>
-                          <Selo classe={r.nivel}>{r.selo}</Selo>
+                          <Selo situacao={situacaoDoNivel(r.nivel)}>{r.selo}</Selo>
                         </span>
                       </button>
                     );

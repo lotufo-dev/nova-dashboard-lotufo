@@ -29,12 +29,12 @@ function deltaBR(centavos: number): string {
 function Situacao({ a }: { a: AditivoApi }) {
   if (a.cancelado_em) return <Selo>Cancelado</Selo>;
   if (a.status === "assinado") return (
-    <Selo classe="selo--ok"
+    <Selo situacao="feito"
       sufixo={<IconeCadeado className="icone icone--p" titulo="Congelado" />}>
       Assinado
     </Selo>
   );
-  return <Selo classe="selo--atencao">Em andamento</Selo>;
+  return <Selo situacao="breve">Em andamento</Selo>;
 }
 
 /** O efeito do apostilamento de reajuste; a data-base leva ao ciclo dela na aba Reajuste. */
@@ -134,7 +134,7 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
                     <td>
                       <Situacao a={a} />
                       {l.retroativo && (
-                        <Selo classe="selo--atencao" sufixo={<span className="sr-only"> — assinado depois do fim da execução que prorroga</span>}>
+                        <Selo situacao="breve" sufixo={<span className="sr-only"> — assinado depois do fim da execução que prorroga</span>}>
                           retroativo
                         </Selo>
                       )}

@@ -96,7 +96,7 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
           <p className="pag-numeros__rotulo">A receber{rotuloCota ? " · cota da Lotufo" : ""}</p>
           <p className="pag-numeros__valor pag-numeros__valor--acento num" aria-label={`A receber: ${brl(receber.falta)}`}>{brl(receber.falta)}</p>
           {/* issue #562: o a receber sai de nota que diverge do espelho */}
-          {(grupo[0]?.pagamento_cota?.falta_divergente_centavos ?? 0) > 0 && <Selo classe="selo--acao">Nota divergente do espelho</Selo>}
+          {(grupo[0]?.pagamento_cota?.falta_divergente_centavos ?? 0) > 0 && <Selo situacao="critico">Nota divergente do espelho</Selo>}
         </div>
         <div>
           <p className="pag-numeros__rotulo">Total da medição</p>
@@ -138,9 +138,9 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
                         {!daLotufo(n) ? " · outra coligada" : ""}</td>
                       <td className="col-num num">{brl(n.valor_centavos)}</td>
                       <td>{falta === null ? "—"
-                        : falta === 0 ? <Selo classe="selo--ok">paga{n.recebido_em ? ` em ${fmtDataPura(n.recebido_em.slice(0, 10))}` : ""}</Selo>
-                        : n.recebido_centavos > 0 ? <Selo classe="selo--atencao">paga em parte</Selo>
-                        : <Selo classe="selo--atencao">em aberto</Selo>}</td>
+                        : falta === 0 ? <Selo situacao="feito">paga{n.recebido_em ? ` em ${fmtDataPura(n.recebido_em.slice(0, 10))}` : ""}</Selo>
+                        : n.recebido_centavos > 0 ? <Selo situacao="breve">paga em parte</Selo>
+                        : <Selo situacao="breve">em aberto</Selo>}</td>
                     </tr>
                   );
                 })}
@@ -156,10 +156,10 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
           {receber.falta !== null && receber.total !== null && receber.total > 0 && (
             <p className="num">{brl(receber.recebido)} recebido de {brl(receber.total)}</p>
           )}
-          <p>{recebida ? <Selo classe="selo--ok">Recebida</Selo>
-            : quitado ? <Selo classe="selo--ok">Recebido</Selo>
+          <p>{recebida ? <Selo situacao="feito">Recebida</Selo>
+            : quitado ? <Selo situacao="feito">Recebido</Selo>
             : nadaAReceber ? null
-            : grupo.some(x => ["protocolada", "nf_emitida"].includes(x.estado)) ? <Selo classe={receber.parcial ? "selo--ok" : "selo--atencao"}>{receber.parcial ? "Recebido em parte" : "Aguardando o órgão"}</Selo> : null}</p>
+            : grupo.some(x => ["protocolada", "nf_emitida"].includes(x.estado)) ? <Selo situacao={receber.parcial ? "feito" : "breve"}>{receber.parcial ? "Recebido em parte" : "Aguardando o órgão"}</Selo> : null}</p>
           {/* issue #53: o recebimento a mao e' so' do admin (o servidor recusa outro perfil) */}
           {recebiveis.map(x => (
             <div key={x.id}>

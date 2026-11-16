@@ -55,10 +55,10 @@
 .medicoes__tabela tr:last-child td { border-bottom: 0; }
 .medicoes__tabela tbody tr:hover td { background: var(--cor-papel-sombreado); }
 .medicoes__tabela .col-num { text-align: right; white-space: nowrap; }
-.medicoes__obra { color: var(--cor-tinta); font-weight: 600; text-decoration: none; }
+.medicoes__obra { color: var(--cor-tinta); font-weight: 600; }
 .medicoes__obra:hover { color: var(--cor-tinta); text-decoration: underline; }
 .medicoes__obra-repete { color: var(--cor-texto-secundario); padding-left: 4px; }
-.medicoes__medicao { color: var(--cor-tinta); text-decoration: none; }
+.medicoes__medicao { color: var(--cor-tinta); }
 .medicoes__medicao:hover { color: var(--cor-menu-realce); text-decoration: underline; }
 .medicoes__sub { display: block; font-size: var(--texto-mini); line-height: 16px; color: var(--cor-texto-secundario); }
 .medicoes__traco { color: var(--cor-texto-terciario); }
@@ -97,7 +97,7 @@
 .iniciar__rodape { flex: none; display: flex; flex-direction: column; gap: 14px; border-top: 1px solid var(--cor-linha); padding: 16px 24px 20px; overflow-y: auto; max-height: 55%; }
 .iniciar__aviso { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border: 1px solid; border-radius: var(--raio-canto); }
 .iniciar__aviso .icone { margin-top: 2px; flex: none; }
-.iniciar__aviso--atencao { background: var(--situacao-breve-fundo); border-color: var(--atencao-linha); }
+.iniciar__aviso--atencao { background: var(--situacao-breve-fundo); border-color: var(--situacao-breve-texto); }
 .iniciar__aviso--atencao .icone { color: var(--situacao-breve-texto); }
 .iniciar__aviso--info { background: var(--cor-papel-sombreado); border-color: var(--cor-borda-controle); }
 .iniciar__aviso--info .icone { color: var(--cor-tinta); }
@@ -153,13 +153,12 @@
 .quadro__tabela thead .col-num { font-size: var(--texto-mini); }
 /* o nome da obra quebra entre palavras, nunca no meio de uma */
 .quadro__tabela tbody th.quadro__obra { text-align: left; font-weight: 400; overflow-wrap: normal; word-break: normal; }
-.quadro__medicao { display: block; font-size: var(--texto-mini); line-height: 16px; color: var(--cor-texto-secundario); text-decoration: none; }
+.quadro__medicao { display: block; font-size: var(--texto-mini); line-height: 16px; color: var(--cor-texto-secundario); }
 .quadro__medicao:hover { color: var(--cor-tinta); text-decoration: underline; }
 .quadro__passo { font-size: var(--texto-mini); line-height: 16px; white-space: nowrap; }
 .quadro__check { width: 12px; height: 12px; margin-right: 2px; vertical-align: -1px; stroke-width: 3; }
 .quadro__passo--futuro { color: var(--cor-texto-terciario); font-size: var(--texto-mini); }
-.quadro__atual { padding: 2px 8px; font-size: var(--texto-mini); text-decoration: none; }
-.quadro__atual:hover { text-decoration: underline; }
+.quadro__atual { text-decoration: none; }
 /* #664: a posição do processo no SIGA, em linhas pequenas sob a situação do passo: a sigla do setor e, embaixo, o tempo
    no setor. A coluna não alarga: o bloco usa também o respiro lateral da célula e o tempo quebra entre palavras, nunca
    no meio. A cor do tempo é a da tela SIGA (siga.css, .sg__dias). */

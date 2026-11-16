@@ -9,6 +9,7 @@ import type { Nivel } from "./matriz";
 import { cnpjBR, NATUREZA, ROTULO_TIPO, TIPOS, type ItemFila, type Lida, type RespostaLer } from "./documentosDados";
 import { fmtCompetencia } from "./tempo";
 import "./documentos.css";
+import { situacaoDoNivel } from "./situacao";
 
 /* Pecas comuns das duas telas de Documentos (#161): a lista de empresas (Documentos.tsx) e a pagina da empresa
  * (DocumentosEmpresa.tsx). Os dados vem de `documentos.painel` (GET /api/documentos); a regra (o que e' exigido, a
@@ -25,17 +26,15 @@ export function EmDia({ texto }: { texto: string }) {
 }
 
 /** A situacao de uma celula: "em dia" sem fundo, o resto no selo do nivel. */
-export function SituacaoSelo({ nivel, texto, forte }: { nivel: Nivel; texto: string; forte?: boolean }) {
+export function SituacaoSelo({ nivel, texto }: { nivel: Nivel; texto: string }) {
   return nivel === "ok" ? <EmDia texto={texto} />
-    : <Selo classe={nivel === "neutro" ? "" : `selo--${nivel}`} forte={forte}>{texto}</Selo>;
+    : <Selo situacao={situacaoDoNivel(nivel)}>{texto}</Selo>;
 }
 
 /** A pilula da situacao geral (sempre com fundo): no cartao da empresa e no cabecalho da pagina dela. */
 export function Pilula({ nivel, texto }: { nivel: Nivel; texto: string }) {
   return (
-    <span className={`selo doc-pilula${nivel === "neutro" ? "" : ` selo--${nivel}`}`}>
-      <span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">{texto}</span>
-    </span>
+    <Selo situacao={situacaoDoNivel(nivel)} className="doc-pilula">{texto}</Selo>
   );
 }
 

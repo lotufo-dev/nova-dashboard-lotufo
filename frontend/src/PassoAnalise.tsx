@@ -229,7 +229,7 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
                   </p>
                   {r.siga_processo_id ? (
                     <p className="orgao-emails__siga">
-                      <span className="selo selo--ok"><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">Protocolo do SIGA</span></span>
+                      <span className="selo selo--feito"><span className="glifo glifo--feito" aria-hidden="true" /><span className="selo__texto">Protocolo do SIGA</span></span>
                       {protocolo && <span>{[`Processo ${protocolo.numero ?? protocolo.codigo ?? ""}`.trim(), protocolo.setor].filter(Boolean).join(" · ")}</span>}
                       {protocolo?.link && (
                         <a className="link" href={protocolo.link} target="_blank" rel="noreferrer">

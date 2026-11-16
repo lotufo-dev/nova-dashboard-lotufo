@@ -93,7 +93,7 @@ function QuadroExigidos({ contratoId, natureza }: { contratoId: number; natureza
         <h2 className="cartao__titulo" id={id}>{NATUREZA[natureza]}</h2>
         {/* veredito nunca e' so' cor: o chip carrega a palavra */}
         {temVeredito && (
-          <Selo classe={dados.pronto ? "selo--ok" : "selo--acao"}>
+          <Selo situacao={dados.pronto ? "feito" : "critico"}>
             {dados.pronto ? "Pronto para protocolar" : "Falta documento para protocolar"}
           </Selo>
         )}

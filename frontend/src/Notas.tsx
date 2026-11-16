@@ -263,7 +263,7 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
         {rotulo ?? tituloMedicao(medicao)}
         {/* #514: quantas notas esperadas ja' chegaram ("4 de 6") */}
         {dados && dados.esperadas.length > 0 && (
-          <>{" "}<Selo classe={dados.esperadas.some(e => e.nota_id === null) ? "selo--atencao" : "selo--ok"}>
+          <>{" "}<Selo situacao={dados.esperadas.some(e => e.nota_id === null) ? "breve" : "feito"}>
             {`${dados.esperadas.filter(e => e.nota_id !== null).length} de ${dados.esperadas.length}`}</Selo></>
         )}
       </p>
@@ -316,7 +316,7 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
                     {celula("valor", e.valor)}
                     <td>{n ? <>{situacaoNota(n)}{conferencia(n)}{botaoDesfazer(n)}</> : (
                       <span className="notas__falta">
-                        <Selo classe="selo--atencao">aguardando</Selo>
+                        <Selo situacao="breve">aguardando</Selo>
                         {podeEditar && (
                           <label className="btn btn--pequeno espelho__anexar">
                             Anexar

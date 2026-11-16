@@ -61,6 +61,6 @@ describe("Medições da obra", () => {
     responder({ configurado: true, ultima_sincronizacao: null, ultimo_erro: "tempo esgotado" });
     render(<Medicoes contratoId={3} busca={{}} />);
     const selo = await screen.findByText("Sincronização com o RM falhou");
-    expect(selo.closest(".selo")?.className).toContain("selo--atencao");
+    expect(selo.closest(".selo")?.className).toContain("selo--breve");
   });
 });

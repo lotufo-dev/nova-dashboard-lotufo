@@ -13,6 +13,7 @@ import { fmtCompetencia, fmtDataPura, fmtMesCurto as mesCurto, fmtMesExtenso } f
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import { Abas } from "./Topo";
+import { situacaoDoNivel } from "./situacao";
 
 // Carteira (NAVEGACAO.md › Carteira; bloco 8, spec §10.5; redesenho #163, opcao A), a entrada da diretoria, em
 // abas na URL: Resumo (a padrao, so' o essencial), QDOP e Producao; o "Exportar QDOP" fica visivel nas tres. Tudo na COTA da Lotufo, com o vocabulario fixo: medido, faturado, protocolado,
@@ -64,11 +65,11 @@ type ObrasBase = { ativas: number; encerramento: number; suspensas: number; ence
 // O selo diz a palavra do nivel (D12, D10), a mesma do Selo dos avisos: Critico, Acao e Atencao. Acao e Atencao
 // dividem o ambar e se separam pela forma (contorno cheio na Acao), como em Alertas. So' o QDOP EXPORTADO
 // (arquivo) segue com o vocabulario oficial (verde, amarelo, vermelho).
-const FAROL: Record<Obra["farol"], { rotulo: string; classe: string; forte?: boolean }> = {
-  verde: { rotulo: "Em dia", classe: "selo--ok" },
-  acao: { rotulo: "Ação", classe: "selo--atencao", forte: true },
-  atencao: { rotulo: "Atenção", classe: "selo--atencao" },
-  vermelho: { rotulo: "Crítico", classe: "selo--acao" },
+const FAROL: Record<Obra["farol"], { rotulo: string; classe: string }> = {
+  verde: { rotulo: "Em dia", classe: "feito" },
+  acao: { rotulo: "Ação", classe: "breve" },
+  atencao: { rotulo: "Atenção", classe: "breve" },
+  vermelho: { rotulo: "Crítico", classe: "critico" },
 };
 
 function pct(f: number): string {
@@ -438,7 +439,7 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
                         embaixo, a vigencia */}
                     <td className="num">{data(o.termino)}<div className="campo__nota">vig. {data(o.vigencia)}</div></td>
                     <td className="sem-quebra">{o.status}</td>
-                    <td><Selo classe={(FAROL[o.farol] ?? FAROL.atencao).classe} forte={(FAROL[o.farol] ?? FAROL.atencao).forte}>{(FAROL[o.farol] ?? FAROL.atencao).rotulo}</Selo></td>
+                    <td><Selo situacao={situacaoDoNivel((FAROL[o.farol] ?? FAROL.atencao).classe)}>{(FAROL[o.farol] ?? FAROL.atencao).rotulo}</Selo></td>
                     <td>{!o.motivos ? (o.motivo || "—") : visiveis.length === 0 ? "—" : (
                       <ul className="motivos">
                         {visiveis.map(x => <li key={`${x.tipo}-${x.texto}`}>{x.texto}</li>)}

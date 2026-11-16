@@ -105,7 +105,7 @@
 .resposta__marca { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: var(--raio-canto); font-weight: 700; }
 .resposta__marca svg { width: 16px; height: 16px; }
 .resposta__marca--ok { background: var(--situacao-feito-ponto); color: var(--cor-superficie); }
-.resposta__marca--rev { background: var(--situacao-breve-fundo); color: var(--situacao-breve-texto); border: 1px solid var(--atencao-linha); }
+.resposta__marca--rev { background: var(--situacao-breve-fundo); color: var(--situacao-breve-texto); border: var(--borda-situacao-breve); }
 .resposta__texto { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
 .resposta__titulo { font-size: var(--texto-titulo-bloco); font-weight: 600; }
 .resposta__sub { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
@@ -164,8 +164,8 @@
 .frc__marco--ok .frc__marca { border-color: var(--situacao-feito-ponto); background: var(--situacao-feito-ponto); color: var(--cor-superficie); }
 .frc__marca svg { width: 12px; height: 12px; }
 .envio-faixa { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-radius: var(--raio-canto); font-size: var(--texto-valor-menor); font-weight: 600; }
-.envio-faixa--ok { background: var(--situacao-feito-fundo); border: 1px solid var(--ok-linha); color: var(--cor-tinta); }
-.envio-faixa--falta { background: var(--situacao-critico-fundo); border: 1px solid var(--acao-linha); color: var(--situacao-critico-texto); }
+.envio-faixa--ok { background: var(--situacao-feito-fundo); border: var(--borda-situacao-feito); color: var(--cor-tinta); }
+.envio-faixa--falta { background: var(--situacao-critico-fundo); border: var(--borda-situacao-critico); color: var(--situacao-critico-texto); }
 .envio-faixa__marca { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: var(--raio-canto); background: var(--situacao-feito-ponto); color: var(--cor-superficie); }
 .envio-faixa__marca svg { width: 16px; height: 16px; }
 .envio-cartoes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
@@ -188,6 +188,10 @@
 .pag-numeros__valor { font-size: var(--texto-titulo-pagina); line-height: 44px; font-weight: 700; white-space: nowrap; }
 .pag-numeros__valor--acento { color: var(--cor-tinta); }
 .pag-numeros__nota { color: var(--cor-texto-secundario); }
+/* o selo sob o numero quebra linha na coluna estreita (1024 px) em vez de cortar o rotulo */
+.pag-numeros .selo { align-items: flex-start; white-space: normal; }
+.pag-numeros .selo__texto { white-space: normal; overflow: visible; }
+.pag-numeros .selo > .glifo { margin-top: var(--espaco-grade); }
 .pag-dados { margin: 0; }
 .pag-dados > div { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--cor-linha); }
 .pag-dados dt { color: var(--cor-texto-secundario); }

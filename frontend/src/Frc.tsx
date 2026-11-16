@@ -194,7 +194,7 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
       <div className="frc__bloco">
         <div className="frc__cabeca">
           <h4 className="frc__titulo">FRC</h4>
-          {s.assinada && <Selo classe="selo--ok">Assinada</Selo>}
+          {s.assinada && <Selo situacao="feito">Assinada</Selo>}
           {s.frc && (
             <span className="campo__nota">
               nº <span className="nota-mono">{String(s.frc.numero).padStart(5, "0")}</span> gerada em {fmtDataPura(s.frc.data_geracao)}

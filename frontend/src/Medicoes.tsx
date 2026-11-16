@@ -97,7 +97,7 @@ export function Estado({ m }: { m: Medicao }) {
     <span className={`estado estado--${m.estado}${excecao ? " estado--excecao" : ""}`}>
       <span className="estado__ponto" aria-hidden="true" />
       {ROTULO_ESTADO[m.estado] ?? m.estado}
-      {m.final === 1 && <Selo classe="selo--atencao">final</Selo>}
+      {m.final === 1 && <Selo situacao="breve">final</Selo>}
       {m.congelada === 1 && (
         <span className="cadeado">
           <IconeCadeado className="icone icone--p" titulo="Congelada" />
@@ -156,7 +156,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
       <section className="cartao" aria-labelledby="titulo-em-andamento" id="em-andamento">
         <div className="cartao__cabeca">
           <h2 className="cartao__titulo" id="titulo-em-andamento">Em andamento</h2>
-          {rmFalhou && <Selo classe="selo--atencao">Sincronização com o RM falhou</Selo>}
+          {rmFalhou && <Selo situacao="breve">Sincronização com o RM falhou</Selo>}
         </div>
         {emAndamento.length === 0 ? (
           <div className="vazio vazio--curto"><p>Nenhuma medição aberta.</p></div>
@@ -190,7 +190,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
                       <td className="col-num dinheiro num">{brl(m.valor_atestado_centavos)}</td>
                       <td>{passo ? passo.rotulo : "—"}</td>
                       <td>{notasDivergentes(m).length > 0
-                        ? <Link className="link-selo" para={destino} secao="notas"><Selo classe="selo--acao">nota diverge</Selo></Link> : "—"}</td>
+                        ? <Link className="link-selo" para={destino} secao="notas"><Selo situacao="critico">nota diverge</Selo></Link> : "—"}</td>
                     </tr>
                   );
                 })}

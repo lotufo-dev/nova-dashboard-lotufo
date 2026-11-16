@@ -10,6 +10,7 @@ import { IconeCheck, iniciarEnvio, ListaCertidoes, mensagem, naturezaDoEnvio, pe
          type Envio, type ItemCertidao, type ListaEnvios } from "./NotasAEnviar";
 import RegistrarFora from "./RegistrarFora";
 import Selo from "./Selo";
+import { situacaoDoNivel } from "./situacao";
 
 // Etapa 4 da pagina da medicao (#152, opcao B): o envio ao orgao numa tabela de uma linha por envio -- um so' na
 // SINFRA e na Pref. VG (medicao e reajuste no mesmo e-mail), dois lado a lado na MTPAR e na SES --, com o motivo ao
@@ -41,8 +42,8 @@ export function useEnvios(ids: number[]) {
 
 function SeloDocs({ e }: { e: Envio }) {
   const r = resumoDe(e);
-  if (r.situacao === "pronto" && notasDivergentes(e).length > 0) return <Selo classe="selo--acao">Nota divergente</Selo>;
-  return <Selo classe={r.nivel}>{r.situacao === "pronto" ? "Completo" : r.selo}</Selo>;
+  if (r.situacao === "pronto" && notasDivergentes(e).length > 0) return <Selo situacao="critico">Nota divergente</Selo>;
+  return <Selo situacao={situacaoDoNivel(r.nivel)}>{r.situacao === "pronto" ? "Completo" : r.selo}</Selo>;
 }
 
 // Issue #562: o nome do campo conferido, o mesmo de notas.NOME_CAMPO no servidor
@@ -153,7 +154,7 @@ function Cartao({ titulo, linhas, children }: { titulo: string; linhas: Linha[];
   return (
     <section className="cartao med-painel envio-cartao" aria-label={titulo}>
       <h3 className="med-painel__titulo">{titulo}
-        {linhas.length > 0 && <Selo classe={ok === linhas.length ? "selo--ok" : "selo--acao"}>{`${ok} de ${linhas.length}`}</Selo>}</h3>
+        {linhas.length > 0 && <Selo situacao={ok === linhas.length ? "feito" : "critico"}>{`${ok} de ${linhas.length}`}</Selo>}</h3>
       {children ?? (linhas.length === 0 ? <p>—</p> : (
         <ul className="envio-itens">
           {linhas.map(l => (

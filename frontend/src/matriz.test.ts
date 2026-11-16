@@ -73,7 +73,7 @@ describe("redesenho de Documentos (#161)", () => {
     expect(situacaoGarantia(null, "")).toMatchObject({ texto: "sem vigência no cadastro", nivel: "neutro" });
     expect(situacaoGarantia(g(20, "vencendo"), "01/12/2026")).toMatchObject({ texto: "vence em 20 dias", nivel: "atencao" });
     expect(situacaoGarantia(g(15, "vencendo"), "01/12/2026").nivel).toBe("acao");
-    expect(situacaoGarantia(g(-3, "vencida"), "01/12/2026")).toMatchObject({ texto: "vencida", nivel: "acao", forte: true });
+    expect(situacaoGarantia(g(-3, "vencida"), "01/12/2026")).toMatchObject({ texto: "vencida", nivel: "acao" });
     expect(situacaoGarantia(g(-3, "vencida"), "01/12/2026").nota).toBe("venceu em 01/12/2026 · apólice AP-1");
     expect(situacaoGarantia(g(300, "baixada"), "01/12/2026").nivel).toBe("neutro");
   });

@@ -27,7 +27,7 @@
 .emp-cartao__cabeca { display: grid; gap: 2px; min-width: 0; }
 .emp-cartao__nome { margin: 0; font-size: var(--texto-titulo-bloco); line-height: 26px; font-weight: 600; overflow-wrap: anywhere; }
 /* o cartao inteiro e' o link: o ::after do nome cobre o cartao; o Copiar fica por cima */
-.emp-cartao__nome a { color: var(--cor-tinta); text-decoration: none; }
+.emp-cartao__nome a { color: var(--cor-tinta); }
 .emp-cartao__nome a::after { content: ""; position: absolute; inset: 0; border-radius: var(--raio-canto); }
 .emp-cartao__nome a:focus-visible { outline: none; }
 .emp-cartao__nome a:focus-visible::after { outline: 2px solid var(--cor-foco); outline-offset: 2px; }
@@ -135,7 +135,7 @@
 
 .doc-pilula { max-width: 100%; height: auto; align-items: flex-start; }
 .doc-pilula .selo__texto { white-space: normal; overflow: visible; text-overflow: clip; }
-.doc-pilula .selo__ponto { margin-top: 7px; }
+.doc-pilula .glifo { margin-top: var(--espaco-grade); }
 .doc-abas-cartao > .abas { overflow-x: auto; }
 .doc-abas-cartao .aba { white-space: nowrap; }
 
@@ -153,7 +153,7 @@
 .doc-linha { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); align-items: center; gap: 8px 16px;
   padding: 10px 14px; background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: var(--raio-canto); }
 .doc-linha__nome { display: grid; gap: 2px; min-width: 0; }
-.doc-linha__nome a, .doc-linha__obra { color: var(--cor-tinta); font-weight: 700; font-size: var(--texto-titulo-sub); text-decoration: none; overflow-wrap: anywhere; }
+.doc-linha__nome a, .doc-linha__obra { color: var(--cor-tinta); font-weight: 700; font-size: var(--texto-titulo-sub); overflow-wrap: anywhere; }
 .doc-linha__nome a:hover { text-decoration: underline; }
 .doc-linha__nome > span:not(.doc-linha__obra) { font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 .doc-linha__zip { justify-self: start; height: auto; padding: 0; border: 0; background: none; color: var(--cor-tinta); font-size: var(--texto-mini);

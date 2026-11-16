@@ -42,7 +42,7 @@ export function AceiteDiferenca({ m, podeEditar, salvando, agir, aoFechar, erro 
   const capaDiverge = (m.capa_divergencias ?? []).length > 0;
   if (!comBoletim || ["cancelada", "desistida"].includes(m.estado) || pedido === null || aprovado === null
     || (aprovado >= pedido && !capaDiverge && !m.diferenca_aceita)) return null;
-  if (m.diferenca_aceita) return <Selo classe="selo--ok">Diferença aceita</Selo>;
+  if (m.diferenca_aceita) return <Selo situacao="feito">Diferença aceita</Selo>;
   if (!podeEditar) return null;
   if (!aberto) {
     return <div><button type="button" className="btn btn--pequeno" onClick={() => setAbertoAqui(true)}>Aceitar a diferença</button></div>;
