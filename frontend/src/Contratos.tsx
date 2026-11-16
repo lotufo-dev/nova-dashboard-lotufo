@@ -8,9 +8,11 @@ import {
   type ObraLista,
 } from "./listaObras";
 import { brl } from "./Medicoes";
-import { trocarBusca, type Busca, type Ir } from "./rota";
+import ObrasCarteira from "./ObrasCarteira";
+import { trocarBusca, type AbaObras, type Busca, type Ir } from "./rota";
 import { Link } from "./Link";
 import Rolagem from "./Rolagem";
+import { Abas } from "./Topo";
 import "./obras.css";
 
 // Obras (lista), redesenho de 06/11/2026 (#509) revisto em 10/11/2026 (#645): uma tabela de posicao financeira NA COTA
@@ -18,18 +20,22 @@ import "./obras.css";
 // subtotal de cada um, os totais sob o titulo e a busca no topo. O estado fica na URL: ?q=<busca>, ?situacao=todas (com
 // as encerradas) e, nos links de antes, ?c=<contratante> (ou ?orgao=), que mostra so' o grupo dele.
 // Os Avisos (?avisos=1) continuam abrindo acima da tabela enquanto a tela propria deles nao existe.
+// #748: o Resumo e o QDOP da Carteira (que saiu) sao vistas desta lista, em "/obras/resumo" e "/obras/qdop".
 
 type Entidade = { id: number; nome: string; nome_curto?: string | null };
 type Obra = ObraLista;
 
 const FORA = new Set(["encerrado", "rescindido"]);
+const VISTAS: { id: AbaObras; rotulo: string }[] = [
+  { id: "posicao", rotulo: "Posição" }, { id: "resumo", rotulo: "Resumo" }, { id: "qdop", rotulo: "QDOP" },
+];
 
 /** "R$ 1.712,6 mi", como nos totais da imagem. */
 function emMilhoes(centavos: number): string {
   return `R$ ${(centavos / 100_000_000).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} mi`;
 }
 
-export default function Contratos({ ir, busca = {} }: { ir: Ir; busca?: Busca }) {
+export default function Contratos({ ir, busca = {}, aba = "posicao" }: { ir: Ir; busca?: Busca; aba?: AbaObras }) {
   const [lista, setLista] = useState<Obra[] | null>(null);
   const [empresas, setEmpresas] = useState<Map<number, string> | null>(new Map());
   const [avisos, setAvisos] = useState<Aviso[] | null | undefined>(undefined);
@@ -70,7 +76,7 @@ export default function Contratos({ ir, busca = {} }: { ir: Ir; busca?: Busca })
       <header className="topbar topbar--detalhe">
         <div className="topbar__linha topbar__linha--quebra obras-topo">
           <h1 className="topbar__titulo topbar__titulo--grande">Obras <span className="obras-topo__sub">cota da Lotufo</span></h1>
-          {lista && (
+          {lista && aba === "posicao" && (
             <div className="obras-busca">
               {orgao && <Link para={aqui} busca={semContratante}>Todas as obras</Link>}
               <label className="sr-only" htmlFor="obras-busca">Buscar obra</label>
@@ -79,7 +85,7 @@ export default function Contratos({ ir, busca = {} }: { ir: Ir; busca?: Busca })
             </div>
           )}
         </div>
-        {lista && (
+        {lista && aba === "posicao" && (
           <div className="obras-totais" role="group" aria-label="Totais">
             <span>Contratado <strong className="num">{emMilhoes(totais.contratado)}</strong></span>
             <span>Medido <strong className="num">{emMilhoes(totais.medido)}</strong></span>
@@ -89,6 +95,10 @@ export default function Contratos({ ir, busca = {} }: { ir: Ir; busca?: Busca })
         )}
       </header>
       <div className="pagina">
+        <Abas rotulo="Vistas da lista de Obras" atual={aba}
+          itens={VISTAS.map(v => ({ ...v, para: { tela: "obras" as const, aba: v.id } }))} />
+        {aba !== "posicao" && <ObrasCarteira ir={ir} vista={aba} />}
+        {aba === "posicao" && <>
         {!lista && !erro && <div className="vazio"><p>Carregando as obras…</p></div>}
         {erro && <p className="erro" role="alert">
           <IconeAlerta className="icone icone--p" />{erro} Recarregue a página para tentar de novo.
@@ -174,6 +184,7 @@ export default function Contratos({ ir, busca = {} }: { ir: Ir; busca?: Busca })
             </footer>
           </section>
         )}
+        </>}
       </div>
     </>
   );

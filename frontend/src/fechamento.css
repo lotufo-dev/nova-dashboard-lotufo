@@ -1,0 +1,114 @@
+/* Fechamento (#748): a disposicao e os blocos proprios da pagina. A moldura do painel (.cartao), a tabela (.tabela),
+   o selo, o contador e a caixa de aviso sao pecas de base de tokens.css. Cor, familia, tamanho, espaco e borda so'
+   por variavel. */
+
+.fch {
+  min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); row-gap: var(--espaco-entre-blocos);
+  color: var(--cor-tinta); font-family: var(--fonte-texto); font-size: var(--texto-corpo); line-height: var(--entrelinha);
+}
+.fch-vazio { margin: 0; padding: 0 var(--espaco-g) var(--espaco-g); color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.fch > .fch-vazio { padding: 0; }
+
+/* grupo "Cota da Lotufo": a regua grossa da Inicio, com o ano ao lado */
+.fch-cota {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--espaco-pp) var(--espaco-m);
+  border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro);
+}
+.fch-cota h2 { margin: 0; font-size: var(--texto-titulo-bloco); }
+
+/* botoes de escolha (ano, numero comparado): o escolhido em tinta cheia */
+.fch-botoes { display: flex; flex-wrap: wrap; gap: var(--espaco-mini); }
+.fch-botao {
+  height: var(--alvo-minimo); padding: 0 var(--espaco-m); border: var(--borda-campo); border-radius: var(--raio-controle);
+  background: var(--cor-superficie); color: var(--cor-tinta); box-shadow: none;
+  font-size: var(--texto-meta); font-weight: var(--peso-medio);
+}
+.fch-botao:hover:not(:disabled) { background: var(--cor-papel-sombreado); }
+.fch-botao[aria-pressed="true"], .fch-botao[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel);
+}
+
+/* os cinco numeros do ano: so' rotulo e valor, sem moldura, como os numeros do mes da Inicio */
+.fch-numeros {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr)); gap: var(--espaco-m) var(--espaco-g);
+  margin: 0;
+}
+.fch-numero { min-width: 0; }
+.fch-numero__rotulo { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.fch-numero__valor {
+  margin: 0; white-space: nowrap;
+  font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
+  font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-valor-menor); line-height: var(--entrelinha-numero);
+}
+
+/* painel */
+.fch .fch-painel { min-width: 0; padding: var(--espaco-g) 0 var(--espaco-mini); }
+.fch-painel__cab {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-pp) var(--espaco-p);
+  padding: 0 var(--espaco-g); margin-bottom: var(--titulo-margem-base);
+}
+.fch-painel__cab h2 { margin: 0; font-size: var(--texto-titulo-sub); }
+.fch-painel__cab .fch-botoes { margin-left: auto; }
+
+/* tabela: a da fundacao, com a primeira coluna presa a' esquerda quando a caixa rola (celular) */
+.fch-tabela th, .fch-tabela td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
+.fch-tabela th:first-child, .fch-tabela td:first-child { padding-left: var(--espaco-g); }
+.fch-tabela th:last-child, .fch-tabela td:last-child { padding-right: var(--espaco-g); }
+.fch-tabela tbody th { text-align: left; font-weight: var(--peso-normal); vertical-align: top; }
+.fch-tabela tbody td { vertical-align: top; }
+.fch-tabela .fch-primeira { position: sticky; left: 0; z-index: 1; background: var(--cor-superficie); }
+.fch-tabela tfoot .fch-primeira { background: var(--cor-superficie); }
+.fch-rolagem { margin: 0; }
+
+/* abrir o mes e a obra: o nome e' o botao (teclado e leitor de tela), com a seta que gira */
+.fch-abre {
+  display: inline-flex; align-items: center; gap: var(--espaco-pp); height: auto; min-height: var(--alvo-minimo);
+  padding: 0; margin: calc(var(--espaco-p) * -1) 0; border: 0; background: none; box-shadow: none;
+  color: var(--cor-tinta); font-size: var(--texto-meta); font-weight: var(--peso-forte); text-align: left;
+}
+.fch-abre:hover:not(:disabled) { background: none; text-decoration: underline; }
+.fch-abre__seta {
+  flex: none; width: 0; height: 0;
+  border-top: var(--espaco-mini) solid transparent; border-bottom: var(--espaco-mini) solid transparent;
+  border-left: calc(var(--espaco-mini) * 1.5) solid var(--cor-tinta);
+  transition: transform .12s ease;
+}
+.fch-abre[aria-expanded="true"] .fch-abre__seta { transform: rotate(90deg); }
+
+/* variante A: obra e medicao como linhas da mesma tabela, recuadas */
+.fch-linha--mes > th, .fch-linha--mes > td { font-weight: var(--peso-forte); }
+.fch-linha--obra > th, .fch-linha--obra > td, .fch-linha--medicao > th, .fch-linha--medicao > td { background: var(--cor-papel-sombreado); }
+.fch-linha--obra > th { padding-left: calc(var(--espaco-g) + var(--espaco-m)); }
+.fch-linha--obra .fch-abre { font-weight: var(--peso-medio); }
+.fch-linha--medicao > th { padding-left: calc(var(--espaco-g) + var(--espaco-gg) + var(--espaco-pp)); }
+.fch-linha--medicao > td { font-weight: var(--peso-normal); }
+
+.fch-notas { list-style: none; margin: var(--espaco-mini) 0 0; padding: 0; display: grid; gap: var(--espaco-mini); }
+.fch-notas li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-pp); font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
+
+/* variante B: o mes abre um quadro com uma tabela curta por obra */
+.fch-quadro > td { padding: 0; background: var(--cor-papel-sombreado); }
+.fch-quadro__corpo { display: grid; gap: var(--espaco-m); padding: var(--espaco-m) var(--espaco-g) var(--espaco-m) var(--espaco-xg); }
+.fch-quadro__obra { min-width: 0; }
+.fch-quadro__titulo { margin: 0 0 var(--espaco-pp); font-size: var(--texto-meta); }
+.fch-quadro__tabela { background: var(--cor-superficie); }
+.fch-quadro__tabela th:first-child, .fch-quadro__tabela td:first-child { padding-left: var(--espaco-p); }
+.fch-quadro__tabela th:last-child, .fch-quadro__tabela td:last-child { padding-right: var(--espaco-p); }
+.fch-quadro__tabela tbody th { text-align: left; font-weight: var(--peso-normal); }
+
+/* variante B da comparacao: o mesmo mes do outro ano embaixo do valor */
+.fch-outro { display: block; margin-top: var(--espaco-traco); color: var(--cor-texto-secundario); font-size: var(--texto-mini); font-weight: var(--peso-normal); }
+.fch-acumulado > th, .fch-acumulado > td { font-weight: var(--peso-medio); color: var(--cor-texto-secundario); border-top: var(--borda-linha); }
+
+/* em aberto */
+.fch-sub { display: block; color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
+.fch-tabela--aberto td, .fch-tabela--aberto tbody th { white-space: nowrap; }
+.fch-aparte { display: grid; gap: var(--espaco-mini); margin: 0; padding: var(--espaco-m) var(--espaco-g) var(--espaco-m); border-top: var(--borda-linha); font-size: var(--texto-meta); }
+.fch-aparte > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--espaco-mini) var(--espaco-m); }
+.fch-aparte dt { color: var(--cor-texto-secundario); }
+.fch-aparte dd { margin: 0; font-weight: var(--peso-forte); }
+
+@media (max-width: 760px) {
+  .fch-painel__cab .fch-botoes { margin-left: 0; }
+  .fch-quadro__corpo { padding: var(--espaco-p); }
+}

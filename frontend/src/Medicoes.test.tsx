@@ -57,6 +57,45 @@ describe("Medições da obra", () => {
     expect(celulas(anteriores, "td")[0]).toContain("|R$ 150,03|R$ 149,01|");
   });
 
+  // issue #748: o custo lançado no RM (era a aba Custo da Carteira) vira coluna, só na obra que tem cadastro de custo
+  it("coluna Custo lançado no RM só na obra com custo, uma vez por competência, na primeira execução", async () => {
+    const lista = [medicao(), medicao({ id: 71, numero: 7, tipo: "reajuste" }),
+      medicao({ id: 60, numero: 6, competencia: "2026-08", estado: "recebida", recebida_em: "2026-09-20" }),
+      medicao({ id: 50, numero: 5, competencia: "2026-07", estado: "recebida", recebida_em: "2026-08-20" })];
+    api.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/medicoes/andamento")) return [];
+      if (url === "/api/rm/status") return { configurado: false, ultima_sincronizacao: null, ultimo_erro: null };
+      if (url === "/api/contratos/3/custo") {
+        return { linhas: [{ competencia: "2026-09", custo_centavos: 123_457 }, { competencia: "2026-08", custo_centavos: 98_701 },
+          { competencia: "2026-07", custo_centavos: 0 }, { competencia: "2026-06", custo_centavos: 55_555 }] };
+      }
+      return lista;
+    });
+    render(<Medicoes contratoId={3} busca={{}} />);
+    await screen.findByRole("heading", { name: "Em andamento" });
+    const [abertas, anteriores] = screen.getAllByRole("table");
+    expect(within(abertas).getAllByRole("columnheader").map(h => h.textContent)).toContain("Custo lançado no RM");
+    const linha = (tabela: HTMLElement, nome: string) => within(tabela).getByRole("link", { name: nome }).closest("tr") as HTMLElement;
+    const custo = (tr: HTMLElement) => (tr.children[5].textContent ?? "").replace(/\s/g, " ");
+    expect(custo(linha(abertas, "7ª Medição"))).toBe("R$ 1.234,57");
+    expect(custo(linha(abertas, "Reajuste da 7ª Medição"))).toBe("—");      // uma vez só por competência
+    expect(custo(linha(anteriores, "6ª Medição"))).toBe("R$ 987,01");
+    expect(custo(linha(anteriores, "5ª Medição"))).toBe("—");               // zero não é custo lançado
+    // a coluna fica fora de total, sem a palavra margem
+    expect(document.body.textContent).not.toMatch(/margem|lucro/i);
+    expect(abertas.querySelector("tfoot")).toBeNull();
+    cleanup();
+    api.mockImplementation(async (url: string) => {
+      if (url === "/api/contratos/3/custo") throw new Error("Esta obra não tem cadastro de custo.");
+      if (url === "/api/rm/status") return { configurado: false, ultima_sincronizacao: null, ultimo_erro: null };
+      return url.startsWith("/api/medicoes/andamento") ? [] : lista;
+    });
+    render(<Medicoes contratoId={3} busca={{}} />);
+    await screen.findByRole("heading", { name: "Em andamento" });
+    expect(screen.queryByText("Custo lançado no RM")).toBeNull();
+    expect(screen.queryByText(/cadastro de custo/)).toBeNull();
+  });
+
   it("a falha da última sincronização do RM vira selo, só quando acontece", async () => {
     responder({ configurado: true, ultima_sincronizacao: null, ultimo_erro: "tempo esgotado" });
     render(<Medicoes contratoId={3} busca={{}} />);

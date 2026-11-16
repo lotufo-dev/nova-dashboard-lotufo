@@ -9,15 +9,16 @@ describe("navegação por perfil", () => {
   });
 
   it("trilho sem grupos, na ordem do trabalho, com o recorte do perfil; as Notas saíram (viraram abas de Medições)", () => {
-    expect(menuDe("engenharia")).toEqual(["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "a-receber", "ancoras-docusign"]);
-    // decisão 3: a diretoria sem Medições, com a Carteira
-    expect(menuDe("diretoria")).toEqual(["inicio", "obras", "avisos", "documentos", "a-receber", "carteira"]);
-    expect(menuDe("admin")).toEqual(["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "a-receber", "carteira", "ancoras-docusign", "admin"]);
+    expect(menuDe("engenharia")).toEqual(["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "fechamento", "ancoras-docusign"]);
+    // decisão 3: a diretoria sem Medições; #748: o Fechamento no lugar de A receber e da Carteira
+    expect(menuDe("diretoria")).toEqual(["inicio", "obras", "avisos", "documentos", "fechamento"]);
+    expect(menuDe("admin")).toEqual(["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "fechamento", "ancoras-docusign", "admin"]);
   });
 
   it("o item fica marcado também abaixo dele na hierarquia", () => {
     expect(itemDe({ tela: "obra", id: 7, aba: "prazos" })).toBe("obras");
-    expect(itemDe({ tela: "carteira" })).toBe("carteira");
+    expect(itemDe({ tela: "fechamento" })).toBe("fechamento");
+    expect(itemDe({ tela: "obras", aba: "qdop" })).toBe("obras");
     expect(itemDe({ tela: "obras" })).toBe("obras");
     expect(itemDe({ tela: "obras" }, { c: "todas", avisos: "1" })).toBe("avisos");   // Avisos abertos dentro de Obras
     expect(itemDe({ tela: "inicio" })).toBe("inicio");
@@ -34,7 +35,7 @@ describe("navegação por perfil", () => {
     expect(tituloDaSecao({ tela: "medicao", obra: 7, id: 723 })).toBe("Medições");
     expect(tituloDaSecao({ tela: "medicoes" })).toBe("Medições");
     expect(tituloDaSecao({ tela: "conta" })).toBe("Minha conta");
-    expect(tituloDaSecao({ tela: "a-receber" })).toBe("A receber");
+    expect(tituloDaSecao({ tela: "fechamento" })).toBe("Fechamento");
     expect(tituloDaSecao({ tela: "siga" })).toBe("SIGA");
     expect(tituloDe("siga")).toBe("SIGA");
   });
