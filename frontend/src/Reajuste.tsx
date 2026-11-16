@@ -7,7 +7,7 @@ import { cicloDoApostilamento, reajustePorDataBase, termosCorrigidos, type BaseD
   type InstrumentoCadastro } from "./obra";
 import { Link } from "./Link";
 import { fmtCompetencia as mesAno, fmtDataPura } from "./tempo";
-import { brl, fmtPercentual } from "./formato";
+import { brl, fmtPercentualDoCadastro } from "./formato";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import { LinhaPleito, partesDoEnvio, pleitoEmLinha, type DesfechoPleito } from "./Prazos";
@@ -74,14 +74,6 @@ function dasMedicoes(ns: number[]): string {
   const o = ns.map(n => `${n}ª`);
   return o.length > 1 ? `${o.slice(0, -1).join(", ")} e ${o[o.length - 1]} medições de reajuste`
     : `${o[0] ?? ""} medição de reajuste`.trim();
-}
-
-/** O percentual do termo da MT-PAR como o cadastro o guarda ("6,76", "6,76%" ou 6.76), com as casas que ele tem (ate'
- *  quatro: o indice de reajuste nao se arredonda na tela). */
-function percentual(p: string | number): string {
-  const s = String(p).trim().replace(/\s*%$/, "");
-  const n = typeof p === "number" ? p : Number(s.includes(",") ? s.replace(/\./g, "").replace(",", ".") : s);
-  return Number.isFinite(n) ? fmtPercentual(n / 100, 4) : `${s}%`;
 }
 
 function somaDe(linhas: Competencia[], f: (x: Competencia) => number | null): number | null {
@@ -223,7 +215,7 @@ function TabelaCompetencias({ rotulo, linhas, termos }: { rotulo: string; linhas
               </Celula>
               <Celula origem={doTermo(x)}>
                 {x.apostilado_centavos !== null ? brl(x.apostilado_centavos)
-                  : x.apostilada && x.apostilado_percentual !== null ? percentual(x.apostilado_percentual) : "—"}
+                  : (x.apostilada ? fmtPercentualDoCadastro(x.apostilado_percentual) : null) ?? "—"}
                 {/* o nº da medicao que o termo cita, a' vista (era coluna da tabela das apostiladas) */}
                 {x.apostilada && citada(x) && <span className="reajuste-competencias__citada"> ({citada(x)} med.)</span>}
               </Celula>
@@ -339,9 +331,7 @@ function linhaDoCiclo(c: Ciclo): string {
 
 /** O apostilamento: numero, data e o percentual concedido (o cadastro guarda "3,80"; issue #275: era NaN%). */
 function textoApostilamento(i: InstrumentoCadastro): string {
-  const pct = i.dados.percentual;
-  return [`${i.numero ?? "s/n"}, de ${fmtDataPura(i.data)}`,
-          typeof pct === "string" || typeof pct === "number" ? (String(pct).trim() ? percentual(pct) : "") : ""]
+  return [`${i.numero ?? "s/n"}, de ${fmtDataPura(i.data)}`, fmtPercentualDoCadastro(i.dados.percentual)]
     .filter(Boolean).join(" · ");
 }
 

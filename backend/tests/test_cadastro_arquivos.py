@@ -805,6 +805,22 @@ def test_apostilamento_so_com_percentual_e_periodo_e_aceito(tmp_path):
     assert ca.competencias_do_apostilamento(inst["dados"]) == []
 
 
+def test_apostilamento_com_percentual_em_qualquer_forma_de_numero_e_aceito_e_fica_como_escrito(tmp_path):
+    # o percentual fica guardado como foi escrito (instrumento aplicado nao muda); vazio e' ausencia, zero nao
+    for i, pct in enumerate(("6,76", "6.76", "6,76%", "6,76 %", " 7 ", "-0,35", "0", 6.76, 7, 0, "", None)):
+        ap = _apostilamento(percentual=pct, periodo={"de": "2026-04", "ate": "2027-03"})
+        cad = ca.preparar(_escrever(tmp_path / f"caso{i}", contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+        assert cad["contratos"][0]["instrumentos"][0]["dados"]["percentual"] == pct
+
+
+def test_apostilamento_com_percentual_que_nao_e_numero_e_erro(tmp_path):
+    for i, pct in enumerate(("a definir", "   ", "%", "6,7,6", "1.234,5", "3,5 a 4", "1e3", "nan", float("nan"),
+                             float("inf"), 10 ** 400, True, ["6,76"], {"valor": "6,76"})):
+        ap = _apostilamento(percentual=pct, periodo={"de": "2026-04", "ate": "2027-03"})
+        erros = _erros(_escrever(tmp_path / f"caso{i}", contratos=[{**CONTRATO, "instrumentos": [ap]}]))
+        assert any("instrumentos[ap-reaj-1].percentual: use só o número" in e for e in erros), (pct, erros)
+
+
 def test_apostilamento_de_reajuste_sem_numero_e_erro(tmp_path):
     # issue #278 (gate Sol, rodada 1 da PR #435): o oficio de reajuste cita o numero do termo
     for i, numero in enumerate((None, "", "   ")):

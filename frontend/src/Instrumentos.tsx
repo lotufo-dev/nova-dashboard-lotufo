@@ -5,7 +5,7 @@ import { brl } from "./Medicoes";
 import { instrumentosDaObra, type AditivoApi, type InstrumentoCadastro, type InstrumentoPrazo } from "./obra";
 import { Link } from "./Link";
 import { fmtCompetencia as mesBR, fmtDataPura } from "./tempo";
-import { fmtPercentual } from "./formato";
+import { fmtPercentualDoCadastro } from "./formato";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 
@@ -40,8 +40,8 @@ function Situacao({ a }: { a: AditivoApi }) {
 /** O efeito do apostilamento de reajuste; a data-base leva ao ciclo dela na aba Reajuste. */
 function EfeitoDoCadastro({ i, contratoId }: { i: InstrumentoCadastro; contratoId: number }) {
   if (i.tipo !== "apostilamento_reajuste") return <>—</>;
-  const pct = i.dados.percentual, eficacia = i.dados.eficacia, base = i.dados.data_base;
-  const partes = [pct !== undefined && pct !== null ? fmtPercentual(Number(pct) / 100) : "",
+  const eficacia = i.dados.eficacia, base = i.dados.data_base;
+  const partes = [fmtPercentualDoCadastro(i.dados.percentual),
                   typeof eficacia === "string" ? `eficácia ${data(eficacia)}` : ""].filter(Boolean);
   if (typeof base !== "string") return <>{partes.join(" · ") || "—"}</>;
   const mes = base.slice(0, 7);
