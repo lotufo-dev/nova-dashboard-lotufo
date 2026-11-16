@@ -95,7 +95,9 @@ def _notas_em_aberto(conn) -> list[dict]:
     coligada. So' notas da coligada da entidade do contrato: a NFS-e da Lotufo em obra de consorcio e' repassada
     pelo consorcio e nao e' cobranca ao orgao. O valor e' o que falta dos titulos (liquido), titulo a titulo, na cota.
     Nota ligada a medicao recebida a mao fica fora (issue #203): o registro manual vale, e o titulo ainda aberto
-    no RM aparece na Saude, nao de novo no a receber. So' notas de `CODTMV_COBRANCA` (#563)."""
+    no RM aparece na Saude, nao de novo no a receber. Issue #713: a nota que chega DEPOIS do recebimento a mao e'
+    ligada a' medicao pelo casador do RM (`sincronizacao_rm._candidatas`) e sai daqui por esta mesma regra; antes
+    ficava solta e somava, pelo centro de custo, um dinheiro que ja' entrou. So' notas de `CODTMV_COBRANCA` (#563)."""
     em_aberto = set(ESPERANDO_NOTA + ESPERANDO_PROTOCOLO + PROTOCOLADAS)
     a_mao = conciliacao.recebidas_a_mao(conn)
     contr, por_centro, por_coligada = _mapa_contratos(conn)
