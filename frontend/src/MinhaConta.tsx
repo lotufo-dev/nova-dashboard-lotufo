@@ -6,6 +6,7 @@ import { IconeAlerta, IconeOlho, IconeOlhoFechado } from "./icones";
 import type { Usuario } from "./Login";
 import { rotuloPerfil } from "./navegacao";
 import Selo from "./Selo";
+import CaixaAviso from "./CaixaAviso";
 
 type Login = { estado: string; user_code: string | null; verification_uri: string | null; erro?: string };
 type Status = { configurado: boolean; conectado: boolean; login: Login; assinatura: boolean };
@@ -184,12 +185,11 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
         <section className="cartao" aria-labelledby="t-ms">
           <header className="cartao__cabeca">
             <h2 className="cartao__titulo" id="t-ms">Conta Microsoft</h2>
-            {st.conectado ? <Selo classe="selo--ok">Conectada</Selo> : <Selo classe="selo--atencao">Não conectada</Selo>}
+            {st.conectado ? <Selo situacao="feito">Conectada</Selo> : <Selo situacao="breve">Não conectada</Selo>}
           </header>
           <div className="cartao__corpo">
             {!st.configurado && (
-              <p className="aviso" role="alert"><span className="aviso__ponto" aria-hidden="true" />
-                <span>O Microsoft 365 ainda não foi configurado neste servidor.</span></p>
+              <CaixaAviso nivel="atencao" role="alert">O Microsoft 365 ainda não foi configurado neste servidor.</CaixaAviso>
             )}
             {st.login.estado === "aguardando" && st.login.user_code && (
               <div className="codigo">
@@ -201,13 +201,13 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
               </div>
             )}
             {st.login.estado === "expirado" && (
-              <p className="aviso" role="alert"><span className="aviso__ponto" aria-hidden="true" /><span>O código expirou. Peça outro.</span></p>
+              <CaixaAviso nivel="atencao" role="alert">O código expirou. Peça outro.</CaixaAviso>
             )}
             {st.login.estado === "recusado" && (
-              <p className="aviso aviso--critico" role="alert"><IconeAlerta className="icone icone--p" /><span>A Microsoft recusou o acesso. Tente de novo.</span></p>
+              <CaixaAviso nivel="critico" role="alert">A Microsoft recusou o acesso. Tente de novo.</CaixaAviso>
             )}
             {st.login.estado === "erro" && (
-              <p className="aviso aviso--critico" role="alert"><IconeAlerta className="icone icone--p" /><span>{st.login.erro}</span></p>
+              <CaixaAviso nivel="critico" role="alert">{st.login.erro}</CaixaAviso>
             )}
             {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
             <button type="button" className={`btn botao-largo${st.conectado ? "" : " btn--primario"}`}
@@ -220,7 +220,7 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
         <section className="cartao" aria-labelledby="t-ass">
           <header className="cartao__cabeca">
             <h2 className="cartao__titulo" id="t-ass">Assinatura de e-mail</h2>
-            {st.assinatura ? <Selo classe="selo--ok">Cadastrada</Selo> : <Selo>Não cadastrada</Selo>}
+            {st.assinatura ? <Selo situacao="feito">Cadastrada</Selo> : <Selo>Não cadastrada</Selo>}
           </header>
           <div className="cartao__corpo">
             <div className={`assinatura-alvo${arrastando ? " arrastando" : ""}`} tabIndex={0} role="button"

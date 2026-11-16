@@ -362,7 +362,7 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
   if (!podeEditar) {
     return (
       <div className={classe}>
-        {det.bloqueio && <CaixaAviso nivel="critico" role="alert">Envio bloqueado: {det.bloqueio}</CaixaAviso>}
+        {det.bloqueio && <CaixaAviso nivel="trava" role="alert">Envio bloqueado: {det.bloqueio}</CaixaAviso>}
         <Secao n={1} titulo="O que vai no e-mail" passo="atual">
           <ItensEnvio itens={e.itens} aoMudar={() => void carregar()} podeEditar={false} />
         </Secao>
@@ -373,7 +373,7 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
   return (
     <>
       <div className={classe}>
-        {det.bloqueio && <CaixaAviso nivel="critico" role="alert">Envio bloqueado: {det.bloqueio}</CaixaAviso>}
+        {det.bloqueio && <CaixaAviso nivel="trava" role="alert">Envio bloqueado: {det.bloqueio}</CaixaAviso>}
         {erroAcao && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroAcao}</p>}
         {confirmar && <ConfirmarFaltas itens={confirmar.itens} mudou={confirmar.mudou} aoCancelar={() => setConfirmar(null)}
           aoContinuar={() => void enviarConfirmado(confirmar.m, confirmar.itens)} />}

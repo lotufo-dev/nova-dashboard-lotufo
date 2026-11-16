@@ -214,7 +214,8 @@ describe("Enviar a nota", () => {
     it("termo mudou depois da montagem: o envio fica bloqueado e o ofício se monta de novo", async () => {
       const MUDOU = "O apostilamento do reajuste mudou depois da montagem: monte o pacote de novo (e assine de novo, se já tinha assinado)";
       abrir({ ...mtpar("assinado", false), bloqueio: MUDOU, remontar: true, remontar_liberado: true });
-      expect(await screen.findByText(`Envio bloqueado: ${MUDOU}`)).toBeTruthy();
+      // #720: a trava e' o bloco cheio (nao a faixa clara do critico), e o botao da acao fica desligado
+      expect((await screen.findByText(`Envio bloqueado: ${MUDOU}`)).closest(".aviso")!.className).toBe("aviso aviso--trava");
       expect((screen.getByRole("button", { name: "Enviar o e-mail" }) as HTMLButtonElement).disabled).toBe(true);
       const montar = screen.getByRole("button", { name: "Montar de novo" }) as HTMLButtonElement;
       expect(montar.disabled).toBe(false);
