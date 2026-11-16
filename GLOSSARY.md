@@ -144,7 +144,8 @@ _Avoid_: casamento, alocação (são nomes internos)
 O registro no RM de que um título foi pago. A data da baixa é o dia do pagamento.
 
 **Prazo do órgão**:
-Quantos dias o órgão costuma levar do protocolo ao pagamento.
+Quantos dias o órgão costuma levar do protocolo ao pagamento: o terceiro quartil dos recebimentos dos últimos doze
+meses, com no mínimo cinco. Com menos, o órgão fica sem previsão.
 
 **Custo lançado no RM**:
 O custo que o RM registra para uma obra. Não é margem nem lucro.

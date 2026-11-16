@@ -1124,8 +1124,14 @@ protocolado.
 
 **Prazo normal do órgão:** saiu da Diretoria na #255 (motor de atraso de pagamento; decisão de 19/10/2026): não
 há mais aviso de pagamento atrasado nem recebimento previsto. O a receber da Diretoria mostra só a idade (faixas e
-maior número de dias). O "previsto" da tela A receber ainda usa o 3º quartil do órgão (com menos de 10 amostras,
-30 dias); a #255 não tratou dele.
+maior número de dias).
+
+**Prazo do órgão (`docs/adr/0007`, issue #711):** uma conta só, `diretoria.prazos_do_orgao`. É o terceiro quartil dos
+dias entre o primeiro protocolo da nota e o recebimento, das medições recebidas nos últimos 365 dias, por contratante
+(a SINFRA inteira, não cada superintendência), com no mínimo cinco recebimentos. Usam essa conta a previsão de entrada
+e a linha "Atrasado" do Início, a matriz obra por competência e o "previsto" da tela A receber. Contratante com menos
+de cinco recebimentos fica "Sem previsão" no Início e fora do "previsto" da tela A receber: não há número padrão (os
+30 dias saíram).
 
 **Total a receber:** enquanto `geral.yaml` tiver `diretoria.total_a_receber_liberado: false`, a tela mostra
 quantidade e dias do protocolado, sem valor ("a conciliar"). Depois da conciliação com a controladoria: trocar para `true`, `cadastro

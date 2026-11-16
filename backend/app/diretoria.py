@@ -17,7 +17,9 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from app import avisos as _av, conciliacao, contratos, cronograma, medicoes, paineis, qdop, reajuste, sincronizacao_rm, tempo
 
-QUARTIL, MINIMO, PADRAO_DIAS = 0.75, 10, 30   # prazo do orgao: so' o "previsto" da tela A receber usa
+# Prazo do orgao (docs/adr/0007, issue #711): o terceiro quartil dos dias entre o protocolo e o recebimento, com no
+# minimo cinco recebimentos em doze meses. A conta e' uma so' (`prazos_do_orgao`); nao ha' numero padrao.
+PRAZO_QUARTIL, PRAZO_MINIMO_CASOS, PRAZO_JANELA_DIAS = 0.75, 5, 365
 ESPERANDO_NOTA = ("espelho_gerado", "espelho_enviado")
 ESPERANDO_PROTOCOLO = ("nota_emitida",)
 PROTOCOLADAS = ("protocolada", "nf_emitida")
@@ -61,13 +63,33 @@ def _cota(m: dict) -> int:
     return contratos.cota(valor or 0, m["pct"]) or 0
 
 
-def _prazo(ms: list[dict], orgao_id, hoje: datetime.date, quantil: float) -> int:
-    desde = (hoje - datetime.timedelta(days=365)).isoformat()
-    dias = [(_d(m["recebida_em"]) - _d(m["protocolo_em"])).days for m in ms
-            if m["orgao_id"] == orgao_id and m["estado"] == "recebida" and _d(m["recebida_em"]) and _d(m["protocolo_em"])
-            and m["recebida_em"][:10] >= desde]
-    dias = [d for d in dias if d >= 0]
-    return _quantil(dias, quantil) if len(dias) >= MINIMO else PADRAO_DIAS
+def prazos_do_orgao(ms: list[dict], hoje: datetime.date) -> dict[str, int]:
+    """O prazo de pagamento de cada contratante, em dias (docs/adr/0007; a UNICA conta de prazo do sistema: a previsao
+    de entrada e o "Atrasado" do Inicio, a matriz e o previsto da tela A receber saem daqui).
+
+    E' o terceiro quartil (`_quantil`: o elemento de posicao ceil(0,75 * n) dos dias em ordem, sempre um prazo que
+    aconteceu, sem interpolar) dos dias entre o primeiro protocolo da nota e o recebimento, das medicoes recebidas nos
+    ultimos 365 dias. O contratante e' a sigla de `_contratante` (a SINFRA inteira, nao cada superintendencia).
+    Recebimento com data anterior ao protocolo nao e' prazo. Contratante com menos de PRAZO_MINIMO_CASOS recebimentos
+    fica FORA do dicionario: e' "sem previsao", e ninguem preenche com numero padrao."""
+    desde = hoje - datetime.timedelta(days=PRAZO_JANELA_DIAS)
+    dias: dict[str, list[int]] = {}
+    for m in ms:
+        recebida, protocolo = _d(m["recebida_em"]), _d(m["protocolo_em"])
+        if m["estado"] != "recebida" or not recebida or not protocolo or not desde <= recebida <= hoje or recebida < protocolo:
+            continue
+        dias.setdefault(_contratante(m), []).append((recebida - protocolo).days)
+    return {k: _quantil(v, PRAZO_QUARTIL) for k, v in dias.items() if len(v) >= PRAZO_MINIMO_CASOS}
+
+
+def esperada(m: dict, prazos: dict[str, int]) -> datetime.date | None:
+    """A data esperada do recebimento de uma medicao: o primeiro protocolo da nota + o prazo do contratante
+    (`prazos_do_orgao`). Sem a data do protocolo ou com o contratante sem prazo, nao ha' data esperada. Atrasada e' a
+    protocolada com essa data anterior a hoje: passou do que e' normal naquele orgao."""
+    protocolo, prazo = _d(m["protocolo_em"]), prazos.get(_contratante(m))
+    if protocolo is None or prazo is None:
+        return None
+    return protocolo + datetime.timedelta(days=prazo)
 
 
 def _mapa_contratos(conn) -> tuple[dict, dict, dict]:
@@ -725,10 +747,11 @@ def a_receber(conn, hoje: datetime.date | None = None) -> dict:
     esperando pagamento (medicoes protocoladas e, como no painel da diretoria, as notas do RM em aberto que nenhuma
     medicao representa), por obra. Antes da conciliacao o valor e' None e as notas do RM ficam fora (como no painel).
 
-    Regra do "previsto" (a confirmar pelo Leo; o sistema nao tem previsao por medicao): o previsto de um mes e' a
-    soma, na cota, das medicoes protocoladas (hoje em aberto ou ja' recebidas) cujo
-    vencimento (data do protocolo ou da emissao + prazo normal do orgao) cai naquele mes. O recebido do mes e' a
-    soma, na cota, das medicoes com `recebida_em` no mes. Seis meses ate o atual e tres a frente."""
+    Regra do "previsto": o previsto de um mes e' a soma, na cota, das medicoes protocoladas (hoje em aberto ou ja'
+    recebidas) cuja data esperada (`esperada`: protocolo + prazo do contratante, docs/adr/0007) cai naquele mes. A
+    medicao de contratante sem prazo (menos de cinco recebimentos em doze meses) nao tem data esperada e fica fora de
+    todos os meses (issue #711: o padrao de trinta dias saiu). O recebido do mes e' a soma, na cota, das medicoes com
+    `recebida_em` no mes. Seis meses ate o atual e tres a frente."""
     hoje = hoje or tempo.hoje_local()
     liberado = _liberado(conn)
     ms = _medicoes(conn)
@@ -754,17 +777,15 @@ def a_receber(conn, hoje: datetime.date | None = None) -> dict:
               "nota_numero": m.get("nf") if m.get("tipo") == "nota" else None, "competencia": m["competencia"],
               "protocolada_em": (m["protocolo_em"] or "")[:10] or None, "valor_centavos": _cota(m) if liberado else None}
              for m in abertas]
-    prazos: dict = {}
+    prazos = prazos_do_orgao(ms, hoje)
     previsto = dict.fromkeys([_mes(hoje, k) for k in range(-5, 4)], 0)
     # so' medicoes (a nota do RM repetiria a recebida) e recebida so' com data: o corte de 25/09/2026 fechou o legado como
     # recebida sem `recebida_em`; essas nao entram no recebido e, por isso, tambem ficam fora do previsto
     for m in [x for x in ms if x["estado"] in PROTOCOLADAS or (x["estado"] == "recebida" and x["recebida_em"])]:
-        base = _d(m["protocolo_em"])
-        if not base:
+        vence = esperada(m, prazos)
+        if vence is None:               # sem protocolo, ou contratante sem prazo: sem previsao
             continue
-        if m["orgao_id"] not in prazos:
-            prazos[m["orgao_id"]] = _prazo(ms, m["orgao_id"], hoje, QUARTIL)
-        mes = _mes(base + datetime.timedelta(days=prazos[m["orgao_id"]]))
+        mes = _mes(vence)
         # meses futuros: so' o que ainda nao foi pago; a recebida conta se o vencimento nao e' posterior ao mes do recebimento
         if m["estado"] == "recebida" and mes > _mes(hoje) and mes > m["recebida_em"][:7]:
             continue
