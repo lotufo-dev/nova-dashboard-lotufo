@@ -1,6 +1,7 @@
 """scripts/segunda_revisao.py (issue #709): PR que toca dinheiro, envio ou banco exige o item "Segunda revisao
 independente" marcado e preenchido no corpo; PR que nao toca passa sem o item; base que nao e' o master so' avisa."""
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -150,7 +151,11 @@ def test_pr_que_nao_toca_passa_sem_exigir_o_item(padroes, corpo):
 
 # --- linha de comando --------------------------------------------------------------------------------------------
 
-def _rodar(tmp_path, arquivos, corpo, *extras, env=None):
+def _rodar(tmp_path, arquivos, corpo, *extras, na_ci=False):
+    # a suite roda dentro da CI: GITHUB_ACTIONS sai do ambiente, e so' entra quando o teste pede
+    env = {k: v for k, v in os.environ.items() if k != "GITHUB_ACTIONS"}
+    if na_ci:
+        env["GITHUB_ACTIONS"] = "true"
     (tmp_path / "arquivos.txt").write_text("\n".join(arquivos) + "\n", encoding="utf-8")
     (tmp_path / "corpo.md").write_text(corpo, encoding="utf-8")
     return subprocess.run(
@@ -176,8 +181,7 @@ def test_base_que_nao_e_o_master_so_avisa(tmp_path):
 
 
 def test_na_ci_a_falha_vira_anotacao_de_erro(tmp_path):
-    import os
-    r = _rodar(tmp_path, TOCA, SEM_ITEM, env={**os.environ, "GITHUB_ACTIONS": "true"})
+    r = _rodar(tmp_path, TOCA, SEM_ITEM, na_ci=True)
     assert r.returncode == 1 and r.stdout.startswith("::error::Esta PR toca dinheiro")
 
 
@@ -201,7 +205,6 @@ def copia(tmp_path):
         destino = pasta / rel
         destino.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(RAIZ / rel, destino)
-    import os
     env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
            "GIT_AUTHOR_NAME": "Teste", "GIT_AUTHOR_EMAIL": "teste@exemplo.com.br",
            "GIT_COMMITTER_NAME": "Teste", "GIT_COMMITTER_EMAIL": "teste@exemplo.com.br"}
