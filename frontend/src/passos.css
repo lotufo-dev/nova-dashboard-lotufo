@@ -52,6 +52,12 @@
   .med-resumo .res-lista > div:nth-child(3n + 1) { padding-left: var(--espaco-m); border-left: var(--borda-linha); }
   .med-resumo .res-lista > div:nth-child(6n + 1) { padding-left: 0; border-left: 0; }
 }
+/* na tela estreita (celular) duas colunas: tres espremiam o valor atestado sobre a coluna ao lado */
+@container (max-width: 559px) {
+  .med-resumo .res-lista { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .med-resumo .res-lista > div:nth-child(3n + 1) { padding-left: var(--espaco-m); border-left: var(--borda-linha); }
+  .med-resumo .res-lista > div:nth-child(odd) { padding-left: 0; border-left: 0; }
+}
 
 /* disposicao: o passo e, ao lado, a Linha do tempo; sem largura (menos de 1040 px uteis), embaixo */
 .med-corpo { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-entre-blocos) var(--espaco-entre-colunas);
