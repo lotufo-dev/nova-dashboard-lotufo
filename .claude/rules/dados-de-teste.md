@@ -9,10 +9,13 @@ paths:
 
 - **O repositório é público e cada push sai na hora.** O que entra aqui já é conhecido de quem quiser ler;
   não existe "apago depois". Conferir o diff antes de commitar.
-- **Continua proibido na árvore** (código, teste, fixture, migração, spec, plano, backlog, comentário): nome de
-  pessoa, e-mail real, CNPJ ou CPF real, número de nota fiscal, valor real (de contrato, medição ou nota),
-  certidão, nome de máquina, porta e tarefa de produção, identificador de aplicativo e domínio do Microsoft 365.
-  O nome do dono também não se escreve: nos textos vale o papel ("o dono").
+- **Continua proibido na árvore** (código, teste, fixture, migração, exemplo de cadastro, docs, spec, plano,
+  backlog, comentário): nome de pessoa, e-mail real, CNPJ ou CPF real, número de nota fiscal, valor real (de
+  contrato, medição ou nota), certidão, nome de máquina, porta e tarefa de produção, identificador de aplicativo e
+  domínio do Microsoft 365. O nome do dono também não se escreve: nos textos vale o papel ("o dono").
+- **Exceção para o nome do dono já escrito**: fica como está em migração já aplicada (não se reescreve), em dado de
+  teste do qual um assert depende, na verificação de vazamento (`scripts/vazamento*`, mudança nela é do dono) e no
+  registro histórico de `docs/superpowers/specs/` e `plans/`. Texto novo usa o papel.
 - **Nome de obra e de órgão de contrato público não é dado real** (decisão de 16/11/2026, `docs/adr/0011`): é
   informação publicada em Diário Oficial. O que já está escrito com nome real de obra ou órgão (código,
   migração, teste, doc) não é violação e não precisa de troca.

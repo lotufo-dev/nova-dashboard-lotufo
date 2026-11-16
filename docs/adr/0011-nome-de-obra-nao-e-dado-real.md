@@ -13,4 +13,7 @@ Microsoft 365. O nome do dono também não se escreve: vale o papel.
 
 - Nome de obra já escrito não é violação e não se troca. Teste e fixture novos continuam preferindo a obra
   fictícia de `cadastro-exemplo/`.
+- O nome do dono já escrito fica como está em migração já aplicada, em dado de teste do qual um assert depende, na
+  verificação de vazamento (mudança nela é do dono) e no registro histórico de `docs/superpowers/specs/` e
+  `plans/`. Texto novo usa o papel.
 - O detalhe da regra está em `.claude/rules/dados-de-teste.md`.
