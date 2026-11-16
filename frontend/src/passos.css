@@ -163,9 +163,9 @@
 .frc__marca { display: grid; place-items: center; width: 22px; height: 22px; flex: none; border-radius: var(--raio-selo); border: 2px solid var(--cor-borda-controle); }
 .frc__marco--ok .frc__marca { border-color: var(--situacao-feito-ponto); background: var(--situacao-feito-ponto); color: var(--cor-superficie); }
 .frc__marca svg { width: 12px; height: 12px; }
-.envio-faixa { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-radius: var(--raio-canto); font-size: var(--texto-valor-menor); font-weight: 600; }
-.envio-faixa--ok { background: var(--situacao-feito-fundo); border: var(--borda-situacao-feito); color: var(--cor-tinta); }
-.envio-faixa--falta { background: var(--situacao-critico-fundo); border: var(--borda-situacao-critico); color: var(--situacao-critico-texto); }
+/* a faixa do que falta (.envio-faixa--falta) e' a peca de aviso: trava em bloco cheio ou faixa amarela (EtapaEnvio.tsx) */
+.envio-faixa--ok { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-radius: var(--raio-canto); font-size: var(--texto-valor-menor); font-weight: 600;
+  background: var(--situacao-feito-fundo); border: var(--borda-situacao-feito); color: var(--cor-tinta); }
 .envio-faixa__marca { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: var(--raio-canto); background: var(--situacao-feito-ponto); color: var(--cor-superficie); }
 .envio-faixa__marca svg { width: 16px; height: 16px; }
 .envio-cartoes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
@@ -205,6 +205,6 @@
   .pag-numeros > div { padding: 14px 16px; border-left: 0; border-top: 1px solid var(--cor-linha); }
   .pag-numeros > div:first-child { border-top: 0; }
   .pag-numeros__valor { font-size: var(--texto-numero); line-height: 34px; }
-  .envio-faixa { font-size: var(--texto-corpo); padding: 12px 14px; }
+  .envio-faixa--ok { font-size: var(--texto-corpo); padding: 12px 14px; }
   .frc__valor { font-size: var(--texto-valor); line-height: 32px; }
 }

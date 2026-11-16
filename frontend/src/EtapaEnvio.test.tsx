@@ -421,7 +421,7 @@ describe("Etapa 4: registrar envio feito fora do sistema", () => {
 describe("Envio da nota: faixa e cartões (#514)", () => {
   afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
 
-  it("certidão vencida: faixa vermelha com o motivo e “Enviar a nota” desligado", () => {
+  it("certidão vencida: a faixa é a trava (bloco cheio, sinal de proibido) com o motivo, e “Enviar a nota” fica desligado", () => {
     api.mockResolvedValue({ itens: [] });
     montar([envio({ situacao: "bloqueado", aviso: "Guaxe: FGTS vencida em 01/11",
       itens: [{ chave: "notas", rotulo: "Nota fiscal (1)", estado: "ok" },
@@ -429,8 +429,16 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
         { chave: "certidoes:guaxe", rotulo: "Certidões Guaxe (5)", detalhe: "FGTS vencida em 01/11", estado: "vencida", entidade_id: 2 }] })]);
     const faixa = document.querySelector(".envio-faixa")!;
     expect(faixa.className).toContain("envio-faixa--falta");
-    expect(faixa.textContent).toBe("Falta 1 item para enviar: Guaxe: FGTS vencida em 01/11");
+    // #720: envio bloqueado tem a forma de trava, e nao a mesma faixa de quando so' falta algo
+    expect(faixa.className).toContain("aviso--trava");
+    expect(faixa.querySelector("svg.icone")).not.toBeNull();
+    expect(faixa.querySelector(".glifo")).toBeNull();
+    expect(faixa.textContent).toBe("Crítico: Falta 1 item para enviar: Guaxe: FGTS vencida em 01/11");
     expect((screen.getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(true);
+    // o motivo da linha, ao lado do botao desligado, tambem e' a trava
+    const motivo = document.querySelector(".envios__motivo")!;
+    expect(motivo.className).toContain("aviso--trava");
+    expect(motivo.textContent).toBe("Crítico: Envio bloqueado: Guaxe: FGTS vencida em 01/11");
     const certidoes = screen.getByRole("region", { name: "Certidões por empresa" });
     expect(within(certidoes).getByText("1 de 2")).toBeTruthy();
     expect(within(certidoes).getByText("FGTS vencida em 01/11")).toBeTruthy();
@@ -452,11 +460,16 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
     expect((screen.getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("documento faltando: faixa vermelha diz o que falta, mas o botão segue ligado (só o bloqueio desliga)", () => {
+  it("documento faltando: a faixa amarela de atenção diz o que falta, e o botão segue ligado (só o bloqueio desliga)", () => {
     api.mockResolvedValue({ itens: [] });
     montar([envio({ situacao: "pendente", aviso: "Falta a regularidade",
       itens: [{ chave: "regularidade:lotufo", rotulo: "Regularidade mensal", detalhe: "O DP ainda não enviou o arquivo de 10/2026", estado: "falta" }] })]);
-    expect(document.querySelector(".envio-faixa")!.textContent).toBe("Falta 1 item para enviar: a regularidade");
+    const faixa = document.querySelector(".envio-faixa")!;
+    expect(faixa.textContent).toBe("Atenção: Falta 1 item para enviar: a regularidade");
+    // #720: falta que nao trava e' a faixa amarela com o triangulo, nunca a forma de trava
+    expect(faixa.className).toBe("aviso envio-faixa envio-faixa--falta");
+    expect(faixa.querySelector(".glifo--breve")).not.toBeNull();
+    expect(document.querySelector(".aviso--trava")).toBeNull();
     expect(within(screen.getByRole("region", { name: "Documentos" })).getByText("0 de 1")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(false);
   });
@@ -467,13 +480,13 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
       envio({ chave: "b", familia: "mtpar", descricao: "Reajuste da 25ª medição", medicao_ids: [632], situacao: "bloqueado",
         aviso: "Trabalhista vencida em 02/11", notas: [{ numero: "2361", natureza: "reajuste", valor_centavos: 1 }] })]);
     expect(screen.getAllByRole("row").slice(1)).toHaveLength(2);
-    expect(document.querySelector(".envio-faixa")!.textContent).toBe("Falta 1 item para enviar: Reajuste da 25ª medição: Trabalhista vencida em 02/11");
+    expect(document.querySelector(".envio-faixa")!.textContent).toBe("Crítico: Falta 1 item para enviar: Reajuste da 25ª medição: Trabalhista vencida em 02/11");
   });
 
   it("certidão só para vencer avisa, mas não entra na faixa como falta (code-review)", () => {
     api.mockResolvedValue({ itens: [] });
     montar([envio({ situacao: "pendente", aviso: "Falta a nota fiscal · CND vence em 5 dias" })]);
-    expect(document.querySelector(".envio-faixa")!.textContent).toBe("Falta 1 item para enviar: a nota fiscal");
+    expect(document.querySelector(".envio-faixa")!.textContent).toBe("Atenção: Falta 1 item para enviar: a nota fiscal");
   });
 
   it("o cartão Notas fiscais não repete o texto do servidor da FRC (etapa antiga, “anexe aqui”) (revisor, PR #555)", () => {
