@@ -44,7 +44,7 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 
 ## Externo (dono)
 
-- 2026-09-04 RM: a API só responde HTTP, então a credencial da conta de serviço viaja em claro na rede interna; trocar a senha do RM que passou pelo chat e criar uma conta de serviço só-leitura.
+- Nenhum em 17/11/2026.
 - 2026-11-17 Job `ponta-a-ponta` (#701): falta torná-lo obrigatório. Depois de três execuções verdes seguidas no `master`, o dono acrescenta o check `ponta-a-ponta` (nome exato) aos checks obrigatórios do ruleset `master protegida` (Settings › Rules › Rulesets). Até lá o job roda em PR, no `master` e na fila de merge, mas vermelho não barra o merge. Feito isso, fechar a #701.
 
 ## Decisões vigentes (registro)
@@ -58,3 +58,4 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 - 2026-11-17 O número grande do alto da página da medição continua sendo o valor pedido, com o aprovado à parte, como na tela aprovada pelo dono em 16/11/2026.
 - 2026-11-17 Diretório Microsoft nas sugestões de destinatário não será ligado: o catálogo de contatos do próprio sistema atende. As permissões `People.Read` e `User.ReadBasic.All` não serão acrescentadas no aplicativo do Entra ID.
 - 2026-11-17 Segundo administrador: não será criado agora. O desbloqueio do único administrador é pelo `cli desbloquear` no servidor; entra um segundo quando outra pessoa passar a administrar o sistema.
+- 2026-11-17 Senha do RM: o dono decidiu não trocar a senha da conta que a dashboard usa nem criar conta de serviço só-leitura. Risco aceito por ele: a API do RM só responde HTTP, então a credencial viaja em claro na rede interna.
