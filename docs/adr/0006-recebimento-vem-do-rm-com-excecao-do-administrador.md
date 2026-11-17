@@ -69,6 +69,16 @@ divergirem até a medição virar recebida. Em consórcio com a nota da empresa 
 Na cópia da produção de 17/11/2026 a parte das medições fechou ao centavo entre as duas telas, e a diferença inteira
 foram as cobranças do RM dos dois tipos acima.
 
+## Medição recebida por registro (decisões de 17/11/2026)
+
+O dono delegou estas decisões à sessão em 17/11/2026, medidas numa cópia da produção. Nela não havia nenhuma medição
+recebida à mão pelo administrador; os casos contados são os da correção de cadastro e do corte.
+
+- **Aviso "notas pagas não cobrem a medição".** A medição que espera a baixa com todas as notas ligadas pagas no RM
+  e sem cobertura do valor não vira recebida (regra do começo deste documento) e passou a ter aviso próprio, o par do
+  aviso da nota maior que a medição. Não muda estado nenhum: a saída é ligar a nota que falta ou o administrador
+  registrar o recebimento.
+
 ## Nota e título excluídos no RM deixam de contar (17/11/2026, #755)
 
 A sincronização só inseria e atualizava. Quando o faturamento exclui um título e o refaz (o movimento continua e

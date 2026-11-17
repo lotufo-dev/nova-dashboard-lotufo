@@ -439,8 +439,9 @@ def justificar(conn, usuario: dict, nota_id: int, texto: str) -> None:
 # ------------------------------------------------------------------ avisos
 
 def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
-    """Tres avisos (spec §11 e revisao adversarial): nota divergente do espelho (grau `divergente`, sem
-    justificativa), nota protocolada ausente do RM ha' 5 dias, e nota cancelada no RM em medicao ainda aberta."""
+    """Os avisos de nota (spec §11 e revisao adversarial): nota divergente do espelho (grau `divergente`, sem
+    justificativa), nota maior que a medicao (#562), notas pagas que nao cobrem a medicao (depois da #714), nota
+    protocolada ausente do RM ha' 5 dias, e nota cancelada no RM em medicao ainda aberta."""
     hoje = hoje or tempo.hoje_local()
     out = []
     for r in conn.execute("""
@@ -469,6 +470,14 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                         "medicao_id": r["medicao_id"], "contrato_id": r["contrato_id"], "dias": None,
                         "mensagem": f"nota {x['numero']} de {dinheiro.format_brl(x['alocado_centavos'])} é maior que "
                                     f"a medição ({dinheiro.format_brl(x['medicao_centavos'])})"})
+    # depois da issue #714 (docs/adr/0006): o par do aviso acima. As notas ligadas estao pagas no RM e nao cobrem o
+    # valor da medicao; ela nao vira recebida sozinha e, sem o aviso, ficava protocolada sem ninguem saber por que
+    from app import sincronizacao_rm     # import local: sincronizacao_rm importa este modulo
+    for x in sincronizacao_rm.pagas_sem_cobrir(conn):
+        out.append({"tipo": "notas_pagas_nao_cobrem", "nota_id": None, "numero": None, "medicao_id": x["medicao_id"],
+                    "contrato_id": x["contrato_id"], "dias": None,
+                    "mensagem": f"notas pagas somam {dinheiro.format_brl(x['notas_centavos'])} e não cobrem a medição "
+                                f"({dinheiro.format_brl(x['valor_centavos'])})"})
     for r in conn.execute("""
         SELECT n.id AS nota_id, n.numero_int AS numero, a.medicao_id, m.contrato_id,
                (SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') AS protocolado_em

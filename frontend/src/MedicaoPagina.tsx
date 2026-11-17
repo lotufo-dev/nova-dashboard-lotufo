@@ -53,8 +53,9 @@ const SECAO_PASSO: Record<string, number> = { espelho: 3, notas: 4, protocolo: 5
 
 // #712 (docs/adr/0008): a pendencia sem data da medicao que nenhum passo desta pagina mostra sozinho. Vem da fila de
 // avisos do servidor (a mesma da lateral da obra), que a agenda nao mostra por nao ter data. A nota maior que a
-// medicao tambem aparece no passo Envio da nota (antes do protocolo): la' a caixa daqui nao se repete.
-const SEM_DATA_DA_MEDICAO = ["nota_cancelada_rm", "nota_acima_da_medicao", "medicao_fora_de_ordem"];
+// medicao tambem aparece no passo Envio da nota (antes do protocolo): la' a caixa daqui nao se repete. As notas pagas
+// que nao cobrem a medicao (depois da #714, docs/adr/0006) sao o par dela: a medicao nao vira recebida sozinha.
+const SEM_DATA_DA_MEDICAO = ["nota_cancelada_rm", "nota_acima_da_medicao", "notas_pagas_nao_cobrem", "medicao_fora_de_ordem"];
 
 export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }:
     { contratoId: number; medicaoId: number; usuario: Usuario; origem: Origem | null }) {

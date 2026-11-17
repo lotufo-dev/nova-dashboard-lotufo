@@ -953,6 +953,92 @@ def _falta_por_titulo(conn, nota_id: int, aberto_inteiro: bool = False, baixa_to
     return falta
 
 
+_SQL_ESPERAM_BAIXA = """SELECT m.id, m.contrato_id, m.tipo, m.estado, m.planilha_enviada_em, e.coligada_rm,
+                               COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
+                        FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
+                        JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
+                        WHERE m.estado IN ('protocolada','nf_emitida','nota_emitida')"""
+
+
+def _leitura_do_recebimento(conn, m, extras, passos_de, tolerancia: int) -> dict | None:
+    """O que as notas ligadas e os titulos do RM dizem de UMA medicao que espera a baixa (linha de
+    `_SQL_ESPERAM_BAIXA`). A UNICA leitura: `_recebimentos` muda o estado por ela e o aviso "notas pagas nao cobrem a
+    medicao" (`pagas_sem_cobrir`) avisa por ela. None quando nao ha' o que concluir (sem nota, nota sem titulo, titulo
+    em aberto, vinculo fora da cobranca). Senao `{"cobre", "notas_centavos", "valor_centavos", "datas", "curtas"}`:
+    as notas vigentes estao pagas; `cobre` diz se elas cobrem o valor da medicao (issue #714)."""
+    # Issue #743: a nota emitida so' na obra sem o passo "Envio da nota" (recebida sem protocolo); na obra com
+    # ele, a medicao espera o protocolo, como sempre. As regras abaixo (#714, #584, #35) valem igual
+    if m["estado"] == "nota_emitida" and not medicoes.recebe_sem_protocolo(m["estado"], passos_de(m)):
+        return None
+    # Bloco 3 (decisao 13 do plano): so' as notas da COLIGADA DA ENTIDADE DO CONTRATO decidem o
+    # recebimento. Em obra de consorcio a medicao tambem tem a NFS-e da Lotufo ao orgao
+    # (coligada 1, cota, titulo que o consorcio repassa depois): ela nao segura a medicao.
+    notas = [x for x in notas_da_medicao(conn, m["id"]) if x["coligada"] == m["coligada_rm"]]
+    if not notas:
+        return None
+    # Issue #584: vinculo automatico antigo com nota de tipo fora da cobranca ao orgao (2.2.15, 2.2.10) nao fecha
+    # a medicao sozinho; fica no relato `vinculos_fora_da_cobranca` para o dono decidir. O tipo extra que o contrato
+    # da medicao declara no cadastro e' cobranca nela (`cobranca_orgao.e_cobranca`, docs/adr/0015) e nao a segura.
+    tipos = conn.execute("""SELECT n.codtmv FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
+                            WHERE a.medicao_id=? AND a.desfeita_em IS NULL AND a.origem='detectado'
+                              AND n.coligada=? AND n.codtmv IS NOT NULL""", (m["id"], m["coligada_rm"])).fetchall()
+    if any(not cobranca_orgao.e_cobranca(r["codtmv"], m["contrato_id"], extras) for r in tipos):
+        return None
+    # Issue #714 (docs/adr/0006): a medicao so' vira recebida quando as notas VIGENTES cobrem o valor dela. Faturada
+    # em mais de uma nota, com uma cancelada no RM (o vinculo e' desfeito), desfeita a' mao (gate Sol S1, PR #202)
+    # ou ainda nao ligada, a quitacao das que ficaram nao basta. A cobertura e' exata, como na correcao de cadastro
+    # (`correcao_medicoes._ligar_nf`) e na carga do historico: a tolerancia de R$ 1,00 (#35) e' do pagamento do
+    # titulo, nao da nota que fatura a medicao. Soma o valor ATUAL de cada nota (o RM pode te-lo corrigido depois
+    # do vinculo, como na nota do PDF confirmada com outro valor), nao o congelado em `valor_alocado_centavos`.
+    # issue #589: a execucao que absorveu reajuste negativo e' coberta pelo valor do par (o da nota)
+    valor = medicoes.valor_do_par(conn, m["id"], m["valor"])
+    soma = sum(x["valor_centavos"] for x in notas)
+    if valor is None:
+        # sem valor na medicao nao ha' o que cobrir: segue pelos titulos, salvo vinculo desfeito a' mao (S1)
+        if conn.execute("SELECT 1 FROM nf_alocacoes WHERE medicao_id=? AND desfeita_em IS NOT NULL "
+                        "AND motivo_desfazer LIKE ?", (m["id"], MOTIVO_A_MAO + "%")).fetchone():
+            return None
+    # Recebida quando os TITULOS de CADA NF alocada estao quitados (cada um pelo seu valor liquido; ver
+    # issue #251 abaixo). Comparar com o bruto da NF nunca fechava por causa das retencoes. NF sem titulo
+    # (devido=0: titulo ainda nao existe ou foi cancelado) segura a medicao -- nao da' para concluir
+    # recebimento do que nao tem lancamento a receber.
+    if not all(x["situacao"] == "ativa" and x["devido_centavos"] > 0 for x in notas):
+        return None
+    curtas = []
+    # Issue #251: quitada e' falta ZERO titulo a titulo, nao o total da nota (recebido >= devido): juros
+    # num titulo nao quitam outro titulo aberto da mesma nota. Falta zero ja' implica recebido >= devido.
+    faltas = [(x, _falta_por_titulo(conn, x["nota_id"])) for x in notas]
+    if not all(f == 0 for _, f in faltas):
+        # Issue #35 (decisao do dono, 19/10/2026): medicao paga ate' R$ 1,00 abaixo, SOMANDO a falta de
+        # todas as notas dela, fecha como recebida; sem percentual. A falta e' contada titulo a titulo
+        # (juros num titulo nao cobrem outro) e todo titulo precisa de baixa. A diferenca vai para a
+        # auditoria como evento proprio.
+        if any(f is None for _, f in faltas) or sum(f for _, f in faltas) > tolerancia:
+            return None
+        curtas = [{"nota_id": x["nota_id"], "numero": x["numero"], "devido_centavos": x["devido_centavos"],
+                   "recebido_centavos": x["recebido_centavos"], "diferenca_centavos": f}
+                  for x, f in faltas if f > 0]
+    return {"cobre": valor is None or soma >= valor, "notas_centavos": soma, "valor_centavos": valor,
+            "datas": [x["recebido_em"] for x in notas if x["recebido_em"]], "curtas": curtas}
+
+
+def pagas_sem_cobrir(conn) -> list[dict]:
+    """Depois da issue #714 (docs/adr/0006): as medicoes que esperam a baixa com TODAS as notas ligadas pagas no RM e
+    sem cobertura do valor (aprovado acima da nota, nota centavos abaixo, uma das notas cancelada ou com o vinculo
+    desfeito, nota que falta ligar). Elas nao viram recebidas sozinhas; isto so' as lista, para o aviso
+    (`notas.avisos`): [{medicao_id, contrato_id, notas_centavos, valor_centavos}]. Nenhum estado muda."""
+    from app import diretoria   # import local: diretoria importa este modulo
+    extras = cobranca_orgao.extras_por_contrato(conn)
+    passos_de = medicoes.passos_das_medicoes(conn)
+    out = []
+    for m in conn.execute(_SQL_ESPERAM_BAIXA + " ORDER BY m.id").fetchall():
+        r = _leitura_do_recebimento(conn, m, extras, passos_de, diretoria.TOLERANCIA_CENTAVOS)
+        if r is not None and not r["cobre"]:
+            out.append({"medicao_id": m["id"], "contrato_id": m["contrato_id"], "notas_centavos": r["notas_centavos"],
+                        "valor_centavos": r["valor_centavos"]})
+    return out
+
+
 def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
     """`medicao_ids`: so' essas (a carga do historico, issue #259, fecha as que acabou de criar sem mexer nas outras)."""
     from app import diretoria   # import local: diretoria importa este modulo
@@ -963,66 +1049,11 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
     filtro = f" AND m.id IN ({','.join('?' * len(medicao_ids))})" if medicao_ids is not None else ""
     extras = cobranca_orgao.extras_por_contrato(conn)
     passos_de = medicoes.passos_das_medicoes(conn)
-    for m in conn.execute("""SELECT m.id, m.contrato_id, m.tipo, m.estado, m.planilha_enviada_em, e.coligada_rm,
-                                    COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
-                             FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
-                             JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
-                             WHERE m.estado IN ('protocolada','nf_emitida','nota_emitida')""" + filtro,
-                          medicao_ids or ()).fetchall():
-        # Issue #743: a nota emitida so' na obra sem o passo "Envio da nota" (recebida sem protocolo); na obra com
-        # ele, a medicao espera o protocolo, como sempre. As regras abaixo (#714, #584, #35) valem igual
-        if m["estado"] == "nota_emitida" and not medicoes.recebe_sem_protocolo(m["estado"], passos_de(m)):
+    for m in conn.execute(_SQL_ESPERAM_BAIXA + filtro, medicao_ids or ()).fetchall():
+        leitura = _leitura_do_recebimento(conn, m, extras, passos_de, tolerancia)
+        if leitura is None or not leitura["cobre"]:
             continue
-        # Bloco 3 (decisao 13 do plano): so' as notas da COLIGADA DA ENTIDADE DO CONTRATO decidem o
-        # recebimento. Em obra de consorcio a medicao tambem tem a NFS-e da Lotufo ao orgao
-        # (coligada 1, cota, titulo que o consorcio repassa depois): ela nao segura a medicao.
-        notas = [x for x in notas_da_medicao(conn, m["id"]) if x["coligada"] == m["coligada_rm"]]
-        if not notas:
-            continue
-        # Issue #584: vinculo automatico antigo com nota de tipo fora da cobranca ao orgao (2.2.15, 2.2.10) nao fecha
-        # a medicao sozinho; fica no relato `vinculos_fora_da_cobranca` para o dono decidir. O tipo extra que o contrato
-        # da medicao declara no cadastro e' cobranca nela (`cobranca_orgao.e_cobranca`, docs/adr/0015) e nao a segura.
-        tipos = conn.execute("""SELECT n.codtmv FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
-                                WHERE a.medicao_id=? AND a.desfeita_em IS NULL AND a.origem='detectado'
-                                  AND n.coligada=? AND n.codtmv IS NOT NULL""", (m["id"], m["coligada_rm"])).fetchall()
-        if any(not cobranca_orgao.e_cobranca(r["codtmv"], m["contrato_id"], extras) for r in tipos):
-            continue
-        # Issue #714 (docs/adr/0006): a medicao so' vira recebida quando as notas VIGENTES cobrem o valor dela. Faturada
-        # em mais de uma nota, com uma cancelada no RM (o vinculo e' desfeito), desfeita a' mao (gate Sol S1, PR #202)
-        # ou ainda nao ligada, a quitacao das que ficaram nao basta. A cobertura e' exata, como na correcao de cadastro
-        # (`correcao_medicoes._ligar_nf`) e na carga do historico: a tolerancia de R$ 1,00 (#35) e' do pagamento do
-        # titulo, nao da nota que fatura a medicao. Soma o valor ATUAL de cada nota (o RM pode te-lo corrigido depois
-        # do vinculo, como na nota do PDF confirmada com outro valor), nao o congelado em `valor_alocado_centavos`.
-        # issue #589: a execucao que absorveu reajuste negativo e' coberta pelo valor do par (o da nota)
-        valor = medicoes.valor_do_par(conn, m["id"], m["valor"])
-        if valor is None:
-            # sem valor na medicao nao ha' o que cobrir: segue pelos titulos, salvo vinculo desfeito a' mao (S1)
-            if conn.execute("SELECT 1 FROM nf_alocacoes WHERE medicao_id=? AND desfeita_em IS NOT NULL "
-                            "AND motivo_desfazer LIKE ?", (m["id"], MOTIVO_A_MAO + "%")).fetchone():
-                continue
-        elif sum(x["valor_centavos"] for x in notas) < valor:
-            continue
-        # Recebida quando os TITULOS de CADA NF alocada estao quitados (cada um pelo seu valor liquido; ver
-        # issue #251 abaixo). Comparar com o bruto da NF nunca fechava por causa das retencoes. NF sem titulo
-        # (devido=0: titulo ainda nao existe ou foi cancelado) segura a medicao -- nao da' para concluir
-        # recebimento do que nao tem lancamento a receber.
-        if not all(x["situacao"] == "ativa" and x["devido_centavos"] > 0 for x in notas):
-            continue
-        curtas = []
-        # Issue #251: quitada e' falta ZERO titulo a titulo, nao o total da nota (recebido >= devido): juros
-        # num titulo nao quitam outro titulo aberto da mesma nota. Falta zero ja' implica recebido >= devido.
-        faltas = [(x, _falta_por_titulo(conn, x["nota_id"])) for x in notas]
-        if not all(f == 0 for _, f in faltas):
-            # Issue #35 (decisao do dono, 19/10/2026): medicao paga ate' R$ 1,00 abaixo, SOMANDO a falta de
-            # todas as notas dela, fecha como recebida; sem percentual. A falta e' contada titulo a titulo
-            # (juros num titulo nao cobrem outro) e todo titulo precisa de baixa. A diferenca vai para a
-            # auditoria como evento proprio.
-            if any(f is None for _, f in faltas) or sum(f for _, f in faltas) > tolerancia:
-                continue
-            curtas = [{"nota_id": x["nota_id"], "numero": x["numero"], "devido_centavos": x["devido_centavos"],
-                       "recebido_centavos": x["recebido_centavos"], "diferenca_centavos": f}
-                      for x, f in faltas if f > 0]
-        datas = [x["recebido_em"] for x in notas if x["recebido_em"]]
+        curtas, datas = leitura["curtas"], leitura["datas"]
         with db.mutacao(conn):
             medicoes.mudar_estado(conn, None, m["id"], "recebida", None, max(datas) if datas else None)
             if curtas:

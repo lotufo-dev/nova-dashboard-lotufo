@@ -1719,6 +1719,50 @@ def test_medicao_com_parte_das_notas_ligada_nao_e_recebida(conn, cid, tmp_path):
     assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
 
 
+def _avisos_nao_cobrem(conn):
+    from app import avisos, notas
+    return ([(a["medicao_id"], a["mensagem"]) for a in notas.avisos(conn) if a["tipo"] == "notas_pagas_nao_cobrem"],
+            [(a["nivel"], a["medicao_id"], a["data"]) for a in avisos.listar(conn, publico="todos")
+             if a["tipo"] == "notas_pagas_nao_cobrem"])
+
+
+def test_notas_pagas_que_nao_cobrem_a_medicao_avisam_sem_mudar_o_estado(conn, cid, tmp_path):
+    """Depois da #714: medicao de R$ 1.500,01 (centavo impar) com so' a nota de R$ 1.000,01 ligada e paga. Nao vira
+    recebida, e passa a ter aviso proprio (critico, sem data, ligado a' medicao). Com o titulo ainda aberto nao ha'
+    aviso (a medicao so' espera o pagamento); ligada e paga a nota que faltava, o aviso some e ela e' recebida."""
+    mid = _medicao(conn, cid, 12, 1500_01)
+    nfs = [_nf(100, 1000.01), _nf(101, 500.0, emissao="2026-09-05T00:00:00-04:00")]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs[:1], [_baixa(1, 100, 924.01, 0.0, 0)]))
+    _ligar(conn, mid, 100)
+    assert _avisos_nao_cobrem(conn) == ([], [])                    # titulo aberto: nada pago ainda
+    paga = [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-01T00:00:00-04:00")]
+    antes = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs[:1], paga))
+    assert r["recebimentos"] == 0 and medicoes.detalhe(conn, mid)["estado"] == "protocolada", r
+    assert _avisos_nao_cobrem(conn) == (
+        [(mid, "notas pagas somam R$ 1.000,01 e não cobrem a medição (R$ 1.500,01)")], [("critico", mid, None)])
+    assert sincronizacao_rm.pagas_sem_cobrir(conn) == [
+        {"medicao_id": mid, "contrato_id": cid, "notas_centavos": 1000_01, "valor_centavos": 1500_01}]
+    # ler o aviso nao grava nada (so' a auditoria da propria rodada)
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao<>'rm.sincronizacao'").fetchone()[0] <= antes
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, paga))
+    _ligar(conn, mid, 101)
+    assert _avisos_nao_cobrem(conn) == ([], [])                    # agora cobre; a segunda nota ainda nao tem titulo
+    pagas = [*paga, _baixa(2, 101, 462.0, 462.0, 1, "2026-09-10T00:00:00-04:00")]
+    assert sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, pagas))["recebimentos"] == 1
+    assert medicoes.detalhe(conn, mid)["estado"] == "recebida" and _avisos_nao_cobrem(conn) == ([], [])
+
+
+def test_nota_paga_um_centavo_abaixo_da_medicao_avisa(conn, cid, tmp_path):
+    """A cobertura e' exata (#714): a nota de R$ 999,99 paga numa medicao de R$ 1.000,00 nao a fecha, e avisa."""
+    mid = _medicao(conn, cid, 12, 1000_00)
+    cli = _simulador(tmp_path, [_nf(100, 999.99)], [_baixa(1, 100, 923.99, 923.99, 1, "2026-09-01T00:00:00-04:00")])
+    sincronizacao_rm.sincronizar(conn, cli)
+    _ligar(conn, mid, 100)
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
+    assert _avisos_nao_cobrem(conn)[0] == [(mid, "notas pagas somam R$ 999,99 e não cobrem a medição (R$ 1.000,00)")]
+
+
 def test_uma_nota_so_do_valor_da_medicao_continua_recebendo(conn, cid, tmp_path):
     """Issue #714: o caso comum nao muda. Uma nota, do valor da medicao (centavo impar), titulo liquido quitado."""
     mid = _medicao(conn, cid, 12, 1000_01)

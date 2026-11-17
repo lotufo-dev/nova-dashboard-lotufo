@@ -302,6 +302,17 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(caixa.textContent).toContain("NF 102 de R$ 20,00 é maior que a medição (R$ 10,00)");
   });
 
+  it("as notas pagas que não cobrem a medição avisam como crítico e levam às notas", async () => {
+    responder({ "/api/inicio": { avisos: [pendencia("notas_pagas_nao_cobrem", "notas pagas somam R$ 9,99 e não cobrem a medição (R$ 10,00)",
+      { nivel: "critico" })] } });
+    pagina();
+    const link = await screen.findByRole("link", { name: "ver as notas" });
+    expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#passo-4");
+    const caixa = link.closest(".aviso")!;
+    expect(caixa.classList.contains("aviso--critico")).toBe(true);
+    expect(caixa.textContent).toBe("Crítico: Notas pagas somam R$ 9,99 e não cobrem a medição (R$ 10,00): ver as notas");
+  });
+
   const ACIMA = pendencia("nota_acima_da_medicao", "nota 102 de R$ 20,00 é maior que a medição (R$ 10,00)", { nivel: "critico" });
   const acimaDe = (medicaoId: number) => ({ medicao_id: medicaoId, nota_id: 7, numero: 102, alocado_centavos: 2000, medicao_centavos: 1000 });
   const caixasAcima = () => [...document.querySelectorAll(".aviso")].filter(x => /é maior que a medição/.test(x.textContent ?? ""));
