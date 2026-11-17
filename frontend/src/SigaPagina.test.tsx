@@ -106,9 +106,12 @@ describe("SigaPagina", () => {
     mostrar(painel([ALFA, BETA]));
     await screen.findByRole("grid");
     expect(screen.getByText("2 processos · última leitura 11:00")).toBeTruthy();
-    const legenda = screen.getByRole("list", { name: "Cor do tempo no setor" });
+    const legenda = screen.getByRole("list", { name: "Legenda das cores" });
     expect(within(legenda).getAllByRole("listitem").map(li => li.textContent)).toEqual(
-      ["andou hoje", "parado há 5 dias úteis ou mais", "10 dias úteis ou mais"]);
+      ["andou hoje", "menos de 5 dias úteis no setor", "parado há 5 dias úteis ou mais", "10 dias úteis ou mais"]);
+    // cada situacao da legenda tem a forma dela (o glifo), alem da cor
+    expect(within(legenda).getAllByRole("listitem").map(li => li.querySelector(".glifo")?.className)).toEqual(
+      ["glifo glifo--feito", "glifo glifo--andamento", "glifo glifo--breve", "glifo glifo--critico"]);
   });
 
   it("Processo: obra em negrito e o que é embaixo (título da medição, 'Aditivo de prazo'); o nome do robô só sem obra; o número não entra no nome (#663)", async () => {
@@ -125,15 +128,16 @@ describe("SigaPagina", () => {
     expect(within(beta).getByText("Processo Beta").className).toContain("sg__nome");
   });
 
-  it("cor do tempo no setor: âmbar a partir de 5 dias úteis, vermelho a partir de 10, nenhuma antes; verde 'hoje' quando andou hoje", async () => {
+  it("tempo no setor nas quatro situações, com o glifo: crítico a partir de 10 dias úteis, vence em breve a partir de 5, em andamento antes; feito quando andou hoje", async () => {
     mostrar(painel([ALFA, DELTA, BETA, GAMA]));
     await screen.findByRole("grid");
-    expect(screen.getByText("12 dias úteis").className).toContain("sg__dias--acao");
-    expect(screen.getByText("6 dias úteis").className).toContain("sg__dias--atencao");
-    expect(screen.getByText("3 dias úteis").className).not.toMatch(/sg__dias--(atencao|acao)/);
-    const hoje = screen.getByText("hoje");
-    expect(hoje.className).toContain("sg__dias--hoje");
-    expect(within(screen.getByRole("row", { name: /Obra Alfa/ })).getByText("hoje")).toBe(hoje);
+    const selo = (texto: string) => screen.getByText(texto).closest(".sg__dias")!;
+    const situacao = (texto: string) => [selo(texto).className, selo(texto).querySelector(".glifo")?.className];
+    expect(situacao("12 dias úteis")).toEqual(["selo selo--critico sg__dias sg__dias--critico", "glifo glifo--critico"]);
+    expect(situacao("6 dias úteis")).toEqual(["selo selo--breve sg__dias sg__dias--breve", "glifo glifo--breve"]);
+    expect(situacao("3 dias úteis")).toEqual(["selo selo--andamento sg__dias sg__dias--andamento", "glifo glifo--andamento"]);
+    expect(situacao("hoje")).toEqual(["selo selo--feito sg__dias sg__dias--feito", "glifo glifo--feito"]);
+    expect(within(screen.getByRole("row", { name: /Obra Alfa/ })).getByText("hoje")).toBe(screen.getByText("hoje"));
   });
 
   it("No setor há: minutos e horas antes de um dia útil, para quem não andou hoje", async () => {
@@ -673,7 +677,7 @@ describe("SigaPagina", () => {
     mostrar(painel([RECEBIDO, ARQUIVADO, GAMA], { robo: { ...PARADO, avisos } }));
     await screen.findByRole("grid");
     const secao = encerrados();
-    expect(secao.querySelector(".sg__dias, .sg__nao-lido, [class*='--acao'], [class*='--atencao'], [class*='--hoje']")).toBeNull();
+    expect(secao.querySelector(".sg__dias, .sg__nao-lido, .selo, .glifo, [class*='--critico'], [class*='--breve'], [class*='--feito']")).toBeNull();
     expect(within(secao).queryByText(/não lido|dias úteis|hoje/)).toBeNull();
   });
 
