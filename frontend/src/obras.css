@@ -79,8 +79,8 @@
   /* as seis colunas cabem na caixa: letra de apoio nos valores e colunas mais juntas */
   .obras-posicao td.dinheiro, .qdop-tabela td.dinheiro { font-size: var(--texto-mini); }
   .obras-posicao th, .obras-posicao td, .qdop-tabela th, .qdop-tabela td { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
-  .obras-posicao th:first-child, .obras-posicao td:first-child, .qdop-tabela th:first-child, .qdop-tabela td:first-child { padding-left: var(--espaco-m); }
-  .obras-posicao th:last-child, .obras-posicao td:last-child, .qdop-tabela th:last-child, .qdop-tabela td:last-child { padding-right: var(--espaco-m); }
+  .obras-posicao th:first-child, .obras-posicao td:first-child, .qdop-tabela th:first-child, .qdop-tabela td:first-child { padding-left: var(--espaco-p); }
+  .obras-posicao th:last-child, .obras-posicao td:last-child, .qdop-tabela th:last-child, .qdop-tabela td:last-child { padding-right: var(--espaco-p); }
   .obras-exec { min-width: calc(var(--alvo-minimo) * 2); gap: var(--espaco-pp); }
   .qdop-filtros { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
   /* o QDOP cabe na caixa: o que identifica a obra e os motivos quebram linha */
@@ -109,7 +109,7 @@
   }
   :is(.obras-posicao, .qdop-tabela) :is(tbody, tfoot) :is(td, th):first-child { display: block; padding: 0 0 var(--espaco-mini); text-align: left; }
   :is(.obras-posicao, .qdop-tabela) :is(tbody, tfoot) td:not(:first-child)::before {
-    content: attr(data-rotulo); flex: none; max-width: 55%; color: var(--cor-texto-secundario); font-weight: var(--peso-normal); text-align: left; white-space: normal;
+    content: attr(data-rotulo); flex: 0 1 auto; min-width: 0; max-width: 55%; color: var(--cor-texto-secundario); font-weight: var(--peso-normal); text-align: left; white-space: normal;
   }
   .obras-posicao tbody tr.obras-grupo { background: var(--cor-papel-sombreado); border-top: var(--regua-secao); }
   .obras-posicao .obras-grupo th, .obras-posicao .obras-grupo td { border: 0; }
@@ -135,4 +135,8 @@
   .avisos-area .form-inline { flex-wrap: wrap; }
   .avisos-area .form-inline .campo { min-width: 0; flex: 1 1 140px; }
   .avisos-area .cartao__cabeca { flex-wrap: wrap; }
+  /* Reajustes esperando apostilamento: tres colunas em 290 px; o nome quebra em vez de cortar e o valor vai na letra de apoio */
+  .cartao:has(#dir-reajustes) .tabela :is(th, td) { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
+  .cartao:has(#dir-reajustes) .tabela .truncar--nome { max-width: none; white-space: normal; overflow: visible; }
+  .cartao:has(#dir-reajustes) .tabela td.dinheiro { font-size: var(--texto-mini); }
 }
