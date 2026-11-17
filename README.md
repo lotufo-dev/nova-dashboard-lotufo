@@ -49,7 +49,7 @@ No app do Claude, as mesmas duas coisas estão em `.claude/launch.json` (`backen
 - Sem a variável, o cadastro é o `cadastro-exemplo/` do repositório: 100% fictício, usado pelos testes e pela CI.
   O `aplicar` recusa esse exemplo em banco que já tem contratos de outro cadastro.
 
-Telas: `/inicio`, `/medicoes` (com abas), `/obras`, `/obras/N` (abas Medições, Prazos, Reajuste, Documentos
+Telas: `/inicio`, `/medicoes` (com abas), `/resumo-medicoes`, `/obras`, `/obras/N` (abas Medições, Prazos, Reajuste, Documentos
 exigidos, Contrato; as notas moram na medição), `/obras/N/medicoes/M` (Espelho, Faturamento, Nota, Envio, Pagamento), `/documentos`,
 `/fechamento`, `/admin`, `/conta`.
 

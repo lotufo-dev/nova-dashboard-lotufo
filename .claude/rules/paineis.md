@@ -3,6 +3,7 @@ paths:
   - "backend/app/inicio.py"
   - "backend/app/diretoria.py"
   - "backend/app/fechamento.py"
+  - "backend/app/resumo_medicoes.py"
   - "backend/app/paineis.py"
   - "backend/app/avisos*.py"
   - "backend/app/custo_obra.py"
@@ -12,6 +13,7 @@ paths:
   - "frontend/src/Inicio.tsx"
   - "frontend/src/ObrasCarteira.tsx"
   - "frontend/src/Fechamento.tsx"
+  - "frontend/src/ResumoDasMedicoes.tsx"
   - "frontend/src/AvisosPagina.tsx"
   - "frontend/src/avisos.ts"
 ---

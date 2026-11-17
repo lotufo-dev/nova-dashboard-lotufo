@@ -15,6 +15,7 @@ import MedicoesPagina from "./MedicoesPagina";
 import MinhaConta from "./MinhaConta";
 import MedicaoNova from "./MedicaoNova";
 import Fechamento from "./Fechamento";
+import ResumoDasMedicoes from "./ResumoDasMedicoes";
 import { entradaDe, itemDe, tituloDaSecao, tituloDe } from "./navegacao";
 import SigaPagina from "./SigaPagina";
 import AncorasDocusign from "./AncorasDocusign";
@@ -124,6 +125,7 @@ export default function App() {
           {rota.tela === "ancoras-docusign" && usuario.perfil !== "diretoria" && <div className="pagina"><AncorasDocusign /></div>}
           {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}
           {rota.tela === "fechamento" && <div className="pagina"><Fechamento ir={ir} /></div>}
+          {rota.tela === "resumo-medicoes" && <div className="pagina"><ResumoDasMedicoes ir={ir} busca={busca} /></div>}
           {rota.tela === "obras" && <Contratos ir={ir} busca={busca} aba={rota.aba} />}
           {rota.tela === "obra" && (
             // `key` no id: trocar de obra REMONTA a pagina em vez de reaproveitar a

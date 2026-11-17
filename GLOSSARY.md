@@ -69,6 +69,10 @@ O que foi executado num contrato numa competência, com número próprio. Tipos:
 O mês a que a medição se refere.
 _Avoid_: período, mês de referência
 
+**Competência em trabalho**:
+O mês anterior ao de hoje, cuja medição está sendo feita agora. É a competência que a tela Medições e o Resumo das
+medições abrem.
+
 **Em análise**:
 Etapa em que a planilha/carta foi enviada ao órgão e ele ainda não aprovou.
 

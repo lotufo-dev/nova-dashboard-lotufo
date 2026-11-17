@@ -4,7 +4,7 @@ import { buscaDosAvisosEmObras, caminhoDe, hrefDe, origemPara, parseRota, substi
 describe("rota", () => {
   it("toda rota tem um caminho canônico e volta igual", () => {
     const rotas: Rota[] = [
-      { tela: "inicio" }, { tela: "medicoes" }, { tela: "fechamento" }, { tela: "obras" },
+      { tela: "inicio" }, { tela: "medicoes" }, { tela: "resumo-medicoes" }, { tela: "fechamento" }, { tela: "obras" },
       { tela: "obras", aba: "resumo" }, { tela: "obras", aba: "qdop" },
       { tela: "documentos" }, { tela: "admin" }, { tela: "conta" }, { tela: "avisos" }, { tela: "siga" },
       { tela: "obra", id: 7, aba: "ficha" },
