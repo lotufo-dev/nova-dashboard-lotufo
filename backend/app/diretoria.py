@@ -52,7 +52,11 @@ def _d(iso: str | None) -> datetime.date | None:
 
 
 def _medicoes(conn) -> list[dict]:
-    return [dict(r) for r in conn.execute(
+    """As medicoes com o contrato e o orgao. `sem_protocolo` (issue #743, docs/adr/0006): a medicao com nota emitida
+    da obra cujo cadastro nao tem o passo "Envio da nota" (`medicoes.recebe_sem_protocolo`). La' a nota emitida ja'
+    e' a cobranca: a medicao espera o pagamento como a protocolada (`espera_pagamento`)."""
+    passos_de = medicoes.passos_das_medicoes(conn)
+    return [{**dict(r), "sem_protocolo": medicoes.recebe_sem_protocolo(r["estado"], passos_de(r))} for r in conn.execute(
         "SELECT m.*, c.percentual_direito_bp AS pct, c.orgao_id, c.estado AS contrato_estado, "
         "COALESCE(c.nome_curto, c.numero_instrumento) AS obra, o.nome AS orgao_nome, o.familia AS orgao_familia, "
         "o.chave AS orgao_chave, "
@@ -60,9 +64,26 @@ def _medicoes(conn) -> list[dict]:
         "FROM medicoes m JOIN contratos c ON c.id=m.contrato_id LEFT JOIN orgaos o ON o.id=c.orgao_id")]
 
 
+def espera_pagamento(m: dict) -> bool:
+    """A medicao foi cobrada do orgao e espera o pagamento: a protocolada (`PROTOCOLADAS`) e a de nota emitida da obra
+    sem o passo "Envio da nota" (`sem_protocolo`, de `_medicoes`). A UNICA resposta do Inicio, da lista de Obras e da
+    pagina da obra a "esta medicao entra no a receber?"; a do Fechamento e' `fechamento._em_cobranca`, igual."""
+    return m["estado"] in PROTOCOLADAS or bool(m.get("sem_protocolo"))
+
+
+def cobrada_em(m: dict) -> str | None:
+    """De quando a espera pelo pagamento conta: o primeiro protocolo da nota; na medicao sem protocolo da obra sem o
+    passo "Envio da nota", a emissao da nota (docs/adr/0006)."""
+    return m["nota_emitida_em"] if m.get("sem_protocolo") else m["protocolo_em"]
+
+
 def _cota(m: dict) -> int:
     valor = m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"]
     return contratos.cota(valor or 0, m["pct"]) or 0
+
+
+def _cheio(m: dict) -> int:
+    return m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"] or 0
 
 
 def prazos_do_orgao(ms: list[dict], hoje: datetime.date) -> dict[str, int]:
@@ -90,7 +111,9 @@ def prazos_do_orgao(ms: list[dict], hoje: datetime.date) -> dict[str, int]:
 def esperada(m: dict, prazos: dict[str, int]) -> datetime.date | None:
     """A data esperada do recebimento de uma medicao: o primeiro protocolo da nota + o prazo do contratante
     (`prazos_do_orgao`). Sem a data do protocolo ou com o contratante sem prazo, nao ha' data esperada. Atrasada e' a
-    protocolada com essa data anterior a hoje: passou do que e' normal naquele orgao."""
+    protocolada com essa data anterior a hoje: passou do que e' normal naquele orgao. A medicao que espera o
+    pagamento sem protocolo (obra sem o passo "Envio da nota", #743) nao tem data esperada: o prazo do orgao e'
+    contado do protocolo (docs/adr/0007)."""
     protocolo, prazo = _d(m["protocolo_em"]), prazos.get(_contratante(m))
     if protocolo is None or prazo is None:
         return None
@@ -115,7 +138,45 @@ def _mapa_contratos(conn) -> tuple[dict, dict, dict]:
     return contr, por_centro, por_coligada
 
 
-def _notas_em_aberto(conn) -> list[dict]:
+def a_receber_na_cota(conn, ms: list[dict] | None = None) -> list[dict]:
+    """A UNICA lista do a receber do Inicio e da lista de Obras, na COTA (`_a_receber_cota` da' o valor de cada linha):
+    1. a medicao que espera o pagamento (`espera_pagamento`), pelo valor dela na cota, com a data de `cobrada_em`;
+    2. a cobranca do RM em aberto que nenhuma medicao em aberto representa (`_notas_em_aberto`);
+    3. em consorcio com a nota da PROPRIA empresa ligada a' medicao (decisao do dono de 17/11/2026, issue #756,
+       docs/adr/0006), vale a conta do Fechamento, pela mesma funcao que decide quais notas contam
+       (`fechamento._notas_da_conta`, por `fechamento.cota_pela_nota_da_empresa`): a medicao que espera o pagamento
+       entra pelo que esta' em aberto nas notas da empresa (a face menos o que foi baixado nos titulos delas), e nao
+       pelo valor da medicao; a medicao ja' RECEBIDA (o orgao pagou o consorcio) com a nota da empresa sem baixa
+       entra por esse em aberto (`repasse`: quem deve e' o consorcio); e a fatura do consorcio que a nota da empresa
+       tirou da conta nao entra por (2), mesmo com titulo aberto. Sem a nota da empresa ligada, nada muda."""
+    from app import fechamento   # import local: fechamento importa este modulo
+    ms = _medicoes(conn) if ms is None else ms
+    pela_empresa, preteridas = fechamento.cota_pela_nota_da_empresa(conn)
+    out = []
+    for m in ms:
+        aberto = pela_empresa.get(m["id"])
+        if espera_pagamento(m):
+            out.append({**m, "protocolo_em": cobrada_em(m), "cota_em_aberto_centavos": aberto})
+        elif m["estado"] == "recebida" and aberto:
+            out.append({**m, "repasse": True, "cota_em_aberto_centavos": aberto})
+    return out + _notas_em_aberto(conn, preteridas)
+
+
+def _a_receber_cota(x: dict) -> int:
+    """O valor de uma linha de `a_receber_na_cota`: o em aberto das notas da empresa quando a medicao de consorcio
+    conta por elas (ja' e' a cota); senao, o valor da medicao ou da nota na cota (`_cota`)."""
+    aberto = x.get("cota_em_aberto_centavos")
+    return _cota(x) if aberto is None else aberto
+
+
+def _a_receber_cheio(conn) -> list[dict]:
+    """O a receber em valor CHEIO (pagina da obra, que mostra o contrato inteiro): o que o orgao deve ao contrato. As
+    medicoes que esperam o pagamento e as cobrancas do RM em aberto. A nota da empresa ao consorcio nao entra aqui:
+    ela e' a cota, e o repasse do consorcio nao e' divida do orgao."""
+    return [m for m in _medicoes(conn) if espera_pagamento(m)] + _notas_em_aberto(conn)
+
+
+def _notas_em_aberto(conn, preteridas=frozenset()) -> list[dict]:
     """Cobrancas do RM (nota ativa com titulo nao pago) que nenhuma medicao em aberto representa, no formato das
     medicoes protocoladas: nota sem medicao, ou ligada so' a medicao ja' fechada (recebida pelo corte, por
     exemplo). A obra vem da medicao ligada ou do centro de custo (atual ou anterior); consorcio sem centro, pela
@@ -126,7 +187,9 @@ def _notas_em_aberto(conn) -> list[dict]:
     ligada a' medicao pelo casador do RM (`sincronizacao_rm._candidatas`) e sai daqui por esta mesma regra; antes
     ficava solta e somava, pelo centro de custo, um dinheiro que ja' entrou. So' nota de cobranca ao orgao (#563):
     a de tipo da lista geral e, na obra a que a nota foi atribuida, a dos tipos extras dela
-    (`cobranca_orgao.e_cobranca`, docs/adr/0015)."""
+    (`cobranca_orgao.e_cobranca`, docs/adr/0015).
+    `preteridas` (issue #756, so' na cota: `a_receber_na_cota`): as faturas do consorcio que a nota da propria empresa
+    tirou da conta da medicao a que estao ligadas; ficam fora, para a mesma cobranca nao entrar duas vezes."""
     em_aberto = set(ESPERANDO_NOTA + ESPERANDO_PROTOCOLO + PROTOCOLADAS)
     a_mao = conciliacao.recebidas_a_mao(conn)
     contr, por_centro, por_coligada = _mapa_contratos(conn)
@@ -139,6 +202,8 @@ def _notas_em_aberto(conn) -> list[dict]:
                                   WHERE a.nota_id=? AND a.desfeita_em IS NULL""", (n["id"],)).fetchall()
         if any(r["estado"] in em_aberto for r in ligadas):
             continue                                        # a medicao em aberto ja' conta
+        if n["id"] in preteridas:
+            continue                                        # a medicao conta pela nota da empresa ao consorcio (#756)
         if ligadas and all(r["id"] in a_mao for r in ligadas):
             continue                                        # recebida a mao: o registro manual vale (#203)
         # (`sincronizacao_rm.alocar` so' liga a nota a uma medicao; se um dia houver nota partida com medicao
@@ -342,7 +407,7 @@ def _liberado(conn) -> bool:
 
 
 def _grupo(ms: list[dict], com_valor: bool = True) -> dict:
-    return {"quantidade": len(ms), "valor_centavos": sum(_cota(m) for m in ms) if com_valor else None}
+    return {"quantidade": len(ms), "valor_centavos": sum(_a_receber_cota(m) for m in ms) if com_valor else None}
 
 
 def _grupo_rec(ms: list[dict], com_valor: bool = True) -> dict:
@@ -563,34 +628,30 @@ def _obras(conn, ms: list[dict], hoje: datetime.date, avisos: list[dict], cache:
 def da_obra(conn, contrato_id: int) -> dict:
     """Faturado e a receber de UMA obra, em valor CHEIO (a pagina da obra mostra o contrato inteiro; mapa de
     2026-09-28, mudanca A3). As regras sao as desta tela e do QDOP: faturado = medicoes com nota emitida,
-    protocoladas, com NF do legado ou recebidas, no atestado quando houver; a receber = protocoladas e com NF
-    do legado, mais as cobrancas do RM em aberto da obra (`_notas_em_aberto`). O a receber so' tem valor com o
-    total liberado, como o protocolado desta tela."""
+    protocoladas, com NF do legado ou recebidas, no atestado quando houver; a receber = as medicoes que
+    esperam o pagamento (`espera_pagamento`: protocoladas, com NF do legado e, na obra sem o passo "Envio da nota",
+    com nota emitida), mais as cobrancas do RM em aberto da obra (`_notas_em_aberto`): `_a_receber_cheio`. O a
+    receber so' tem valor com o total liberado, como o protocolado desta tela."""
     faturado = conn.execute(
         "SELECT COALESCE(SUM(COALESCE(valor_atestado_centavos, valor_protocolado_centavos)), 0) FROM medicoes "
         "WHERE contrato_id=? AND estado IN ('nota_emitida','protocolada','nf_emitida','recebida')", (contrato_id,)).fetchone()[0]
     a_receber = None
     if _liberado(conn):
-        cheio = lambda m: m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"] or 0
-        ms = [m for m in _medicoes(conn) if m["contrato_id"] == contrato_id and m["estado"] in PROTOCOLADAS]
-        a_receber = sum(cheio(m) for m in ms) + sum(cheio(n) for n in _notas_em_aberto(conn) if n["contrato_id"] == contrato_id)
+        a_receber = sum(_cheio(x) for x in _a_receber_cheio(conn) if x["contrato_id"] == contrato_id)
     return {"faturado_centavos": faturado, "a_receber_centavos": a_receber}
 
 
 def a_receber_por_obra(conn, na_cota: bool = False) -> dict[int, int] | None:
     """O a receber de TODAS as obras de uma vez, em valor CHEIO, pela mesma conta de `da_obra` (#509).
     Sem o total liberado, nulo: a lista mostra "—" em vez de um numero nao conciliado. Obra sem nada a receber fica de fora.
-    `na_cota` (lista de Obras, #645): cada cobranca na cota da Lotufo (`_cota`), a conta do `por_obra` da tela A receber."""
+    `na_cota` (lista de Obras, #645): cada cobranca na cota da Lotufo, pela lista do Inicio (`a_receber_na_cota`); em
+    consorcio com a nota da propria empresa ligada, pelo em aberto dela (#756)."""
     if not _liberado(conn):
         return None
-    cheio = lambda m: m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"] or 0
-    valor = _cota if na_cota else cheio
+    linhas, valor = (a_receber_na_cota(conn), _a_receber_cota) if na_cota else (_a_receber_cheio(conn), _cheio)
     por_obra: dict[int, int] = {}
-    for m in _medicoes(conn):
-        if m["estado"] in PROTOCOLADAS:
-            por_obra[m["contrato_id"]] = por_obra.get(m["contrato_id"], 0) + valor(m)
-    for n in _notas_em_aberto(conn):
-        por_obra[n["contrato_id"]] = por_obra.get(n["contrato_id"], 0) + valor(n)
+    for x in linhas:
+        por_obra[x["contrato_id"]] = por_obra.get(x["contrato_id"], 0) + valor(x)
     return por_obra
 
 
