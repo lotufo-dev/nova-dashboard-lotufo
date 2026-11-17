@@ -12,7 +12,7 @@ const n = (medido: number, aprovado: number, protocolado: number, recebido: numb
 });
 const medicao = (id: number, numero: number, comp: string, x: ReturnType<typeof n>,
     notas: { id: number; numero: string; v: number; ok: boolean; parte?: boolean }[]) => ({
-  ...x, medicao_id: id, contrato_id: 7, obra: "Obra Alfa", numero, tipo: "execucao", estado: "protocolada", competencia: comp,
+  ...x, medicao_id: id, contrato_id: 7, obra: "Obra Alfa", numero, tipo: "execucao", competencia: comp,
   protocolo_em: `${comp}-28`,
   notas: notas.map(t => ({ nota_id: t.id, numero: t.numero, valor_centavos: t.v, recebida: t.ok, paga_em_parte: !!t.parte })),
 });
@@ -274,7 +274,7 @@ describe("Fechamento (#748)", () => {
     const total = n(1_700_001, 1_400_001, 1_400_001, 700_000);          // em aberto das notas: 7.000,01
     api.mockResolvedValue({ ...FECHAMENTO,
       meses: FECHAMENTO.meses.map(m => m.competencia !== "2026-03" ? m : { ...m, obras: [{ ...m.obras[0], medicoes: [
-        { ...medicao(2, 15, "2026-03", MAR26, [{ id: 22, numero: "602", v: 400_001, ok: false }]), estado: "recebida",
+        { ...medicao(2, 15, "2026-03", MAR26, [{ id: 22, numero: "602", v: 400_001, ok: false }]),
           notas: [{ nota_id: 22, numero: "602", valor_centavos: 400_001, recebida: false, paga_em_parte: false, aguarda_repasse: true }] }] }] }),
       em_aberto: [linha("nota", 23, "603", 5, 18, 300_000), linha("repasse", 22, "602", 2, 15, 400_001)],
       por_ano: { ...FECHAMENTO.por_ano, "2026": ano(total, 2, 0, 400_001) } });
