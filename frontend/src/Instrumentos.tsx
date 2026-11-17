@@ -79,8 +79,7 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
       </div>
 
       {erro && <div className="cartao__corpo"><Falha><IconeAlerta className="icone icone--p" />{erro}</Falha></div>}
-      {erroCadastro && <div className="cartao__corpo"><p className="campo__nota">
-        Não foi possível ler os instrumentos do cadastro.</p></div>}
+      {erroCadastro && <div className="cartao__corpo"><Falha>Não foi possível ler os instrumentos do cadastro.</Falha></div>}
 
       {!carregando && !erro && !erroCadastro && linhas.length === 0 && (
         <div className="vazio">

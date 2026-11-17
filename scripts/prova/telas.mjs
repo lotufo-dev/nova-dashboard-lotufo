@@ -18,11 +18,13 @@
 //            { clicar: seletor }, { preencher: [seletor, texto] } ou { arquivo: [seletor do campo, nome do PDF] }.
 //            Com passos, `espera` e' o seletor do estado ja' aberto
 //   simular  respostas da API trocadas so' nesta tela: { caminho: /regex do caminho/, metodo: "GET", status: 200,
-//            corpo: {...} }. Serve para a tela vazia, a tela de erro e o que o cadastro de exemplo nao alcanca
+//            corpo: {...} }. Serve para a tela vazia, a tela de erro e o que o cadastro de exemplo nao alcanca.
+//            `corpo` pode ser funcao dos registros da prova, e `ajustar: (resposta, registros) => resposta` muda a
+//            resposta verdadeira em vez de troca-la
 //   erro     true quando a tela DEVE mostrar o aviso de erro (a falha foi simulada); sem ele, aviso de erro reprova
 //
 // Todo item do menu de um perfil precisa de uma tela aqui para esse perfil: a prova reprova o item sem tela.
-import { falha, PDF_ILEGIVEL, SIGA_COM_PROCESSOS } from "./simulados.mjs";
+import { falha, medicaoComNotaEmitida, notasAEnviar, PDF_ILEGIVEL, SIGA_COM_PROCESSOS } from "./simulados.mjs";
 
 export const PERFIS = ["admin", "engenharia", "diretoria"];
 export const LARGURAS = [1440, 1024, 390];
@@ -38,6 +40,11 @@ const MEDICAO = "/obras/:obra/medicoes/:medicao";
 const JANELA = "dialog[open] .iniciar__caixa";
 const maisAcoes = item => [{ clicar: '#conteudo button:has-text("Mais ações")' }, { clicar: `#conteudo button:has-text("${item}")` }];
 const passo = nome => [{ clicar: `nav.passos button:has-text("${nome}")` }];
+// a medicao com a nota emitida e o envio ao orgao por fazer (ver simulados.mjs)
+const comNotaAEnviar = familia => [
+  { caminho: /^\/api\/contratos\/\d+\/medicoes$/, ajustar: medicaoComNotaEmitida },
+  { caminho: /^\/api\/notas\/a-enviar$/, corpo: notasAEnviar(familia) },
+];
 
 export const TELAS = [
   // ---- Inicio
@@ -99,6 +106,8 @@ export const TELAS = [
 
   // ---- Fechamento e Ancoras
   { rota: "fechamento", id: "fechamento", caminho: "/fechamento", perfis: TODOS, espera: ".fch-numeros" },
+  { rota: "fechamento", id: "fechamento-2025", caminho: "/fechamento", perfis: TODOS, antes: ".fch-numeros", espera: ".fch-tabela--aberto",
+    passos: [{ clicar: '.fch-botao:has-text("2025")' }] },
   { rota: "fechamento", id: "fechamento-erro", caminho: "/fechamento", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/fechamento$/) },
   { rota: "ancoras-docusign", id: "ancoras-docusign", caminho: "/ancoras-docusign", perfis: OPERA, espera: ".anc" },
@@ -139,10 +148,16 @@ export const TELAS = [
     passos: maisAcoes("Editar o atestado") },
   { rota: "medicao", id: "medicao-protocolo-fora", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
     passos: [...passo("Envio da nota"), { clicar: '#conteudo button:has-text("Registrar protocolo feito fora")' }] },
+  { rota: "medicao", id: "medicao-a-enviar", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: "#passo-5 table",
+    simular: comNotaAEnviar("sinfra"), passos: passo("Envio da nota") },
+  { rota: "medicao", id: "medicao-envio-fora", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
+    simular: comNotaAEnviar("sinfra"), passos: [...passo("Envio da nota"), { clicar: '#passo-5 button:has-text("Já enviei por fora")' }] },
+  { rota: "medicao", id: "medicao-oficio", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
+    simular: comNotaAEnviar("mtpar"), passos: [...passo("Envio da nota"), { clicar: '#passo-5 button:has-text("Enviar a nota")' }] },
   { rota: "medicao", id: "medicao-recebimento", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
     passos: [{ clicar: '#conteudo button:has-text("Registrar recebimento")' }] },
   { rota: "medicao", id: "medicao-erro", caminho: MEDICAO, perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
-    simular: falha(/^\/api\/medicoes\/\d+$/) },
+    simular: falha(/^\/api\/contratos\/\d+\/medicoes$/) },
   { rota: "nova-medicao", id: "nova-medicao", caminho: "/obras/:obra/medicoes/nova", perfis: OPERA, espera: ".med-grade" },
   // o cadastro de exemplo nao tem protocolo de nota: a tela do envio e' vista no estado "nao foi possivel abrir"
   { rota: "notas-envio", id: "notas-envio-erro", caminho: "/notas/envio/1", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
@@ -161,7 +176,7 @@ export const TELAS = [
     simular: [{ caminho: /^\/api\/admin\/auditoria$/, corpo: { cadeia_integra: true, ha_mais: false, eventos: [] } }] },
   { rota: "admin", id: "admin-pendencias", caminho: "/admin/pendencias", perfis: SO_ADMIN, espera: "#conteudo h2" },
   { rota: "admin", id: "admin-erro", caminho: "/admin", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
-    simular: falha(/^\/api\/admin\/saude$/) },
+    simular: falha(/^\/api\/admin\/backup$/) },
 
   // ---- Minha conta
   { rota: "conta", id: "conta", caminho: "/conta", perfis: TODOS, espera: ".conta-eu" },

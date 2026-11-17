@@ -386,7 +386,7 @@ function Backup({ b, aoGerar }: { b: Backup | null | undefined; aoGerar: () => v
       {(b === undefined || b === null || temLinha) && (
         <div className="cartao__corpo pilha pilha--curta">
           {b === undefined ? <p>Carregando…</p>
-            : b === null ? <p className="campo__nota">Não foi possível ler o estado do backup; recarregue a página para tentar de novo.</p>
+            : b === null ? <Falha>Não foi possível ler o estado do backup; recarregue a página para tentar de novo.</Falha>
             : <>
                 {b.atrasado && (
                   <CaixaAviso nivel="critico" role="alert">
@@ -429,7 +429,7 @@ function Seguranca({ itens, fora, aviso, alertas }: { itens: ItemSeguranca[] | n
             </CaixaAviso>
           )}
           {itens === undefined ? <p>Carregando…</p>
-            : itens === null ? <p className="campo__nota">Não foi possível ler a segurança; recarregue a página para tentar de novo.</p>
+            : itens === null ? <Falha>Não foi possível ler a segurança; recarregue a página para tentar de novo.</Falha>
             : itens.length === 0 ? null : <>
                 {itens.map(i => (
                   <CaixaAviso key={`${i.data}-${i.mensagem}`} nivel={i.nivel === "atencao" ? "atencao" : "critico"}>
@@ -633,7 +633,7 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
           </div>
           {/* so' a contagem do recorte na regiao viva: trocar o grupo ou a obra refaz as tabelas */}
           <span className="sr-only" role="status">{linhas === 1 ? "1 linha" : `${linhas.toLocaleString("pt-BR")} linhas`}</span>
-          {obras === null && <p className="campo__nota">Não foi possível ler as obras: o filtro por obra fica desligado e as alocações desfeitas ficam sem link. Recarregue a página para tentar de novo.</p>}
+          {obras === null && <Falha>Não foi possível ler as obras: o filtro por obra fica desligado e as alocações desfeitas ficam sem link. Recarregue a página para tentar de novo.</Falha>}
         </div>
       </section>
 
@@ -893,16 +893,10 @@ function Usuarios({ eu }: { eu?: number }) {
                                 onClick={() => setAcessosDe(aberto ? null : u.id)}>
                           Últimos acessos<span className="sr-only"> de {u.nome}</span>
                         </button>
-                        {u.id === eu ? null
-                          : redefinir === u.id ? (
-                            <form className="form-inline" onSubmit={e => confirmarSenha(e, u)}>
-                              <label className="sr-only" htmlFor={`senha-${u.id}`}>Senha nova de {u.nome} (mínimo de 10 caracteres)</label>
-                              <input id={`senha-${u.id}`} type="password" required minLength={10} autoComplete="new-password" autoFocus
-                                     placeholder="Senha nova (mín. 10)…" value={senhaNova} onChange={e => setSenhaNova(e.target.value)} />
-                              <button type="submit" className="btn btn--pequeno btn--primario">Confirmar a senha nova</button>
-                              <button type="button" className="btn btn--pequeno" onClick={() => { setRedefinir(null); setSenhaNova(""); }}>Cancelar</button>
-                            </form>
-                          ) : !u.ativo ? (
+                        {/* a redefinicao abre numa linha propria, abaixo da pessoa (#779): dentro da celula das acoes ela
+                            alargava a tabela e fazia a caixa rolar de lado a 1024 px */}
+                        {u.id === eu || redefinir === u.id ? null
+                          : !u.ativo ? (
                             <button type="button" className="btn btn--pequeno" onClick={() => alternar(u)}>
                               Reativar<span className="sr-only"> {u.nome}</span>
                             </button>
@@ -925,6 +919,21 @@ function Usuarios({ eu }: { eu?: number }) {
                           )}
                       </div></td>
                     </tr>
+                    {redefinir === u.id && u.id !== eu && (
+                      <tr className="linha adm-acessos">
+                        <td colSpan={5}>
+                          <form className="form-inline adm-redefinir" onSubmit={e => confirmarSenha(e, u)}>
+                            <div className="campo">
+                              <label className="campo__rotulo" htmlFor={`senha-${u.id}`}>Senha nova de {u.nome} (mínimo de 10 caracteres)</label>
+                              <input id={`senha-${u.id}`} type="password" required minLength={10} autoComplete="new-password" autoFocus
+                                     value={senhaNova} onChange={e => setSenhaNova(e.target.value)} />
+                            </div>
+                            <button type="submit" className="btn btn--primario">Confirmar a senha nova</button>
+                            <button type="button" className="btn" onClick={() => { setRedefinir(null); setSenhaNova(""); }}>Cancelar</button>
+                          </form>
+                        </td>
+                      </tr>
+                    )}
                     {aberto && (
                       <tr className="linha adm-acessos">
                         <td colSpan={5} id={`acessos-${u.id}`}>
@@ -939,7 +948,7 @@ function Usuarios({ eu }: { eu?: number }) {
             </table>
           </Rolagem>
         )}
-        {contas === null && <div className="cartao__corpo"><p className="campo__nota">Não foi possível ler as contas Microsoft; recarregue a página para tentar de novo.</p></div>}
+        {contas === null && <div className="cartao__corpo"><Falha>Não foi possível ler as contas Microsoft; recarregue a página para tentar de novo.</Falha></div>}
         <p className="sr-only" role="status">{aviso}</p>
         {aviso && <div className="cartao__corpo"><p className="adm-feito"><Glifo situacao="feito" />{aviso}</p></div>}
       </section>
@@ -1059,7 +1068,7 @@ function Auditoria({ busca }: { busca: Busca }) {
           {/* so' a contagem do recorte na regiao viva: trocar os filtros refaz a tabela */}
           <span className="sr-only" role="status">{contar(eventos.length, "evento", "eventos")}</span>
           {nomes === null && (
-            <p className="cartao__corpo campo__nota">Não foi possível ler os nomes: a coluna Quem mostra o número de cada usuário. Recarregue a página para tentar de novo.</p>
+            <div className="cartao__corpo"><Falha>Não foi possível ler os nomes: a coluna Quem mostra o número de cada usuário. Recarregue a página para tentar de novo.</Falha></div>
           )}
           {audit.eventos.length === 0 ? (
             <div className="vazio vazio--curto"><p className="vazio__titulo">Nenhum evento registrado.</p></div>

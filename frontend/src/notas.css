@@ -157,9 +157,9 @@
 .notas-v3 .ol-janela .ol-assunto,
 .notas-v3 .ol-janela .ol-corpo,
 .notas-v3 .ol-janela .ol-anexos { margin-left: 76px; padding: 0; }
-.notas-v3 .ol-janela .ol-assunto input { height: 40px; padding: 0 8px; border: 1px solid var(--nota-campo); border-radius: var(--raio-canto);
+.notas-v3 .ol-janela .ol-assunto textarea { height: auto; min-height: var(--alvo-minimo); padding: var(--espaco-pp); border: 1px solid var(--nota-campo); border-radius: var(--raio-canto);
   background: var(--cor-superficie); }
-.notas-v3 .ol-janela .ol-assunto input:focus { border: 1px solid var(--cor-tinta); box-shadow: 0 0 0 1px var(--cor-tinta); }
+.notas-v3 .ol-janela .ol-assunto textarea:focus { border: 1px solid var(--cor-tinta); box-shadow: 0 0 0 1px var(--cor-tinta); }
 .notas-v3 .ol-janela .ol-anexo { border-color: var(--cor-linha); border-radius: var(--raio-canto); }
 .notas-v3 .ol-janela .ol-corpo .ol-editor { padding: 8px; border: 1px solid var(--nota-campo); border-radius: var(--raio-canto);
   background: var(--cor-superficie); font-family: inherit; font-size: var(--texto-meta); line-height: 1.5; color: var(--cor-tinta); }

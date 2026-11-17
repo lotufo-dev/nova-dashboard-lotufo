@@ -251,6 +251,8 @@
   --borda-situacao-feito: var(--borda-fina) solid var(--situacao-feito-texto);
   --borda-erro: var(--borda-grossa) solid var(--situacao-critico-texto);   /* campo com erro de validacao */
   --altura-area-texto: calc(var(--alvo-minimo) * 2.4);                     /* area de texto da justificativa: 96px */
+  /* o lapis antes do rotulo da justificativa (mascara: a cor vem do texto) */
+  --icone-lapis: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='square'%3E%3Cpath d='M4 20h4L19 9l-4-4L4 16z'/%3E%3Cpath d='m13 7 4 4'/%3E%3C/svg%3E");
   --tamanho-icone: var(--tamanho-icone-conta);                             /* icone de traco em botao e em faixa */
 
   /* telas de leitura no celular (Inicio, #721): o titulo da pagina desce um passo da escala */
@@ -1011,6 +1013,12 @@ span.aviso { display: inline-flex; }
 .aviso--trava { border: var(--borda-trava); background: var(--situacao-critico-ponto); color: var(--cor-sobre-ponto); }
 .justificativa { display: grid; gap: var(--espaco-mini); padding: var(--espaco-m); border: var(--borda-justificativa); background: var(--cor-papel-sombreado); }
 .justificativa textarea { width: 100%; max-width: none; min-height: var(--altura-area-texto); }
+/* o lapis antes do rotulo: a caixa e' onde se ESCREVE o motivo (pagina da medicao montada pelo dono, #722) */
+.justificativa > label:first-child { display: flex; align-items: center; gap: var(--espaco-pp); }
+.justificativa > label:first-child::before {
+  content: ""; flex: none; width: var(--tamanho-icone); height: var(--tamanho-icone); background: currentColor;
+  -webkit-mask: var(--icone-lapis) center / contain no-repeat; mask: var(--icone-lapis) center / contain no-repeat;
+}
 
 /* linha expandida com o formulario da acao — substitui prompt()/confirm().
    Prefixada com `.tabela tbody` de proposito: sem isso `.tabela tbody td` (que e'
@@ -1332,9 +1340,10 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-assunto { padding: 4px 12px; }
 /* o nome do campo a' vista so' onde a pagina o pede (a da medicao, #722): o campo ja' se chama "Assunto" */
 .ol-assunto__rotulo { display: none; }
-.ol-assunto input { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--cor-linha); outline: 0;
-  font: inherit; padding: 8px 0; background: transparent; }
-.ol-assunto input:focus { border-bottom: 2px solid var(--cor-foco); }
+/* o assunto e' uma area de texto de uma linha que cresce com o conteudo (field-sizing): o texto longo quebra */
+.ol-assunto textarea { display: block; width: 100%; max-width: none; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--cor-linha); outline: 0;
+  font: inherit; line-height: var(--entrelinha); padding: 8px 0; background: transparent; resize: none; overflow: hidden; field-sizing: content; }
+.ol-assunto textarea:focus { border-bottom: 2px solid var(--cor-foco); }
 .ol-anexos { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 8px 12px 0; list-style: none; }
 .ol-anexo { display: flex; align-items: center; gap: 8px; max-width: 360px; border: 1px solid var(--cor-linha);
   border-radius: var(--raio-controle); padding: 6px 10px; }
@@ -1421,7 +1430,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-corpo .ol-editor { height: auto; padding: 0; border-radius: 0; max-width: none; }
 .ol-janela input, .ol-janela textarea { box-shadow: none; }
 .ol-entrada { height: auto; padding: 4px 0; border-radius: 0; }
-.ol-assunto input { height: auto; border-radius: 0; padding: 8px 0; }
+.ol-assunto textarea { height: auto; border-radius: 0; padding: 8px 0; }
 .assinatura-alvo { border: 1px dashed var(--cor-borda-controle); border-radius: var(--raio-controle); padding: 14px; text-align: center; color: var(--cor-texto-secundario); cursor: pointer; }
 .assinatura-alvo:focus { outline: 2px solid var(--cor-tinta); outline-offset: 2px; }
 /* Ajuste fino das linhas Para/Cc/Cco contra o print do Outlook (2026-09-25): botao branco com borda e texto

@@ -12,7 +12,8 @@
 const TAMANHOS = [12, 14, 16, 19.2, 22, 23.04, 27.648, 33.184];
 const FAMILIAS = ["Archivo", "Barlow Condensed", "Barlow Semi Condensed"];
 // seletores cujo tamanho de letra e' calculado pela largura da caixa (clamp com cqi) ou relativo ao texto em volta
-const TAMANHO_LIVRE = ".ini-etapa__valor, .ini-previsao__valor, .ini-numero__valor, .ini-numeros *, .ini-etapas *, .ini-previsao *, code";
+const TAMANHO_LIVRE = ".ini-etapa__valor, .ini-previsao__valor, .ini-numero__valor, .ini-numeros *, .ini-etapas *, .ini-previsao *, "
+  + ".pag-numeros__valor, code";
 
 export async function auditar(pagina) {
   return pagina.evaluate(({ TAMANHOS, FAMILIAS, TAMANHO_LIVRE }) => {
@@ -31,6 +32,14 @@ export async function auditar(pagina) {
     const raiz = document.querySelector("dialog[open]") ?? document.body;
     const estilos = new Map();
     const estilo = el => { let s = estilos.get(el); if (!s) { s = getComputedStyle(el); estilos.set(el, s); } return s; };
+
+    // caixa que rola de lado (tabela larga dentro da propria caixa): permitido, mas fica dito para quem confere
+    for (const el of raiz.querySelectorAll("*")) {
+      const s = estilo(el);
+      if (/auto|scroll/.test(s.overflowX) && el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) {
+        achar("caixa rolando de lado", el, "", `${el.scrollWidth} px de conteúdo em ${el.clientWidth} px`);
+      }
+    }
 
     // cantos: so' o avatar e' redondo (--raio-avatar); a caixa de opcao (radio) e' do navegador
     for (const el of raiz.querySelectorAll("*")) {

@@ -89,9 +89,10 @@
   .medicoes__painel-cab, .medicoes__vazio { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
   .medicoes .tabela th:first-child, .medicoes .tabela td:first-child, .medicoes .tabela tbody th[scope="row"]:first-child { padding-left: var(--espaco-m); }
   .medicoes .tabela th:last-child, .medicoes .tabela td:last-child { padding-right: var(--espaco-m); }
-  .quadro__c-obra { width: 18%; }
-  .quadro__c-passo { width: 8.5%; }
-  .quadro__c-valor { width: 15.5%; }
+  /* o nome da obra com a largura que sobra: a 1024 px quebrava em ate cinco linhas (#779) */
+  .quadro__c-obra { width: 21.8%; }
+  .quadro__c-passo { width: 8.2%; }
+  .quadro__c-valor { width: 14.5%; }
   .medicoes .quadro__tabela thead th { font-size: var(--texto-mini); }
   .medicoes .quadro__tabela thead th.quadro__th-passo, .medicoes .quadro__tabela tbody td.quadro__passo,
   .medicoes .quadro__tabela .col-num { padding-left: var(--espaco-traco); padding-right: var(--espaco-traco); font-size: var(--texto-mini); }

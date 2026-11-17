@@ -127,10 +127,8 @@ export default function Contratos({ ir, busca = {}, aba = "posicao" }: { ir: Ir;
         {!lista && !erro && <div className="vazio"><p>Carregando as obras…</p></div>}
         {erro && <Falha><IconeAlerta className="icone icone--p" />{erro} Recarregue a página para tentar de novo.</Falha>}
         {lista && (empresas === null || avisos === null) && avisosAbertos && (
-          <p className="campo__nota" role="alert">
-            Não foi possível carregar {[empresas === null && "os nomes das empresas", avisos === null && "os avisos"].filter(Boolean).join(" nem ")};
-            recarregue a página para tentar de novo.
-          </p>
+          <Falha>Não foi possível carregar {[empresas === null && "os nomes das empresas", avisos === null && "os avisos"].filter(Boolean).join(" nem ")};
+            recarregue a página para tentar de novo.</Falha>
         )}
 
         {lista && avisosAbertos && (

@@ -334,7 +334,13 @@ async function abrirTela(contexto, perfil, largura, tela, reg) {
     for (const s of simuladas) {
       await pagina.route(u => u.pathname.startsWith("/api/") && s.caminho.test(u.pathname), (rota, pedido) => {
         if (pedido.method() !== (s.metodo ?? "GET")) return rota.fallback();
-        return rota.fulfill({ status: s.status ?? 200, contentType: "application/json", body: JSON.stringify(s.corpo ?? {}) });
+        // `ajustar` muda a resposta verdadeira (um campo, um estado); `corpo` a troca inteira. Os dois podem ser
+        // funcao dos registros da prova (obra, medicao, empresa).
+        if (s.ajustar) {
+          return rota.fetch().then(async r => rota.fulfill({ response: r, json: s.ajustar(await r.json(), reg) }));
+        }
+        const corpo = typeof s.corpo === "function" ? s.corpo(reg) : s.corpo ?? {};
+        return rota.fulfill({ status: s.status ?? 200, contentType: "application/json", body: JSON.stringify(corpo) });
       });
     }
     await pagina.goto(BASE + caminho, { waitUntil: "load" });

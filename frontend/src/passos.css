@@ -124,6 +124,8 @@
 .med-painel__titulo { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-pp) var(--espaco-p);
   border-top: var(--regua-secao); padding-top: var(--regua-secao-respiro); font-size: var(--texto-titulo-sub); line-height: var(--entrelinha-titulo); }
 .med-quadro .painel__titulo { margin: 0; max-width: none; font-size: var(--texto-corpo); }
+/* passo 3 com o e-mail aberto: o painel ja' se chama "Enviar ao faturamento"; o titulo de dentro repetia o nome */
+.med-painel:has(> #faturamento-titulo) .cartao__corpo > .painel__titulo:first-child { display: none; }
 .med-quadro .espelho-etapa .painel__titulo { margin: 0 0 var(--espaco-p); max-width: none; border-top: var(--regua-secao); padding-top: var(--regua-secao-respiro);
   font-family: var(--fonte-titulo); font-stretch: var(--largura-titulo); font-weight: var(--peso-titulo); font-size: var(--texto-titulo-sub);
   line-height: var(--entrelinha-titulo); text-transform: var(--caixa-titulo); letter-spacing: var(--espacamento-titulo); color: var(--cor-tinta); }
@@ -441,7 +443,7 @@
 .med .med-quadro .ol-janela .ol-chip button { width: var(--altura-contador); height: var(--altura-contador); margin: 0; border-radius: 0; color: var(--cor-texto-secundario); }
 .med .med-quadro .ol-janela .ol-chip button:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
 .med .med-quadro .ol-janela .ol-entrada { height: auto; min-height: var(--alvo-menor); min-width: 120px; padding: 0 var(--espaco-mini); font-size: var(--texto-corpo); }
-.med .med-quadro .ol-janela .ol-entrada:focus-visible, .med .med-quadro .ol-janela .ol-assunto input:focus-visible {
+.med .med-quadro .ol-janela .ol-entrada:focus-visible, .med .med-quadro .ol-janela .ol-assunto textarea:focus-visible {
   outline: var(--largura-foco) solid var(--cor-foco); outline-offset: var(--afastamento-foco); }
 .med .med-quadro .ol-janela .ol-cco { height: auto; padding: 0 var(--espaco-mini); color: var(--cor-tinta); font-size: var(--texto-corpo); font-weight: var(--peso-medio);
   text-decoration: underline; text-underline-offset: var(--afastamento-sublinhado); }
@@ -450,7 +452,7 @@
 .med .med-quadro .ol-janela .ol-assunto { display: grid; grid-template-columns: var(--largura-rotulo-email) minmax(0, 1fr); align-items: center; gap: 0 var(--espaco-pp);
   min-height: var(--alvo-minimo); margin: 0; padding: 0; border-bottom: var(--borda-campo); }
 .med .med-quadro .ol-janela .ol-assunto__rotulo { display: block; color: var(--cor-texto-secundario); font-weight: var(--peso-medio); }
-.med .med-quadro .ol-janela .ol-assunto input, .med .med-quadro .ol-janela .ol-assunto input:focus { width: 100%; height: auto; min-height: var(--alvo-menor); padding: var(--espaco-pp) var(--espaco-mini);
+.med .med-quadro .ol-janela .ol-assunto textarea, .med .med-quadro .ol-janela .ol-assunto textarea:focus { width: 100%; height: auto; min-height: var(--alvo-menor); padding: var(--espaco-pp) var(--espaco-mini);
   border: 0; border-radius: 0; background: none; box-shadow: none; font-size: var(--texto-corpo); font-weight: var(--peso-medio); }
 .med .med-quadro .ol-janela .ol-assunto .campo__erro { grid-column: 2; }
 .med .med-quadro .ol-janela .ol-anexos { margin: 0; padding: var(--espaco-p) 0; gap: var(--espaco-pp); }

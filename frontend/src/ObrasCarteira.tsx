@@ -12,6 +12,7 @@ import { fmtCompetencia, fmtDataPura, fmtMesCurto as mesCurto } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import { situacaoDoNivel } from "./situacao";
+import Falha from "./Falha";
 
 // As pecas da lista de Obras que vieram da Carteira (#748; bloco 8, spec §10.5): a curva do previsto e do medido, os
 // reajustes esperando apostilamento e o QDOP. Tudo na COTA da Lotufo, com as regras em `app/diretoria.py`
@@ -352,7 +353,7 @@ export function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
             </Link>
           </li>
         </ul>
-        {lista === null && <p className="campo__nota">Não foi possível contar as obras; os links abrem a lista.</p>}
+        {lista === null && <Falha>Não foi possível contar as obras; os links abrem a lista.</Falha>}
       </footer>
     </section>
   );
