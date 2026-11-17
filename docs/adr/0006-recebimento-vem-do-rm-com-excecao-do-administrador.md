@@ -110,6 +110,9 @@ volta a contar.
 - **A baixa da nota que saiu** fica gravada e marcada, fora do recebido. Quando há substituta, o dinheiro conta
   pelo título dela, uma vez. A medição que já estava recebida continua recebida.
 - **Na tela**, a página da medição mostra a nota e o título marcados, ditos como excluídos no RM, fora dos totais.
+- **No Fechamento**, a nota marcada sai do protocolado e do em aberto (a medição que fica sem nota volta ao em
+  aberto pelo valor dela, como "sem nota ligada"), e o título marcado não entra na leitura de paga, paga em parte ou
+  em aberto: a baixa de um título excluído não é recebimento.
 - A correção de cadastro não desconsidera nem liga nota marcada: ela já não conta, e a marca é só da sincronização.
 
 Ficou de fora: passar o vínculo da nota antiga para a substituta sem prova (a substituta só liga pelas regras do
