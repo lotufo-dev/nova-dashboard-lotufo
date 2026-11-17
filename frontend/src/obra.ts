@@ -114,9 +114,20 @@ export function linhaDoTempo(inicio: string | null, fim: string, hoje: string): 
  *  escreve). */
 export function seloDoPrazo(restantes: number | null): { classe: string; texto: string } | null {
   if (restantes === null || Number.isNaN(restantes) || restantes > 60) return null;
-  const texto = restantes < 0 ? "vencida" : restantes === 0 ? "vence hoje"
+  return { classe: restantes <= 30 ? "critico" : "breve", texto: textoDoPrazo(restantes) };
+}
+
+/** O que o selo de um prazo diz: "vencida", "vence hoje" ou "vence em N dias". */
+export function textoDoPrazo(restantes: number): string {
+  return restantes < 0 ? "vencida" : restantes === 0 ? "vence hoje"
     : `vence em ${restantes} ${restantes === 1 ? "dia" : "dias"}`;
-  return { classe: restantes <= 30 ? "critico" : "breve", texto };
+}
+
+/** O selo de uma linha do tempo da pagina da obra: o nivel e' o do servidor (`ficha_obra.nivel_do_prazo`, a mesma
+ *  regra do numero dos dias), a tela so' escreve quanto falta. Sem nivel a cobrar (normal ou ausente), null. */
+export function seloDaLinhaDoTempo(nivel: string | null | undefined, restantes: number): { classe: string; texto: string } | null {
+  if (nivel !== "critico" && nivel !== "atencao") return null;
+  return { classe: nivel === "critico" ? "critico" : "breve", texto: textoDoPrazo(restantes) };
 }
 
 /** Rótulo curto da marca do aditivo na curva: "2º TA" para "TA 2º Termo Aditivo ao Contrato …"; sem número, "TA". */

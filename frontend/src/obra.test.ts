@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { desfechoDoPedido, diasEntre, instrumentosDaObra, linhaDoTempo, reajustePorDataBase, seloDoPrazo } from "./obra";
+import { desfechoDoPedido, diasEntre, instrumentosDaObra, linhaDoTempo, reajustePorDataBase, seloDaLinhaDoTempo, seloDoPrazo } from "./obra";
 
 // texto na tela (26/10/2026): o prazo so' vira selo quando pede acao, nos limites do aviso "Execucao vencendo"
 describe("seloDoPrazo", () => {
@@ -11,6 +11,15 @@ describe("seloDoPrazo", () => {
     expect(seloDoPrazo(1)).toEqual({ classe: "critico", texto: "vence em 1 dia" });
     expect(seloDoPrazo(0)).toEqual({ classe: "critico", texto: "vence hoje" });
     expect(seloDoPrazo(-3)).toEqual({ classe: "critico", texto: "vencida" });
+  });
+});
+
+describe("seloDaLinhaDoTempo", () => {
+  it("o nível vem do servidor; a tela só escreve quanto falta, e sem nível a cobrar não há selo", () => {
+    expect(seloDaLinhaDoTempo("critico", -40)).toEqual({ classe: "critico", texto: "vencida" });
+    expect(seloDaLinhaDoTempo("atencao", 75)).toEqual({ classe: "breve", texto: "vence em 75 dias" });
+    expect(seloDaLinhaDoTempo("normal", -40)).toBeNull();      // paralisada, encerrada: o servidor cala
+    expect(seloDaLinhaDoTempo(undefined, 3)).toBeNull();
   });
 });
 

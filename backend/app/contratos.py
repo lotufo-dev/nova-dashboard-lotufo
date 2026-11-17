@@ -162,10 +162,12 @@ def cabecalho(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | 
     v = vigente(conn, contrato_id)
     o = conn.execute("SELECT nome FROM orgaos WHERE id=?", (v["orgao_id"],)).fetchone() if v.get("orgao_id") else None
     status = "em_encerramento" if v["estado"] == "ativo" and v.get("encerramento_iniciado_em") else v["estado"]
-    from app import medicoes, prazos  # import tardio: os dois importam este modulo ou sao importados por quem importa
+    from app import ficha_obra, medicoes, prazos  # import tardio: importam este modulo ou sao importados por quem importa
     # #662: execucao registrada vencida e aditivo posterior so' de vigencia: a data fica, sem dias (nada de "vencido")
     sem_prazo = prazos.execucao_sem_prazo(conn, contrato_id, hoje) is not None
     sem_fluxo = contrato_id in medicoes.sem_fluxo(conn)
+    dias_execucao = None if sem_prazo else _dias_ate(v["execucao_fim_vigente"], hoje)
+    dias_vigencia = _dias_ate(v["vigencia_fim_vigente"], hoje)
     return {"id": contrato_id, "obra": v.get("nome_curto") or v["numero_instrumento"],
             "orgao": o["nome"] if o else v["orgao"], "instrumento": v["numero_instrumento"],
             "valor_vigente_centavos": v["valor_vigente_centavos"], "cota_vigente_centavos": v["cota_vigente_centavos"],
@@ -173,9 +175,13 @@ def cabecalho(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | 
             # os inicios (so' leitura) alimentam as linhas do tempo da pagina da obra; nulos quando o cadastro nao os tem
             "execucao_inicio": v.get("execucao_inicio"), "vigencia_inicio": v.get("vigencia_inicio"),
             "execucao_fim": v["execucao_fim_vigente"], "execucao_sem_prazo": sem_prazo,
-            "dias_execucao": None if sem_prazo else _dias_ate(v["execucao_fim_vigente"], hoje),
-            "vigencia_fim": v["vigencia_fim_vigente"], "dias_vigencia": _dias_ate(v["vigencia_fim_vigente"], hoje),
+            "dias_execucao": dias_execucao,
+            "vigencia_fim": v["vigencia_fim_vigente"], "dias_vigencia": dias_vigencia,
             "status": status,
+            # o nivel de cada prazo, decidido num lugar so' (`ficha_obra.nivel_do_prazo`): o numero dos dias e o selo
+            # das linhas do tempo da pagina da obra mostram o mesmo
+            "nivel_execucao": ficha_obra.nivel_do_prazo(dias_execucao, status),
+            "nivel_vigencia": ficha_obra.nivel_do_prazo(dias_vigencia, status),
             # issue #660: os passos da medicao que a obra inicia (familia do orgao e `passos_medicao` do cadastro); a
             # lista vazia do cadastro e' a obra sem fluxo de medicao, que nao oferece "Iniciar"
             "sem_fluxo_medicao": sem_fluxo,

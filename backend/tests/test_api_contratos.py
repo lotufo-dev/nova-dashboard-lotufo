@@ -263,6 +263,29 @@ def test_ficha_obra_sem_medicao_e_inexistente_404(client_admin):
 def test_ficha_nivel_do_prazo_e_o_semaforo():
     from app.ficha_obra import nivel_do_prazo
     assert [nivel_do_prazo(d) for d in (None, -3, 30, 31, 90, 91)] == ["normal", "critico", "critico", "atencao", "atencao", "normal"]
+    # so' a obra ativa tem prazo a cobrar: paralisada, em encerramento, encerrada e rescindida ficam sem nivel
+    assert {nivel_do_prazo(-40, s) for s in ("suspenso", "em_encerramento", "encerrado", "rescindido")} == {"normal"}
+    assert nivel_do_prazo(-40, "ativo") == "critico"
+
+
+def test_obra_paralisada_com_execucao_vencida_nao_tem_nivel_no_numero_nem_na_linha_do_tempo(client_admin, monkeypatch):
+    """Uma regra so' para o painel "Prazo": o nivel do numero (ficha) e o das linhas do tempo (cabecalho) saem de
+    `ficha_obra.nivel_do_prazo`. A obra ativa vencida e' critica nos dois; paralisada, em nenhum."""
+    import datetime
+    from app import db, tempo
+    monkeypatch.setattr(tempo, "hoje_local", lambda: datetime.date(2026, 12, 1))
+    cid = novo_contrato({**NOVO, "execucao_fim": "2026-10-20", "vigencia_fim": "2026-12-21"})
+
+    def niveis():
+        f = client_admin.get(f"/api/contratos/{cid}/ficha").json()
+        cab = client_admin.get(f"/api/contratos/{cid}/cabecalho").json()
+        return f["vencimentos"][0]["nivel"], cab["nivel_execucao"], cab["nivel_vigencia"], cab["dias_execucao"]
+
+    assert niveis() == ("critico", "critico", "critico", -42)
+    conn = db.get_conn()
+    conn.execute("UPDATE contratos SET estado='suspenso' WHERE id=?", (cid,))
+    conn.commit(); conn.close()
+    assert niveis() == ("normal", "normal", "normal", -42)
 
 
 def test_ficha_conta_so_os_tas_que_valem(client_admin):

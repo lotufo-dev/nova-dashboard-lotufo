@@ -11,8 +11,12 @@ CRITICO_DIAS = 30      # prazo de execucao/vigencia a ate' 30 dias (ou ja' venci
 ATENCAO_DIAS = 90      # ate' 90 dias: ambar
 
 
-def nivel_do_prazo(dias: int | None) -> str:
-    if dias is None:
+def nivel_do_prazo(dias: int | None, status: str = "ativo") -> str:
+    """O nivel de um prazo da obra (fim da execucao ou da vigencia), a regra unica do painel "Prazo": os dias do
+    numero e o selo das linhas do tempo saem daqui (`contratos.cabecalho` e a ficha). So' a obra ativa tem prazo a
+    cobrar: paralisada (D16: o vencimento da execucao nao conta, Lei 14.133, art. 115, par. 5o), em encerramento,
+    encerrada ou rescindida fica `normal`, assim como o prazo sem dias (execucao sem prazo conhecido, #662)."""
+    if dias is None or status != "ativo":
         return "normal"
     return "critico" if dias <= CRITICO_DIAS else "atencao" if dias <= ATENCAO_DIAS else "normal"
 
@@ -65,7 +69,7 @@ def da_obra(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | No
     # da execucao (os dias e o nivel); o item da vigencia saiu com o cartao "Proximos vencimentos" (a data da
     # vigencia esta' na linha do tempo, pelo cabecalho da obra).
     venc = [{"chave": "execucao", "rotulo": "Fim da execução", "data": cab["execucao_fim"],
-             "dias": cab["dias_execucao"], "nivel": nivel_do_prazo(cab["dias_execucao"])}]
+             "dias": cab["dias_execucao"], "nivel": cab["nivel_execucao"]}]
     # #646: o topo numa base so'. Valor vigente, medido e saldo na base de execucao (a precos iniciais, sem o aditivo
     # de reajuste: a mesma de `paineis.saldo`) e na cota da Lotufo. Vigente e medido arredondam uma vez cada e o saldo
     # e' a diferenca dos dois, para a conta da tela fechar ao centavo. O reajuste contratado vai a parte. O medido soma
