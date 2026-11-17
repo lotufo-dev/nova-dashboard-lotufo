@@ -341,19 +341,8 @@ export default function Cronograma({ contratoId, podeEditar }:
                     <td className="col-num dinheiro num">{valorOuTraco(p.medido_reajuste_centavos)}</td>
                     <td className="col-num dinheiro num">{valorOuTraco(p.medido_projeto_centavos)}</td>
                     <td>
-                      {semValor ? (
-                        <span className="estado estado--aberto">
-                          <span className="estado__ponto" aria-hidden="true" />em aberto
-                        </span>
-                      ) : pend ? (
-                        <span className="estado estado--provisorio">
-                          <span className="estado__ponto" aria-hidden="true" />provisório
-                        </span>
-                      ) : (
-                        <span className="estado estado--atestado">
-                          <span className="estado__ponto" aria-hidden="true" />atestado
-                        </span>
-                      )}
+                      {/* a situacao da competencia, com glifo e palavra; em aberto fica neutra */}
+                      {semValor ? <Selo>em aberto</Selo> : pend ? <Selo situacao="andamento">provisório</Selo> : <Selo situacao="feito">atestado</Selo>}
                     </td>
                   </tr>
                 );

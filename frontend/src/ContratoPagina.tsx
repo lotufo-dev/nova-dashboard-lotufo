@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import Alertas, { avisosDaObra, type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
-import ExecucaoContrato from "./ExecucaoContrato";
-import FichaObra, { RitmoEPrazo, type Ficha } from "./FichaObra";
+import FichaObra, { MedicoesAgora, PrazoDaObra, type Ficha } from "./FichaObra";
 import { IconeAlerta, IconeVoltar } from "./icones";
 import LegendaCor from "./LegendaCor";
 import type { Usuario } from "./Login";
@@ -18,6 +17,7 @@ import { Abas, destinoDeHref, Migalhas, VoltarOrigem } from "./Topo";
 import { baseDosValores } from "./formato";
 import Selo from "./Selo";
 import { situacaoDoNivel } from "./situacao";
+import "./obra.css";
 
 // Bloco 6 (spec §10.3): cabecalho da obra, montado no servidor (`contratos.cabecalho`).
 type Cabecalho = {
@@ -129,7 +129,7 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
 
   return (
     <>
-      <header className="topbar topbar--detalhe">
+      <header className="topbar topbar--detalhe topbar--obra">
         <div className="topbar__linha topbar__linha--quebra">
           <div className="topbar__trilha">
             <Link className="btn--voltar" para={lista.para} busca={lista.busca}>
@@ -142,7 +142,6 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
               ...(c ? [{ rotulo: c.orgao, para: { tela: "obras" as const }, busca: { orgao: c.orgao }, fixa: true }] : []),
               { rotulo: c?.obra ?? "Obra" }]} />
           </div>
-          <LegendaCor />
         </div>
         <div className="topbar__linha topbar__linha--quebra">
           <h1 className="topbar__titulo topbar__titulo--grande" title={c?.obra}>{c ? c.obra : "Obra"}</h1>
@@ -152,7 +151,7 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
         </div>
       </header>
 
-      <div className="pagina ficha">
+      <div className="pagina obra">
         {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
 
         {!c && !erro && (
@@ -165,12 +164,13 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
             faria as filhas repetirem o mesmo erro em cascata. */}
         {c && (
           <>
-          <FichaObra contratoId={contratoId} prazos={c} ficha={ficha} />
+          <FichaObra ficha={ficha} />
           <div className="obra-grade">
             <div className="obra-grade__principal">
-              <div id="ritmo"><RitmoEPrazo ficha={ficha} /></div>
+              <PrazoDaObra ficha={ficha} prazos={c} />
 
-              <section className="cartao" id="secoes" aria-label="Seções da obra">
+              {/* as secoes da obra: a faixa de abas direto na pagina e, embaixo, os paineis da aba (sem caixa em volta) */}
+              <section className="obra-secoes" id="secoes" aria-label="Seções da obra">
                 <Abas rotulo="Seções da obra" atual={abaAtiva} classe="abas--obra"
                   itens={ABAS.map(a => ({ id: a.id, rotulo: a.rotulo, para: { tela: "obra" as const, id: contratoId, aba: a.id } }))} />
 
@@ -192,13 +192,10 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
               </section>
             </div>
 
-            <aside className="obra-grade__lateral" aria-label="Avisos e prazos da obra">
+            <aside className="obra-grade__lateral" aria-label="Medições e avisos da obra">
+              <div id="agora"><MedicoesAgora contratoId={contratoId} ficha={ficha} /></div>
               <div id="avisos-obra"><AvisosDaObra contratoId={contratoId} itens={avisos} /></div>
-              <div id="execucao">
-                <ExecucaoContrato execucaoInicio={c.execucao_inicio ?? null} execucaoFim={c.execucao_fim}
-                  vigenciaInicio={c.vigencia_inicio ?? null} vigenciaFim={c.vigencia_fim} status={c.status}
-                  execucaoSemPrazo={c.execucao_sem_prazo} />
-              </div>
+              <div id="legenda-obra"><LegendaCor /></div>
             </aside>
           </div>
           </>

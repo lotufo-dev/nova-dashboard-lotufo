@@ -10,6 +10,7 @@ import { situacaoDoNivel } from "./situacao";
 // 26/10/2026: quantos dias restam nao se escreve).
 
 type Status = "ativo" | "suspenso" | "em_encerramento" | "encerrado" | "rescindido";
+export type StatusDaObra = Status;
 
 /** A data do dia, relida a cada minuto: o marcador muda de lugar na virada do dia sem a pessoa recarregar. */
 export function useHoje(): string {
@@ -63,18 +64,26 @@ function Linha({ titulo, inicio, fim, status, hoje, paralisada, soData }:
   );
 }
 
-export default function ExecucaoContrato({ execucaoInicio, execucaoFim, vigenciaInicio, vigenciaFim, status, execucaoSemPrazo }:
-    { execucaoInicio: string | null; execucaoFim: string | null; vigenciaInicio: string | null; vigenciaFim: string | null;
-      status: Status; execucaoSemPrazo?: boolean }) {
+type Props = { execucaoInicio: string | null; execucaoFim: string | null; vigenciaInicio: string | null; vigenciaFim: string | null;
+  status: Status; execucaoSemPrazo?: boolean };
+
+/** As duas linhas do tempo, sem moldura: o painel "Prazo" da pagina da obra as traz dentro dele. */
+export function LinhasDoTempo({ execucaoInicio, execucaoFim, vigenciaInicio, vigenciaFim, status, execucaoSemPrazo }: Props) {
   const hoje = useHoje();
+  return (
+    <div className="linhas-tempo">
+      <Linha titulo="Execução" inicio={execucaoInicio} fim={execucaoFim} status={status} hoje={hoje} paralisada={status === "suspenso"}
+        soData={execucaoSemPrazo} />
+      <Linha titulo="Vigência" inicio={vigenciaInicio} fim={vigenciaFim} status={status} hoje={hoje} />
+    </div>
+  );
+}
+
+export default function ExecucaoContrato(props: Props) {
   return (
     <section className="cartao" aria-labelledby="titulo-execucao">
       <div className="cartao__cabeca"><h2 className="cartao__titulo" id="titulo-execucao">Execução do contrato</h2></div>
-      <div className="linhas-tempo">
-        <Linha titulo="Execução" inicio={execucaoInicio} fim={execucaoFim} status={status} hoje={hoje} paralisada={status === "suspenso"}
-          soData={execucaoSemPrazo} />
-        <Linha titulo="Vigência" inicio={vigenciaInicio} fim={vigenciaFim} status={status} hoje={hoje} />
-      </div>
+      <LinhasDoTempo {...props} />
     </section>
   );
 }

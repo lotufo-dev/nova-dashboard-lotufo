@@ -109,6 +109,21 @@ export function Estado({ m }: { m: Medicao }) {
   );
 }
 
+/** O estado na lista de medicoes da obra, nas situacoes da fundacao: recebida e' "feito", cancelada e desistida ficam
+ *  neutras e riscadas, e o resto esta' em andamento. Glifo e palavra, nunca so' cor. */
+function EstadoDaLinha({ m }: { m: Medicao }) {
+  const excecao = EXCECOES.includes(m.estado);
+  return (
+    <span className="obra-medicoes__estado">
+      <Selo situacao={excecao ? undefined : m.estado === "recebida" ? "feito" : "andamento"} className={excecao ? "selo--riscado" : undefined}
+        sufixo={m.congelada === 1 ? <IconeCadeado className="icone icone--p" titulo="Congelada" /> : undefined}>
+        {ROTULO_ESTADO[m.estado] ?? m.estado}
+      </Selo>
+      {m.final === 1 && <Selo situacao="breve">final</Selo>}
+    </span>
+  );
+}
+
 type LinhaAndamento = { id: number; proximo_passo: string; desde: string };
 /** #748: o custo lancado no RM da competencia (`/api/contratos/{id}/custo`, so' na obra com cadastro de custo). */
 type CustoObra = { linhas: { competencia: string; custo_centavos: number }[] };
@@ -175,10 +190,29 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
   const custos = custoPorMedicao(itens, custo);
   const comCusto = custo !== null;
   const celulaCusto = (m: Medicao) => comCusto
-    && <td className="col-num dinheiro num">{custos.has(m.id) ? brl(custos.get(m.id) as number) : "—"}</td>;
+    && <td data-rotulo="Custo lançado no RM" className="col-num dinheiro num">{custos.has(m.id) ? brl(custos.get(m.id) as number) : "—"}</td>;
 
   if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>;
   if (carregando) return <section className="cartao"><div className="vazio"><p>Carregando medições…</p></div></section>;
+
+  // as duas tabelas dividem as mesmas colunas (o dinheiro cai na mesma coluna em "Em andamento" e em "Anteriores")
+  const colunas = (
+    <colgroup>
+      <col className="c-om-medicao" /><col className="c-om-estado" /><col className="c-om-valor" /><col className="c-om-valor" />
+      {comCusto && <col className="c-om-valor" />}<col className="c-om-resto" />
+    </colgroup>
+  );
+  const cabecalho = (ultima: string) => (
+    <thead>
+      <tr>
+        <th scope="col">Medição</th><th scope="col">Estado</th>
+        <th scope="col" className="col-num">Pedido</th><th scope="col" className="col-num">Aprovado</th>
+        {comCusto && <th scope="col" className="col-num">Custo lançado no RM</th>}
+        <th scope="col">{ultima}</th>
+      </tr>
+    </thead>
+  );
+  const classeTabela = `tabela obra-medicoes${comCusto ? " obra-medicoes--com-custo" : ""}`;
 
   return (
     <>
@@ -191,37 +225,31 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
           <div className="vazio vazio--curto"><p>Nenhuma medição aberta.</p></div>
         ) : (
           <Rolagem rotulo="Medições em andamento da obra">
-            {/* grade comum com "Anteriores", logo abaixo (F-47): o dinheiro das duas tabelas cai na mesma coluna */}
-            <table className={`tabela tabela--grade${comCusto ? " tabela--com-custo" : ""}`}>
-              <colgroup>
-                <col className="c-medicao-obra" /><col className="c-comp" /><col className="c-estado" />
-                <col className="c-valor" /><col className="c-valor" />{comCusto && <col className="c-valor" />}<col /><col className="c-marcas" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th scope="col">Medição</th><th scope="col">Competência</th><th scope="col">Estado</th>
-                  <th scope="col" className="col-num">Pedido</th><th scope="col" className="col-num">Aprovado</th>
-                  {comCusto && <th scope="col" className="col-num">Custo lançado no RM</th>}
-                  <th scope="col">Próximo passo</th><th scope="col">Marcas</th>
-                </tr>
-              </thead>
+            <table className={classeTabela}>
+              <caption className="sr-only">Medições em andamento da obra</caption>
+              {colunas}
+              {cabecalho("Próximo passo")}
               <tbody>
-                {emAndamento.map((m, i) => {
+                {emAndamento.map(m => {
                   const linha = andamento.get(m.id);
                   const passo = passoDe(linha?.proximo_passo);
                   const destino = { tela: "medicao" as const, obra: contratoId, id: m.id };
                   return (
-                    <tr key={m.id} className={`linha${i % 2 === 1 ? " par" : ""}`}>
+                    <tr key={m.id} className="linha">
                       {/* a medicao abre na secao do proximo passo (NAVEGACAO.md: quem chega cai onde age) */}
-                      <td className="forte"><Link className="link" para={destino} secao={passo?.secao || undefined}>{tituloMedicao(m)}</Link></td>
-                      <td className="num">{competenciaBR(m.competencia)}</td>
-                      <td><Estado m={m} /></td>
-                      <td className="col-num dinheiro num">{brl(m.valor_protocolado_centavos)}</td>
-                      <td className="col-num dinheiro num">{brl(m.valor_atestado_centavos)}</td>
+                      <td data-rotulo="Medição">
+                        <Link className="link forte" para={destino} secao={passo?.secao || undefined}>{tituloMedicao(m)}</Link>
+                        <div className="obra-medicoes__sub num">{competenciaBR(m.competencia)}</div>
+                      </td>
+                      <td data-rotulo="Estado">
+                        <EstadoDaLinha m={m} />
+                        {notasDivergentes(m).length > 0
+                          && <Link className="link-selo" para={destino} secao="notas"><Selo situacao="critico">nota diverge</Selo></Link>}
+                      </td>
+                      <td data-rotulo="Pedido" className="col-num dinheiro num">{brl(m.valor_protocolado_centavos)}</td>
+                      <td data-rotulo="Aprovado" className="col-num dinheiro num">{brl(m.valor_atestado_centavos)}</td>
                       {celulaCusto(m)}
-                      <td>{passo ? passo.rotulo : "—"}</td>
-                      <td>{notasDivergentes(m).length > 0
-                        ? <Link className="link-selo" para={destino} secao="notas"><Selo situacao="critico">nota diverge</Selo></Link> : "—"}</td>
+                      <td data-rotulo="Próximo passo">{passo ? passo.rotulo : "—"}</td>
                     </tr>
                   );
                 })}
@@ -245,30 +273,25 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
         </div>
         {anteriores.length > 0 && (
           <Rolagem rotulo="Medições anteriores da obra" alta>
-            <table className={`tabela tabela--grade${comCusto ? " tabela--com-custo" : ""}`}>
-              <colgroup>
-                <col className="c-medicao-obra" /><col className="c-comp" /><col className="c-estado" />
-                <col className="c-valor" /><col className="c-valor" />{comCusto && <col className="c-valor" />}<col /><col className="c-data" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th scope="col">Medição</th><th scope="col">Competência</th><th scope="col">Estado</th>
-                  <th scope="col" className="col-num">Pedido</th><th scope="col" className="col-num">Aprovado</th>
-                  {comCusto && <th scope="col" className="col-num">Custo lançado no RM</th>}
-                  <th scope="col">Notas</th><th scope="col">Recebida em</th>
-                </tr>
-              </thead>
+            <table className={classeTabela}>
+              <caption className="sr-only">Medições anteriores da obra</caption>
+              {colunas}
+              {cabecalho("Notas e recebimento")}
               <tbody>
-                {visiveis.map((m, i) => (
-                  <tr key={m.id} className={`linha${i % 2 === 1 ? " par" : ""}`}>
-                    <td className="forte"><Link className="link" para={{ tela: "medicao", obra: contratoId, id: m.id }}>{tituloMedicao(m)}</Link></td>
-                    <td className="num">{competenciaBR(m.competencia)}</td>
-                    <td><Estado m={m} /></td>
-                    <td className="col-num dinheiro num">{brl(m.valor_protocolado_centavos)}</td>
-                    <td className="col-num dinheiro num">{brl(m.valor_atestado_centavos)}</td>
+                {visiveis.map(m => (
+                  <tr key={m.id} className="linha">
+                    <td data-rotulo="Medição">
+                      <Link className="link forte" para={{ tela: "medicao", obra: contratoId, id: m.id }}>{tituloMedicao(m)}</Link>
+                      <div className="obra-medicoes__sub num">{competenciaBR(m.competencia)}</div>
+                    </td>
+                    <td data-rotulo="Estado"><EstadoDaLinha m={m} /></td>
+                    <td data-rotulo="Pedido" className="col-num dinheiro num">{brl(m.valor_protocolado_centavos)}</td>
+                    <td data-rotulo="Aprovado" className="col-num dinheiro num">{brl(m.valor_atestado_centavos)}</td>
                     {celulaCusto(m)}
-                    <td>{resumoNotas(m)}</td>
-                    <td className="num">{m.recebida_em ? dataBR(m.recebida_em) : "—"}</td>
+                    <td data-rotulo="Notas e recebimento">
+                      {resumoNotas(m)}
+                      {m.recebida_em && <div className="obra-medicoes__sub num">recebida em {dataBR(m.recebida_em)}</div>}
+                    </td>
                   </tr>
                 ))}
               </tbody>

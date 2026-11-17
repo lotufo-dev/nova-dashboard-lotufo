@@ -21,7 +21,7 @@ describe("Instrumentos", () => {
     expect(tabela.textContent).not.toContain("NaN");
     return Object.fromEntries(within(tabela).getAllByRole("row").slice(1).map(tr => {
       const td = tr.querySelectorAll("td");
-      return [td[2].textContent, td[3].textContent];
+      return [tr.querySelector(".instrumento__numero")!.textContent, td[2].textContent];
     }));
   }
 
