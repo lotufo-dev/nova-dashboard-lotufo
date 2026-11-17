@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { diasEntre, linhaDoTempo, seloDaLinhaDoTempo } from "./obra";
+import { diasEntre, linhaDoTempo, seloDoPrazo } from "./obra";
 import Selo from "./Selo";
 import { fmtDataPura, hojeLocal } from "./tempo";
 import { situacaoDoNivel } from "./situacao";
@@ -8,7 +8,7 @@ import { situacaoDoNivel } from "./situacao";
 // data de inicio, o marcador "Hoje" (calculado pela data do dia em Cuiaba: anda sozinho, e a tela o refaz na virada
 // do dia sem recarregar) e a data final; o prazo perto do fim ou vencido vira selo (texto na tela, 26/10/2026:
 // quantos dias restam nao se escreve). O nivel do selo e' o do servidor (`nivel_execucao` e `nivel_vigencia` do
-// cabecalho da obra, `ficha_obra.nivel_do_prazo`), o mesmo do numero dos dias: a tela so' mostra.
+// cabecalho da obra, `prazos.situacao` no servidor), o mesmo do numero dos dias: a tela so' mostra.
 
 type Status = "ativo" | "suspenso" | "em_encerramento" | "encerrado" | "rescindido";
 export type StatusDaObra = Status;
@@ -39,7 +39,7 @@ function Linha({ titulo, inicio, fim, nivel, hoje, paralisada, soData }:
   }
   const { posicao, restantes } = linhaDoTempo(inicio, fim, hoje);
   // o servidor decide se ha' prazo a cobrar (so' em obra ativa; D16: a paralisada nao conta o vencimento da execucao)
-  const selo = seloDaLinhaDoTempo(nivel, restantes);
+  const selo = seloDoPrazo(nivel, restantes);
   const pos = posicao ?? 0;
   return (
     <div className="lt">

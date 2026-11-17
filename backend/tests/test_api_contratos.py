@@ -260,12 +260,13 @@ def test_ficha_obra_sem_medicao_e_inexistente_404(client_admin):
     assert client_admin.get("/api/contratos/99999/ficha").status_code == 404
 
 
-def test_ficha_nivel_do_prazo_e_o_semaforo():
-    from app.ficha_obra import nivel_do_prazo
-    assert [nivel_do_prazo(d) for d in (None, -3, 30, 31, 90, 91)] == ["normal", "critico", "critico", "atencao", "atencao", "normal"]
-    # so' a obra ativa tem prazo a cobrar: paralisada, em encerramento, encerrada e rescindida ficam sem nivel
-    assert {nivel_do_prazo(-40, s) for s in ("suspenso", "em_encerramento", "encerrado", "rescindido")} == {"normal"}
-    assert nivel_do_prazo(-40, "ativo") == "critico"
+def test_nivel_do_prazo_e_um_so_nos_limites_do_aviso():
+    """Os limites sao os do aviso "Execução vencendo" (60 dias do fim, critico aos 30), em `prazos`: o numero dos
+    dias da ficha, as linhas do tempo, a aba Prazos e os avisos usam a mesma funcao."""
+    from app import prazos
+    assert (prazos.DIAS_EXECUCAO, prazos.DIAS_CRITICO, prazos.DIAS_VIGENCIA) == (60, 30, 60)
+    assert [prazos.nivel_do_prazo(d) for d in (None, -3, 30, 31, 60, 61)] == [
+        "normal", "critico", "critico", "atencao", "atencao", "normal"]
 
 
 def test_obra_paralisada_com_execucao_vencida_nao_tem_nivel_no_numero_nem_na_linha_do_tempo(client_admin, monkeypatch):
@@ -281,11 +282,30 @@ def test_obra_paralisada_com_execucao_vencida_nao_tem_nivel_no_numero_nem_na_lin
         cab = client_admin.get(f"/api/contratos/{cid}/cabecalho").json()
         return f["vencimentos"][0]["nivel"], cab["nivel_execucao"], cab["nivel_vigencia"], cab["dias_execucao"]
 
+    def prazos_da_aba():
+        s = client_admin.get(f"/api/contratos/{cid}/prazos").json()["situacao"]
+        return s["nivel_execucao"], s["nivel_vigencia"]
+
     assert niveis() == ("critico", "critico", "critico", -42)
+    assert prazos_da_aba() == ("critico", "critico")          # a aba Prazos le a mesma regra
     conn = db.get_conn()
     conn.execute("UPDATE contratos SET estado='suspenso' WHERE id=?", (cid,))
     conn.commit(); conn.close()
     assert niveis() == ("normal", "normal", "normal", -42)
+    assert prazos_da_aba() == ("normal", "normal")
+
+
+def test_nivel_do_prazo_cala_onde_o_aviso_cala():
+    """A regra unica (`prazos._niveis`): paralisacao registrada cala a execucao e nao a vigencia; a vigencia que o
+    orgao prorroga junto nao tem nivel; em encerramento, nenhum dos dois."""
+    from app import prazos
+    s = {"dias_execucao": -5, "dias_vigencia": 45, "paralisacao": None, "vigencia_automatica": False, "encerramento": None}
+    assert prazos._niveis("ativo", s) == ("critico", "atencao")
+    assert prazos._niveis("ativo", {**s, "paralisacao": {"desde": "2026-09-01", "numero": None}}) == ("normal", "atencao")
+    assert prazos._niveis("ativo", {**s, "vigencia_automatica": True}) == ("critico", "normal")
+    assert prazos._niveis("ativo", {**s, "encerramento": {"desde": "2026-10-01"}}) == ("normal", "normal")
+    assert prazos._niveis("ativo", {**s, "dias_execucao": None}) == ("normal", "atencao")
+    assert prazos._niveis("encerrado", s) == ("normal", "normal")
 
 
 def test_ficha_conta_so_os_tas_que_valem(client_admin):

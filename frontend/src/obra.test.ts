@@ -1,25 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { desfechoDoPedido, diasEntre, instrumentosDaObra, linhaDoTempo, reajustePorDataBase, seloDaLinhaDoTempo, seloDoPrazo } from "./obra";
+import { desfechoDoPedido, diasEntre, instrumentosDaObra, linhaDoTempo, reajustePorDataBase, seloDoPrazo } from "./obra";
 
-// texto na tela (26/10/2026): o prazo so' vira selo quando pede acao, nos limites do aviso "Execucao vencendo"
 describe("seloDoPrazo", () => {
-  it("nada acima de 60 dias; Atenção até 60; Crítico até 30, no dia e depois de vencido", () => {
-    expect(seloDoPrazo(61)).toBeNull();
-    expect(seloDoPrazo(null)).toBeNull();
-    expect(seloDoPrazo(60)).toEqual({ classe: "breve", texto: "vence em 60 dias" });
-    expect(seloDoPrazo(30)).toEqual({ classe: "critico", texto: "vence em 30 dias" });
-    expect(seloDoPrazo(1)).toEqual({ classe: "critico", texto: "vence em 1 dia" });
-    expect(seloDoPrazo(0)).toEqual({ classe: "critico", texto: "vence hoje" });
-    expect(seloDoPrazo(-3)).toEqual({ classe: "critico", texto: "vencida" });
-  });
-});
-
-describe("seloDaLinhaDoTempo", () => {
   it("o nível vem do servidor; a tela só escreve quanto falta, e sem nível a cobrar não há selo", () => {
-    expect(seloDaLinhaDoTempo("critico", -40)).toEqual({ classe: "critico", texto: "vencida" });
-    expect(seloDaLinhaDoTempo("atencao", 75)).toEqual({ classe: "breve", texto: "vence em 75 dias" });
-    expect(seloDaLinhaDoTempo("normal", -40)).toBeNull();      // paralisada, encerrada: o servidor cala
-    expect(seloDaLinhaDoTempo(undefined, 3)).toBeNull();
+    expect(seloDoPrazo("critico", -40)).toEqual({ classe: "critico", texto: "vencida" });
+    expect(seloDoPrazo("atencao", 75)).toEqual({ classe: "breve", texto: "vence em 75 dias" });
+    expect(seloDoPrazo("normal", -40)).toBeNull();      // paralisada, encerrada: o servidor cala
+    expect(seloDoPrazo(undefined, 3)).toBeNull();
+    expect(seloDoPrazo("critico", 0)).toEqual({ classe: "critico", texto: "vence hoje" });
+    expect(seloDoPrazo("critico", 1)).toEqual({ classe: "critico", texto: "vence em 1 dia" });
   });
 });
 

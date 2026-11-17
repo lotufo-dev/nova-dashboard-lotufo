@@ -12,7 +12,7 @@ import Falha from "./Falha";
 //  - `PrazoDaObra`: um painel so' para o prazo (os dias da execucao, as duas linhas do tempo e o ritmo), no lugar
 //    dos cartoes "Prazo", "Proximos vencimentos", "Ritmo e prazo" e "Execucao do contrato", que repetiam as datas;
 //  - `MedicoesAgora`: a medicao em andamento e a ultima recebida, na coluna do lado.
-// Quem decide o nivel de prazo e' o servidor (`ficha_obra.nivel_do_prazo`), para o numero dos dias e para o selo das
+// Quem decide o nivel de prazo e' o servidor (`prazos.situacao` no servidor), para o numero dos dias e para o selo das
 // linhas do tempo.
 
 type Vencimento = { chave: "execucao"; rotulo: string; data: string | null; dias: number | null; nivel: Nivel };
