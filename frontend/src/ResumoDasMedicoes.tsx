@@ -16,7 +16,8 @@ import "./resumoDasMedicoes.css";
 // de cada obra na competencia em trabalho, quais obras nao tem medicao nela e o que ficou aberto de meses anteriores.
 // So' leitura: tudo vem pronto de GET /api/resumo-medicoes (`app/resumo_medicoes.py`); a tela nao calcula etapa, nao
 // soma nem estima data. A obra so' tem as etapas do fluxo dela, e cada etapa alcancada leva a data que o sistema
-// registrou.
+// registrou. A etapa que ficou para tras sem o registro do evento (a medicao pulou a etapa, ou veio do historico) nao
+// leva visto nem data: a pagina so' afirma o que tem registro.
 //
 // A fundacao nao tinha a faixa das etapas de uma linha: aqui ela e' uma coluna por etapa, com a data de cada uma
 // (decisao do dono de 17/11/2026).
@@ -24,7 +25,8 @@ import "./resumoDasMedicoes.css";
 type Etapa = "em_analise" | "boletim" | "nota" | "protocolado" | "recebido";
 /** `antes`: a planilha/carta foi gerada e ainda nao foi enviada ao orgao (a medicao existe, o ciclo nao comecou). */
 type EtapaDaVez = Etapa | "antes";
-type EtapaDaLinha = { etapa: Etapa; situacao: "feito" | "atual" | "futuro"; data: string | null };
+/** `sem_registro`: a etapa ficou para tras e o sistema nao tem o registro do evento dela. */
+type EtapaDaLinha = { etapa: Etapa; situacao: "feito" | "sem_registro" | "atual" | "futuro"; data: string | null };
 type Linha = {
   contrato_id: number; obra: string; contratante: string | null; medicao_id: number; medicao_ids: number[]; titulo: string;
   numero: number; tipo: string; competencia: string; etapa: EtapaDaVez; etapas: EtapaDaLinha[]; valor_centavos: number | null;
@@ -58,8 +60,10 @@ const quantas = (linhas: Linha[]) => linhas.reduce((n, l) => n + l.medicao_ids.l
 
 /* ------------------------------------------------------------------ faixa das etapas (o mes inteiro) */
 
-/** Quantas medicoes da competencia estao em cada etapa, com o valor na cota, e quantas obras estao sem medicao. A
- *  cor de cada etapa e' a da fundacao (--etapa-*), a mesma das linhas abaixo; o rotulo esta' sempre escrito. */
+/** Quantas medicoes da competencia estao em cada etapa, com o medido delas na cota (nao e' o bruto das notas, que e'
+ *  o protocolado e o recebido do Fechamento: a frase do alto e o nome da lista dizem a base), e quantas obras estao
+ *  sem medicao. A cor de cada etapa e' a da fundacao (--etapa-*), a mesma das linhas abaixo; o rotulo esta' sempre
+ *  escrito. */
 function FaixaDasEtapas({ d }: { d: RespostaResumo }) {
   const de = new Map(d.etapas.map(e => [e.etapa, e]));
   const item = (chave: EtapaDaVez, rotulo: string) => {
@@ -77,7 +81,7 @@ function FaixaDasEtapas({ d }: { d: RespostaResumo }) {
   };
   const sem = d.sem_medicao.length;
   return (
-    <ol className="rdm-faixa" aria-label={`Medições de ${mesPorExtenso(d.mes)} por etapa`}>
+    <ol className="rdm-faixa" aria-label={`Medições de ${mesPorExtenso(d.mes)} por etapa, com o medido na cota da Lotufo`}>
       {(de.get("antes")?.medicoes ?? 0) > 0 && item("antes", ANTES)}
       {ETAPAS.map(e => item(e.chave, e.rotulo))}
       <li className="rdm-faixa__item rdm-faixa__item--sem">
@@ -108,14 +112,17 @@ function SemData() {
   return <><span aria-hidden="true">—</span><span className="sr-only">sem data registrada</span></>;
 }
 
-/** Uma celula por etapa. A barra de cima e' a faixa da linha (cheia na cor da etapa alcancada, vazia na
- *  que falta, sem barra na etapa que a obra nao tem); embaixo, so' na etapa alcancada, a situacao com a forma dela e a
- *  data registrada. */
+/** Uma celula por etapa. A barra de cima e' a faixa da linha (cheia na cor da etapa alcancada, tracejada e neutra na
+ *  que ficou para tras sem registro, vazia na que falta, sem barra na etapa que a obra nao tem); embaixo, so' na etapa
+ *  alcancada com registro, a situacao com a forma dela e a data registrada. */
 function CelulaEtapa({ etapa, l }: { etapa: { chave: Etapa; rotulo: string }; l: Linha }) {
   const x = l.etapas.find(e => e.etapa === etapa.chave);
   if (!x) return <td className="rdm-etapa rdm-etapa--fora"><span className="sr-only">a obra não tem esta etapa</span></td>;
   if (x.situacao === "futuro") {
     return <td className="rdm-etapa rdm-etapa--futuro rdm-cor--vazia"><span className="sr-only">ainda não</span></td>;
+  }
+  if (x.situacao === "sem_registro") {
+    return <td className="rdm-etapa rdm-etapa--sem-registro"><span className="sr-only">sem registro</span></td>;
   }
   const atual = x.situacao === "atual";
   return (
@@ -209,11 +216,12 @@ function SemMedicaoNoMes({ d, ir }: { d: RespostaResumo; ir: Ir }) {
 
 /* ------------------------------------------------------------------ pagina */
 
-/** De quando e' o dado, em uma frase: o ultimo lancamento de uma pessoa numa medicao e a ultima leitura do RM. */
+/** A base dos valores, dita uma vez (o valor de cada etapa e' o medido das medicoes que estao nela, na cota), e de
+ *  quando e' o dado: o ultimo lancamento de uma pessoa numa medicao e a ultima leitura do RM. */
 function Atualizacao({ a }: { a: RespostaResumo["atualizacao"] }) {
   const lancamento = a.ultimo_lancamento ? `Último lançamento em ${fmtDataHora(a.ultimo_lancamento)}` : "Nenhum lançamento registrado";
   const rm = a.rm_lido_em ? `; recebimentos lidos do RM em ${fmtDataHora(a.rm_lido_em)}` : "";
-  return <p className="rdm-base">Valores na cota da Lotufo. {lancamento}{rm}.</p>;
+  return <p className="rdm-base">Medido das medições de cada etapa, na cota da Lotufo. {lancamento}{rm}.</p>;
 }
 
 export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: Busca }) {

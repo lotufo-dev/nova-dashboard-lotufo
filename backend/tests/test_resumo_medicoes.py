@@ -1,6 +1,8 @@
 """Pagina Resumo das medicoes (issue #749): a etapa do ciclo da medicao de cada obra na competencia, as obras sem
 medicao no mes e as medicoes abertas de meses anteriores. Dados sinteticos, com os nomes do `cadastro-exemplo/`."""
 import datetime
+import itertools
+import json
 
 import pytest
 
@@ -126,15 +128,144 @@ def test_obra_so_tem_as_etapas_do_fluxo_dela(conn, cenario):
     assert resumo_medicoes.etapas_do_fluxo((1, 2, 3, 4, 5, 6)) == resumo_medicoes.ETAPAS
 
 
-def test_etapa_da_vez_por_estado():
-    cheio, sem_planilha = (1, 2, 3, 4, 5, 6), (3, 4, 5, 6)
+ESTADOS_COM_ETAPA = ("planilha_gerada", "planilha_enviada", "boletim_recebido", "espelho_gerado", "espelho_enviado",
+                     "nota_emitida", "protocolada", "nf_emitida", "recebida")
+
+
+def test_etapa_da_vez_sai_do_estado():
     da_vez = resumo_medicoes.etapa_da_vez
-    assert [da_vez(e, cheio) for e in ("planilha_gerada", "planilha_enviada", "boletim_recebido", "espelho_gerado",
-                                       "espelho_enviado", "nota_emitida", "protocolada", "nf_emitida", "recebida")] == [
+    assert [da_vez(e) for e in ESTADOS_COM_ETAPA] == [
         "antes", "em_analise", "boletim", "boletim", "boletim", "nota", "protocolado", "protocolado", "recebido"]
-    assert da_vez("espelho_gerado", sem_planilha) == "boletim"
-    assert da_vez("nota_emitida", (1, 2, 3, 4, 6)) == "nota" and da_vez("protocolada", (1, 2, 3, 4, 6)) == "nota"
-    assert da_vez("cancelada", cheio) is None and da_vez("desistida", cheio) is None
+    assert [da_vez(e) for e in ("prevista", "cancelada", "desistida")] == [None, None, None]
+    # todo estado da medicao tem etapa ou esta' fora da pagina: estado novo sem decisao quebra aqui
+    assert set(medicoes.TRANSICOES) == {*ESTADOS_COM_ETAPA, "prevista", "cancelada", "desistida"}
+
+
+def test_os_passos_so_dizem_quais_etapas_a_obra_tem():
+    """Segunda revisao, achado 3: em nenhuma lista de `passos_medicao` que o cadastro aceita a medicao cai numa etapa
+    que nao e' a do estado dela; a linha tem as etapas da obra e a etapa em que a medicao esta'."""
+    nomes = medicoes.CHAVES_PASSO
+    numero = {nome: i + 1 for i, nome in enumerate(nomes)}
+    # as listas que `cadastro_arquivos._passos_medicao` aceita: com pagamento, e analise so' com planilha
+    listas = [c for n in range(len(nomes)) for c in itertools.combinations(nomes, n + 1)
+              if "pagamento" in c and ("analise" not in c or "planilha" in c)]
+    assert len(listas) == 24
+    for lista, estado in itertools.product(listas, ESTADOS_COM_ETAPA):
+        passos = tuple(numero[nome] for nome in lista)
+        da_obra = resumo_medicoes.etapas_do_fluxo(passos)
+        da_linha = resumo_medicoes.etapas_da_medicao(estado, passos)
+        da_vez = resumo_medicoes.etapa_da_vez(estado)
+        assert set(da_linha) == set(da_obra) | ({da_vez} - {"antes"}), (lista, estado)
+        assert list(da_linha) == [e for e in resumo_medicoes.ETAPAS if e in da_linha]
+
+
+def _obra_com_lista(c, orgao_id, nome, lista):
+    assert not set(lista) - set(medicoes.CHAVES_PASSO)
+    return _obra(c, nome, orgao_id, passos=json.dumps(lista))
+
+
+def test_lista_sem_analise_a_planilha_enviada_esta_em_analise_e_nao_no_boletim(conn, cenario):
+    """Achado 3: na obra cuja lista nao tem `analise`, a planilha/carta enviada e ainda nao aprovada nao aparece no
+    boletim. A linha dela mostra a etapa do estado; a medicao da mesma obra que ja' passou dali nao ganha a etapa."""
+    c = conn
+    orgao = c.execute("SELECT id FROM orgaos WHERE chave='secretaria-exemplo'").fetchone()[0]
+    cid = _obra_com_lista(c, orgao, "Obra Sem Análise", ["planilha", "espelhos", "notas", "envio_nota", "pagamento"])
+    enviada = _medicao(c, cid, 2, "planilha_enviada", 80_001, planilha_enviada_em="2026-11-05")
+    aprovada = _medicao(c, cid, 1, "boletim_recebido", 70_001, comp="2026-09", planilha_enviada_em="2026-10-05",
+                        atestado_em="2026-10-09", valor_atestado_centavos=70_001)
+    c.commit()
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    x = _linha(r, "Obra Sem Análise")
+    assert (x["medicao_id"], x["etapa"]) == (enviada, "em_analise")
+    assert _etapas(x) == [("em_analise", "atual", "2026-11-05"), ("boletim", "futuro", None), ("nota", "futuro", None),
+                          ("protocolado", "futuro", None), ("recebido", "futuro", None)]
+    [y] = [y for g in r["anteriores"] for y in g["linhas"] if y["medicao_id"] == aprovada]
+    assert y["etapa"] == "boletim" and _etapas(y) == [
+        ("boletim", "atual", "2026-10-09"), ("nota", "futuro", None), ("protocolado", "futuro", None), ("recebido", "futuro", None)]
+
+
+def test_lista_sem_notas_a_medicao_aprovada_esta_no_boletim_e_nao_na_nota(conn, cenario):
+    """Achado 3: sem `notas` na lista (e so' com `pagamento`), boletim recebido e espelho enviado nao aparecem na
+    etapa da nota, que nao foi emitida."""
+    c = conn
+    orgao = c.execute("SELECT id FROM orgaos WHERE chave='secretaria-exemplo'").fetchone()[0]
+    sem_notas = _obra_com_lista(c, orgao, "Obra Sem Notas", ["planilha", "analise", "espelhos", "envio_nota", "pagamento"])
+    so_pagamento = _obra_com_lista(c, orgao, "Obra Só Pagamento", ["pagamento"])
+    _medicao(c, sem_notas, 1, "espelho_enviado", 60_001, planilha_enviada_em="2026-11-03", atestado_em="2026-11-06",
+             valor_atestado_centavos=60_001)
+    _medicao(c, so_pagamento, 1, "boletim_recebido", 50_001, planilha_enviada_em="2026-11-03", atestado_em="2026-11-07",
+             valor_atestado_centavos=50_001)
+    c.commit()
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    a = _linha(r, "Obra Sem Notas")
+    assert a["etapa"] == "boletim" and _etapas(a) == [
+        ("em_analise", "feito", "2026-11-03"), ("boletim", "atual", "2026-11-06"), ("nota", "futuro", None),
+        ("protocolado", "futuro", None), ("recebido", "futuro", None)]
+    # so' com pagamento, a obra tem nota e recebido; a medicao aprovada mostra o boletim em que esta', sem a nota feita
+    b = _linha(r, "Obra Só Pagamento")
+    assert b["etapa"] == "boletim" and _etapas(b) == [
+        ("boletim", "atual", "2026-11-07"), ("nota", "futuro", None), ("recebido", "futuro", None)]
+
+
+def test_protocolo_registrado_na_obra_sem_envio_da_nota_aparece_como_protocolado(conn, cenario):
+    """A obra sem o passo "Envio da nota" nao tem a etapa do protocolado; a medicao dela que tem protocolo registrado
+    (estado protocolada) mostra a etapa em que esta'. A outra medicao da obra continua sem ela."""
+    c, ids = conn, cenario
+    prot = _medicao(c, ids["sem_envio"], 3, "protocolada", 60_001, comp="2026-09", nota_emitida_em="2026-10-06",
+                    protocolo=("2026-10-08",))
+    c.commit()
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    [x] = [x for g in r["anteriores"] for x in g["linhas"] if x["medicao_id"] == prot]
+    assert x["etapa"] == "protocolado" and [e["etapa"] for e in x["etapas"]] == ["boletim", "nota", "protocolado", "recebido"]
+    assert [e["etapa"] for e in _linha(r, "Obra Sem Envio")["etapas"]] == ["em_analise", "boletim", "nota", "recebido"]
+
+
+# --- segunda revisao, achado 1: a etapa anterior so' e' "feita" com o registro do evento -------------------------
+
+def test_protocolada_direto_da_prevista_nao_tem_etapa_feita_sem_registro(conn, cenario):
+    """Obra com planilha/carta (regra de espelho ativa), medicao protocolada direto da prevista, pelo protocolo de
+    verdade: a planilha nao foi enviada, nao houve boletim e a nota nao foi emitida. Nenhuma das tres aparece feita."""
+    c, ids = conn, cenario
+    c.execute("UPDATE certidao_tipos SET aplicavel_por_padrao=0")
+    c.execute("INSERT INTO espelho_regras (contrato_id, situacao, regra, modelos, sha256) VALUES (?,'ativa','{}','{}','x')",
+              (ids["parada"],))
+    c.commit()
+    uid = auth.criar_usuario(c, "Engenharia Exemplo", "engenharia@exemplo.com.br", "senha-forte-123", "engenharia")
+    mid = medicoes.criar(c, uid, {"contrato_id": ids["parada"], "numero": 8, "tipo": "execucao", "competencia": MES})
+    medicoes.definir_valor(c, uid, mid, "protocolado", 45_001, "manual")
+    medicoes.registrar_protocolo(c, uid, mid, "2026-11-12", None, None, "manual")
+    assert medicoes.detalhe(c, mid)["estado"] == "protocolada"
+    x = _linha(resumo_medicoes.resumo(conn, HOJE, mes=MES), "Obra Parada")
+    assert x["etapa"] == "protocolado" and _etapas(x) == [
+        ("em_analise", "sem_registro", None), ("boletim", "sem_registro", None), ("nota", "sem_registro", None),
+        ("protocolado", "atual", "2026-11-12"), ("recebido", "futuro", None)]
+    # recebida: o recebimento e' o estado; as anteriores continuam sem registro
+    medicoes.mudar_estado(c, uid, mid, "recebida", None, "2026-11-15")
+    x = _linha(resumo_medicoes.resumo(conn, HOJE, mes=MES), "Obra Parada")
+    assert _etapas(x) == [
+        ("em_analise", "sem_registro", None), ("boletim", "sem_registro", None), ("nota", "sem_registro", None),
+        ("protocolado", "feito", "2026-11-12"), ("recebido", "feito", "2026-11-15")]
+
+
+def test_medicao_que_seguiu_sem_boletim_nao_tem_boletim_feito(conn, cenario):
+    """Planilha/carta enviada, espelho e nota, sem boletim: o boletim fica sem registro; o envio e a nota, feitos."""
+    c, ids = conn, cenario
+    _medicao(c, ids["parada"], 8, "nota_emitida", 45_001, planilha_enviada_em="2026-11-03", nota_emitida_em="2026-11-10")
+    c.commit()
+    x = _linha(resumo_medicoes.resumo(conn, HOJE, mes=MES), "Obra Parada")
+    assert x["etapa"] == "nota" and _etapas(x) == [
+        ("em_analise", "feito", "2026-11-03"), ("boletim", "sem_registro", None), ("nota", "atual", "2026-11-10"),
+        ("protocolado", "futuro", None), ("recebido", "futuro", None)]
+    # o valor aprovado gravado sem a data do boletim e' registro do boletim: feito, sem data (o traco na tela)
+    c.execute("UPDATE medicoes SET valor_atestado_centavos=44_001 WHERE contrato_id=? AND numero=8", (ids["parada"],))
+    c.commit()
+    assert _etapas(_linha(resumo_medicoes.resumo(conn, HOJE, mes=MES), "Obra Parada"))[1] == ("boletim", "feito", None)
+
+
+def test_etapa_da_vez_sem_data_e_etapa_que_falta_nao_viram_sem_registro(conn, cenario):
+    # a etapa atual vem do estado (sem data, o traco); `sem_registro` e' so' de etapa que ficou para tras
+    c3 = _linha(resumo_medicoes.resumo(conn, HOJE, mes=MES), "Obra da Companhia")
+    assert {e["situacao"] for e in c3["etapas"]} == {"atual", "futuro"}
 
 
 def test_planilha_gerada_ainda_nao_entrou_no_ciclo(conn, cenario):
@@ -151,20 +282,44 @@ def test_planilha_gerada_ainda_nao_entrou_no_ciclo(conn, cenario):
     assert next(e for e in r["etapas"] if e["etapa"] == "antes") == {"etapa": "antes", "medicoes": 1, "valor_centavos": 0}
 
 
+def _medido_do_fechamento(conn, mes):
+    [m] = [m for m in fechamento.fechamento(conn)["meses"] if m["competencia"] == mes]
+    return m["medido_centavos"]
+
+
 def test_medido_do_mes_fecha_com_o_do_fechamento(conn, cenario):
     """A soma do medido das linhas da competencia e' o medido do mes no Fechamento: a mesma regra (a medicao enviada
     ao orgao, o aprovado e, sem boletim, o pedido, na cota), com a planilha/carta so' gerada fora das duas."""
     c, ids = conn, cenario
     _medicao(c, ids["parada"], 7, "planilha_gerada", 9_001)
-    _medicao(c, ids["consorcio"], 7, "planilha_enviada", 500_001, tipo="reajuste")       # reajuste: linha e valor proprios
     c.commit()
     r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
     soma = sum(x["valor_centavos"] or 0 for g in r["grupos"] for x in g["linhas"])
-    [mes] = [m for m in fechamento.fechamento(conn)["meses"] if m["competencia"] == MES]
-    # consorcio a 33,33%: 333.300 da execucao + 166.650 do reajuste (500.001 x 33,33% = 166.650,33), cada um com o
-    # arredondamento dele
-    assert soma == mes["medido_centavos"] == 99_999 + 333_300 + 166_650 + 50_000 + 70_000
+    assert soma == _medido_do_fechamento(conn, MES) == 99_999 + 333_300 + 50_000 + 70_000
     assert sum(e["valor_centavos"] for e in r["etapas"]) == soma
+
+
+@pytest.mark.parametrize("reajuste, cota_reajuste", [(500_001, 166_650), (-500_002, -166_651)])
+def test_par_execucao_e_reajuste_em_consorcio_fecha_ao_centavo_com_o_fechamento(conn, cenario, reajuste, cota_reajuste):
+    """Segunda revisao, achado 5: o par na mesma linha, em consorcio (33,33%), com centavo impar nas duas cotas e com o
+    reajuste negativo, em estado que o sistema produz (as duas com o espelho enviado). Cada cota arredonda uma vez e a
+    linha e' a soma das duas, como no Fechamento."""
+    c, ids = conn, cenario
+    # a execucao da 7ª sai da analise com o boletim (aprovado de centavo impar) e o espelho enviado; o reajuste, junto
+    c.execute("UPDATE medicoes SET estado='espelho_enviado', atestado_em='2026-11-08', valor_atestado_centavos=1_000_002 "
+              "WHERE id=?", (ids["k7"],))
+    r7 = _medicao(c, ids["consorcio"], 7, "espelho_enviado", reajuste, tipo="reajuste", atestado_em="2026-11-08",
+                  valor_atestado_centavos=reajuste)
+    c.commit()
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    k = _linha(r, "Obra Consórcio")
+    # 1.000.002 x 33,33% = 333.300,67 -> 333.301; 500.001 x 33,33% = 166.650,33 -> 166.650; -500.002 -> -166.651
+    assert (k["titulo"], k["medicao_ids"], k["etapa"]) == ("7ª Medição + Reajuste", [ids["k7"], r7], "boletim")
+    assert k["valor_centavos"] == 333_301 + cota_reajuste
+    soma = sum(x["valor_centavos"] or 0 for g in r["grupos"] for x in g["linhas"])
+    assert soma == _medido_do_fechamento(conn, MES) == 99_999 + 333_301 + cota_reajuste + 50_000 + 70_000
+    assert next(e for e in r["etapas"] if e["etapa"] == "boletim") == {
+        "etapa": "boletim", "medicoes": 3, "valor_centavos": 333_301 + cota_reajuste + 50_000}
 
 
 def test_medicao_de_projeto_tem_linha_valor_e_conta_como_ultima(conn, cenario):
@@ -200,7 +355,7 @@ def test_obra_sem_envio_da_nota_vai_da_nota_ao_recebido_pela_baixa(conn, cenario
     c.commit()
     r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
     [aberta] = [x for g in r["anteriores"] for x in g["linhas"] if x["medicao_id"] == antiga]
-    assert _etapas(aberta) == [("boletim", "feito", None), ("nota", "atual", "2026-10-06"), ("recebido", "futuro", None)]
+    assert _etapas(aberta) == [("boletim", "sem_registro", None), ("nota", "atual", "2026-10-06"), ("recebido", "futuro", None)]
     for mid, dia in ((ids["s4"], "2026-11-13"), (antiga, "2026-11-12")):
         assert "recebida" in medicoes.alcancaveis(c, medicoes.detalhe(c, mid))
         medicoes.mudar_estado(c, uid, mid, "recebida", "baixa conferida no extrato", dia, origem="manual")
@@ -228,8 +383,8 @@ def test_recebida_tem_todas_as_etapas_feitas(conn, cenario):
 
 def test_execucao_e_reajuste_na_mesma_etapa_sao_uma_linha_e_em_etapas_diferentes_sao_duas(conn, cenario):
     c, ids = conn, cenario
-    r12 = _medicao(c, ids["propria"], 12, "protocolada", 1_001, tipo="reajuste", nota_emitida_em="2026-11-11",
-                   protocolo=("2026-11-12",))
+    r12 = _medicao(c, ids["propria"], 12, "protocolada", 1_001, tipo="reajuste", atestado_em="2026-11-06",
+                   valor_atestado_centavos=1_001, nota_emitida_em="2026-11-11", protocolo=("2026-11-12",))
     c.commit()
     r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
     p = _linha(r, "Obra Própria")
@@ -242,6 +397,19 @@ def test_execucao_e_reajuste_na_mesma_etapa_sao_uma_linha_e_em_etapas_diferentes
     c.commit()
     linhas = [x for g in resumo_medicoes.resumo(conn, HOJE, mes=MES)["grupos"] for x in g["linhas"] if x["obra"] == "Obra Própria"]
     assert [(x["titulo"], x["etapa"]) for x in linhas] == [("12ª Medição", "protocolado"), ("Reajuste da 12ª Medição", "nota")]
+
+
+def test_execucao_e_reajuste_so_se_juntam_quando_dizem_o_mesmo_de_cada_etapa(conn, cenario):
+    """Na mesma etapa, mas a execucao com o boletim registrado e o reajuste sem: duas linhas, para a linha conjunta
+    nao dizer do reajuste o boletim que so' a execucao tem."""
+    c, ids = conn, cenario
+    _medicao(c, ids["propria"], 12, "protocolada", 1_001, tipo="reajuste", nota_emitida_em="2026-11-11", protocolo=("2026-11-12",))
+    c.commit()
+    linhas = [x for g in resumo_medicoes.resumo(conn, HOJE, mes=MES)["grupos"] for x in g["linhas"] if x["obra"] == "Obra Própria"]
+    assert [(x["titulo"], x["etapa"], len(x["medicao_ids"])) for x in linhas] == [
+        ("12ª Medição", "protocolado", 1), ("Reajuste da 12ª Medição", "protocolado", 1)]
+    assert _etapas(linhas[1]) == [("boletim", "sem_registro", None), ("nota", "feito", "2026-11-11"),
+                                  ("protocolado", "atual", "2026-11-12"), ("recebido", "futuro", None)]
 
 
 def test_contagem_por_etapa_soma_as_linhas(conn, cenario):
@@ -321,6 +489,9 @@ def test_rota_e_exportacao_da_relacao(client_admin, _sem_certidoes):
     c = db.get_conn()
     c.execute("UPDATE contratos SET nome_curto=objeto")
     mid = _medicao(c, cid, 3, "nota_emitida", 150_001, nota_emitida_em="2026-11-09")
+    reajuste = _medicao(c, cid, 3, "nota_emitida", 2_000, tipo="reajuste", nota_emitida_em="2026-11-10")
+    antiga = _medicao(c, cid, 2, "protocolada", 80_000, comp="2026-09", nota_emitida_em="2026-10-05",
+                      protocolo=("2026-10-09",))
     c.commit()
     c.close()
     r = client_admin.get(f"/api/resumo-medicoes?mes={MES}")
@@ -328,8 +499,9 @@ def test_rota_e_exportacao_da_relacao(client_admin, _sem_certidoes):
     d = r.json()
     assert set(d) == {"hoje", "mes", "em_trabalho", "atualizacao", "etapas", "grupos", "sem_medicao", "anteriores"}
     [linha] = [x for g in d["grupos"] for x in g["linhas"]]
-    assert (linha["medicao_id"], linha["etapa"], linha["valor_centavos"]) == (mid, "nota", 150_001)
+    assert (linha["medicao_ids"], linha["etapa"], linha["valor_centavos"]) == ([mid, reajuste], "nota", 152_001)
     assert [o["contrato_id"] for o in d["sem_medicao"]] == [outra]
+    assert [x["medicao_id"] for g in d["anteriores"] for x in g["linhas"]] == [antiga]
     assert client_admin.get("/api/resumo-medicoes").json()["mes"] == d["em_trabalho"]
     assert client_admin.get("/api/resumo-medicoes?mes=2026-13").status_code == 422
 
@@ -337,10 +509,40 @@ def test_rota_e_exportacao_da_relacao(client_admin, _sem_certidoes):
     assert x.status_code == 200 and x.headers["content-type"].startswith("text/csv")
     assert f'filename="resumo-das-medicoes-{MES}.csv"' in x.headers["content-disposition"]
     texto = x.content.decode("utf-8-sig").split("\r\n")
-    assert texto[0] == "parte;contratante;obra;medicao;competencia;etapa;data_em_analise;data_boletim;data_nota;data_protocolado;data_recebido;valor_cota"
-    # o nome que comeca com "=" sai neutralizado (formula em planilha); a data no formato da tela; o valor em reais
-    assert texto[1] == "competência;Secretaria de Exemplo;'=Obra Própria;3ª Medição;10/2026;Nota;;;09/11/2026;;;R$ 1.500,01"
+    # o valor e' o medido na cota, dito no nome da coluna
+    assert texto[0] == "parte;contratante;obra;medicao;competencia;etapa;data_em_analise;data_boletim;data_nota;data_protocolado;data_recebido;medido_cota"
+    # o nome que comeca com "=" sai neutralizado (formula em planilha); a data no formato da tela; o valor em reais.
+    # A linha conjunta: a soma das duas cotas e, na nota, a data da ultima das duas
+    assert texto[1] == "competência;Secretaria de Exemplo;'=Obra Própria;3ª Medição + Reajuste;10/2026;Nota;;;10/11/2026;;;R$ 1.520,01"
     assert texto[2] == "sem medição no mês;Secretaria de Exemplo;Obra Consórcio;;10/2026;;;;;;;"
+    # meses anteriores em aberto, com a competencia de cada linha
+    assert texto[3] == "meses anteriores;Secretaria de Exemplo;'=Obra Própria;2ª Medição;09/2026;Protocolado;;;05/10/2026;09/10/2026;;R$ 800,00"
+    assert texto[4:] == [""]
+
+
+@pytest.mark.parametrize("perfil", ["diretoria", "engenharia"])
+def test_rota_e_csv_abrem_para_quem_so_consulta_e_para_quem_opera(client, _sem_certidoes, perfil):
+    """A pagina e' de leitura para os tres perfis (`ver_paineis`); o admin esta' no teste acima."""
+    c = db.get_conn()
+    auth.criar_usuario(c, "Pessoa Exemplo", f"{perfil}@exemplo.com.br", "senha-forte-123", perfil)
+    c.close()
+    r = client.post("/api/auth/login", json={"email": f"{perfil}@exemplo.com.br", "senha": "senha-forte-123"})
+    assert r.status_code == 200, r.text
+    client.cookies.set("sessao", r.cookies.get("sessao") or client.cookies.get("sessao"))
+    d = client.get(f"/api/resumo-medicoes?mes={MES}")
+    assert d.status_code == 200 and d.json()["mes"] == MES
+    x = client.get(f"/api/resumo-medicoes.csv?mes={MES}")
+    assert x.status_code == 200 and x.headers["content-type"].startswith("text/csv")
+
+
+def test_resumo_le_um_retrato_so_do_banco(conn, cenario, monkeypatch):
+    """Segunda revisao, achado 4: todas as consultas dentro de uma transacao de leitura (`db.leitura`), fechada no fim."""
+    visto = []
+    original = resumo_medicoes._atualizacao
+    monkeypatch.setattr(resumo_medicoes, "_atualizacao", lambda c: (visto.append(c.in_transaction), original(c))[1])
+    assert not conn.in_transaction
+    resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    assert visto == [True] and not conn.in_transaction
 
 
 def test_rota_exige_login(client):

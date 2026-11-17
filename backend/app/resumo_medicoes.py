@@ -1,23 +1,41 @@
 """Pagina Resumo das medicoes (issue #749): em que etapa do ciclo esta' a medicao de cada obra numa competencia, as
 obras sem medicao nela e as medicoes de competencias anteriores ainda em aberto. So' leitura.
 
-As etapas sao as do glossario, na ordem do ciclo: em analise, boletim, nota, protocolado, recebido. A medicao so' tem
-as etapas do fluxo dela (`medicoes.passos_das_medicoes`: a familia do orgao e a chave `passos_medicao` do contrato):
+As etapas sao as do glossario, na ordem do ciclo: em analise, boletim, nota, protocolado, recebido.
+
+A ETAPA DA VEZ sai do ESTADO da medicao (`etapa_da_vez`), nunca de data, de valor nem dos passos: planilha/carta
+enviada = em analise; boletim recebido e espelho (gerado ou enviado) = boletim, a medicao que espera a nota; nota
+emitida = nota; protocolada = protocolado; recebida = recebido. A planilha/carta gerada e ainda nao enviada fica
+`antes` do ciclo.
+
+OS PASSOS (`medicoes.passos_das_medicoes`: a familia do orgao e a chave `passos_medicao` do contrato) so' dizem quais
+etapas a obra tem (`etapas_do_fluxo`):
 
 - em analise: a obra tem o passo "Análise do órgão";
 - boletim: tem "Espelhos" ou "Notas" (a medicao aprovada espera a nota);
 - nota e recebido: sempre (o passo "Pagamento" e' obrigatorio no cadastro, e so' se paga contra a nota);
 - protocolado: tem "Envio da nota" (a obra sem esse passo vai da nota ao recebido).
 
-A etapa da vez sai do passo da vez (`medicoes.passo_do_estado`), nunca de data ou de valor. Cada etapa alcancada leva
-a data do evento que o sistema registrou (envio da planilha/carta, boletim, emissao da nota, primeiro protocolo da
-nota, recebimento); sem o registro, a data vem nula e a tela mostra o traco. Nada e' estimado.
+Quando o estado poe a medicao numa etapa que a obra nao tem (a lista do cadastro mudou depois, ou e' uma lista em que
+o estado nao tem passo: planilha/carta enviada na obra sem "Análise do órgão", protocolo registrado na obra sem "Envio
+da nota"), a linha DESSA medicao mostra a etapa do estado mesmo assim (`etapas_da_medicao`): o estado e' o registro, e
+empurrar a medicao para a etapa vizinha diria que ela foi aprovada, teve nota ou foi protocolada sem ter sido. As
+outras etapas que a obra nao tem continuam fora da linha.
+
+A SITUACAO de cada etapa da linha: `atual` na etapa da vez (`feito` no recebido, que encerra o ciclo); `futuro` nas
+seguintes; nas anteriores, `feito` so' com o registro do evento e `sem_registro` sem ele (a medicao protocolada direto
+da prevista, a que seguiu sem boletim, a que veio do historico). A posicao nao prova nada: a pagina so' afirma o que
+tem registro. O registro de cada etapa: em analise, o envio da planilha/carta; boletim, o valor aprovado ou a data do
+boletim; nota, a data da emissao; protocolado, o primeiro protocolo da nota. A data e' a do evento registrado; sem ela,
+vem nula e a tela mostra o traco. Nada e' estimado.
 
 Valor: o medido (o aprovado e, sem boletim, o pedido) na COTA da Lotufo, medicao a medicao, com o arredondamento
 unico de `contratos.cota`; medicao sem valor nenhum vem nula. So' mede a medicao enviada ao orgao
 (`medicoes.ESTADOS_NO_MEDIDO`, a regra do glossario e de `docs/adr/0012`): a planilha/carta gerada e ainda nao enviada
 aparece na linha, sem valor, e a soma do mes fecha com o medido do Fechamento (`fechamento.py`). Execucao, projeto e
-reajuste tem linha e valor: aqui o medido e' o de cada medicao, nao o medido da obra (que deixa o reajuste fora).
+reajuste tem linha e valor: aqui o medido e' o de cada medicao, nao o medido da obra (que deixa o reajuste fora). O
+valor de cada etapa na contagem do mes e' esse medido das medicoes que estao nela; nao e' o bruto das notas, que e'
+o que o Fechamento chama de protocolado e de recebido.
 
 A prevista, a cancelada e a desistida nao contam: a obra so' com elas esta' sem medicao no mes (a regra do quadro do
 mes, `medicoes._quadro_do_mes`).
@@ -27,11 +45,15 @@ emissao, ate' a baixa do RM (ou o registro do administrador) leva'-la a recebido
 """
 import datetime
 
-from app import contratos, diretoria, medicoes, tempo
+from app import contratos, db, diretoria, medicoes, tempo
 
 ETAPAS = ("em_analise", "boletim", "nota", "protocolado", "recebido")
 ROTULO = {"antes": "Planilha/carta a enviar", "em_analise": "Em análise", "boletim": "Boletim", "nota": "Nota",
           "protocolado": "Protocolado", "recebido": "Recebido"}
+# o estado da medicao -> a etapa em que ela esta'. `nf_emitida` e' o legado, que espera o orgao como a protocolada
+_ETAPA_DO_ESTADO = {"planilha_gerada": "antes", "planilha_enviada": "em_analise", "boletim_recebido": "boletim",
+                    "espelho_gerado": "boletim", "espelho_enviado": "boletim", "nota_emitida": "nota",
+                    "protocolada": "protocolado", "nf_emitida": "protocolado", "recebida": "recebido"}
 # o passo da barra da medicao (`medicoes.PASSOS`) cujo dia e' o evento que poe a medicao na etapa
 _PASSO_DA_DATA = {"em_analise": 1, "boletim": 2, "nota": 4, "protocolado": 5, "recebido": 6}
 _FORA = ("prevista", "cancelada", "desistida")
@@ -39,25 +61,33 @@ _ORDEM_TIPO = ("execucao", "projeto", "reajuste")
 
 
 def etapas_do_fluxo(passos) -> tuple[str, ...]:
-    """As etapas do ciclo que a medicao com estes passos (numeros de `medicoes.PASSOS`) tem."""
+    """As etapas do ciclo que a obra tem, pelos passos da medicao (numeros de `medicoes.PASSOS`)."""
     tem = set(passos)
     return tuple(e for e, vale in (("em_analise", 2 in tem), ("boletim", bool(tem & {3, 4})), ("nota", True),
                                    ("protocolado", 5 in tem), ("recebido", True)) if vale)
 
 
-def etapa_da_vez(estado: str, passos) -> str | None:
-    """A etapa em que a medicao esta': `antes` (planilha/carta ainda nao enviada), uma de `ETAPAS`, ou None para a
-    cancelada e a desistida. A prevista nao chega aqui: quem chama a deixa de fora (`_FORA`)."""
-    n = medicoes.passo_do_estado(estado, passos)
-    if n == 0:
-        return None
-    if n == 7:
-        return "recebido"
-    if n == 1:
-        return "antes"
+def etapa_da_vez(estado: str) -> str | None:
+    """A etapa em que a medicao esta', pelo estado dela: `antes` (planilha/carta gerada e ainda nao enviada), uma de
+    `ETAPAS`, ou None para a prevista, a cancelada e a desistida (quem chama as deixa de fora, `_FORA`). Os passos da
+    obra nao entram aqui: eles nao mudam onde a medicao esta'."""
+    return _ETAPA_DO_ESTADO.get(estado)
+
+
+def etapas_da_medicao(estado: str, passos) -> tuple[str, ...]:
+    """As etapas da linha de uma medicao, na ordem do ciclo: as que a obra tem e, quando o estado poe a medicao numa
+    etapa que a obra nao tem, tambem essa (o estado e' o registro; ver o texto do modulo)."""
     do_fluxo = etapas_do_fluxo(passos)
-    # esperando o pagamento (passo 6), a medicao esta' na ultima etapa antes do recebido que o fluxo dela tem
-    return {2: "em_analise", 3: "boletim", 4: "boletim", 5: "nota"}.get(n) or do_fluxo[-2]
+    da_vez = etapa_da_vez(estado)
+    return tuple(e for e in ETAPAS if e in do_fluxo or e == da_vez)
+
+
+def _com_registro(m: dict, datas: dict) -> dict[str, bool]:
+    """Se o sistema tem o registro do evento de cada etapa que pode ficar para tras: o envio da planilha/carta, o
+    boletim (o valor aprovado ou a data dele), a emissao da nota e o protocolo da nota."""
+    return {"em_analise": bool(m["planilha_enviada_em"]),
+            "boletim": m["valor_atestado_centavos"] is not None or datas[2] is not None,
+            "nota": bool(m["nota_emitida_em"]), "protocolado": bool(m["protocolado_em"])}
 
 
 def _cota(m: dict) -> int | None:
@@ -69,19 +99,24 @@ def _cota(m: dict) -> int | None:
 
 
 def _medicao(conn, m: dict, passos_de) -> dict | None:
-    """A medicao com a etapa da vez e, de cada etapa do fluxo dela, a situacao (feito, atual, futuro) e a data."""
-    passos = passos_de(m)
-    da_vez = etapa_da_vez(m["estado"], passos)
+    """A medicao com a etapa da vez e, de cada etapa da linha dela, a situacao (feito, sem_registro, atual, futuro) e
+    a data registrada."""
+    da_vez = etapa_da_vez(m["estado"])
     if da_vez is None:
         return None
-    do_fluxo = etapas_do_fluxo(passos)
+    da_linha = etapas_da_medicao(m["estado"], passos_de(m))
     datas = medicoes._datas_dos_passos(conn, m)
-    pos = do_fluxo.index(da_vez) if da_vez in do_fluxo else -1
+    registro = _com_registro(m, datas)
+    pos = da_linha.index(da_vez) if da_vez in da_linha else -1       # `antes`: nenhuma etapa alcancada
     etapas = []
-    for i, e in enumerate(do_fluxo):
-        # recebida, o ciclo acabou: a ultima etapa tambem esta' feita
-        situacao = "futuro" if i > pos else "feito" if i < pos or e == "recebido" else "atual"
-        dia = datas[_PASSO_DA_DATA[e]] if situacao != "futuro" else None
+    for i, e in enumerate(da_linha):
+        if i > pos:
+            situacao = "futuro"
+        elif i == pos:
+            situacao = "feito" if e == "recebido" else "atual"      # recebida, o ciclo acabou
+        else:
+            situacao = "feito" if registro[e] else "sem_registro"   # a posicao nao prova que a etapa aconteceu
+        dia = datas[_PASSO_DA_DATA[e]] if situacao in ("feito", "atual") else None
         etapas.append({"etapa": e, "situacao": situacao, "data": dia.isoformat() if dia else None})
     return {"id": m["id"], "contrato_id": m["contrato_id"], "numero": m["numero"], "tipo": m["tipo"],
             "competencia": m["competencia"], "titulo": medicoes.titulo(m), "etapa": da_vez, "etapas": etapas,
@@ -91,7 +126,9 @@ def _medicao(conn, m: dict, passos_de) -> dict | None:
 def _linhas(partes: list[dict], obras: dict[int, dict]) -> list[dict]:
     """Uma linha por medicao. A execucao e o reajuste de mesmo numero, na mesma competencia e na mesma etapa, viram
     uma linha so' ("24ª Medição + Reajuste", como em `medicoes.linhas_em_andamento`): o valor e' a soma das duas cotas
-    e cada etapa leva a data da ultima das duas a chegar nela."""
+    e cada etapa leva a data da ultima das duas a chegar nela. So' se juntam quando as duas dizem o mesmo de cada
+    etapa que tem em comum (uma com o registro do boletim e a outra sem ficam em duas linhas): a linha conjunta nao
+    afirma de uma o que so' a outra tem."""
     grupos: dict[tuple, list[dict]] = {}
     for p in partes:
         grupos.setdefault((p["contrato_id"], p["competencia"], p["numero"], p["etapa"]), []).append(p)
@@ -99,6 +136,10 @@ def _linhas(partes: list[dict], obras: dict[int, dict]) -> list[dict]:
     for ps in grupos.values():
         tipos = {p["tipo"]: p for p in ps}
         par = [tipos["execucao"], tipos["reajuste"]] if {"execucao", "reajuste"} <= set(tipos) else []
+        if par:
+            situacoes = [{x["etapa"]: x["situacao"] for x in p["etapas"]} for p in par]
+            if any(situacoes[0][e] != situacoes[1][e] for e in situacoes[0].keys() & situacoes[1].keys()):
+                par = []
         for juntas in ([par] if par else []) + [[p] for p in ps if p not in par]:
             principal = juntas[0]
             etapas = []
@@ -131,7 +172,14 @@ def _atualizacao(conn) -> dict:
 def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> dict:
     """A competencia `mes` (AAAA-MM; sem ela, a competencia em trabalho: o mes anterior ao de hoje): as linhas por
     contratante, a contagem por etapa, as obras ativas sem medicao nela (com a ultima medicao de cada uma) e as
-    medicoes abertas de competencias anteriores, da mais antiga para a mais nova."""
+    medicoes abertas de competencias anteriores, da mais antiga para a mais nova. Tudo de um retrato so' do banco
+    (`db.leitura`, como o Fechamento): uma gravacao no meio nao deixa as linhas de um instante e as obras sem medicao
+    de outro."""
+    with db.leitura(conn):
+        return _resumo(conn, hoje, mes)
+
+
+def _resumo(conn, hoje: datetime.date | None, mes: str | None) -> dict:
     hoje = hoje or tempo.hoje_local()
     em_trabalho = diretoria._mes(hoje, -1)
     mes = mes or em_trabalho
@@ -162,7 +210,7 @@ def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> d
                           "ORDER BY m.competencia DESC, m.numero DESC, m.id DESC", (*_FORA, mes)):
         if r["contrato_id"] not in ultima:
             m = dict(r)
-            da_vez = etapa_da_vez(m["estado"], passos_de(m))
+            da_vez = etapa_da_vez(m["estado"])
             if da_vez is not None:
                 ultima[m["contrato_id"]] = {"medicao_id": m["id"], "titulo": medicoes.titulo(m),
                                             "competencia": m["competencia"], "etapa": da_vez}
@@ -188,7 +236,7 @@ def _data_br(iso: str | None) -> str:
 
 
 CABECALHO_CSV = ["parte", "contratante", "obra", "medicao", "competencia", "etapa",
-                 *(f"data_{e}" for e in ETAPAS), "valor_cota"]
+                 *(f"data_{e}" for e in ETAPAS), "medido_cota"]
 
 
 def linhas_csv(r: dict, brl) -> list[list[str]]:

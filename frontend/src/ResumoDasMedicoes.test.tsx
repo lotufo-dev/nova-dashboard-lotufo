@@ -69,7 +69,7 @@ describe("Resumo das medições (#749)", () => {
     expect(api).toHaveBeenCalledWith("/api/resumo-medicoes");
     expect(screen.getByText("Competência em trabalho")).toBeTruthy();
     // os carimbos do banco (UTC) saem no horario de Cuiaba
-    expect(screen.getByText(/Valores na cota da Lotufo\. Último lançamento em 14\/11\/2026 às 14:40; recebimentos lidos do RM em 16\/11\/2026 às 07:00\./)).toBeTruthy();
+    expect(screen.getByText(/Medido das medições de cada etapa, na cota da Lotufo\. Último lançamento em 14\/11\/2026 às 14:40; recebimentos lidos do RM em 16\/11\/2026 às 07:00\./)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Voltar à competência em trabalho/ })).toBeNull();
     expect(screen.getByRole("link", { name: /Exportar CSV/ }).getAttribute("href")).toBe("/api/resumo-medicoes.csv?mes=2026-10");
   });
@@ -77,7 +77,8 @@ describe("Resumo das medições (#749)", () => {
   it("a faixa conta as medições de cada etapa, com o valor, e as obras sem medição; zero vira traço", async () => {
     api.mockResolvedValue(RESUMO);
     render(<ResumoDasMedicoes ir={() => {}} />);
-    const faixa = await screen.findByRole("list", { name: "Medições de outubro de 2026 por etapa" });
+    // o valor sob cada etapa e' o medido das medicoes que estao nela: o nome da lista diz a base
+    const faixa = await screen.findByRole("list", { name: "Medições de outubro de 2026 por etapa, com o medido na cota da Lotufo" });
     expect(within(faixa).getAllByRole("listitem").map(texto)).toEqual([
       "Em análise—", "Boletim1 mediçãoR$ 3.333,00", "Nota—", "Protocolado2 mediçõesR$ 101.000,01",
       "Recebido1 mediçãoR$ 500,00", "Sem medição2 obras"]);
@@ -139,7 +140,7 @@ describe("Resumo das medições (#749)", () => {
     expect(window.location.search).toBe("?mes=2026-09");
     expect(screen.getByText("Competência")).toBeTruthy();
     // sem lancamento e sem leitura do RM, a frase diz so' o que o sistema tem; listas vazias viram uma linha curta
-    expect(screen.getByText("Valores na cota da Lotufo. Nenhum lançamento registrado.")).toBeTruthy();
+    expect(screen.getByText("Medido das medições de cada etapa, na cota da Lotufo. Nenhum lançamento registrado.")).toBeTruthy();
     expect(screen.getByText("Nenhuma medição em setembro de 2026.")).toBeTruthy();
     expect(screen.getByText("Nenhuma obra sem medição.")).toBeTruthy();
     expect(screen.getByText("Nenhuma medição aberta de meses anteriores.")).toBeTruthy();
@@ -174,6 +175,26 @@ describe("Resumo das medições (#749)", () => {
     expect(texto(within(tabela).getAllByRole("rowheader")[1])).toBe("Obra Quarta1ª MediçãoPlanilha/carta a enviar");
     expect(celulas(within(tabela).getAllByRole("row")[2])).toEqual(["ainda não", "ainda não", "ainda não", "ainda não", "ainda não", "—"]);
     expect(texto(within(screen.getByRole("list", { name: /por etapa/ })).getAllByRole("listitem")[0])).toBe("Planilha/carta a enviar1 medição—");
+  });
+
+  it("etapa que ficou para trás sem registro não leva visto nem data", async () => {
+    // protocolada direto: a planilha nao foi enviada, nao houve boletim e a nota nao tem emissao registrada
+    api.mockResolvedValue({ ...RESUMO, grupos: [{ contratante: "Secretaria de Exemplo", linhas: [
+      linha({ contrato_id: 12, obra: "Obra Quinta", medicao_id: 121, titulo: "8ª Medição", etapa: "protocolado", valor_centavos: 45_001,
+        etapas: [e("em_analise", "sem_registro"), e("boletim", "sem_registro"), e("nota", "feito", "2026-11-10"),
+          e("protocolado", "atual", "2026-11-12"), e("recebido", "futuro")] })] }] });
+    render(<ResumoDasMedicoes ir={() => {}} />);
+    const tabela = await screen.findByRole("table", { name: /Etapa da medição de cada obra/ });
+    const quinta = within(tabela).getAllByRole("row")[2];
+    expect(celulas(quinta)).toEqual(["sem registro", "sem registro", "NotaFeito em 10/11/26", "ProtocoladoEtapa atual, desde 12/11/26", "ainda não", "R$ 450,01"]);
+    const [analise, boletim, nota, , recebido] = within(quinta).getAllByRole("cell");
+    for (const c of [analise, boletim]) {
+      expect(c.className).toBe("rdm-etapa rdm-etapa--sem-registro");
+      expect(c.querySelector(".glifo")).toBeNull();
+    }
+    // nem a cor da etapa (feita) nem a da que falta
+    expect(nota.className).toContain("rdm-cor--nota");
+    expect(recebido.className).toContain("rdm-cor--vazia");
   });
 
   it("erro ao carregar vira aviso com o que fazer", async () => {

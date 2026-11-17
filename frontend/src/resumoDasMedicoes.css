@@ -109,6 +109,11 @@ a.rdm-obra:hover { text-decoration: underline; text-underline-offset: var(--afas
   border-radius: var(--raio-canto); background: var(--rdm-cor); box-shadow: var(--rdm-contorno, none);
 }
 .rdm-etapa--fora::before { background: none; }
+/* a etapa ficou para tras sem o registro do evento: tracejada no tom neutro do texto de apoio, nem cheia na cor da
+   etapa (feita) nem lisa e clara (a que falta) */
+.rdm-etapa--sem-registro::before {
+  background: repeating-linear-gradient(90deg, var(--cor-texto-terciario) 0 var(--espaco-mini), transparent var(--espaco-mini) var(--espaco-pp));
+}
 .rdm-etapa__nome { display: none; }
 .rdm-etapa__dado { display: inline-flex; align-items: center; gap: var(--espaco-mini); }
 .rdm-etapa--atual .rdm-etapa__dado { font-weight: var(--peso-forte); }
@@ -131,8 +136,9 @@ a.rdm-obra:hover { text-decoration: underline; text-underline-offset: var(--afas
 }
 
 /* ---------------------------------------------------------------- faixa estreita (celular)
-   A tabela vira um bloco por medicao: a obra e o valor em cima, e embaixo so' as etapas alcancadas, tres por linha,
-   cada uma com o nome escrito, a forma da situacao e a data. O que falta e o que a obra nao tem nao ocupam lugar. */
+   A tabela vira um bloco por medicao: a obra e o valor em cima, e embaixo so' as etapas alcancadas com registro, tres
+   por linha, cada uma com o nome escrito, a forma da situacao e a data. O que falta, o que ficou para tras sem
+   registro e o que a obra nao tem nao ocupam lugar. */
 @container rdm-pagina (max-width: 640px) {
   .rdm-faixa { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rdm-faixa__numero { font-size: var(--texto-valor-menor); }
@@ -159,7 +165,7 @@ a.rdm-obra:hover { text-decoration: underline; text-underline-offset: var(--afas
 
   /* as etapas alcancadas, tres por linha; as barras continuam formando a trilha */
   .rdm .rdm-tabela--etapas.tabela tr > .rdm-etapa { order: 3; flex: 0 0 33.333%; padding-right: var(--espaco-traco); }
-  .rdm .rdm-tabela--etapas.tabela tr > :is(.rdm-etapa--futuro, .rdm-etapa--fora) { display: none; }
+  .rdm .rdm-tabela--etapas.tabela tr > :is(.rdm-etapa--futuro, .rdm-etapa--fora, .rdm-etapa--sem-registro) { display: none; }
   .rdm-etapa::before { margin-bottom: var(--espaco-mini); }
   .rdm-etapa__nome { display: block; color: var(--cor-texto-secundario); }
 
