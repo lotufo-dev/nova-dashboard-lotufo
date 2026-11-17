@@ -4,7 +4,8 @@ import pathlib
 
 import pytest
 
-from app import auth, cadastro_aplicar, db, fechamento, medicoes
+from app import auth, cadastro_aplicar, cadastro_arquivos, db, fechamento, medicoes
+from tests.conftest import CADASTRO_EXEMPLO
 from tests.test_protocolo import _contrato
 
 MODELO = pathlib.Path(__file__).parents[2] / "cadastro-exemplo" / "modelos" / "qdop" / "qdop-modelo.xlsx"
@@ -31,6 +32,24 @@ def cenario(tmp_path, monkeypatch):
     ids = {"propria": c.execute("SELECT id FROM contratos WHERE nome_curto='Própria'").fetchone()[0],
            "consorcio": c.execute("SELECT id FROM contratos WHERE nome_curto='Consórcio'").fetchone()[0], "uid": uid}
     yield c, ids
+    c.close()
+
+
+EMPRESA, CONSORCIO, OUTRA = 1, 90, 77      # coligadas no RM: a empresa, o Consorcio Exemplo e uma que nao e' nenhuma das duas
+
+
+@pytest.fixture
+def exemplo(tmp_path, monkeypatch):
+    """O cadastro de exemplo (`cadastro-exemplo/`): a Obra Consorcio, do Consorcio Exemplo (coligada 90 no RM), com a
+    cota de 50% da empresa (coligada 1). Devolve a conexao e o id do contrato."""
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    c = db.get_conn(); db.migrate(c)
+    uid = auth.criar_usuario(c, "Adm", "adm@exemplo.com.br", "senha-forte-123", "admin")
+    cadastro_aplicar.aplicar(c, uid, cadastro_arquivos.preparar(CADASTRO_EXEMPLO), ensaio=False)
+    k = c.execute("SELECT id FROM contratos WHERE nome_curto='Obra Consórcio'").fetchone()[0]
+    assert tuple(c.execute("SELECT e.coligada_rm, e.papel, k.percentual_direito_bp FROM contratos k JOIN entidades e "
+                           "ON e.id=k.entidade_id WHERE k.id=?", (k,)).fetchone()) == (CONSORCIO, "consorcio", 5000)
+    yield c, k
     c.close()
 
 
@@ -89,6 +108,9 @@ def _confere_soma(f):
                     assert n["recebido_centavos"] >= 0 and n["em_aberto_centavos"] >= 0
                     assert n["recebida"] == (n["em_aberto_centavos"] == 0)
                     assert n["paga_em_parte"] == (0 < n["em_aberto_centavos"] < n["valor_centavos"])
+                # a nota fora da conta (fatura do consorcio preterida pela nota da empresa) nao leva valor nem soma
+                assert all(set(n) == {"nota_id", "numero"} for n in md["notas_fora_da_conta"])
+                assert md["notas_fora_da_conta"] == [] or md["notas"]
                 # em aberto = (a) nota protocolada nao paga (ou paga em parte) + (b) medicao protocolada sem nota ligada
                 assert md["em_aberto_notas_centavos"] == md["protocolado_centavos"] - md["recebido_centavos"]
                 assert md["em_aberto_centavos"] == md["em_aberto_notas_centavos"] + md["sem_nota_centavos"]
@@ -108,6 +130,13 @@ def _confere_soma(f):
         assert tot["sem_nota_centavos"] == sum(e["valor_centavos"] for e in do_ano if e["tipo_aberto"] == "sem_nota")
         assert tot["em_aberto_centavos"] == tot["protocolado_centavos"] - tot["recebido_centavos"] + tot["sem_nota_centavos"]
     assert all(e["competencia"][:4] in f["anos"] for e in f["em_aberto"])
+    # nenhuma nota em duas partes: a que conta numa medicao (a), a que ficou fora da conta e a sem medicao ligada (c)
+    mds = [md for m in f["meses"] for o in m["obras"] for md in o["medicoes"]]
+    contam = {n["nota_id"] for md in mds for n in md["notas"]}
+    fora = {n["nota_id"] for md in mds for n in md["notas_fora_da_conta"]}
+    soltas = {e["nota_id"] for e in f["notas_sem_medicao"]["em_aberto"]}
+    assert not contam & soltas and not fora & soltas
+    assert all(not {n["nota_id"] for n in md["notas"]} & {n["nota_id"] for n in md["notas_fora_da_conta"]} for md in mds)
 
 
 def _em_aberto(f):
@@ -143,19 +172,21 @@ def test_os_quatro_numeros_pela_competencia_da_medicao(cenario):
     _confere_soma(f)
 
 
-def test_consorcio_na_cota_com_centavo_impar_e_nfse_da_consorciada_fora(cenario):
-    """Em consorcio: a cota de cada parcela (50%, meio para cima, uma vez por parcela); a fatura do consorcio (coligada
-    do contrato, valor cheio) e' a que cobra o orgao; a NFS-e da empresa (coligada 1) na mesma medicao nao conta."""
+def test_consorcio_na_cota_com_centavo_impar_e_nfse_de_outra_consorciada_fora(cenario):
+    """Em consorcio sem a nota da propria empresa ligada: a cota de cada parcela (50%, meio para cima, uma vez por
+    parcela), da fatura do consorcio (coligada do contrato, valor cheio). A NFS-e de outra consorciada na mesma
+    medicao nao conta nem aparece."""
     c, ids = cenario
     k = ids["consorcio"]
     mid = medir(c, k, 1, "2025-07", "protocolada", 2_000_003, aprovado=2_000_001, protocolo="2025-09-02")
     nota(c, 2_000_001, [mid], coligada=12)
-    nota(c, 1_000_001, [mid], coligada=1)                                    # NFS-e da consorciada: fora
+    nota(c, 1_000_000, [mid], coligada=OUTRA)                                # NFS-e de outra consorciada: fora
     f = fechamento.fechamento(c)
     m = _mes(f, "2025-07")
     assert _numeros(m) == (1_000_001, 1_000_001, 1_000_001, 0, 1_000_001)   # 2.000.001 x 50% = 1.000.000,5 -> 1.000.001
     assert [(e["obra"], e["protocolo_em"], e["valor_centavos"]) for e in f["em_aberto"]] == [
         ("Consórcio", "2025-09-02", 1_000_001)]
+    assert m["obras"][0]["medicoes"][0]["notas_fora_da_conta"] == []
     _confere_soma(f)
 
 
@@ -499,4 +530,218 @@ def test_soma_fecha_ao_centavo_em_dois_anos_com_consorcio(cenario):
     assert f["acumulado"]["ate_mes"] == "10"
     for k_ in NUMEROS:
         assert f["acumulado"]["2026"][k_] == f["por_ano"]["2026"][k_]
+    _confere_soma(f)
+
+
+# ---------------------------------------------------------------- consorcio: a nota da propria empresa (issue #756)
+
+def _medicao(f, mid):
+    return next(md for m in f["meses"] for o in m["obras"] for md in o["medicoes"] if md["medicao_id"] == mid)
+
+
+def _ligar(c, mid, numero, valor):
+    """Mais um vinculo da mesma nota, em outra medicao, pelo valor dado."""
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
+              "SELECT ?, id, ?, 'manual', 't' FROM notas_fiscais WHERE numero=?", (mid, valor, f"{int(numero):09d}"))
+    c.commit()
+
+
+def test_consorcio_so_com_a_fatura_do_consorcio_ligada_vale_ela_vezes_a_cota(exemplo):
+    """(a) Sem a nota da empresa ligada, continua a fatura do consorcio, valor cheio vezes a cota."""
+    c, k = exemplo
+    mid = medir(c, k, 1, "2026-03", "protocolada", 2_400_003, aprovado=2_400_003, protocolo="2026-04-10")
+    fatura = nota(c, 2_400_003, [mid], coligada=CONSORCIO, titulos=[(2_232_003, 1_000_000, 4)])     # faltam 1.232.003
+    f = fechamento.fechamento(c)
+    md = _medicao(f, mid)
+    # 2.400.003 x 50% = 1.200.001,5 -> 1.200.002; a falta 1.232.003 x 50% = 616.001,5 -> 616.002
+    assert _numeros(md) == (1_200_002, 1_200_002, 1_200_002, 1_200_002 - 616_002, 616_002)
+    assert [(n["numero"], n["valor_centavos"], n["paga_em_parte"]) for n in md["notas"]] == [(fatura, 1_200_002, True)]
+    assert md["notas_fora_da_conta"] == [] and md["sem_nota"] is False
+    _confere_soma(f)
+
+
+def test_consorcio_so_com_a_nota_da_empresa_ligada_vale_ela_pela_face(exemplo):
+    """(b) A nota da propria empresa ao consorcio ja' e' a cota: entra pelo valor de face, sem o percentual, e o
+    recebido sai da baixa dos titulos dela. A medicao deixa de aparecer como "sem nota ligada"."""
+    c, k = exemplo
+    aberta = medir(c, k, 1, "2026-03", "protocolada", 2_000_001, aprovado=2_000_001, protocolo="2026-04-10")
+    n1 = nota(c, 999_999, [aberta], coligada=EMPRESA, centro="5.001.001")       # face impar; x 50% daria 500.000
+    paga = medir(c, k, 2, "2026-03", "protocolada", 600_001, aprovado=600_001, protocolo="2026-04-11")
+    n2 = nota(c, 300_001, [paga], coligada=EMPRESA, centro="5.001.001", titulos=PAGO(279_001))
+    f = fechamento.fechamento(c)
+    a, p = _medicao(f, aberta), _medicao(f, paga)
+    # medido e aprovado continuam o valor cheio da medicao vezes a cota (2.000.001 x 50% -> 1.000.001; 600.001 -> 300.001)
+    assert _numeros(a) == (1_000_001, 1_000_001, 999_999, 0, 999_999)
+    assert _numeros(p) == (300_001, 300_001, 300_001, 300_001, 0)
+    assert [(n["numero"], n["valor_centavos"], n["recebida"]) for n in a["notas"]] == [(n1, 999_999, False)]
+    assert [(n["numero"], n["valor_centavos"], n["recebida"]) for n in p["notas"]] == [(n2, 300_001, True)]
+    assert a["sem_nota"] is False and a["sem_nota_centavos"] == 0 and a["notas_fora_da_conta"] == []
+    assert [(e["tipo_aberto"], e["numero"], e["valor_centavos"]) for e in f["em_aberto"]] == [("nota", n1, 999_999)]
+    _confere_soma(f)
+
+
+def test_consorcio_com_as_duas_ligadas_conta_so_a_nota_da_empresa(exemplo):
+    """(c) Com a nota da empresa ligada, a fatura do consorcio ligada a' MESMA medicao nao entra na conta: nem no
+    protocolado, nem no recebido, nem no em aberto, esteja ela paga ou nao no RM. Aparece na medicao, sem valor."""
+    c, k = exemplo
+    m1 = medir(c, k, 1, "2026-03", "protocolada", 2_000_001, aprovado=2_000_001, protocolo="2026-04-10")
+    fat1 = nota(c, 2_400_003, [m1], coligada=CONSORCIO, titulos=PAGO(2_232_003))     # a fatura paga nao quita a da empresa
+    emp1 = nota(c, 1_000_001, [m1], coligada=EMPRESA, centro="5.001.001")
+    m2 = medir(c, k, 2, "2026-03", "protocolada", 800_001, aprovado=800_001, protocolo="2026-04-11")
+    fat2 = nota(c, 800_001, [m2], coligada=CONSORCIO)                                # a fatura aberta nao segura a da empresa
+    emp2 = nota(c, 400_001, [m2], coligada=EMPRESA, centro="5.001.001", titulos=PAGO(372_001))
+    f = fechamento.fechamento(c)
+    a, b = _medicao(f, m1), _medicao(f, m2)
+    assert _numeros(a) == (1_000_001, 1_000_001, 1_000_001, 0, 1_000_001)           # e nao 1.200.002 nem 2.200.003
+    assert _numeros(b) == (400_001, 400_001, 400_001, 400_001, 0)
+    assert [n["numero"] for n in a["notas"]] == [emp1] and [n["numero"] for n in b["notas"]] == [emp2]
+    assert [n["numero"] for n in a["notas_fora_da_conta"]] == [fat1]
+    assert [n["numero"] for n in b["notas_fora_da_conta"]] == [fat2]
+    assert _numeros(_mes(f, "2026-03")) == (1_400_002, 1_400_002, 1_400_002, 400_001, 1_000_001)
+    assert [(e["numero"], e["valor_centavos"]) for e in f["em_aberto"]] == [(emp1, 1_000_001)]
+    # a fatura preterida esta' ligada a medicao: tambem nao vira "nota sem medicao ligada"
+    assert f["notas_sem_medicao"]["em_aberto"] == [] and f["notas_sem_medicao"]["pagas"]["quantidade"] == 0
+    _confere_soma(f)
+
+
+def test_consorcio_nota_da_empresa_paga_em_parte_fica_pelo_que_falta_sem_aplicar_a_cota(exemplo):
+    """(d) A regra da nota paga em parte vale igual: o em aberto e' o que falta nos titulos da nota da empresa, que ja'
+    e' a cota (nao se multiplica pelo percentual), limitado ao valor dela; o recebido e' a face menos a falta."""
+    c, k = exemplo
+    mid = medir(c, k, 1, "2026-05", "protocolada", 2_000_001, aprovado=2_000_001, protocolo="2026-06-01")
+    nota(c, 2_000_001, [mid], coligada=CONSORCIO, titulos=PAGO(1_860_001))           # a do consorcio, quitada: fora
+    emp = nota(c, 1_000_001, [mid], coligada=EMPRESA, centro="5.001.001", titulos=[(930_001, 400_000, 4)])
+    teto = medir(c, k, 2, "2026-05", "protocolada", 200_001, aprovado=200_001, protocolo="2026-06-02")
+    nota(c, 100_001, [teto], coligada=EMPRESA, centro="5.001.001", titulos=[(90_000, 10_000, 4), (90_000, 0, 0)])
+    quase = medir(c, k, 3, "2026-05", "protocolada", 600_001, aprovado=600_001, protocolo="2026-06-03")
+    nota(c, 300_001, [quase], coligada=EMPRESA, centro="5.001.001", titulos=[(279_001, 278_901, 1)])   # faltam R$ 1,00
+    f = fechamento.fechamento(c)
+    md = _medicao(f, mid)
+    # faltam 530.001 nos titulos da nota da empresa: e' o em aberto (x 50% daria 265.001)
+    assert md["notas"] == [{"nota_id": md["notas"][0]["nota_id"], "numero": emp, "valor_centavos": 1_000_001,
+                            "recebido_centavos": 470_000, "em_aberto_centavos": 530_001, "recebida": False,
+                            "paga_em_parte": True}]
+    assert _numeros(md) == (1_000_001, 1_000_001, 1_000_001, 470_000, 530_001)
+    # a falta (170.000) acima do valor da nota fica no teto; ate' R$ 1,00 de falta, paga
+    assert _numeros(_medicao(f, teto))[2:] == (100_001, 0, 100_001)
+    assert _numeros(_medicao(f, quase))[2:] == (300_001, 300_001, 0)
+    assert [(e["valor_centavos"], e["paga_em_parte"]) for e in f["em_aberto"]] == [(530_001, True), (100_001, False)]
+    _confere_soma(f)
+
+
+def test_consorcio_execucao_com_nota_da_empresa_e_reajuste_com_fatura_do_consorcio_no_mesmo_mes(exemplo):
+    """(e) A escolha e' por medicao: no mesmo mes, a execucao com a nota da empresa conta pela face e o reajuste, so'
+    com a fatura do consorcio, conta por ela vezes a cota. A fatura do consorcio ligada as duas (pelo valor de cada
+    vinculo) fica fora na execucao e entra no reajuste pelo valor do vinculo dele."""
+    c, k = exemplo
+    exe = medir(c, k, 5, "2026-06", "protocolada", 2_000_001, aprovado=2_000_001, protocolo="2026-07-10")
+    rea = medir(c, k, 5, "2026-06", "protocolada", 300_003, aprovado=300_003, tipo="reajuste", protocolo="2026-07-10")
+    emp = nota(c, 1_000_001, [exe], coligada=EMPRESA, centro="5.001.001", titulos=PAGO(930_001))
+    fat = nota(c, 300_003, [rea], coligada=CONSORCIO)
+    f = fechamento.fechamento(c)
+    e, r = _medicao(f, exe), _medicao(f, rea)
+    assert _numeros(e) == (1_000_001, 1_000_001, 1_000_001, 1_000_001, 0)
+    assert _numeros(r) == (150_002, 150_002, 150_002, 0, 150_002)                # 300.003 x 50% = 150.001,5 -> 150.002
+    assert [n["numero"] for n in e["notas"]] == [emp] and [n["numero"] for n in r["notas"]] == [fat]
+    assert e["notas_fora_da_conta"] == r["notas_fora_da_conta"] == []
+    assert _numeros(_mes(f, "2026-06")) == (1_150_003, 1_150_003, 1_150_003, 1_000_001, 150_002)
+    _confere_soma(f)
+    # a mesma fatura do consorcio passa a cobrir tambem a execucao: la' fica fora da conta; no reajuste, o vinculo dele
+    c.execute("UPDATE nf_alocacoes SET valor_alocado_centavos=200003 WHERE medicao_id=?", (rea,))
+    _ligar(c, exe, fat, 100_000)
+    f = fechamento.fechamento(c)
+    e, r = _medicao(f, exe), _medicao(f, rea)
+    assert _numeros(e) == (1_000_001, 1_000_001, 1_000_001, 1_000_001, 0)
+    assert [n["numero"] for n in e["notas_fora_da_conta"]] == [fat]
+    assert _numeros(r) == (150_002, 150_002, 100_002, 0, 100_002)                # 200.003 x 50% = 100.001,5 -> 100.002
+    _confere_soma(f)
+
+
+def test_consorcio_nota_da_empresa_ligada_a_duas_medicoes_entra_pelo_valor_do_vinculo_sem_cota(exemplo):
+    """A nota da empresa ligada a' execucao e ao reajuste entra em cada um pelo valor do vinculo, pela face; paga em
+    parte, a falta reparte-se na proporcao dos vinculos, com o centavo de residuo, tambem sem a cota."""
+    c, k = exemplo
+    exe = medir(c, k, 1, "2026-08", "protocolada", 1_400_000, protocolo="2026-09-01")
+    rea = medir(c, k, 1, "2026-08", "protocolada", 600_002, tipo="reajuste", protocolo="2026-09-01")
+    nid = nota(c, 1_000_001, [exe], coligada=EMPRESA, centro="5.001.001", alocado=700_000,
+               titulos=[(930_000, 430_000, 4)])                                  # faltam 500.000
+    _ligar(c, rea, nid, 300_001)
+    f = fechamento.fechamento(c)
+    # 500.000 x 700.000 / 1.000.001 = 349.999,65 e 500.000 x 300.001 / 1.000.001 = 150.000,35: o centavo vai ao maior resto
+    assert sorted((e["tipo"], e["valor_centavos"], e["paga_em_parte"]) for e in f["em_aberto"]) == [
+        ("execucao", 350_000, True), ("reajuste", 150_000, True)]
+    assert (_medicao(f, exe)["protocolado_centavos"], _medicao(f, rea)["protocolado_centavos"]) == (700_000, 300_001)
+    m = _mes(f, "2026-08")
+    assert (m["protocolado_centavos"], m["recebido_centavos"], m["em_aberto_centavos"]) == (1_000_001, 500_001, 500_000)
+    _confere_soma(f)
+
+
+def test_consorcio_cobertura_do_vinculo_conta_a_nota_da_empresa(exemplo):
+    """(f) A medicao de consorcio com a nota da empresa ligada conta como coberta, como a que tem a fatura do
+    consorcio; so' com a NFS-e de outra consorciada, ou sem nota, nao."""
+    c, k = exemplo
+    a = medir(c, k, 1, "2026-01", "recebida", 2_000_001, aprovado=2_000_001, protocolo="2026-02-01")
+    nota(c, 1_000_001, [a], coligada=EMPRESA, centro="5.001.001", titulos=PAGO(930_001))
+    b = medir(c, k, 2, "2026-02", "nota_emitida", 400_001, aprovado=400_001)
+    nota(c, 200_001, [b], coligada=EMPRESA, centro="5.001.001")                 # ainda nao protocolada: ja' cobre
+    d = medir(c, k, 3, "2026-03", "protocolada", 600_001, aprovado=600_001, protocolo="2026-04-01")
+    nota(c, 600_001, [d], coligada=CONSORCIO)
+    e = medir(c, k, 4, "2026-04", "protocolada", 100_001, aprovado=100_001, protocolo="2026-05-01")
+    nota(c, 50_001, [e], coligada=OUTRA)                                        # de outra consorciada: nao cobre
+    f = fechamento.fechamento(c)
+    # a base e' o aprovado na cota: 1.000.001 + 200.001 + 300.001 + 50.001
+    assert f["cobertura"]["2026"] == {"aprovado_centavos": 1_550_004, "com_nota_centavos": 1_500_003,
+                                      "sem_nota_centavos": 50_001, "medicoes_sem_nota": 1, "percentual": 96.8}
+    assert _medicao(f, b)["protocolado_centavos"] == 0 and _medicao(f, b)["notas"] == []
+    assert _medicao(f, e)["sem_nota"] is True and _medicao(f, e)["sem_nota_centavos"] == 50_001
+    _confere_soma(f)
+
+
+def test_consorcio_nota_da_empresa_sem_medicao_ligada_nao_vira_nota_sem_medicao(exemplo):
+    """O que NAO mudou: a nota da empresa ao consorcio sem vinculo com medicao nao aparece em lugar nenhum da pagina
+    (a lista "nota sem medicao ligada" so' tem nota da coligada da entidade do contrato); ligada, entra na medicao e
+    continua fora dessa lista. A fatura do consorcio sem medicao ligada segue na lista, vezes a cota."""
+    c, k = exemplo
+    mid = medir(c, k, 1, "2026-03", "protocolada", 2_000_001, aprovado=2_000_001, protocolo="2026-04-10")
+    solta = nota(c, 1_000_001, coligada=EMPRESA, centro="5.001.001", emissao="2026-04-02")
+    fatura = nota(c, 700_001, coligada=CONSORCIO, emissao="2026-04-03")
+    f = fechamento.fechamento(c)
+    assert [(e["numero"], e["valor_centavos"]) for e in f["notas_sem_medicao"]["em_aberto"]] == [(fatura, 350_001)]
+    assert _medicao(f, mid)["sem_nota"] is True and _em_aberto(f) == 1_000_001   # (b), pelo valor da medicao
+    _ligar(c, mid, solta, 1_000_001)
+    f = fechamento.fechamento(c)
+    assert [(e["tipo_aberto"], e["numero"], e["valor_centavos"]) for e in f["em_aberto"]] == [("nota", solta, 1_000_001)]
+    assert [e["numero"] for e in f["notas_sem_medicao"]["em_aberto"]] == [fatura]
+    _confere_soma(f)
+
+
+def test_consorcio_com_a_trava_a_nota_fora_da_conta_aparece_sem_nada_do_recebido(exemplo):
+    """Com o total a receber nao liberado, a medicao continua dizendo qual fatura ficou fora da conta (so' o numero);
+    o recebido e o em aberto seguem escondidos."""
+    import json
+    c, k = exemplo
+    mid = medir(c, k, 1, "2026-03", "protocolada", 2_000_001, aprovado=2_000_001, protocolo="2026-04-10")
+    fat = nota(c, 2_000_001, [mid], coligada=CONSORCIO)
+    nota(c, 1_000_001, [mid], coligada=EMPRESA, centro="5.001.001", titulos=[(930_001, 400_000, 4)])
+    c.execute("UPDATE cadastro_geral SET valor=? WHERE chave='diretoria'", (json.dumps({"total_a_receber_liberado": False}),))
+    c.commit()
+    f = fechamento.fechamento(c)
+    md = _medicao(f, mid)
+    assert f["total_a_receber_liberado"] is False and md["protocolado_centavos"] == 1_000_001
+    assert [set(n) for n in md["notas_fora_da_conta"]] == [{"nota_id", "numero"}]
+    assert md["notas_fora_da_conta"][0]["numero"] == fat
+    assert md["recebido_centavos"] is None and md["em_aberto_centavos"] is None
+    assert all(str(v) not in json.dumps(f) for v in (470_000, 530_001))
+
+
+def test_obra_propria_nao_muda_com_a_regra_do_consorcio(exemplo):
+    """Em obra propria a nota da empresa e' a da entidade do contrato: valor da nota, sem nota fora da conta."""
+    c, _ = exemplo
+    p = c.execute("SELECT id FROM contratos WHERE nome_curto='Obra Própria'").fetchone()[0]
+    mid = medir(c, p, 1, "2026-03", "protocolada", 500_001, aprovado=500_001, protocolo="2026-04-10")
+    nota(c, 500_001, [mid], coligada=EMPRESA)
+    nota(c, 500_001, [mid], coligada=CONSORCIO)                                 # nota de outra coligada: nao conta
+    f = fechamento.fechamento(c)
+    md = _medicao(f, mid)
+    assert _numeros(md) == (500_001, 500_001, 500_001, 0, 500_001) and md["notas_fora_da_conta"] == []
     _confere_soma(f)

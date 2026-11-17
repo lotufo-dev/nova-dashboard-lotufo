@@ -38,6 +38,9 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 - 2026-11-16 #748: a nota com título em aberto no RM ligada a medição de competência anterior a 2025 já recebida não aparece no Fechamento (a medição está fora dos anos da página e a nota não é "sem medição ligada").
 - 2026-11-16 #748: no Fechamento, a medição paga sem nota ligada não tem marca na linha dela (aparece com aprovado, sem protocolado nem recebido); só o aviso de cobertura do ano diz.
 - 2026-11-16 #748: a tabela de medições da obra (`tabela--grade`, larguras fixas) já não cabia na caixa a 1024 e a 1440 antes da coluna de custo; o próximo passo quebra em várias linhas. Rever no redesenho da página da obra.
+- 2026-11-17 #756: o Fechamento já conta a medição de consórcio pela nota da empresa ao consórcio, quando ligada (`fechamento._notas_da_conta`); os outros três lugares da issue ainda usam o bruto da fatura do consórcio: o faturado mensal do RM (`diretoria.rm_por_mes`), a página da medição e a regra de que as notas vigentes cobrem a medição (`docs/adr/0006`).
+- 2026-11-17 #756: a nota da empresa ao consórcio só conta no Fechamento se for de tipo de cobrança (`diretoria.CODTMV_COBRANCA`) ou só lida do PDF; lançada no RM em outro tipo de movimento, fica fora mesmo ligada, e a medição segue "sem nota ligada". Tipo novo só entra por decisão (#563).
+- 2026-11-17 #756: a fatura do consórcio em aberto no RM e sem medição ligada continua na lista "nota sem medição ligada" do Fechamento (`fechamento._notas_sem_medicao`) mesmo quando a medição da mesma cobrança já conta pela nota da empresa: a mesma cobrança pode aparecer no em aberto e nessa lista, que fica fora do total, e o aviso da tela só fala da medição sem nota.
 
 ## Cadastro (dono)
 

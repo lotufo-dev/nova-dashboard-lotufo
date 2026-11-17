@@ -196,6 +196,24 @@ describe("Fechamento (#748)", () => {
     expect(within(linha).queryByText("em aberto")).toBeNull();
   });
 
+  it("consórcio com a nota da empresa ligada: a fatura do consórcio aparece na medição, sem selo de situação e sem valor (#756)", async () => {
+    const consorcio: RespostaFechamento = {
+      ...FECHAMENTO,
+      meses: FECHAMENTO.meses.map(m => m.competencia !== "2026-03" ? m : { ...m, obras: [{ ...m.obras[0],
+        medicoes: [{ ...medicao(2, 15, "2026-03", MAR26, [{ id: 21, numero: "601", v: 1_400_001, ok: false }]),
+          notas_fora_da_conta: [{ nota_id: 23, numero: "88" }] }] }] }),
+    };
+    api.mockResolvedValue(consorcio);
+    render(<Fechamento ir={() => {}} />);
+    const meses = await screen.findByRole("table", { name: /por mês de competência de 2026/ });
+    fireEvent.click(within(meses).getByRole("button", { name: /Março de 2026, por obra/ }));
+    fireEvent.click(within(meses).getByRole("button", { name: /Obra Alfa, medições de 03\/2026/ }));
+    const linha = within(meses).getByRole("link", { name: "15ª Medição" }).closest("tr") as HTMLElement;
+    const itens = [...linha.querySelectorAll(".fch-notas li")].map(li => texto(li));
+    expect(itens).toEqual(["Nota 601em aberto", "Nota 88fatura do consórcio, não entra na conta"]);
+    expect(texto(linha)).not.toContain("88R$");                 // a fatura fora da conta não leva valor
+  });
+
   it("linha sem nota ligada e sem data de protocolo: diz que não há data, em vez de traço", async () => {
     api.mockResolvedValue({ ...TRES_PARTES, em_aberto: TRES_PARTES.em_aberto.map(e => e.tipo_aberto === "sem_nota" ? { ...e, protocolo_em: null } : e) });
     render(<Fechamento ir={() => {}} />);

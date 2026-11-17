@@ -28,9 +28,11 @@ type Numeros = {
 /** As duas partes que somam o em aberto do ano: (a) notas e (b) medicoes sem nota ligada. */
 type DoAno = Numeros & { meses: number; em_aberto_notas_centavos: number | null; sem_nota_centavos: number | null };
 type NotaLinha = { nota_id: number; numero: string; valor_centavos: number; recebida: boolean | null; paga_em_parte: boolean | null };
+/** Em consorcio com a nota da propria empresa ligada, a fatura do consorcio ligada a' mesma medicao: sem valor, nao soma. */
+type NotaFora = { nota_id: number; numero: string };
 type MedicaoLinha = Numeros & {
   medicao_id: number; contrato_id: number; obra: string; numero: number; tipo: string; estado: string;
-  competencia: string; protocolo_em: string | null; notas: NotaLinha[]; sem_nota?: boolean;
+  competencia: string; protocolo_em: string | null; notas: NotaLinha[]; notas_fora_da_conta?: NotaFora[]; sem_nota?: boolean;
 };
 type ObraLinha = Numeros & { contrato_id: number; obra: string; medicoes: MedicaoLinha[] };
 type Mes = Numeros & { competencia: string; obras: ObraLinha[] };
@@ -102,10 +104,13 @@ function Celulas({ x }: { x: Numeros }) {
   );
 }
 
-/** As notas da medicao, cada uma com a situacao: recebida, paga em parte ou em aberto (sem selo com a trava). */
+/** As notas da medicao, cada uma com a situacao: recebida, paga em parte ou em aberto (sem selo com a trava). Em
+ *  consorcio, com a nota da propria empresa ligada, a fatura do consorcio da mesma medicao vem depois, dita em texto:
+ *  nao entra no protocolado, no recebido nem no em aberto (o servidor nao manda valor para ela). */
 function Notas({ m }: { m: MedicaoLinha }) {
   if (m.sem_nota) return <ul className="fch-notas"><li><Selo>sem nota ligada</Selo></li></ul>;
-  if (m.notas.length === 0) return null;
+  const fora = m.notas_fora_da_conta ?? [];
+  if (m.notas.length === 0 && fora.length === 0) return null;
   return (
     <ul className="fch-notas">
       {m.notas.map(n => (
@@ -114,6 +119,12 @@ function Notas({ m }: { m: MedicaoLinha }) {
           {n.recebida !== null && (
             <Selo situacao={n.recebida ? "feito" : "andamento"}>{n.recebida ? "recebida" : n.paga_em_parte ? "paga em parte" : "em aberto"}</Selo>
           )}
+        </li>
+      ))}
+      {fora.map(n => (
+        <li key={`fora-${n.nota_id}`}>
+          <span className="num">Nota {n.numero}</span>
+          <span>fatura do consórcio, não entra na conta</span>
         </li>
       ))}
     </ul>
