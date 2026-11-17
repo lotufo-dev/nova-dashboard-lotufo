@@ -385,6 +385,21 @@ def test_certidao_vencida_bloqueia_com_409(api):
     assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
 
 
+def test_arquivo_do_envio_que_sumiu_do_disco_vira_erro_tratado(api):
+    """O arquivo de um anexo (a nota) nao esta' mais na pasta de dados: a previa nao monta. Antes era 500
+    (FileNotFoundError); agora e' um erro tratado, com a frase que a tela mostra."""
+    cl, c, ids = api
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"], ids["sinfra_reaj"]]}).json()["protocolo_id"]
+    assert cl.get(f"/api/notas/envio/{pid}").status_code == 200
+    rel = c.execute("SELECT arquivo FROM medicao_documentos WHERE medicao_id=? AND tipo_doc='nfs'",
+                    (ids["sinfra_exec"],)).fetchone()[0]
+    arquivos.caminho_seguro(rel).unlink()
+    r = cl.get(f"/api/notas/envio/{pid}")
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "Um arquivo deste envio não está mais disponível no servidor."
+
+
 def test_envio_pelo_simulador_vira_aguardando_pagamento(api, tmp_path):
     cl, c, ids = api
     r = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],

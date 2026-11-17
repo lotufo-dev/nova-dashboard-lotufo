@@ -68,6 +68,9 @@ def detalhe(pid: ID, usuario: dict = Depends(exigir("ver_paineis", com_csrf=Fals
         return notas_envio.detalhe_envio(conn, pid, remetente=usuario.get("email"))
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
+    except FileNotFoundError:
+        # a previa le os anexos do disco; arquivo gravado no banco e ausente da pasta de dados nao pode virar 500
+        raise HTTPException(409, "Um arquivo deste envio não está mais disponível no servidor.") from None
 
 
 @router.post("/api/notas/envio/{pid}/enviar")

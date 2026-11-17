@@ -41,6 +41,14 @@ describe("Enviar a nota", () => {
     expect(JSON.parse(opcoes.body).cco).toEqual(["oculto@exemplo.com"]);
   });
 
+  it("arquivo do envio que não está mais no servidor: a tela mostra a frase do servidor e oferece tentar de novo", async () => {
+    api.mockRejectedValue(new ApiErro(409, "Um arquivo deste envio não está mais disponível no servidor."));
+    render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
+    expect((await screen.findByRole("alert")).textContent)
+      .toBe("Não foi possível abrir o envio: Um arquivo deste envio não está mais disponível no servidor.");
+    expect(screen.getByRole("button", { name: "Tentar de novo" })).toBeTruthy();
+  });
+
   it("ao concluir o envio embutido, avisa a página com a hora (B-06, 10/10/2026)", async () => {
     api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? det : {}));
     const aoConcluir = vi.fn();
