@@ -684,7 +684,7 @@ td, th { font-variant-numeric: tabular-nums; }
 
 .pagina {
   width: 100%; max-width: var(--pagina-largura-max);
-  padding: 24px 32px 40px;
+  padding: var(--pagina-margem-topo) var(--pagina-margem-lado) var(--pagina-margem-base);
   display: flex; flex-direction: column; gap: 24px;
 }
 
