@@ -541,6 +541,16 @@ test("Saúde: sem linha de custo pulada, não há aviso (#603)", async () => {
   expect(document.body.textContent).not.toMatch(/puladas por mês ilegível/);
 });
 
+test("Saúde: exclusão em massa recusada vira atenção no cartão do RM, com o aviso da rodada (#755)", async () => {
+  const aviso = "Exclusão em massa recusada: 412 notas deixaram de vir do RM, inteiras ou em algum título (teto de 109). Nada foi marcado como excluído. Ver docs/runbook.md, TOTVS RM.";
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null,
+    rodadas: [RODADA_BOA], custo_aviso: null, exclusao_aviso: aviso });
+  expect(await screen.findByText(aviso)).toBeTruthy();
+  const cartao = screen.getByRole("heading", { name: "Sincronização com o RM" }).closest("li")!;
+  expect(cartao.className).toContain("situacao--atencao");
+  expect(within(cartao).getByText("exclusão em massa recusada")).toBeTruthy();
+});
+
 // Issue #330: o monitor do SIGA ao lado da saúde do RM
 test("Saúde: cartão Monitor do SIGA com a hora da última leitura e os processos; sem leitura, traço", async () => {
   saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] },

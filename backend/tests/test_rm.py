@@ -880,12 +880,13 @@ def test_reclassificacao_com_a_antiga_que_so_parou_de_vir_conta_as_duas_ate_a_an
     """Desfecho 2: o movimento antigo so' deixa de vir, sem cancelamento. A nota antiga continua ativa e ligada a'
     medicao; a nova, de tipo 2.2.03, fica solta (a medicao ja' tem nota) e cai na obra pelo centro de custo.
 
-    Sem a chave, so' a antiga conta. COM a chave, HOJE AS DUAS CONTAM: o faturado da obra dobra, a baixa da nova entra
-    no recebido e a medicao segue protocolada (a antiga, que a segura, nunca tera' baixa). Por isso a protecao e' no
-    cadastro (docs/adr/0015): o `cadastro aplicar` recusa declarar o tipo enquanto houver esse par
-    (`diretoria.notas_gemeas_de_tipo_extra`, que aqui o lista), e a saida e' tirar a antiga da conta. Depois de
-    desligada e desconsiderada, a nova liga, a medicao e' recebida pela baixa e a nota conta uma vez. A nota que para
-    de vir do RM e continua ativa no banco e' assunto da issue #755."""
+    Sem a chave, so' a antiga conta. COM a chave, AS DUAS CONTAM enquanto a antiga nao sai: o faturado da obra dobra,
+    a baixa da nova entra no recebido e a medicao segue protocolada. A antiga sai sozinha quando a sincronizacao a
+    marca como excluida no RM, depois de duas rodadas completas sem ela (issue #755, `test_rm_excluidos.py`); as
+    rodadas deste teste caem no mesmo instante, entao ela ainda nao foi marcada, e o teste cobre esse intervalo e a
+    saida pela mao: o `cadastro aplicar` recusa declarar o tipo enquanto houver o par
+    (`diretoria.notas_gemeas_de_tipo_extra`, que aqui o lista). Depois de desligada e desconsiderada, a nova liga, a
+    medicao e' recebida pela baixa e a nota conta uma vez."""
     from app import correcao_medicoes, diretoria
     c2 = _obra_com_centro(conn, CENTRO)
     m = _medicao(conn, c2, 3, 500_01)
@@ -908,7 +909,7 @@ def test_reclassificacao_com_a_antiga_que_so_parou_de_vir_conta_as_duas_ate_a_an
     assert diretoria.rm_por_mes(conn) == ({"2026-08": 2 * 500_01}, {"2026-09": 470_01})       # as duas contam
     assert diretoria.notas_gemeas_de_tipo_extra(conn, c2, {"2.2.03"}) == [{
         "obra": "CT 9", "coligada": 1, "numero": "77", "emissao": "2026-08-10", "valor_centavos": 500_01,
-        "idmov_geral": 7, "tipo_geral": "2.2.01", "idmov_extra": 8, "tipo_extra": "2.2.03"}]
+        "idmov_antiga": 7, "tipo_antiga": "2.2.01", "idmov_nova": 8, "tipo_nova": "2.2.03"}]
 
     # a saida que a recusa do cadastro indica: a antiga sai da medicao e da conta
     correcao_medicoes.executar(conn, 1, [

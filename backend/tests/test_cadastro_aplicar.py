@@ -198,12 +198,13 @@ def _nota_do_rm(conn, idmov, codtmv, numero="77", valor=500_01, emissao="2026-08
 
 
 RECUSA_DAS_GEMEAS = (
-    "declarar o tipo de movimento 2.2.03 em MT-402 faria 1 nota contar duas vezes no a receber e no faturado: a nota "
-    "reclassificada chegou do RM como movimento novo e a antiga continua ativa.\n"
+    "declarar o tipo de movimento 2.2.03 em MT-402 faria 1 nota contar duas vezes no a receber e no faturado: o "
+    "movimento foi refeito no RM, chegou como nota nova e a mais antiga continua ativa.\n"
     "  - MT-402: nota 77 (coligada 1) de 10/08/2026, R$ 500,01: idmov 7 (tipo 2.2.01) e idmov 8 (tipo 2.2.03)\n"
-    "Antes de declarar o tipo, tire da conta a nota de tipo da lista geral de cada par, em `cadastro "
-    "corrigir-medicoes`: `desligar_nf` se ela estiver ligada a uma medição e `desconsiderar_nf` com {idmov: N}. "
-    "Depois aplique o cadastro de novo.")
+    "Se o RM deixou de devolver a mais antiga, a sincronização a marca como excluída depois de duas rodadas "
+    "completas: espere e aplique de novo. Se o RM devolve as duas, tire da conta a mais antiga de cada par, em "
+    "`cadastro corrigir-medicoes`: `desligar_nf` se ela estiver ligada a uma medição e `desconsiderar_nf` com "
+    "{idmov: N}; com baixa, a nota só sai cancelada no RM. Depois aplique o cadastro de novo.")
 
 
 def test_declarar_tipo_extra_e_recusado_enquanto_houver_nota_gemea_ativa_e_nada_e_gravado(conn):
@@ -255,7 +256,6 @@ def test_recusa_das_gemeas_lista_todos_os_pares(conn):
     {"emissao": "2026-08-11"},          # outra emissao
     {"numero": "78"},                   # outro numero
     {"situacao": "cancelada"},          # a antiga veio cancelada do RM (ou foi desconsiderada)
-    {"codtmv": "2.2.03"},               # as duas do tipo extra: a regra e' um tipo geral e um extra
     {"codtmv": "2.2.15"},               # a outra nao e' cobranca: nao conta, nao dobra
     {"centro": "9.009.001"},            # a antiga nao cai em obra nenhuma: nao conta, nao dobra
     {"coligada": 77},                   # outra coligada
@@ -284,16 +284,83 @@ def test_nota_reclassificada_de_outra_obra_nao_trava_a_declaracao(conn):
             {**outra, "tipos_cobranca_extras_rm": ["2.2.03"]}]))
 
 
-def test_trava_das_gemeas_so_confere_o_tipo_que_esta_sendo_declarado(conn):
-    """A trava e' do ato de declarar. O tipo que o contrato ja' declarava nao e' reconferido a cada aplicacao (a gemea
-    que aparece depois e' a nota que parou de vir do RM, issue #755), e declarar outro tipo nao esbarra no par do
-    primeiro."""
+AVISO_DO_PAR = (
+    "MT-402: nota 77 (coligada 1) de 10/08/2026, R$ 500,01: idmov 7 (tipo 2.2.01) e idmov 8 (tipo 2.2.03): a nota "
+    "conta duas vezes no a receber e no faturado. Se o RM deixou de devolver a mais antiga, ela sai sozinha na "
+    "sincronização; se devolve as duas, tire uma da conta (`desconsiderar_nf`) ou cancele no RM")
+
+
+def test_par_que_aparece_depois_de_declarado_o_tipo_vira_aviso_em_toda_aplicacao_sem_recusar(conn):
+    """A trava e' do ato de declarar. Na obra que ja' declara o tipo, o par que aparece depois (o faturamento refaz
+    outra nota) nao trava o cadastro, que pode estar trazendo mudanca sem relacao com ele; vira aviso em toda
+    aplicacao e em todo ensaio, ate' o par sumir. Declarar outro tipo nao esbarra no par do primeiro."""
     cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03"]))
+    assert cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03"]))["avisos"] == []
     _nota_do_rm(conn, 7, "2.2.01")
     _nota_do_rm(conn, 8, "2.2.03")
-    assert cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03"]))["contratos"]["iguais"] == 1
-    r = cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03", "2.2.04"]))
+    for ensaio in (True, False, False):
+        r = cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03"]), ensaio=ensaio)
+        assert r["contratos"]["iguais"] == 1 and r["avisos"] == [AVISO_DO_PAR]
+    r = cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03", "2.2.04"], objeto="Outro objeto"))
     assert r["contratos"]["alterados"] == ["MT-402 (tipos de cobrança extras do RM: 2.2.03 → 2.2.03, 2.2.04)"]
+    assert r["avisos"] == [AVISO_DO_PAR]
+    conn.execute("UPDATE notas_fiscais SET situacao='cancelada', excluida_rm_em=datetime('now') WHERE idmov=7")
+    conn.commit()                               # a sincronizacao marcou a antiga como excluida no RM (issue #755)
+    assert cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03", "2.2.04"],
+                                                   objeto="Outro objeto"))["avisos"] == []
+
+
+def test_duas_notas_do_tipo_extra_tambem_travam_a_declaracao(conn):
+    """Segunda revisao da PR #764: a nota que nasceu no tipo extra e teve o movimento refeito. Sem a chave nenhuma
+    conta; ao declarar, as duas contariam. E' par como o de tipo geral com extra, e a mensagem aponta a mais antiga."""
+    cadastro_aplicar.aplicar(conn, 1, _obra())
+    _nota_do_rm(conn, 8, "2.2.03")
+    _nota_do_rm(conn, 7, "2.2.03")
+    with pytest.raises(ValueError) as e:
+        cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03"]), ensaio=True)
+    linhas = str(e.value).splitlines()
+    assert linhas[0].startswith("declarar o tipo de movimento 2.2.03 em MT-402 faria 1 nota contar duas vezes")
+    assert linhas[1:-1] == [
+        "  - MT-402: nota 77 (coligada 1) de 10/08/2026, R$ 500,01: idmov 7 (tipo 2.2.03) e idmov 8 (tipo 2.2.03)"]
+    assert "tire da conta a mais antiga de cada par" in linhas[-1]
+
+
+def test_nota_antiga_com_baixa_que_o_rm_deixou_de_devolver_sai_pela_sincronizacao_e_destrava_a_declaracao(conn, tmp_path):
+    """O beco da segunda revisao da PR #764: par de gemeas com a ANTIGA COM BAIXA. A declaracao do tipo e' recusada, e
+    a correcao de cadastro recusa desconsiderar nota com recebimento. A saida e' a da issue #755: a antiga que o RM
+    deixou de devolver e' marcada como excluida pela sincronizacao, depois de duas rodadas completas sem ela. A baixa
+    dela fica gravada, marcada, e sai do recebido (o dinheiro e' o da substituta, que tem o titulo dela); sem par, a
+    mesma aplicacao do cadastro passa e a nota conta uma vez."""
+    from app import correcao_medicoes, diretoria
+    from tests.test_rm import _baixa, _nf
+    from tests.test_rm_excluidos import _marcados, _rodada
+    def nota(idmov, tipo):
+        return _nf(idmov, 500.01, centro_custo=CENTRO, numero="77", codtmv=tipo)
+    cadastro_aplicar.aplicar(conn, 1, _obra())
+    antiga_paga = _baixa(1, 7, 470.03, 470.03, 1, "2026-08-28T00:00:00-04:00")
+    nova_paga = _baixa(2, 8, 470.03, 470.03, 1, "2026-09-01T00:00:00-04:00")
+    _rodada(conn, tmp_path, [nota(7, "2.2.01")], [antiga_paga])
+    _rodada(conn, tmp_path, [nota(8, "2.2.03")], [nova_paga])            # o movimento refeito; o antigo parou de vir
+    declarando = _obra(tipos_cobranca_extras_rm=["2.2.03"])
+    with pytest.raises(ValueError, match="faria 1 nota contar duas vezes"):
+        cadastro_aplicar.aplicar(conn, 1, declarando)
+    with pytest.raises(correcao_medicoes.CorrecaoRecusada) as e:
+        correcao_medicoes.executar(conn, 1, [{"operacao": "desconsiderar_nf", "nf": {"idmov": 7}, "coligada": 1,
+                                              "motivo": "refeita no RM", "fonte": "conferência no RM"}], ensaio=False)
+    assert e.value.relatorio["itens"][0]["erro"] == "NF 77 tem baixa no RM: nota com recebimento não se desconsidera"
+    with pytest.raises(ValueError, match="faria 1 nota contar duas vezes"):       # a recusa persiste: sem saida a' mao
+        cadastro_aplicar.aplicar(conn, 1, declarando)
+    assert diretoria.rm_por_mes(conn) == ({"2026-08": 500_01}, {"2026-08": 470_03})          # sem a chave: so' a antiga
+
+    r = _rodada(conn, tmp_path, [nota(8, "2.2.03")], [nova_paga])        # a segunda rodada completa sem a antiga
+    assert (r["notas_excluidas"], r["titulos_excluidos"]) == (1, 1) and _marcados(conn) == ([7], [1])
+    assert tuple(conn.execute("SELECT valor_baixado_centavos, status_lan FROM baixas WHERE idlan=1").fetchone()) == (
+        470_03, 1)                                                       # a baixa continua gravada
+    assert diretoria.rm_por_mes(conn) == ({}, {})                        # a antiga saiu; a nova ainda nao e' cobranca
+    rel = cadastro_aplicar.aplicar(conn, 1, declarando)
+    assert rel["contratos"]["alterados"] == ["MT-402 (tipos de cobrança extras do RM: nenhum → 2.2.03)"]
+    assert rel["avisos"] == []
+    assert diretoria.rm_por_mes(conn) == ({"2026-08": 500_01}, {"2026-09": 470_03})          # uma vez, pela nova
 
 
 @pytest.mark.parametrize("celula", ["", "isto nao e json", "null", '"2.2.03"'])
@@ -305,11 +372,13 @@ def test_coluna_ilegivel_dos_tipos_extras_e_lida_como_nenhum_e_regravada_pelo_ca
         return conn.execute("SELECT tipos_cobranca_extras_rm FROM contratos").fetchone()[0]
     conn.execute("UPDATE contratos SET tipos_cobranca_extras_rm=?", (celula,)); conn.commit()
     r = cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03"]))
-    assert r["contratos"]["alterados"] == ["MT-402 (tipos de cobrança extras do RM: nenhum → 2.2.03)"]
+    motivo = " (tipos de cobrança extras do RM: a célula gravada estava ilegível e foi regravada pelo arquivo)"
+    assert r["contratos"]["alterados"] == ["MT-402 (tipos de cobrança extras do RM: nenhum → 2.2.03)" + motivo]
     assert gravado() == '["2.2.03"]'
     conn.execute("UPDATE contratos SET tipos_cobranca_extras_rm=?", (celula,)); conn.commit()
     r = cadastro_aplicar.aplicar(conn, 1, _obra())                 # o arquivo nao declara nada: a coluna volta a nula
-    assert r["contratos"]["alterados"] == ["MT-402"] and gravado() is None
+    assert r["contratos"]["alterados"] == ["MT-402" + motivo] and gravado() is None   # o relatorio diz por que mudou
+    assert cadastro_aplicar.aplicar(conn, 1, _obra())["contratos"]["iguais"] == 1
 
 
 def test_em_encerramento_mantem_ativo_e_grava_a_data(conn):

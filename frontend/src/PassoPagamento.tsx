@@ -86,6 +86,8 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
   const inicio = enviada ?? emitida;
   const dias = inicio && !recebida ? diasEntre(inicio, hojeLocal()) : null;
   const notas = grupo.flatMap(x => (x.notas ?? []).map(n => ({ n, m: x })));
+  // #755: o que o RM deixou de devolver aparece na tabela, dito como excluido; os totais sao os do servidor, sem ele
+  const excluidas = grupo.flatMap(x => x.notas_excluidas_rm ?? []);
   const nfsDocs = notas.length === 0 ? grupo.flatMap(x => (x.documentos ?? []).filter(d => d.tipo_doc === "nfs" && d.numero_nf)) : [];
   const pct = receber.total && receber.recebido !== null ? Math.min(100, Math.floor((receber.recebido * 100) / receber.total)) : 0;
   // onde o orgao junta medicao e reajuste, um processo so'; onde separa, um por medicao
@@ -131,7 +133,7 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
             <table className="tabela">
               <thead><tr><th scope="col">Nota</th><th scope="col" className="col-num">Valor</th><th scope="col">No financeiro</th></tr></thead>
               <tbody>
-                {notas.length === 0 && nfsDocs.length === 0 && <tr><td colSpan={3}>—</td></tr>}
+                {notas.length === 0 && nfsDocs.length === 0 && excluidas.length === 0 && <tr><td colSpan={3}>—</td></tr>}
                 {nfsDocs.map(d => (
                   <tr key={`d${d.id}`}><td>NF {d.numero_nf}{d.municipio ? ` · ${d.municipio}` : ""}</td><td className="col-num">—</td><td>—</td></tr>
                 ))}
@@ -146,10 +148,20 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
                       <td>{falta === null ? "—"
                         : falta === 0 ? <Selo classe="selo--ok">paga{n.recebido_em ? ` em ${fmtDataPura(n.recebido_em.slice(0, 10))}` : ""}</Selo>
                         : n.recebido_centavos > 0 ? <Selo classe="selo--atencao">paga em parte</Selo>
-                        : <Selo classe="selo--atencao">em aberto</Selo>}</td>
+                        : <Selo classe="selo--atencao">em aberto</Selo>}
+                        {(n.titulos_excluidos_rm ?? []).map((t, i) => (
+                          <span key={i}>{" "}<Selo>título de <span className="num">{brl(t.valor_original_centavos)}</span> excluído no RM</Selo></span>
+                        ))}</td>
                     </tr>
                   );
                 })}
+                {excluidas.map(n => (
+                  <tr key={`x${n.nota_id}`}>
+                    <td>NF {Number(n.numero) || n.numero}</td>
+                    <td className="col-num num">{brl(n.valor_centavos)}</td>
+                    <td><Selo>excluída no RM</Selo></td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
