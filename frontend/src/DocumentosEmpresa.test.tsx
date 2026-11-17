@@ -41,16 +41,16 @@ test("as abas têm endereço próprio e mostram a contagem de pendências", asyn
   const certidoes = within(abas).getByRole("link", { name: /^Certidões/ });
   expect(certidoes.getAttribute("href")).toBe("/documentos/1");
   expect(certidoes.getAttribute("aria-current")).toBe("page");
-  expect(within(certidoes).getByLabelText("2 com pendência")).toBeTruthy();          // municipal vencida e FGTS vencendo
+  expect(within(certidoes).getByText("2 com pendência")).toBeTruthy();          // municipal vencida e FGTS vencendo
   const reg = within(abas).getByRole("link", { name: /^Regularidade do mês/ });
   expect(reg.getAttribute("href")).toBe("/documentos/1/regularidade");
-  within(reg).getByLabelText("1 com pendência");
+  within(reg).getByText("1 com pendência");
   const gar = within(abas).getByRole("link", { name: /^Garantia por obra/ });
   expect(gar.getAttribute("href")).toBe("/documentos/1/garantia");
-  within(gar).getByLabelText("1 com pendência");                                       // só a garantia vencendo
+  within(gar).getByText("1 com pendência");                                       // só a garantia vencendo
 });
 
-test("tabela de certidões: Emitir em toda exigida, o primário só na pendência mais urgente, Ver PDF", async () => {
+test("tabela de certidões: Emitir em toda exigida, com destaque só nas que pedem ação, Ver PDF", async () => {
   render(<DocumentosEmpresa usuario={usuario} id={1} />);
   await screen.findByRole("heading", { level: 1, name: "Lotufo" });
   const linhas = screen.getAllByRole("row").slice(1);
@@ -62,9 +62,12 @@ test("tabela de certidões: Emitir em toda exigida, o primário só na pendênci
   expect(emitir(linhaDa(/Federal/))!.getAttribute("href")).toBe("https://emissao.exemplo.com.br/federal");
   expect(emitir(linhaDa(/FGTS/))).not.toBeNull();
   expect(emitir(linhaDa(/Falência/))).toBeNull();
-  // o unico botao principal: a municipal, vencida (mais urgente que o FGTS, que vence em 4 dias)
+  // decisao D6 do dono (#767): o destaque fica so' nas certidoes que pedem acao: a municipal, vencida, e o FGTS, que
+  // vence em 4 dias; a federal, em dia, tem o Emitir comum
   const principais = screen.getAllByRole("link").filter(a => a.classList.contains("btn--primario"));
-  expect(principais).toHaveLength(1);
+  expect(principais).toHaveLength(2);
+  expect(emitir(linhaDa(/FGTS/))!.classList.contains("btn--primario")).toBe(true);
+  expect(emitir(linhaDa(/Federal/))!.classList.contains("btn--primario")).toBe(false);
   expect(emitir(linhaDa(/Municipal/))!.classList.contains("btn--primario")).toBe(true);
   // datas e situacao
   const municipal = linhaDa(/Municipal/);

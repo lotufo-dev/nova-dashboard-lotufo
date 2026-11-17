@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { apiForm, mensagemDeErro } from "./api";
 import CampoCompetencia from "./CampoCompetencia";
+import Contador from "./Contador";
 import { IconeAlerta, IconeArquivo, IconeBaixar, IconeClipe, IconeLinkExterno } from "./icones";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import {
-  certidaoPendente, certidoesOrdenadas, NOME_CURTO, pendenciaMaisUrgente, resumoEmpresa, situacaoCertidao,
+  certidaoPendente, certidoesOrdenadas, NOME_CURTO, resumoEmpresa, situacaoCertidao,
   situacaoGarantia, type EmpresaDoc,
 } from "./matriz";
 import { type AbaDocumentos, type Origem } from "./rota";
@@ -145,14 +146,12 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                 <Link key={a.id} className="aba" para={{ tela: "documentos-empresa", id, aba: a.id }}
                   aria-current={a.id === aba ? "page" : undefined}>
                   {a.rotulo}
-                  {contas[a.id] > 0 && <span className="aba__conta" aria-label={contas[a.id] === 1 ? "1 com pendência" : `${contas[a.id]} com pendência`}>{contas[a.id]}</span>}
+                  {contas[a.id] > 0 && <Contador situacao="critico" rotulo={contas[a.id] === 1 ? "1 com pendência" : `${contas[a.id]} com pendência`}>{contas[a.id]}</Contador>}
                 </Link>
               ))}
             </nav>
 
-            {aba === "certidoes" && (() => {
-              const urgente = pendenciaMaisUrgente(e);
-              return (
+            {aba === "certidoes" && (
                 <div className="doc-painel">
                   <div className="tabela-wrap">
                     <table className="tabela tabela--empilha">
@@ -184,9 +183,10 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                               </td>
                               <td className="col-largo">
                                 <div className="doc-acoes">
+                                  {/* decisao D6 do dono: o Emitir so' tem destaque na certidao que pede acao */}
                                   {l.exigida && aplica && l.link_emissao && (
                                     <a href={l.link_emissao} target="_blank" rel="noreferrer"
-                                      className={`btn btn--pequeno${l === urgente ? " btn--primario" : ""}`}
+                                      className={`btn btn--pequeno${certidaoPendente(l) ? " btn--primario" : ""}`}
                                       aria-label={`Emitir ${curto} de ${e.entidade} (abre o site do órgão)`}>
                                       <IconeLinkExterno className="icone" />Emitir
                                     </a>
@@ -220,7 +220,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                   {/* consorcio: a habilitacao e' por CNPJ (o consorcio e cada consorciada); a situacao de cada uma */}
                   {e.papel === "consorcio" && (e.consorciadas ?? []).length > 0 && (
                     <div className="pilha doc-consorciadas-bloco">
-                      <h2 className="doc-secao-titulo">Consorciadas</h2>
+                      <h2 className="doc-bloco__titulo doc-secao-titulo">Consorciadas</h2>
                       <ul className="doc-consorciadas">
                         {e.consorciadas!.map(x => {
                           const o = porId.get(x);
@@ -245,8 +245,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                     <AnexarCertidoes ref={anexar} empresas={painel.empresas} empresaPadrao={e} aoGravar={carregar} anunciar={setAnuncio} />
                   )}
                 </div>
-              );
-            })()}
+            )}
 
             {aba === "regularidade" && (
               <div className="doc-painel">

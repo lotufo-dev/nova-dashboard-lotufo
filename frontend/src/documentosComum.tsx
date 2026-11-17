@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { apiForm, mensagemDeErro } from "./api";
 import { IconeEnviarNuvem } from "./icones";
 import { NOME_CURTO, type EmpresaDoc } from "./matriz";
-import Selo from "./Selo";
+import Selo, { Glifo } from "./Selo";
 // emissao/validade sao DATAS PURAS do papel que o orgao emitiu: fmtDataPura nao passa por fuso.
 import { fmtDataPura } from "./tempo";
 import type { Nivel } from "./matriz";
@@ -15,13 +15,11 @@ import { situacaoDoNivel } from "./situacao";
  * (DocumentosEmpresa.tsx). Os dados vem de `documentos.painel` (GET /api/documentos); a regra (o que e' exigido, a
  * situacao de cada certidao) e' do servidor, e a tela so' mostra. */
 
-// D15: "em dia" e' o estado normal e vira ponto e palavra, sem fundo; o selo com fundo fica para Atencao e Critico.
-// A maiuscula inicial do selo vem do CSS; o `.estado` nao a poe, entao ela sai daqui.
+// D15: "em dia" e' o estado normal: o glifo de feito e a palavra, sem fundo; o selo com fundo fica para o que pede
+// atencao. A maiuscula inicial do selo vem do CSS; aqui ela sai do texto.
 export function EmDia({ texto }: { texto: string }) {
   return (
-    <span className="estado estado--ok">
-      <span className="estado__ponto" aria-hidden="true" />{texto.charAt(0).toUpperCase() + texto.slice(1)}
-    </span>
+    <span className="doc-em-dia"><Glifo situacao="feito" />{texto.charAt(0).toUpperCase() + texto.slice(1)}</span>
   );
 }
 
@@ -38,8 +36,11 @@ export function Pilula({ nivel, texto }: { nivel: Nivel; texto: string }) {
   );
 }
 
+/** O sinal de uma certidao na linha da consorciada: o glifo da situacao (forma e cor). O que nao tem situacao (nao
+ *  exigida, nao se aplica) leva o traco neutro. Decorativo: o nome e a situacao escrita vem ao lado. */
 export function Ponto({ nivel }: { nivel: Nivel }) {
-  return <span className={`doc-ponto doc-ponto--${nivel}`} aria-hidden="true" />;
+  const situacao = situacaoDoNivel(nivel);
+  return situacao ? <Glifo situacao={situacao} /> : <span className="doc-ponto" aria-hidden="true" />;
 }
 
 export function CnpjCopiar({ e, copia, aoCopiar }: {

@@ -1,6 +1,8 @@
 // Tela SIGA (issue #329): o que o servidor devolve em GET /api/siga e as contas da tela (ordem, tempo no setor,
 // nivel de atraso, textos da linha). Funcoes puras; o SigaPagina so' desenha o que sai daqui.
 
+import type { Situacao } from "./situacao";
+
 export type TipoMovimentacao = "transferencia" | "recebimento" | "juntada" | "marcacao" | "outras";
 
 export type Movimentacao = {
@@ -62,6 +64,15 @@ export const DIAS_ACAO = 10;
 export function nivelDias(dias: number | null): "atencao" | "acao" | null {
   if (dias === null) return null;
   return dias >= DIAS_ACAO ? "acao" : dias >= DIAS_ATENCAO ? "atencao" : null;
+}
+
+/** O tempo no setor como uma das quatro situacoes da fundacao (#767): andou hoje = feito; parado ha' 10 dias uteis ou
+ *  mais = critico; ha' 5 ou mais = breve; menos que isso = em andamento. Sem data de entrada no setor, nenhuma. */
+export function situacaoDoTempo(p: Pick<ProcessoSiga, "dias_uteis" | "hoje">): Situacao | undefined {
+  if (p.hoje > 0) return "feito";
+  if (p.dias_uteis === null) return undefined;
+  const nivel = nivelDias(p.dias_uteis);
+  return nivel === "acao" ? "critico" : nivel === "atencao" ? "breve" : "andamento";
 }
 
 const instante = (iso: string | null, vazio: number): number => {
