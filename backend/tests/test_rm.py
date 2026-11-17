@@ -2138,6 +2138,97 @@ def test_medicao_recebida_sem_ser_a_mao_nao_atrai_nota(conn, cid, tmp_path, como
     assert not _tem_nf(conn, mid)
 
 
+@pytest.mark.parametrize("emissao, liga", [("2026-09-18", True), ("2026-09-25", True), ("2026-09-26", False),
+                                           ("2026-10-28", False)])
+def test_janela_da_recebida_a_mao_so_a_nota_emitida_ate_o_recebimento_liga(conn, cid, tmp_path, emissao, liga):
+    """Decisao de 17/11/2026 (docs/adr/0006): a recebida a' mao em 20/09 so' fica com a nota emitida ate' cinco dias
+    depois do recebimento. A nota de OUTRA medicao de mesmo valor na obra, emitida um mes depois (antes de essa outra
+    existir no sistema), nao liga a ela e segue no a receber."""
+    c2 = _obra_com_centro(conn)
+    mid = _medicao(conn, c2, 3, 500_01)
+    _receber_a_mao(conn, mid)
+    nota = _nf(7, 500.01, centro_custo="2.001.012", numero="77", emissao=f"{emissao}T00:00:00-04:00")
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [nota], [_baixa(1, 7, 462.01, 0.0, 0)]))
+    assert (r["alocacoes"], r["sugestoes"]) == ((1, 0) if liga else (0, 0)), r
+    assert _tem_nf(conn, mid) is liga
+    assert _a_receber_do_rm(conn) == ([] if liga else ["77"])
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-20")
+
+
+def test_recebida_a_mao_sem_data_nao_atrai_nota(conn, cid, tmp_path):
+    """O registro a' mao antigo, sem data, nao tem janela que se prove: a nota nao liga sozinha."""
+    c2 = _obra_com_centro(conn)
+    mid = _medicao(conn, c2, 3, 500_01)
+    _receber_a_mao(conn, mid, em=None)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(7, 500.01, centro_custo="2.001.012")], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0) and not _tem_nf(conn, mid), r
+
+
+def _avisos_da_recebida(conn):
+    from app import avisos
+    return [(a["nivel"], a["medicao_id"], a["mensagem"]) for a in avisos.listar(conn, publico="todos")
+            if a["tipo"] == "recebida_notas_nao_cobrem"]
+
+
+def test_recebida_a_mao_em_duas_notas_com_uma_ligada_nao_recebe_a_segunda_e_avisa(conn, cid, tmp_path):
+    """Decisao de 17/11/2026 (docs/adr/0006): fica como esta', com aviso. A recebida a' mao de R$ 1.500,01 com a nota
+    de R$ 1.000,01 ja' ligada nao e' mais candidata do casador: a de R$ 500,00 fica solta e no a receber, e a medicao
+    avisa. Ligada a segunda (o administrador anexa o PDF; aqui, o vinculo direto), o aviso some."""
+    c2 = _obra_com_centro(conn)
+    mid = _medicao(conn, c2, 3, 1500_01)
+    _receber_a_mao(conn, mid)
+    assert _avisos_da_recebida(conn) == []                         # sem nota nenhuma ainda e' candidata: nao avisa
+    nfs = [_nf(7, 1000.01, centro_custo="2.001.012", numero="77"), _nf(8, 500.0, centro_custo="2.001.012", numero="88")]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs[:1], []))
+    sincronizacao_rm.alocar(conn, 1, conn.execute("SELECT id FROM notas_fiscais WHERE idmov=7").fetchone()[0], mid,
+                            "manual", None, "pdf", aceita_recebida=True)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(2, 8, 462.0, 0.0, 0)]))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0), r
+    assert [n["idmov"] for n in medicoes.detalhe(conn, mid)["notas"]] == [7] and _a_receber_do_rm(conn) == ["88"]
+    assert _avisos_da_recebida(conn) == [("atencao", mid, "recebida à mão com notas de R$ 1.000,01, que não cobrem a "
+                                          "medição (R$ 1.500,01): a nota que falta não liga sozinha")]
+    sincronizacao_rm.alocar(conn, 1, conn.execute("SELECT id FROM notas_fiscais WHERE idmov=8").fetchone()[0], mid,
+                            "manual", None, "pdf", aceita_recebida=True)
+    assert _avisos_da_recebida(conn) == [] and _a_receber_do_rm(conn) == []
+    assert medicoes.detalhe(conn, mid)["estado"] == "recebida"
+
+
+@pytest.mark.parametrize("como, no_a_receber", [("correcao", False), ("manual", False), ("corte", True)])
+def test_nota_ligada_a_medicao_recebida_por_registro_sai_do_a_receber(conn, cid, tmp_path, como, no_a_receber):
+    """Decisao de 17/11/2026 (docs/adr/0006): a nota ligada a' medicao recebida por registro feito para ela (o
+    administrador, a' mao, ou a correcao de cadastro) nao soma no a receber, mesmo com o titulo aberto no RM, e aparece
+    na Saude. A fechada pelo corte continua: a decisao do corte e' "o que o RM mostra em aberto segue a receber"."""
+    from app import conciliacao
+    c2 = _obra_com_centro(conn)
+    mid = _medicao(conn, c2, 3, 500_01)
+    cli = _simulador(tmp_path, [_nf(7, 500.01, centro_custo="2.001.012", numero="77")], [_baixa(1, 7, 462.01, 0.0, 0)])
+    assert sincronizacao_rm.sincronizar(conn, cli)["alocacoes"] == 1
+    assert _a_receber_do_rm(conn) == []                            # protocolada: a medicao conta, a nota nao
+    if como == "corte":
+        medicoes.mudar_estado(conn, 1, mid, "recebida", conciliacao.MOTIVO_CORTE.format(data="22/09/2026"), None,
+                              origem="corte")
+    else:
+        medicoes.mudar_estado(conn, 1, mid, "recebida", "paga, conforme o extrato do banco", "2026-09-20",
+                              origem="manual" if como == "manual" else conciliacao.ORIGEM_CORRECAO)
+    assert (mid in conciliacao.recebidas_por_registro(conn)) is not no_a_receber
+    assert _a_receber_do_rm(conn) == (["77"] if no_a_receber else [])
+    assert _total_a_receber(conn) == (462_01 if no_a_receber else 0)
+    sem_baixa = [(x["medicao_id"], x["falta_centavos"]) for x in sincronizacao_rm.reconciliacao(conn)["recebidas_sem_baixa"]]
+    assert sem_baixa == ([] if no_a_receber else [(mid, 462_01)])
+
+
+def test_recebidas_por_registro_vale_a_ultima_passagem_a_recebida(conn, cid, tmp_path):
+    """A medicao recebida a' mao, reaberta e depois recebida pela baixa do RM deixa de ser "por registro"."""
+    from app import conciliacao
+    mid = _medicao(conn, cid, 3, 500_01)
+    _receber_a_mao(conn, mid)
+    assert conciliacao.recebidas_por_registro(conn) == {mid}
+    conn.execute("UPDATE medicoes SET estado='protocolada', recebida_em=NULL WHERE id=?", (mid,)); conn.commit()
+    medicoes.mudar_estado(conn, None, mid, "recebida", None, "2026-10-01")
+    assert conciliacao.recebidas_por_registro(conn) == set()
+
+
 def test_recebida_a_mao_do_legado_nao_atrai_nota(conn, cid, tmp_path):
     """Issue #713: a medicao da carga do legado (competencia anterior ao corte, valor manual) continua fora do casador
     mesmo recebida a' mao: 24 meses de notas contra o historico e' coincidencia de valor."""
@@ -2440,10 +2531,25 @@ def test_desalocar_recusa_medicao_encerrada_e_nota_do_pdf_anexado(conn, cid, tmp
     with pytest.raises(ValueError, match="PDF anexado nesta medição"):
         sincronizacao_rm.desalocar(conn, 1, mid, aid, "errada")
     conn.execute("UPDATE notas_fiscais SET documento_id=NULL WHERE id=?", (nota,))
-    conn.execute("UPDATE medicoes SET estado='recebida' WHERE id=?", (mid,)); conn.commit()
-    with pytest.raises(ValueError, match="recebida"):
+    conn.execute("UPDATE medicoes SET estado='cancelada' WHERE id=?", (mid,)); conn.commit()
+    with pytest.raises(ValueError, match="cancelada"):
         sincronizacao_rm.desalocar(conn, 1, mid, aid, "errada")
     assert conn.execute("SELECT desfeita_em FROM nf_alocacoes WHERE id=?", (aid,)).fetchone()[0] is None
+
+
+def test_desalocar_vale_na_medicao_recebida_sem_mudar_o_estado(conn, cid, tmp_path):
+    """Decisao de 17/11/2026 (docs/adr/0006): na medicao recebida, o administrador desfaz o vinculo errado. O estado e
+    a data do recebimento ficam, a auditoria leva quem desfez, o motivo e o estado, e o casador nao religa a nota."""
+    mid, aid, cli = _alocada(conn, cid, tmp_path)
+    _receber_a_mao(conn, mid)
+    sincronizacao_rm.desalocar(conn, 1, mid, aid, "nota de outra medição")
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"], m["notas"]) == ("recebida", "2026-09-20", [])
+    ev = conn.execute("SELECT usuario_id, antes, depois FROM audit_log WHERE acao='nf.desalocar' ORDER BY id DESC LIMIT 1").fetchone()
+    assert ev["usuario_id"] == 1 and json.loads(ev["antes"])["estado_medicao"] == "recebida"
+    assert json.loads(ev["depois"]) == {"motivo": "Desfeita à mão: nota de outra medição"}
+    assert sincronizacao_rm.sincronizar(conn, cli)["alocacoes"] == 0 and not _tem_nf(conn, mid)
+    assert auditoria.verificar_cadeia(conn)
 
 
 def test_rota_desalocar_so_admin(client_admin, tmp_path, monkeypatch):

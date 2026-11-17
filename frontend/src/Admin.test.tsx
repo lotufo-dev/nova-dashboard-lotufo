@@ -159,7 +159,7 @@ test("Reconciliação: recebida à mão sem baixa no RM mostra a medição, a NF
     throw new Error(`chamada inesperada: ${url}`);
   });
   render(<Admin aba="reconciliacao" busca={{ categoria: "recebidas" }} />);
-  expect(await screen.findByRole("heading", { name: "Notas de recebimentos à mão sem baixa no RM" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "Notas de medições recebidas por registro sem baixa no RM" })).toBeTruthy();
   expect(screen.getByRole("link", { name: "14ª Medição" })).toBeTruthy();
   expect(screen.getByText("100/1")).toBeTruthy();
   expect(screen.getByText("20/09/2026")).toBeTruthy();

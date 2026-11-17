@@ -235,6 +235,29 @@ def recebidas_a_mao(conn) -> set[int]:
             if r["origem"] == "manual" or (r["origem"] is None and not _MOTIVO_CORTE_RE.match(r["motivo"] or ""))}
 
 
+ORIGEM_CORRECAO = "correção de cadastro"      # a `origem` que `correcao_medicoes` grava na auditoria do estado
+
+
+def recebidas_por_registro(conn) -> set[int]:
+    """Decisao de 17/11/2026 (docs/adr/0006): as medicoes dadas por recebidas por um registro feito PARA AQUELA
+    medicao, com motivo: o "Registrar recebimento" do administrador (`recebidas_a_mao`) e a correcao de cadastro
+    (`estado: recebida`, origem `ORIGEM_CORRECAO`). O registro vale: a nota ligada a elas sai do "a receber"
+    (`diretoria._notas_em_aberto`) e a Saude avisa enquanto o RM mostrar o titulo aberto
+    (`sincronizacao_rm.reconciliacao`). Ficam fora a recebida pela baixa do RM (sem usuario) e a fechada pelo corte:
+    o corte e' por data, para todo o legado de uma vez, e a decisao dele ja' diz que o que o RM mostra em aberto segue
+    a receber pelas notas (`MOTIVO_CORTE`). Vale a ULTIMA passagem da medicao a recebida."""
+    ultimo: dict[int, tuple] = {}
+    for r in conn.execute("""
+            SELECT m.id, a.usuario_id, json_extract(a.depois, '$.motivo') AS motivo, json_extract(a.depois, '$.origem') AS origem
+            FROM medicoes m JOIN audit_log a ON a.entidade='medicao' AND a.entidade_id=CAST(m.id AS TEXT)
+                                             AND a.acao='medicao.estado'
+            WHERE m.estado='recebida' AND json_extract(a.depois, '$.estado')='recebida' ORDER BY a.id"""):
+        ultimo[r["id"]] = (r["usuario_id"], r["origem"], r["motivo"])
+    return {mid for mid, (usuario, origem, motivo) in ultimo.items()
+            if usuario is not None and (origem in ("manual", ORIGEM_CORRECAO)
+                                        or (origem is None and not _MOTIVO_CORTE_RE.match(motivo or "")))}
+
+
 def cortar(conn, usuario_id: int, data_corte: str, ensaio: bool) -> dict:
     datetime.date.fromisoformat(data_corte)
     rel = {"ensaio": ensaio, "data": data_corte, "fechadas": 0, "com_nota": 0, "valor_centavos": 0, "por_obra": {}}

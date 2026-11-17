@@ -39,7 +39,8 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
      sozinha e todas contam como ambiguas na rodada.
    Alocar nao muda o estado de `protocolada`; em medicao nascida do espelho fecha `nota_emitida`
    quando nao falta nota. A medicao recebida a' mao que ainda falta nota tambem e' candidata (issue #713):
-   a nota liga e o estado e a data do recebimento ficam.
+   a nota liga e o estado e a data do recebimento ficam; so' a nota emitida ate' cinco dias depois do recebimento
+   (`_ate_o_recebimento`, docs/adr/0006).
 5. Recebimentos: medicao `protocolada` (ou com nota emitida na obra sem o passo "Envio da nota", issue #743)
    cujas NFs alocadas DA COLIGADA DA ENTIDADE DO CONTRATO cobrem o valor dela (issue #714) e ja' tem baixa (status 1, 3 ou 4) cobrindo o titulo vira
    `recebida`, com a maior data de baixa. Issue #35: titulo pago ate' R$ 1,00 a menos tambem fecha, com a diferenca auditada em
@@ -341,9 +342,11 @@ def desalocar(conn, usuario_id, medicao_id: int, alocacao_id: int, motivo: str) 
             raise ValueError("Vínculo da nota com esta medição não encontrado")
         if a["desfeita_em"] is not None:
             raise ValueError(f"O vínculo da nota {a['numero']} já foi desfeito")
-        # Medicao encerrada nao recebe NF pela tela, entao tirar a nota dela nao teria volta. A recebida a' mao recebe
-        # nota do casador (issue #713), mas desfazer continua so' pela correcao de cadastro (`desligar_nf`).
-        if a["estado"] in ("cancelada", "desistida", "recebida"):
+        # Medicao encerrada nao recebe NF pela tela, entao tirar a nota dela nao teria volta. Na RECEBIDA o vinculo se
+        # desfaz (decisao de 17/11/2026, docs/adr/0006): ela recebe nota do casador (issue #713) e do PDF anexado pelo
+        # administrador, e o vinculo errado nela so' saia pela correcao de cadastro. O estado e a data do recebimento
+        # ficam; a auditoria leva quem desfez, o motivo e `estado_medicao`.
+        if a["estado"] in ("cancelada", "desistida"):
             raise ValueError(f"Medição em estado {a['estado']} não tem o vínculo da nota desfeito")
         # O PDF anexado nesta medicao seguiria no envio ao orgao e na FRC: desfazer o vinculo nao o tira dali.
         if a["documento_id"] is not None and conn.execute(
@@ -842,9 +845,32 @@ def _casar(conn, nota_id: int, coligadas_com_centro: set, cache: dict | None = N
     # andamento quis, e so' pelas regras de valor exato.
     r = _casar_entre(conn, nf, [m for m in todas if m["id"] not in recebidas], coligadas_com_centro, extras, _aloca)
     if r is None and recebidas:
-        r = _casar_entre(conn, nf, [m for m in todas if m["id"] in recebidas], coligadas_com_centro, extras, _aloca,
-                         so_exato=True)
+        # Janela da recebida a' mao (decisao de 17/11/2026, docs/adr/0006): so' a nota emitida ate' o recebimento
+        r = _casar_entre(conn, nf, [m for m in todas if m["id"] in recebidas and _ate_o_recebimento(nf["emissao"], m)],
+                         coligadas_com_centro, extras, _aloca, so_exato=True)
     return r
+
+
+# A nota de uma medicao e' emitida antes de o dinheiro entrar. Numa copia da producao de 17/11/2026, de 624 pares
+# nota x medicao recebida com as duas datas, 622 tinham a nota emitida ate' o dia do recebimento e 2 depois dele (1 e
+# 3 dias). A folga cobre esses e fica longe da nota da medicao seguinte da mesma obra, que sai um mes depois.
+FOLGA_APOS_RECEBIMENTO_DIAS = 5
+
+
+def _ate_o_recebimento(emissao, m: dict) -> bool:
+    """docs/adr/0006 (janela de datas da recebida a' mao no casador): a nota so' liga a' medicao recebida a' mao se
+    foi emitida ate' `FOLGA_APOS_RECEBIMENTO_DIAS` dias depois da data do recebimento. Com a trava de data
+    (`_depois_do_pedido`), a janela fica entre o pedido da medicao e o recebimento dela: a nota de OUTRA medicao de
+    mesmo valor na obra, emitida depois, nao liga a ela. Sem data de emissao, ou recebimento registrado sem data (o
+    registro a' mao a exige desde 17/11/2026), nao ha' janela que se prove: nao liga."""
+    recebida = (m.get("recebida_em") or "")[:10]
+    if not emissao or not recebida:
+        return False
+    try:
+        limite = datetime.date.fromisoformat(recebida) + datetime.timedelta(days=FOLGA_APOS_RECEBIMENTO_DIAS)
+    except ValueError:
+        return False
+    return emissao[:10] <= limite.isoformat()
 
 
 def _casar_entre(conn, nf, candidatas: list[dict], coligadas_com_centro: set, extras: dict[int, frozenset[str]],
@@ -1036,6 +1062,29 @@ def pagas_sem_cobrir(conn) -> list[dict]:
         if r is not None and not r["cobre"]:
             out.append({"medicao_id": m["id"], "contrato_id": m["contrato_id"], "notas_centavos": r["notas_centavos"],
                         "valor_centavos": r["valor_centavos"]})
+    return out
+
+
+def recebidas_a_mao_sem_cobrir(conn) -> list[dict]:
+    """Decisao de 17/11/2026 (docs/adr/0006): a medicao recebida a' mao que ja' tem nota ligada da coligada do contrato
+    e cujas notas nao cobrem o valor dela (faturada em duas notas, com uma so' ligada). Ela deixou de ser candidata do
+    casador (`_candidatas`: so' entra enquanto nao tem nota), entao a nota que falta nao liga sozinha e fica solta, no
+    a receber. Isto so' as lista, para o aviso (`notas.avisos`): [{medicao_id, contrato_id, notas_centavos,
+    valor_centavos}]. A que nasceu do espelho segue pelas saidas dele (continua candidata) e nao entra aqui."""
+    from app import conciliacao, notas as _notas   # import local: os dois importam este modulo
+    out = []
+    for mid in sorted(conciliacao.recebidas_a_mao(conn)):
+        m = conn.execute("""SELECT m.id, m.contrato_id, e.coligada_rm,
+                                   COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
+                            FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
+                            JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1) WHERE m.id=?""", (mid,)).fetchone()
+        valor = medicoes.valor_do_par(conn, mid, m["valor"])
+        ligadas = [x for x in notas_da_medicao(conn, mid) if x["coligada"] == m["coligada_rm"]]
+        if valor is None or not ligadas or _notas.esperadas(conn, mid):
+            continue
+        soma = sum(x["valor_centavos"] for x in ligadas)
+        if soma < valor:
+            out.append({"medicao_id": mid, "contrato_id": m["contrato_id"], "notas_centavos": soma, "valor_centavos": valor})
     return out
 
 
@@ -1530,14 +1579,16 @@ def reconciliacao(conn, nfs_apos: int | None = None, desfeitas_apos: int | None 
 
 
 def _recebidas_sem_baixa(conn) -> list[dict]:
-    """Issue #203: medicao recebida a mao (`conciliacao.recebidas_a_mao`) com nota ligada cujo titulo o RM ainda
-    mostra em aberto. O registro manual vale (a nota sai do a receber); esta lista e' o aviso de que o RM nao tem a
-    baixa. Uma linha por nota (nota partida entre duas medicoes aparece uma vez, na primeira), so' as da coligada
+    """Issue #203 e decisao de 17/11/2026 (docs/adr/0006): medicao recebida por registro feito para ela
+    (`conciliacao.recebidas_por_registro`: o administrador, a' mao, ou a correcao de cadastro) com nota ligada cujo
+    titulo o RM ainda mostra em aberto. O registro vale (a nota sai do a receber); esta lista e' o aviso de que o RM
+    nao tem a baixa, para o titulo aberto nao sumir sem ninguem ver. Uma linha por nota (nota partida entre duas
+    medicoes aparece uma vez, na primeira), so' as da coligada
     da entidade do contrato (as que decidem o recebimento) e com mais que a tolerancia em aberto, a mesma regra do
     a receber; o valor e' o que falta do titulo, cheio."""
     from app import conciliacao, diretoria   # import local: os dois importam este modulo
-    a_mao = conciliacao.recebidas_a_mao(conn)
-    if not a_mao:
+    por_registro = conciliacao.recebidas_por_registro(conn)
+    if not por_registro:
         return []
     out, vistas = [], set()
     for r in conn.execute("""
@@ -1548,7 +1599,7 @@ def _recebidas_sem_baixa(conn) -> list[dict]:
             JOIN notas_fiscais n ON n.id=a.nota_id AND n.situacao='ativa' AND n.coligada=e.coligada_rm
             WHERE m.estado='recebida'
             ORDER BY c.numero_instrumento, m.numero, m.id, n.id"""):
-        if r["medicao_id"] not in a_mao or r["nota_id"] in vistas:
+        if r["medicao_id"] not in por_registro or r["nota_id"] in vistas:
             continue
         vistas.add(r["nota_id"])
         falta = _falta_por_titulo(conn, r["nota_id"], aberto_inteiro=True, baixa_total_quita=True)   # #253, #563

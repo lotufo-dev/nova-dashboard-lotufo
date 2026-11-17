@@ -89,8 +89,8 @@ describe("administração", () => {
     const rec: Reconciliacao = { nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [],
       recebidas_sem_baixa: [linha(5, 7), linha(6, 8)],
       totais: { nfs_sem_medicao: 0, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
-    expect(contagemRec("recebidas", 1)).toBe("1 nota de recebimento à mão sem baixa no RM");
-    expect(contagemRec("recebidas", 2)).toBe("2 notas de recebimentos à mão sem baixa no RM");
+    expect(contagemRec("recebidas", 1)).toBe("1 nota de medição recebida por registro sem baixa no RM");
+    expect(contagemRec("recebidas", 2)).toBe("2 notas de medições recebidas por registro sem baixa no RM");
     expect(contaRec(rec, rec, "recebidas", false)).toEqual({ n: 2, piso: false, haMais: false });
     const daObra = reconciliacaoDaObra(rec, { id: 7, numero_instrumento: "161/2022" });
     expect(daObra.recebidas_sem_baixa.map(x => x.medicao_id)).toEqual([5]);

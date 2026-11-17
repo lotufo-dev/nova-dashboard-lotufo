@@ -8,7 +8,7 @@ Nada aqui muda estado para tras.
 import datetime
 import json
 
-from app import arquivos, auditoria, db, dinheiro, espelho, frc, leitura_nfse, leitura_pdf, medicoes, tempo
+from app import arquivos, auditoria, db, dinheiro, espelho, frc, leitura_nfse, leitura_pdf, medicoes, permissoes, tempo
 
 EMISSOR_LOTUFO = "lotufo"
 CAMPOS_CONFERIDOS = ("valor", "iss", "inss", "irrf", "ibs", "cbs", "liquido")   # liquido por ultimo: tolera os tributos
@@ -298,7 +298,13 @@ def _vincular(conn, usuario, m: dict, nota_id: int, lida: dict) -> list[dict]:
     from app import sincronizacao_rm   # import local: sincronizacao_rm importa notas
     ja = conn.execute("SELECT medicao_id FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL", (nota_id,)).fetchone()
     if ja is None:
-        sincronizacao_rm.alocar(conn, usuario["id"], nota_id, m["id"], "manual", None, "pdf")
+        # Decisao de 17/11/2026 (docs/adr/0006): na medicao ja' RECEBIDA, a nota do PDF liga para quem administra, sem
+        # mudar o estado nem a data do recebimento; o vinculo fica na auditoria com quem fez e `estado_medicao`. Antes
+        # so' a correcao de cadastro ligava (a tela devolvia erro).
+        recebida = m["estado"] == "recebida"
+        if recebida and not permissoes.tem(usuario.get("perfil") or "", "administrar"):
+            raise ValueError("Medição recebida: só o administrador liga nota a ela")
+        sincronizacao_rm.alocar(conn, usuario["id"], nota_id, m["id"], "manual", None, "pdf", aceita_recebida=recebida)
     elif ja["medicao_id"] != m["id"]:
         raise ValueError(f"A nota {lida['numero']} já está vinculada a outra medição")
     esp = esperadas(conn, m["id"])
@@ -478,6 +484,13 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                     "contrato_id": x["contrato_id"], "dias": None,
                     "mensagem": f"notas pagas somam {dinheiro.format_brl(x['notas_centavos'])} e não cobrem a medição "
                                 f"({dinheiro.format_brl(x['valor_centavos'])})"})
+    # decisao de 17/11/2026 (docs/adr/0006): a recebida a' mao com nota ligada que nao cobre o valor dela nao recebe
+    # a nota que falta sozinha; avisa na medicao, onde o administrador anexa o PDF da outra nota
+    for x in sincronizacao_rm.recebidas_a_mao_sem_cobrir(conn):
+        out.append({"tipo": "recebida_notas_nao_cobrem", "nota_id": None, "numero": None, "medicao_id": x["medicao_id"],
+                    "contrato_id": x["contrato_id"], "dias": None,
+                    "mensagem": f"recebida à mão com notas de {dinheiro.format_brl(x['notas_centavos'])}, que não cobrem "
+                                f"a medição ({dinheiro.format_brl(x['valor_centavos'])}): a nota que falta não liga sozinha"})
     for r in conn.execute("""
         SELECT n.id AS nota_id, n.numero_int AS numero, a.medicao_id, m.contrato_id,
                (SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') AS protocolado_em

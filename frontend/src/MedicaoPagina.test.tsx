@@ -29,8 +29,8 @@ vi.mock("./Frc", () => ({
   FrcConsorcio: ({ medicaoId }: { medicaoId: number }) => <div data-frc={medicaoId} />,
 }));
 vi.mock("./Notas", () => ({
-  Notas: ({ aoMudar, rotulo, medicao, podeDesfazer }: { aoMudar: () => void; rotulo?: string; medicao: { id: number }; podeDesfazer?: boolean }) =>
-    <div data-medicao={medicao.id} data-desfazer={String(!!podeDesfazer)}>{rotulo}<button type="button" onClick={aoMudar}>Anexar nota (teste)</button></div>,
+  Notas: ({ aoMudar, rotulo, medicao, podeDesfazer, podeEditar }: { aoMudar: () => void; rotulo?: string; medicao: { id: number }; podeDesfazer?: boolean; podeEditar?: boolean }) =>
+    <div data-medicao={medicao.id} data-desfazer={String(!!podeDesfazer)} data-editar={String(!!podeEditar)}>{rotulo}<button type="button" onClick={aoMudar}>Anexar nota (teste)</button></div>,
 }));
 vi.mock("./Protocolo", async () => {
   const real = await vi.importActual<typeof import("./Protocolo")>("./Protocolo");
@@ -419,14 +419,24 @@ describe("Página da medição: as etapas se atualizam entre si", () => {
   beforeEach(() => abrirEtapa(3));
   afterEach(() => { cleanup(); api.mockReset(); });
 
-  // issue #71 (revisor na PR #202): desfazer o vinculo da nota so' para o admin e so' em medicao aberta
-  it.each([["protocolada", "true"], ["recebida", "false"], ["cancelada", "false"], ["desistida", "false"]])(
-    "medição %s: desfazer vínculo da nota = %s", async (estado, esperado) => {
+  // issue #71 (revisor na PR #202): desfazer o vinculo da nota so' para o admin. docs/adr/0006 (17/11/2026): na
+  // medicao recebida o admin ainda desfaz o vinculo e anexa o PDF da nota; cancelada e desistida seguem fechadas
+  it.each([["protocolada", "true"], ["recebida", "true"], ["cancelada", "false"], ["desistida", "false"]])(
+    "medição %s: desfazer vínculo e anexar a nota, para o admin = %s", async (estado, esperado) => {
       responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado }] });
       const { container } = pagina();
       await waitFor(() => expect(container.querySelector("[data-medicao='5']")).not.toBeNull());
       expect(container.querySelector("[data-medicao='5']")!.getAttribute("data-desfazer")).toBe(esperado);
+      expect(container.querySelector("[data-medicao='5']")!.getAttribute("data-editar")).toBe(esperado);
     });
+
+  it("engenharia não anexa nota nem desfaz vínculo na medição recebida", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "recebida" }] });
+    const { container } = pagina("engenharia");
+    await waitFor(() => expect(container.querySelector("[data-medicao='5']")).not.toBeNull());
+    expect(container.querySelector("[data-medicao='5']")!.getAttribute("data-desfazer")).toBe("false");
+    expect(container.querySelector("[data-medicao='5']")!.getAttribute("data-editar")).toBe("false");
+  });
 
   it("engenharia não desfaz vínculo de nota", async () => {
     responder();
