@@ -51,12 +51,12 @@ def porta_livre() -> int:
 
 
 def porta_ocupada(porta: int) -> bool:
+    """Alguem responde nesta porta? Tenta conectar, em vez de tentar um `bind`: a porta de um servidor de prova
+    que acabou de cair fica uns 30 s presa para um `bind` simples (conexoes encerradas), sem ninguem escutando, e
+    subir de novo na mesma `--porta` e' o fluxo do retrato (antes, mudanca, depois)."""
     with socket.socket() as s:
-        try:
-            s.bind(("127.0.0.1", porta))
-        except OSError:
-            return True
-    return False
+        s.settimeout(2)
+        return s.connect_ex(("127.0.0.1", porta)) == 0
 
 
 def exigir_porta_livre(porta: int) -> None:

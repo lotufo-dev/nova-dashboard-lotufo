@@ -142,6 +142,49 @@ def test_o_marcador_da_instalacao_e_o_mesmo_arquivo_que_o_backend_le(monkeypatch
     monkeypatch.delenv("DASH_INSTALACAO_ARQUIVO", raising=False)
     assert instalacao.caminho_arquivo() == comum.marcador_de_instalacao(banco)
     assert comum.marcador_de_instalacao(banco) == tmp_path / "Dashboard" / "segredos" / "instalacao.json"
+    # o nome da variavel tambem e' o mesmo dos dois lados: o backend le o arquivo que ela aponta, e a prova recusa
+    arquivo = tmp_path / "outro-lugar" / "instalacao.json"
+    arquivo.parent.mkdir()
+    arquivo.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("DASH_INSTALACAO_ARQUIVO", str(arquivo))
+    assert instalacao.caminho_arquivo() == arquivo
+    with pytest.raises(comum.Recusa, match="DASH_INSTALACAO_ARQUIVO"):
+        comum.banco_de_prova(dict(os.environ))
+
+
+def _link(link, destino, pasta=False):
+    try:
+        link.symlink_to(destino, target_is_directory=pasta)
+    except (OSError, NotImplementedError):
+        pytest.skip("este sistema não deixa criar link simbólico (Windows sem a permissão)")
+
+
+def test_pasta_de_dados_que_e_link_para_outro_disco_continua_sendo_da_instalacao(repo):
+    """O backend procura `segredos/instalacao.json` a partir do caminho como esta' escrito em DASH_DB_PATH; a
+    guarda resolvia o link antes e procurava ao lado do destino, onde o arquivo nao esta'."""
+    raiz, fora = repo
+    _banco(fora / "outro-disco" / "dados" / "dashboard.db", contratos=2)
+    (fora / "Dashboard" / "segredos").mkdir(parents=True)
+    (fora / "Dashboard" / "segredos" / "instalacao.json").write_text("{}", encoding="utf-8")
+    _link(fora / "Dashboard" / "dados", fora / "outro-disco" / "dados", pasta=True)
+    escrito = fora / "Dashboard" / "dados" / "dashboard.db"
+    assert not comum.marcador_de_instalacao(escrito.resolve()).exists()      # ao lado do destino nao ha' nada
+    for ambiente, base in (({"DASH_DB_PATH": str(escrito)}, None),
+                           ({"DASH_DB_PATH": "Dashboard/dados/dashboard.db"}, fora)):
+        with pytest.raises(comum.Recusa, match="banco de uma instalação"):
+            comum.banco_de_prova(ambiente, raiz, base)
+    # sem o arquivo da instalacao, o mesmo link e' so' um caminho: passa e devolve o banco resolvido
+    (fora / "Dashboard" / "segredos" / "instalacao.json").unlink()
+    assert comum.banco_de_prova({"DASH_DB_PATH": str(escrito)}, raiz) == escrito.resolve()
+
+
+def test_link_de_fora_para_o_banco_da_instalacao_tambem_e_recusado(repo):
+    raiz, fora = repo
+    banco = _banco(_instalacao(fora / "Dashboard"), contratos=2)
+    (fora / "temp").mkdir()
+    _link(fora / "temp" / "atalho.db", banco)
+    with pytest.raises(comum.Recusa, match="banco de uma instalação"):
+        comum.banco_de_prova({"DASH_DB_PATH": str(fora / "temp" / "atalho.db")}, raiz)
 
 
 def test_banco_com_contratos_so_com_copia_explicita(repo):
@@ -234,6 +277,28 @@ def test_porta_pedida_ja_ocupada_recusa_sem_preparar_o_banco(tmp_path):
             servidor.subir(ambiente, porta=porta, com_frontend=False)
     assert not banco.exists() and _nada_nasceu_ao_lado(banco) == []
     assert servidor.porta_ocupada(porta) is False        # liberada, a mesma porta serve
+
+
+def test_porta_de_servidor_que_atendeu_e_caiu_esta_livre_na_hora():
+    """O fluxo do retrato: tirar "antes", derrubar o servidor de prova e subir de novo na mesma `--porta`. A
+    conexao atendida e fechada segura a porta no sistema por uns 30 s para quem tenta um `bind` simples; quem
+    decide e' a pergunta que importa (alguem responde nesta porta?), e ninguem responde."""
+    servidor_que_caiu = socket.socket()
+    servidor_que_caiu.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)     # como o uvicorn abre a porta
+    servidor_que_caiu.bind(("127.0.0.1", 0))
+    servidor_que_caiu.listen()
+    porta = servidor_que_caiu.getsockname()[1]
+    with socket.create_connection(("127.0.0.1", porta)) as cliente:
+        atendida, _ = servidor_que_caiu.accept()
+        assert servidor.porta_ocupada(porta) is True      # no ar e atendendo
+        cliente.sendall(b"GET /api/health HTTP/1.0\r\n\r\n")
+        atendida.recv(100)
+        atendida.sendall(b"HTTP/1.0 200 OK\r\n\r\n")
+        atendida.close()                                  # o servidor fecha primeiro, como ao ser derrubado
+        cliente.recv(100)
+    servidor_que_caiu.close()
+    assert servidor.porta_ocupada(porta) is False
+    servidor.exigir_porta_livre(porta)                    # nao recusa: a subida seguinte na mesma porta passa
 
 
 def test_capturar_recusa_lista_vazia_de_perfis_ou_de_telas():

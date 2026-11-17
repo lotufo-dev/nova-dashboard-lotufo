@@ -44,11 +44,14 @@ def email_de_teste(perfil: str) -> str:
     return f"prova-{perfil}@{DOMINIO_DE_TESTE}"
 
 
-def absoluto(valor: str, base: Path | None = None) -> Path:
+def como_escrito(valor: str, base: Path | None = None) -> Path:
+    """O caminho absoluto como foi escrito: sem resolver link simbolico, juncao de pasta nem `..`."""
     p = Path(valor).expanduser()
-    if not p.is_absolute():
-        p = (base or Path.cwd()) / p
-    return p.resolve()
+    return p if p.is_absolute() else (base or Path.cwd()) / p
+
+
+def absoluto(valor: str, base: Path | None = None) -> Path:
+    return como_escrito(valor, base).resolve()
 
 
 def dentro(caminho: Path, pasta: Path) -> bool:
@@ -83,15 +86,19 @@ def marcador_de_instalacao(banco: Path) -> Path:
     return banco.parent.parent / "segredos" / "instalacao.json"
 
 
-def _recusar_banco_de_instalacao(banco: Path, ambiente, base: Path | None) -> None:
+def _recusar_banco_de_instalacao(banco: Path, escrito: Path, ambiente, base: Path | None) -> None:
     """Banco de uma instalacao (a producao, ou a pasta dela copiada inteira) nunca e' banco de prova. Basta o
-    arquivo existir; a assinatura nao e' conferida: na duvida, recusa."""
+    arquivo existir; a assinatura nao e' conferida: na duvida, recusa.
+    O arquivo e' procurado nas duas formas do caminho do banco. A escrita (`escrito`, sem resolver link) e' a que o
+    backend usa: se a pasta `dados` da instalacao for um link ou uma juncao para outro disco, o arquivo esta' ao
+    lado do link, nao do destino. A resolvida (`banco`) pega o caminho contrario: um link de fora que aponta para
+    o banco dentro da pasta da instalacao."""
     copie = ("A prova roda as migrações e cria usuários de teste, um deles administrador: isso nunca se faz no "
              "banco em uso. Copie o arquivo do banco para uma pasta temporária e aponte DASH_DB_PATH para a cópia.")
-    marcador = marcador_de_instalacao(banco)
-    if marcador.exists():
-        raise Recusa(f"DASH_DB_PATH aponta para o banco de uma instalação da dashboard ({banco}): existe "
-                     f"{marcador}. {copie}")
+    for marcador in dict.fromkeys((marcador_de_instalacao(escrito), marcador_de_instalacao(banco))):
+        if marcador.exists():
+            raise Recusa(f"DASH_DB_PATH aponta para o banco de uma instalação da dashboard ({banco}): existe "
+                         f"{marcador}. {copie}")
     explicito = (ambiente.get("DASH_INSTALACAO_ARQUIVO") or "").strip()
     if explicito and absoluto(explicito, base).exists():
         raise Recusa("Este terminal está com as variáveis de uma instalação da dashboard: DASH_INSTALACAO_ARQUIVO "
@@ -113,7 +120,7 @@ def banco_de_prova(ambiente=os.environ, raiz: Path = RAIZ, base: Path | None = N
                      "senha de teste, o correio simulado e o log: use uma pasta temporária, fora do repositório.")
     if banco.is_dir():
         raise Recusa(f"DASH_DB_PATH é uma pasta ({banco}); precisa ser o arquivo do banco.")
-    _recusar_banco_de_instalacao(banco, ambiente, base)
+    _recusar_banco_de_instalacao(banco, como_escrito(valor, base), ambiente, base)
     return banco
 
 
