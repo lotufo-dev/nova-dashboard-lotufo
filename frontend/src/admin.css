@@ -50,7 +50,13 @@
 .saude-dado__rotulo { font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 .saude-dado__valor { font-size: var(--texto-corpo); font-weight: var(--peso-forte); color: var(--cor-tinta); }
 
+/* as rodadas do RM tem onze colunas: o cabecalho de duas palavras quebra, para a tabela caber sem rolar a 1440 */
+.adm-rodadas th { white-space: normal; }
+
 /* ----------------------------------------------------------- Reconciliacao */
+/* alocacoes desfeitas: o motivo e' longo e e' ele que quebra; o nome da obra e o da medicao ficam inteiros */
+.adm-desfeitas td:nth-child(-n+2) { white-space: nowrap; }
+.adm-desfeitas td:nth-child(5) { min-width: calc(var(--alvo-minimo) * 6); }
 .adm-filtros { display: grid; gap: var(--espaco-m); }
 .adm-filtros__grupos { margin: 0; max-width: none; }
 .adm-filtros__rotulo { margin-right: var(--espaco-pp); font-size: var(--texto-meta); font-weight: var(--peso-medio); color: var(--cor-tinta); }
