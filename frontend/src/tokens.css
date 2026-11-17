@@ -1269,7 +1269,6 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .falha { max-width: 56ch; margin: 64px auto; padding: 0 24px; display: grid; gap: 12px; justify-items: start; }
 .falha__titulo { margin: 0; font-size: var(--texto-titulo-bloco); letter-spacing: -.018em; }
 .falha p { margin: 0; color: var(--cor-texto-secundario); }
-.falha__detalhe { font-size: var(--texto-mini); color: var(--cor-texto-terciario); word-break: break-word; }
 
 /* Rodape do painel de protocolo com o checklist acoplado: os blocos (veredito,
    assumir a pendencia, justificativa, aviso do congelamento) empilham. */
