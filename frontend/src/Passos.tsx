@@ -4,7 +4,8 @@ import "./passos.css";
 
 // Issue #508 (aprovado em 06/11/2026, "Fluxo da medição por obra"): a medicao de uma obra e' um fluxo unico numa
 // pagina so', com a BARRA DE PASSOS numerados no alto. Os mesmos nomes em toda obra; a obra so' deixa de mostrar o
-// passo que nao tem (MT-PAR comeca em Espelhos, com 4 passos). O id do passo (1..6) e' fixo; o numero na tela e' a
+// passo que nao tem (a MT-PAR nao tem "Planilha e carta": comeca em "Análise do órgão", que nela e' o passo do boletim
+// assinado pelo fiscal, #753). O id do passo (1..6) e' fixo; o numero na tela e' a
 // posicao dele na barra da obra. 7 = tudo feito (recebida); 0 = encerrada por excecao (cancelada, desistida).
 
 export const PASSOS = ["Planilha e carta", "Análise do órgão", "Espelhos", "Notas", "Envio da nota", "Pagamento"] as const;

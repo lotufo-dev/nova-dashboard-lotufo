@@ -396,6 +396,33 @@ def registrar_assinatura(conn: sqlite3.Connection, usuario_id: int, medicao_id: 
 
 # --- issue #284: boletim do orgao (spec 2026-10-20 §2.1, passo 3; D4) -----------------------------------------
 MEIOS_BOLETIM = ("smo", "oficio", "email", "carimbo", "ci", "outro")     # o CHECK de medicao_atestos.meio (042)
+# Issue #753 (decisao do dono de 16/11/2026, #297; docs/adr/0013): na MT-PAR a empresa preenche o boletim no modelo
+# do orgao e o fiscal assina; a planilha/carta nao vai ao orgao. A medicao tem o passo do boletim ("Análise do órgão")
+# sem o envio da planilha/carta, o boletim entra tambem na planilha/carta so' gerada, e o PDF e' lido por
+# `leitura_boletim_mtpar`.
+FAMILIAS_PASSO_BOLETIM = ("mtpar",)
+PASSO_BOLETIM = 2
+# a medicao que passou do passo do boletim sem ele e ainda nao foi recebida: a pendencia "boletim não anexado"
+ESTADOS_DEPOIS_DO_BOLETIM = ("espelho_gerado", "espelho_enviado", "nota_emitida", "protocolada", "nf_emitida")
+
+
+def familia_do_contrato(conn, contrato_id: int) -> str | None:
+    r = conn.execute("SELECT o.familia FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id WHERE c.id=?",
+                     (contrato_id,)).fetchone()
+    return r["familia"] if r else None
+
+
+def modelo_do_boletim(conn, contrato_id: int) -> str | None:
+    """"mtpar" na obra cujo boletim e' o do modelo da MT-PAR (lido por `leitura_boletim_mtpar`); None nas outras (a
+    capa do SMO, `leitura_smo`)."""
+    return "mtpar" if familia_do_contrato(conn, contrato_id) in FAMILIAS_PASSO_BOLETIM else None
+
+
+def boletim_pendente(conn, m, passos) -> bool:
+    """Issue #753: a medicao que tem o passo do boletim sem a planilha/carta enviada (MT-PAR), seguiu sem o boletim e
+    ainda espera a nota, o envio ou o pagamento. O passo nao trava; a pagina da medicao diz a pendencia."""
+    return (PASSO_BOLETIM in passos and 1 not in passos and m["estado"] in ESTADOS_DEPOIS_DO_BOLETIM
+            and modelo_do_boletim(conn, m["contrato_id"]) is not None and not tem_boletim(conn, m["id"]))
 
 
 def diferenca(m) -> int | None:
@@ -430,8 +457,9 @@ def conferir_boletim(conn: sqlite3.Connection, medicao_id: int, dados: dict):
     if m["estado"] in ("cancelada", "desistida"):
         raise ValueError(f"{nome_medicao(m['numero'], m['tipo'])} está {rotulo_estado(m['estado'])}: "
                          "não recebe boletim")
-    if m["estado"] == "planilha_gerada":
-        # spec §2.1: o boletim vem depois do envio da planilha/carta (pelo sistema ou registrado por fora)
+    if m["estado"] == "planilha_gerada" and modelo_do_boletim(conn, m["contrato_id"]) is None:
+        # spec §2.1: o boletim vem depois do envio da planilha/carta (pelo sistema ou registrado por fora). Na MT-PAR
+        # nao ha' esse envio (#753): o boletim entra na planilha/carta so' gerada
         raise ValueError("Registre o envio da planilha/carta antes do boletim do órgão")
     if m["estado"] == "planilha_enviada":
         # revisor (rodada 4): depois do boletim a revisao nao se envia nem se registra mais, e o espelho espera a
@@ -450,7 +478,8 @@ def registrar_boletim(conn: sqlite3.Connection, usuario_id: int, medicao_id: int
     o aprovado vigente (`valor_atestado_centavos`) e' o do ultimo evento. Na planilha/carta enviada a medicao vai a
     `boletim_recebido`; nos estados seguintes e' glosa (evento novo, estado igual). A prevista vai a
     `boletim_recebido` na obra que gera espelho (o passo seguinte); na do fluxo antigo guarda o evento e fica
-    prevista, porque o protocolo nao recebe `boletim_recebido`. O pedido nao muda.
+    prevista, porque o protocolo nao recebe `boletim_recebido`. Na MT-PAR (#753) a planilha/carta so' gerada tambem
+    vai a `boletim_recebido`. O pedido nao muda.
     Issue #625: com a capa do SMO aprovada, o mesmo boletim vai tambem ao par (execucao <-> reajuste de mesmo nº e
     competencia), na mesma transacao, com o valor dele lido da capa (`par` na resposta)."""
     meio = dados.get("meio") or None
@@ -490,8 +519,10 @@ def _gravar_boletim(conn, usuario_id: int, m, dia, valor: int, origem: str, meio
     atual = m["estado"]
     regra_ativa = conn.execute("SELECT 1 FROM espelho_regras WHERE contrato_id=? AND situacao='ativa'",
                                (m["contrato_id"],)).fetchone() is not None
+    # #753: na MT-PAR a planilha/carta so' gerada tambem vai a `boletim_recebido` (nao ha' envio ao orgao antes dele)
+    gerada_sem_envio = atual == "planilha_gerada" and modelo_do_boletim(conn, m["contrato_id"]) is not None
     novo = ("boletim_recebido" if atual == "planilha_enviada" or (atual == "prevista" and regra_ativa)
-            else atual)
+            or gerada_sem_envio else atual)
     cur = conn.execute(
         "UPDATE medicoes SET valor_atestado_centavos=?, valor_atestado_origem=?, atestado_em=?, estado=? "
         "WHERE id=? AND estado=?", (valor, origem, dia.isoformat(), novo, m["id"], atual))
@@ -509,6 +540,15 @@ def _gravar_boletim(conn, usuario_id: int, m, dia, valor: int, origem: str, meio
                "observacao": observacao, "pedido_centavos": m["valor_protocolado_centavos"]}
     if par_de is not None:
         boletim["par_de_medicao_id"] = par_de       # issue #625: veio do registro na outra medicao do par
+    if anexo.get("leituras"):
+        # issue #753: as duas leituras do valor que o servidor fez do PDF e, quando o valor registrado nao e' o de uma
+        # delas, a diferenca (registrado menos lido, em centavos): o registro nao trava, a auditoria guarda
+        boletim["leituras"] = anexo["leituras"]
+        difere = {k: valor - lido for k, lido in anexo["leituras"].items() if lido is not None and lido != valor}
+        if difere:
+            boletim["diferenca_das_leituras"] = difere
+    if anexo.get("contrato_nao_conferido"):
+        boletim["contrato_nao_conferido"] = anexo["contrato_nao_conferido"]     # #753: a obra ficou por conferir
     auditoria.registrar(conn, usuario_id, "medicao.valor_atestado", "medicao", m["id"], antes, {
         "estado": novo, "valor_atestado_centavos": valor, "valor_atestado_origem": origem,
         "atestado_em": dia.isoformat(), "boletim": boletim})
@@ -1124,7 +1164,11 @@ def conferir_espelho_da_planilha(conn, ja: dict, numero: int, tipo: str, compete
                          "o envio terminar (ou libere o envio preso) antes de gerar o espelho")
     # revisao registrada e ainda nao enviada (rodada extra, PR #382): o espelho a levaria a `espelho_gerado`, onde ela
     # nao sai mais por caminho nenhum. A vigente tem de ser a ultima enviada (pelo sistema ou por fora).
-    if ja["estado"] in ("planilha_enviada", "boletim_recebido"):
+    # #753: na MT-PAR a planilha/carta nunca e' enviada ao orgao e o boletim entra na so' gerada: a revisao registrada
+    # antes do boletim nao tem envio a esperar
+    sem_envio = ja["estado"] == "boletim_recebido" and not ja.get("planilha_enviada_em") and modelo_do_boletim(
+        conn, conn.execute("SELECT contrato_id FROM medicoes WHERE id=?", (ja["id"],)).fetchone()[0]) is not None
+    if ja["estado"] in ("planilha_enviada", "boletim_recebido") and not sem_envio:
         from app import planilha_envio      # import local: planilha_envio importa este modulo
         vigente = conn.execute("SELECT MAX(versao) FROM medicao_planilhas WHERE medicao_id=?",
                                (ja["id"],)).fetchone()[0] or 0
@@ -1231,7 +1275,8 @@ def titulo(m: dict) -> str:
 
 # Os estados de "em andamento" e o passo de cada um na barra da pagina da medicao (#653: o proximo passo diz o NOME do
 # passo, o mesmo vocabulario em toda tela). O valor daqui e' o do fluxo completo; `em_andamento` devolve o da medicao,
-# que na obra sem planilha/carta comeca em "Espelhos" (`passo_do_estado`).
+# que na obra sem planilha/carta comeca em "Espelhos" e, na MT-PAR (#753), em "Análise do órgão", o passo do boletim
+# (`passo_do_estado`).
 PROXIMO_PASSO = {"planilha_gerada": "Planilha e carta", "planilha_enviada": "Análise do órgão",
                  "boletim_recebido": "Espelhos", "espelho_gerado": "Espelhos", "espelho_enviado": "Notas",
                  "nota_emitida": "Envio da nota", "protocolada": "Pagamento", "nf_emitida": "Pagamento"}
@@ -1579,7 +1624,8 @@ def passos_das_medicoes(conn):
     servidor sobre isso (quadro do mes, proximo passo, pagina da medicao e da obra).
 
     Pela familia do orgao (#508): "Planilha e carta" e "Análise do órgão" so' na execucao ou no projeto, em orgao que
-    recebe a planilha/carta, com a regra de espelho ativa ou a medicao ja' nascida da planilha. A chave
+    recebe a planilha/carta, com a regra de espelho ativa ou a medicao ja' nascida da planilha. Na MT-PAR (#753) a
+    medicao tem "Análise do órgão" sem "Planilha e carta": e' o passo do boletim assinado pelo fiscal. A chave
     `passos_medicao` do contrato (#660) tira dai' os passos que a obra nao tem; nao da' a' obra o passo que a familia
     nao tem. Com a lista vazia (obra sem fluxo) a medicao que ja' existe segue com os passos da familia."""
     from app import planilha_envio      # import local: planilha_envio importa este modulo
@@ -1594,6 +1640,10 @@ def passos_das_medicoes(conn):
                         and (m["contrato_id"] in regra_ativa or m["estado"] in ESTADOS_PLANILHA
                              or bool(m["planilha_enviada_em"])))
         da_familia = tuple(range(1 if com_planilha else 3, 7))
+        # #753: a MT-PAR tem o passo do boletim ("Análise do órgão") sem o da planilha/carta, em todo tipo de medicao
+        # (o reajuste tem o PDF proprio)
+        if not com_planilha and familia_de.get(m["contrato_id"]) in FAMILIAS_PASSO_BOLETIM:
+            da_familia = (PASSO_BOLETIM, *da_familia)
         lista = do_cadastro.get(m["contrato_id"])
         return tuple(n for n in da_familia if n in lista) or da_familia if lista else da_familia
     return passos

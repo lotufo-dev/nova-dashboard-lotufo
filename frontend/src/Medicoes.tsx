@@ -63,6 +63,10 @@ export type Medicao = {
   // #284: boletins do orgao, do 1o ao vigente (#290: tambem na lista da obra, que a pagina da medicao le)
   boletins?: { id: number; tem_arquivo: boolean; valor_centavos?: number; atestado_em?: string | null;
     meio?: string | null; numero_orgao?: string | null }[];
+  /** #753: "mtpar" na obra cujo boletim é o do modelo da MT-PAR (leitor e passo próprios); nas outras, nulo */
+  boletim_modelo?: string | null;
+  /** #753: a medição seguiu sem o boletim e ainda não foi recebida (o passo do boletim não trava) */
+  boletim_pendente?: boolean;
   // #359: o aprovado mudou depois do espelho vigente (na nota emitida, o espelho nao se gera mais), ou o espelho
   // antigo nao se confere
   espelho_desatualizado?: "aprovado_mudou" | "nota_emitida" | "nao_conferido" | null;
