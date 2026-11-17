@@ -40,6 +40,9 @@ test("Usuários: bloqueio com Desbloquear, Redefinir senha e perfil editável (m
   });
   render(<Admin aba="usuarios" eu={1} />);
   expect(await screen.findByText("até 14:35")).toBeTruthy();
+  // #768: o bloqueio fica na coluna Situação, no selo de "vence em breve"
+  expect(screen.getByText("Bloqueado").closest(".selo--breve")).not.toBeNull();
+  expect(screen.queryByRole("columnheader", { name: "Bloqueio" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /Desbloquear\s*Maria/ }));
   expect(api).toHaveBeenCalledWith("/api/admin/usuarios/2/desbloquear", expect.objectContaining({ method: "POST" }));
 
@@ -445,7 +448,7 @@ test("Backup: cópia dos arquivos em dia não aparece no cartão; a falha dela a
              ultima_copia_arquivos_erro: "1 arquivo(s) sem cópia: notas/x.pdf (disco cheio)" });
   expect(await screen.findByText(/Última cópia dos arquivos: a última tentativa, em 13\/10\/2026 às 10:00, falhou/)).toBeTruthy();
   expect(screen.getByText(/disco cheio/)).toBeTruthy();
-  expect(screen.getByText("Falhou")).toBeTruthy();
+  expect(within(screen.getByRole("region", { name: "Backup" })).getByText("Falhou")).toBeTruthy();
   expect(screen.queryByText(/Último erro: nenhum/)).toBeNull();
 });
 
@@ -454,7 +457,7 @@ test("Backup: cópia externa dos arquivos que não termina aparece; sem pasta ex
   saudeCom({ ...BACKUP_EM_DIA, ultima_copia_externa_arquivos_erro: "a cópia está rodando há 3 horas sem terminar" });
   expect(await screen.findByText(/Última cópia externa dos arquivos: a última tentativa falhou/)).toBeTruthy();
   expect(screen.getByText(/rodando há 3 horas sem terminar/)).toBeTruthy();
-  expect(screen.getByText("Falhou")).toBeTruthy();
+  expect(within(screen.getByRole("region", { name: "Backup" })).getByText("Falhou")).toBeTruthy();
   cleanup();
   saudeCom({ ...BACKUP_EM_DIA, copia_externa_configurada: false });
   const regiao = await screen.findByRole("region", { name: "Backup" });
@@ -493,12 +496,12 @@ test("Saúde: três cartões de situação com a hora, nota só na falha, e a ta
   saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] });
   const sync = await screen.findByRole("heading", { name: "Sincronização com o RM" });
   const rm = sync.closest("li") as HTMLElement;
-  expect(rm.className).toMatch(/situacao--ok/);
+  expect(rm.className).toMatch(/situacao--feito/);
   expect(rm.textContent).toMatch(/16\/10\/2026 às 10:40/);
   expect(rm.querySelector(".situacao__nota")).toBeNull();
   expect(await within(cartaoDe("Último backup")).findByText(/13\/10\/2026 às 07:30/)).toBeTruthy();
   expect(cartaoDe("Último backup").querySelector(".situacao__nota")).toBeNull();
-  expect(cartaoDe("Última cópia externa dos arquivos").className).toMatch(/situacao--atencao/); // sem cópia dos arquivos ainda
+  expect(cartaoDe("Última cópia externa dos arquivos").className).toMatch(/situacao--breve/); // sem cópia dos arquivos ainda
   expect(screen.queryByRole("heading", { name: "Rodadas com falha" })).toBeNull();
   // a tabela não fica atrás de um "abrir": já vem visível, com a duração da rodada
   expect(screen.getByRole("columnheader", { name: "Duração" })).toBeTruthy();
@@ -549,13 +552,13 @@ test("Saúde: cartão Monitor do SIGA com a hora da última leitura e os process
   const cartao = cartaoDe("Monitor do SIGA");
   expect(cartao.textContent).toMatch(/28\/10\/2026 às 11:15/);
   expect(cartao.textContent).toMatch(/12 processos/);
-  expect(cartao.className).toMatch(/situacao--ok/);
+  expect(cartao.className).toMatch(/situacao--feito/);
   cleanup(); api.mockReset();
   // robô parado: o cartão fica de ação, como o aviso da fila de Avisos
   saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] },
     BACKUP_EM_DIA, { ultima_leitura: "2026-10-28T15:15:00+00:00", atrasado: true, processos: 12 });
   await screen.findByRole("heading", { name: "Monitor do SIGA" });
-  expect(cartaoDe("Monitor do SIGA").className).toMatch(/situacao--acao/);
+  expect(cartaoDe("Monitor do SIGA").className).toMatch(/situacao--critico/);
   expect(cartaoDe("Monitor do SIGA").textContent).toMatch(/12 processos, sem leitura recente/);
   cleanup(); api.mockReset();
   saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] });
@@ -567,7 +570,7 @@ test("Saúde: cartão Monitor do SIGA com a hora da última leitura e os process
 test("Saúde: última rodada com falha vira cartão vermelho, caixa com o erro e a última boa, sem nome de máquina na tela", async () => {
   saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_RUIM, RODADA_BOA] });
   const rm = (await screen.findByRole("heading", { name: "Sincronização com o RM" })).closest("li") as HTMLElement;
-  expect(rm.className).toMatch(/situacao--acao/);
+  expect(rm.className).toMatch(/situacao--critico/);
   expect(rm.textContent).toMatch(/falhou em 16\/10\/2026 às 11:40/);
   const caixa = screen.getByText(/Última rodada: falhou em/);
   expect(caixa.closest(".aviso--critico")).toBeTruthy();
@@ -581,8 +584,11 @@ test("Saúde: última rodada com falha vira cartão vermelho, caixa com o erro e
 
 test("Saúde: RM não configurado desliga o Sincronizar agora com o motivo ao lado, sem explicar a regra", async () => {
   saudeComRm({ configurado: false, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [] });
-  expect(await screen.findByText("O RM não está configurado neste servidor.")).toBeTruthy();
+  // #768: o motivo do botao desligado vai na forma de trava
+  expect((await screen.findByText("O RM não está configurado neste servidor.")).closest(".aviso--trava")).not.toBeNull();
   expect(cartaoDe("Sincronização com o RM").textContent).toMatch(/não configurado/);
+  // #768: sem RM e sem rodada, o painel das rodadas (que seria so' o titulo) nao aparece
+  expect(screen.queryByRole("heading", { name: "Rodadas de sincronização com o RM" })).toBeNull();
   const botao = screen.getByRole("button", { name: "Sincronizar agora" }) as HTMLButtonElement;
   expect(botao.disabled).toBe(true);
   expect(botao.getAttribute("title")).toBeNull();
@@ -599,8 +605,10 @@ test("Saúde: as contagens da reconciliação levam ao grupo certo da aba Reconc
 test("Saúde: falha só na cópia externa dos arquivos também deixa o cartão do backup vermelho (mesma regra do cartão Backup)", async () => {
   saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] },
     { ...BACKUP_EM_DIA, ultima_copia_arquivos_erro: "1 arquivo(s) sem cópia" });
-  await screen.findByText("Falhou");
-  expect(cartaoDe("Último backup").className).toMatch(/situacao--acao/);
+  await screen.findAllByText("Falhou");
+  expect(cartaoDe("Último backup").className).toMatch(/situacao--critico/);
+  // a situacao tem forma alem da cor: o selo com o glifo do critico e a palavra
+  expect(cartaoDe("Último backup").querySelector(".selo--critico .glifo--critico")).not.toBeNull();
 });
 
 test("Saúde: sem rodada, uma linha curta; rodando, o botão desliga com o motivo e o motivo some quando para", async () => {
@@ -616,7 +624,9 @@ test("Saúde: sem rodada, uma linha curta; rodando, o botão desliga com o motiv
   saudeComRm({ configurado: true, em_andamento: true, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] });
   await screen.findByText("rodando");
   expect((screen.getByRole("button", { name: "Sincronizar agora" }) as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.getByText("Uma rodada está em andamento.")).toBeTruthy();
+  // #768: rodando e' a situacao "em andamento", no item e ao lado do botao, com o glifo dela
+  expect(screen.getByText("Uma rodada está em andamento.").closest(".selo--andamento")?.querySelector(".glifo--andamento")).toBeTruthy();
+  expect(cartaoDe("Sincronização com o RM").className).toMatch(/situacao--andamento/);
 });
 
 test("Reconciliação: sem a dica, sem a nota do filtro por obra e sem 'sem NF do RM' repetido na linha", async () => {

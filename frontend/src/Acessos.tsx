@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
-import { IconeAlerta } from "./icones";
+import Falha from "./Falha";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import { fmtDataHora } from "./tempo";
@@ -24,7 +24,7 @@ export default function UltimosAcessos({ url, rotulo }: { url: string; rotulo: s
     api<Acesso[]>(url).then(l => { setAcessos(l); setErro(""); }).catch(e => setErro(mensagemDeErro(e)));
   }, [url]);
 
-  if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>;
+  if (erro) return <Falha>{erro}</Falha>;
   if (acessos === null) return <p>Carregando…</p>;
   if (acessos.length === 0) return <p>Nenhum acesso.</p>;
   return (
