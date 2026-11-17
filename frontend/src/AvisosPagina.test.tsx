@@ -28,27 +28,38 @@ describe("Avisos: o que vence quando", () => {
         destino: { tela: "contrato", id: 9, aba: "notas" } }),
     ]);
     const nomes = screen.getAllByRole("heading", { level: 3 }).map(h => h.textContent);
-    expect(nomes).toEqual(["VENCIDO · 1", "ESTA SEMANA · 1", "ESTE MÊS · 1", "DEPOIS · 1"]);
-    expect(within(secao(/^VENCIDO/)).getByText("Vencida")).toBeTruthy();
-    expect(within(secao(/^ESTA SEMANA/)).getByText("Semana")).toBeTruthy();
-    expect(within(secao(/^ESTE MÊS/)).getByText("Mes")).toBeTruthy();
-    expect(within(secao(/^DEPOIS/)).getByText("Longe")).toBeTruthy();
+    expect(nomes).toEqual(["Vencido", "Esta semana", "Este mês", "Depois"]);
+    // a situação vem da seção, com forma além da cor: vencido = crítico; semana e mês = vence em breve; depois, neutro
+    const classes = (nome: RegExp, peca: string) => secao(nome).querySelector(peca)!.className;
+    expect(classes(/^Vencido/, ".contador")).toBe("contador contador--critico");
+    expect(classes(/^Vencido/, ".selo")).toContain("selo--critico");
+    expect(secao(/^Vencido/).querySelector(".selo .glifo--critico")).not.toBeNull();
+    expect(classes(/^Esta semana/, ".selo")).toContain("selo--breve");
+    expect(classes(/^Este mês/, ".contador")).toBe("contador contador--breve");
+    expect(classes(/^Depois/, ".contador")).toBe("contador");
+    expect(secao(/^Depois/).querySelector(".selo .glifo")).toBeNull();
+    expect(within(secao(/^Vencido/)).getByText("Vencida")).toBeTruthy();
+    expect(within(secao(/^Esta semana/)).getByText("Semana")).toBeTruthy();
+    expect(within(secao(/^Este mês/)).getByText("Mes")).toBeTruthy();
+    expect(within(secao(/^Depois/)).getByText("Longe")).toBeTruthy();
     // fora da agenda: nem linha, nem obra no filtro, nem família no filtro
     expect(container.textContent).not.toMatch(/Sem data|Parada|Distante/i);
     expect(screen.queryByRole("link", { name: "Nota" })).toBeNull();
     expect(within(screen.getByLabelText("Obra")).getAllByRole("option").map(o => o.textContent)).toEqual(["Todas", "Longe"]);      // a obra 7 (o último nome dela); 8 e 9 não
     // a data do fato, a obra em coluna própria e os dias
-    const vencido = within(secao(/^VENCIDO/));
+    const vencido = within(secao(/^Vencido/));
     expect(vencido.getByText("04/11/2026")).toBeTruthy();
     expect(vencido.getByText("há 3 dias")).toBeTruthy();
-    expect(within(secao(/^ESTA SEMANA/)).getByText("5 dias")).toBeTruthy();
+    expect(within(secao(/^Esta semana/)).getByText("5 dias")).toBeTruthy();
     expect(vencido.getByRole("link", { name: /execução vencida/  }).getAttribute("href")).toContain("/obras/7");
   });
 
   it("as quatro seções do tempo aparecem sempre", () => {
     painel([aviso()]);
-    expect(screen.getAllByRole("heading", { level: 3 }).map(h => h.textContent))
-      .toEqual(["VENCIDO · 0", "ESTA SEMANA · 0", "ESTE MÊS · 1", "DEPOIS · 0"]);
+    expect(screen.getAllByRole("heading", { level: 3 }).map(h => h.textContent)).toEqual(["Vencido", "Esta semana", "Este mês", "Depois"]);
+    // a contagem ao lado do título: o número desenhado e, para o leitor de tela, "N avisos"
+    expect(screen.getAllByRole("heading", { level: 3 }).map(h => h.closest("section")!.querySelector(".contador")!.textContent))
+      .toEqual(["00 avisos", "00 avisos", "11 aviso", "00 avisos"]);
   });
 
   it("só aviso fora da agenda (sem data, ou além de 90 dias): 'Nenhum aviso.'", () => {
@@ -65,18 +76,18 @@ describe("Avisos: o que vence quando", () => {
         entidade_id: 3, entidade, dias: null, data, mensagem: `${entidade}: FGTS vencida`, destino: { tela: "documentos" } });
       painel([aviso({ obra: "Recente", dias: -2, data: "2026-11-09" }), certidao("Construtora Alfa", "2026-11-01"),
         aviso({ obra: "Antiga", dias: -30, data: "2026-10-12" }), certidao("Construtora Beta", "2026-11-20")]);
-      const linhas = within(secao(/^VENCIDO/)).getAllByRole("listitem");
-      expect(linhas.map(l => l.querySelector(".aviso-linha__obra")?.textContent)).toEqual(["Antiga", "Construtora Alfa", "Recente"]);
+      const linhas = within(secao(/^Vencido/)).getAllByRole("listitem");
+      expect(linhas.map(l => l.querySelector(".avs-linha__obra")?.textContent)).toEqual(["Antiga", "Construtora Alfa", "Recente"]);
       expect(within(linhas[1]).getByText("01/11/2026")).toBeTruthy();
       expect(within(linhas[1]).getByText("há 10 dias")).toBeTruthy();
-      expect(within(secao(/^ESTE MÊS/)).getByText("9 dias")).toBeTruthy();
+      expect(within(secao(/^Este mês/)).getByText("9 dias")).toBeTruthy();
     } finally { vi.useRealTimers(); }
   });
 
   it("o vencido mostra todos, do mais antigo, sem o corte '… e mais N' (#656)", () => {
     const vencidos = Array.from({ length: 9 }, (_, i) => aviso({ obra: `Obra ${i}`, dias: -(i + 1), data: `2026-10-${String(20 - i).padStart(2, "0")}` }));
     painel(vencidos);
-    const vencido = secao(/^VENCIDO/);
+    const vencido = secao(/^Vencido/);
     expect(within(vencido).getAllByRole("listitem")).toHaveLength(9);
     expect(within(vencido).getAllByRole("listitem")[0].textContent).toContain("Obra 8");
     expect(within(vencido).queryByRole("button")).toBeNull();
@@ -84,8 +95,8 @@ describe("Avisos: o que vence quando", () => {
 
   it("a vencer, o mais próximo primeiro", () => {
     painel([aviso({ obra: "B", dias: 6, data: "2026-11-13" }), aviso({ obra: "A", dias: 2, data: "2026-11-09" })]);
-    const linhas = within(secao(/^ESTA SEMANA/)).getAllByRole("listitem");
-    expect(linhas.map(l => l.querySelector(".aviso-linha__obra")?.textContent)).toEqual(["A", "B"]);
+    const linhas = within(secao(/^Esta semana/)).getAllByRole("listitem");
+    expect(linhas.map(l => l.querySelector(".avs-linha__obra")?.textContent)).toEqual(["A", "B"]);
   });
 
   it("o filtro por categoria da rota esconde as outras (o Início manda ?familia=reajustes)", () => {
@@ -100,11 +111,11 @@ describe("Avisos: o que vence quando", () => {
     expect(todas.container.textContent).toContain("DeReajuste");
   });
 
-  it("traz o título, o subtítulo e a legenda da cor, e o botão fecha os avisos", () => {
+  it("traz o título e a legenda da cor, sem frase de apoio, e o botão fecha os avisos", () => {
     const fechar = vi.fn();
     painel([aviso()], { nome: "SINFRA", onFechar: fechar });
     expect(screen.getByRole("heading", { name: "Avisos · SINFRA" })).toBeTruthy();
-    expect(screen.getByText("o que vence quando")).toBeTruthy();
+    expect(screen.queryByText("o que vence quando")).toBeNull();
     expect(screen.getByRole("list", { name: "Legenda das cores" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Fechar os avisos" }));
     expect(fechar).toHaveBeenCalledTimes(1);
@@ -122,7 +133,7 @@ describe("Avisos: o que vence quando", () => {
     cleanup();
     const todas = painel(lista);
     expect(todas.container.textContent).toContain("Maternidade");
-    expect(within(secao(/^ESTA SEMANA/)).getByText("Construtora Alfa")).toBeTruthy();
+    expect(within(secao(/^Esta semana/)).getByText("Construtora Alfa")).toBeTruthy();
     expect(screen.getByRole("link", { name: /certidão vence/ })).toBeTruthy();
   });
 

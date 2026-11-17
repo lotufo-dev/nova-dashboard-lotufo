@@ -464,8 +464,10 @@ describe("Início", () => {
     const total = totalDaCaixa();
     cleanup();
     render(<AvisosPagina busca={{}} avisos={FILA} nome="Todas as obras" onFechar={() => {}} />);
-    const naTela = screen.getAllByRole("heading", { level: 3 }).map(limpo);
-    expect(naTela).toEqual(["VENCIDO · 2", "ESTA SEMANA · 2", "ESTE MÊS · 1", "DEPOIS · 1"]);
+    // na tela Avisos a contagem fica ao lado do título da seção (o número desenhado do Contador)
+    const naTela = screen.getAllByRole("heading", { level: 3 })
+      .map(h => `${limpo(h)} · ${h.closest("section")!.querySelector(".contador [aria-hidden]:not(.glifo)")!.textContent}`);
+    expect(naTela).toEqual(["Vencido · 2", "Esta semana · 2", "Este mês · 1", "Depois · 1"]);
     expect(total).toBe(String(2 + 2 + 1));
   });
 
