@@ -13,16 +13,16 @@ const posicao = (vigente: number, medido: number, aReceber: number | null) =>
   ({ vigente_centavos: vigente, medido_centavos: medido, saldo_centavos: vigente - medido, a_receber_centavos: aReceber });
 const obra = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => ({
   id, orgao: "SINFRA - SUEF II", contratante: "SINFRA", orgao_sub: "SUEF II", numero_instrumento: `IC ${id}/2026`, nome_curto: nome,
-  estado: "ativo", entidade_id: 1, valor_vigente_centavos: 1000_00, medido_execucao_centavos: 250_00, saldo_centavos: 750_00, percentual_direito_bp: 10000,
+  estado: "ativo", entidade_id: 1, valor_vigente_centavos: 1000_00, medido_centavos: 250_00, saldo_centavos: 750_00, percentual_direito_bp: 10000,
   posicao: posicao(1000_00, 250_00, 100_00),
   execucao_fim_vigente: "2027-03-31", vigencia_fim_vigente: "2027-06-30", dias_execucao: 100, dias_vigencia: 200, ...extra });
 
 const OBRAS: ObraLista[] = [
   obra(1, "Estações BRT"),
   // consórcio a 49%: cheio 3.000,01 / 1.500,00; na cota 1.470,00 / 735,00
-  obra(2, "MT-388", { orgao: "SINFRA - SUPU", orgao_sub: "SUPU", percentual_direito_bp: 4900, valor_vigente_centavos: 3000_01, medido_execucao_centavos: 1500_00, saldo_centavos: 1500_01,
+  obra(2, "MT-388", { orgao: "SINFRA - SUPU", orgao_sub: "SUPU", percentual_direito_bp: 4900, valor_vigente_centavos: 3000_01, medido_centavos: 1500_00, saldo_centavos: 1500_01,
     posicao: posicao(1470_00, 735_00, 49_01) }),
-  obra(3, "Granito", { orgao: "MTPAR", contratante: "MTPAR", orgao_sub: null, valor_vigente_centavos: 2000_00, medido_execucao_centavos: 500_00,
+  obra(3, "Granito", { orgao: "MTPAR", contratante: "MTPAR", orgao_sub: null, valor_vigente_centavos: 2000_00, medido_centavos: 500_00,
     saldo_centavos: 1500_00, posicao: posicao(2000_00, 500_00, 100_00), estado: "suspenso", execucao_fim_vigente: "2026-12-31" }),
   obra(4, "Deciolândia", { orgao: "MTPAR", contratante: "MTPAR", orgao_sub: null, estado: "encerrado", execucao_fim_vigente: "2025-12-31" }),
 ];
@@ -114,7 +114,7 @@ describe("Obras: posição financeira na cota da Lotufo, por contratante", () =>
   it("os totais do topo somam as linhas na cota e o a receber vira traço sem o total liberado", async () => {
     const mi = 1_000_000_00;
     api.mockImplementation(async (caminho: string) => {
-      if (caminho === "/api/contratos") return OBRAS.map(o => ({ ...o, valor_vigente_centavos: 400 * mi, medido_execucao_centavos: 160 * mi, posicao: posicao(100 * mi, 40 * mi, null) }));
+      if (caminho === "/api/contratos") return OBRAS.map(o => ({ ...o, valor_vigente_centavos: 400 * mi, medido_centavos: 160 * mi, posicao: posicao(100 * mi, 40 * mi, null) }));
       if (caminho === "/api/entidades") return [];
       return { avisos: [] };
     });

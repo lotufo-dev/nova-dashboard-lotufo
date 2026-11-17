@@ -1,4 +1,4 @@
-"""FRC -- Fatura de Recebimento de Consorcio gerada pela dashboard (decisoes do Leonardo, 2026-10-09).
+"""FRC -- Fatura de Recebimento de Consorcio gerada pela dashboard (decisoes do dono, 2026-10-09).
 
 Depois que cada consorciada emite a sua NFS-e contra o consorcio, a FRC (1 pagina) junta essas notas e vai ao
 orgao com elas. A FRC e' SO' A SOMA das notas: bruto, INSS, IRRF, ISS e liquido vem da leitura de cada PDF

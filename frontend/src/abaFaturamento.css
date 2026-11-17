@@ -1,4 +1,4 @@
-/* Aba "Enviar ao faturamento" (#155, prototipo aprovado pelo Leo em 14/10/2026; AbaFaturamento.tsx).
+/* Aba "Enviar ao faturamento" (#155, prototipo aprovado pelo dono em 14/10/2026; AbaFaturamento.tsx).
    Cores so' dos tokens; o quadro e o "Parada há" vem de medicoes.css. */
 .fat-grupos { display: flex; flex-direction: column; gap: 16px; }
 .fat-grupo__cabeca { margin: 0; padding: 16px; border-bottom: 1px solid var(--cor-linha); font-size: var(--texto-titulo-sub); line-height: 24px; font-weight: 600; }

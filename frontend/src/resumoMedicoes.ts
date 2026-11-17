@@ -1,4 +1,4 @@
-// Regras de APRESENTACAO da pagina Medicoes com abas (09/10/2026, prototipo aprovado pelo Leo): funcoes puras sobre
+// Regras de APRESENTACAO da pagina Medicoes com abas (09/10/2026, prototipo aprovado pelo dono): funcoes puras sobre
 // GET /api/medicoes/resumo. Situacao, marco, dias parados e a linha unica de medicao + reajuste sao do servidor
 // (`medicoes.resumo`); aqui so' os rotulos, os limiares de cor do "Parada há" e o agrupamento por contratante.
 

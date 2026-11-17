@@ -161,7 +161,7 @@ def test_falha_no_envio_nao_muda_nada(ambiente, monkeypatch):
 
 
 def test_versao_substituida_nao_se_envia_e_a_nova_volta_a_espelho_gerado(ambiente, tmp_path, monkeypatch):
-    # issue #359 (decisao do Leo de 03/11/2026): a versao nova da medicao com espelho enviado volta a
+    # issue #359 (decisao do dono de 03/11/2026): a versao nova da medicao com espelho enviado volta a
     # `espelho_gerado` ate' o envio dela ao faturamento (antes, desde a #208, ficava `espelho_enviado`)
     monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
     conn, u, cid = ambiente
@@ -625,7 +625,7 @@ def test_espelho_da_medicao_com_boletim_usa_o_aprovado_e_nao_sobrescreve_o_pedid
 
 
 def test_atestado_digitado_sem_boletim_trava_o_valor_com_a_fonte_atestado(ambiente):
-    # decisao do Leo de 03/11/2026: vale como aprovado; a trava do boletim continua (nao ha' PDF)
+    # decisao do dono de 03/11/2026: vale como aprovado; a trava do boletim continua (nao ha' PDF)
     conn, u, cid = ambiente
     mid = _antes_do_espelho(conn, cid, 23, "planilha_enviada", pedido=12_345_67)
     medicoes.definir_valor(conn, u["id"], mid, "atestado", 12_000_01, "manual", "2026-02-10")
@@ -1019,7 +1019,7 @@ def test_espelho_so_do_reajuste_negativo_e_recusado(ambiente_projeto):
 
 def test_reajuste_negativo_abate_no_espelho_da_execucao_e_segue_os_marcos_dela(ambiente_projeto, tmp_path,
                                                                                  monkeypatch):
-    """Decisao do Leo de 08/11/2026: o espelho junta execucao (R$ 1.000,01) e reajuste (-R$ 10,01), soma com o sinal
+    """Decisao do dono de 08/11/2026: o espelho junta execucao (R$ 1.000,01) e reajuste (-R$ 10,01), soma com o sinal
     numa nota so' (R$ 990,00) e o reajuste avanca com a execucao: espelho enviado, nota emitida, protocolo e
     recebimento, com as mesmas datas. O a receber e o faturado da obra somam com o sinal (R$ 990,00, sem descontar
     duas vezes)."""
@@ -1136,6 +1136,22 @@ def test_cancelar_a_execucao_encerra_o_reajuste_absorvido(ambiente_projeto):
     xid, rid = _absorvido_com_nota(conn, u, cid)
     medicoes.mudar_estado(conn, u["id"], xid, "cancelada", "nota cancelada pela prefeitura")
     assert medicoes.detalhe(conn, rid)["estado"] == "cancelada"
+
+
+def test_reajuste_absorvido_recebe_com_a_execucao_na_obra_sem_envio_da_nota(ambiente_projeto):
+    """Issue #743: na obra sem o passo "Envio da nota", a execucao com nota emitida recebida sem protocolo leva o
+    reajuste negativo absorvido junto, na mesma data; so' ele continua recusado."""
+    conn, u, cid = ambiente_projeto
+    conn.execute("UPDATE contratos SET passos_medicao=? WHERE id=?", (json.dumps(["espelhos", "notas", "pagamento"]), cid))
+    conn.commit()
+    xid, rid = _absorvido_com_nota(conn, u, cid)
+    assert (medicoes.detalhe(conn, xid)["estado"], medicoes.detalhe(conn, rid)["estado"]) == ("nota_emitida",) * 2
+    with pytest.raises(ValueError, match="Este reajuste acompanha a execução"):
+        medicoes.mudar_estado(conn, u["id"], rid, "recebida", "baixa conferida no extrato", "2026-03-10", "manual")
+    medicoes.mudar_estado(conn, u["id"], xid, "recebida", "baixa conferida no extrato", "2026-03-10", "manual")
+    r, x = medicoes.detalhe(conn, rid), medicoes.detalhe(conn, xid)
+    assert (r["estado"], r["recebida_em"], r["congelada"]) == ("recebida", "2026-03-10", 1)
+    assert x["congelada"] == 1
 
 
 def test_reajuste_absorvido_nao_tem_marco_proprio(ambiente_projeto):

@@ -1,6 +1,6 @@
 # Nomes de arquivo por obra no ciclo de medição (Outlook, 2026-09-17)
 
-Fonte: caixa do Leonardo via conector Microsoft 365, só leitura, período
+Fonte: caixa do dono via conector Microsoft 365, só leitura, período
 2026-05-13 a 2026-09-17. 16 das 17 obras com exemplos reais (Via Parecis / Deciolândia não aparece).
 Pergunta de origem: "tem diferença de modelo de nome de arquivo entre as obras? Creio que para consórcio
 é diferente, por exemplo BRT".

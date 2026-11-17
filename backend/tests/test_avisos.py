@@ -505,7 +505,7 @@ def test_medicao_protocolada_nao_avisa_espelho_desatualizado(ambiente):
     assert _desatualizados(conn) == []
 
 
-# --- issue #288: avisos do motor de medicao (spec 2026-10-20 §2.1 e §2.1.1; decisao do Leo de 08/11/2026) ----------
+# --- issue #288: avisos do motor de medicao (spec 2026-10-20 §2.1 e §2.1.1; decisao do dono de 08/11/2026) ----------
 
 @pytest.fixture
 def motor(tmp_path, monkeypatch):
@@ -674,6 +674,29 @@ def test_aprovado_abaixo_do_pedido_operacao_sempre_diretoria_acima_de_10_por_cen
     assert _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos") == []
 
 
+def test_aprovado_abaixo_do_pedido_so_avisa_acima_de_meio_por_cento(motor):
+    # #741: ate' 0,5% do pedido (inclusive) nao avisa; a conta e' em centavos inteiros
+    c, u, cid = motor
+    mid = _med(c, cid, 1, "2026-10", "planilha_enviada", pedido=10_000_00, enviada_em="2026-10-30")
+    _bol(c, u, mid, 9_950_01, "a")               # diferenca de 49,99: abaixo de 0,5%
+    assert _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos") == []
+    _bol(c, u, mid, 9_950_00, "b")               # 50,00: exatamente 0,5% nao avisa
+    assert _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos") == []
+    _bol(c, u, mid, 9_949_99, "c")               # 50,01: acima de 0,5% avisa, so' para a operacao
+    [a] = _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos")
+    assert (a["medicao_id"], a["publico"], a["valor_centavos"]) == (mid, ["operacao"], 50_01)
+
+
+def test_meio_por_cento_de_pedido_com_centavo_impar_nao_arredonda(motor):
+    # 0,5% de 10.000,01 e' 50,00005: 50,00 nao avisa e 50,01 avisa (sem ponto flutuante)
+    c, u, cid = motor
+    mid = _med(c, cid, 1, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
+    _bol(c, u, mid, 9_950_01, "a")
+    assert _do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8), "todos") == []
+    _bol(c, u, mid, 9_950_00, "b")
+    assert len(_do_tipo(c, "aprovado_abaixo_do_pedido", D(2026, 11, 8))) == 1
+
+
 def test_aceitar_a_diferenca_tira_o_aviso_ate_o_proximo_boletim_abaixo(motor):
     c, u, cid = motor
     mid = _med(c, cid, 1, "2026-10", "planilha_enviada", pedido=10_000_01, enviada_em="2026-10-30")
@@ -767,7 +790,7 @@ def test_periodo_contiguo_ou_anterior_sem_periodo_nao_avisa_fora_de_ordem(motor)
     assert _do_tipo(c, "medicao_fora_de_ordem", D(2026, 11, 8)) == []
 
 
-# ---- Avisos do motor de apostilamento (issue #274; spec 2026-10-20 §2.2, decisao do Leo de 08/11/2026) ----
+# ---- Avisos do motor de apostilamento (issue #274; spec 2026-10-20 §2.2, decisao do dono de 08/11/2026) ----
 
 @pytest.fixture
 def obra_reajuste(tmp_path, monkeypatch):
@@ -1129,7 +1152,7 @@ def test_indeferimento_registrado_por_engano_fica_sem_efeito_e_os_avisos_voltam(
     assert reajuste.ciclos(c, cid, hoje)[0]["resposta"] is None
 
 
-# --- issue #286: capa do SMO contra o cadastro (decisao do Leo de 08/11/2026) ---------------------------------------
+# --- issue #286: capa do SMO contra o cadastro (decisao do dono de 08/11/2026) ---------------------------------------
 
 TIPOS_CAPA = ("capa_prazo_divergente", "capa_instrumento_ausente", "capa_valor_contrato_divergente",
               "capa_acumulado_divergente")

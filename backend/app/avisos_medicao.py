@@ -1,4 +1,4 @@
-"""Avisos do motor de medicao (issue #288; spec 2026-10-20 §2.1 "Avisos gerados" e §2.1.1; E4; decisao do Leo de
+"""Avisos do motor de medicao (issue #288; spec 2026-10-20 §2.1 "Avisos gerados" e §2.1.1; E4; decisao do dono de
 08/11/2026). Uma fonte do registro unico de `app/avisos.py`, que a tela le sem saber de onde o aviso vem.
 
 - `planilha_nao_enviada` (operacao): obra ativa, nao paralisada, fora da MT-PAR (onde nao ha' o passo) e da obra
@@ -8,8 +8,9 @@
   do mes do inicio da execucao; obra reiniciada, do mes do reinicio. Lacunas anteriores nao avisam.
 - `pedido_sem_boletim` (operacao; diretoria em 2X): planilha/carta enviada ha' mais de X dias sem boletim, X =
   `prazo_boletim_dias` do orgao. Orgao sem o prazo nao tem o aviso.
-- `aprovado_abaixo_do_pedido` (operacao; diretoria acima de 10%): o boletim vigente abaixo do pedido; some com a
-  diferenca aceita (do boletim vigente) ou com boletim novo que nao fique abaixo.
+- `aprovado_abaixo_do_pedido` (operacao; diretoria acima de 10%): o boletim vigente abaixo do pedido por mais de
+  0,5% do pedido (#741; ate' 0,5% a diferenca so' aparece na pagina da medicao); some com a diferenca aceita
+  (do boletim vigente) ou com boletim novo que nao fique abaixo.
 - `medicao_fora_de_ordem` (operacao): planilha/carta gerada ou enviada com periodo que pula ou sobrepoe o da medicao
   anterior; some com o periodo corrigido (revisao desta ou da anterior) ou com o boletim registrado.
 """
@@ -26,6 +27,8 @@ ESTADOS_ENVIADA = ("planilha_enviada", "boletim_recebido", "espelho_gerado", "es
 DIA_DO_AVISO = 5
 FAMILIAS_SEM_PEDIDO = ("mtpar",)       # na MT-PAR o oficio vai com a nota: nao ha' planilha/carta do mes
 ESTADOS_PERIODO = ("planilha_gerada", "planilha_enviada")
+# aprovado abaixo do pedido so' avisa quando a diferenca passa de 5 por mil (0,5%) do pedido; exatamente 0,5% nao (#741)
+ABAIXO_DO_PEDIDO_POR_MIL = 5
 
 
 def _destino(cid: int) -> dict:
@@ -141,6 +144,8 @@ def _aprovados_abaixo(conn, hoje: datetime.date) -> list[dict]:
             continue
         pedido, aprovado = m["valor_protocolado_centavos"], m["valor_atestado_centavos"]
         falta = pedido - aprovado
+        if falta * 1000 <= pedido * ABAIXO_DO_PEDIDO_POR_MIL:     # ate' 0,5% do pedido, em inteiros
+            continue
         diretoria = falta * 10 > pedido        # acima de 10% do pedido, em inteiros
         data = (m["atestado_em"] or "")[:10] or None
         out.append({**_av.aviso(

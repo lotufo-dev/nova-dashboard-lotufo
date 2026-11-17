@@ -48,6 +48,10 @@ def instalacao_dev(request, monkeypatch):
     conferencia de verdade marca `instalacao_real` e assina o arquivo com um par de chaves gerado no proprio teste."""
     from app import instalacao
     monkeypatch.setattr(instalacao, "_estado", None)
+    # Issue #707: o `DASH_DEV=1` do terminal de quem roda a suite travaria o envio real dos testes que trocam o Graph
+    # por um falso. A suite roda como na CI, sem ele; quem testa a trava liga as variaveis no proprio teste.
+    monkeypatch.delenv("DASH_DEV", raising=False)
+    monkeypatch.delenv(instalacao.LIBERAR_EMAIL_REAL_EM_DEV, raising=False)
     if request.node.get_closest_marker("instalacao_real"):
         return
     monkeypatch.setattr(instalacao, "verificar", lambda: {"instalacao": instalacao.DEV, "motivo": None})

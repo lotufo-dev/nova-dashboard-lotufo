@@ -38,8 +38,8 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
    Alocar nao muda o estado de `protocolada`; em medicao nascida do espelho fecha `nota_emitida`
    quando nao falta nota. A medicao recebida a' mao que ainda falta nota tambem e' candidata (issue #713):
    a nota liga e o estado e a data do recebimento ficam.
-5. Recebimentos: medicao `protocolada` cujas NFs alocadas DA COLIGADA DA ENTIDADE DO CONTRATO
-   cobrem o valor dela (issue #714) e ja' tem baixa (status 1, 3 ou 4) cobrindo o titulo vira
+5. Recebimentos: medicao `protocolada` (ou com nota emitida na obra sem o passo "Envio da nota", issue #743)
+   cujas NFs alocadas DA COLIGADA DA ENTIDADE DO CONTRATO cobrem o valor dela (issue #714) e ja' tem baixa (status 1, 3 ou 4) cobrindo o titulo vira
    `recebida`, com a maior data de baixa. Issue #35: titulo pago ate' R$ 1,00 a menos tambem fecha, com a diferenca auditada em
    `medicao.recebida_com_diferenca`. Parcial fica visivel no detalhe da medicao (recebido por NF), sem mudar de estado.
 
@@ -737,11 +737,17 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
         return 0                        # "IN ()" nem e' SQL valido
     filtro = f" AND m.id IN ({','.join('?' * len(medicao_ids))})" if medicao_ids is not None else ""
     cobranca = ",".join("?" * len(diretoria.CODTMV_COBRANCA))
-    for m in conn.execute("""SELECT m.id, e.coligada_rm,
+    passos_de = medicoes.passos_das_medicoes(conn)
+    for m in conn.execute("""SELECT m.id, m.contrato_id, m.tipo, m.estado, m.planilha_enviada_em, e.coligada_rm,
                                     COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
                              FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
                              JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
-                             WHERE m.estado IN ('protocolada','nf_emitida')""" + filtro, medicao_ids or ()).fetchall():
+                             WHERE m.estado IN ('protocolada','nf_emitida','nota_emitida')""" + filtro,
+                          medicao_ids or ()).fetchall():
+        # Issue #743: a nota emitida so' na obra sem o passo "Envio da nota" (recebida sem protocolo); na obra com
+        # ele, a medicao espera o protocolo, como sempre. As regras abaixo (#714, #584, #35) valem igual
+        if m["estado"] == "nota_emitida" and not medicoes.recebe_sem_protocolo(m["estado"], passos_de(m)):
+            continue
         # Bloco 3 (decisao 13 do plano): so' as notas da COLIGADA DA ENTIDADE DO CONTRATO decidem o
         # recebimento. Em obra de consorcio a medicao tambem tem a NFS-e da Lotufo ao orgao
         # (coligada 1, cota, titulo que o consorcio repassa depois): ela nao segura a medicao.
@@ -749,7 +755,7 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
         if not notas:
             continue
         # Issue #584: vinculo automatico antigo com nota de tipo fora da cobranca ao orgao (2.2.15, 2.2.10) nao fecha
-        # a medicao sozinho; fica no relato `vinculos_fora_da_cobranca` para o Leo decidir.
+        # a medicao sozinho; fica no relato `vinculos_fora_da_cobranca` para o dono decidir.
         if conn.execute(f"""SELECT 1 FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
                             WHERE a.medicao_id=? AND a.desfeita_em IS NULL AND a.origem='detectado'
                               AND n.coligada=? AND n.codtmv IS NOT NULL AND n.codtmv NOT IN ({cobranca})""",
@@ -781,7 +787,7 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
         # num titulo nao quitam outro titulo aberto da mesma nota. Falta zero ja' implica recebido >= devido.
         faltas = [(x, _falta_por_titulo(conn, x["nota_id"])) for x in notas]
         if not all(f == 0 for _, f in faltas):
-            # Issue #35 (decisao do Leo, 19/10/2026): medicao paga ate' R$ 1,00 abaixo, SOMANDO a falta de
+            # Issue #35 (decisao do dono, 19/10/2026): medicao paga ate' R$ 1,00 abaixo, SOMANDO a falta de
             # todas as notas dela, fecha como recebida; sem percentual. A falta e' contada titulo a titulo
             # (juros num titulo nao cobrem outro) e todo titulo precisa de baixa. A diferenca vai para a
             # auditoria como evento proprio.
@@ -804,7 +810,7 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
 def vinculos_fora_da_cobranca(conn) -> list[dict]:
     """Issue #584: vinculos automaticos vigentes (origem `detectado`) cuja nota tem tipo de movimento do RM fora de
     `diretoria.CODTMV_COBRANCA` (os mesmos que `_recebimentos` nao fecha sozinho; nota sem tipo nao veio do RM).
-    So' le: o Leo decide cada um (correcao e' evento novo)."""
+    So' le: o dono decide cada um (correcao e' evento novo)."""
     from app import diretoria   # import local: diretoria importa este modulo
     cobranca = ",".join("?" * len(diretoria.CODTMV_COBRANCA))
     return [dict(r) for r in conn.execute(f"""

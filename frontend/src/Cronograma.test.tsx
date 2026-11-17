@@ -8,7 +8,7 @@ vi.mock("./api", () => ({ api, ApiErro: class ApiErro extends Error { status = 0
 
 const VERSAO = { numero: 2, criado_em: "2026-09-01T12:00:00", origem: "sistema",
   itens: [{ competencia: "2026-09", valor_previsto_centavos: 120000000 }] };
-const CURVA = { curva: [], saldo: { vigente_centavos: 100, atestado_execucao_centavos: 0, saldo_centavos: 100, formula: "x" } };
+const CURVA = { curva: [], saldo: { vigente_centavos: 100, medido_centavos: 0, saldo_centavos: 100, formula: "x" } };
 
 // guarda de rascunho (issue #27): cronograma digitado e nao publicado
 describe("Cronograma: guarda de rascunho", () => {
@@ -48,10 +48,13 @@ describe("Cronograma: saldo e reajuste contratado", () => {
 
   it("com aditivo de reajuste: a conta usa o vigente de execução e o reajuste fica à parte", async () => {
     comSaldo({ vigente_centavos: 133301, vigente_execucao_centavos: 120001, reajuste_contratado_centavos: 13300,
-      atestado_execucao_centavos: 24000, saldo_centavos: 96001, formula: "f" });
+      medido_centavos: 24000, saldo_centavos: 96001, formula: "f" });
     render(<Cronograma contratoId={1} podeEditar={false} />);
     expect(await screen.findByText("Vigente de execução")).toBeTruthy();
     expect(screen.getByText("R$ 1.200,01")).toBeTruthy();
+    // #742: o medido da conta e' o da obra, execucao e projeto
+    expect(screen.getByText("Medido (execução e projeto)")).toBeTruthy();
+    expect(screen.getByText("R$ 240,00")).toBeTruthy();
     expect(screen.getByText("R$ 960,01")).toBeTruthy();
     expect(screen.getByText("Reajuste contratado (fora do saldo)")).toBeTruthy();
     expect(screen.getByText("R$ 133,00")).toBeTruthy();
@@ -60,7 +63,7 @@ describe("Cronograma: saldo e reajuste contratado", () => {
 
   it("sem aditivo de reajuste: sem a linha do reajuste", async () => {
     comSaldo({ vigente_centavos: 100000, vigente_execucao_centavos: 100000, reajuste_contratado_centavos: 0,
-      atestado_execucao_centavos: 0, saldo_centavos: 100000, formula: "f" });
+      medido_centavos: 0, saldo_centavos: 100000, formula: "f" });
     render(<Cronograma contratoId={1} podeEditar={false} />);
     expect(await screen.findByText("Vigente de execução")).toBeTruthy();
     expect(screen.queryByText("Reajuste contratado (fora do saldo)")).toBeNull();
@@ -151,7 +154,7 @@ describe("Cronograma: texto na tela", () => {
   });
 
   it("“Medido acima do vigente de execução” só aparece com o saldo negativo", async () => {
-    const negativo = { ...CURVA, saldo: { ...CURVA.saldo, atestado_execucao_centavos: 200, saldo_centavos: -100 } };
+    const negativo = { ...CURVA, saldo: { ...CURVA.saldo, medido_centavos: 200, saldo_centavos: -100 } };
     api.mockImplementation((c: string) => Promise.resolve(c.endsWith("/curva") ? negativo : c.endsWith("/cronograma") ? VERSAO
       : c.endsWith("/versoes") ? [] : null));
     render(<Cronograma contratoId={1} podeEditar={false} />);

@@ -16,7 +16,7 @@ import { fmtDataPura, hojeLocal } from "./tempo";
 // Issue #514, passo 6 da pagina da obra (aprovado em 06/11/2026): o que falta receber (a cota da Lotufo no
 // consorcio), o total da medicao, ha' quantos dias a nota esta' com o orgao, as notas no financeiro (as baixas do RM)
 // e o processo no orgao. Sem botao de fluxo: a medicao recebida fecha o passo. O recebimento a mao (so' admin, #53)
-// continua na linha da nota.
+// continua na linha da nota. #743: na obra sem o passo "Envio da nota", a nota emitida ja' esta' aqui, sem protocolo.
 
 type ProtocoloLido = { numero_orgao: string | null; situacao: string; medicoes: { id: number }[] };
 
@@ -80,13 +80,18 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
   // o par so' esta' recebido quando a ultima metade entra: a data e' a maior (gate Sol, rodada 5)
   const recebidaEm = grupo.map(x => x.recebida_em).filter((d): d is string => !!d).sort().at(-1) ?? null;
   const enviada = grupo.flatMap(x => x.protocolos.map(p => p.data)).sort().at(-1) ?? null;
-  const dias = enviada && !recebida ? diasEntre(enviada, hojeLocal()) : null;
+  // #743: na obra sem o passo "Envio da nota" nao ha' protocolo; a espera conta da emissao da nota (a mais recente)
+  const emitida = !enviada && grupo.some(x => x.recebe_sem_protocolo)
+    ? grupo.map(x => x.nota_emitida_em).filter((d): d is string => !!d).sort().at(-1) ?? null : null;
+  const inicio = enviada ?? emitida;
+  const dias = inicio && !recebida ? diasEntre(inicio, hojeLocal()) : null;
   const notas = grupo.flatMap(x => (x.notas ?? []).map(n => ({ n, m: x })));
   const nfsDocs = notas.length === 0 ? grupo.flatMap(x => (x.documentos ?? []).filter(d => d.tipo_doc === "nfs" && d.numero_nf)) : [];
   const pct = receber.total && receber.recebido !== null ? Math.min(100, Math.floor((receber.recebido * 100) / receber.total)) : 0;
   // onde o orgao junta medicao e reajuste, um processo so'; onde separa, um por medicao
   const linhas = junta && grupo.length > 1 ? [grupo] : grupo.map(x => [x]);
-  const recebiveis = usuario.perfil === "admin" ? grupo.filter(x => (PROXIMOS[x.estado] ?? []).includes("recebida")) : [];
+  const recebiveis = usuario.perfil === "admin"
+    ? grupo.filter(x => (PROXIMOS[x.estado] ?? []).includes("recebida") || x.recebe_sem_protocolo) : [];
 
   return (
     <section className="med-passo" id="passo-6" aria-labelledby="passo-6-titulo">
@@ -114,6 +119,7 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
               <p className="pag-numeros__rotulo">Aguardando há</p>
               <p className="pag-numeros__valor num">{dias === null ? "—" : fmtDias(dias)}</p>
               {enviada && <p className="pag-numeros__nota">nota enviada em {fmtDataPura(enviada)}</p>}
+              {emitida && <p className="pag-numeros__nota">nota emitida em {fmtDataPura(emitida.slice(0, 10))}</p>}
             </>
           )}
         </div>
@@ -162,11 +168,12 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
             {receber.falta !== null && receber.total !== null && receber.total > 0 && (
               <p className="num">{brl(receber.recebido)} recebido de {brl(receber.total)}</p>
             )}
-            {/* #722: recebido em parte e aguardando o orgao sao andamento; o visto de feito so' com tudo recebido */}
+            {/* #722: recebido em parte e aguardando o orgao sao andamento; o visto de feito so' com tudo recebido.
+                #743: a nota emitida da obra sem o passo "Envio da nota" tambem aguarda o orgao */}
             <p>{recebida ? <Selo situacao="feito">Recebida</Selo>
               : quitado ? <Selo situacao="feito">Recebido</Selo>
               : nadaAReceber ? null
-              : grupo.some(x => ["protocolada", "nf_emitida"].includes(x.estado)) ? <Selo situacao="andamento">{receber.parcial ? "Recebido em parte" : "Aguardando o órgão"}</Selo> : null}</p>
+              : grupo.some(x => ["protocolada", "nf_emitida"].includes(x.estado) || x.recebe_sem_protocolo) ? <Selo situacao="andamento">{receber.parcial ? "Recebido em parte" : "Aguardando o órgão"}</Selo> : null}</p>
           </div>
           {/* issue #53: o recebimento a mao e' so' do admin (o servidor recusa outro perfil) */}
           {recebiveis.map(x => (

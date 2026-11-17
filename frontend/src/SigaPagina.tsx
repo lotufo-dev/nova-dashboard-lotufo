@@ -14,7 +14,7 @@ import {
 import { fmtData, fmtDataHora, fmtHora } from "./tempo";
 import "./siga.css";
 
-// Tela SIGA (#329; redesenho #512, aprovado pelo Leo em 06/11/2026): duas paginas. A principal e' uma tabela com a
+// Tela SIGA (#329; redesenho #512, aprovado pelo dono em 06/11/2026): duas paginas. A principal e' uma tabela com a
 // posicao atual de cada processo, do mais parado ao menos; clicar na linha abre o historico completo do processo
 // (a mesma rota, com ?processo=<id>). Tudo vem de GET /api/siga; aqui so' se desenha.
 // #663: a tabela principal tem uma secao por categoria (Medicoes, Aditivos, Indenizatorios, Outros) e o nome do
