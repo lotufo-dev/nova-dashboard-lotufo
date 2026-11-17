@@ -1,4 +1,6 @@
 """Conciliacao dos recebidos do legado: nota do RM ligada a medicao antiga so' quando inequivoca."""
+import json
+
 from app import conciliacao, medicoes, sincronizacao_rm
 from tests.test_rm import _baixa, _medicao, _nf, _simulador, cid, conn  # noqa: F401 (fixtures)
 
@@ -108,6 +110,43 @@ def test_nota_antiga_fora_da_cobranca_nao_liga_nem_entra_no_banco(conn, cid, tmp
     nfs.append(dict(_nf(202, 800.0, emissao=emissao), CODTMV="2.2.16"))
     assert conciliacao.conciliar(conn, 1, ensaio=False, antigas=(nfs, []))["ligadas"] == 1
     assert [r[0] for r in conn.execute("SELECT idmov FROM notas_fiscais")] == [202]
+    assert _regras(conn, mid) == [conciliacao.REGRA]
+
+
+def _declarar_tipos_extras(conn, contrato_id, *tipos):
+    conn.execute("UPDATE contratos SET tipos_cobranca_extras_rm=? WHERE id=?", (json.dumps(list(tipos)), contrato_id))
+    conn.commit()
+
+
+def test_nota_de_tipo_extra_so_e_opcao_da_medicao_da_obra_que_o_declara(conn, cid, tmp_path):
+    """docs/adr/0015: a nota 2.2.03 na janela e com o valor exato vira opcao so' da medicao do contrato cujo cadastro
+    declara o tipo. Duas obras da mesma coligada, sem centro, com medicao do mesmo valor: com um tipo da lista geral as
+    duas ficariam ambiguas; com o 2.2.03 declarado numa so', ela liga sozinha e a outra fica sem nota."""
+    from app import contratos
+    outra = contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "CT 10", "objeto": "Obra 3",
+                                      "valor_original_centavos": 100_000_00})
+    da_obra = _medicao(conn, cid, 12, 461_900_01, comp="2025-03")
+    da_outra = _medicao(conn, outra, 7, 461_900_01, comp="2025-03")
+    nota = dict(_nf(100, 461900.01, emissao=EMISSAO), CODTMV="2.2.03")
+    _carregar(conn, tmp_path, [nota], [_baixa(1, 100, 430000.01, 430000.01, 1, PAGO)])
+    rel = conciliacao.conciliar(conn, 1, ensaio=False)          # ninguem declara: a nota nao e' opcao de ninguem
+    assert (rel["ligadas"], rel["sem_nota"], rel["ambiguas"]) == (0, 2, 0)
+    _declarar_tipos_extras(conn, cid, "2.2.03")
+    rel = conciliacao.conciliar(conn, 1, ensaio=False)
+    assert (rel["ligadas"], rel["recebidas"], rel["sem_nota"], rel["ambiguas"]) == (1, 1, 1, 0)
+    assert _regras(conn, da_obra) == [conciliacao.REGRA] and _regras(conn, da_outra) == []
+    assert medicoes.detalhe(conn, da_obra)["estado"] == "recebida"
+
+
+def test_nota_antiga_de_tipo_extra_so_entra_no_banco_pela_obra_que_o_declara(conn, cid, tmp_path):
+    """docs/adr/0015, fase 2 (DASH12): a 2.2.03 antiga so' liga, e so' entao entra no banco, com o contrato declarando."""
+    mid = _medicao(conn, cid, 3, 800_01, comp="2023-03")
+    nfs = [dict(_nf(200, 800.01, emissao="2023-04-12T00:00:00-04:00"), CODTMV="2.2.03")]
+    assert conciliacao.conciliar(conn, 1, ensaio=False, antigas=(nfs, []))["ligadas"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM notas_fiscais").fetchone()[0] == 0
+    _declarar_tipos_extras(conn, cid, "2.2.03")
+    assert conciliacao.conciliar(conn, 1, ensaio=False, antigas=(nfs, []))["ligadas"] == 1
+    assert [tuple(r) for r in conn.execute("SELECT idmov, codtmv FROM notas_fiscais")] == [(200, "2.2.03")]
     assert _regras(conn, mid) == [conciliacao.REGRA]
 
 

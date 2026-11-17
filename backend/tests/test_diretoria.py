@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from app import auth, avisos, cadastro_aplicar, db, diretoria, medicoes, qdop, reajuste, sincronizacao_rm
+from app import auth, avisos, cadastro_aplicar, cobranca_orgao, db, diretoria, medicoes, qdop, reajuste, sincronizacao_rm
 from tests.test_protocolo import _contrato
 
 D = datetime.date
@@ -787,6 +787,164 @@ def test_so_nota_de_cobranca_ao_orgao_entra_no_a_receber_e_no_faturado(cenario):
     assert r["total"]["valor_centavos"] == 700_000 + 300_000 + 1_000_000
     assert diretoria.rm_por_mes(c)[0] == {"2026-08": 1_000_000}
     assert diretoria.complemento_rm(c) == {ids["propria"]: {"2026-07": 900_000}}
+
+
+# --- docs/adr/0015: tipo de movimento extra por contrato (`tipos_cobranca_extras_rm` do cadastro) ----------------
+
+def _tipos_extras(c, contrato_id, *tipos):
+    c.execute("UPDATE contratos SET tipos_cobranca_extras_rm=? WHERE id=?",
+              (json.dumps(list(tipos)) if tipos else None, contrato_id))
+    c.commit()
+
+
+def _nota_do_rm(c, idmov, codtmv, valor, titulos, coligada=1, centro=None, medicao=None, emissao="2026-08-10"):
+    """Nota ativa do RM com os titulos dela: (original, baixado, status, data da baixa)."""
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo, "
+                    "codtmv) VALUES (?, ?, ?, ?, ?, 'ativa', ?, ?)",
+                    (coligada, idmov, str(idmov), emissao, valor, centro, codtmv)).lastrowid
+    for i, (original, baixado, status, data) in enumerate(titulos, 1):
+        c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
+                  "status_lan, data_baixa) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                  (coligada, idmov * 10 + i, nid, idmov, original, baixado, status, data))
+    if medicao:
+        c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
+                  "VALUES (?, ?, ?, 'detectado', 't')", (medicao, nid, valor))
+    c.commit()
+    return nid
+
+
+def _notas_a_receber(c):
+    return sorted((i["contrato_id"], i["valor_centavos"]) for i in diretoria.a_receber(c, HOJE)["itens"] if i["tipo"] == "nota")
+
+
+def test_tipo_extra_e_cobranca_so_na_obra_que_o_declara_pelo_centro_de_custo(cenario):
+    """docs/adr/0015: a nota de tipo 2.2.03 so' entra no a receber, no faturado, no recebido e no complemento do RM da
+    obra cujo cadastro declara o tipo. A mesma nota em obra que nao declara, e a nota que nao cai em obra nenhuma,
+    continuam fora; a lista geral nao muda, e tipo que ninguem declara (2.2.15) segue fora ate' na obra que declara
+    outro. Consorcio a 50% com centavo impar: cada parcela arredonda uma vez, e faturado = recebido + a receber."""
+    c, ids = cenario
+    p, k = ids["propria"], ids["consorcio"]
+    c.execute("UPDATE contratos SET centro_custo_rm='9.001.001' WHERE id=?", (p,))
+    c.execute("UPDATE entidades SET coligada_rm=12 WHERE chave='cons'")       # sem centro: a obra vem pela coligada
+    # consorcio: 333.333 centavos em dois titulos, um aberto (233.332) e um pago em 02/09 (100.001)
+    _nota_do_rm(c, 9801, "2.2.03", 333_333, [(233_332, 0, 0, None), (100_001, 100_001, 1, "2026-09-02")], coligada=12)
+    _nota_do_rm(c, 9802, "2.2.03", 250_001, [(250_001, 0, 0, None)], centro="9.001.001")     # obra propria
+    _nota_do_rm(c, 9803, "2.2.03", 77_777, [(77_777, 0, 0, None)])                            # sem obra
+    _nota_do_rm(c, 9804, "2.2.15", 60_001, [(60_001, 0, 0, None)], coligada=12)               # fornecedor, no consorcio
+    ids["liberar"]()
+    base = 700_000 + 300_000
+    def retrato():
+        r = diretoria.a_receber(c, HOJE)
+        faturado, recebido = diretoria.rm_por_mes(c)
+        return (_notas_a_receber(c), r["total"]["valor_centavos"], faturado, {m: v for m, v in recebido.items() if v},
+                diretoria.complemento_rm(c))
+    # ninguem declara: o tipo 2.2.03 nao e' cobranca em lugar nenhum (como antes desta regra)
+    assert retrato() == ([], base, {}, {}, {})
+    assert cobranca_orgao.tipos_buscados(cobranca_orgao.extras_por_contrato(c)) == diretoria.CODTMV_COBRANCA
+
+    _tipos_extras(c, k, "2.2.03")                 # so' o consorcio declara
+    # 233.332 x 50% = 116.666; 333.333 x 50% = 166.666,5 -> 166.667; 100.001 x 50% = 50.000,5 -> 50.001
+    assert retrato() == ([(k, 116_666)], base + 116_666, {"2026-08": 166_667}, {"2026-09": 50_001},
+                         {k: {"2026-07": 333_333}})
+    assert 166_667 == 50_001 + 116_666            # faturado = recebido + a receber, ao centavo
+    assert diretoria.da_obra(c, k)["a_receber_centavos"] == 233_332          # a pagina da obra, em valor cheio
+    assert diretoria.a_receber_por_obra(c, na_cota=True) == {p: base, k: 116_666}
+    assert diretoria.da_obra(c, p)["a_receber_centavos"] == base             # a obra propria nao ganhou nada
+
+    _tipos_extras(c, k)                           # a chave sai do consorcio e entra na propria
+    _tipos_extras(c, p, "2.2.03")
+    # o complemento e' o que a nota passa da medicao lancada na competencia (07/2026 tem 100.000 lancados na propria)
+    assert retrato() == ([(p, 250_001)], base + 250_001, {"2026-08": 250_001}, {}, {p: {"2026-07": 150_001}})
+
+    _tipos_extras(c, k, "2.2.03")                 # as duas declaram: cada nota na sua obra; a sem obra, em nenhuma
+    assert retrato() == ([(p, 250_001), (k, 116_666)], base + 250_001 + 116_666, {"2026-08": 250_001 + 166_667},
+                         {"2026-09": 50_001}, {p: {"2026-07": 150_001}, k: {"2026-07": 333_333}})
+
+    # a lista geral segue valendo em toda obra, com ou sem a chave
+    _tipos_extras(c, p)
+    _nota_do_rm(c, 9805, "2.2.01", 40_001, [(40_001, 0, 0, None)], centro="9.001.001")
+    assert _notas_a_receber(c) == [(p, 40_001), (k, 116_666)]
+
+
+def test_tipo_extra_vale_pela_medicao_a_que_a_nota_esta_ligada(cenario):
+    """docs/adr/0015: a nota chega ao contrato pela medicao ligada (`nf_alocacoes`) antes do centro de custo. Ligada a
+    uma medicao da obra que declara o tipo, conta, mesmo com centro de custo que nao aponta obra; ligada a medicao de
+    obra que nao declara, nao conta, mesmo com o centro de custo da obra que declara."""
+    from app import contratos
+    c, ids = cenario
+    p = ids["propria"]
+    c.execute("UPDATE contratos SET centro_custo_rm='9.001.001' WHERE id=?", (p,))
+    c.commit()
+    outra = contratos.criar(c, 1, {"orgao": "SECRETARIA DE EXEMPLO", "numero_instrumento": "IC 9/2025",
+                                   "objeto": "Outra obra", "valor_original_centavos": 50_000_000})
+    da_outra = c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+                         "VALUES (?, 1, 'execucao', '2026-06', 'recebida', 500001)", (outra,)).lastrowid
+    da_propria = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=1", (p,)).fetchone()[0]   # recebida
+    _tipos_extras(c, p, "2.2.03")
+    _nota_do_rm(c, 9811, "2.2.03", 500_001, [(500_001, 0, 0, None)], centro="9.999.999", medicao=da_propria)
+    _nota_do_rm(c, 9812, "2.2.03", 123_457, [(123_457, 0, 0, None)], centro="9.001.001", medicao=da_outra)
+    ids["liberar"]()
+    assert _notas_a_receber(c) == [(p, 500_001)]
+    assert diretoria.rm_por_mes(c)[0] == {"2026-08": 500_001}
+    _tipos_extras(c, p)
+    assert _notas_a_receber(c) == [] and diretoria.rm_por_mes(c)[0] == {}
+
+
+def test_tipo_extra_nao_muda_a_regra_da_coligada_no_consorcio(cenario):
+    """Segunda revisao da PR #764: no a receber e no faturado do RM so' conta a nota da coligada da entidade do
+    contrato. No contrato em nome do consorcio que declara o 2.2.03, a nota da propria empresa (outra coligada) desse
+    tipo continua fora das duas somas, ligada a uma medicao dele ou solta, com titulo aberto e com baixa: os numeros
+    sao os mesmos com e sem a chave. A fatura do consorcio (a coligada dele) do mesmo tipo e' a que entra."""
+    c, ids = cenario
+    k = ids["consorcio"]
+    c.execute("UPDATE entidades SET coligada_rm=12 WHERE chave='cons'")
+    fechada = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=2 AND tipo='execucao'", (k,)).fetchone()[0]
+    # da empresa (coligada 1): uma ligada a' medicao recebida do consorcio, outra solta, as duas com titulo
+    _nota_do_rm(c, 9821, "2.2.03", 200_000_001, [(150_000_001, 0, 0, None), (50_000_000, 50_000_000, 1, "2026-09-02")],
+                medicao=fechada)
+    _nota_do_rm(c, 9822, "2.2.03", 77_777, [(77_777, 0, 0, None)])
+    ids["liberar"]()
+    def retrato():
+        return (_notas_a_receber(c), diretoria.a_receber(c, HOJE)["total"]["valor_centavos"], diretoria.rm_por_mes(c),
+                diretoria.baixado_sem_caixa_por_mes(c), diretoria.complemento_rm(c), diretoria.da_obra(c, k),
+                diretoria.a_receber_por_obra(c, na_cota=True))
+    sem_a_chave = retrato()
+    assert sem_a_chave[:3] == ([], 700_000 + 300_000, ({}, {}))
+    _tipos_extras(c, k, "2.2.03")
+    assert retrato() == sem_a_chave
+    assert diretoria.notas_gemeas_de_tipo_extra(c, k, {"2.2.03"}) == []
+    # a fatura do proprio consorcio, do mesmo tipo, entra (na cota: 333.333 x 50% = 166.666,5 -> 166.667)
+    _nota_do_rm(c, 9823, "2.2.03", 333_333, [(333_333, 0, 0, None)], coligada=12)
+    assert _notas_a_receber(c) == [(k, 166_667)] and diretoria.rm_por_mes(c)[0] == {"2026-08": 166_667}
+
+
+def test_notas_gemeas_de_tipo_extra_so_lista_o_par_que_contaria_junto(cenario):
+    """docs/adr/0015: o par que o `cadastro aplicar` recusa. Conta a fatura do consorcio reclassificada (movimento
+    novo de tipo extra e a antiga, de tipo geral, as duas ativas na coligada dele); nao conta o par da nota da empresa
+    na obra do consorcio, que a regra da coligada ja' deixa fora das somas, nem o par de outra obra."""
+    c, ids = cenario
+    p, k = ids["propria"], ids["consorcio"]
+    c.execute("UPDATE contratos SET centro_custo_rm='9.001.001' WHERE id=?", (p,))
+    c.execute("UPDATE entidades SET coligada_rm=12 WHERE chave='cons'")
+    _tipos_extras(c, k, "2.2.03")
+    aberto = [(333_333, 0, 0, None)]
+    def par(idmov, coligada, centro=None):
+        for i, tipo in enumerate(("2.2.01", "2.2.03")):
+            nid = _nota_do_rm(c, idmov + i, tipo, 333_333, aberto, coligada=coligada, centro=centro)
+            c.execute("UPDATE notas_fiscais SET numero='500', numero_int=500 WHERE id=?", (nid,))
+        c.commit()
+    par(9831, 1)                        # da empresa, sem obra
+    par(9841, 1, centro="9.001.001")    # na Obra Propria, que nao declara
+    assert diretoria.notas_gemeas_de_tipo_extra(c, k, {"2.2.03"}) == []
+    assert diretoria.notas_gemeas_de_tipo_extra(c, p, {"2.2.03"}) == []      # a propria nao declara: a 2.2.03 nao conta
+    par(9851, 12)                       # do consorcio
+    assert diretoria.notas_gemeas_de_tipo_extra(c, k, {"2.2.03"}) == [{
+        "obra": "Consórcio", "coligada": 12, "numero": "500", "emissao": "2026-08-10", "valor_centavos": 333_333,
+        "idmov_geral": 9851, "tipo_geral": "2.2.01", "idmov_extra": 9852, "tipo_extra": "2.2.03"}]
+    assert diretoria.notas_gemeas_de_tipo_extra(c, k, {"2.2.04"}) == []      # outro tipo: nenhum par
+    _tipos_extras(c, p, "2.2.03")       # declarado tambem na propria: o par do centro dela passa a contar junto
+    assert [(g["idmov_geral"], g["idmov_extra"]) for g in diretoria.notas_gemeas_de_tipo_extra(c, p, {"2.2.03"})] == [
+        (9841, 9842)]
 
 
 def test_a_receber_recebida_sem_data_do_corte_fica_fora_do_previsto(cenario):

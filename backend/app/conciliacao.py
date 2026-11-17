@@ -31,7 +31,7 @@ import re
 from collections import Counter, defaultdict
 from itertools import combinations
 
-from app import db, medicoes, rm, sincronizacao_rm
+from app import cobranca_orgao, db, medicoes, rm, sincronizacao_rm
 
 REGRA = "conciliacao_historica"
 CONFIANCA = 0.85
@@ -89,33 +89,34 @@ def _opcoes(m, notas: list[dict]) -> list[frozenset]:
     return ops
 
 
-def _livres_do_banco(conn) -> list[dict]:
-    """Issue #598: so' nota de cobranca ao orgao (`diretoria.CODTMV_COBRANCA`, a lista do a receber, #563); nota de
-    fornecedor (2.2.15), de pessoa fisica (2.2.10) ou sem tipo nao vira opcao."""
-    from app import diretoria   # import local: diretoria importa este modulo
-    cobranca = ",".join("?" * len(diretoria.CODTMV_COBRANCA))
+def _livres_do_banco(conn, extras: dict[int, frozenset[str]]) -> list[dict]:
+    """Issue #598: so' nota de cobranca ao orgao (a regra do a receber, #563); nota de fornecedor (2.2.15), de pessoa
+    fisica (2.2.10) ou sem tipo nao vira opcao. Aqui a nota ainda nao tem obra: vem a de todo tipo que e' cobranca em
+    alguma (`cobranca_orgao.tipos_buscados`), com o tipo, e `conciliar` so' a oferece a' medicao do contrato em que
+    ela e' cobranca (`cobranca_orgao.e_cobranca`, docs/adr/0015)."""
+    tipos = cobranca_orgao.tipos_buscados(extras)
     return [dict(r) for r in conn.execute(f"""
-        SELECT id, coligada, centro_custo, emissao, valor_centavos FROM notas_fiscais n
-        WHERE idmov IS NOT NULL AND situacao='ativa' AND emissao IS NOT NULL AND codtmv IN ({cobranca})
-          AND NOT EXISTS (SELECT 1 FROM nf_alocacoes a WHERE a.nota_id=n.id AND a.desfeita_em IS NULL)""",
-        diretoria.CODTMV_COBRANCA)]
+        SELECT id, coligada, centro_custo, emissao, valor_centavos, codtmv FROM notas_fiscais n
+        WHERE idmov IS NOT NULL AND situacao='ativa' AND emissao IS NOT NULL AND codtmv IN ({','.join('?' * len(tipos))})
+          AND NOT EXISTS (SELECT 1 FROM nf_alocacoes a WHERE a.nota_id=n.id AND a.desfeita_em IS NULL)""", tipos)]
 
 
-def _livres_do_rm(conn, linhas: list[dict]) -> list[dict]:
+def _livres_do_rm(conn, linhas: list[dict], extras: dict[int, frozenset[str]]) -> list[dict]:
     """Notas antigas do RM que ainda nao estao no banco (a DASH10 pode ter trazido a borda da janela). A DASH12 traz
-    todo `2.2.%`: so' entra a nota de cobranca ao orgao (issue #598)."""
-    from app import diretoria   # import local: diretoria importa este modulo
+    todo `2.2.%`: so' entra a nota de cobranca ao orgao (issue #598), pela mesma regra de `_livres_do_banco`."""
+    tipos = cobranca_orgao.tipos_buscados(extras)
     ja = {(r[0], r[1]) for r in conn.execute("SELECT coligada, idmov FROM notas_fiscais WHERE idmov IS NOT NULL")}
     out = []
     for l in linhas:
         col, idmov = int(l["CODCOLIGADA"]), int(l["IDMOV"])
         emissao = rm.data(l.get("DATAEMISSAO"))
-        if l.get("CODTMV") not in diretoria.CODTMV_COBRANCA:
+        if l.get("CODTMV") not in tipos:
             continue
         if str(l.get("STATUS", "")).upper() == "C" or (col, idmov) in ja or not emissao:
             continue
         out.append({"id": f"rm:{col}:{idmov}", "coligada": col, "centro_custo": l.get("CODCCUSTO"),
-                    "emissao": emissao, "valor_centavos": rm.centavos(l.get("VALORBRUTO")), "linha": l})
+                    "emissao": emissao, "valor_centavos": rm.centavos(l.get("VALORBRUTO")), "codtmv": l.get("CODTMV"),
+                    "linha": l})
     return out
 
 
@@ -127,12 +128,13 @@ def conciliar(conn, usuario_id: int, ensaio: bool, antigas: tuple[list, list] | 
         with db.mutacao(conn):
             meds = _medicoes_do_legado(conn)
             rel["legado_sem_nota"] = len(meds)
+            extras = cobranca_orgao.extras_por_contrato(conn)
             if antigas is None:
-                livres = _livres_do_banco(conn)
+                livres = _livres_do_banco(conn, extras)
                 # inicio da janela que o RM entrega (DASH10: 24 meses), por TODAS as notas, nao so' as livres
                 inicio_rm = _data(conn.execute("SELECT MIN(emissao) FROM notas_fiscais WHERE idmov IS NOT NULL").fetchone()[0])
             else:
-                livres = _livres_do_rm(conn, antigas[0])
+                livres = _livres_do_rm(conn, antigas[0], extras)
                 inicio_rm = INICIO_DASH12
                 linha_da = {n["id"]: n["linha"] for n in livres}
                 baixas_de = defaultdict(list)
@@ -155,6 +157,7 @@ def conciliar(conn, usuario_id: int, ensaio: bool, antigas: tuple[list, list] | 
                     cc = (m["centro_custo_rm"] or "").strip()
                     centros = {cc, *json.loads(m["centros_custo_anteriores_rm"] or "[]")}
                     notas = [n for n in livres if n["coligada"] == m["coligada_rm"]
+                             and cobranca_orgao.e_cobranca(n["codtmv"], m["contrato_id"], extras)
                              and (not cc or (n["centro_custo"] or "").strip() in centros)
                              and -JANELA_ANTES <= (_data(n["emissao"]) - prot).days <= JANELA_DEPOIS]
                     opcoes[m["id"]] = _opcoes(m, notas)
