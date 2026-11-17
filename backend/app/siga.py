@@ -897,11 +897,21 @@ def pedir_leitura(conn, usuario_id: int, processo_id: int | None, tarefa: str,
             "novo": novo, "disparado": not lendo and erro is None, "erro_disparo": erro}
 
 
+def _novos(conn) -> set[int]:
+    """Processos que acabaram de entrar: sem leitura nenhuma e que nenhuma rodada chamou ainda. O processo novo e'
+    lido na pergunta seguinte do robo, sem esperar a rodada da hora (decisao do dono em 17/11/2026). Vale uma vez:
+    chamado por uma rodada, mesmo sem ter sido lido, deixa de ser novo e segue na rodada da hora, para o codigo que
+    nao abre nao virar uma entrada no SIGA a cada pergunta."""
+    return {r[0] for r in conn.execute(
+        "SELECT p.id FROM siga_processos p WHERE NOT EXISTS (SELECT 1 FROM siga_leituras l WHERE l.processo_id=p.id) "
+        "AND NOT EXISTS (SELECT 1 FROM siga_rodadas r, json_each(r.processos) j WHERE j.value=p.id)")}
+
+
 def iniciar_rodada(conn, agora: datetime.datetime | None = None, so_pedidos: bool = False) -> dict:
     """"Comecei" do robo: o servidor decide o que ler. Completa (todos os processos vivos; o encerrado so' entra
     com pedido da pessoa para ele, #657) com pedido "todos" em aberto, ou quando a ultima rodada completa terminada
     comecou ha' 59 minutos ou mais (ou nunca houve): e' a rodada automatica, no maximo uma por hora. Senao, so' os
-    processos dos pedidos em aberto. Os pedidos em aberto ficam
+    processos dos pedidos em aberto e os novos (`_novos`), que valem a qualquer hora. Os pedidos em aberto ficam
     ligados a' rodada. Sem nada a ler nao grava nada: e' o que o robo recebe quando pergunta, antes de encerrar, se
     chegou pedido novo. Com rodada aberta ha' menos de 10 minutos (o robo dela pode estar vivo: so' ele chama aqui,
     porque o Windows nao roda a tarefa duas vezes), devolve a mesma: e' o robo repetindo o "comecei".
@@ -921,7 +931,8 @@ def iniciar_rodada(conn, agora: datetime.datetime | None = None, so_pedidos: boo
             por_tempo = not so_pedidos and (ultima is None or agora - _instante(ultima) >= COMPLETA_A_CADA)
             completa = por_tempo or None in pedidos
             fora = encerrados(conn) if completa else {}
-            processos = [p for p in todos if (completa and p["id"] not in fora) or p["id"] in pedidos]
+            chamados = pedidos | _novos(conn)
+            processos = [p for p in todos if (completa and p["id"] not in fora) or p["id"] in chamados]
             if not processos:
                 return {"rodada_id": None, "tipo": None, "processos": []}
             tipo = "automatica" if por_tempo else "pedido"
