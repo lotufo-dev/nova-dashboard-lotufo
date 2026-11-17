@@ -109,14 +109,18 @@ export function linhaDoTempo(inicio: string | null, fim: string, hoje: string): 
   return { posicao, restantes };
 }
 
-/** Selo do prazo (texto na tela, 26/10/2026): so' quando pede acao, nos limites do aviso "Execucao vencendo" (spec
- *  §11): a ate' 60 dias do fim em Atencao, a ate' 30 ou vencido em Critico. Fora disso, null (quanto falta nao se
- *  escreve). */
-export function seloDoPrazo(restantes: number | null): { classe: string; texto: string } | null {
-  if (restantes === null || Number.isNaN(restantes) || restantes > 60) return null;
-  const texto = restantes < 0 ? "vencida" : restantes === 0 ? "vence hoje"
+/** O que o selo de um prazo diz: "vencida", "vence hoje" ou "vence em N dias". */
+export function textoDoPrazo(restantes: number): string {
+  return restantes < 0 ? "vencida" : restantes === 0 ? "vence hoje"
     : `vence em ${restantes} ${restantes === 1 ? "dia" : "dias"}`;
-  return { classe: restantes <= 30 ? "critico" : "breve", texto };
+}
+
+/** O selo de um prazo da obra (texto na tela, 26/10/2026: so' quando pede acao; quanto falta nao se escreve fora
+ *  dele). O nivel e' o do servidor (`prazos.situacao`: a regra unica dos avisos, da aba Prazos, do numero dos dias e
+ *  das linhas do tempo); a tela so' escreve quanto falta. Sem nivel a cobrar (normal ou ausente), null. */
+export function seloDoPrazo(nivel: string | null | undefined, restantes: number): { classe: string; texto: string } | null {
+  if (nivel !== "critico" && nivel !== "atencao") return null;
+  return { classe: nivel === "critico" ? "critico" : "breve", texto: textoDoPrazo(restantes) };
 }
 
 /** Rótulo curto da marca do aditivo na curva: "2º TA" para "TA 2º Termo Aditivo ao Contrato …"; sem número, "TA". */

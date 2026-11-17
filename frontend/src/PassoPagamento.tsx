@@ -197,9 +197,12 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
               : grupo.some(x => ["protocolada", "nf_emitida"].includes(x.estado) || x.recebe_sem_protocolo) ? <Selo situacao="andamento">{receber.parcial ? "Recebido em parte" : "Aguardando o órgão"}</Selo> : null}</p>
           </div>
           {/* issue #53: o recebimento a mao e' so' do admin (o servidor recusa outro perfil) */}
+          {/* o recebimento e' de cada medicao: no par (medicao e reajuste) o botao diz de qual, senao seriam dois iguais */}
           {recebiveis.map(x => (
             <div key={x.id}>
-              <button type="button" className="btn" title={tituloMedicao(x)} onClick={() => aoReceber(x)}>Registrar recebimento</button>
+              <button type="button" className="btn" title={tituloMedicao(x)} onClick={() => aoReceber(x)}>
+                Registrar recebimento{grupo.length > 1 ? (x.tipo === "reajuste" ? " do reajuste" : " da medição") : ""}
+              </button>
             </div>
           ))}
         </section>

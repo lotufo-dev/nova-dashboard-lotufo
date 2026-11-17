@@ -68,6 +68,9 @@ def detalhe(pid: ID, usuario: dict = Depends(exigir("ver_paineis", com_csrf=Fals
         return notas_envio.detalhe_envio(conn, pid, remetente=usuario.get("email"))
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
+    except FileNotFoundError:
+        # a previa le os anexos do disco; arquivo gravado no banco e ausente da pasta de dados nao pode virar 500
+        raise HTTPException(409, protocolo.ARQUIVO_AUSENTE) from None
 
 
 @router.post("/api/notas/envio/{pid}/enviar")
@@ -91,6 +94,11 @@ def enviar(pid: ID, dados: EnviarIn, usuario: dict = Depends(exigir("editar_cada
     except protocolo.Bloqueio as e:
         conn.rollback()
         raise HTTPException(409, str(e)) from None
+    except FileNotFoundError:
+        # anexo ausente do disco: o envio e' recusado inteiro. `protocolo.enviar` le os anexos antes da reserva e de
+        # novo antes do e-mail (ai' ele mesmo solta a reserva): nenhum e-mail sai e nada fica gravado
+        conn.rollback()
+        raise HTTPException(409, protocolo.ARQUIVO_AUSENTE) from None
     except (ValueError, graph.ErroGraph) as e:
         conn.rollback()
         raise HTTPException(422, str(e)) from None

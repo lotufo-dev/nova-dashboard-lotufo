@@ -55,13 +55,16 @@ def pronto_para_protocolar(conn: sqlite3.Connection, contrato_id: int, natureza:
                           "chave": t.get("chave"), "jurisdicao": t["jurisdicao"], "situacao": sit,
                           "validade": s["certidao"]["validade"] if vale else None, "dias": s["dias"],
                           "certidao_id": s["certidao"]["id"] if vale else None,
+                          # o `pendente` cobre dois casos que a tela mostra diferente: a certidao vencida (trava o
+                          # envio, docs/adr/0002) e a que nunca foi cadastrada (falta, nao trava)
+                          "nunca_cadastrada": s["situacao"] == "faltando",
                           "link_emissao": t.get("link_emissao")})
     if ex["regularidade"]:
         r = documentos.situacao_regularidade(conn, ex["regularidade"], hoje)
         itens.append({"entidade_id": ex["regularidade"], "entidade": nome(ex["regularidade"]), "tipo_id": None,
                       "tipo": "Regularidade mensal", "chave": "regularidade", "jurisdicao": None,
                       "situacao": "ok" if r["situacao"] == "ok" else "pendente", "validade": None, "dias": None,
-                      "certidao_id": None, "link_emissao": None,
+                      "certidao_id": None, "nunca_cadastrada": r["situacao"] == "faltando", "link_emissao": None,
                       "competencia": r["competencia"], "esperada": r["esperada"]})
     ent = contratos.entidade_de(c)
     e = entidades.detalhe(conn, ent)

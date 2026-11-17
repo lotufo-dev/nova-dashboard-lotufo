@@ -19,6 +19,8 @@ import Falha from "./Falha";
 type Instrumento = InstrumentoPrazo & { nova_execucao_fim: string | null; nova_vigencia_fim: string | null };
 type Situacao = {
   execucao_fim: string | null; dias_execucao: number | null; vigencia_fim: string | null; dias_vigencia: number | null;
+  /** o nivel de cada prazo, decidido no servidor (`prazos.situacao`): `normal` onde nao ha' prazo a cobrar */
+  nivel_execucao?: string; nivel_vigencia?: string;
   vigencia_automatica: boolean; folga: { exigida: number | null; real: number | null; quebrada: boolean };
   paralisacao: { desde: string; numero: string | null } | null;
   // o pedido de prorrogacao enviado que nenhum instrumento atendeu ainda (o servidor decide)
@@ -47,9 +49,9 @@ function data(iso: string | null | undefined): string {
 function dias(n: number): string {
   return `${n}\u00a0${n === 1 ? "dia" : "dias"}`;
 }
-// prazo perto do fim ou vencido pede acao: vira selo so' quando acontece (seloDoPrazo)
-function SeloPrazo({ d }: { d: number | null }) {
-  const selo = seloDoPrazo(d);
+// prazo perto do fim ou vencido pede acao: vira selo so' quando acontece; quem decide e' o servidor (o nivel)
+function SeloPrazo({ nivel, d }: { nivel: string | undefined; d: number | null }) {
+  const selo = d === null ? null : seloDoPrazo(nivel, d);
   return selo ? <Selo situacao={situacaoDoNivel(selo.classe)}>{selo.texto}</Selo> : null;
 }
 
@@ -165,15 +167,15 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
           <div className="dado">
             <span className="resumo__rotulo">Execução até</span>
             <span className="dado__valor num">{data(s.execucao_fim)}</span>
-            {/* os mesmos casos em que o servidor nao avisa (prazos.py): obra em encerramento e, na execucao,
+            {/* o nivel vem do servidor, que cala onde nao avisa (prazos.py): obra em encerramento e, na execucao,
                 obra paralisada (D16); na vigencia, a que o orgao prorroga junto */}
-            {s.execucao_fim && !s.paralisacao && !s.encerramento && <SeloPrazo d={s.dias_execucao} />}
+            {s.execucao_fim && <SeloPrazo nivel={s.nivel_execucao} d={s.dias_execucao} />}
             {s.paralisacao && <Selo situacao="breve">paralisada desde {data(s.paralisacao.desde)}</Selo>}
           </div>
           <div className="dado">
             <span className="resumo__rotulo">Vigência até</span>
             <span className="dado__valor num">{data(s.vigencia_fim)}</span>
-            {s.vigencia_fim && !s.vigencia_automatica && !s.encerramento && <SeloPrazo d={s.dias_vigencia} />}
+            {s.vigencia_fim && <SeloPrazo nivel={s.nivel_vigencia} d={s.dias_vigencia} />}
           </div>
           <div className="dado">
             <span className="resumo__rotulo">Folga entre execução e vigência</span>

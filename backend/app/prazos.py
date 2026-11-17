@@ -14,7 +14,29 @@ from fractions import Fraction
 
 from app import avisos as _av, contratos, dinheiro, tempo
 
+# Os limites do prazo da obra, num lugar so' (spec de 21/09/2026, §11, aviso "Execução vencendo": 60 dias do fim,
+# critico aos 30). Valem para os avisos, o farol da lista de Obras (que sai dos avisos), a aba Prazos, o numero dos
+# dias e as linhas do tempo da pagina da obra: tudo passa por `nivel_do_prazo`.
 DIAS_EXECUCAO, DIAS_CRITICO, DIAS_VIGENCIA = 60, 30, 60
+
+
+def nivel_do_prazo(dias: int | None, limite: int = DIAS_EXECUCAO) -> str:
+    """`critico` a ate' DIAS_CRITICO dias do fim (ou vencido), `atencao` a ate' `limite` dias, senao `normal`."""
+    if dias is None:
+        return "normal"
+    return "critico" if dias <= DIAS_CRITICO else "atencao" if dias <= limite else "normal"
+
+
+def _niveis(estado: str, s: dict) -> tuple[str, str]:
+    """(nivel da execucao, nivel da vigencia) da obra: QUANDO ha' prazo a cobrar, a regra unica dos avisos e das
+    telas. So' a obra ativa e fora do encerramento tem prazo a cobrar. A execucao da obra paralisada nao conta
+    (D16: Lei 14.133, art. 115, par. 5o), nem a sem prazo conhecido (#662: `dias_execucao` nulo). A vigencia que o
+    orgao prorroga junto com a execucao tambem nao."""
+    if estado != "ativo" or s["encerramento"]:
+        return "normal", "normal"
+    execucao = "normal" if s["paralisacao"] else nivel_do_prazo(s["dias_execucao"], DIAS_EXECUCAO)
+    vigencia = "normal" if s["vigencia_automatica"] else nivel_do_prazo(s["dias_vigencia"], DIAS_VIGENCIA)
+    return execucao, vigencia
 ENDOSSO_PRAZO, ENDOSSO_JANELA = 5, 60
 
 
@@ -128,14 +150,17 @@ def situacao(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict:
                "conclusao_comunicada": _pleito(conn, contrato_id, "conclusao") is not None}
     # #662: sem prazo de execucao conhecido nao ha' dias a contar (nem aviso, nem selo de vencido); a data fica
     sem_prazo = _execucao_sem_prazo(insts, exe, hoje)
-    return {"execucao_fim": exe, "dias_execucao": (exe_d - hoje).days if exe_d and not sem_prazo else None,
-            "execucao_sem_prazo": sem_prazo,
-            "vigencia_fim": vig, "dias_vigencia": (vig_d - hoje).days if vig_d else None,
-            "vigencia_automatica": bool(regras.get("vigencia_automatica")),
-            "folga": {"exigida": exigida, "real": real,
-                      "quebrada": exigida is not None and real is not None and real < exigida},
-            "paralisacao": _paralisacao(conn, contrato_id), "pedido": pedido, "instrumentos": insts,
-            "endosso": endosso, "encerramento": enc}
+    s = {"execucao_fim": exe, "dias_execucao": (exe_d - hoje).days if exe_d and not sem_prazo else None,
+         "execucao_sem_prazo": sem_prazo,
+         "vigencia_fim": vig, "dias_vigencia": (vig_d - hoje).days if vig_d else None,
+         "vigencia_automatica": bool(regras.get("vigencia_automatica")),
+         "folga": {"exigida": exigida, "real": real,
+                   "quebrada": exigida is not None and real is not None and real < exigida},
+         "paralisacao": _paralisacao(conn, contrato_id), "pedido": pedido, "instrumentos": insts,
+         "endosso": endosso, "encerramento": enc}
+    # o nivel de cada prazo, para a tela so' mostrar (aba Prazos, numero dos dias e linhas do tempo da pagina da obra)
+    s["nivel_execucao"], s["nivel_vigencia"] = _niveis(v["estado"], s)
+    return s
 
 
 def resumo(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict:
@@ -360,13 +385,13 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                                      f"execução vencida há {-dias} dias, sem pedido de prorrogação",
                                      cid, nome, dias=dias, publico=("operacao", "diretoria"), destino=destino,
                                      data=s["execucao_fim"], sentido="prazo"))
-            elif dias is not None and dias <= DIAS_EXECUCAO:
-                out.append(_av.aviso("execucao_vencendo", "critico" if dias <= DIAS_CRITICO else "atencao",
+            elif s["nivel_execucao"] != "normal":
+                out.append(_av.aviso("execucao_vencendo", s["nivel_execucao"],
                                      f"execução termina em {dias} dias ({_br(s['execucao_fim'])})",
                                      cid, nome, dias=dias, destino=destino, data=s["execucao_fim"], sentido="prazo"))
-        if not s["vigencia_automatica"] and s["dias_vigencia"] is not None and s["dias_vigencia"] <= DIAS_VIGENCIA:
+        if s["nivel_vigencia"] != "normal":
             dv = s["dias_vigencia"]
-            out.append(_av.aviso("vigencia_vencendo", "critico" if dv <= DIAS_CRITICO else "atencao",
+            out.append(_av.aviso("vigencia_vencendo", s["nivel_vigencia"],
                                  f"vigência termina em {dv} dias ({_br(s['vigencia_fim'])})" if dv >= 0
                                  else f"vigência vencida há {-dv} dias ({_br(s['vigencia_fim'])})",
                                  cid, nome, dias=dv, destino=destino, data=s["vigencia_fim"], sentido="prazo"))
