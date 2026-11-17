@@ -11,7 +11,10 @@ vigentes cobrem o valor da medição; com uma nota cancelada no RM, a quitação
 O recebimento parte de `protocolada`. Na obra cuja lista `passos_medicao` do cadastro não tem `envio_nota`, a empresa
 não envia a nota ao órgão e a medição ficava em nota emitida sem caminho até recebida. Nessas obras, a medição com
 nota emitida é recebida direto, sem protocolo, pela baixa do RM ou pelo registro do administrador com motivo; a
-cobertura das notas vigentes vale igual, e a espera pelo pagamento conta da emissão da nota. Na obra com o passo, sem
+cobertura das notas vigentes vale igual, e a espera pelo pagamento conta da emissão da nota. Enquanto espera, ela
+conta como a protocolada no protocolado e no em aberto do Fechamento e no a receber do Início, da lista de Obras e da
+página da obra, com a data da emissão da nota no lugar da do protocolo; no Início ela fica na etapa "Protocolado" do
+ciclo e, por não ter protocolo, sem data esperada (`docs/adr/0007`). Na obra com o passo, sem
 a chave ou com a lista vazia (vale a família do órgão), nada muda. A decisão sobre os passos é a mesma da barra da
 página da medição (`passos_das_medicoes`), para a tela e o servidor não divergirem.
 
@@ -31,4 +34,12 @@ Consequências:
   quem deve é o consórcio.
 - Se o repasse entrar sem baixa no RM, o registro à mão não tira a nota do em aberto. A saída que existe é desfazer o
   vínculo da nota da empresa, que devolve a medição à regra da fatura do consórcio.
-- A página da medição e o a receber do Início e da lista de Obras ainda não seguem esta exceção (`docs/backlog.md`).
+- O a receber do Início e da lista de Obras (na cota) segue esta exceção desde 17/11/2026, pela mesma função que
+  decide quais notas contam (`fechamento._notas_da_conta`): a medição que espera o pagamento entra pelo em aberto da
+  nota da empresa; a que o órgão já pagou, pelo repasse sem baixa; e a fatura do consórcio da mesma medição não entra
+  de novo como cobrança do RM. O a receber da página da obra é em valor cheio (o que o órgão deve ao contrato) e não
+  leva o repasse.
+- No passo Pagamento da página da medição, a medição de consórcio sem espelho conta pelos títulos da nota da empresa
+  ligada e, sem ela, pelos títulos da fatura do consórcio vezes a cota; a fatura que a nota da empresa tirou da conta
+  aparece sem valor. Com espelho, o passo continua pelas saídas do espelho.
+- O que ainda não segue (a cobertura das notas vigentes, o recebido por mês do Início) está no `docs/backlog.md`.

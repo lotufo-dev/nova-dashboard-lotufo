@@ -26,9 +26,8 @@ const LISTA = { familia: "ses", etapas: [{ chave: "unico", rotulo: "Protocolo", 
 const FICHA = { topo: { vigente_centavos: 100000, medido_centavos: 45000, saldo_centavos: 55000, reajuste_centavos: 0 },
   contrato: { original_centavos: 100000, original_igual: true, tas: 0, data_base: null },
   ultima_medicao: null, em_andamento: null,
-  ritmo: { ritmo_centavos: 11000, saldo_centavos: 55000, conclusao: "2027-03-15", execucao_fim: "2026-12-31", situacao: "atrasa", dias_alem: 74 },
-  vencimentos: [{ chave: "execucao", rotulo: "Fim da execução", data: null, dias: null, nivel: "normal" },
-    { chave: "vigencia", rotulo: "Fim da vigência", data: null, dias: null, nivel: "normal" }] };
+  ritmo: { ritmo_centavos: 11000, conclusao: "2027-03-15", situacao: "atrasa", dias_alem: 74 },
+  vencimentos: [{ chave: "execucao", rotulo: "Fim da execução", data: null, dias: null, nivel: "normal" }] };
 
 const leituras = (caminho: string) => api.mock.calls.filter(c => c[0] === caminho && !c[1]);
 
@@ -196,7 +195,7 @@ describe("Página da obra: o desenho novo", () => {
     const base = api.getMockImplementation()!;
     api.mockImplementation(async (url: string, o?: { method?: string }) => url.endsWith("/ficha")
       ? { ...FICHA,
-          em_andamento: { id: 9, titulo: "24ª Medição", rotulo: "24ª", competencia: "2026-10", valor_centavos: 123400, etapa: "Envio da nota", desde: "2026-10-20", outras: 0 },
+          em_andamento: { id: 9, titulo: "24ª Medição", rotulo: "24ª", competencia: "2026-10", valor_centavos: 123400, etapa: "Envio da nota", desde: "2026-10-20" },
           ultima_medicao: { id: 8, titulo: "23ª Medição", rotulo: "23ª", competencia: "2026-09", valor_centavos: 500000, recebida_em: "2026-10-10", dias_apos_nota: 12 } }
       : base(url, o));
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="prazos" origem={null} busca={{}} />);

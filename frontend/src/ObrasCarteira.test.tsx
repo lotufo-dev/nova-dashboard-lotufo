@@ -10,8 +10,6 @@ const PAINEL: Painel = {
   curva_carteira: [{ competencia: "2026-08", previsto_centavos: 150_000, previsto_anterior_centavos: 300_000, medido_centavos: 100_000 },
                    { competencia: "2026-09", previsto_centavos: 200_000, previsto_anterior_centavos: 200_000, medido_centavos: 150_000 }],
   reajustes_apostilamento: { competencias: 0, valor_centavos: 0, obras: [] },
-  carteira: { saldo_centavos: 5_000_000,
-              por_orgao: [{ orgao: "Secretaria de Exemplo", saldo_centavos: 5_000_000, vigente_centavos: 20_000_000, medido_centavos: 15_000_000 }] },
   obras: [{ contrato_id: 7, seq: 1, obra: "Obra Própria", contratante: "Secretaria de Exemplo", empreita: "PRÓPRIA", direito: 1,
             // #262: faturado (QDOP, com projeto) e saldo (execucao - medido de execucao) nao fecham entre si
             pi_va: 1_000_000, faturados: 450_000, saldo: 600_000, status: "EM ANDAMENTO",

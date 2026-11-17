@@ -336,11 +336,13 @@ def pagamento_cota(conn, medicao_id: int) -> dict | None:
     RM (liquidos): falta titulo a titulo (`_falta_por_titulo`), recebido efetivo = devido - falta (juros num titulo
     nao cobrem outro aberto).
 
-    Em consorcio (issue #756), a medicao sem nota da empresa casada com saida do espelho conta pelas notas que o
-    Fechamento conta (`_da_conta_em_consorcio`): a nota da propria empresa ligada, pelos titulos dela; sem ela, os
-    titulos da fatura do consorcio vezes a cota (um arredondamento por nota; a falta nunca passa do devido).
+    Em consorcio (issue #756), a medicao SEM espelho vigente conta pelas notas que o Fechamento conta
+    (`_da_conta_em_consorcio`): a nota da propria empresa ligada, pelos titulos dela; sem ela, os titulos da fatura
+    do consorcio vezes a cota (um arredondamento por nota; a falta nunca passa do devido). Para o resumo ela vale
+    como medicao "com espelho": sabe-se o que esperar.
 
-    Devolve None quando nenhuma medicao do grupo tem espelho vigente (nao da' para saber o que esperar). Senao
+    Devolve None quando nenhuma medicao do grupo tem espelho vigente nem, em consorcio, nota que conte (nao da' para
+    saber o que esperar). Senao
     {notas_faltam, completo, total_centavos, recebido_centavos, falta_centavos, parcial, falta_divergente_centavos}: `completo` exige toda
     medicao do grupo com espelho, toda saida com nota e toda nota com titulo; sem isso os valores vem None. Espelho
     sem saida da Lotufo conta zero. `parcial`: alguma nota da cota ja' teve baixa e ainda falta receber (ou o resumo
@@ -357,8 +359,8 @@ def pagamento_cota(conn, medicao_id: int) -> dict | None:
         esp = _notas.esperadas_do_espelho(conn, mid)
         da_conta = _da_conta_em_consorcio(conn, mid, esp)
         if da_conta is not None:
-            # issue #756: em consorcio, sem nota da empresa casada com saida do espelho, contam as notas que o
-            # Fechamento conta: a da propria empresa pela face (`pct` nulo), senao a fatura do consorcio vezes a cota
+            # issue #756: em consorcio, a medicao sem espelho conta pelas notas que o Fechamento conta: a da propria
+            # empresa pela face (`pct` nulo), senao a fatura do consorcio vezes a cota
             com_espelho += 1
             for x in da_conta:
                 rec, devido, _ = _recebido_da_nota(conn, x["nota_id"])
@@ -406,11 +408,12 @@ def _da_conta_em_consorcio(conn, medicao_id: int, esperadas) -> list[dict] | Non
     consorcio, pela MESMA escolha do Fechamento (`fechamento.notas_da_cota_em_consorcio`, sobre `_notas_da_conta`): a
     nota da propria empresa ligada, pela face (`pct` nulo) e pelos titulos dela; sem ela, a fatura do consorcio vezes
     a cota (`pct` do contrato). Nunca as duas.
-    None quando a regra do espelho ja' responde e nada muda: fora de consorcio, medicao sem nota que conte, e medicao
-    com nota da empresa casada com uma saida do espelho vigente (`esperadas`): ali o resumo ja' sai so' das notas da
-    empresa, saida a saida, e diz a que falta."""
+    So' para a medicao SEM espelho vigente (`esperadas` None), que ate' aqui ficava sem resumo. None, e nada muda,
+    quando ha' espelho (ele diz o que a empresa fatura, saida a saida: o resumo ja' sai so' das notas da empresa, diz a
+    que falta, e o espelho sem saida da empresa nesta natureza fecha a cota em zero), fora de consorcio e na medicao
+    sem nota que conte."""
     from app import fechamento   # import local: fechamento importa este modulo
-    if esperadas and any(e["nota_id"] is not None for e in esperadas):
+    if esperadas is not None:
         return None
     escolha = fechamento.notas_da_cota_em_consorcio(conn, medicao_id)
     return escolha[0] if escolha and escolha[0] else None

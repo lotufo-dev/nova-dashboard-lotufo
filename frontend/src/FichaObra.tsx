@@ -14,17 +14,17 @@ import "./obra.css";
 // Quem decide o nivel de prazo e' o servidor (`ficha_obra`); o selo das linhas do tempo segue `seloDoPrazo`.
 
 type Nivel = "critico" | "atencao" | "normal";
-type Vencimento = { chave: "execucao" | "vigencia"; rotulo: string; data: string | null; dias: number | null; nivel: Nivel };
+type Vencimento = { chave: "execucao"; rotulo: string; data: string | null; dias: number | null; nivel: Nivel };
 type Medicao = { id: number; titulo: string; rotulo: string; competencia: string; valor_centavos: number | null };
 export type Ficha = {
   // #646: base de execucao (sem o aditivo de reajuste) e cota da Lotufo; vigente − medido = saldo
   topo: { vigente_centavos: number; medido_centavos: number; saldo_centavos: number; reajuste_centavos: number };
   contrato: { original_centavos: number; original_igual: boolean; tas: number; data_base: string | null };
   // #655: a conta de `prazos.ritmo_e_prazo`, na mesma base do topo; `situacao` nula quando a conta nao fecha
-  ritmo: { ritmo_centavos: number | null; saldo_centavos: number; conclusao: string | null; execucao_fim: string | null;
+  ritmo: { ritmo_centavos: number | null; conclusao: string | null;
     situacao: "no_prazo" | "atrasa" | null; dias_alem: number | null };
   ultima_medicao: (Medicao & { recebida_em: string | null; dias_apos_nota: number | null }) | null;
-  em_andamento: (Medicao & { etapa: string; desde: string | null; outras: number }) | null;
+  em_andamento: (Medicao & { etapa: string; desde: string | null }) | null;
   vencimentos: Vencimento[];
 };
 

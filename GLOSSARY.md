@@ -86,6 +86,8 @@ _Avoid_: NF na tela (vale em nome de arquivo e no número do documento)
 
 **Protocolado**:
 A nota e o pacote foram enviados formalmente ao órgão. A data do protocolo começa a contar o prazo de pagamento.
+Na obra sem o passo "Envio da nota", a medição com nota emitida conta como protocolada nas somas (protocolado, em
+aberto, a receber), com a data da emissão da nota (`docs/adr/0006`).
 _Avoid_: protocolada para a planilha enviada (isso é "em análise")
 
 **Recebido**:

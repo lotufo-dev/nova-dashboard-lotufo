@@ -20,6 +20,7 @@ import datetime
 from app import avisos, diretoria, tempo
 
 FORA = diretoria.FORA
+MAIS_DE_DIAS = 60       # a faixa "ha' mais de 60 dias" do a receber (as outras faixas sairam com a tela A receber, #748)
 
 
 def _dia_local(utc: str | None) -> datetime.date | None:
@@ -174,9 +175,9 @@ def _a_receber(conn, hoje: datetime.date) -> dict:
     if not liberado:
         return {"liberado": False, "valor_centavos": None, "mais_60_centavos": None}
     todas = diretoria.a_receber_na_cota(conn)
-    faixas = diretoria._faixas(todas, hoje, True)
-    return {"liberado": True, "valor_centavos": diretoria._grupo_rec(todas)["valor_centavos"],
-            "mais_60_centavos": faixas["mais_60"]["valor_centavos"]}
+    datas = [(x, diretoria._d(x["protocolo_em"])) for x in todas]
+    return {"liberado": True, "valor_centavos": sum(diretoria._a_receber_cota(x) for x in todas),
+            "mais_60_centavos": sum(diretoria._a_receber_cota(x) for x, d in datas if d and (hoje - d).days > MAIS_DE_DIAS)}
 
 
 def _protocoladas_dia(conn) -> list[dict]:
