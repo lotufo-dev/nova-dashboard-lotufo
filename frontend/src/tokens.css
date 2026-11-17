@@ -637,7 +637,9 @@ td, th { font-variant-numeric: tabular-nums; }
   .casca:has(.menu[data-estado="largo"]) { padding-left: var(--largura-menu-recolhido); }
   .menu[data-estado="largo"] { box-shadow: var(--menu-sombra-sobreposto); }
   /* abas da obra e da Administracao: rolam na horizontal em vez de alargar a pagina */
-  .abas { overflow-x: auto; scrollbar-width: none; }
+  /* `position`: o texto so' para leitor de tela (absoluto) de um contador rolado para fora ficaria preso `a pagina e
+     a alargaria; preso `a faixa, rola com ela */
+  .abas { position: relative; overflow-x: auto; scrollbar-width: none; }
   .abas > .aba { flex: none; white-space: nowrap; }
   .topo { padding: 0 var(--espaco-pp) 0 var(--espaco-m); }
   /* no celular fica o avatar; o nome esta' no rotulo acessivel do botao */

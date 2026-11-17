@@ -171,7 +171,7 @@ a.doc-chip:focus-visible { outline: var(--largura-foco) solid var(--cor-foco); o
 .doc-cabeca__zip input { width: calc(var(--alvo-minimo) * 4); }
 
 .doc-abas-cartao { padding: 0; }
-.doc-abas-cartao > .abas { padding: 0 var(--espaco-m); overflow-x: auto; border-bottom: var(--regua-secao); }
+.doc-abas-cartao > .abas { position: relative; padding: 0 var(--espaco-m); overflow-x: auto; border-bottom: var(--regua-secao); }
 .doc-abas-cartao .aba { white-space: nowrap; gap: var(--espaco-pp); height: var(--alvo-minimo); }
 .doc-painel { padding: var(--espaco-m) 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-g); }
 .doc-painel > :not(.tabela-wrap) { margin-left: var(--espaco-g); margin-right: var(--espaco-g); }
