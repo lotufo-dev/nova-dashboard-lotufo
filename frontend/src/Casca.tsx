@@ -26,9 +26,13 @@ function celular(): boolean {
   return typeof window.matchMedia === "function" && window.matchMedia(CELULAR).matches;
 }
 
-function estadoInicial(): "largo" | "recolhido" {
-  if (celular()) return "recolhido";
+/** A escolha guardada no computador (padrao largo). */
+function escolhaGuardada(): "largo" | "recolhido" {
   try { return localStorage.getItem(CHAVE_MENU) === "recolhido" ? "recolhido" : "largo"; } catch { return "largo"; }
+}
+
+function estadoInicial(): "largo" | "recolhido" {
+  return celular() ? "recolhido" : escolhaGuardada();
 }
 
 const ICONES: Record<ItemMenu, (p: { className?: string }) => React.ReactElement> = {
@@ -41,11 +45,13 @@ export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemM
   const largo = estado === "largo";
   const caixa = useRef<HTMLElement>(null);
 
-  // Ao estreitar a janela para o celular o menu largo (que ali cobre a tela) recolhe sozinho.
+  // Ao estreitar a janela para o celular o menu largo (que ali cobre a tela) recolhe sozinho. Ao alargar de volta,
+  // vale de novo a escolha guardada: sem isso o menu ficava recolhido ate' recarregar a pagina, sem ninguem ter
+  // clicado (era o menu "recolhido em umas capturas e aberto em outras", #779).
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
     const m = window.matchMedia(CELULAR);
-    const mudou = (ev: MediaQueryListEvent) => { if (ev.matches) setEstado("recolhido"); };
+    const mudou = (ev: MediaQueryListEvent) => setEstado(ev.matches ? "recolhido" : escolhaGuardada());
     m.addEventListener("change", mudou);
     return () => m.removeEventListener("change", mudou);
   }, []);
