@@ -171,8 +171,8 @@ def _de_outro_cadastro(conn, cad: dict) -> list[str]:
 
 def _carregar_medicoes(args) -> int:
     """`cadastro carregar-medicoes <obra>.csv --ensaio` (issue #258): confere o histórico de medições de uma
-    obra contra o banco e imprime o relatório, sem gravar. Sem `--ensaio` (issue #259), com o OK do dono no
-    relatório: cria as medições que faltam."""
+    obra contra o banco e imprime o relatório, sem gravar. Sem `--ensaio` (issue #259), com o relatório do
+    ensaio conferido: cria as medições que faltam."""
     if not args.arquivo:
         print("`cadastro carregar-medicoes` exige o arquivo <obra>.csv")
         return 1
