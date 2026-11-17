@@ -336,7 +336,7 @@ function AcompanharProcesso({ aoGravar }: { aoGravar: (id: number) => Promise<vo
           value={link} onChange={e => setLink(e.target.value)} />
       </div>
       <button type="submit" className="btn btn--primario" disabled={ocupado}>Acompanhar</button>
-      <button type="button" className="btn btn--pequeno" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
+      <button type="button" className="btn" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
       {erro && <Falha className="sg__erro">{erro}</Falha>}
     </form>
   );
@@ -377,7 +377,7 @@ function CorrigirCategoria({ p, aoGravar }: { p: ProcessoSiga; aoGravar: () => P
     <form className="form-inline sg__novo" onSubmit={enviar} aria-label="Corrigir categoria">
       <CamposCategoria id="siga-corrigir" valor={valor} mudar={setValor} obras={obras} aoFalhar={setErro} />
       <button type="submit" className="btn btn--primario" disabled={ocupado}>Salvar</button>
-      <button type="button" className="btn btn--pequeno" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
+      <button type="button" className="btn" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
       {erro && <Falha className="sg__erro">{erro}</Falha>}
     </form>
   );

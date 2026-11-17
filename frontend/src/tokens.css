@@ -945,14 +945,15 @@ td, th { font-variant-numeric: tabular-nums; }
 .form-inline { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; max-width: 100%; }
 /* filtro com opcao longa (nome de obra do consorcio) nao estica o select pela linha inteira */
 .form-inline select { max-width: 32ch; }
-.campo { display: grid; gap: 4px; }
+/* a coluna pode encolher: sem isso o campo largo (320 px) passava da caixa estreita em vez de caber nela */
+.campo { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 /* `min-width: 0` DESTRAVA o encolhimento: o padrao `auto` impede o campo de ficar
    menor que o controle dentro dele, e a `.entrada--larga` (320px) num cartao de
    303px em 375 estourava a pagina inteira — o `max-width: 100%` da entrada nunca
    chegava a valer porque o proprio campo ja media 320. Vale so' na linha de campos:
    os controles de 168px continuam cada um na sua linha (o flex so' encolhe o item
    que sozinho nao cabe). */
-.form-inline > .campo { min-width: 0; }
+.form-inline > .campo { min-width: 0; max-width: 100%; }
 .campo__rotulo { font-size: var(--texto-meta); font-weight: var(--peso-medio); color: var(--cor-tinta); }
 /* Medida de corpo: 78ch e' o mesmo teto do `.aviso`. Sem ele a
    nota de 12px do formulario de certidao corria ~170ch numa tela larga. */
@@ -1591,15 +1592,20 @@ a.contagem:hover .dado__valor { color: var(--cor-menu-realce); text-decoration: 
 .secoes-pleito > .cartao__corpo, .secoes-pleito > .detalhes { border-top: 1px solid var(--cor-linha); }
 /* logo abaixo da cabeca do cartao pai a divisoria ja existe: a primeira secao nao dobra o traco */
 .cartao__cabeca + .secoes-pleito > :first-child { border-top: 0; }
-.pleito-linha { display: grid; gap: 4px; padding: 12px 20px; border-top: 1px solid var(--cor-linha); }
+.pleito-linha { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 12px 20px; border-top: 1px solid var(--cor-linha); }
 .pleito-linha__cabeca { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
-.pleito-linha__cabeca .selo { flex: none; }
+/* o selo do desfecho e comprido ("Atendido pelo apostilamento ..."): em caixa estreita quebra, em vez de alargar a pagina */
+.pleito-linha__cabeca .selo { flex: 0 1 auto; white-space: normal; }
+.pleito-linha__cabeca .selo__texto { white-space: normal; }
 .pleito-linha > p { margin: 0; }
 /* "Ciclos anteriores": o summary acompanha o respiro lateral das secoes e a lista abre colada nele */
 .pleito-anteriores > summary { padding: 12px 20px; }
 .pleito-anteriores[open] > summary { margin-bottom: 0; }
 /* issue #275: na tabela por competencia do reajuste, o estado e a marca do aviso na Situacao (ancorada a' direita,
    `.col-fixa`): lado a lado quando cabem, um embaixo do outro quando a tabela aperta */
+/* o cabecalho comprido ("Previsto no apostilamento") quebra: as oito colunas cabem na caixa sem rolar a 1440 px */
+.reajuste-competencias thead th { white-space: normal; }
+.tabela.tabela--densa.reajuste-competencias :is(th, td):not(:first-child):not(:last-child) { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
 .reajuste-competencias .selos { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 /* o nº da medicao que o termo cita, ao lado do valor apostilado */
 .reajuste-competencias__citada { color: var(--cor-texto-secundario); }

@@ -36,7 +36,7 @@ export async function auditar(pagina) {
     // caixa que rola de lado (tabela larga dentro da propria caixa): permitido, mas fica dito para quem confere
     for (const el of raiz.querySelectorAll("*")) {
       const s = estilo(el);
-      if (/auto|scroll/.test(s.overflowX) && el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) {
+      if (/auto|scroll/.test(s.overflowX) && el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0 && el.tagName !== "MAIN") {
         achar("caixa rolando de lado", el, "", `${el.scrollWidth} px de conteúdo em ${el.clientWidth} px`);
       }
     }

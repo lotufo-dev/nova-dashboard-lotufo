@@ -189,6 +189,8 @@ async function estadoDaTela(pagina) {
       texto: (conteudo?.innerText ?? "").trim().length,
       larguraDaPagina: document.documentElement.scrollWidth,
       larguraDaJanela: window.innerWidth,
+      // no celular a casca deixa o conteudo rolar dentro do <main> em vez de alargar a pagina: e' rolagem lateral igual
+      sobraNoConteudo: (() => { const m = document.querySelector("main"); return m ? m.scrollWidth - m.clientWidth : 0; })(),
     };
   });
 }
@@ -206,6 +208,7 @@ function julgar(estado, caminhoEsperado, problemas, erroEsperado = false) {
   if (estado.larguraDaPagina > estado.larguraDaJanela + 1) {
     problemas.push(`rola de lado: página com ${estado.larguraDaPagina} px numa janela de ${estado.larguraDaJanela} px`);
   }
+  if (estado.sobraNoConteudo > 1) problemas.push(`rola de lado: o conteúdo passa ${estado.sobraNoConteudo} px da largura da tela`);
 }
 
 // Os achados da auditoria visual entram como aviso; com --estrito, os de REPROVA viram problema.

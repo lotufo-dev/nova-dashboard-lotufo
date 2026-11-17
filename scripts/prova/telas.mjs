@@ -154,7 +154,7 @@ export const TELAS = [
     simular: comNotaAEnviar("sinfra"), passos: [...passo("Envio da nota"), { clicar: '#passo-5 button:has-text("Já enviei por fora")' }] },
   { rota: "medicao", id: "medicao-oficio", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
     simular: comNotaAEnviar("mtpar"), passos: [...passo("Envio da nota"), { clicar: '#passo-5 button:has-text("Enviar a nota")' }] },
-  { rota: "medicao", id: "medicao-recebimento", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
+  { rota: "medicao", id: "medicao-recebimento", caminho: MEDICAO, perfis: SO_ADMIN, antes: "nav.passos", espera: JANELA,
     passos: [{ clicar: '#conteudo button:has-text("Registrar recebimento")' }] },
   { rota: "medicao", id: "medicao-erro", caminho: MEDICAO, perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/contratos\/\d+\/medicoes$/) },

@@ -73,7 +73,7 @@
 .adm-pessoa__nome, .adm-pessoa__email { display: block; overflow-wrap: anywhere; }
 .adm-pessoa__nome { color: var(--cor-tinta); font-weight: var(--peso-forte); }
 .adm-pessoa__email { color: var(--cor-texto-secundario); }
-.adm .tabela td.adm-pessoa { min-width: calc(var(--largura-menu) * 0.8); }
+.adm .tabela td.adm-pessoa { min-width: calc(var(--largura-menu) * 0.6); }
 .adm-situacao { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-pp); }
 /* as acoes da linha a' direita, numa fileira quando cabe; em tela estreita quebram dentro da celula */
 .adm-acoes, .adm-acoes .form-inline { justify-content: flex-end; gap: var(--espaco-pp); }
