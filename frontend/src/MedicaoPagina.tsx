@@ -737,6 +737,9 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
  *  junta medicao e reajuste (SINFRA, Pref. VG) o registro cobriu as duas e o numero e' um so'; onde separa (MTPAR,
  *  SES) cada medicao tem o SIGA dela, um campo por envio registrado por fora. */
 function NumeroDoOrgaoFora({ ms, junta, podeEditar, aoMudar }: { ms: Medicao[]; junta: boolean; podeEditar: boolean; aoMudar: () => void }) {
+  // sem medicao que ainda aceite o numero (as do grupo ja' recebidas ou canceladas), nao ha' campo: com `junta` a
+  // lista vazia virava uma unidade vazia e a pagina caia ao abrir o passo
+  if (ms.length === 0) return null;
   const unidades = junta ? [ms] : ms.map(x => [x]);
   return (
     <div className="pilha">

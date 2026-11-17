@@ -563,6 +563,15 @@ describe("Página da medição: as etapas se atualizam entre si", () => {
     expect(api.mock.calls.some(c => c[0] === "/api/notas/6/numero-orgao")).toBe(false);   // o SIGA do reajuste nao e' sobrescrito
   });
 
+  it("onde o órgão junta e as duas já foram recebidas, o passo abre só com o registro, sem o campo do número", async () => {
+    abrirEtapa(4);
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "recebida", protocolos: [REGISTRADO] }, { ...REAJ, estado: "recebida" }],
+      "/api/medicoes/5/par": par(true) });
+    pagina();
+    expect((await screen.findAllByText("Fora do sistema")).length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText(/Nº do protocolo no órgão/)).toBeNull();
+  });
+
   it("onde o órgão junta, um campo só grava o número nas duas medições; falha no meio diz qual já ficou", async () => {
     abrirEtapa(4);
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, protocolos: [REGISTRADO] }, { ...REAJ, protocolos: [{ ...REGISTRADO, id: 10 }] }],
