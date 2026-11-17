@@ -168,7 +168,8 @@ medição, é dela que saem o protocolado e o recebido da cota no Fechamento: pe
 percentual, e pela baixa dos títulos dela; a fatura do consórcio ligada à mesma medição não entra na conta. Sem ela,
 vale a fatura do consórcio vezes a cota. Nunca as duas na mesma medição. O recebido dela é só o que foi baixado nos
 títulos dela no RM, mesmo com a medição recebida: a medição vira recebida quando o órgão paga o consórcio, e a cota
-só entrou quando o consórcio repassou.
+só entrou quando o consórcio repassou (`docs/adr/0006`). O que falta dela numa medição recebida é repasse sem baixa:
+quem deve é o consórcio, não o órgão.
 _Avoid_: NFS-e da consorciada (quando a nota é a da própria construtora)
 
 **Baixa**:
