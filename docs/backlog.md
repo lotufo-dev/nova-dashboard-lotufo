@@ -40,17 +40,21 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 
 ## Decisões do dono em aberto
 
-- 2026-10-28 #296 (curva S da carteira), gate Sol S1: a curva da carteira no Resumo acumula só dentro da janela de 12 meses (parte de zero no primeiro mês), como já fazia; o dono decide se ela passa a acumular desde o início dos contratos. O desvio em p.p. do QDOP já conta o histórico inteiro.
-- 2026-09-22 **IBS/CBS**: motor e tela prontos (linhas informativas, não deduzem do líquido), mas NENHUMA regra os declara. As notas reais de 2026 trazem CBS 0,9% e IBS 0,1% com redução de 60% (efetivas 0,36% e 0,04%), base = bruto − ISS − PIS − COFINS. Falta decidir se entram no espelho; depois acrescentar os controles `ibs`/`cbs` nos modelos Word e descomentar nos YAMLs.
+- Nenhuma em 17/11/2026: as que havia foram decididas e estão em "Decisões vigentes".
 
 ## Externo (dono)
 
-- 2026-09-25 Diretório Microsoft nas sugestões de destinatário: o código já pede `People.Read` e `User.ReadBasic.All`; falta acrescentá-las (delegadas) no aplicativo do Entra ID e cada pessoa "Conectar de novo".
 - 2026-09-04 RM: a API só responde HTTP, então a credencial da conta de serviço viaja em claro na rede interna; trocar a senha do RM que passou pelo chat e criar uma conta de serviço só-leitura.
-- 2026-09-02 Segundo administrador da dashboard.
 - 2026-11-17 Job `ponta-a-ponta` (#701): falta torná-lo obrigatório. Depois de três execuções verdes seguidas no `master`, o dono acrescenta o check `ponta-a-ponta` (nome exato) aos checks obrigatórios do ruleset `master protegida` (Settings › Rules › Rulesets). Até lá o job roda em PR, no `master` e na fila de merge, mas vermelho não barra o merge. Feito isso, fechar a #701.
 
 ## Decisões vigentes (registro)
 
 - 2026-09-02 Decisão (gate Sol): "execução após a data-base" usa a COMPETÊNCIA, não a data do ofício; aniversário no meio do mês não separa a competência. Revisar se um órgão cobrar pró-rata.
 - 2026-09-24 O fluxo "Certidão Alerta" do Power Automate continua ligado (decisão de 2026-09-24); os avisos da tela inicial não dependem dele.
+- 2026-11-17 **IBS/CBS** não entram no espelho em 2026: nas notas deste ano são linhas informativas, que não mudam o líquido, e o espelho segue o modelo que o órgão já aprova. O motor e a tela ficam prontos e nenhuma regra os declara. Rever quando a retenção passar a valer; aí entram os controles `ibs`/`cbs` nos modelos Word e nos YAMLs.
+- 2026-11-17 Curva S da carteira (#296): encerrada sem mudança. A página Carteira sai no redesenho (`docs/adr/0004`, issue #717) e o desvio do QDOP, que fica na lista de Obras, já conta o histórico inteiro.
+- 2026-11-17 Pendências de competências anteriores a 2025 ficam fora das telas da diretoria: o Fechamento cobre 2025 e 2026.
+- 2026-11-17 Canal do boletim nas superintendências sem e-mail (#299): encerrada. O motor aceita o PDF venha de onde vier e o `prazo_boletim_dias` não muda; issue nova se o aviso de pedido sem boletim errar.
+- 2026-11-17 O número grande do alto da página da medição continua sendo o valor pedido, com o aprovado à parte, como na tela aprovada pelo dono em 16/11/2026.
+- 2026-11-17 Diretório Microsoft nas sugestões de destinatário não será ligado: o catálogo de contatos do próprio sistema atende. As permissões `People.Read` e `User.ReadBasic.All` não serão acrescentadas no aplicativo do Entra ID.
+- 2026-11-17 Segundo administrador: não será criado agora. O desbloqueio do único administrador é pelo `cli desbloquear` no servidor; entra um segundo quando outra pessoa passar a administrar o sistema.
