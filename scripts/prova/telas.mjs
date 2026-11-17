@@ -90,9 +90,9 @@ export const TELAS = [
   // ---- Documentos: as tres abas, a fila do "Anexar PDF", a janela do ZIP e a pagina da empresa
   { rota: "documentos", id: "documentos", caminho: "/documentos", perfis: TODOS, espera: ".doc-painel-aba" },
   { rota: "documentos", id: "documentos-regularidade", caminho: "/documentos", perfis: TODOS, antes: ".doc-painel-aba", espera: ".doc-painel-aba",
-    passos: [{ clicar: '.doc-aba:has-text("Regularidade")' }] },
+    passos: [{ clicar: '.escolha:has-text("Regularidade")' }] },
   { rota: "documentos", id: "documentos-garantias", caminho: "/documentos", perfis: TODOS, antes: ".doc-painel-aba", espera: ".doc-painel-aba",
-    passos: [{ clicar: '.doc-aba:has-text("Garantias")' }] },
+    passos: [{ clicar: '.escolha:has-text("Garantias")' }] },
   { rota: "documentos", id: "documentos-anexar", caminho: "/documentos", perfis: OPERA, antes: ".doc-painel-aba", espera: ".doc-fila form",
     simular: [{ metodo: "POST", caminho: /^\/api\/documentos\/anexar\/ler$/, corpo: PDF_ILEGIVEL }],
     passos: [{ arquivo: ['input[aria-label="Escolher PDFs para anexar"]', "certidao-de-prova.pdf"] }] },
@@ -109,7 +109,7 @@ export const TELAS = [
   // ---- Fechamento e Ancoras
   { rota: "fechamento", id: "fechamento", caminho: "/fechamento", perfis: TODOS, espera: ".fch-numeros" },
   { rota: "fechamento", id: "fechamento-2025", caminho: "/fechamento", perfis: TODOS, antes: ".fch-numeros", espera: ".fch-tabela--aberto",
-    passos: [{ clicar: '.fch-botao:has-text("2025")' }] },
+    passos: [{ clicar: '.escolha:has-text("2025")' }] },
   { rota: "fechamento", id: "fechamento-erro", caminho: "/fechamento", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/fechamento$/) },
   { rota: "ancoras-docusign", id: "ancoras-docusign", caminho: "/ancoras-docusign", perfis: OPERA, espera: ".anc" },

@@ -52,16 +52,8 @@
 
 /* ----------------------------------------------------------- Reconciliacao */
 .adm-filtros { display: grid; gap: var(--espaco-m); }
-.adm-filtros__grupos { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini); margin: 0; max-width: none; }
+.adm-filtros__grupos { margin: 0; max-width: none; }
 .adm-filtros__rotulo { margin-right: var(--espaco-pp); font-size: var(--texto-meta); font-weight: var(--peso-medio); color: var(--cor-tinta); }
-/* o grupo escolhido em tinta cheia, como os botoes de escolha do Fechamento */
-.adm-filtros__grupos a {
-  display: inline-flex; align-items: center; min-height: var(--alvo-menor); padding: 0 var(--espaco-p);
-  border: var(--borda-campo); background: var(--cor-superficie); color: var(--cor-tinta);
-  font-size: var(--texto-meta); font-weight: var(--peso-medio); text-decoration: none;
-}
-.adm-filtros__grupos a:hover { background: var(--cor-papel-sombreado); }
-.adm-filtros__grupos a[aria-current="true"], .adm-filtros__grupos a[aria-current="true"]:hover { background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel); }
 
 /* grupo sem linha: o titulo e a linha curta lado a lado, sem gastar a altura de um painel */
 .adm-grupo--vazio { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--espaco-m); box-shadow: none; border: var(--borda-campo); }

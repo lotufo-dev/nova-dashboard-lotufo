@@ -620,11 +620,11 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
           <h2 className="cartao__titulo" id="titulo-rec-filtros">Reconciliação RM × dashboard</h2>
         </div>
         <div className="cartao__corpo adm-filtros">
-          <p className="adm-filtros__grupos">
+          <p className="escolhas adm-filtros__grupos">
             <span className="adm-filtros__rotulo">Grupo</span>
-            <Link para={aqui} busca={com({ categoria: null })} aria-current={categoria === null ? "true" : undefined}>todos</Link>
+            <Link className="escolha" para={aqui} busca={com({ categoria: null })} aria-current={categoria === null ? "true" : undefined}>todos</Link>
             {CATEGORIAS_REC.map(c => (
-              <Link key={c.id} para={aqui} busca={com({ categoria: c.id })} aria-current={categoria === c.id ? "true" : undefined}>{c.titulo}</Link>
+              <Link key={c.id} className="escolha" para={aqui} busca={com({ categoria: c.id })} aria-current={categoria === c.id ? "true" : undefined}>{c.titulo}</Link>
             ))}
           </p>
           <div className="form-inline">

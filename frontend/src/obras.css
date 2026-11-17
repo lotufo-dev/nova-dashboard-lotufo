@@ -59,19 +59,7 @@
 
 /* ------------------------------------------------------------ QDOP: um painel, com o filtro e o rodape */
 .qdop-painel__cabeca { flex-wrap: wrap; }
-.qdop-filtros { display: flex; flex-wrap: wrap; gap: var(--espaco-mini); padding: 0 var(--espaco-g) var(--espaco-m); }
-.qdop-filtro {
-  height: var(--alvo-minimo); padding: 0 var(--espaco-p); gap: var(--espaco-pp);
-  border: var(--borda-campo); border-radius: var(--raio-controle);
-  background: var(--cor-superficie); color: var(--cor-tinta); box-shadow: none;
-  font-size: var(--texto-meta); font-weight: var(--peso-medio);
-}
-.qdop-filtro:hover:not(:disabled) { background: var(--cor-papel-sombreado); }
-.qdop-filtro[aria-pressed="true"], .qdop-filtro[aria-pressed="true"]:hover:not(:disabled) {
-  background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel);
-}
-.qdop-filtro__n { color: var(--cor-texto-secundario); font-weight: var(--peso-numero); }
-.qdop-filtro[aria-pressed="true"] .qdop-filtro__n { color: var(--cor-papel); }
+.qdop-filtros { padding: 0 var(--espaco-g) var(--espaco-m); }
 .qdop-tabela th, .qdop-tabela td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
 .qdop-tabela th:first-child, .qdop-tabela td:first-child { padding-left: var(--espaco-g); }
 .qdop-tabela th:last-child, .qdop-tabela td:last-child { padding-right: var(--espaco-g); }

@@ -339,6 +339,25 @@ button:active:not(:disabled), .btn:active:not(:disabled) { background: var(--cor
 :where(button, .btn):disabled { background: var(--cor-papel-escuro); border-color: var(--cor-papel-escuro); }
 button:disabled, .btn:disabled { color: var(--cor-texto-terciario); cursor: not-allowed; box-shadow: none; }
 
+/* ESCOLHA ENTRE OPCOES (filtro, vista, ano): fileira de botoes com moldura fina, a escolhida em tinta cheia. Uma
+   classe so' para Fechamento, QDOP, SIGA, Documentos e Reconciliacao; serve em <button> (aria-pressed), em aba
+   (aria-selected) e em link (aria-current). A quantidade ao lado do rotulo vai em `.escolha__n`. */
+.escolhas { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini); }
+.escolha {
+  display: inline-flex; align-items: center; gap: var(--espaco-pp);
+  height: auto; min-height: var(--alvo-minimo); padding: var(--espaco-mini) var(--espaco-p);
+  border: var(--borda-campo); border-radius: var(--raio-controle);
+  background: var(--cor-superficie); color: var(--cor-tinta); box-shadow: none;
+  font-size: var(--texto-meta); font-weight: var(--peso-medio); line-height: var(--entrelinha-justa); text-decoration: none;
+}
+.escolha:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
+.escolha:is([aria-pressed="true"], [aria-selected="true"], [aria-current="true"]),
+.escolha:is([aria-pressed="true"], [aria-selected="true"], [aria-current="true"]):hover:not(:disabled) {
+  background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel);
+}
+.escolha__n { color: var(--cor-texto-secundario); font-weight: var(--peso-numero); }
+.escolha:is([aria-pressed="true"], [aria-selected="true"], [aria-current="true"]) .escolha__n { color: var(--cor-papel); }
+
 /* CAMPO: borda fina na cor de controle, cantos retos; o foco usa o contorno comum. */
 input, select, textarea {
   height: var(--alvo-minimo); padding: 0 var(--espaco-p);
@@ -1668,7 +1687,6 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .cart-c-guia { stroke: var(--cor-borda-controle); stroke-dasharray: 3 3; }
 .cart-leitura { font-size: var(--texto-mini); color: var(--cor-texto-secundario); padding-top: 4px; margin: 0; }
 .cart-leitura .num { color: var(--cor-tinta); }
-/* o filtro escolhido e' o mais forte: tinta cheia com texto papel (como o .sg__chip do SIGA) */
 @media (max-width: 767px) {
                 .cart-curva { padding: 8px 8px 4px; }
 }

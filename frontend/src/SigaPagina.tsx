@@ -174,13 +174,13 @@ function Historico({ p, dados, aoPedir, podeEditar }: { p: ProcessoSiga; dados: 
         </div>
       </header>
       <div className="sg__filtros">
-        <div className="sg__chips" role="group" aria-label="Tipo de movimentação">
-          <button type="button" className="sg__chip" aria-pressed={tipo === null} onClick={() => escolher(null)}>
-            Todas <span className="num">{total}</span>
+        <div className="escolhas" role="group" aria-label="Tipo de movimentação">
+          <button type="button" className="escolha" aria-pressed={tipo === null} onClick={() => escolher(null)}>
+            Todas <span className="escolha__n num">{total}</span>
           </button>
           {TIPOS.map(t => (
-            <button key={t.tipo} type="button" className="sg__chip" aria-pressed={tipo === t.tipo} onClick={() => escolher(t.tipo)}>
-              {t.rotulo} <span className="num">{contagem[t.tipo]}</span>
+            <button key={t.tipo} type="button" className="escolha" aria-pressed={tipo === t.tipo} onClick={() => escolher(t.tipo)}>
+              {t.rotulo} <span className="escolha__n num">{contagem[t.tipo]}</span>
             </button>
           ))}
         </div>

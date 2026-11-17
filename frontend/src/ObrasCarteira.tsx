@@ -268,12 +268,12 @@ export function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
           <a className="btn btn--pequeno" href="/api/diretoria/qdop.xlsx"><IconeBaixar className="icone icone--p" /> Exportar QDOP (.xlsx)</a>
         </div>
       </div>
-      <div className="qdop-filtros" role="group" aria-label="Filtrar o QDOP pelo farol">
+      <div className="escolhas qdop-filtros" role="group" aria-label="Filtrar o QDOP pelo farol">
         {FILTROS.map(f => {
           const n = p.obras.filter(o => noFiltro(o, f.id)).length;
           return (
-            <button key={f.id} type="button" className="qdop-filtro" aria-pressed={filtro === f.id} onClick={() => setFiltro(f.id)}>
-              {f.rotulo} <span className="qdop-filtro__n num">{n}</span>
+            <button key={f.id} type="button" className="escolha" aria-pressed={filtro === f.id} onClick={() => setFiltro(f.id)}>
+              {f.rotulo} <span className="escolha__n num">{n}</span>
             </button>
           );
         })}

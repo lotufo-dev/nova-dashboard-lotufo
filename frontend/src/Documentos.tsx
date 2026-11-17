@@ -354,10 +354,10 @@ export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; 
       {/* o alto da pagina: a regua grossa, as abas com o contador do que pede acao e o Anexar */}
       <div className="doc-topo">
         {painel && (
-          <div className="doc-abas" role="tablist" aria-label="Documentos">
+          <div className="escolhas doc-abas" role="tablist" aria-label="Documentos">
             {ABAS.map(a => (
               <button key={a.id} type="button" role="tab" id={`aba-${a.id}`} aria-selected={aba === a.id}
-                aria-controls="painel-documentos" className="doc-aba"
+                aria-controls="painel-documentos" className="escolha doc-aba"
                 onClick={() => trocarBusca({ aba: a.id === "certidoes" ? null : a.id })}>
                 {a.rotulo}{contadores[a.id] > 0 && <> <Contador situacao={a.cor}>{a.sufixo(contadores[a.id])}</Contador></>}
               </button>
