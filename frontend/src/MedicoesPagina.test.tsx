@@ -100,6 +100,8 @@ describe("Medições: quadro do mês (#643)", () => {
     const tabela = await screen.findByRole("table", { name: "Quadro do mês" });
     const celulas = within(linhaDa(tabela, "Estações Alfa")).getAllByRole("cell");
     expect(celulas[0].textContent).toContain("02/11");
+    expect(celulas[0].querySelector(".glifo--feito")).not.toBeNull();
+    expect(celulas[2].querySelector(".selo--andamento .glifo--andamento")).not.toBeNull();
     expect(celulas[1].textContent).toContain("04/11");
     const atual = within(celulas[2]).getByRole("link", { name: "Abrir 8ª Medição de Estações Alfa: Espelhos" });
     // #653: o link cai no passo da vez da página da medição
@@ -157,15 +159,20 @@ describe("Medições: quadro do mês (#643)", () => {
     expect(within(linhaDa(tabela, "Obra Um")).getByRole("link", { name: "Abrir 3ª Medição de Obra Um: Análise do órgão" })).toBeTruthy();
     const dois = posicao("Obra Dois", 5) as HTMLElement;
     expect(dois.textContent).toBe("No SIGA: COFIN 5 dias úteis");
-    expect(dois.querySelector(".quadro__siga-tempo")?.classList.contains("quadro__siga-tempo--atencao")).toBe(true);
+    expect(dois.querySelector(".quadro__siga-tempo")?.classList.contains("quadro__siga-tempo--breve")).toBe(true);
+    // a situação do tempo no setor tem forma além da cor: o glifo dela; dentro do prazo, sem glifo
+    expect(dois.querySelector(".quadro__siga-tempo .glifo--breve")).not.toBeNull();
+    expect(um.querySelector(".glifo")).toBeNull();
     const tres = within(linhaDa(tabela, "Obra Três")).getAllByRole("cell")[5];
     expect(tres.textContent).toBe("A fazerNo SIGA: GABIN 10 dias úteis");
-    expect(tres.querySelector(".quadro__siga-tempo")?.classList.contains("quadro__siga-tempo--acao")).toBe(true);
+    expect(tres.querySelector(".quadro__siga-tempo")?.classList.contains("quadro__siga-tempo--critico")).toBe(true);
+    expect(tres.querySelector(".quadro__siga-tempo .glifo--critico")).not.toBeNull();
     expect((posicao("Obra Quatro", 5) as HTMLElement).textContent).toBe("No SIGA: PROTOC 3 h");
     expect((posicao("Obra Cinco", 5) as HTMLElement).textContent).toBe("No SIGA: ASSEJUR");
     const seis = posicao("Obra Seis", 5) as HTMLElement;
     expect(seis.textContent).toBe("No SIGA: COFIN hoje");
-    expect(seis.querySelector(".quadro__siga-tempo")?.className).toBe("quadro__siga-tempo num quadro__siga-tempo--hoje");
+    expect(seis.querySelector(".quadro__siga-tempo")?.className).toBe("quadro__siga-tempo num quadro__siga-tempo--feito");
+    expect(seis.querySelector(".quadro__siga-tempo .glifo--feito")).not.toBeNull();
   });
 
   it("a medição sem processo do SIGA não mostra o bloco (#664)", async () => {

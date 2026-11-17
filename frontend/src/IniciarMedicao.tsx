@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
-import { IconeAlerta } from "./icones";
+import CaixaAviso from "./CaixaAviso";
 import { Link } from "./Link";
 import { NovaMedicaoManual } from "./Medicoes";
 import { NovaPlanilhaCarta } from "./PlanilhaCarta";
 import type { ObraResumo } from "./resumoMedicoes";
 import { ir } from "./rota";
+import "./iniciarMedicao.css";
 
 // Iniciar a medição de uma obra pelo "Iniciar" do quadro do mês (MedicoesPagina.tsx), na competência do quadro. Desde a
 // #653 não há formulário próprio daqui: é o mesmo da página da obra e da página da medição, a "Nova planilha/carta"
@@ -26,7 +27,7 @@ export default function IniciarMedicao({ obra, mes }: { obra: ObraResumo; mes: s
     return () => { vivo = false; };
   }, [obra.contrato_id]);
 
-  if (erroRegra) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler a regra da obra: {erroRegra} Escolha a obra de novo para tentar outra vez.</p>;
+  if (erroRegra) return <CaixaAviso nivel="critico" role="alert">Não foi possível ler a regra da obra: {erroRegra} Escolha a obra de novo para tentar outra vez.</CaixaAviso>;
   if (regraAtiva === null) return <p role="status" className="iniciar-med__carregando">Carregando…</p>;
 
   const abrir = (id: number) => ir({ tela: "medicao", obra: obra.contrato_id, id }, { forcar: true });

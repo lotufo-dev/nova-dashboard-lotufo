@@ -1,200 +1,160 @@
-/* Pagina Medicoes com abas (09/10/2026, prototipo aprovado pelo dono; MedicoesPagina.tsx e IniciarMedicao.tsx).
-   Cores so' dos tokens (tokens.css): as da situacao sao --sit-*. */
+/* Medicoes (redesenho 4a): o quadro do mes (MedicoesPagina.tsx), os meses anteriores e a janela de dialogo
+   (Janela.tsx). A moldura do painel (.cartao), a tabela (.tabela), o botao (.btn), o selo, o glifo, o contador e a
+   caixa de aviso sao pecas de base de tokens.css. Cor, familia, tamanho, espaco e borda so' por variavel. */
 
-.medicoes { gap: 20px; }
+/* A pagina e' o container: o quadro muda de forma pela largura que sobra para o conteudo (com o menu lateral aberto
+   ou recolhido), e nao pela largura da janela. Tres faixas: larga, media (ate' 900 px: a 1024 com o menu aberto) e
+   estreita (ate' 640 px), em que cada obra vira um bloco. */
+.medicoes { container: medicoes-pagina / inline-size; gap: var(--espaco-entre-blocos); }
+
+/* o botao "Nova planilha/carta" da aba Medicoes da obra (IniciarProxima.tsx) */
 .medicoes__acoes { display: flex; justify-content: flex-end; }
-.medicoes__iniciar { height: 44px; padding: 0 20px; gap: 8px; font-size: var(--texto-corpo); font-weight: 600; box-shadow: 0 1px 2px color-mix(in srgb, var(--cor-tinta) 10%, transparent); }
-.medicoes__iniciar .icone { stroke-width: 2.2; }
+.medicoes__iniciar { gap: var(--espaco-pp); }
 
-/* ponto e pilula da situacao */
-.sit-ponto { width: 8px; height: 8px; flex: none; border-radius: var(--raio-selo); }
-.sit-ponto--sem-medicao { background: var(--cor-texto-secundario); }
-.sit-ponto--planilha-gerada, .sit-ponto--planilha-enviada, .sit-ponto--boletim-recebido { background: var(--situacao-andamento-texto); }
-.sit-ponto--faturamento { background: var(--situacao-andamento-texto); }
-.sit-ponto--aguardando-nota { background: var(--situacao-andamento-texto); }
-.sit-ponto--enviar-nota { background: var(--situacao-andamento-texto); }
-.sit-ponto--aguardando-pagamento { background: var(--situacao-andamento-texto); }
-.sit-pilula {
-  display: inline-block; padding: 1px 9px;
-  border: 1px solid transparent; border-radius: var(--raio-selo);
-  font-size: var(--texto-mini); line-height: 18px; font-weight: 500; white-space: nowrap;
+/* cabecalho: a regua grossa da Inicio, a competencia, a troca de mes e a legenda das situacoes */
+.medicoes__cab {
+  display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--espaco-p) var(--espaco-m);
+  border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro);
 }
-.sit-pilula--sem-medicao { background: var(--cor-contador-neutro); color: var(--cor-texto-secundario); border-color: var(--cor-linha); }
-.sit-pilula--planilha-gerada, .sit-pilula--planilha-enviada, .sit-pilula--boletim-recebido { background: var(--situacao-andamento-fundo); color: var(--situacao-andamento-texto); }
-.sit-pilula--faturamento { background: var(--situacao-andamento-fundo); color: var(--situacao-andamento-texto); }
-.sit-pilula--aguardando-nota { background: var(--situacao-andamento-fundo); color: var(--situacao-andamento-texto); }
-.sit-pilula--enviar-nota { background: var(--situacao-andamento-fundo); color: var(--situacao-andamento-texto); }
-.sit-pilula--aguardando-pagamento { background: var(--situacao-andamento-fundo); color: var(--situacao-andamento-texto); }
+.medicoes__cab-rotulo { margin: 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.medicoes__troca { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-pp) var(--espaco-m); }
+.medicoes__mes { margin: 0; font-size: var(--texto-titulo-bloco); }
+.medicoes__botoes { display: flex; gap: var(--espaco-mini); }
 
-/* ------------------------------------------------------------------- quadro */
-.medicoes__quadro {
-  background: var(--cor-superficie);
-  border: 1px solid var(--cor-linha); border-radius: var(--raio-canto);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--cor-tinta) 4%, transparent);
-  overflow: hidden;
+/* painel */
+.medicoes .medicoes__painel { min-width: 0; padding: var(--espaco-g) 0 var(--espaco-mini); }
+.medicoes__painel-cab {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-pp) var(--espaco-p);
+  padding: 0 var(--espaco-g); margin-bottom: var(--espaco-pp);
 }
-.medicoes__quadro-cabeca { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 16px 16px 14px; }
-.medicoes__quadro-cabeca h2 { margin: 0; font-size: var(--texto-titulo-sub); line-height: 24px; }
-
-/* Tabela de largura fixa (as colunas caem no mesmo x da tabela de cima e de cada grupo). Abaixo de 820px a caixa
-   rola na horizontal por dentro: a faixa e os grupos tem a mesma largura minima da tabela. */
-.medicoes .tabela-wrap > * { min-width: 820px; }
-.medicoes__tabela { width: 100%; table-layout: fixed; border-collapse: collapse; }
-.medicoes__c-obra { width: 19%; }
-.medicoes__c-contratante { width: 17%; }
-.medicoes__c-medicao { width: 20%; }
-.medicoes__c-situacao { width: 17%; }
-.medicoes__c-valor { width: 15%; }
-.medicoes__c-parada { width: 12%; }
-.medicoes__tabela th {
-  padding: 12px 16px; text-align: left;
-  background: var(--cor-papel-sombreado); border-bottom: 1px solid var(--cor-linha);
-  color: var(--cor-texto-secundario); font-size: var(--texto-mini); line-height: 16px; font-weight: 600; white-space: nowrap;
-}
-.medicoes__tabela td { padding: 12px 16px; border-bottom: 1px solid var(--cor-linha); vertical-align: middle; overflow-wrap: anywhere; }
-.medicoes__tabela tr:last-child td { border-bottom: 0; }
-.medicoes__tabela tbody tr:hover td { background: var(--cor-papel-sombreado); }
-.medicoes__tabela .col-num { text-align: right; white-space: nowrap; }
-.medicoes__obra { color: var(--cor-tinta); font-weight: 600; }
-.medicoes__obra:hover { color: var(--cor-tinta); text-decoration: underline; }
-.medicoes__obra-repete { color: var(--cor-texto-secundario); padding-left: 4px; }
-.medicoes__medicao { color: var(--cor-tinta); }
-.medicoes__medicao:hover { color: var(--cor-menu-realce); text-decoration: underline; }
-.medicoes__sub { display: block; font-size: var(--texto-mini); line-height: 16px; color: var(--cor-texto-secundario); }
+.medicoes__painel-cab h2 { margin: 0; font-size: var(--texto-titulo-sub); }
+.medicoes__vazio { margin: 0; max-width: none; padding: 0 var(--espaco-g) var(--espaco-g); color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.medicoes__vazio--pagina { padding: 0; }
 .medicoes__traco { color: var(--cor-texto-terciario); }
-/* "Parada há": ambar e vermelho so' com o limiar passado (resumoMedicoes.nivelParada) */
-.medicoes__parada { color: var(--cor-texto-secundario); white-space: nowrap; }
-.medicoes__parada--atencao { color: var(--situacao-breve-texto); font-weight: 600; }
-.medicoes__parada--acao { color: var(--situacao-critico-texto); font-weight: 600; }
+.medicoes__obra { color: var(--cor-tinta); font-weight: var(--peso-forte); text-decoration: none; }
+.medicoes__obra:hover { text-decoration: underline; text-underline-offset: var(--afastamento-sublinhado); }
 
-/* ------------------------------------------- janela "Iniciar processo de medição" (#151, protótipo de 15/10/2026) */
+/* as tabelas: a da fundacao, com a margem do painel nas pontas */
+.medicoes .tabela th, .medicoes .tabela td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
+.medicoes .tabela th:first-child, .medicoes .tabela td:first-child, .medicoes .tabela tbody th[scope="row"]:first-child { padding-left: var(--espaco-g); }
+.medicoes .tabela th:last-child, .medicoes .tabela td:last-child { padding-right: var(--espaco-g); }
+.medicoes .tabela tbody tr:hover > * { background: var(--cor-papel-sombreado); }
+
+/* ------------------------------------------------------------------- quadro do mês (#643)
+   Uma linha por obra, uma coluna por passo, pedido e aprovado. Largura fixa em porcentagem, sem largura minima: a
+   1024 px cabe sem rolagem lateral. */
+.quadro__tabela { table-layout: fixed; }
+.quadro__c-obra { width: 22%; }
+.quadro__c-passo { width: 9%; }
+.quadro__c-valor { width: 12%; }
+.medicoes .quadro__tabela thead th { white-space: normal; }
+.medicoes .quadro__tabela thead th.quadro__th-passo, .medicoes .quadro__tabela tbody td.quadro__passo {
+  padding-left: var(--espaco-mini); padding-right: var(--espaco-mini);
+}
+/* o nome da obra quebra entre palavras, nunca no meio de uma */
+.medicoes .quadro__tabela tbody th.quadro__obra {
+  padding-top: var(--espaco-p); padding-bottom: var(--espaco-p); border-bottom: var(--borda-linha);
+  text-align: left; font-weight: var(--peso-normal); vertical-align: top;
+}
+.medicoes .quadro__tabela tbody td { vertical-align: top; }
+.medicoes .quadro__tabela tbody tr:last-child > th { border-bottom: 0; }
+.quadro__medicao { display: block; width: fit-content; margin-top: var(--espaco-traco); color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
+.quadro__medicao:hover { color: var(--cor-tinta); }
+
+/* o passo: feito = o visto e a data; da vez = o selo "Atual", que e' o link; o que falta, apagado */
+.quadro__passo { white-space: nowrap; }
+.quadro__feito { display: inline-flex; align-items: center; gap: var(--espaco-mini); }
+.medicoes .quadro__tabela tbody td.quadro__passo--futuro { color: var(--cor-texto-terciario); }
+.quadro__atual { display: inline-flex; max-width: 100%; text-decoration: none; }
+/* #664: a posicao do processo no SIGA, sob a situacao do passo: a sigla do setor e, embaixo, o tempo no setor com o
+   simbolo da situacao (movimentou hoje, parado ha' dias). A coluna nao alarga: o tempo quebra entre palavras. */
+.quadro__siga { display: block; margin-top: var(--espaco-mini); color: var(--cor-texto-secundario); font-size: var(--texto-mini); line-height: var(--entrelinha-justa); white-space: normal; }
+.quadro__siga-setor { display: block; color: var(--cor-tinta); font-weight: var(--peso-forte); overflow-wrap: anywhere; }
+.quadro__siga-tempo { display: inline-flex; align-items: flex-start; gap: var(--espaco-traco); margin-top: var(--espaco-traco); }
+.quadro__siga-tempo .glifo { margin-top: var(--espaco-fio); }
+.quadro__siga-tempo--feito { color: var(--situacao-feito-texto); font-weight: var(--peso-forte); }
+.quadro__siga-tempo--breve { color: var(--situacao-breve-texto); font-weight: var(--peso-forte); }
+.quadro__siga-tempo--critico { color: var(--situacao-critico-texto); font-weight: var(--peso-forte); }
+.medicoes .quadro__tabela td.quadro__iniciar { vertical-align: middle; padding-left: var(--espaco-mini); }
+.medicoes .quadro__tabela .col-num { text-align: right; white-space: nowrap; }
+.medicoes .quadro__tabela td.col-num { font-weight: var(--peso-numero); }
+
+/* meses anteriores */
+.quadro__anteriores td:not(.quadro__anterior-obra) { white-space: nowrap; }
+.quadro__acao { text-align: right; }
+
+/* faixa media: letra de apoio nos passos e nos valores, para as nove colunas caberem */
+@container medicoes-pagina (max-width: 900px) {
+  .medicoes .medicoes__painel { padding-top: var(--espaco-m); }
+  .medicoes__painel-cab, .medicoes__vazio { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
+  .medicoes .tabela th:first-child, .medicoes .tabela td:first-child, .medicoes .tabela tbody th[scope="row"]:first-child { padding-left: var(--espaco-m); }
+  .medicoes .tabela th:last-child, .medicoes .tabela td:last-child { padding-right: var(--espaco-m); }
+  .quadro__c-obra { width: 18%; }
+  .quadro__c-passo { width: 8.5%; }
+  .quadro__c-valor { width: 15.5%; }
+  .medicoes .quadro__tabela thead th { font-size: var(--texto-mini); }
+  .medicoes .quadro__tabela thead th.quadro__th-passo, .medicoes .quadro__tabela tbody td.quadro__passo,
+  .medicoes .quadro__tabela .col-num { padding-left: var(--espaco-traco); padding-right: var(--espaco-traco); font-size: var(--texto-mini); }
+  .medicoes .quadro__tabela td.col-num:last-child, .medicoes .quadro__tabela th.col-num:last-child { padding-right: var(--espaco-p); }
+  .quadro__passo .selo { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); font-size: var(--texto-mini); }
+}
+
+/* faixa estreita: cada obra (e cada medicao anterior) vira um bloco, com o nome do passo ao lado da situacao */
+@container medicoes-pagina (max-width: 640px) {
+  .medicoes .tabela, .medicoes .tabela tbody, .medicoes .tabela tr, .medicoes .tabela tbody th, .medicoes .tabela tbody td { display: block; width: auto; }
+  .medicoes .tabela colgroup, .medicoes .tabela thead { display: none; }
+  .medicoes .tabela tbody tr { padding: var(--espaco-p) var(--espaco-m); border-bottom: var(--borda-linha); }
+  .medicoes .tabela tbody tr:last-child { border-bottom: 0; }
+  .medicoes .tabela tbody tr:hover > * { background: none; }
+  .medicoes .tabela tbody tr > th, .medicoes .tabela tbody tr > td {
+    display: flex; justify-content: space-between; align-items: baseline; gap: var(--espaco-p);
+    padding: var(--espaco-grade) 0; border: 0; text-align: right; white-space: normal; font-size: var(--texto-meta);
+  }
+  .medicoes .quadro__tabela tbody tr > th.quadro__obra, .medicoes .tabela tbody tr > td.quadro__anterior-obra { display: block; padding: 0 0 var(--espaco-pp); text-align: left; }
+  .medicoes .tabela tbody td[data-rotulo]::before {
+    content: attr(data-rotulo); flex: none; color: var(--cor-texto-secundario); font-size: var(--texto-meta); font-weight: var(--peso-normal); text-align: left;
+  }
+  .medicoes .quadro__tabela td.quadro__passo--sem { display: none; }
+  /* o nome do passo a' esquerda; a situacao e a posicao do SIGA a' direita (se nao couber ao lado, desce) */
+  .medicoes .quadro__tabela tbody td.quadro__passo:has(.quadro__siga) { flex-wrap: wrap; justify-content: flex-end; row-gap: var(--espaco-traco); }
+  .medicoes .quadro__tabela td.quadro__passo:has(.quadro__siga)::before { margin-right: auto; }
+  .quadro__siga { display: inline-flex; align-items: baseline; gap: var(--espaco-mini); margin: 0; white-space: nowrap; }
+  .quadro__siga-setor { display: inline; overflow-wrap: normal; }
+  .quadro__siga-tempo { margin-top: 0; align-items: center; }
+  .medicoes .tabela tbody td.quadro__acao { justify-content: flex-end; padding-top: var(--espaco-pp); }
+}
+
+/* ------------------------------------------------------------------- janela de dialogo (Janela.tsx)
+   Painel da fundacao por cima de um veu: borda grossa de tinta, cantos retos, sombra dura. O titulo no alto com o
+   botao de fechar; o conteudo com a margem do painel. */
 .iniciar {
-  width: min(600px, calc(100vw - 32px)); max-height: min(820px, calc(100dvh - 64px));
-  padding: 0; border: 0; border-radius: 12px;
+  width: min(calc(var(--largura-menu) * 3), calc(100vw - var(--espaco-gg))); max-height: calc(100dvh - var(--espaco-xxg));
+  padding: 0; border: var(--borda-painel); border-radius: var(--raio-canto); background: var(--cor-superficie);
   box-shadow: var(--sombra-painel); color: var(--cor-tinta); overflow: hidden;
 }
 .iniciar[open] { display: flex; flex-direction: column; }
 .iniciar::backdrop { background: var(--cor-veu); }
 .iniciar__caixa { display: flex; flex-direction: column; min-height: 0; max-height: inherit; flex: 1 1 auto; }
-.iniciar__cabeca { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 22px 24px 12px; }
-.iniciar__titulo { margin: 0; font-size: var(--texto-titulo-bloco); line-height: 28px; }
-.iniciar__fechar { width: 36px; height: 36px; flex: none; padding: 0; justify-content: center; border: 0; background: none; color: var(--cor-texto-secundario); border-radius: var(--raio-controle); cursor: pointer; display: inline-flex; align-items: center; }
-.iniciar__fechar:hover { background: var(--cor-papel-sombreado); }
-.iniciar__busca { height: 44px; flex: none; margin: 0 24px 12px; width: auto; }
-.iniciar__lista { flex: 1 1 auto; min-height: 120px; overflow-y: auto; border-top: 1px solid var(--cor-linha); padding: 0 12px 8px; }
-.iniciar__contratante {
-  position: sticky; top: 0; z-index: 1; margin: 0; padding: 12px 12px 8px; background: var(--cor-superficie); box-shadow: 0 -1px 0 var(--cor-superficie);
-  font-size: var(--texto-mini); line-height: 16px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--cor-texto-secundario);
+.iniciar__cabeca { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--espaco-p); padding: var(--espaco-g) var(--espaco-g) var(--espaco-m); }
+.iniciar__titulo { margin: 0; font-size: var(--texto-titulo-bloco); text-wrap: balance; }
+.iniciar__fechar {
+  width: var(--alvo-minimo); height: var(--alvo-minimo); flex: none; margin: calc(var(--espaco-pp) * -1) calc(var(--espaco-pp) * -1) 0 0; padding: 0;
+  justify-content: center; border: 0; background: none; color: var(--cor-tinta);
 }
-.iniciar__obra { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 12px; align-items: start; padding: 10px 12px; border-radius: var(--raio-controle); cursor: pointer; }
-.iniciar__obra:hover { background: var(--cor-papel-sombreado); }
-.iniciar__obra:has(input:checked) { background: var(--cor-papel-sombreado); }
-.iniciar__obra input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--cor-tinta); }
-.iniciar__obra-nome { font-weight: 600; }
-.iniciar__obra-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: var(--texto-meta); line-height: 18px; color: var(--cor-texto-secundario); }
-.iniciar__vazio { margin: 0; padding: 24px 12px; color: var(--cor-texto-secundario); text-align: center; }
-
-.iniciar__rodape { flex: none; display: flex; flex-direction: column; gap: 14px; border-top: 1px solid var(--cor-linha); padding: 16px 24px 20px; overflow-y: auto; max-height: 55%; }
-.iniciar__aviso { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border: 1px solid; border-radius: var(--raio-canto); }
-.iniciar__aviso .icone { margin-top: 2px; flex: none; }
-.iniciar__aviso--atencao { background: var(--situacao-breve-fundo); border-color: var(--situacao-breve-texto); }
-.iniciar__aviso--atencao .icone { color: var(--situacao-breve-texto); }
-.iniciar__aviso--info { background: var(--cor-papel-sombreado); border-color: var(--cor-borda-controle); }
-.iniciar__aviso--info .icone { color: var(--cor-tinta); }
-.iniciar__rotulo { font-size: var(--texto-meta); font-weight: 500; color: var(--cor-texto-secundario); }
-.iniciar__tipo-grupo { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.iniciar__tipo-grupo legend { padding: 0; margin-bottom: 6px; }
-.iniciar__tipo { display: inline-flex; width: fit-content; padding: 3px; gap: 3px; border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); }
-.iniciar__tipo label { display: inline-flex; align-items: center; height: 32px; padding: 0 14px; border-radius: 6px; cursor: pointer; font-weight: 500; color: var(--cor-texto-secundario); }
-.iniciar__tipo input { position: absolute; opacity: 0; pointer-events: none; }
-.iniciar__tipo label:has(input:checked) { background: var(--cor-tinta); color: var(--cor-papel); }
-.iniciar__tipo label:has(input:focus-visible) { outline: 2px solid var(--cor-foco); outline-offset: 2px; }
-.iniciar__campos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.iniciar__campo { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.iniciar__campo > span, .iniciar__campo label > span { font-size: var(--texto-meta); font-weight: 500; color: var(--cor-texto-secundario); }
-.iniciar__campo input { height: 40px; width: 100%; min-width: 0; padding: 0 10px; border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); font-family: var(--fonte-numero); }
-.iniciar__campo input[readonly] { background: var(--cor-papel-sombreado); color: var(--cor-texto-secundario); }
-.iniciar__botoes { display: flex; justify-content: flex-end; gap: 10px; }
-/* o rótulo do botão leva o nome da obra: no celular passa da largura, então quebra em vez de vazar */
-.iniciar__botoes .btn { white-space: normal; height: auto; min-height: 32px; padding-block: 5px; line-height: 20px; }
+.iniciar__fechar:hover:not(:disabled) { background: var(--cor-papel-sombreado); }
+.janela__corpo { padding: 0 var(--espaco-g) var(--espaco-g); }
+/* o formulario que ja' vem com a margem de painel (nova planilha/carta, nova medicao) fica com a da janela */
+.janela__corpo > .cartao__corpo { padding: 0; }
+/* os botoes do formulario da janela, no pe' dela: sobre um fio, na largura toda */
+.iniciar__rodape {
+  display: flex; flex-wrap: wrap; gap: var(--espaco-pp);
+  margin: 0 calc(var(--espaco-g) * -1) calc(var(--espaco-g) * -1); padding: var(--espaco-m) var(--espaco-g) var(--espaco-g);
+  border-top: var(--borda-linha);
+}
 
 @media (max-width: 767px) {
-  .iniciar { width: 100vw; max-width: 100vw; max-height: calc(100dvh - 24px); margin: auto 0 0; border-radius: 12px 12px 0 0; }
-  .iniciar__cabeca { padding: 18px 16px 10px; }
-  .iniciar__busca { margin: 0 16px 10px; }
-  .iniciar__lista { padding: 0 4px 8px; }
-  .iniciar__rodape { padding: 14px 16px 16px; }
-  .iniciar__botoes { flex-direction: column-reverse; }
-  .iniciar__botoes .btn { width: 100%; }
+  .iniciar { width: 100vw; max-width: 100vw; max-height: calc(100dvh - var(--espaco-g)); margin: auto 0 0; border-width: var(--borda-grossa) 0 0; box-shadow: none; }
+  .iniciar__cabeca { padding: var(--espaco-m) var(--espaco-m) var(--espaco-p); }
+  .janela__corpo { padding: 0 var(--espaco-m) var(--espaco-m); }
+  .iniciar__rodape { margin: 0 calc(var(--espaco-m) * -1) calc(var(--espaco-m) * -1); padding: var(--espaco-m); }
 }
-
-/* ------------------------------------------------------------------- quadro do mês (#643)
-   Uma linha por obra, uma coluna por passo, pedido e aprovado. Tabela de largura fixa em porcentagem, sem largura
-   mínima: a 1024 px (720 px úteis com o menu aberto) cabe sem rolagem horizontal. Abaixo de 768 px cada obra vira um
-   bloco, com o nome do passo ao lado da situação (data-rotulo). */
-.quadro__cabeca { align-items: center; }
-.quadro__tabela { width: 100%; table-layout: fixed; border-collapse: collapse; }
-.quadro__c-obra { width: 15%; }
-.quadro__c-passo { width: 8.5%; }
-.quadro__c-valor { width: 17%; }
-.quadro__tabela th, .quadro__tabela td { padding: 10px 4px; border-bottom: 1px solid var(--cor-linha); vertical-align: middle; overflow-wrap: anywhere; }
-.quadro__tabela thead th {
-  background: var(--cor-papel-sombreado); border-bottom: 1px solid var(--cor-linha); vertical-align: bottom;
-  color: var(--cor-texto-secundario); font-size: var(--texto-mini); line-height: 14px; font-weight: 600; text-align: left;
-}
-.quadro__tabela thead th.quadro__th-passo, .quadro__tabela td.quadro__passo { text-align: center; padding-left: 2px; padding-right: 2px; }
-/* o nome do passo quebra entre palavras, nunca no meio de uma */
-.quadro__tabela thead th.quadro__th-passo { overflow-wrap: normal; }
-.quadro__tabela thead th:first-child, .quadro__tabela tbody th.quadro__obra { padding-left: 16px; }
-.quadro__tabela th:last-child, .quadro__tabela td:last-child { padding-right: 10px; }
-.quadro__tabela tbody tr:last-child > * { border-bottom: 0; }
-.quadro__tabela tbody tr:hover > * { background: var(--cor-papel-sombreado); }
-.quadro__tabela .col-num { text-align: right; white-space: nowrap; font-size: var(--texto-mini); }
-.quadro__tabela thead .col-num { font-size: var(--texto-mini); }
-/* o nome da obra quebra entre palavras, nunca no meio de uma */
-.quadro__tabela tbody th.quadro__obra { text-align: left; font-weight: 400; overflow-wrap: normal; word-break: normal; }
-.quadro__medicao { display: block; font-size: var(--texto-mini); line-height: 16px; color: var(--cor-texto-secundario); }
-.quadro__medicao:hover { color: var(--cor-tinta); text-decoration: underline; }
-.quadro__passo { font-size: var(--texto-mini); line-height: 16px; white-space: nowrap; }
-.quadro__check { width: 12px; height: 12px; margin-right: 2px; vertical-align: -1px; stroke-width: 3; }
-.quadro__passo--futuro { color: var(--cor-texto-terciario); font-size: var(--texto-mini); }
-.quadro__atual { text-decoration: none; }
-/* #664: a posição do processo no SIGA, em linhas pequenas sob a situação do passo: a sigla do setor e, embaixo, o tempo
-   no setor. A coluna não alarga: o bloco usa também o respiro lateral da célula e o tempo quebra entre palavras, nunca
-   no meio. A cor do tempo é a da tela SIGA (siga.css, .sg__dias). */
-.quadro__siga { display: block; margin: 3px -2px 0; font-size: var(--texto-mini); line-height: 13px; white-space: normal; overflow-wrap: normal; color: var(--cor-texto-secundario); font-weight: 400; }
-.quadro__siga-setor { display: block; font-weight: 600; overflow-wrap: anywhere; }
-.quadro__siga-tempo { color: var(--cor-tinta); }
-.quadro__siga-tempo--hoje { color: var(--situacao-feito-texto); font-weight: 600; }
-.quadro__siga-tempo--atencao { color: var(--situacao-breve-texto); font-weight: 600; }
-.quadro__siga-tempo--acao { color: var(--situacao-critico-texto); font-weight: 600; }
-.quadro__tabela td.quadro__iniciar { text-align: left; padding-left: 12px; }
-.quadro__acao { text-align: right; }
-.quadro__anteriores { table-layout: auto; }
-
-@media (max-width: 767px) {
-  .quadro__tabela, .quadro__tabela tbody, .quadro__tabela tr, .quadro__tabela th, .quadro__tabela td,
-  .quadro__anteriores, .quadro__anteriores tbody, .quadro__anteriores tr, .quadro__anteriores td { display: block; width: auto; }
-  .quadro__tabela colgroup, .quadro__tabela thead, .quadro__anteriores thead { display: none; }
-  .quadro__tabela tr, .quadro__anteriores tr { padding: 12px 16px; border-bottom: 1px solid var(--cor-linha); }
-  .quadro__tabela tbody tr:last-child, .quadro__anteriores tbody tr:last-child { border-bottom: 0; }
-  .quadro__tabela tbody th, .quadro__tabela tbody td, .quadro__anteriores.medicoes__tabela td {
-    display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 3px 0; border: 0;
-    text-align: right; white-space: normal;
-  }
-  .quadro__tabela tbody th.quadro__obra { display: block; padding: 0 0 6px; text-align: left; }
-  .quadro__tabela tbody td::before, .quadro__anteriores td[data-rotulo]::before {
-    content: attr(data-rotulo); flex: none; color: var(--cor-texto-secundario); font-size: var(--texto-mini); text-align: left;
-  }
-  .quadro__tabela td.quadro__passo--sem { display: none; }
-  /* o nome do passo à esquerda; a situação e a posição do SIGA à direita, a posição inteira numa linha (se não couber ao
-     lado da situação, desce para a linha de baixo) */
-  .quadro__tabela tbody td.quadro__passo:has(.quadro__siga) { flex-wrap: wrap; justify-content: flex-end; row-gap: 2px; }
-  .quadro__tabela td.quadro__passo:has(.quadro__siga)::before { margin-right: auto; }
-  .quadro__siga { display: inline; margin: 0; font-size: var(--texto-mini); line-height: 16px; white-space: nowrap; }
-  .quadro__siga-setor { display: inline; overflow-wrap: normal; }
-  .quadro__tabela .col-num { font-size: var(--texto-meta); }
-  .quadro__anteriores.medicoes__tabela .quadro__acao { justify-content: flex-end; padding-top: 8px; }
-}
-
-/* o formulário de iniciar dentro da janela: sem a moldura de cartão */

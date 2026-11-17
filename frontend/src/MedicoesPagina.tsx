@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import { brl } from "./formato";
-import { IconeAlerta, IconeCheck } from "./icones";
+import CaixaAviso from "./CaixaAviso";
+import Contador from "./Contador";
 import IniciarMedicao from "./IniciarMedicao";
 import Janela from "./Janela";
 import LegendaCor from "./LegendaCor";
-import Selo from "./Selo";
+import Selo, { Glifo } from "./Selo";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import { diaMes, PASSOS } from "./Passos";
 import { mesPorExtenso, somarMes, type LinhaAnterior, type LinhaQuadro, type ObraResumo, type PassoQuadro, type ResumoMedicoes, type SigaNoQuadro } from "./resumoMedicoes";
 import { nivelDias, tempoNoSetor } from "./siga";
+import type { Situacao } from "./situacao";
 import { fmtCompetencia, hojeLocal } from "./tempo";
-import "./iniciarMedicao.css";
 import "./medicoes.css";
 
 // Medições (#643, decisão do dono na revisão página a página de 10/11/2026): o QUADRO DO MÊS no lugar de "Iniciar medição"
@@ -23,18 +24,23 @@ import "./medicoes.css";
 
 const traco = <span className="medicoes__traco">—</span>;
 
-/** #664: onde está o processo do SIGA da medição que está neste passo: sigla do setor e tempo no setor, com o texto e a
- *  cor da tela SIGA (o `NoSetor` de SigaPagina: "hoje" quando houve movimentação hoje; senão `tempoNoSetor` com a cor de
- *  atraso de `nivelDias`). Sem data de entrada no setor, só a sigla. */
+// O tempo do processo no setor, na situação da fundação que o mostra (cor e forma): movimentou hoje = feito; parado além
+// do primeiro limiar de `nivelDias` = vence em breve; além do segundo = crítico. Dentro do prazo não tem situação.
+const SITUACAO_DO_TEMPO: Record<"hoje" | "atencao" | "acao", Situacao> = { hoje: "feito", atencao: "breve", acao: "critico" };
+
+/** #664: onde está o processo do SIGA da medição que está neste passo: sigla do setor e tempo no setor, com o texto da
+ *  tela SIGA (o `NoSetor` de SigaPagina: "hoje" quando houve movimentação hoje; senão `tempoNoSetor`) e a situação do
+ *  atraso de `nivelDias`. Sem data de entrada no setor, só a sigla. */
 function PosicaoSiga({ siga }: { siga: SigaNoQuadro | null }) {
   if (!siga) return null;
   const nivel = siga.hoje > 0 ? "hoje" : nivelDias(siga.dias_uteis);
+  const situacao = nivel ? SITUACAO_DO_TEMPO[nivel] : undefined;
   const tempo = siga.hoje > 0 ? "hoje" : siga.desde === null || siga.dias_uteis === null ? "—" : tempoNoSetor(siga, new Date());
   return (
     <span className="quadro__siga">
       <span className="sr-only">No SIGA: </span>
       <span className="quadro__siga-setor">{siga.setor}</span>
-      {tempo !== "—" && <> <span className={`quadro__siga-tempo num${nivel ? ` quadro__siga-tempo--${nivel}` : ""}`}>{tempo}</span></>}
+      {tempo !== "—" && <> <span className={`quadro__siga-tempo num${situacao ? ` quadro__siga-tempo--${situacao}` : ""}`}>{situacao && <Glifo situacao={situacao} />}{tempo}</span></>}
     </span>
   );
 }
@@ -46,9 +52,11 @@ function CelulaPasso({ n, passo, linha }: { n: number; passo: PassoQuadro | unde
   if (passo.situacao === "feito") {
     const data = diaMes(passo.data);
     return (
-      <td className="quadro__passo info--feito" data-rotulo={nome}>
-        <IconeCheck className="icone quadro__check" />
-        {data ? <><span className="sr-only">Feito em </span><span className="num">{data}</span></> : "Feito"}
+      <td className="quadro__passo quadro__passo--feito" data-rotulo={nome}>
+        <span className="quadro__feito">
+          <Glifo situacao="feito" />
+          {data ? <><span className="sr-only">Feito em </span><span className="num">{data}</span></> : "Feito"}
+        </span>
       </td>
     );
   }
@@ -90,10 +98,13 @@ function Linha({ linha, podeIniciar, aoIniciar }: { linha: LinhaQuadro; podeInic
 
 function Anteriores({ linhas }: { linhas: LinhaAnterior[] }) {
   return (
-    <section className="medicoes__quadro" aria-labelledby="anteriores-titulo">
-      <div className="medicoes__quadro-cabeca"><h2 id="anteriores-titulo">Meses anteriores</h2></div>
-      {linhas.length === 0 ? <div className="vazio vazio--curto"><p>Nenhuma medição aberta de meses anteriores.</p></div> : (
-        <table className="medicoes__tabela quadro__anteriores" aria-labelledby="anteriores-titulo">
+    <section className="cartao medicoes__painel" aria-labelledby="anteriores-titulo">
+      <div className="medicoes__painel-cab">
+        <h2 id="anteriores-titulo">Meses anteriores</h2>
+        {linhas.length > 0 && <Contador rotulo={linhas.length === 1 ? "1 medição" : `${linhas.length} medições`}>{linhas.length.toLocaleString("pt-BR")}</Contador>}
+      </div>
+      {linhas.length === 0 ? <p className="medicoes__vazio">Nenhuma medição aberta de meses anteriores.</p> : (
+        <table className="tabela quadro__anteriores" aria-labelledby="anteriores-titulo">
           <thead>
             <tr>
               <th scope="col">Obra</th><th scope="col">Medição</th><th scope="col">Competência</th><th scope="col">Passo atual</th>
@@ -103,7 +114,7 @@ function Anteriores({ linhas }: { linhas: LinhaAnterior[] }) {
           <tbody>
             {linhas.map(l => (
               <tr key={l.medicao_id}>
-                <td data-rotulo="Obra"><Link className="medicoes__obra" para={{ tela: "obra", id: l.contrato_id, aba: "medicoes" }}>{l.obra}</Link></td>
+                <td className="quadro__anterior-obra"><Link className="medicoes__obra" para={{ tela: "obra", id: l.contrato_id, aba: "medicoes" }}>{l.obra}</Link></td>
                 <td data-rotulo="Medição">{l.titulo}</td>
                 <td data-rotulo="Competência" className="num">{fmtCompetencia(l.competencia)}</td>
                 <td data-rotulo="Passo atual"><Selo situacao="andamento">{l.passo.nome}</Selo></td>
@@ -138,8 +149,8 @@ export default function MedicoesPagina({ usuario }: { usuario: Usuario }) {
 
   if (!dados) {
     return erro
-      ? <div className="pagina"><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler as medições: {erro} Recarregue a página para tentar de novo.</p></div>
-      : <div className="pagina"><section className="cartao"><div className="vazio"><p>Carregando as medições…</p></div></section></div>;
+      ? <div className="pagina medicoes"><CaixaAviso nivel="critico" role="alert">Não foi possível ler as medições: {erro} Recarregue a página para tentar de novo.</CaixaAviso></div>
+      : <div className="pagina medicoes"><p className="medicoes__vazio medicoes__vazio--pagina" role="status">Carregando as medições…</p></div>;
   }
   // enquanto o mês escolhido não chega, o quadro na tela ainda é o do mês anterior: nada de iniciar nele
   const carregando = dados.mes !== mes;
@@ -147,19 +158,30 @@ export default function MedicoesPagina({ usuario }: { usuario: Usuario }) {
 
   return (
     <div className="pagina medicoes">
-      <section className="medicoes__quadro" aria-labelledby="quadro-titulo">
-        <div className="medicoes__quadro-cabeca quadro__cabeca">
-          <h2 id="quadro-titulo">Quadro do mês</h2>
-          <div className="iniciar-med__mes">
-            <button type="button" className="iniciar-med__mes-seta" aria-label="Mês anterior" onClick={() => trocarMes(-1)}>‹</button>
-            <span className="iniciar-med__mes-nome" aria-live="polite">{mesPorExtenso(mes)}</span>
-            <button type="button" className="iniciar-med__mes-seta" aria-label="Mês seguinte" onClick={() => trocarMes(1)}>›</button>
+      <div className="medicoes__cab">
+        <div>
+          <p className="medicoes__cab-rotulo">Competência</p>
+          <div className="medicoes__troca">
+            <h2 className="medicoes__mes" aria-live="polite">{mesPorExtenso(mes)}</h2>
+            <div className="medicoes__botoes" role="group" aria-label="Trocar a competência">
+              <button type="button" className="btn btn--pequeno" aria-label="Mês anterior" onClick={() => trocarMes(-1)}>‹</button>
+              <button type="button" className="btn btn--pequeno" aria-label="Mês seguinte" onClick={() => trocarMes(1)}>›</button>
+            </div>
           </div>
-          <LegendaCor />
         </div>
-        {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler as medições: {erro}</p>}
-        {dados.quadro.length === 0 ? <div className="vazio vazio--curto"><p>Nenhuma obra ativa.</p></div> : (
-          <table className="quadro__tabela" aria-labelledby="quadro-titulo" aria-busy={carregando || undefined}>
+        <LegendaCor />
+      </div>
+      {erro && <CaixaAviso nivel="critico" role="alert">Não foi possível ler as medições: {erro}</CaixaAviso>}
+
+      <section className="cartao medicoes__painel" aria-labelledby="quadro-titulo">
+        <div className="medicoes__painel-cab">
+          <h2 id="quadro-titulo">Quadro do mês</h2>
+          {dados.quadro.length > 0 && (
+            <Contador rotulo={dados.quadro.length === 1 ? "1 obra" : `${dados.quadro.length} obras`}>{dados.quadro.length.toLocaleString("pt-BR")}</Contador>
+          )}
+        </div>
+        {dados.quadro.length === 0 ? <p className="medicoes__vazio">Nenhuma obra ativa.</p> : (
+          <table className="tabela quadro__tabela" aria-labelledby="quadro-titulo" aria-busy={carregando || undefined}>
             <colgroup>
               <col className="quadro__c-obra" />{PASSOS.map(p => <col key={p} className="quadro__c-passo" />)}
               <col className="quadro__c-valor" /><col className="quadro__c-valor" />
