@@ -73,7 +73,9 @@ _Avoid_: período, mês de referência
 Etapa em que a planilha/carta foi enviada ao órgão e ele ainda não aprovou.
 
 **Boletim**:
-O documento em que o órgão aprova a medição; também a etapa em que a medição aprovada espera a nota.
+O documento em que o órgão aprova a medição; também a etapa em que a medição aprovada espera a nota. Na MT-PAR é a
+empresa que o preenche, no modelo do órgão, e o fiscal do órgão assina; o reajuste tem boletim próprio
+(`docs/adr/0013`).
 _Avoid_: atestado, atesto
 
 **Nota**:
@@ -94,7 +96,8 @@ O valor que a planilha/carta pede ao órgão.
 _Avoid_: valor protocolado
 
 **Aprovado**:
-O valor que o órgão fixa no boletim.
+O valor que o órgão fixa no boletim. Na MT-PAR, o "Valor Total da Nª Medição" da página do "Visto" do boletim
+assinado e, no reajuste, o "TOTAL REAJUSTE" do boletim dele.
 _Avoid_: valor atestado
 
 **Faturado**:

@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AceiteDiferenca, FormBoletim } from "./Boletim";
+import { AceiteDiferenca, FormBoletim, PassoBoletim } from "./Boletim";
 import type { Medicao } from "./Medicoes";
 
 const { apiForm, api } = vi.hoisted(() => ({ apiForm: vi.fn(), api: vi.fn() }));
@@ -183,5 +183,99 @@ describe("AceiteDiferenca (issue #288)", () => {
     rerender(<AceiteDiferenca m={{ ...COM_BOLETIM, valor_atestado_centavos: 1234567, capa_divergencias: [] }}
       podeEditar salvando={false} agir={agirReal()} />);
     expect(container.textContent).toBe("");
+  });
+});
+
+describe("boletim da MT-PAR (issue #753)", () => {
+  afterEach(() => { cleanup(); apiForm.mockReset(); });
+  const MT = { ...M, estado: "prevista", boletim_modelo: "mtpar" } as Medicao;
+
+  function soltar(leitura: unknown, m: Medicao = MT) {
+    apiForm.mockImplementation(async (url: string) => url.endsWith("/leitura") ? leitura : { id: 1, par: null });
+    const agir = vi.fn(async (fn: () => Promise<unknown>) => { await fn(); return true; });
+    render(<FormBoletim m={m} salvando={false} agir={agir} aoFechar={() => {}} />);
+    fireEvent.drop(screen.getByTestId("soltar-boletim"), { dataTransfer: { files: [PDF] } });
+    return agir;
+  }
+
+  it("as duas leituras batem: nº, data e valor vêm lidos do boletim, sem o meio do SMO", async () => {
+    soltar({ modelo: "mtpar", lido: true, fonte: "texto", avisos: [], recusa: null,
+      campos: { numero_orgao: "7", data: "2026-08-01", valor_centavos: 12345679 },
+      leituras: [{ fonte: "Visto", valor_centavos: 12345679 }, { fonte: "Controle financeiro", valor_centavos: 12345679 }] });
+    await waitFor(() => expect(campo(/Valor aprovado/).value).toBe("123.456,79"));
+    expect(screen.getAllByText("Lido do boletim")).toHaveLength(3);
+    expect(screen.queryByText("Lido da capa")).toBeNull();
+    expect((screen.getByLabelText("Meio") as HTMLSelectElement).value).toBe("");
+    // com o valor proposto, as duas leituras não se repetem na tela
+    expect(screen.queryByLabelText("Leituras do valor")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Aceitar e registrar o boletim" }));
+    await waitFor(() => expect(enviado()).toBeTruthy());
+    expect([enviado()!.get("numero_orgao"), enviado()!.get("data"), enviado()!.get("valor"), enviado()!.get("meio")])
+      .toEqual(["7", "2026-08-01", "123.456,79", null]);
+  });
+
+  it("o valor não veio proposto: as duas leituras aparecem para conferir e a pessoa digita", async () => {
+    const agir = soltar({ modelo: "mtpar", lido: true, fonte: "texto", recusa: null,
+      avisos: ["O valor não saiu ao lado do rótulo no boletim: confira no PDF e digite o valor aprovado"],
+      campos: { numero_orgao: "7", data: "2026-08-01" },
+      leituras: [{ fonte: "Visto", valor_centavos: null }, { fonte: "Controle financeiro", valor_centavos: 12345679 }] });
+    const quadro = await screen.findByLabelText("Leituras do valor");
+    expect(quadro.textContent).toBe("Visto—Controle financeiroR$\u00a0123.456,79");
+    expect(screen.getByText(/O valor não saiu ao lado do rótulo/)).toBeTruthy();
+    expect(campo(/Valor aprovado/).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Aceitar e registrar o boletim" }));
+    expect(screen.getByText("Informe o valor aprovado.")).toBeTruthy();
+    expect(agir).not.toHaveBeenCalled();
+    fireEvent.change(campo(/Valor aprovado/), { target: { value: "123.456,79" } });
+    fireEvent.click(screen.getByRole("button", { name: "Aceitar e registrar o boletim" }));
+    await waitFor(() => expect(enviado()!.get("valor")).toBe("123.456,79"));
+  });
+
+  it("leituras que não batem: as duas quantias na tela", async () => {
+    soltar({ modelo: "mtpar", lido: true, fonte: "texto", recusa: null,
+      avisos: ["As duas leituras do valor não batem: confira no PDF e digite o valor aprovado"],
+      campos: { numero_orgao: "7", data: "2026-08-01" },
+      leituras: [{ fonte: "Visto", valor_centavos: 12345679 }, { fonte: "Controle financeiro", valor_centavos: 12345678 }] });
+    const quadro = await screen.findByLabelText("Leituras do valor");
+    expect(quadro.textContent).toContain("123.456,79");
+    expect(quadro.textContent).toContain("123.456,78");
+  });
+
+  it("boletim de outra medição: a recusa do servidor por extenso, e o PDF sai do formulário", async () => {
+    const agir = soltar({ modelo: "mtpar", lido: false, fonte: null, avisos: [], campos: {}, leituras: [],
+      recusa: "Este boletim é da 6ª medição, e esta é a 7ª: escolha o PDF da 7ª medição" });
+    expect((await screen.findByRole("alert")).textContent).toBe("Este boletim é da 6ª medição, e esta é a 7ª: escolha o PDF da 7ª medição");
+    expect(screen.queryByText("boletim.pdf")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Registrar boletim" }));
+    expect(screen.getByText("Arraste ou escolha o PDF do boletim.")).toBeTruthy();
+    expect(agir).not.toHaveBeenCalled();
+  });
+
+  it("o passo mostra um cartão por medição: o boletim anexado com o PDF, e o formulário na que falta", () => {
+    const execucao = { ...MT, estado: "boletim_recebido", valor_atestado_centavos: 12345679, atestado_em: "2026-08-01",
+      boletins: [{ id: 9, tem_arquivo: true, valor_centavos: 12345679, atestado_em: "2026-08-01" }] } as Medicao;
+    const reajuste = { ...MT, id: 6, tipo: "reajuste", valor_protocolado_centavos: null, boletins: [] } as Medicao;
+    render(<PassoBoletim ms={[execucao, reajuste]} podeEditar salvando={false} agir={vi.fn()} />);
+    const daMedicao = screen.getByRole("region", { name: "Boletim · 7ª Medição" });
+    expect(daMedicao.textContent).toContain("Anexado");
+    expect(screen.getByLabelText("Boletim anexado: 7ª Medição").textContent).toContain("123.456,79");
+    expect(screen.getByLabelText("Boletim anexado: 7ª Medição").textContent).toContain("01/08/2026");
+    expect(screen.getByRole("link", { name: "Abrir o PDF" }).getAttribute("href")).toBe("/api/medicoes/5/boletins/9");
+    // o reajuste tem o PDF próprio: o formulário já abre nele, que é a que falta
+    const doReajuste = screen.getByRole("region", { name: "Boletim · Reajuste da 7ª Medição" });
+    expect(doReajuste.textContent).toContain("Não anexado");
+    expect(doReajuste.querySelector("form[aria-label='Registrar boletim']")).not.toBeNull();
+    expect(daMedicao.querySelector("form")).toBeNull();
+    // um formulário por vez: abrir o da medição (boletim novo) fecha o do reajuste
+    fireEvent.click(screen.getByRole("button", { name: "Registrar boletim novo" }));
+    expect(daMedicao.querySelector("form[aria-label='Registrar boletim']")).not.toBeNull();
+    expect(doReajuste.querySelector("form")).toBeNull();
+    expect(screen.getByRole("button", { name: "Anexar o boletim" })).toBeTruthy();
+  });
+
+  it("quem só consulta vê a situação do boletim, sem formulário nem botão", () => {
+    render(<PassoBoletim ms={[{ ...MT, boletins: [] } as Medicao]} podeEditar={false} salvando={false} agir={vi.fn()} />);
+    expect(screen.getByRole("region", { name: "Boletim" }).textContent).toBe("BoletimNão anexado");
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

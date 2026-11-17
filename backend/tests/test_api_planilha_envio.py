@@ -690,9 +690,10 @@ def test_pagina_da_medicao_recebe_os_passos_da_obra_pelo_cadastro(api):
         c.execute("UPDATE contratos SET passos_medicao=? WHERE id=?", (lista, cid))
         c.commit()
         c.close()
-    assert passos(cid_sinfra) == [[1, 2, 3, 4, 5, 6]] and passos(cid_mtpar) == [[3, 4, 5, 6]]
+    # #753: a MT-PAR nao tem "Planilha e carta", mas tem o passo do boletim ("Análise do órgão")
+    assert passos(cid_sinfra) == [[1, 2, 3, 4, 5, 6]] and passos(cid_mtpar) == [[2, 3, 4, 5, 6]]
     # o cabecalho diz os passos da medicao que a obra inicia: sem regra de espelho ativa, comeca em Espelhos
-    assert cab(cid_sinfra) == ([3, 4, 5, 6], False) and cab(cid_mtpar) == ([3, 4, 5, 6], False)
+    assert cab(cid_sinfra) == ([3, 4, 5, 6], False) and cab(cid_mtpar) == ([2, 3, 4, 5, 6], False)
     gravar(cid_sinfra, '["espelhos", "notas", "pagamento"]')
     assert passos(cid_sinfra) == [[3, 4, 6]] and cab(cid_sinfra) == ([3, 4, 6], False)
     # lista vazia: a obra nao inicia medicao; a que ja' existe abre com os passos da familia do orgao

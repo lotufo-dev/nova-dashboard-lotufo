@@ -188,9 +188,13 @@ def listar(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
         edicoes =medicoes.edicoes_valor(conn, [m["id"] for m in lista])   # B-02 (10/10/2026): a pagina da medicao le daqui
         sigas = siga.registrado_em(conn, "medicao", [m["id"] for m in lista])    # issue #328: link do SIGA do envio por fora
         # issue #290: os boletins do orgao, que a pagina da medicao le daqui (achado do gate Sol na PR #358)
+        # issue #753: o modelo do boletim da obra (o da MT-PAR tem leitor e passo proprios) e a pendencia "boletim
+        # não anexado" da medicao que seguiu sem ele
+        modelo = medicoes.modelo_do_boletim(conn, contrato_id)
         return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"]),
                  "boletins": medicoes.boletins(conn, m["id"]), **_envio_ao_orgao(conn, m),
                  "com_envio_planilha": com_envio, "passos": list(passos_de(m)),
+                 "boletim_modelo": modelo, "boletim_pendente": medicoes.boletim_pendente(conn, m, passos_de(m)),
                  # issue #743: a nota emitida da obra sem o passo "Envio da nota" e' recebida sem protocolo
                  "recebe_sem_protocolo": medicoes.recebe_sem_protocolo(m["estado"], passos_de(m))} for m in lista]
 
@@ -240,6 +244,9 @@ def detalhe(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
         d["envio_assinados"] = assinados_envio.situacao(conn, medicao_id)   # issue #627: SINFRA, depois do boletim
         d["siga_registrado_em"] = siga.registrado_em(conn, "medicao", [medicao_id]).get(medicao_id)
         d["boletins"] = medicoes.boletins(conn, medicao_id)     # issue #284: os boletins do orgao, do 1o ao vigente
+        # issue #753: o modelo do boletim da obra e a pendencia "boletim não anexado" (como na lista da obra)
+        d["boletim_modelo"] = medicoes.modelo_do_boletim(conn, d["contrato_id"])
+        d["boletim_pendente"] = medicoes.boletim_pendente(conn, d, medicoes.passos_das_medicoes(conn)(d))
         d["leitura_planilha"] = medicao_grupos.situacao(conn, medicao_id)   # issue #490: "planilha não lida"
         d.update(_envio_ao_orgao(conn, d))                         # issue #508: passo 2 da pagina da obra
         d["pacote_planilha"] = _pacote_planilha(conn, d)          # issue #508: medidor do pacote no passo 1
@@ -598,17 +605,95 @@ def registrar_boletim(medicao_id: ID,
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
     pdf = _pdf_validado(arquivo, TETO_PLANILHA)   # o pacote do SMO (capa, resumo, calculo, cronograma) passa de 10 MB
-    # issue #286: a capa do SMO lida do PDF (so' o texto), gravada com o boletim para a conferencia contra o cadastro;
-    # so' a capa aprovada conta
-    from app import leitura_smo
-    lida = leitura_smo.ler_pdf_texto(pdf)["campos"]
-    capa = lida if lida.get("situacao") == "APROVADA" else None
+    m = conn.execute("SELECT contrato_id FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
+    capa = leituras = None
+    if medicoes.modelo_do_boletim(conn, m["contrato_id"]) == "mtpar":
+        # issue #753: o servidor le o boletim de novo no registro: o de outra medicao, de outra obra ou do outro tipo
+        # e' recusado aqui tambem, antes de o PDF ser guardado; as duas leituras do valor vao para a auditoria
+        lido, recusa = _boletim_mtpar(conn, medicao_id, pdf)
+        if recusa:
+            raise HTTPException(422, recusa)
+        if lido["documento"]:
+            leituras = lido["leituras"]
+    else:
+        # issue #286: a capa do SMO lida do PDF (so' o texto), gravada com o boletim para a conferencia contra o
+        # cadastro; so' a capa aprovada conta
+        from app import leitura_smo
+        lida = leitura_smo.ler_pdf_texto(pdf)["campos"]
+        capa = lida if lida.get("situacao") == "APROVADA" else None
     caminho, sha = arquivos.gravar_bytes("boletins", pdf, "pdf")
     try:
         return medicoes.registrar_boletim(conn, usuario["id"], medicao_id, dados,
-                                          {"arquivo": caminho, "sha256": sha, "capa": capa})
+                                          {"arquivo": caminho, "sha256": sha, "capa": capa, "leituras": leituras})
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
+
+
+def _boletim_mtpar(conn: sqlite3.Connection, medicao_id: int, pdf: bytes) -> tuple[dict, str | None]:
+    """Issue #753: o boletim da MT-PAR lido do PDF e a recusa dele para esta medicao (None: pode ser o dela)."""
+    from app import leitura_boletim_mtpar
+    m = conn.execute("SELECT m.numero, m.numero_orgao, m.tipo, c.numero_instrumento FROM medicoes m "
+                     "JOIN contratos c ON c.id=m.contrato_id WHERE m.id=?", (medicao_id,)).fetchone()
+    lido = leitura_boletim_mtpar.ler_pdf(pdf)
+    return lido, leitura_boletim_mtpar.recusa(lido, m["tipo"], m["numero_orgao"] or m["numero"],
+                                              m["numero_instrumento"])
+
+
+# as duas leituras do valor, pelo nome que a pessoa ve no documento
+_LEITURA_DO_ROTULO = {"medicao": "Visto", "reajuste": "Total do reajuste"}
+_SEM_VALOR_MTPAR = {
+    "numero-nao-lido": "O nº da medição não foi lido na capa do boletim",
+    "numero-divergente": "A capa e o Visto do boletim trazem medições diferentes",
+    "valor-fora-do-rotulo": "O valor não saiu ao lado do rótulo no boletim",
+    "controle-nao-lido": "A linha da medição não foi lida no controle financeiro",
+    "leituras-divergentes": "As duas leituras do valor não batem",
+}
+
+
+def _ler_boletim_mtpar(conn: sqlite3.Connection, medicao_id: int, pdf: bytes, usuario_id: int) -> dict:
+    """Issue #753: a leitura do boletim da MT-PAR para a tela. O valor so' e' proposto quando as duas leituras (a do
+    rotulo e a do controle financeiro) sao a mesma quantia; senao a pessoa confere e digita, com as duas mostradas
+    (`leituras`). O boletim de outra medicao, de outra obra ou do outro tipo volta em `recusa` e nada e' proposto."""
+    lido, recusa = _boletim_mtpar(conn, medicao_id, pdf)
+    base = {"modelo": "mtpar", "lido": False, "fonte": None, "campos": {}, "avisos": [], "leituras": [], "recusa": None}
+    if recusa:
+        return {**base, "recusa": recusa}
+    if lido["motivo"] == "pdf-recusado":
+        return {**base, "avisos": [lido.get("aviso") or "Não foi possível ler este PDF; digite os valores"]}
+    if lido["documento"] is None:
+        aviso = ("Este PDF não tem texto: confira no documento e digite o nº, a data e o valor aprovado"
+                 if lido["motivo"] == "sem-texto"
+                 else "Não foi possível reconhecer o boletim da MT-PAR neste PDF; digite os valores")
+        return {**base, "avisos": [aviso]}
+    c = lido["campos"]
+    campos = {}
+    if "numero" in c:
+        campos["numero_orgao"] = str(c["numero"])
+    if "data" in c:
+        campos["data"] = c["data"]
+    if lido["ok"]:
+        campos["valor_centavos"] = c["valor_centavos"]
+    leituras = [{"fonte": _LEITURA_DO_ROTULO[lido["documento"]], "valor_centavos": lido["leituras"]["rotulo_centavos"]},
+                {"fonte": "Controle financeiro", "valor_centavos": lido["leituras"]["controle_centavos"]}]
+    avisos = [] if lido["ok"] else [f"{_SEM_VALOR_MTPAR[lido['motivo']]}: confira no PDF e digite o valor aprovado"]
+    if len(campos) == 3:
+        _guardar_leitura(conn, medicao_id, pdf, campos, "texto", usuario_id)
+    return {**base, "lido": bool(campos), "fonte": "texto" if campos else None, "campos": campos, "avisos": avisos,
+            "leituras": leituras}
+
+
+def _guardar_leitura(conn: sqlite3.Connection, medicao_id: int, pdf: bytes, campos: dict, fonte: str | None,
+                     usuario_id: int) -> None:
+    """Gate Sol, rodada 2 (#290): so' a leitura completa e do boletim desta medicao pode dar `aceito`; a mesma leitura
+    repetida nao duplica, e ficam so' as LEITURAS_GUARDADAS mais recentes da medicao (tabela de apoio)."""
+    with db.mutacao(conn):
+        conn.execute("INSERT OR IGNORE INTO medicao_boletim_leituras (medicao_id, sha256, numero_orgao, data, "
+                     "valor_centavos, fonte, usuario_id) VALUES (?,?,?,?,?,?,?)",
+                     (medicao_id, arquivos.sha_de(pdf), campos["numero_orgao"], campos["data"],
+                      campos["valor_centavos"], fonte, usuario_id))
+        conn.execute("DELETE FROM medicao_boletim_leituras WHERE medicao_id=? AND id NOT IN (SELECT id FROM "
+                     "medicao_boletim_leituras WHERE medicao_id=? ORDER BY id DESC LIMIT ?)",
+                     (medicao_id, medicao_id, LEITURAS_GUARDADAS))
 
 
 LEITURAS_GUARDADAS = 20     # issue #290: leituras da capa guardadas por medicao para a origem `aceito`
@@ -623,7 +708,8 @@ def ler_capa_do_boletim(medicao_id: ID, arquivo: UploadFile = File(...),
     que foi lido de qual PDF, para o registro saber se os campos sao os lidos (origem `aceito`, gate Sol rodada 1).
     Na execucao o valor e' o dos precos iniciais (o da NF da medicao); no reajuste, o do reajustamento."""
     from app import leitura_smo
-    m = conn.execute("SELECT numero, numero_orgao, tipo, estado FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
+    m = conn.execute("SELECT numero, numero_orgao, tipo, estado, contrato_id FROM medicoes WHERE id=?",
+                     (medicao_id,)).fetchone()
     if m is None:
         raise HTTPException(404, "Medição não encontrada")
     # code-review: a medicao que nao recebe boletim nao gasta leitura (nem OCR) no servidor; as mesmas recusas do
@@ -631,9 +717,12 @@ def ler_capa_do_boletim(medicao_id: ID, arquivo: UploadFile = File(...),
     if m["estado"] in ("cancelada", "desistida"):
         raise HTTPException(422, f"{medicoes.nome_medicao(m['numero'], m['tipo'])} está "
                                  f"{medicoes.rotulo_estado(m['estado'])}: não recebe boletim")
-    if m["estado"] == "planilha_gerada":
+    mtpar = medicoes.modelo_do_boletim(conn, m["contrato_id"]) == "mtpar"
+    if m["estado"] == "planilha_gerada" and not mtpar:
         raise HTTPException(422, "Registre o envio da planilha/carta antes do boletim do órgão")
     pdf = _pdf_validado(arquivo, TETO_PLANILHA)
+    if mtpar:
+        return _ler_boletim_mtpar(conn, medicao_id, pdf, usuario["id"])     # issue #753: o modelo da MT-PAR
     r = leitura_smo.ler_pdf(pdf)
     avisos = list(r["avisos"])
     c = r["campos"]
@@ -663,16 +752,7 @@ def ler_capa_do_boletim(medicao_id: ID, arquivo: UploadFile = File(...),
     if not campos and not avisos:
         avisos.append("Não foi possível ler a capa do boletim neste PDF; digite os valores")
     if da_medicao and len(campos) == 3:
-        # gate Sol, rodada 2: so' a leitura completa e da capa desta medicao pode dar `aceito`; a mesma leitura
-        # repetida nao duplica, e ficam so' as LEITURAS_GUARDADAS mais recentes da medicao (tabela de apoio)
-        with db.mutacao(conn):
-            conn.execute("INSERT OR IGNORE INTO medicao_boletim_leituras (medicao_id, sha256, numero_orgao, data, "
-                         "valor_centavos, fonte, usuario_id) VALUES (?,?,?,?,?,?,?)",
-                         (medicao_id, arquivos.sha_de(pdf), campos["numero_orgao"], campos["data"],
-                          campos["valor_centavos"], r["fonte"], usuario["id"]))
-            conn.execute("DELETE FROM medicao_boletim_leituras WHERE medicao_id=? AND id NOT IN (SELECT id FROM "
-                         "medicao_boletim_leituras WHERE medicao_id=? ORDER BY id DESC LIMIT ?)",
-                         (medicao_id, medicao_id, LEITURAS_GUARDADAS))
+        _guardar_leitura(conn, medicao_id, pdf, campos, r["fonte"], usuario["id"])
     return {"lido": bool(campos), "fonte": r["fonte"] if campos else None, "campos": campos, "avisos": avisos}
 
 

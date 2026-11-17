@@ -1370,3 +1370,63 @@ describe("Página da obra em medição: passos 3 a 6 (issue #514)", () => {
     expect(screen.getByLabelText(/^Valor: R\$\s10\.000,00$/)).toBeTruthy();       // o valor grande, sem o reajuste cancelado
   });
 });
+
+describe("MT-PAR: o passo do boletim antes do espelho (issue #753)", () => {
+  beforeEach(() => window.history.replaceState(null, "", "/obras/1/medicoes/5"));
+  afterEach(() => { cleanup(); api.mockReset(); });
+  const MT = { ...MEDICAO, numero: 7, estado: "prevista", passos: [2, 3, 4, 5, 6], boletim_modelo: "mtpar",
+    boletim_pendente: false, boletins: [] };
+  const rotulos = (barra: HTMLElement) => within(barra).getAllByRole("button").map(b => b.getAttribute("aria-label")!.replace(/, feito em .*/, ""));
+
+  it("a barra começa em Análise do órgão, com o boletim para anexar e o espelho só a pedido", async () => {
+    responder({ "/api/contratos/1/medicoes": [MT] });
+    const { container } = pagina();
+    const barra = await screen.findByRole("navigation", { name: "Passos da medição" });
+    expect(rotulos(barra)).toEqual(["Passo 1: Análise do órgão", "Passo 2: Espelhos", "Passo 3: Notas", "Passo 4: Envio da nota", "Passo 5: Pagamento"]);
+    expect(barra.querySelector("[aria-current='step']")!.textContent).toContain("Análise do órgão");
+    const cartao = screen.getByRole("region", { name: "Boletim" });
+    expect(cartao.textContent).toContain("Não anexado");
+    expect(within(cartao).getByRole("form", { name: "Registrar boletim" })).toBeTruthy();
+    // o espelho não aparece sozinho antes do boletim: o passo não trava, mas segue a pedido
+    expect(container.querySelector("[data-espelho]")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Gerar o espelho sem o boletim" }));
+    expect(container.querySelector("[data-espelho='espelho']")).not.toBeNull();
+    // o boletim mora no passo dele: "Mais ações" não repete o ato, e não há pendência com o passo aberto
+    fireEvent.click(screen.getByRole("button", { name: "Mais ações" }));
+    expect(screen.queryByRole("menuitem", { name: /Registrar boletim/ })).toBeNull();
+    expect(screen.queryByText(/Boletim não anexado/)).toBeNull();
+  });
+
+  it("com o boletim, a vez é do espelho; o passo do boletim fica feito, com o valor e o PDF", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MT, estado: "boletim_recebido", valor_atestado_centavos: 12345679,
+      atestado_em: "2026-10-01", boletins: [{ id: 9, tem_arquivo: true, valor_centavos: 12345679, atestado_em: "2026-10-01" }] }] });
+    pagina();
+    const barra = await screen.findByRole("navigation", { name: "Passos da medição" });
+    expect(barra.querySelector("[aria-current='step']")!.textContent).toContain("Espelhos");
+    fireEvent.click(within(barra).getByRole("button", { name: /Passo 1: Análise do órgão/ }));
+    expect(screen.getByLabelText("Boletim anexado").textContent).toContain("123.456,79");
+    expect(screen.getByRole("link", { name: "Abrir o PDF" }).getAttribute("href")).toBe("/api/medicoes/5/boletins/9");
+    expect(screen.getByRole("button", { name: "Registrar boletim novo" })).toBeTruthy();
+  });
+
+  it("a medição que seguiu sem o boletim diz a pendência, com o link para o passo", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MT, estado: "nota_emitida", nota_emitida_em: "2026-10-02", boletim_pendente: true }] });
+    pagina();
+    await screen.findByRole("heading", { name: "Envio da nota", level: 2 });
+    const caixa = screen.getByText(/Boletim não anexado/).closest(".aviso") as HTMLElement;
+    fireEvent.click(within(caixa).getByRole("link", { name: "anexe o boletim" }));
+    expect(await screen.findByRole("region", { name: "Boletim" })).toBeTruthy();
+    // com o passo do boletim aberto, a caixa do alto sai: o próprio passo diz
+    expect(screen.queryByText(/Boletim não anexado:/)).toBeNull();
+  });
+
+  it("nos outros órgãos nada muda: sem o modelo da MT-PAR não há cartão do boletim nem pendência", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida", nota_emitida_em: "2026-10-02",
+      passos: [3, 4, 5, 6], boletim_modelo: null, boletim_pendente: false }] });
+    pagina();
+    await screen.findByRole("heading", { name: "Envio da nota", level: 2 });
+    expect(screen.queryByText(/Boletim não anexado/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Mais ações" }));
+    expect(screen.getByRole("menuitem", { name: "Registrar boletim" })).toBeTruthy();
+  });
+});

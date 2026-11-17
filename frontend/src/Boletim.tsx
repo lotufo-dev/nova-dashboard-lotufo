@@ -5,18 +5,25 @@ import ErroCampo from "./ErroCampo";
 import { api, apiForm, mensagemDeErro } from "./api";
 import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
+import { EXCECOES, tituloMedicao } from "./medicao";
 import { brlCampo, type Agir } from "./MedicaoAtos";
 import type { Medicao } from "./Medicoes";
 import Selo from "./Selo";
-import { hojeLocal } from "./tempo";
+import { fmtDataPura, hojeLocal } from "./tempo";
+import "./passos.css";
 import "./planilhaCarta.css";
 
 // Issue #290 (spec 2026-10-20 §2.1 passo 3 e §2.3): "Registrar boletim". A pessoa arrasta o PDF do orgao, o leitor
 // da capa do SMO (#285) propoe nº, data e valor, marcados como lidos; ela confere e aceita (origem `aceito`). Sem
 // leitura, os tres campos ficam vazios para digitar (origem `manual`). A diferenca pedido x aprovado aparece na hora.
+// Issue #753: na MT-PAR o servidor le o boletim do modelo do orgao. O valor so' vem proposto quando as duas leituras
+// dele (a do rotulo e a do controle financeiro) batem; senao elas aparecem para a pessoa conferir e digitar
+// (`leituras`). O boletim de outra medicao ou de outra obra volta recusado (`recusa`) e o PDF nao fica no formulario.
 
+type LeituraDoValor = { fonte: string; valor_centavos: number | null };
 type Leitura = { lido: boolean; fonte: string | null; avisos: string[];
-  campos: { numero_orgao?: string; data?: string; valor_centavos?: number } };
+  campos: { numero_orgao?: string; data?: string; valor_centavos?: number };
+  modelo?: string | null; leituras?: LeituraDoValor[]; recusa?: string | null };
 type Campo = "numero" | "data" | "valor";
 
 const MEIOS_BOLETIM: [string, string][] = [
@@ -112,7 +119,10 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
   const [sobre, setSobre] = useState(false);
   const [lendo, setLendo] = useState(false);
   const [erroLeitura, setErroLeitura] = useState("");
+  const [recusa, setRecusa] = useState("");
   const [avisos, setAvisos] = useState<string[]>([]);
+  const [leituras, setLeituras] = useState<LeituraDoValor[]>([]);
+  const mtpar = m.boletim_modelo === "mtpar";
   const [numero, setNumero] = useState("");
   const [data, setData] = useState("");
   const [valor, setValor] = useState("");
@@ -131,13 +141,15 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
     if (lidos.has("numero")) setNumero("");
     if (lidos.has("data")) setData("");
     if (lidos.has("valor")) setValor("");
-    setArquivo(f); setErroLeitura(""); setAvisos([]); setLido({});
+    setArquivo(f); setErroLeitura(""); setRecusa(""); setAvisos([]); setLeituras([]); setLido({});
     setLendo(true);
     const fd = new FormData();
     fd.append("arquivo", f);
     try {
       const r = await apiForm<Leitura>(`/api/medicoes/${m.id}/boletim/leitura`, fd);
       if (n !== leitura.current) return;     // outro PDF chegou enquanto este era lido
+      // #753: o boletim de outra medicao ou de outra obra nao fica no formulario (o servidor tambem recusa o registro)
+      if (r.recusa) { setArquivo(null); setRecusa(r.recusa); return; }
       const c = r.campos ?? {};
       const novo: typeof lido = {};
       if (c.numero_orgao) { setNumero(c.numero_orgao); novo.numero = c.numero_orgao; }
@@ -146,9 +158,11 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
       if (typeof c.valor_centavos === "number" && c.valor_centavos >= 0) {
         setValor(brlCampo(c.valor_centavos)); novo.valor = c.valor_centavos;
       }
-      if (Object.keys(novo).length > 0 && !meio) setMeio("smo");
+      if (Object.keys(novo).length > 0 && !meio && !mtpar) setMeio("smo");
       setLido(novo);
       setAvisos(r.avisos ?? []);
+      // as duas leituras so' aparecem quando o valor nao veio proposto: e' com elas que a pessoa confere
+      setLeituras(novo.valor === undefined ? r.leituras ?? [] : []);
     } catch (e) {
       if (n === leitura.current) setErroLeitura(mensagemDeErro(e));
     } finally {
@@ -183,7 +197,7 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
     if (ok) aoFechar();
   }
 
-  const seloLido = (c: Campo) => lidos.has(c) ? <> <Selo>Lido da capa</Selo></> : null;
+  const seloLido = (c: Campo) => lidos.has(c) ? <> <Selo>{mtpar ? "Lido do boletim" : "Lido da capa"}</Selo></> : null;
 
   return (
     <form className="pilha" onSubmit={salvar} noValidate aria-label="Registrar boletim" onKeyDown={ev => ev.key === "Escape" && aoFechar()}>
@@ -205,9 +219,15 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
           </label>
         </div>
       </div>
-      <p className={lendo ? "" : "sr-only"} role="status">{lendo ? "Lendo a capa…" : ""}</p>
+      <p className={lendo ? "" : "sr-only"} role="status">{lendo ? (mtpar ? "Lendo o boletim…" : "Lendo a capa…") : ""}</p>
       {erroLeitura && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler o PDF: {erroLeitura}</p>}
+      {recusa && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{recusa}</p>}
       {avisos.map(a => <CaixaAviso nivel="atencao" key={a}>{a}</CaixaAviso>)}
+      {leituras.length > 0 && (
+        <dl className="planilha__saldo" aria-label="Leituras do valor">
+          {leituras.map(l => <div key={l.fonte}><dt>{l.fonte}</dt><dd className="num">{brl(l.valor_centavos)}</dd></div>)}
+        </dl>
+      )}
       <div className="form-inline">
         <div className="campo">
           <label className="campo__rotulo" htmlFor="bol-numero">Nº no órgão{seloLido("numero")}</label>
@@ -245,5 +265,49 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
         <button type="button" className="btn" onClick={aoFechar}>Cancelar</button>
       </div>
     </form>
+  );
+}
+
+/** Issue #753: o passo do boletim na MT-PAR ("Análise do órgão", sem planilha/carta enviada). Um cartao por medicao
+ *  da pagina (a medicao e, no par, o reajuste, que tem o PDF proprio): o boletim anexado, com o valor aprovado, a
+ *  data e o PDF, ou o formulario para arrastar o PDF. O passo nao trava: sem boletim a medicao segue. */
+export function PassoBoletim({ ms, podeEditar, salvando, agir, erro }: {
+  ms: Medicao[]; podeEditar: boolean; salvando: boolean; agir: Agir; erro?: string;
+}) {
+  const pode = (x: Medicao) => podeEditar && !EXCECOES.includes(x.estado);
+  const anexado = (x: Medicao) => (x.boletins ?? []).filter(b => b.tem_arquivo).at(-1) ?? null;
+  // o formulario ja' abre na primeira medicao sem boletim; um de cada vez (os campos tem o mesmo id)
+  const [aberta, setAberta] = useState<number | null>(() => ms.find(x => pode(x) && !anexado(x))?.id ?? null);
+  return (
+    <div className="pilha">
+      {ms.map(x => {
+        const b = anexado(x);
+        const nome = ms.length > 1 ? `Boletim · ${tituloMedicao(x)}` : "Boletim";
+        return (
+          <section key={x.id} className="cartao med-painel" aria-label={nome}>
+            <h3 className="med-painel__titulo">{nome}
+              {b ? <Selo classe="selo--ok">Anexado</Selo> : <Selo classe="selo--atencao">Não anexado</Selo>}</h3>
+            {b && (
+              <>
+                <dl className="orgao-faixa__dados" aria-label={`Boletim anexado${ms.length > 1 ? `: ${tituloMedicao(x)}` : ""}`}>
+                  <div><dt>Valor aprovado</dt><dd>{brl(b.valor_centavos ?? null)}</dd></div>
+                  <div><dt>Data do boletim</dt><dd>{b.atestado_em ? fmtDataPura(b.atestado_em) : "—"}</dd></div>
+                  {x.valor_atestado_centavos !== null && x.valor_protocolado_centavos !== null
+                    && x.valor_atestado_centavos < x.valor_protocolado_centavos && !x.diferenca_aceita && (
+                    <div><dt>Diferença</dt><dd className="num">{brl(x.valor_atestado_centavos - x.valor_protocolado_centavos)}</dd></div>
+                  )}
+                  <a className="link orgao-faixa__link" href={`/api/medicoes/${x.id}/boletins/${b.id}`} target="_blank" rel="noreferrer">Abrir o PDF</a>
+                </dl>
+                <AceiteDiferenca m={x} podeEditar={podeEditar} salvando={salvando} agir={agir} />
+              </>
+            )}
+            {pode(x) && (aberta === x.id
+              ? <FormBoletim m={x} salvando={salvando} agir={agir} aoFechar={() => setAberta(null)} erro={erro} />
+              : <div><button type="button" className="btn btn--pequeno" onClick={() => setAberta(x.id)}>
+                  {b ? "Registrar boletim novo" : "Anexar o boletim"}</button></div>)}
+          </section>
+        );
+      })}
+    </div>
   );
 }
