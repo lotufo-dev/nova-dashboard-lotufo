@@ -163,7 +163,7 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
                         : <Selo situacao="andamento">em aberto</Selo>}
                         {/* #755: o titulo que o RM deixou de devolver; selo neutro (nao e' situacao da nota), fora dos totais */}
                         {(n.titulos_excluidos_rm ?? []).map((t, i) => (
-                          <span key={i}>{" "}<Selo>título de <span className="num">{brl(t.valor_original_centavos)}</span> excluído no RM</Selo></span>
+                          <span key={i}>{" "}<Selo className="pag-excluido">título de <span className="num">{brl(t.valor_original_centavos)}</span> excluído no RM</Selo></span>
                         ))}</td>
                     </tr>
                   );

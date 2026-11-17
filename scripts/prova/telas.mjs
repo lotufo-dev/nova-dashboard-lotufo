@@ -24,7 +24,8 @@
 //   erro     true quando a tela DEVE mostrar o aviso de erro (a falha foi simulada); sem ele, aviso de erro reprova
 //
 // Todo item do menu de um perfil precisa de uma tela aqui para esse perfil: a prova reprova o item sem tela.
-import { falha, medicaoComNotaEmitida, notasAEnviar, PDF_ILEGIVEL, SIGA_COM_PROCESSOS } from "./simulados.mjs";
+import { falha, medicaoComExcluidosNoRm, medicaoComNotaEmitida, medicaoDaMtpar, notasAEnviar, PDF_ILEGIVEL, RM_EXCLUSAO_RECUSADA,
+         SIGA_COM_PROCESSOS } from "./simulados.mjs";
 
 export const PERFIS = ["admin", "engenharia", "diretoria"];
 export const LARGURAS = [1440, 1024, 390];
@@ -41,8 +42,9 @@ const JANELA = "dialog[open] .iniciar__caixa";
 const maisAcoes = item => [{ clicar: '#conteudo button:has-text("Mais ações")' }, { clicar: `#conteudo button:has-text("${item}")` }];
 const passo = nome => [{ clicar: `nav.passos button:has-text("${nome}")` }];
 // a medicao com a nota emitida e o envio ao orgao por fazer (ver simulados.mjs)
+const MEDICOES_DA_OBRA = /^\/api\/contratos\/\d+\/medicoes$/;
 const comNotaAEnviar = familia => [
-  { caminho: /^\/api\/contratos\/\d+\/medicoes$/, ajustar: medicaoComNotaEmitida },
+  { caminho: MEDICOES_DA_OBRA, ajustar: medicaoComNotaEmitida },
   { caminho: /^\/api\/notas\/a-enviar$/, corpo: notasAEnviar(familia) },
 ];
 
@@ -156,6 +158,16 @@ export const TELAS = [
     simular: comNotaAEnviar("mtpar"), passos: [...passo("Envio da nota"), { clicar: '#passo-5 button:has-text("Enviar a nota")' }] },
   { rota: "medicao", id: "medicao-recebimento", caminho: MEDICAO, perfis: SO_ADMIN, antes: "nav.passos", espera: JANELA,
     passos: [{ clicar: '#conteudo button:has-text("Registrar recebimento")' }] },
+  // o passo do boletim da MT-PAR (#753): a pendencia na pagina, o formulario do boletim e o boletim anexado
+  { rota: "medicao", id: "medicao-mtpar-sem-boletim", caminho: MEDICAO, perfis: TODOS, espera: "nav.passos",
+    simular: [{ caminho: MEDICOES_DA_OBRA, ajustar: medicaoDaMtpar() }] },
+  { rota: "medicao", id: "medicao-mtpar-boletim", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: "#passo-2 .planilha__soltar",
+    simular: [{ caminho: MEDICOES_DA_OBRA, ajustar: medicaoDaMtpar() }], passos: passo("Análise do órgão") },
+  { rota: "medicao", id: "medicao-mtpar-anexado", caminho: MEDICAO, perfis: TODOS, antes: "nav.passos", espera: "#passo-2 .orgao-faixa__dados",
+    simular: [{ caminho: MEDICOES_DA_OBRA, ajustar: medicaoDaMtpar(true) }], passos: passo("Análise do órgão") },
+  // o que o RM deixou de devolver (#755): o titulo e a nota ditos como excluidos no passo Pagamento
+  { rota: "medicao", id: "medicao-excluidos-rm", caminho: MEDICAO, perfis: TODOS, antes: "nav.passos", espera: "#passo-6 table",
+    simular: [{ caminho: MEDICOES_DA_OBRA, ajustar: medicaoComExcluidosNoRm }], passos: passo("Pagamento") },
   { rota: "medicao", id: "medicao-erro", caminho: MEDICAO, perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/contratos\/\d+\/medicoes$/) },
   { rota: "nova-medicao", id: "nova-medicao", caminho: "/obras/:obra/medicoes/nova", perfis: OPERA, espera: ".med-grade" },
@@ -175,6 +187,9 @@ export const TELAS = [
   { rota: "admin", id: "admin-auditoria-vazia", caminho: "/admin/auditoria", perfis: SO_ADMIN, espera: "#conteudo h2",
     simular: [{ caminho: /^\/api\/admin\/auditoria$/, corpo: { cadeia_integra: true, ha_mais: false, eventos: [] } }] },
   { rota: "admin", id: "admin-pendencias", caminho: "/admin/pendencias", perfis: SO_ADMIN, espera: "#conteudo h2" },
+  // a rodada do RM que recusou uma exclusao em massa (#755): atencao no cartao do RM e o aviso no das rodadas
+  { rota: "admin", id: "admin-exclusao-recusada", caminho: "/admin", perfis: SO_ADMIN, espera: "#conteudo .aviso",
+    simular: [{ caminho: /^\/api\/rm\/status$/, corpo: RM_EXCLUSAO_RECUSADA }] },
   { rota: "admin", id: "admin-erro", caminho: "/admin", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/admin\/backup$/) },
 

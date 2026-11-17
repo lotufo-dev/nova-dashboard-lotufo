@@ -486,6 +486,9 @@
 .pag-numeros__valor--acento { color: var(--cor-tinta); }
 .pag-numeros__nota { color: var(--cor-texto-terciario); font-size: var(--texto-meta); }
 .pag-par { min-width: 0; }
+/* #755: o selo do titulo excluido no RM leva o valor e nao cabe numa linha da coluna "No financeiro": quebra em vez de
+   cortar (o corte do `.selo` e' para rotulo curto em coluna fixa) */
+.selo.pag-excluido, .selo.pag-excluido .selo__texto { white-space: normal; overflow: visible; }
 .pag-duas { gap: var(--espaco-g) var(--espaco-entre-colunas); align-items: start; }
 @container (min-width: 700px) {
   .pag-duas { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }

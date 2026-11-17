@@ -70,3 +70,37 @@ export const falha = caminho => [{ caminho, status: 500, corpo: FALHA }];
 
 /** O PDF que o sistema nao conseguiu ler: a fila do "Anexar PDF" abre a digitacao. */
 export const PDF_ILEGIVEL = { ok: false, digitavel: true, mensagem: "Não deu para ler este PDF. Digite os dados da certidão." };
+
+// ---- O que veio da master em 17/11/2026 e o cadastro de exemplo nao alcanca (a obra de exemplo e' da SINFRA e a prova
+// nao fala com o RM): o passo do boletim da MT-PAR (#753) e o que o RM deixou de devolver (#755).
+
+// A medicao como numa obra da MT-PAR: "Análise do órgão" sem "Planilha e carta" e' o passo do boletim assinado. Sem
+// `boletim`, a medicao seguiu sem ele (a pendencia aparece na pagina e o passo abre o formulario); com ele, o passo
+// mostra o boletim anexado, com a diferenca para o pedido.
+export const medicaoDaMtpar = (boletim = false) => (medicoes, reg) => medicoes.map(m => (m.id === reg.medicao ? {
+  ...m, boletim_modelo: "mtpar", passos: [2, 3, 4, 5, 6], estado: "espelho_gerado", protocolos: [], congelada: 0,
+  boletim_pendente: !boletim, diferenca_aceita: false,
+  valor_protocolado_centavos: 41234567, valor_atestado_centavos: boletim ? 41000001 : null,
+  boletins: boletim ? [{ id: 1, tem_arquivo: true, valor_centavos: 41000001, atestado_em: "2025-05-20" }] : [],
+} : m));
+
+// O passo Pagamento com uma nota que perdeu um titulo no RM e outra que o RM deixou de devolver inteira.
+export const medicaoComExcluidosNoRm = (medicoes, reg) => medicoes.map(m => (m.id === reg.medicao ? {
+  ...m,
+  notas: [{ nota_id: 9001, coligada: 1, numero: "2322", serie: null, emissao: "2025-05-22", valor_centavos: 41234567,
+    recebido_centavos: 0, devido_centavos: 38000001, falta_centavos: 38000001, da_lotufo: true, da_cota: true,
+    recebido_em: null, origem: "rm", regra: null,
+    titulos_excluidos_rm: [{ valor_original_centavos: 38000001, valor_baixado_centavos: 0, excluida_rm_em: "2025-06-02 12:00:00" }] }],
+  notas_excluidas_rm: [{ nota_id: 9002, coligada: 1, numero: "2310", serie: null, emissao: "2025-05-20",
+    valor_centavos: 41234567, excluida_rm_em: "2025-06-02 12:00:00" }],
+} : m));
+
+// A Saude com a ultima rodada do RM recusando uma exclusao em massa.
+export const RM_EXCLUSAO_RECUSADA = {
+  configurado: true, ultima_sincronizacao: "2025-06-02T10:40:38-04:00", ultimo_erro: null, em_andamento: false,
+  rodadas: [{ id: 2, disparo: "agendada", estado: "success", iniciado_em: "2025-06-02T10:40:00-04:00",
+    terminado_em: "2025-06-02T10:40:38-04:00", nfs: 600, baixas: 900, alocacoes: 0, sugestoes: 0, recebimentos: 0, erro: null }],
+  custo_aviso: null,
+  exclusao_aviso: "Exclusão em massa recusada: 412 notas deixaram de vir do RM, inteiras ou em algum título (teto de 30). "
+    + "Nada foi marcado como excluído. Ver docs/runbook.md, TOTVS RM.",
+};
