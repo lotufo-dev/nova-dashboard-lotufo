@@ -389,9 +389,16 @@ def test_espelho_de_antes_da_migracao_usa_as_entradas_gravadas(ambiente):
     _boletim(conn, u, mid, 99_99, sha="b")
     assert [a["medicao_id"] for a in _desatualizados(conn)] == [mid]
 
-    # a regra trocada depois do espelho pode ter outras chaves: sem a do espelho, nao ha' como comparar
-    conn.execute("UPDATE espelho_regras SET sha256='outra' WHERE contrato_id=?", (cid,)); conn.commit()
-    assert _desatualizados(conn) == []
+    # a regra trocada depois do espelho pode ter outras chaves: as entradas deixam de valer e a referencia passa a ser
+    # o que o espelho travou ao ser gerado (PR #474), aqui o pedido, posto em 99,99 para diferir das entradas.
+    # O espelho ganha data anterior a dos boletins: `criado_em` tem resolucao de segundo e, sem isso, o resultado
+    # dependia de o espelho e os dois boletins caberem no mesmo segundo (o boletim contava como anterior ao espelho)
+    conn.execute("UPDATE espelho_regras SET sha256='outra' WHERE contrato_id=?", (cid,))
+    conn.execute("UPDATE espelhos SET criado_em='2026-01-05 10:00:00'")
+    conn.execute("UPDATE medicoes SET valor_protocolado_centavos=? WHERE id=?", (99_99, mid)); conn.commit()
+    assert _desatualizados(conn) == [] and _nao_conferidos(conn) == []
+    conn.execute("UPDATE medicoes SET valor_protocolado_centavos=? WHERE id=?", (100_01, mid)); conn.commit()
+    assert [a["medicao_id"] for a in _desatualizados(conn)] == [mid]
 
 
 def _nao_conferidos(conn):
