@@ -214,6 +214,52 @@ _Avoid_: bloqueio para o que só pede confirmação ou justificativa
 **Justificativa**:
 A linha escrita por quem segue adiante com algo fora da regra; fica na auditoria.
 
+**Situação**:
+A leitura de um dado em uma de quatro: feito, em andamento, vence em breve ou crítico. Cada uma tem cor e forma. O
+que não tem situação fica sem marca.
+_Avoid_: status, nível (nível é o do aviso: Crítico, Ação, Atenção)
+
+**Feito**:
+Aconteceu e não pede mais nada (recebida, anexada, em dia). Verde, círculo com visto.
+
+**Em andamento**:
+Está em curso e dentro do esperado. Azul, círculo meio cheio.
+
+**Vence em breve**:
+Ainda não venceu, falta sem travar, ou se acompanha. Amarelo, triângulo.
+_Avoid_: atenção como nome da situação (Atenção é um nível de aviso, que aparece como vence em breve)
+
+**Crítico**:
+Venceu, diverge, falhou, trava ou pede ação agora. Vermelho, octógono.
+
+**Glifo**:
+O símbolo que dá forma à situação, para ela não depender só da cor.
+
+**Selo**:
+A situação de uma linha: o glifo e uma palavra sobre o fundo claro da situação. Sem situação, é neutro e sem glifo.
+_Avoid_: pílula, chip, badge
+
+**Contador**:
+A quantidade ao lado de um título. Com situação, leva o glifo dela.
+
+**Painel**:
+O bloco com moldura preta e sombra dura, com o título dentro.
+_Avoid_: cartão, card
+
+**Régua**:
+A linha preta acima de um título: a de grupo, grossa, e a de seção, fina.
+
+**Casca**:
+O que fica igual em toda tela: o menu lateral e o topo.
+_Avoid_: trilho, layout
+
+**Janela**:
+O painel que abre por cima da página para um formulário ou uma ação fora do fluxo dela.
+_Avoid_: modal, popup
+
+**Falha**:
+A ação ou a leitura que não deu certo. Aparece na faixa de crítico, com o octógono.
+
 **Engenharia**:
 O perfil de quem opera o ciclo da medição.
 _Avoid_: operação
