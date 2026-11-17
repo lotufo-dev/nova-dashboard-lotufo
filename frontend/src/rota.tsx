@@ -23,6 +23,7 @@ export type AbaObra = "ficha" | "medicoes" | "prazos" | "reajuste" | "documentos
 export type AbaObras = "posicao" | "resumo" | "qdop";
 // Abas da Administracao (NAVEGACAO.md › Administracao). A Saude e' a padrao e nao entra na URL.
 export type AbaAdmin = "saude" | "reconciliacao" | "usuarios" | "auditoria" | "pendencias";
+// Resumo das medicoes (#749): "/resumo-medicoes", com a competencia na busca (?mes=2026-09).
 // Medicoes (#643): uma tela so', o quadro do mes ("/medicoes"). Os enderecos de antes ("/medicoes/iniciar",
 // "/medicoes/em-andamento", as oito abas antigas e as telas Notas "/notas", "/notas/aguardando") abrem o quadro.
 
@@ -33,6 +34,7 @@ export type Rota =
   | { tela: "raiz" }
   | { tela: "inicio" }
   | { tela: "medicoes" }
+  | { tela: "resumo-medicoes" }
   | { tela: "avisos" }
   | { tela: "siga" }
   | { tela: "documentos" }
@@ -67,7 +69,7 @@ const ABA_ANTIGA: Record<string, AbaObra> = { ficha: "ficha", protocolo: "medico
 
 // Telas de um segmento so' ("/medicoes"), sem parametro, e os nomes antigos de cada uma.
 // Bloco 9: "/engenharia" e "/sugestoes" sairam; por nao estarem aqui, caem na raiz (entrada do perfil).
-const SIMPLES = ["inicio", "medicoes", "avisos", "siga", "documentos", "obras", "fechamento", "ancoras-docusign", "admin", "conta"] as const;
+const SIMPLES = ["inicio", "medicoes", "resumo-medicoes", "avisos", "siga", "documentos", "obras", "fechamento", "ancoras-docusign", "admin", "conta"] as const;
 type Simples = (typeof SIMPLES)[number];
 const SIMPLES_ANTIGAS: Record<string, Simples> = {
   certidoes: "documentos",   // bloco 4: Certidoes virou Documentos de protocolo

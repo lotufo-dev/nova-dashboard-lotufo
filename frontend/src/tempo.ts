@@ -116,6 +116,14 @@ export function fmtDataPura(iso: string): string {
   return m === null ? iso : `${m[3]}/${m[2]}/${m[1]}`;
 }
 
+/** Data PURA ("AAAA-MM-DD") -> "DD/MM/AA", para coluna estreita com varias datas lado a lado (#749: uma data por
+ *  etapa do ciclo). O ano fica, com dois digitos: a lista de meses anteriores atravessa o ano. Sem fuso, como
+ *  `fmtDataPura`; o que nao for data aparece cru. */
+export function fmtDataCurta(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((iso ?? "").trim());
+  return m === null ? iso : `${m[3]}/${m[2]}/${m[1].slice(2)}`;
+}
+
 /** Competencia "AAAA-MM" -> "MM/AAAA" (DESIGN.md › Numeros e datas). E' mes de calendario, sem
  *  fuso; vazio vira "—" e o que nao for competencia aparece cru. */
 export function fmtCompetencia(c: string | null | undefined): string {

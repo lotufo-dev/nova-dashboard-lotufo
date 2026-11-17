@@ -1,0 +1,187 @@
+/* Resumo das medicoes (#749): a disposicao e os blocos proprios da pagina. A moldura do painel (.cartao), a tabela
+   (.tabela), o botao (.btn), o selo, o glifo, o contador e a caixa de aviso sao pecas de base de tokens.css. Cor,
+   familia, tamanho, espaco e borda so' por variavel. */
+
+/* A pagina e' o container: os blocos mudam de forma pela largura que sobra para o conteudo (com o menu lateral aberto
+   ou recolhido), e nao pela largura da janela. Tres faixas: larga, media (ate' 900 px: a 1024 com o menu aberto) e
+   estreita (ate' 640 px: o celular), em que a tabela vira um bloco por medicao. */
+.rdm {
+  container: rdm-pagina / inline-size;
+  /* a largura reservada ao valor na primeira linha do bloco estreito (cabe "R$ 123.456.789,01" na letra de apoio) */
+  --rdm-largura-valor: calc(var(--espaco-xxg) * 2 + var(--espaco-pp));
+  min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); row-gap: var(--espaco-entre-blocos);
+  color: var(--cor-tinta); font-family: var(--fonte-texto); font-size: var(--texto-corpo); line-height: var(--entrelinha);
+}
+.rdm[aria-busy="true"] .rdm-painel, .rdm[aria-busy="true"] .rdm-faixa { opacity: .6; }
+.rdm-vazio { margin: 0; padding: 0 var(--espaco-g) var(--espaco-g); color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.rdm-vazio--pagina { padding: 0; }
+.rdm-aviso { margin: 0; }
+
+/* as cores das etapas (as da fundacao), uma vez: a faixa do alto, a faixa de cada linha, a trilha e a chave */
+.rdm-cor--em_analise { --rdm-cor: var(--etapa-analise); --rdm-contorno: inset 0 0 0 var(--etapa-borda-largura) var(--etapa-analise-borda); }
+.rdm-cor--boletim { --rdm-cor: var(--etapa-boletim); }
+.rdm-cor--nota { --rdm-cor: var(--etapa-nota); }
+.rdm-cor--protocolado { --rdm-cor: var(--etapa-protocolado); }
+.rdm-cor--recebido { --rdm-cor: var(--etapa-recebido); }
+.rdm-cor--vazia { --rdm-cor: var(--etapa-vazia); }
+
+/* cabecalho: a regua grossa da Inicio, a competencia e os botoes */
+.rdm-cab {
+  display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--espaco-p) var(--espaco-m);
+  border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro);
+}
+.rdm-cab__rotulo { margin: 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.rdm-cab h2 { margin: 0; font-size: var(--texto-titulo-bloco); }
+.rdm-cab__troca { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-pp) var(--espaco-m); }
+.rdm-botoes { display: flex; flex-wrap: wrap; gap: var(--espaco-mini); }
+/* de quando e' o dado e a base dos valores, uma vez, sob o cabecalho */
+.rdm-base { margin: calc(var(--espaco-entre-blocos) * -0.5) 0 0; max-width: none; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+
+/* faixa das etapas do mes: uma coluna por etapa, com a barra na cor dela, a quantidade e o valor */
+.rdm-faixa {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); column-gap: var(--espaco-traco);
+}
+.rdm-faixa__item { min-width: 0; display: grid; align-content: start; row-gap: var(--espaco-traco); padding-right: var(--espaco-p); }
+.rdm-faixa__item::before {
+  content: ""; height: var(--altura-barra-etapa); margin-right: calc(var(--espaco-p) * -1); margin-bottom: var(--espaco-pp);
+  border-radius: var(--raio-canto); background: var(--rdm-cor); box-shadow: var(--rdm-contorno, none);
+}
+/* "Sem medição" nao e' etapa: sem barra de cor, separada por um fio */
+.rdm-faixa__item--sem { padding-left: var(--espaco-p); padding-right: 0; border-left: var(--borda-linha); }
+.rdm-faixa__item--sem::before { margin-right: 0; background: none; }
+.rdm-faixa__rotulo { font-size: var(--texto-meta); font-weight: var(--peso-forte); }
+.rdm-faixa__qtd { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.rdm-faixa__numero {
+  margin-right: var(--espaco-traco); color: var(--cor-tinta);
+  font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
+  font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-valor); line-height: var(--entrelinha-numero);
+}
+.rdm-faixa__valor {
+  white-space: nowrap; font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
+  font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-meta);
+}
+
+/* painel */
+.rdm .rdm-painel { min-width: 0; padding: var(--espaco-g) 0 var(--espaco-mini); }
+.rdm-painel__cab {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-pp) var(--espaco-p);
+  padding: 0 var(--espaco-g); margin-bottom: var(--espaco-pp);
+}
+.rdm-painel__cab h2 { margin: 0; font-size: var(--texto-titulo-sub); }
+.rdm-rolagem { margin: 0; }
+
+/* tabela: a da fundacao, com a margem do painel nas pontas */
+.rdm .rdm-tabela th, .rdm .rdm-tabela td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
+.rdm .rdm-tabela th:first-child, .rdm .rdm-tabela td:first-child { padding-left: var(--espaco-g); }
+.rdm .rdm-tabela th:last-child, .rdm .rdm-tabela td:last-child { padding-right: var(--espaco-g); }
+.rdm .rdm-tabela tbody th {
+  padding-top: var(--espaco-p); padding-bottom: var(--espaco-p); border-bottom: var(--borda-linha);
+  text-align: left; font-weight: var(--peso-normal); vertical-align: top;
+}
+.rdm .rdm-tabela tbody td { vertical-align: top; }
+.rdm .rdm-tabela tbody tr:last-child > th { border-bottom: 0; }
+/* a ultima linha de um grupo que nao e' o ultimo fecha com o fio (a base so' tira o da ultima linha do tbody) */
+@container rdm-pagina (min-width: 641px) {
+  .rdm .rdm-tabela tbody:not(:last-child) tr:last-child > :is(th, td) { border-bottom: var(--borda-linha); }
+}
+/* o grupo (o orgao; nos meses anteriores, a competencia): titulo condensado sobre a regua de secao */
+.rdm .rdm-tabela tbody tr.rdm-grupo > th {
+  padding-top: var(--espaco-m); padding-bottom: var(--espaco-mini); border-bottom: var(--regua-secao);
+  font-family: var(--fonte-titulo); font-stretch: var(--largura-titulo); font-weight: var(--peso-titulo);
+  font-size: var(--texto-mini); text-transform: var(--caixa-titulo); letter-spacing: var(--espacamento-titulo);
+}
+.rdm-primeira { width: 30%; }
+.rdm-obra { display: block; color: var(--cor-tinta); font-weight: var(--peso-forte); text-decoration: none; overflow-wrap: anywhere; }
+a.rdm-obra:hover { text-decoration: underline; text-underline-offset: var(--afastamento-sublinhado); }
+/* a mesma obra na linha de baixo: o nome fica so' para o leitor de tela */
+.rdm-obra--repetida { position: absolute; width: var(--espaco-fio); height: var(--espaco-fio); overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.rdm-medicao { font-size: var(--texto-mini); }
+.rdm-antes { margin-top: var(--espaco-mini); display: flex; width: fit-content; }
+.rdm-sub { margin-left: var(--espaco-pp); color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
+
+/* variante A: uma coluna por etapa. A barra no alto de cada celula e' a faixa da linha: as celulas encostam uma na
+   outra (um traco de vao), entao as barras formam uma trilha so'. */
+.rdm .rdm-tabela--a thead th.rdm-th-etapa { width: 11%; padding-left: 0; padding-right: var(--espaco-pp); }
+.rdm .rdm-tabela--a tbody td.rdm-etapa { padding: var(--espaco-p) var(--espaco-traco) var(--espaco-p) 0; font-size: var(--texto-mini); white-space: nowrap; }
+.rdm-etapa::before {
+  content: ""; display: block; height: var(--altura-barra-etapa); margin-bottom: var(--espaco-pp);
+  border-radius: var(--raio-canto); background: var(--rdm-cor); box-shadow: var(--rdm-contorno, none);
+}
+.rdm-etapa--fora::before { background: none; }
+.rdm-etapa__nome { display: none; }
+.rdm-etapa__dado { display: inline-flex; align-items: center; gap: var(--espaco-mini); }
+.rdm-etapa--atual .rdm-etapa__dado { font-weight: var(--peso-forte); }
+
+/* variante B: a trilha curta (uma celula por etapa), o selo da etapa atual e a data dela */
+.rdm-b-etapa { white-space: nowrap; }
+.rdm-trilha { display: inline-flex; gap: var(--espaco-traco); margin-right: var(--espaco-p); vertical-align: middle; }
+.rdm-trilha__celula {
+  width: var(--largura-min-celula); height: var(--tamanho-chave); border-radius: var(--raio-canto);
+  background: var(--rdm-cor); box-shadow: var(--rdm-contorno, none);
+}
+.rdm-trilha__celula--fora { background: none; }
+.rdm .rdm-tabela--b td.rdm-b-desde { white-space: nowrap; }
+
+/* a etapa da ultima medicao (obras sem medicao): a chave de cor e o nome */
+.rdm-chave-etapa { display: inline-flex; align-items: center; gap: var(--espaco-pp); white-space: nowrap; }
+.rdm-chave { flex: none; width: var(--tamanho-chave); height: var(--tamanho-chave); border-radius: var(--raio-canto); background: var(--rdm-cor); box-shadow: var(--rdm-contorno, none); }
+
+/* ---------------------------------------------------------------- faixa media (a 1024 com o menu aberto) */
+@container rdm-pagina (max-width: 900px) {
+  /* a faixa do mes em duas linhas de tres */
+  .rdm-faixa { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: var(--espaco-m); }
+  .rdm-faixa__item--sem { padding-left: 0; border-left: 0; }
+  .rdm-faixa__item--sem::before { background: var(--cor-linha); height: var(--espaco-fio); margin-top: calc(var(--altura-barra-etapa) - var(--espaco-fio)); margin-right: calc(var(--espaco-p) * -1); }
+  .rdm .rdm-tabela th:first-child, .rdm .rdm-tabela td:first-child { padding-left: var(--espaco-m); }
+  .rdm .rdm-tabela th:last-child, .rdm .rdm-tabela td:last-child { padding-right: var(--espaco-m); }
+  .rdm-painel__cab { padding: 0 var(--espaco-m); }
+  .rdm-vazio { padding: 0 var(--espaco-m) var(--espaco-m); }
+  .rdm-primeira { width: 26%; }
+  .rdm-trilha__celula { width: var(--espaco-m); }
+}
+
+/* ---------------------------------------------------------------- faixa estreita (celular)
+   A tabela vira um bloco por medicao: a obra e o valor em cima, e embaixo so' as etapas alcancadas, tres por linha,
+   cada uma com o nome escrito, a forma da situacao e a data. O que falta e o que a obra nao tem nao ocupam lugar. */
+@container rdm-pagina (max-width: 640px) {
+  .rdm-faixa { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rdm-faixa__numero { font-size: var(--texto-valor-menor); }
+  .rdm-painel__cab { padding: 0 var(--espaco-pp); }
+  .rdm-vazio { padding: 0 var(--espaco-pp) var(--espaco-p); }
+
+  .rdm .rdm-tabela, .rdm .rdm-tabela tbody { display: block; width: 100%; }
+  .rdm .rdm-tabela thead { position: absolute; width: var(--espaco-fio); height: var(--espaco-fio); overflow: hidden; clip: rect(0 0 0 0); }
+  .rdm .rdm-tabela tr {
+    display: flex; flex-wrap: wrap; align-items: baseline; row-gap: var(--espaco-pp);
+    padding: var(--espaco-p) var(--espaco-pp); border-bottom: var(--borda-linha);
+  }
+  .rdm .rdm-tabela tbody:last-child tr:last-child { border-bottom: 0; }
+  .rdm .rdm-tabela.tabela tr > :is(th, td) {
+    display: block; min-width: 0; padding: 0; border: 0; white-space: normal; text-align: left; font-size: var(--texto-mini);
+  }
+  .rdm .rdm-tabela.tabela tr.rdm-grupo { padding-top: var(--espaco-m); padding-bottom: var(--espaco-mini); border-bottom: var(--regua-secao); }
+  .rdm .rdm-tabela.tabela tr.rdm-grupo > th { flex: 1 1 100%; }
+  .rdm .rdm-tabela.tabela tr > .rdm-primeira { order: 1; flex: 1 1 calc(100% - var(--rdm-largura-valor)); width: auto; font-size: var(--texto-meta); }
+  .rdm .rdm-tabela.tabela tr > .rdm-valor { order: 2; flex: 0 0 var(--rdm-largura-valor); text-align: right; white-space: nowrap; font-size: var(--texto-meta); }
+  /* o selo da planilha/carta a enviar quebra em duas linhas em vez de cortar o texto */
+  .rdm-antes, .rdm-antes .selo__texto { white-space: normal; }
+  .rdm-obra--repetida { position: static; width: auto; height: auto; overflow: visible; clip: auto; white-space: normal; }
+
+  /* variante A: as etapas alcancadas, tres por linha; as barras continuam formando a trilha */
+  .rdm .rdm-tabela--a.tabela tr > .rdm-etapa { order: 3; flex: 0 0 33.333%; padding-right: var(--espaco-traco); }
+  .rdm .rdm-tabela--a.tabela tr > :is(.rdm-etapa--futuro, .rdm-etapa--fora) { display: none; }
+  .rdm-etapa::before { margin-bottom: var(--espaco-mini); }
+  .rdm-etapa__nome { display: block; color: var(--cor-texto-secundario); }
+
+  /* variante B: a trilha e o selo numa linha, a data ao lado com o rotulo */
+  .rdm .rdm-tabela--b.tabela tr > .rdm-b-etapa { order: 3; flex: 1 1 auto; }
+  .rdm .rdm-tabela--b.tabela tr > .rdm-b-desde { order: 4; flex: 0 0 auto; margin-left: auto; white-space: nowrap; }
+  .rdm-trilha__celula { width: var(--espaco-p); }
+
+  /* obras sem medicao: a obra em cima; orgao, ultima medicao e etapa dela embaixo, com o rotulo antes do dado */
+  .rdm .rdm-tabela--sem.tabela tr > :is(th, td) { order: 2; flex: 1 1 100%; }
+  .rdm .rdm-tabela--sem.tabela tr > .rdm-primeira { order: 1; }
+  .rdm .rdm-tabela--sem.tabela tr > td { display: flex; flex-wrap: wrap; align-items: center; }
+  .rdm .rdm-tabela [data-rotulo]:not(.rdm-valor)::before { content: attr(data-rotulo); margin-right: var(--espaco-mini); color: var(--cor-texto-secundario); }
+}
