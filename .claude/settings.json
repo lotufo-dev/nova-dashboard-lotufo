@@ -103,6 +103,18 @@
       "PowerShell(.\\backend\\.venv\\Scripts\\python.exe -m pytest *)",
       "PowerShell(.\\.venv\\Scripts\\ruff *)",
       "PowerShell(.\\backend\\.venv\\Scripts\\ruff *)"
+    ],
+    "deny": [
+      "Bash(git push *--force*)",
+      "Bash(git push -f *)",
+      "Bash(git push * -f)",
+      "Bash(git push * -f *)",
+      "Bash(git push * +*)",
+      "PowerShell(git push *--force*)",
+      "PowerShell(git push -f *)",
+      "PowerShell(git push * -f)",
+      "PowerShell(git push * -f *)",
+      "PowerShell(git push * +*)"
     ]
   },
   "hooks": {
