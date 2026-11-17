@@ -16,25 +16,27 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
    competencia >= COMPETENCIA_CORTE_RM); a nota que nenhuma delas quis e' tentada, so' por valor exato,
    nas medicoes recebidas a' mao que ainda faltam nota (issue #713):
    a. (saiu na issue #708, docs/adr/0005: o `CAMPOLIVRE1` nao e' mais chave; o campo continua guardado na nota.)
-   b. valor EXATO de uma saida esperada do espelho vigente, unica entre as candidatas (na obra
-      do centro de custo, ou na carteira inteira quando o centro nao mapeia: NF da Lotufo ao
-      orgao em obra de consorcio) -> auto-aplica `saida_espelho` (0.95). Duas travas (#708):
-      - de data: a medicao que espera nota do espelho so' recebe, por esta regra e pelas mais fracas abaixo, a
-        nota emitida no dia do primeiro envio do espelho dela ao faturamento ou depois (nota mais antiga, nota
-        sem data, ou medicao sem envio registrado: nao liga a ela por valor nenhum);
-      - de nota repetida: havendo mais notas ativas e livres daquele valor, candidatas a' mesma medicao, do que
-        saidas daquele valor esperando nota, nenhuma liga sozinha e todas contam como ambiguas na rodada.
+   b. valor EXATO de uma saida esperada do espelho vigente, unica entre as candidatas, na obra do centro de custo
+      da nota -> auto-aplica `saida_espelho` (0.95).
    O CODCCUSTO da NF estreita as candidatas a' obra certa (o contrato com aquele centro,
    quando ha' exatamente um na coligada). COM esse alvo:
    c. valor exato unico dentro da obra -> auto-aplica `centro_custo_valor` (0.9).
    d. par de NFs do mesmo centro e dia que soma o valor de UMA medicao (padrao MT-388:
       cada medicao sai em duas notas) -> auto-aplica as DUAS, `centro_custo_soma_dia` (0.9).
    e. candidatos proximos (ate' 5%) DENTRO da obra -> sem alocacao, so' log (bloco 9: a fila de sugestoes saiu;
-      quem resolve e' o botao "vincular nota" da medicao).
-   SEM alvo: se a coligada cadastra centros (Lotufo) e o desta NF nao mapeia, silencio --
-   nao casar por valor na coligada inteira (seria coincidencia com outra obra). Coligada
-   sem centro cadastrado (consorcio, ja' isolada 1:1) mantem o antigo: exato unico -> 0.8
+      quem resolve e' o PDF da nota anexado na medicao).
+   SEM alvo: se a coligada cadastra centros (Lotufo) e o desta NF nao aponta obra, silencio -- nenhuma regra de
+   valor vale, nem a da saida do espelho, que ate' 17/11/2026 era procurada na carteira inteira (docs/adr/0005:
+   nunca valor fora da obra; e' o caso da NF da Lotufo ao orgao em obra de consorcio, que entra pelo PDF). Coligada
+   sem centro cadastrado (consorcio de uma obra so', ja' isolada 1:1): exato unico -> 0.8
    `valor_exato`; proximos ate' 5% -> log, sem alocacao. Sem candidato -> so' reconciliacao.
+   Duas travas em TODAS as regras de valor (issue #708; na medicao sem espelho desde 17/11/2026):
+   - de data: a medicao so' recebe a nota emitida no dia do pedido dela ou depois (`_dia_do_pedido`: o primeiro
+     envio do espelho ao faturamento; sem espelho, o boletim do orgao e, sem ele, o envio da planilha/carta). Nota
+     mais antiga, nota sem data, espelho que nao saiu pelo sistema ou medicao sem data nenhuma: nao liga por valor;
+   - de nota repetida: havendo mais notas ativas e livres daquele valor, candidatas a' mesma medicao, do que vagas
+     para aquele valor (saidas esperando nota; uma, sem espelho; as do proprio par, na soma do dia), nenhuma liga
+     sozinha e todas contam como ambiguas na rodada.
    Alocar nao muda o estado de `protocolada`; em medicao nascida do espelho fecha `nota_emitida`
    quando nao falta nota. A medicao recebida a' mao que ainda falta nota tambem e' candidata (issue #713):
    a nota liga e o estado e a data do recebimento ficam.
@@ -626,6 +628,7 @@ def _candidatas(conn, coligada: int, cache: dict | None = None) -> list[dict]:
         esp = notas.esperadas(conn, r["id"])
         d["esperadas"] = [e["valor"] for e in esp if e["nota_id"] is None]
         d["espelho_enviado_em"] = _dia_do_envio_do_espelho(conn, r["id"])
+        d["pedido_em"] = _dia_do_pedido(d, com_espelho=notas.esperadas_do_espelho(conn, r["id"]) is not None)
         if esp and notas.coligada_esperada(conn, r["id"]) == coligada:
             # lado da Lotufo: entra enquanto alguma saida esperada estiver sem nota
             if not d["esperadas"]:
@@ -677,32 +680,60 @@ def _dia_do_envio_do_espelho(conn, medicao_id: int) -> str | None:
     return tempo.para_local(datetime.datetime.fromisoformat(r[0])).date().isoformat()
 
 
-def _depois_do_espelho(emissao, m: dict) -> bool:
-    """A nota e' do dia do envio do espelho ou posterior. A emissao do RM e' so' o dia, entao a nota do mesmo dia do
-    envio vale; nota sem data de emissao legivel e medicao sem envio registrado nao tem como provar a ordem."""
-    return bool(emissao) and bool(m.get("espelho_enviado_em")) and emissao >= m["espelho_enviado_em"]
+def _dia_do_pedido(m: dict, com_espelho: bool) -> str | None:
+    """docs/adr/0005 (trava de data): o dia a partir do qual uma nota pode ser a nota desta medicao.
+    - Medicao COM espelho vigente: o dia do primeiro envio do espelho ao faturamento (`espelho_enviado_em`, issue
+      #708). Espelho que nao saiu pelo sistema nao tem dia: nenhuma nota liga a ela por valor.
+    - Medicao SEM espelho (decisao delegada de 17/11/2026): o dia do boletim do orgao (`atestado_em`: a nota so' e'
+      emitida depois de o orgao aprovar); sem boletim gravado, o dia do envio da planilha/carta, em Cuiaba. Sem
+      nenhuma das duas datas nao ha' como provar a ordem, e nenhuma nota liga a ela por valor: a pessoa liga pelo PDF."""
+    if com_espelho:
+        return m.get("espelho_enviado_em")
+    if m.get("atestado_em"):
+        return m["atestado_em"][:10]
+    if m.get("planilha_enviada_em"):
+        try:
+            return tempo.para_local(datetime.datetime.fromisoformat(m["planilha_enviada_em"])).date().isoformat()
+        except ValueError:
+            return None
+    return None
 
 
-def _nota_repetida(conn, nf, m: dict, extras: dict[int, frozenset[str]]) -> bool:
-    """Issue #708 (docs/adr/0005): ha' mais notas para as saidas deste valor do que saidas esperando nota. Conta como
-    concorrente a OUTRA nota que o casador tambem ligaria a' mesma saida -- ativa, de cobranca ao orgao NO CONTRATO
-    DESTA MEDICAO (`cobranca_orgao.e_cobranca`: a lista geral e os tipos extras dele, `extras`), livre (sem
-    vinculo vigente nem vinculo desfeito a' mao), da mesma coligada, do mesmo valor, emitida depois do envio do
-    espelho e que alcanca esta medicao: o centro de custo dela aponta a obra, ou nao aponta obra nenhuma (a nota sem
-    obra concorre na carteira inteira). Nota de OUTRA obra nao concorre. E' o caso da nota cancelada na pratica e
-    reemitida, que o RM mantem ativa: nenhuma liga sozinha, e a pessoa decide pelo PDF. Medicao com duas saidas do
-    mesmo valor (parcelas iguais) e duas notas: cada nota tem a sua saida, as duas ligam; com tres, nenhuma. Nao
-    depende da ordem em que as notas sao processadas."""
+def _depois_do_pedido(emissao, m: dict) -> bool:
+    """A nota e' do dia do pedido da medicao (`_dia_do_pedido`) ou posterior. A emissao do RM e' so' o dia, entao a
+    nota do mesmo dia vale; nota sem data de emissao legivel e medicao sem dia do pedido nao tem como provar a ordem."""
+    return bool(emissao) and bool(m.get("pedido_em")) and emissao >= m["pedido_em"]
+
+
+def _nota_repetida(conn, nf, m: dict, extras: dict[int, frozenset[str]], coligadas_com_centro: set, vagas: int,
+                   do_par: frozenset = frozenset()) -> bool:
+    """docs/adr/0005 (trava de nota repetida, issue #708; nas tres regras da medicao sem espelho desde 17/11/2026): ha'
+    mais notas deste valor para esta medicao do que `vagas` -- as saidas do espelho daquele valor esperando nota; uma,
+    na medicao sem espelho (`centro_custo_valor`, `valor_exato`); as notas do par com aquele valor, na soma do dia.
+    Conta como concorrente a OUTRA nota (fora de `do_par`) que o casador tambem ligaria a' mesma medicao -- ativa, de
+    cobranca ao orgao NO CONTRATO DESTA MEDICAO (`cobranca_orgao.e_cobranca`: a lista geral e os tipos extras dele,
+    `extras`), livre (sem vinculo vigente nem vinculo desfeito a' mao), da mesma coligada, do mesmo valor, emitida
+    depois do pedido da medicao (`_depois_do_pedido`) e que alcanca esta medicao: o centro de custo dela aponta a
+    obra, ou a coligada nao cadastra centro nenhum (consorcio que e' uma obra so'). Nota de OUTRA obra, e nota sem
+    obra numa coligada que cadastra centros, nao concorrem: nao ligam a esta medicao por regra nenhuma. E' o caso da
+    nota cancelada na pratica e reemitida, que o RM mantem ativa: nenhuma liga sozinha, e a pessoa decide pelo PDF.
+    Medicao com duas saidas do mesmo valor (parcelas iguais) e duas notas: cada nota tem a sua saida, as duas ligam;
+    com tres, nenhuma. Nao depende da ordem em que as notas sao processadas."""
     outras = conn.execute("""
         SELECT id, centro_custo, emissao, codtmv FROM notas_fiscais
         WHERE coligada=? AND id<>? AND situacao='ativa' AND valor_centavos=?
           AND NOT EXISTS (SELECT 1 FROM nf_alocacoes a WHERE a.nota_id=notas_fiscais.id AND a.desfeita_em IS NULL)
           AND NOT """ + _SQL_DESFEITA_A_MAO.format(nota="notas_fiscais.id"),
         (nf["coligada"], nf["id"], nf["valor_centavos"], MOTIVO_A_MAO + "%")).fetchall()
-    concorrentes = sum(1 for r in outras if cobranca_orgao.e_cobranca(r["codtmv"], m["contrato_id"], extras)
-                       and _contrato_por_centro_custo(conn, nf["coligada"], r["centro_custo"]) in (None, m["contrato_id"])
-                       and _depois_do_espelho(r["emissao"], m))
-    return concorrentes + 1 > m["esperadas"].count(nf["valor_centavos"])
+
+    def alcanca(r) -> bool:
+        alvo = _contrato_por_centro_custo(conn, nf["coligada"], r["centro_custo"])
+        return alvo == m["contrato_id"] or (alvo is None and nf["coligada"] not in coligadas_com_centro)
+
+    concorrentes = sum(1 for r in outras if r["id"] not in do_par
+                       and cobranca_orgao.e_cobranca(r["codtmv"], m["contrato_id"], extras)
+                       and alcanca(r) and _depois_do_pedido(r["emissao"], m))
+    return concorrentes + 1 > vagas
 
 
 def _coligadas_com_centro(conn) -> set:
@@ -822,53 +853,67 @@ def _casar_entre(conn, nf, candidatas: list[dict], coligadas_com_centro: set, ex
     cobranca ao orgao). Devolve 'alocada', 'ambigua' ou None. `extras`: os tipos de movimento extras de cada contrato,
     para a nota concorrente e a irma do par. `so_exato`: sem a contagem de medicoes proximas (ate' 5%) como ambiguas."""
     alvo = _contrato_por_centro_custo(conn, nf["coligada"], nf["centro_custo"])
-    # Bloco 3: saida esperada do espelho com o valor EXATO da NF -- a chave mais forte por valor (docs/adr/0005).
-    # Com centro mapeado, dentro da obra; sem centro (NF Lotufo -> orgao em obra de consorcio,
-    # centro 5.001.x), na carteira inteira: o valor da cota e' praticamente unico.
+    if alvo is None and nf["coligada"] in coligadas_com_centro:
+        # Modo estrito (docs/adr/0005, "nunca valor fora da obra"): a coligada cadastra centros e o desta NF nao aponta
+        # obra (imobilizado, NF de cota ao consorcio, obra fora do escopo). Nenhuma regra de valor vale, nem a da
+        # saida do espelho, que ate' 17/11/2026 era procurada na carteira inteira: sem obra, a nota fica solta e a
+        # pessoa liga pelo PDF. Silencio, sem ruido.
+        return None
+    # Com centro mapeado, dentro da obra; coligada sem centro cadastrado (consorcio que e' uma obra so'), a coligada.
     universo = [m for m in candidatas if m["contrato_id"] == alvo] if alvo is not None else candidatas
-    por_saida = [m for m in universo if nf["valor_centavos"] in m["esperadas"]]
-    # Issue #708, trava de data: a medicao que espera nota do espelho so' recebe a nota emitida depois do envio dele.
-    # Vale para a saida e para as regras mais fracas abaixo: a nota mais antiga que o pedido nao e' a nota daquela
-    # medicao por valor nenhum (sem isto ela ligaria por `centro_custo_valor`, quando a saida unica tem o valor da
-    # medicao, ou pelo par da soma do dia).
-    antigas = {m["id"] for m in universo if m["esperadas"] and not _depois_do_espelho(nf["emissao"], m)}
-    if any(m["id"] in antigas for m in por_saida):
-        log.info("NF %s/%s da coligada %s (R$ %.2f) com o valor de uma saida de espelho, mas anterior ao envio dele (ou "
-                 "sem envio registrado): sem alocacao automatica a essa medicao",
+
+    def repetida(m: dict, vagas: int, nota=nf, do_par: frozenset = frozenset()) -> bool:
+        if not _nota_repetida(conn, nota, m, extras, coligadas_com_centro, vagas, do_par):
+            return False
+        log.info("NF %s/%s da coligada %s (R$ %.2f) repetida para a mesma medicao: sem alocacao automatica",
+                 nota["numero"], nota["serie"] or "", nota["coligada"], nota["valor_centavos"] / 100)
+        return True
+
+    # Trava de data (issue #708; na medicao sem espelho desde 17/11/2026): a medicao so' recebe por valor a nota
+    # emitida no dia do pedido dela ou depois (`_dia_do_pedido`: o envio do espelho; sem espelho, o boletim ou o envio
+    # da planilha/carta). Vale para a saida e para as regras mais fracas abaixo: a nota mais antiga que o pedido nao e'
+    # a nota daquela medicao por valor nenhum.
+    antigas = {m["id"] for m in universo if not _depois_do_pedido(nf["emissao"], m)}
+    if any(m["id"] in antigas and (nf["valor_centavos"] in m["esperadas"] or m["valor"] == nf["valor_centavos"])
+           for m in universo):
+        log.info("NF %s/%s da coligada %s (R$ %.2f) com o valor de uma medicao, mas anterior ao pedido dela (envio do "
+                 "espelho, boletim ou planilha; ou sem data registrada): sem alocacao automatica a essa medicao",
                  nf["numero"], nf["serie"] or "", nf["coligada"], nf["valor_centavos"] / 100)
-    por_saida = [m for m in por_saida if m["id"] not in antigas]
-    candidatas = [m for m in candidatas if m["id"] not in antigas]
+    candidatas = [m for m in universo if m["id"] not in antigas]
+    # Bloco 3: saida esperada do espelho com o valor EXATO da NF -- a chave mais forte por valor (docs/adr/0005).
+    por_saida = [m for m in candidatas if nf["valor_centavos"] in m["esperadas"]]
     if len(por_saida) == 1:
-        # Issue #708, trava de nota repetida: mais notas do que saidas daquele valor, nenhuma liga sozinha.
-        if _nota_repetida(conn, nf, por_saida[0], extras):
-            log.info("NF %s/%s da coligada %s (R$ %.2f) repetida para a mesma saida do espelho: sem alocacao automatica",
-                     nf["numero"], nf["serie"] or "", nf["coligada"], nf["valor_centavos"] / 100)
+        # Trava de nota repetida: mais notas do que saidas daquele valor, nenhuma liga sozinha.
+        if repetida(por_saida[0], por_saida[0]["esperadas"].count(nf["valor_centavos"])):
             return "ambigua"
         return _aloca(por_saida[0]["id"], 0.95, "saida_espelho")
-    # Centro de custo estreita as candidatas a' obra certa antes do valor desempatar.
+    exatas = [m for m in candidatas if m["valor"] == nf["valor_centavos"]]
     if alvo is not None:
-        candidatas = [m for m in candidatas if m["contrato_id"] == alvo]
-        exatas = [m for m in candidatas if m["valor"] == nf["valor_centavos"]]
         if len(exatas) == 1:
             # Centro + valor exato: a obra tambem bate; a auditoria registra a regra.
+            if repetida(exatas[0], 1):
+                return "ambigua"
             return _aloca(exatas[0]["id"], 0.9, "centro_custo_valor")
         par = _casar_soma_dia(conn, nf, candidatas, alvo, extras)
         if par is not None:
             medicao_id, irma_id = par
+            m = next(x for x in candidatas if x["id"] == medicao_id)
+            irma = conn.execute("SELECT * FROM notas_fiscais WHERE id=?", (irma_id,)).fetchone()
+            # A irma e' do mesmo dia, entao passa a trava de data com esta. Nota repetida: outra nota livre com o valor
+            # de uma das duas, alem das do proprio par (par de parcelas iguais: duas vagas para aquele valor).
+            do_par = frozenset((nf["id"], irma_id))
+            vagas = 2 if irma["valor_centavos"] == nf["valor_centavos"] else 1
+            if repetida(m, vagas, do_par=do_par) or repetida(m, vagas, nota=irma, do_par=do_par):
+                return "ambigua"
             # As DUAS notas do par sao alocadas AQUI (N:N, cada uma pelo seu valor). Deixar
             # a irma para o loop nao funciona: a medicao alocada deixa de faltar nota e nao
             # apareceria mais em _candidatas.
             return _aloca(medicao_id, 0.9, "centro_custo_soma_dia", irma=irma_id)
-    elif nf["coligada"] in coligadas_com_centro:
-        # Modo estrito: a coligada cadastra centros, mas o desta NF nao mapeia (imobilizado,
-        # NF de cota ao consorcio, obra fora do escopo). Nao casar por valor na coligada
-        # inteira -- seria coincidencia com medicao de outra obra. Silencio, sem ruido.
-        return None
-    else:
-        # Consorcio (sem centro cadastrado): comportamento antigo -- a coligada ja' isola.
-        exatas = [m for m in candidatas if m["valor"] == nf["valor_centavos"]]
-        if len(exatas) == 1:
-            return _aloca(exatas[0]["id"], 0.8, "valor_exato")
+    elif len(exatas) == 1:
+        # Consorcio (coligada sem centro cadastrado): a coligada ja' isola a obra.
+        if repetida(exatas[0], 1):
+            return "ambigua"
+        return _aloca(exatas[0]["id"], 0.8, "valor_exato")
     if so_exato:
         return None
     tol = nf["valor_centavos"] * TOLERANCIA_CANDIDATO

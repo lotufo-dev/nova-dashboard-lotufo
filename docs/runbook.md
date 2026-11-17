@@ -821,7 +821,7 @@ e, quando o PDF chega, é a mesma linha que ganha os valores lidos. O casador s�
 que ainda faltam nota e **não são legado** (nascidas do espelho ou de competência a partir de 07/2026): valor
 igual a uma saída esperada aloca com regra `saida_espelho`, desde que a nota seja do dia do envio do espelho ao
 faturamento ou posterior e não haja outra nota ativa de mesmo valor para a mesma saída (regras completas no item 5
-de "RM"); o resto segue como antes (centro de custo, soma do dia; a NF ambígua fica sem vínculo desde o bloco 9). Recebimento: medição `protocolada` cujas notas **da coligada da entidade do contrato** cobrem o valor dela e têm o
+de "RM"); centro de custo e soma do dia seguem com as mesmas duas travas (a NF ambígua fica sem vínculo desde o bloco 9). Recebimento: medição `protocolada` cujas notas **da coligada da entidade do contrato** cobrem o valor dela e têm o
 título quitado vira `recebida`; a NFS-e da Lotufo ao órgão em obra de consórcio (coligada 1, repassada pelo
 consórcio depois) não segura. Avisos (na tela inicial desde o bloco 6): `nota_divergente`, `nota_ausente_rm` (5 dias
 após o protocolo sem o RM ver a nota), `nota_cancelada_rm`, `nota_sem_protocolo`.
