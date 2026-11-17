@@ -180,6 +180,138 @@ def test_contrato_novo_com_tipo_extra_diz_no_relatorio(conn):
     assert conn.execute("SELECT tipos_cobranca_extras_rm FROM contratos").fetchone()[0] == '["2.2.03"]'
 
 
+# --- docs/adr/0015: a trava das notas gemeas ao declarar um tipo extra (segunda revisao da PR #764) ---
+
+CENTRO = "9.001.001"        # ficticio: o da Obra Propria do `cadastro-exemplo/`
+
+
+def _obra(**troca):
+    return _cad(contratos=[_contrato(centro_custo_rm=CENTRO, **troca)])
+
+
+def _nota_do_rm(conn, idmov, codtmv, numero="77", valor=500_01, emissao="2026-08-10", centro=CENTRO, coligada=1,
+                situacao="ativa"):
+    conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, numero_int, emissao, valor_centavos, situacao, "
+                 "centro_custo, codtmv) VALUES (?,?,?,?,?,?,?,?,?)",
+                 (coligada, idmov, numero, int(numero), emissao, valor, situacao, centro, codtmv))
+    conn.commit()
+
+
+RECUSA_DAS_GEMEAS = (
+    "declarar o tipo de movimento 2.2.03 em MT-402 faria 1 nota contar duas vezes no a receber e no faturado: a nota "
+    "reclassificada chegou do RM como movimento novo e a antiga continua ativa.\n"
+    "  - MT-402: nota 77 (coligada 1) de 10/08/2026, R$ 500,01: idmov 7 (tipo 2.2.01) e idmov 8 (tipo 2.2.03)\n"
+    "Antes de declarar o tipo, tire da conta a nota de tipo da lista geral de cada par, em `cadastro "
+    "corrigir-medicoes`: `desligar_nf` se ela estiver ligada a uma medição e `desconsiderar_nf` com {idmov: N}. "
+    "Depois aplique o cadastro de novo.")
+
+
+def test_declarar_tipo_extra_e_recusado_enquanto_houver_nota_gemea_ativa_e_nada_e_gravado(conn):
+    """A nota reclassificada chega do RM como movimento novo (mesmo numero, emissao e valor, tipo 2.2.03) e a antiga,
+    de tipo da lista geral, so' deixa de vir: continua ativa. Declarar o 2.2.03 na obra faria as duas contarem. O
+    `cadastro aplicar` recusa, no ensaio e para valer, dizendo quais sao e o que fazer; nada do cadastro e' gravado.
+    Com a antiga desconsiderada, a mesma aplicacao passa."""
+    from app import correcao_medicoes, diretoria
+    cadastro_aplicar.aplicar(conn, 1, _obra())
+    _nota_do_rm(conn, 7, "2.2.01")
+    _nota_do_rm(conn, 8, "2.2.03")
+    antes = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+    for ensaio in (True, False):
+        with pytest.raises(ValueError) as e:
+            cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03"], objeto="Outro objeto"),
+                                     ensaio=ensaio)
+        assert str(e.value) == RECUSA_DAS_GEMEAS
+        # nada do cadastro entrou: nem a chave, nem o outro campo que mudava junto, nem auditoria
+        assert tuple(conn.execute("SELECT tipos_cobranca_extras_rm, objeto FROM contratos").fetchone()) == (
+            None, "Remanescente da MT-402")
+        assert conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == antes
+        assert conn.execute("SELECT COUNT(*) FROM cadastro_aplicacoes").fetchone()[0] == 1
+        assert not conn.in_transaction
+    # sem a chave, a obra continua contando so' a antiga
+    assert diretoria.rm_por_mes(conn)[0] == {"2026-08": 500_01}
+    correcao_medicoes.executar(conn, 1, [{"operacao": "desconsiderar_nf", "nf": {"idmov": 7}, "coligada": 1,
+                                          "motivo": "reclassificada no RM", "fonte": "conferência no RM"}], ensaio=False)
+    r = cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03"]))
+    assert r["contratos"]["alterados"] == ["MT-402 (tipos de cobrança extras do RM: nenhum → 2.2.03)"]
+    assert diretoria.rm_por_mes(conn)[0] == {"2026-08": 500_01}          # agora so' a nova, uma vez
+
+
+def test_recusa_das_gemeas_lista_todos_os_pares(conn):
+    cadastro_aplicar.aplicar(conn, 1, _obra())
+    for idmov, numero, valor in ((7, "77", 500_01), (9, "78", 700_03)):
+        _nota_do_rm(conn, idmov, "2.2.01", numero=numero, valor=valor)
+        _nota_do_rm(conn, idmov + 1, "2.2.03", numero=numero, valor=valor)
+    with pytest.raises(ValueError) as e:
+        cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03"]), ensaio=True)
+    linhas = str(e.value).splitlines()
+    assert linhas[0].startswith("declarar o tipo de movimento 2.2.03 em MT-402 faria 2 notas contarem duas vezes")
+    assert linhas[1:3] == [
+        "  - MT-402: nota 77 (coligada 1) de 10/08/2026, R$ 500,01: idmov 7 (tipo 2.2.01) e idmov 8 (tipo 2.2.03)",
+        "  - MT-402: nota 78 (coligada 1) de 10/08/2026, R$ 700,03: idmov 9 (tipo 2.2.01) e idmov 10 (tipo 2.2.03)"]
+
+
+@pytest.mark.parametrize("gemea", [
+    {"valor": 500_02},                  # outro valor
+    {"emissao": "2026-08-11"},          # outra emissao
+    {"numero": "78"},                   # outro numero
+    {"situacao": "cancelada"},          # a antiga veio cancelada do RM (ou foi desconsiderada)
+    {"codtmv": "2.2.03"},               # as duas do tipo extra: a regra e' um tipo geral e um extra
+    {"codtmv": "2.2.15"},               # a outra nao e' cobranca: nao conta, nao dobra
+    {"centro": "9.009.001"},            # a antiga nao cai em obra nenhuma: nao conta, nao dobra
+    {"coligada": 77},                   # outra coligada
+], ids=lambda g: next(iter(g)) + "=" + str(next(iter(g.values()))))
+def test_nota_que_nao_e_gemea_nao_trava_a_declaracao(conn, gemea):
+    cadastro_aplicar.aplicar(conn, 1, _obra())
+    _nota_do_rm(conn, 7, **{"codtmv": "2.2.01", **gemea})
+    _nota_do_rm(conn, 8, "2.2.03")
+    r = cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03"]))
+    assert r["contratos"]["alterados"] == ["MT-402 (tipos de cobrança extras do RM: nenhum → 2.2.03)"]
+
+
+def test_nota_reclassificada_de_outra_obra_nao_trava_a_declaracao(conn):
+    """O par so' trava a obra em que a nota de tipo extra passaria a contar: gemeas no centro de custo de outra obra,
+    que nao declara o tipo, nao dobram nada."""
+    outra = _contrato(nome_curto="Obra Beta", numero_instrumento="002/2025/00/00-EXEMPLO", centro_custo_rm="9.001.002")
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(centro_custo_rm=CENTRO), outra]))
+    _nota_do_rm(conn, 7, "2.2.01", centro="9.001.002")
+    _nota_do_rm(conn, 8, "2.2.03", centro="9.001.002")
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[
+        _contrato(centro_custo_rm=CENTRO, tipos_cobranca_extras_rm=["2.2.03"]), outra]))
+    assert r["contratos"]["alterados"] == ["MT-402 (tipos de cobrança extras do RM: nenhum → 2.2.03)"]
+    with pytest.raises(ValueError, match="em Obra Beta faria 1 nota contar duas vezes"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[
+            _contrato(centro_custo_rm=CENTRO, tipos_cobranca_extras_rm=["2.2.03"]),
+            {**outra, "tipos_cobranca_extras_rm": ["2.2.03"]}]))
+
+
+def test_trava_das_gemeas_so_confere_o_tipo_que_esta_sendo_declarado(conn):
+    """A trava e' do ato de declarar. O tipo que o contrato ja' declarava nao e' reconferido a cada aplicacao (a gemea
+    que aparece depois e' a nota que parou de vir do RM, issue #755), e declarar outro tipo nao esbarra no par do
+    primeiro."""
+    cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03"]))
+    _nota_do_rm(conn, 7, "2.2.01")
+    _nota_do_rm(conn, 8, "2.2.03")
+    assert cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03"]))["contratos"]["iguais"] == 1
+    r = cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03", "2.2.04"]))
+    assert r["contratos"]["alterados"] == ["MT-402 (tipos de cobrança extras do RM: 2.2.03 → 2.2.03, 2.2.04)"]
+
+
+@pytest.mark.parametrize("celula", ["", "isto nao e json", "null", '"2.2.03"'])
+def test_coluna_ilegivel_dos_tipos_extras_e_lida_como_nenhum_e_regravada_pelo_cadastro(conn, celula):
+    """Segunda revisao da PR #764: valor que nao e' lista JSON na coluna (so' se chega la' gravando por fora) nao
+    derruba o `cadastro aplicar`: conta como "nenhum" no relatorio e a aplicacao regrava a coluna pelo arquivo."""
+    cadastro_aplicar.aplicar(conn, 1, _obra())
+    def gravado():
+        return conn.execute("SELECT tipos_cobranca_extras_rm FROM contratos").fetchone()[0]
+    conn.execute("UPDATE contratos SET tipos_cobranca_extras_rm=?", (celula,)); conn.commit()
+    r = cadastro_aplicar.aplicar(conn, 1, _obra(tipos_cobranca_extras_rm=["2.2.03"]))
+    assert r["contratos"]["alterados"] == ["MT-402 (tipos de cobrança extras do RM: nenhum → 2.2.03)"]
+    assert gravado() == '["2.2.03"]'
+    conn.execute("UPDATE contratos SET tipos_cobranca_extras_rm=?", (celula,)); conn.commit()
+    r = cadastro_aplicar.aplicar(conn, 1, _obra())                 # o arquivo nao declara nada: a coluna volta a nula
+    assert r["contratos"]["alterados"] == ["MT-402"] and gravado() is None
+
+
 def test_em_encerramento_mantem_ativo_e_grava_a_data(conn):
     cad = _cad(contratos=[_contrato(status="em_encerramento", status_desde="2026-07-17")])
     cadastro_aplicar.aplicar(conn, 1, cad)

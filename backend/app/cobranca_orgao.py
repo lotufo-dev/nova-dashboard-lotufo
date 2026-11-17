@@ -19,7 +19,10 @@ Uso tipico (uma leitura dos extras por conta):
     if cobranca_orgao.e_cobranca(nota["codtmv"], medicao["contrato_id"], extras): ...
 """
 import json
+import logging
 import re
+
+log = logging.getLogger("app.cobranca_orgao")
 
 # Issue #563: tipos de movimento do RM (codtmv) que sao cobranca ao orgao em toda obra. 2.2.15 (nota do fornecedor,
 # saida contra fornecedor) e 2.2.10 (pessoas fisicas) ficam fora. 2.2.07 e' o do consorcio do Leblon com tomador SINFRA.
@@ -29,11 +32,31 @@ CODTMV_COBRANCA = ("2.2.01", "2.2.02", "2.2.07", "2.2.16")
 FORMATO_CODTMV = re.compile(r"2\.2\.\d{2}")
 
 
+def tipos_gravados(valor, contrato_id=None) -> frozenset[str]:
+    """Os tipos extras de um contrato, lidos da coluna `contratos.tipos_cobranca_extras_rm` com tolerancia. A coluna so'
+    recebe valor pelo `cadastro aplicar`, que valida; se mesmo assim ela trouxer algo que nao e' uma lista JSON de
+    textos (texto vazio, texto que nao e' JSON, `null`, um texto no lugar da lista), vale "nenhum tipo extra", com
+    aviso no log: uma celula ruim nao pode derrubar o a receber, o faturado nem a rodada da sincronizacao com o RM. O
+    proximo `cadastro aplicar` regrava a coluna pelo arquivo."""
+    if valor is None:
+        return frozenset()
+    try:
+        lista = json.loads(valor)
+    except (TypeError, ValueError):
+        lista = None
+    if not isinstance(lista, list) or not all(isinstance(x, str) for x in lista):
+        log.warning("contrato %s: tipos_cobranca_extras_rm ilegivel (%.80r); vale nenhum tipo extra ate' o proximo "
+                    "cadastro aplicar", contrato_id, valor)
+        return frozenset()
+    return frozenset(lista)
+
+
 def extras_por_contrato(conn) -> dict[int, frozenset[str]]:
     """contrato -> os tipos de movimento que, so' nele, tambem sao cobranca ao orgao (`tipos_cobranca_extras_rm` do
-    cadastro). O contrato sem a chave nao aparece."""
-    return {r[0]: frozenset(json.loads(r[1])) for r in conn.execute(
-        "SELECT id, tipos_cobranca_extras_rm FROM contratos WHERE tipos_cobranca_extras_rm IS NOT NULL")}
+    cadastro, lido por `tipos_gravados`). O contrato sem tipo extra nao aparece."""
+    lidos = ((r[0], tipos_gravados(r[1], r[0])) for r in conn.execute(
+        "SELECT id, tipos_cobranca_extras_rm FROM contratos WHERE tipos_cobranca_extras_rm IS NOT NULL"))
+    return {contrato_id: tipos for contrato_id, tipos in lidos if tipos}
 
 
 def e_cobranca(codtmv: str | None, contrato_id: int | None, extras: dict[int, frozenset[str]]) -> bool:

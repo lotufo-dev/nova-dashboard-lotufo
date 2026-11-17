@@ -83,6 +83,32 @@ def test_ensaio_mostra_a_troca_dos_tipos_de_cobranca_e_so_o_aplicar_grava(tmp_pa
     assert gravado() == '["2.2.03"]'
 
 
+def test_aplicar_e_ensaio_recusam_declarar_tipo_extra_com_nota_gemea_ativa_e_dizem_quais(tmp_path, monkeypatch, capsys):
+    """docs/adr/0015: com a nota reclassificada (movimento novo, tipo 2.2.03) e a antiga (tipo da lista geral) as duas
+    ativas na obra, `cadastro aplicar` sai com 1, no ensaio e para valer, lista o par e nao grava a chave."""
+    conn = _banco(tmp_path, monkeypatch)
+    auth.criar_usuario(conn, "Dono", "dono@exemplo.com.br", "senha-forte-123", "admin")
+    obra = {**CONTRATO, "centro_custo_rm": "9.001.001"}
+    antes = str(_cadastro(tmp_path / "antes", obra))
+    depois = str(_cadastro(tmp_path / "depois", {**obra, "tipos_cobranca_extras_rm": ["2.2.03"]}))
+    assert cli.main(["cadastro", "aplicar", "--raiz", antes, "--usuario", "dono@exemplo.com.br"]) == 0
+    for idmov, tipo in ((7, "2.2.01"), (8, "2.2.03")):
+        conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, numero_int, emissao, valor_centavos, situacao, "
+                     "centro_custo, codtmv) VALUES (1, ?, '77', 77, '2026-08-10', 50001, 'ativa', '9.001.001', ?)",
+                     (idmov, tipo))
+    conn.commit()
+    capsys.readouterr()
+    for modo in (["--ensaio"], []):
+        assert cli.main(["cadastro", "aplicar", "--raiz", depois, "--usuario", "dono@exemplo.com.br", *modo]) == 1
+        saida = capsys.readouterr().out
+        assert "Cadastro recusado, nada foi gravado: declarar o tipo de movimento 2.2.03 em MT-402 faria 1 nota contar " \
+               "duas vezes no a receber e no faturado" in saida
+        assert "  - MT-402: nota 77 (coligada 1) de 10/08/2026, R$ 500,01: idmov 7 (tipo 2.2.01) e idmov 8 (tipo 2.2.03)" \
+            in saida
+        assert "`desconsiderar_nf` com {idmov: N}" in saida and "APLICADO" not in saida
+        assert conn.execute("SELECT tipos_cobranca_extras_rm FROM contratos").fetchone()[0] is None
+
+
 def test_ensaio_lista_as_versoes_de_cronograma_por_obra(tmp_path, monkeypatch, capsys):
     """Issue #256: `cadastro aplicar --ensaio` diz quais versoes de cronograma entrariam, por obra."""
     conn = _banco(tmp_path, monkeypatch)

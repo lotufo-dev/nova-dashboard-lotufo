@@ -8,7 +8,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from app import arquivos, auditoria, contratos, cronograma, db, oficios, reajuste, tempo
+from app import arquivos, auditoria, cobranca_orgao, contratos, cronograma, db, dinheiro, oficios, reajuste, tempo
 from app.cadastro_arquivos import (NATUREZAS, TIPOS_ADITIVO, TIPOS_COM_NATUREZA, _corretor_de_valor,
                                    _reajuste_com_valor, competencias_do_apostilamento)
 
@@ -127,8 +127,13 @@ def aplicar(conn: sqlite3.Connection, usuario_id: int, cad: dict, ensaio: bool =
         with db.mutacao(conn):
             ids_orgao = _orgaos(conn, usuario_id, cad["orgaos"], rel["orgaos"])
             ids_ent = _entidades(conn, usuario_id, cad["entidades"], rel["entidades"])
+            # docs/adr/0015: so' quando o cadastro declara tipo extra (banco sem a coluna, de antes da 088, segue igual)
+            declara_tipos = any(c.get("tipos_cobranca_extras_rm") for c in cad["contratos"])
+            tipos_antes = cobranca_orgao.extras_por_contrato(conn) if declara_tipos else {}
             for c in cad["contratos"]:
                 _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel)
+            if declara_tipos:
+                _recusar_notas_gemeas(conn, tipos_antes)
             _geral(conn, usuario_id, _materializar_geral(cad.get("geral"), ensaio), rel["geral"])
             _espelhos(conn, usuario_id, cad.get("espelho") or [], rel["espelho"], ensaio)
             _frcs(conn, usuario_id, cad.get("frc") or [], rel["frc"], ensaio)
@@ -144,6 +149,41 @@ def aplicar(conn: sqlite3.Connection, usuario_id: int, cad: dict, ensaio: bool =
     except _Ensaio:
         pass
     return rel
+
+
+def _recusar_notas_gemeas(conn, tipos_antes: dict[int, frozenset[str]]) -> None:
+    """docs/adr/0015: trava a declaracao de tipo extra que faria nota contar duas vezes. Com os contratos ja' gravados
+    na transacao, procura, em cada contrato que GANHOU tipo extra nesta aplicacao, as notas gemeas
+    (`diretoria.notas_gemeas_de_tipo_extra`: a reclassificada, que chegou do RM como movimento novo, e a antiga, que
+    continua ativa). Havendo alguma, recusa o cadastro inteiro (vale tambem para o ensaio) dizendo quais sao: o
+    numero sairia errado nas telas sem ninguem notar, e a saida e' tirar a antiga da conta antes. Tipo que o contrato
+    ja' declarava nao e' reconferido: as notas dele ja' contam, e a nota que para de vir do RM e' da issue #755."""
+    from app import diretoria   # import local: so' este passo precisa da conta do faturado
+    pares = []
+    for contrato_id, tipos in sorted(cobranca_orgao.extras_por_contrato(conn).items()):
+        novos = tipos - tipos_antes.get(contrato_id, frozenset())
+        if novos:
+            pares += diretoria.notas_gemeas_de_tipo_extra(conn, contrato_id, novos)
+    if not pares:
+        return
+    pares.sort(key=lambda p: (p["obra"], str(p["numero"]), p["idmov_extra"], p["idmov_geral"]))
+    obras = list(dict.fromkeys(p["obra"] for p in pares))
+    tipos = sorted({p["tipo_extra"] for p in pares})
+    linhas = [f"  - {p['obra']}: nota {p['numero']} (coligada {p['coligada']}) de {_data_br(p['emissao'])}, "
+              f"{dinheiro.format_brl(p['valor_centavos'])}: idmov {p['idmov_geral']} (tipo {p['tipo_geral']}) e "
+              f"idmov {p['idmov_extra']} (tipo {p['tipo_extra']})" for p in pares]
+    raise ValueError(
+        f"declarar o tipo de movimento {', '.join(tipos)} em {', '.join(obras)} faria "
+        + ("1 nota contar" if len(pares) == 1 else f"{len(pares)} notas contarem")
+        + " duas vezes no a receber e no faturado: a nota reclassificada chegou do RM como movimento novo e a antiga "
+        "continua ativa.\n" + "\n".join(linhas) + "\n"
+        "Antes de declarar o tipo, tire da conta a nota de tipo da lista geral de cada par, em `cadastro "
+        "corrigir-medicoes`: `desligar_nf` se ela estiver ligada a uma medição e `desconsiderar_nf` com {idmov: N}. "
+        "Depois aplique o cadastro de novo.")
+
+
+def _data_br(iso: str | None) -> str:
+    return f"{iso[8:10]}/{iso[5:7]}/{iso[:4]}" if iso and len(iso) >= 10 else "sem data"
 
 
 # status do cadastro -> contratos.estado. "em_encerramento" nao e' estado do banco: e'
@@ -276,7 +316,9 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
     mudou = False
     # A troca dos tipos de cobranca muda o a receber, o faturado e o vinculo das notas da obra: o relatorio (e o
     # ensaio) diz o antes e o depois ao lado do nome, em vez de so' "alterado".
-    tipos_antes = json.loads(dict(ja or {}).get("tipos_cobranca_extras_rm") or "[]")
+    # leitura tolerante (`cobranca_orgao.tipos_gravados`): celula ilegivel vale "nenhum" e e' regravada abaixo
+    tipos_antes = sorted(cobranca_orgao.tipos_gravados(dict(ja or {}).get("tipos_cobranca_extras_rm"),
+                                                       ja["id"] if ja is not None else None))
     tipos_depois = c.get("tipos_cobranca_extras_rm") or []
     rotulo = c["nome_curto"]
     if tipos_antes != tipos_depois:

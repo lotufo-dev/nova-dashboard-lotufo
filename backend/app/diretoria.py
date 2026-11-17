@@ -180,8 +180,9 @@ def _notas_do_rm(conn) -> list[tuple]:
                           "WHERE a.desfeita_em IS NULL ORDER BY a.id"):
         ligadas.setdefault(r["nota_id"], []).append((r["contrato_id"], r["estado"]))
     out = []
-    for n in conn.execute("SELECT id, coligada, centro_custo, emissao, valor_centavos, situacao, codtmv FROM notas_fiscais "
-                          f"WHERE idmov IS NOT NULL AND codtmv IN ({','.join('?' * len(tipos))})", tipos):
+    for n in conn.execute("SELECT id, coligada, idmov, numero, numero_int, centro_custo, emissao, valor_centavos, situacao, "
+                          f"codtmv FROM notas_fiscais WHERE idmov IS NOT NULL AND codtmv IN ({','.join('?' * len(tipos))})",
+                          tipos):
         lig = ligadas.get(n["id"], [])
         if lig:
             cid = lig[0][0]
@@ -194,6 +195,32 @@ def _notas_do_rm(conn) -> list[tuple]:
         # #561: so' a medicao que mede (`medicoes.ESTADOS_NO_MEDIDO`) representa a nota; a planilha gerada, nao
         out.append((n, c, any(estado in medicoes.ESTADOS_NO_MEDIDO for _, estado in lig)))
     return out
+
+
+def notas_gemeas_de_tipo_extra(conn, contrato_id: int, tipos) -> list[dict]:
+    """docs/adr/0015: as notas que contariam DUAS VEZES nesta obra com os tipos extras `tipos` declarados. No RM, a
+    nota reclassificada chega como movimento novo (outro idmov; mesmo numero, emissao e valor; o tipo novo) e a antiga
+    pode so' deixar de vir, sem cancelamento: continua ativa no banco e, com o tipo declarado, as duas contam no
+    faturado e no a receber. Devolve cada par: a nota ativa de tipo extra que conta nesta obra e a gemea dela, ativa
+    e de tipo da lista geral, que tambem conta (em qualquer obra): mesma coligada, mesmo numero, mesma emissao e mesmo
+    valor. So' le; quem recusa a declaracao enquanto houver par e' o `cadastro aplicar`.
+
+    Parte de `_notas_do_rm`, a conta do faturado: le os tipos extras ja' gravados no banco, entao e' chamada depois de
+    o cadastro gravar o contrato, na mesma transacao. Nota que nao conta (de outra coligada que nao a da entidade do
+    contrato, sem obra) nao forma par: ela nao dobra soma nenhuma."""
+    def chave(n) -> tuple:
+        numero = n["numero_int"] if n["numero_int"] is not None else (n["numero"] or "").strip()
+        return (n["coligada"], numero, n["emissao"], n["valor_centavos"])
+    ativas = [(n, c) for n, c, _ in _notas_do_rm(conn) if n["situacao"] == "ativa"]
+    gerais: dict[tuple, list] = {}
+    for n, _ in ativas:
+        if n["codtmv"] in cobranca_orgao.CODTMV_COBRANCA:
+            gerais.setdefault(chave(n), []).append(n)
+    return [{"obra": c["obra"], "coligada": n["coligada"], "numero": n["numero"], "emissao": n["emissao"],
+             "valor_centavos": n["valor_centavos"], "idmov_geral": g["idmov"], "tipo_geral": g["codtmv"],
+             "idmov_extra": n["idmov"], "tipo_extra": n["codtmv"]}
+            for n, c in ativas if c["id"] == contrato_id and n["codtmv"] in tipos
+            for g in gerais.get(chave(n), [])]
 
 
 def rm_por_mes(conn) -> tuple[dict[str, int], dict[str, int]]:

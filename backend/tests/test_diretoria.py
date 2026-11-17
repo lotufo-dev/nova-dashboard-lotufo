@@ -890,6 +890,63 @@ def test_tipo_extra_vale_pela_medicao_a_que_a_nota_esta_ligada(cenario):
     assert _notas_a_receber(c) == [] and diretoria.rm_por_mes(c)[0] == {}
 
 
+def test_tipo_extra_nao_muda_a_regra_da_coligada_no_consorcio(cenario):
+    """Segunda revisao da PR #764: no a receber e no faturado do RM so' conta a nota da coligada da entidade do
+    contrato. No contrato em nome do consorcio que declara o 2.2.03, a nota da propria empresa (outra coligada) desse
+    tipo continua fora das duas somas, ligada a uma medicao dele ou solta, com titulo aberto e com baixa: os numeros
+    sao os mesmos com e sem a chave. A fatura do consorcio (a coligada dele) do mesmo tipo e' a que entra."""
+    c, ids = cenario
+    k = ids["consorcio"]
+    c.execute("UPDATE entidades SET coligada_rm=12 WHERE chave='cons'")
+    fechada = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=2 AND tipo='execucao'", (k,)).fetchone()[0]
+    # da empresa (coligada 1): uma ligada a' medicao recebida do consorcio, outra solta, as duas com titulo
+    _nota_do_rm(c, 9821, "2.2.03", 200_000_001, [(150_000_001, 0, 0, None), (50_000_000, 50_000_000, 1, "2026-09-02")],
+                medicao=fechada)
+    _nota_do_rm(c, 9822, "2.2.03", 77_777, [(77_777, 0, 0, None)])
+    ids["liberar"]()
+    def retrato():
+        return (_notas_a_receber(c), diretoria.a_receber(c, HOJE)["total"]["valor_centavos"], diretoria.rm_por_mes(c),
+                diretoria.baixado_sem_caixa_por_mes(c), diretoria.complemento_rm(c), diretoria.da_obra(c, k),
+                diretoria.a_receber_por_obra(c, na_cota=True))
+    sem_a_chave = retrato()
+    assert sem_a_chave[:3] == ([], 700_000 + 300_000, ({}, {}))
+    _tipos_extras(c, k, "2.2.03")
+    assert retrato() == sem_a_chave
+    assert diretoria.notas_gemeas_de_tipo_extra(c, k, {"2.2.03"}) == []
+    # a fatura do proprio consorcio, do mesmo tipo, entra (na cota: 333.333 x 50% = 166.666,5 -> 166.667)
+    _nota_do_rm(c, 9823, "2.2.03", 333_333, [(333_333, 0, 0, None)], coligada=12)
+    assert _notas_a_receber(c) == [(k, 166_667)] and diretoria.rm_por_mes(c)[0] == {"2026-08": 166_667}
+
+
+def test_notas_gemeas_de_tipo_extra_so_lista_o_par_que_contaria_junto(cenario):
+    """docs/adr/0015: o par que o `cadastro aplicar` recusa. Conta a fatura do consorcio reclassificada (movimento
+    novo de tipo extra e a antiga, de tipo geral, as duas ativas na coligada dele); nao conta o par da nota da empresa
+    na obra do consorcio, que a regra da coligada ja' deixa fora das somas, nem o par de outra obra."""
+    c, ids = cenario
+    p, k = ids["propria"], ids["consorcio"]
+    c.execute("UPDATE contratos SET centro_custo_rm='9.001.001' WHERE id=?", (p,))
+    c.execute("UPDATE entidades SET coligada_rm=12 WHERE chave='cons'")
+    _tipos_extras(c, k, "2.2.03")
+    aberto = [(333_333, 0, 0, None)]
+    def par(idmov, coligada, centro=None):
+        for i, tipo in enumerate(("2.2.01", "2.2.03")):
+            nid = _nota_do_rm(c, idmov + i, tipo, 333_333, aberto, coligada=coligada, centro=centro)
+            c.execute("UPDATE notas_fiscais SET numero='500', numero_int=500 WHERE id=?", (nid,))
+        c.commit()
+    par(9831, 1)                        # da empresa, sem obra
+    par(9841, 1, centro="9.001.001")    # na Obra Propria, que nao declara
+    assert diretoria.notas_gemeas_de_tipo_extra(c, k, {"2.2.03"}) == []
+    assert diretoria.notas_gemeas_de_tipo_extra(c, p, {"2.2.03"}) == []      # a propria nao declara: a 2.2.03 nao conta
+    par(9851, 12)                       # do consorcio
+    assert diretoria.notas_gemeas_de_tipo_extra(c, k, {"2.2.03"}) == [{
+        "obra": "Consórcio", "coligada": 12, "numero": "500", "emissao": "2026-08-10", "valor_centavos": 333_333,
+        "idmov_geral": 9851, "tipo_geral": "2.2.01", "idmov_extra": 9852, "tipo_extra": "2.2.03"}]
+    assert diretoria.notas_gemeas_de_tipo_extra(c, k, {"2.2.04"}) == []      # outro tipo: nenhum par
+    _tipos_extras(c, p, "2.2.03")       # declarado tambem na propria: o par do centro dela passa a contar junto
+    assert [(g["idmov_geral"], g["idmov_extra"]) for g in diretoria.notas_gemeas_de_tipo_extra(c, p, {"2.2.03"})] == [
+        (9841, 9842)]
+
+
 def test_a_receber_recebida_sem_data_do_corte_fica_fora_do_previsto(cenario):
     c, ids = cenario        # medicao do legado protocolada em 05/09, fechada pelo corte (recebida, sem recebida_em)
     mid = c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "

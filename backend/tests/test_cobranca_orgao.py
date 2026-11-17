@@ -59,6 +59,37 @@ def test_extras_por_contrato_le_so_o_contrato_com_a_chave(conn):
     assert not cobranca_orgao.e_cobranca("2.2.03", sem, extras)
 
 
+ILEGIVEIS = ["", "   ", "isto nao e json", "null", '"2.2.03"', '{"2.2.03": true}', "42", '[203]', '["2.2.03", null]']
+
+
+@pytest.mark.parametrize("celula", ILEGIVEIS)
+def test_coluna_ilegivel_vale_nenhum_tipo_extra_com_aviso_no_log_e_nao_derruba_a_leitura(conn, celula, caplog):
+    """A coluna so' recebe valor pelo `cadastro aplicar`, que valida. Texto vazio, texto que nao e' JSON, `null` em
+    JSON, um texto no lugar da lista ou uma lista com item que nao e' texto valem "nenhum tipo extra" para aquele
+    contrato, com aviso no log; o contrato ao lado continua lido, e as contas que partem dos extras nao quebram."""
+    from app import diretoria
+    ruim = _obra(conn, "001/2025/00/00-EXEMPLO")
+    bom = _obra(conn, "002/2025/00/00-EXEMPLO", ["2.2.03"])
+    conn.execute("UPDATE contratos SET tipos_cobranca_extras_rm=? WHERE id=?", (celula, ruim)); conn.commit()
+    with caplog.at_level("WARNING", logger="app.cobranca_orgao"):
+        extras = cobranca_orgao.extras_por_contrato(conn)
+    assert extras == {bom: frozenset({"2.2.03"})}
+    assert not cobranca_orgao.e_cobranca("2.2.03", ruim, extras) and cobranca_orgao.e_cobranca("2.2.01", ruim, extras)
+    assert f"contrato {ruim}: tipos_cobranca_extras_rm ilegivel" in caplog.text
+    assert f"contrato {bom}:" not in caplog.text
+    assert cobranca_orgao.tipos_gravados(celula) == frozenset()
+    # as leituras que partem dos extras seguem de pe' (antes, o a receber e o faturado levantavam excecao)
+    assert diretoria._notas_em_aberto(conn) == [] and diretoria.rm_por_mes(conn) == ({}, {})
+
+
+def test_tipos_gravados_le_a_lista_valida_e_o_nulo_sem_aviso(caplog):
+    with caplog.at_level("WARNING", logger="app.cobranca_orgao"):
+        assert cobranca_orgao.tipos_gravados(None) == frozenset()
+        assert cobranca_orgao.tipos_gravados("[]") == frozenset()
+        assert cobranca_orgao.tipos_gravados('["2.2.03", "2.2.04"]') == frozenset({"2.2.03", "2.2.04"})
+    assert caplog.text == ""
+
+
 def test_tipos_buscados_e_a_lista_geral_mais_os_extras_de_todas_as_obras():
     """So' estreita a consulta: o tipo extra de uma obra vem do banco para toda nota, e `e_cobranca` decide."""
     assert cobranca_orgao.tipos_buscados({}) == GERAL
