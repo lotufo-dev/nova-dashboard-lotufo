@@ -74,6 +74,9 @@ foram as cobranças do RM dos dois tipos acima.
 O dono delegou estas decisões à sessão em 17/11/2026, medidas numa cópia da produção. Nela não havia nenhuma medição
 recebida à mão pelo administrador; os casos contados são os da correção de cadastro e do corte.
 
+- **O registro à mão exige a data.** Sem ela a medição ficava recebida com a data nula, fora do recebido de qualquer
+  mês e do prazo do órgão. A rota recusa o registro sem data e com data depois de hoje. As medições recebidas sem data
+  que existem vieram do corte e da correção de cadastro, que não sabem o dia.
 - **Aviso "notas pagas não cobrem a medição".** A medição que espera a baixa com todas as notas ligadas pagas no RM
   e sem cobertura do valor não vira recebida (regra do começo deste documento) e passou a ter aviso próprio, o par do
   aviso da nota maior que a medição. Não muda estado nenhum: a saída é ligar a nota que falta ou o administrador
