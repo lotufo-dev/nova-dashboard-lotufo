@@ -52,6 +52,9 @@ describe("Selo: as quatro situações", () => {
     expect(screen.getByText("Passo").closest(".selo")!.className).toBe("selo");
     expect(["ok", "atencao", "acao", "andamento", "neutro", "normal", "", null].map(situacaoDoNivel))
       .toEqual(["feito", "breve", "critico", "andamento", undefined, undefined, undefined, undefined]);
+    // um mapa so' para aviso, documento, farol da obra e tempo parado: Critico e Acao no octogono, Atencao no triangulo
+    expect(["critico", "acao", "atencao"].map(situacaoDoNivel)).toEqual(["critico", "critico", "breve"]);
+    expect(["verde", "atencao", "acao", "vermelho"].map(situacaoDoNivel)).toEqual(["feito", "breve", "critico", "critico"]);
   });
 
   it("o glifo solto (legenda, lista) é a mesma peça", () => {

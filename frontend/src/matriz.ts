@@ -1,5 +1,6 @@
 // Regras de APRESENTACAO da matriz de Documentos (NAVEGACAO.md › Documentos): funcoes puras sobre /api/documentos.
 // A situacao de cada certidao (em dia, vencendo, vencida, faltando) e' do servidor; aqui so' se conta, filtra e ordena.
+import { situacaoDoNivel } from "./situacao";
 
 export type CertidaoDoc = { id: number; emissao: string; validade: string; natureza: string | null;
   leitura?: string | null };    // "manual" = digitada (A-19, 10/10/2026)
@@ -262,7 +263,7 @@ export function chipValidadeGarantia(g: Garantia | null, ate: string): { cor: Co
   if (!g) return { cor: "critico", valor: "sem registro" };
   if (g.situacao === "vencida") return { cor: "neutro", valor: `Último registro: ${ate}` };
   const nivel = situacaoGarantia(g, ate).nivel;
-  return { cor: nivel === "acao" ? "critico" : nivel === "atencao" ? "breve" : nivel === "ok" ? "feito" : "neutro", valor: ate };
+  return { cor: situacaoDoNivel(nivel) ?? "neutro", valor: ate };
 }
 
 /** As obras por orgao, o maior grupo primeiro (empate: ordem alfabetica do orgao). Contratante privado (#651) tem

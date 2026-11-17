@@ -1,7 +1,7 @@
 // Tela SIGA (issue #329): o que o servidor devolve em GET /api/siga e as contas da tela (ordem, tempo no setor,
 // nivel de atraso, textos da linha). Funcoes puras; o SigaPagina so' desenha o que sai daqui.
 
-import type { Situacao } from "./situacao";
+import { situacaoDoNivel, type Situacao } from "./situacao";
 
 export type TipoMovimentacao = "transferencia" | "recebimento" | "juntada" | "marcacao" | "outras";
 
@@ -66,13 +66,17 @@ export function nivelDias(dias: number | null): "atencao" | "acao" | null {
   return dias >= DIAS_ACAO ? "acao" : dias >= DIAS_ATENCAO ? "atencao" : null;
 }
 
-/** O tempo no setor como uma das quatro situacoes da fundacao (#767): andou hoje = feito; parado ha' 10 dias uteis ou
- *  mais = critico; ha' 5 ou mais = breve; menos que isso = em andamento. Sem data de entrada no setor, nenhuma. */
+/** O atraso do processo no setor como situacao: andou hoje = feito; parado ha' 10 dias uteis ou mais = critico; ha' 5
+ *  ou mais = breve (o nivel de `nivelDias`, pelo mapa unico de `situacao.ts`). Dentro do prazo, nenhuma: e' o que o
+ *  quadro de Medicoes mostra, onde so' o atraso leva marca. */
+export function situacaoDoAtraso(p: Pick<ProcessoSiga, "dias_uteis" | "hoje">): Situacao | undefined {
+  return p.hoje > 0 ? "feito" : situacaoDoNivel(nivelDias(p.dias_uteis));
+}
+
+/** O tempo no setor como uma das quatro situacoes da fundacao (#767), para a tela SIGA: o atraso de `situacaoDoAtraso`
+ *  e, dentro do prazo, em andamento (la' toda linha e' um processo em curso). Sem data de entrada no setor, nenhuma. */
 export function situacaoDoTempo(p: Pick<ProcessoSiga, "dias_uteis" | "hoje">): Situacao | undefined {
-  if (p.hoje > 0) return "feito";
-  if (p.dias_uteis === null) return undefined;
-  const nivel = nivelDias(p.dias_uteis);
-  return nivel === "acao" ? "critico" : nivel === "atencao" ? "breve" : "andamento";
+  return situacaoDoAtraso(p) ?? (p.dias_uteis === null ? undefined : "andamento");
 }
 
 const instante = (iso: string | null, vazio: number): number => {

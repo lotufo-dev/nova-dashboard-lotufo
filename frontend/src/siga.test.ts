@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  casaComBusca, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, nivelDias, nomeDoProcesso, ordenar, periodoDe, porCategoria, situacaoDoTempo,
+  casaComBusca, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, nivelDias, nomeDoProcesso, ordenar, periodoDe, porCategoria, situacaoDoAtraso, situacaoDoTempo,
   roboAtivo, setorPessoa, situacaoDoBotao, tempoNoSetor, tituloDoEvento, volumeDe, type Movimentacao, type ProcessoSiga, type Robo,
 } from "./siga";
 
@@ -20,6 +20,10 @@ describe("siga", () => {
     expect([0, 4, 5, 9, 10, 30].map(d => de(d))).toEqual(["andamento", "andamento", "breve", "breve", "critico", "critico"]);
     expect(de(12, 1)).toBe("feito");          // andou hoje: nao e' atraso, mesmo com muitos dias no setor
     expect(de(null)).toBeUndefined();         // sem data de entrada no setor nao ha' situacao
+    // o atraso sozinho (quadro de Medicoes): dentro do prazo nao tem situacao; o resto e' igual
+    const atraso = (dias_uteis: number | null, hoje = 0) => situacaoDoAtraso(p({ dias_uteis, hoje }));
+    expect([0, 4, 5, 10, null].map(d => atraso(d))).toEqual([undefined, undefined, "breve", "critico", undefined]);
+    expect(atraso(12, 1)).toBe("feito");
   });
 
   it("No setor há: dias úteis, depois minutos, horas e, passado um dia corrido sem dia útil, 'menos de 1 dia útil'", () => {

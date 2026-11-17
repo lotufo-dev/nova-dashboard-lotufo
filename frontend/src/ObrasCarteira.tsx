@@ -33,21 +33,15 @@ export type Painel = {
   reajustes_apostilamento?: { competencias: number; valor_centavos: number; obras: ReajusteObra[] };
 };
 
-// O selo diz a palavra do nivel (D12, D10), a mesma do selo dos avisos, com a forma pelo mesmo criterio (Alertas.tsx
-// > SELO): Critico e Acao pedem acao agora e levam o octogono; Atencao leva o triangulo de "vence em breve". So' o
+// O selo diz a palavra do nivel (D12, D10), a mesma do selo dos avisos, com a forma pelo mesmo criterio (o mapa
+// unico de `situacao.ts`): Critico e Acao pedem acao agora e levam o octogono; Atencao leva o triangulo de "vence em breve". So' o
 // QDOP EXPORTADO (arquivo) segue com o vocabulario oficial (verde, amarelo, vermelho).
 type FarolObra = Obra["farol"];
-const FAROL: Record<FarolObra, { rotulo: string; classe: string }> = {
-  verde: { rotulo: "Em dia", classe: "feito" },
-  acao: { rotulo: "Ação", classe: "critico" },
-  atencao: { rotulo: "Atenção", classe: "breve" },
-  vermelho: { rotulo: "Crítico", classe: "critico" },
-};
+const FAROL: Record<FarolObra, string> = { verde: "Em dia", acao: "Ação", atencao: "Atenção", vermelho: "Crítico" };
 
 /** O farol da obra como selo: glifo e palavra. Farol que o servidor inventar conta como Atenção. */
 export function SeloFarol({ farol }: { farol: FarolObra }) {
-  const f = FAROL[farol] ?? FAROL.atencao;
-  return <Selo situacao={situacaoDoNivel(f.classe)}>{f.rotulo}</Selo>;
+  return <Selo situacao={situacaoDoNivel(farol) ?? "breve"}>{FAROL[farol] ?? FAROL.atencao}</Selo>;
 }
 
 function pct(f: number): string {
