@@ -609,6 +609,18 @@ test("Saúde: falha só na cópia externa dos arquivos também deixa o cartão d
   expect(cartaoDe("Último backup").className).toMatch(/situacao--critico/);
   // a situacao tem forma alem da cor: o selo com o glifo do critico e a palavra
   expect(cartaoDe("Último backup").querySelector(".selo--critico .glifo--critico")).not.toBeNull();
+  expect(cartaoDe("Último backup").querySelector(".situacao__nota")?.textContent).toBe("a cópia dos arquivos falhou");
+});
+
+test("Saúde: backup em dia com a cópia do dono atrasada não aparece como falho; o item diz o que atrasou", async () => {
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] },
+    { ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: true, ultima_copia_dono: "2026-09-01T08:00:00-04:00" });
+  await waitFor(() => expect(cartaoDe("Último backup").querySelector(".situacao__nota")?.textContent).toBe("cópia do dono atrasada"));
+  const cartao = cartaoDe("Último backup");
+  expect(cartao.className).toMatch(/situacao--breve/);
+  expect(within(cartao).queryByText("Falhou")).toBeNull();
+  expect(within(cartao).getByText("Atenção")).toBeTruthy();
+  expect(cartao.textContent).not.toMatch(/uma das cópias falhou/);
 });
 
 test("Saúde: sem rodada, uma linha curta; rodando, o botão desliga com o motivo e o motivo some quando para", async () => {

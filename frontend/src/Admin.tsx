@@ -145,6 +145,20 @@ function backupFalhou(b: Backup | null | undefined): boolean {
     || !!b.ultima_copia_dono_erro || !!b.copia_dono_atrasada || !!b.ultimo_envio_copia_dono_erro);
 }
 
+// O item "Ultimo backup" diz o que falhou ou atrasou. Falha do backup em si (snapshot e copias) e' critica; a copia do
+// dono atrasada ou com erro, que tem o bloco dela no cartao Backup, so' pede atencao: o backup do banco esta' em dia.
+function situacaoDoBackup(b: Backup): [nota: string, situacao: Situacao, palavra?: string] {
+  if (b.atrasado) return ["atrasado: sem snapshot recente", "critico", "Atrasado"];
+  if (b.ultimo_snapshot_erro) return ["o último snapshot falhou", "critico"];
+  if (b.ultima_copia_externa_erro) return ["a cópia externa falhou", "critico"];
+  if (b.ultima_copia_arquivos_erro) return ["a cópia dos arquivos falhou", "critico"];
+  if (b.ultima_copia_externa_arquivos_erro) return ["a cópia externa dos arquivos falhou", "critico"];
+  if (b.ultima_copia_dono_erro) return ["a cópia do dono falhou", "breve"];
+  if (b.copia_dono_atrasada) return ["cópia do dono atrasada", "breve"];
+  if (b.ultimo_envio_copia_dono_erro) return ["o envio da cópia do dono falhou", "breve"];
+  return ["", "feito"];
+}
+
 function Situacoes({ status, erroCarga, rodando, b, siga }: {
   status: StatusRm | null; erroCarga: string; rodando: boolean; b: Backup | null | undefined; siga: SaudeSiga | null | undefined;
 }) {
@@ -154,11 +168,7 @@ function Situacoes({ status, erroCarga, rodando, b, siga }: {
   // 1. ultimo backup
   const backup: Cartao = b === undefined ? neutro(T_BACKUP, "carregando…", "")
     : b === null ? neutro(T_BACKUP, "não foi possível ler", NAO_LEU)
-    : [
-      T_BACKUP, b.ultimo_backup ? fmtDataHora(b.ultimo_backup) : "—",
-      b.atrasado ? "atrasado: sem snapshot recente" : backupFalhou(b) ? "uma das cópias falhou" : "",
-      backupFalhou(b) ? "critico" : "feito", b.atrasado ? "Atrasado" : undefined,
-    ];
+    : [T_BACKUP, b.ultimo_backup ? fmtDataHora(b.ultimo_backup) : "—", ...situacaoDoBackup(b)];
   // 2. ultima copia externa dos arquivos (so' existe com pasta externa)
   const externa: Cartao = b === undefined ? neutro(T_EXTERNA, "carregando…", "")
     : b === null ? neutro(T_EXTERNA, "não foi possível ler", NAO_LEU)
