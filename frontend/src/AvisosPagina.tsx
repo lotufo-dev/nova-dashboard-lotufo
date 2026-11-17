@@ -29,7 +29,7 @@ const LEGENDA: ItemLegenda[] = [{ situacao: "critico", texto: "vencido" }, { sit
 function Dias({ a, secao }: { a: Aviso; secao: Secao }) {
   const d = diasAteOAviso(a);
   if (d === null) return null;
-  const n = Math.abs(d), txt = `${n} ${n === 1 ? "dia" : "dias"}`;
+  const n = Math.abs(d), txt = `${n}\u00a0${n === 1 ? "dia" : "dias"}`;
   return <Selo situacao={SITUACAO_DA_SECAO[secao]} className="avs-linha__dias">{secao === "vencido" ? `há ${txt}` : txt}</Selo>;
 }
 

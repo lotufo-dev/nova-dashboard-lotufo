@@ -76,7 +76,6 @@
 .janela .painel__titulo { display: none; }
 .janela .form-inline { align-items: flex-end; }
 .janela textarea, .janela input[type="text"], .janela input[type="date"] { max-width: 100%; }
-.iniciar__rodape { display: flex; flex-wrap: wrap; gap: var(--espaco-pp); padding-top: var(--espaco-mini); }
 
 .btn--grande { height: 44px; padding: 0 22px; font-size: var(--texto-corpo); }
 
