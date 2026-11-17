@@ -10,6 +10,7 @@ import { cnpjBR, NATUREZA, ROTULO_TIPO, TIPOS, type ItemFila, type Lida, type Re
 import { fmtCompetencia } from "./tempo";
 import "./documentos.css";
 import { situacaoDoNivel } from "./situacao";
+import Falha from "./Falha";
 
 /* Pecas comuns das duas telas de Documentos (#161): a lista de empresas (Documentos.tsx) e a pagina da empresa
  * (DocumentosEmpresa.tsx). Os dados vem de `documentos.painel` (GET /api/documentos); a regra (o que e' exigido, a
@@ -158,7 +159,7 @@ export const AnexarCertidoes = forwardRef<AnexarRef, {
 
   return (
     <>
-      {erro && <p className="erro" role="alert">{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
       {!semZona && <div className={`doc-zona${sobre ? " doc-zona--sobre" : ""}`}
         onDragEnter={ev => { ev.preventDefault(); setSobre(true); }}
         onDragOver={ev => { ev.preventDefault(); setSobre(true); }}

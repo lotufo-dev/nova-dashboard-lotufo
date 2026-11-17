@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import { brl } from "./formato";
-import CaixaAviso from "./CaixaAviso";
 import Contador from "./Contador";
 import IniciarMedicao from "./IniciarMedicao";
 import Janela from "./Janela";
@@ -15,6 +14,7 @@ import { nivelDias, tempoNoSetor } from "./siga";
 import type { Situacao } from "./situacao";
 import { fmtCompetencia, hojeLocal } from "./tempo";
 import "./medicoes.css";
+import Falha from "./Falha";
 
 // Medições (#643, decisão do dono na revisão página a página de 10/11/2026): o QUADRO DO MÊS no lugar de "Iniciar medição"
 // e "Em andamento". Uma linha por obra e uma coluna por passo do fluxo, na competência em trabalho (o mês anterior ao de
@@ -149,7 +149,7 @@ export default function MedicoesPagina({ usuario }: { usuario: Usuario }) {
 
   if (!dados) {
     return erro
-      ? <div className="pagina medicoes"><CaixaAviso nivel="critico" role="alert">Não foi possível ler as medições: {erro} Recarregue a página para tentar de novo.</CaixaAviso></div>
+      ? <div className="pagina medicoes"><Falha>Não foi possível ler as medições: {erro} Recarregue a página para tentar de novo.</Falha></div>
       : <div className="pagina medicoes"><p className="medicoes__vazio medicoes__vazio--pagina" role="status">Carregando as medições…</p></div>;
   }
   // enquanto o mês escolhido não chega, o quadro na tela ainda é o do mês anterior: nada de iniciar nele
@@ -171,7 +171,7 @@ export default function MedicoesPagina({ usuario }: { usuario: Usuario }) {
         </div>
         <LegendaCor />
       </div>
-      {erro && <CaixaAviso nivel="critico" role="alert">Não foi possível ler as medições: {erro}</CaixaAviso>}
+      {erro && <Falha>Não foi possível ler as medições: {erro}</Falha>}
 
       <section className="cartao medicoes__painel" aria-labelledby="quadro-titulo">
         <div className="medicoes__painel-cab">

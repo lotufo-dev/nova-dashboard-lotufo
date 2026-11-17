@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import { CartaoPleito, NovoPleito, cadeiaDoPleito, type Pleito, type SugestaoDias, type TipoPleito } from "./FluxoOficio";
 import CaixaAviso from "./CaixaAviso";
-import { IconeAlerta } from "./icones";
 import { focarPorId } from "./foco";
 import { desfechoDoPedido, seloDoPrazo, type InstrumentoPrazo } from "./obra";
 import { Link } from "./Link";
@@ -10,6 +9,7 @@ import { fmtDataPura } from "./tempo";
 import { brl } from "./formato";
 import Selo from "./Selo";
 import { situacaoDoNivel } from "./situacao";
+import Falha from "./Falha";
 
 // Aba Prazos da obra (bloco 7; spec §7.3 e §7.4; NAVEGACAO.md › Obra): a situacao do prazo (execucao, vigencia,
 // folga, endosso e o pedido de prorrogacao em curso, com as linhas que levam aos instrumentos em Contrato), os
@@ -131,7 +131,7 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
   // o oficio criado so' existe depois que a lista recarrega: tenta de novo a cada leitura
   useEffect(() => { if (foco && focarPorId(foco)) setFoco(null); }, [foco, dados]);
 
-  if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>;
+  if (erro) return <Falha>{erro}</Falha>;
   if (!dados) return <section className="cartao"><div className="vazio"><p>Carregando…</p></div></section>;
   const s = dados.situacao;
   const contrato = { tela: "obra" as const, id: contratoId, aba: "contrato" as const };

@@ -5,13 +5,14 @@ import ConfirmarFaltas from "./ConfirmarFaltas";
 import ConfirmarRemocao from "./ConfirmarRemocao";
 import { api, apiForm, ApiErro } from "./api";
 import { brl } from "./formato";
-import { IconeAlerta, IconeArquivo } from "./icones";
+import { IconeArquivo } from "./icones";
 import { iniciarEnvio, ItensEnvio, mensagem, notasDe, type Envio, type ListaEnvios } from "./NotasAEnviar";
 import { Glifo } from "./Selo";
 import JustificativaEnvio, { conferirJustificativa, erroDaJustificativa, pedeJustificativa } from "./JustificativaEnvio";
 import "./notas.css";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import { fmtHora } from "./tempo";
+import Falha from "./Falha";
 
 // Enviar a nota (2026-10-09): o protocolo da etapa `nota` (SINFRA) ou `unico` (demais) de um envio. Sem carta
 // (SINFRA, prefeituras): o que vai no e-mail e para quem vai. Com carta (MTPAR, SES): oficio, assinar e enviar
@@ -226,7 +227,7 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
       <div className="pagina">
         {erro ? (
           <div className="form-inline">
-            <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível abrir o envio: {erro}</p>
+            <Falha>Não foi possível abrir o envio: {erro}</Falha>
             <button type="button" className="btn btn--pequeno" onClick={() => void carregar()}>Tentar de novo</button>
           </div>
         ) : <p className="campo__nota">Carregando o envio…</p>}
@@ -378,7 +379,7 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
     <>
       <div className={classe}>
         {det.bloqueio && <CaixaAviso nivel="trava" role="alert">Envio bloqueado: {det.bloqueio}</CaixaAviso>}
-        {erroAcao && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroAcao}</p>}
+        {erroAcao && <Falha>{erroAcao}</Falha>}
         {confirmar && <ConfirmarFaltas itens={confirmar.itens} mudou={confirmar.mudou} aoCancelar={() => setConfirmar(null)}
           aoContinuar={() => void enviarConfirmado(confirmar.m, confirmar.itens)} />}
         {reserva && <LiberarEnvio tabela="protocolos" id={protocoloId} reserva={reserva}

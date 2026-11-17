@@ -3,7 +3,7 @@ import { api, mensagemDeErro } from "./api";
 import { brl } from "./formato";
 import CampoCompetencia from "./CampoCompetencia";
 import CampoReajuste, { type ValorReajuste } from "./CampoReajuste";
-import { IconeAlerta, IconeBaixar, IconeCadeado, IconeMais } from "./icones";
+import { IconeBaixar, IconeCadeado, IconeMais } from "./icones";
 import { EXCECOES, notasDivergentes, passoDe, resumoNotas, separarMedicoes, tituloMedicao } from "./medicao";
 import { type Busca } from "./rota";
 import { Link } from "./Link";
@@ -11,6 +11,7 @@ import { Link } from "./Link";
 import { fmtCompetencia as competenciaBR, fmtDataPura as dataBR } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
+import Falha from "./Falha";
 
 // As medicoes da obra (NAVEGACAO.md › Obra › aba Medicoes): "Em andamento", com o proximo passo e o link para
 // a secao dele na pagina da medicao, e "Anteriores" (recebidas, canceladas e desistidas), as 6 mais recentes
@@ -192,7 +193,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
   const celulaCusto = (m: Medicao) => comCusto
     && <td data-rotulo="Custo lançado no RM" className="col-num dinheiro num">{custos.has(m.id) ? brl(custos.get(m.id) as number) : "—"}</td>;
 
-  if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>;
+  if (erro) return <Falha>{erro}</Falha>;
   if (carregando) return <section className="cartao"><div className="vazio"><p>Carregando medições…</p></div></section>;
 
   // as duas tabelas dividem as mesmas colunas (o dinheiro cai na mesma coluna em "Em andamento" e em "Anteriores")
@@ -373,7 +374,7 @@ export function NovaMedicaoManual({ contratoId, aoCriar, inicial }: {
       {novo.tipo === "reajuste" && (
         <CampoReajuste contratoId={contratoId} competencia={novo.competencia} prefixo="nova" valor={reaj} aoMudar={setReaj} />
       )}
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
       <p className={feito ? "notas__ok" : "sr-only"} role="status">
         {feito && <>Medição criada:{" "}
           <Link para={{ tela: "medicao", obra: contratoId, id: feito.id }}>{tituloMedicao(feito)}</Link>.</>}

@@ -1247,22 +1247,15 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 
 /* --------------------------------------------------------- erro e vazio */
 
+/* A falha e' a peca Falha.tsx (.aviso--critico, com o octogono). `.erro` fica so' para os dois avisos de falha do
+   Inicio, que ainda nao passaram para a peca: a mesma caixa de critico, sem o simbolo. */
 .erro {
-  display: flex; align-items: flex-start; gap: 8px;
-  margin: 0; padding: 10px 12px;
+  max-width: none; margin: 0; padding: var(--espaco-p) var(--espaco-m);
   border: var(--borda-situacao-critico);
-  border-radius: var(--raio-controle);
   background: var(--situacao-critico-fundo);
   color: var(--situacao-critico-texto);
-  font-size: var(--texto-meta);
+  font-size: var(--texto-corpo); font-weight: var(--peso-forte);
 }
-.erro .icone { margin-top: 1px; }
-/* relatorio de erro POR LINHA (importacao de CSV): o mesmo bloco de erro, com a
-   lista das linhas recusadas dentro dele. min-width:0 para o texto longo quebrar
-   em vez de esticar a caixa. */
-.erro > div { min-width: 0; }
-.erro__titulo { margin: 0; font-weight: 600; }
-.erro__linhas { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 2px; }
 
 .vazio { padding: 32px 20px; text-align: center; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 /* Vazio que e' BOA noticia (nenhum alerta): a mesma linguagem, sem o palco de 32px —

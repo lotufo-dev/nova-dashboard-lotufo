@@ -10,6 +10,7 @@ import { brl } from "./Medicoes";
 import { fmtCompetencia as competenciaBR, fmtData, fmtDataPura } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
+import Falha from "./Falha";
 
 type ItemVersao = { competencia: string; valor_previsto_centavos: number };
 type Versao = { numero: number; criado_em: string; origem: string; itens: ItemVersao[] };
@@ -274,9 +275,7 @@ export default function Cronograma({ contratoId, podeEditar }:
         <h2 className="cartao__titulo" id="titulo-evolucao-mensal">Evolução mensal</h2>
       </div>
 
-      {erro && <div className="cartao__corpo"><p className="erro" role="alert">
-        <IconeAlerta className="icone icone--p" />{erro}
-      </p></div>}
+      {erro && <div className="cartao__corpo"><Falha><IconeAlerta className="icone icone--p" />{erro}</Falha></div>}
 
       {carregando && <div className="vazio"><p>Carregando…</p></div>}
 

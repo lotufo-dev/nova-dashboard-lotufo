@@ -4,7 +4,6 @@ import CaixaAviso from "./CaixaAviso";
 import Contador from "./Contador";
 import EnviarNota from "./EnviarNota";
 import { brl } from "./formato";
-import { IconeAlerta } from "./icones";
 import Janela from "./Janela";
 import { Link } from "./Link";
 import type { Metade } from "./medicao";
@@ -13,6 +12,7 @@ import { IconeCheck, iniciarEnvio, ListaCertidoes, mensagem, naturezaDoEnvio, pe
 import RegistrarFora from "./RegistrarFora";
 import Selo, { Glifo } from "./Selo";
 import { situacaoDoNivel } from "./situacao";
+import Falha from "./Falha";
 
 // Etapa 4 da pagina da medicao (#152, opcao B): o envio ao orgao numa tabela de uma linha por envio -- um so' na
 // SINFRA e na Pref. VG (medicao e reajuste no mesmo e-mail), dois lado a lado na MTPAR e na SES --, com o motivo ao
@@ -248,7 +248,7 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
   const certidoes = useCertidoes(envios?.[0]?.contrato_id ?? 0, envios?.[0] ? naturezaDoEnvio(envios[0]) : "execucao");
 
   if (envios === null) return <p className="campo__nota">Conferindo o envio…</p>;
-  if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler o envio: {erro}</p>;
+  if (erro) return <Falha>Não foi possível ler o envio: {erro}</Falha>;
   if (envios.length === 0) {
     return <p className="campo__nota">Esta medição não aparece em Notas a enviar: confira se a obra tem o órgão no cadastro.</p>;
   }
@@ -284,7 +284,7 @@ export function EtapaEnvio({ medicaoId, envios, erro, recarregarEnvios, podeEdit
           <button type="button" className="botao-link" onClick={() => setFora(true)}>Já enviei por fora</button>
         )}
       </div>
-      {erroAcao && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroAcao}</p>}
+      {erroAcao && <Falha>{erroAcao}</Falha>}
       <div className="med-caixa">
         <table className="tabela envios">
           <thead>

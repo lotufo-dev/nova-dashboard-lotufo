@@ -350,7 +350,7 @@
 .med .med-envio__cabeca > .btn { margin-left: auto; height: var(--alvo-menor); padding: 0 var(--espaco-p); font-size: var(--texto-meta); }
 .med .notas-v3.nota-envio { display: block; max-width: none; padding: 0; }
 .med .notas-v3.nota-envio > .aviso { margin-top: var(--espaco-m); }
-.med .notas-v3.nota-envio > .erro { margin-top: var(--espaco-m); }
+.med .notas-v3.nota-envio > .aviso--falha { margin-top: var(--espaco-m); }
 .med .notas-v3 .nota-secao { display: block; min-width: 0; padding: var(--espaco-g) 0 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
 .med .notas-v3 .nota-secao + .nota-secao { margin-top: var(--espaco-g); border-top: var(--borda-linha); }
 .med .notas-v3 .nota-secao__cabeca { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: var(--espaco-pp) var(--espaco-p); margin-bottom: var(--espaco-m); }
@@ -368,7 +368,7 @@
 
 /* o pacote: as paginas da carta e, ao lado, o que vai junto */
 .envio-pacote { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-m) var(--espaco-g); align-items: start; min-width: 0; }
-.envio-pacote > .erro { grid-column: 1 / -1; }
+.envio-pacote > .aviso--falha { grid-column: 1 / -1; }
 .med .notas-v3 .nota-paginas { display: block; margin: 0; padding-left: var(--espaco-g); list-style: decimal; color: var(--cor-tinta); font-size: var(--texto-meta); }
 .med .notas-v3 .nota-paginas li { padding: var(--espaco-traco) 0; }
 .med .notas-v3 .nota-paginas li::marker { color: var(--cor-texto-terciario); }

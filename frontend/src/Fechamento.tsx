@@ -10,6 +10,7 @@ import { type Ir } from "./rota";
 import Selo from "./Selo";
 import { fmtCompetencia, fmtDataPura, fmtMesExtenso } from "./tempo";
 import "./fechamento.css";
+import Falha from "./Falha";
 
 // Fechamento (#748): o que foi medido, aprovado, protocolado e recebido em cada mes de competencia de 2025 e 2026, na
 // cota da Lotufo, e o que esta' em aberto, nota a nota. Os numeros vem prontos do servidor (`app/fechamento.py`), ja'
@@ -500,7 +501,7 @@ export default function Fechamento({ ir }: { ir: Ir }) {
       .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
     return () => { vivo = false; };
   }, []);
-  if (erro) return <CaixaAviso nivel="critico" role="alert">Não foi possível carregar o fechamento: {erro} Recarregue a página para tentar de novo.</CaixaAviso>;
+  if (erro) return <Falha>Não foi possível carregar o fechamento: {erro} Recarregue a página para tentar de novo.</Falha>;
   if (!f) return <p className="fch-vazio">Carregando…</p>;
   const atual = ano ?? f.anos[f.anos.length - 1];
   return (

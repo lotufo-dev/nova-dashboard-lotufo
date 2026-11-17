@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiForm, mensagemDeErro } from "./api";
 import CampoCompetencia from "./CampoCompetencia";
 import Contador from "./Contador";
-import { IconeAlerta, IconeArquivo, IconeBaixar, IconeClipe, IconeLinkExterno } from "./icones";
+import { IconeArquivo, IconeBaixar, IconeClipe, IconeLinkExterno } from "./icones";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import {
@@ -15,6 +15,7 @@ import { fmtCompetencia as mesBR, fmtDataPura } from "./tempo";
 import { Migalhas, VoltarOrigem } from "./Topo";
 import { AnexarCertidoes, CnpjCopiar, EmDia, Pilula, Ponto, SituacaoSelo, type AnexarRef } from "./documentosComum";
 import { cnpjBR, competenciaDoNome, ROTULO_TIPO, useCopiarCnpj, usePainel } from "./documentosDados";
+import Falha from "./Falha";
 
 /* A pagina de UMA empresa em Documentos (#161): cabecalho com nome, CNPJ e situacao; tres abas, cada uma com
  * endereco (Certidoes, Regularidade do mes, Garantia por obra). A tabela de certidoes traz Emitir, Anexar e Ver
@@ -127,7 +128,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
       </header>
 
       <div className="pagina">
-        {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+        {erro && <Falha>{erro}</Falha>}
         {/* sempre montada: o Copiar e a fila anunciam aqui */}
         <p className="sr-only" role="status">{anuncio}</p>
 
@@ -271,7 +272,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                       {podeEditar && (
                         <form className="doc-reg__bloco" aria-label={`Regularidade de ${e.entidade}`} onSubmit={ev => void enviarRegularidade(ev, e)}>
                           <h3>Anexar regularidade</h3>
-                          {erroReg && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroReg}</p>}
+                          {erroReg && <Falha>{erroReg}</Falha>}
                           <div className="form-inline">
                             <label className="btn btn--pequeno espelho__anexar">
                               <span className="arquivo-nome" title={arquivoReg?.name}>{arquivoReg ? arquivoReg.name : "Escolher PDF"}</span>

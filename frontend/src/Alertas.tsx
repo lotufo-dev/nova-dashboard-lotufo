@@ -6,6 +6,7 @@ import { brl } from "./Medicoes";
 import { type AbaObra, type Busca, type Ir, type Rota } from "./rota";
 import { Link } from "./Link";
 import { situacaoDoNivel } from "./situacao";
+import Falha from "./Falha";
 
 // Cartao de avisos (spec §11). Bloco 6: o servidor manda o aviso PRONTO (`app/avisos.py`): nivel,
 // mensagem de uma linha, obra, dias, valor e destino do clique. Esta tela so' desenha — nao ha mais
@@ -115,10 +116,8 @@ export default function Alertas({ itens, ir, titulo = "Avisos", limite = LIMITE,
 
       {itens === undefined ? null : itens === null ? (
         <div className="cartao__corpo">
-          <p className="erro" role="alert">
-            <IconeAlerta className="icone icone--p" />
-            Não foi possível verificar os avisos. Recarregue a página para tentar de novo.
-          </p>
+          <Falha><IconeAlerta className="icone icone--p" />
+            Não foi possível verificar os avisos. Recarregue a página para tentar de novo.</Falha>
         </div>
       ) : itens.length === 0 ? (
         <div className="vazio vazio--curto">

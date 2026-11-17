@@ -1,12 +1,13 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { api } from "./api";
-import { IconeAjustes, IconeAlerta, IconeArquivo, IconeCifrao, IconeDocumento, IconeGrade, IconeInicio, IconeMedicoes, IconeObras, IconeSiga,
+import { IconeAjustes, IconeArquivo, IconeCifrao, IconeDocumento, IconeGrade, IconeInicio, IconeMedicoes, IconeObras, IconeSiga,
   IconeSeta, IconeSino, IconeVoltar } from "./icones";
 import type { Usuario } from "./Login";
 import { menuDe, ROTULO, rotaDoItem, type ItemMenu } from "./navegacao";
 import { type Ir } from "./rota";
 import { Link } from "./Link";
 import Simbolo from "./Simbolo";
+import Falha from "./Falha";
 
 // Casca de todas as telas logadas (#720, a casca da fundacao): o MENU LATERAL escuro a' esquerda (o simbolo e o nome
 // da marca em dois pesos; icone e nome em cada item; o item ativo com fundo realcado e o icone no laranja da marca;
@@ -162,7 +163,7 @@ function Conta({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
         <button type="button" className="conta__item" disabled={saindo} onClick={() => void sair()}>
           {saindo ? "Saindo…" : "Sair"}
         </button>
-        {erro && <p className="erro conta__erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+        {erro && <Falha className="conta__erro">{erro}</Falha>}
       </div>
     </div>
   );

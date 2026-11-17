@@ -9,6 +9,7 @@ import type { Medicao } from "./Medicoes";
 import { fmtDataPura } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
+import Falha from "./Falha";
 
 // Notas da medicao (bloco 3, spec §3 passo 3 e §7.1): a pessoa arrasta os PDFs que o faturamento
 // devolveu; o sistema le a nota da Lotufo, confere contra a saida do espelho e fecha "nota emitida"
@@ -269,7 +270,7 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
         )}
       </p>
 
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
       {!dados && !erro && <p className="campo__nota">Carregando…</p>}
 
       {dados && dados.esperadas.length > 0 && (

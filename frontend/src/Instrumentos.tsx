@@ -8,6 +8,7 @@ import { fmtCompetencia as mesBR, fmtDataPura } from "./tempo";
 import { fmtPercentualDoCadastro } from "./formato";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
+import Falha from "./Falha";
 
 // Contrato › Instrumentos (NAVEGACAO.md › Obra): aditivos (termos e apostilamentos de prazo, valor, escopo e
 // mistos), apostilamentos de reajuste, paralisacoes, reinicios e endossos numa lista so', do mais novo ao mais
@@ -77,9 +78,7 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
         <h2 className="cartao__titulo" id="titulo-instrumentos">Instrumentos</h2>
       </div>
 
-      {erro && <div className="cartao__corpo"><p className="erro" role="alert">
-        <IconeAlerta className="icone icone--p" />{erro}
-      </p></div>}
+      {erro && <div className="cartao__corpo"><Falha><IconeAlerta className="icone icone--p" />{erro}</Falha></div>}
       {erroCadastro && <div className="cartao__corpo"><p className="campo__nota">
         Não foi possível ler os instrumentos do cadastro.</p></div>}
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Alertas, { avisosDaObra, type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
 import FichaObra, { MedicoesAgora, PrazoDaObra, type Ficha } from "./FichaObra";
-import { IconeAlerta, IconeVoltar } from "./icones";
+import { IconeVoltar } from "./icones";
 import LegendaCor from "./LegendaCor";
 import type { Usuario } from "./Login";
 import IniciarProxima from "./IniciarProxima";
@@ -18,6 +18,7 @@ import { baseDosValores } from "./formato";
 import Selo from "./Selo";
 import { situacaoDoNivel } from "./situacao";
 import "./obra.css";
+import Falha from "./Falha";
 
 // Bloco 6 (spec §10.3): cabecalho da obra, montado no servidor (`contratos.cabecalho`).
 type Cabecalho = {
@@ -152,7 +153,7 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
       </header>
 
       <div className="pagina obra">
-        {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+        {erro && <Falha>{erro}</Falha>}
 
         {!c && !erro && (
           <section className="cartao">
