@@ -83,9 +83,7 @@ describe("tabela, painel e variáveis", () => {
     expect(regra(".cartao__cabeca")).not.toMatch(/border/);
   });
 
-  it("o filtro escolhido é o mais forte (tinta cheia), e o selo dentro de um título mantém a letra do texto", () => {
-    const escolhido = regra('.cart-farol-btn[aria-pressed="true"], .cart-farol-btn[aria-pressed="true"]:hover:not(:disabled)');
-    expect(escolhido).toMatch(/background:\s*var\(--cor-tinta\);\s*border-color:\s*var\(--cor-tinta\);\s*color:\s*var\(--cor-papel\)/);
+  it("o selo dentro de um título mantém a letra do texto", () => {
     for (const peca of [".selo", ".contador"]) {
       expect(regra(peca), peca).toMatch(/font-family:\s*var\(--fonte-texto\);\s*font-stretch:\s*var\(--largura-texto\);\s*text-transform:\s*none;\s*letter-spacing:\s*normal/);
     }

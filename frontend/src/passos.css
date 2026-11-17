@@ -176,7 +176,6 @@
 .acoes-lista button:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
 .acoes-lista svg { width: 16px; height: 16px; color: var(--cor-texto-secundario); }
 
-/* ---------------------------------------------------------------- passo 2: analise do orgao */
 /* a faixa "com o orgao ha N dias uteis" */
 .orgao-faixa, .med-quadro .orgao-faixa { padding: var(--espaco-m) var(--espaco-g); border-left: var(--espaco-mini) solid var(--situacao-feito-ponto);
   display: flex; flex-direction: column; gap: var(--espaco-p); }
@@ -472,7 +471,6 @@
 .med .med-quadro .ol-janela .ol-assinatura img { width: auto; max-width: 100%; height: auto; margin-top: var(--espaco-pp); padding-top: var(--espaco-p); border-top: var(--borda-linha); }
 .med .med-quadro .ol-janela + .aviso { margin-top: var(--espaco-m); }
 
-/* ---------------------------------------------------------------- passo 6: pagamento */
 /* o passo mede a propria largura: os numeros nunca se sobrepoem e notas e processo ficam lado a lado quando cabem */
 #passo-6 { container-type: inline-size; }
 .pag-numeros { display: flex; flex-wrap: wrap; gap: var(--espaco-m) var(--espaco-g); padding: 0; }

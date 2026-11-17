@@ -155,7 +155,6 @@
   .estado-medicao { justify-content: flex-end; }
 }
 
-/* ---------------------------------------------------------------- o cabecalho da obra em tela estreita */
 /* a trilha quebra linha em vez de cortar o nome do orgao e o da obra na borda da pagina */
 .topbar--obra .topbar__trilha { flex-wrap: wrap; row-gap: var(--espaco-pp); }
 .topbar--obra .migalhas ol { flex-wrap: wrap; }

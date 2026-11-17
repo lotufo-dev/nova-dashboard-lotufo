@@ -129,7 +129,7 @@ a.doc-chip:focus-visible { outline: var(--largura-foco) solid var(--cor-foco); o
 
 .doc-cnpj { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-pp); font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 .doc-cnpj .num { font-family: var(--fonte-numero); color: var(--cor-tinta); user-select: all; }
-.doc-cnpj button { height: var(--altura-controle-menor); padding: 0 var(--espaco-pp); font-size: var(--texto-mini); }
+.doc-cnpj button { height: var(--alvo-menor); padding: 0 var(--espaco-p); font-size: var(--texto-meta); }
 .doc-copia { font-size: var(--texto-mini); color: var(--situacao-feito-texto); }
 
 /* o sinal de cada certidao na linha da consorciada: o glifo da situacao e o nome curto */
