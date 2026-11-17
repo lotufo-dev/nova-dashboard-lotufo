@@ -57,6 +57,13 @@ O que fica como está, por decisão de 17/11/2026:
   delas o grupo "repasse sem baixa" do Fechamento.
 - **O complemento do medido pelas notas do RM** (`diretoria.complemento_rm`) só olha a nota sem medição ligada. Sem
   medição não há nota da empresa ligada, e vale a regra geral: a fatura do consórcio vezes a cota.
+- **O passo Pagamento da medição com espelho continua pelas saídas do espelho.** O espelho diz, saída a saída, o que a
+  empresa fatura: sem nota casada a saída mostra "—", e espelho sem saída da empresa fecha a cota em zero. Pôr no
+  lugar a fatura do consórcio vezes a cota mostraria como recebido da empresa um dinheiro que entrou no consórcio.
+- **A página da obra mostra o a receber em valor cheio e não leva o repasse.** Ali o número é o que o órgão deve ao
+  contrato; o repasse é dívida do consórcio com a empresa, na cota, e aparece na lista de Obras, no Início e no
+  Fechamento. Na obra de consórcio com repasse pendente a lista mostra a receber e a página da obra, não: são duas
+  perguntas, e somar cota com valor cheio no mesmo número não fecharia com nenhuma das duas.
 
 ## O a receber do Início e o em aberto do Fechamento (conciliação de 17/11/2026)
 
