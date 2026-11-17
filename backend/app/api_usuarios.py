@@ -102,6 +102,10 @@ def atualizar(alvo_id: ID, dados: UsuarioPatch,
             # meio-tempo (outro admin apagando). Sem esta guarda, `dict(None)` estouraria
             # TypeError dentro do handler -> 500 em vez do mesmo 404 honesto.
             raise HTTPException(404, "Usuário não encontrado")
+        # Pessoa inativa nao muda de perfil: primeiro reativa (o mesmo pedido pode reativar e trocar o perfil).
+        ficara_ativa = bool(antes["ativo"]) if dados.ativo is None else dados.ativo
+        if dados.perfil is not None and dados.perfil != antes["perfil"] and not ficara_ativa:
+            raise HTTPException(409, "Pessoa inativa não muda de perfil. Reative a conta antes.")
         # `campo` so pode ser um nome de campo do UsuarioPatch ('ativo'/'perfil'):
         # a f-string nao ve entrada do cliente.
         for campo, valor in novos.items():

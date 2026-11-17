@@ -877,7 +877,8 @@ function Usuarios({ eu }: { eu?: number }) {
                     <tr className={`linha${i % 2 === 1 ? " par" : ""}`}>
                       {/* #768: o nome e o e-mail numa celula so', para a linha caber a 1024 px com as acoes a' vista */}
                       <td className="adm-pessoa"><span className="adm-pessoa__nome">{u.nome}</span><span className="adm-pessoa__email">{u.email}</span></td>
-                      <td>{u.id === eu ? rotuloPerfil(u.perfil) : (
+                      {/* a inativa nao muda de perfil sem ser reativada (o servidor recusa): so' o texto */}
+                      <td>{u.id === eu || !u.ativo ? rotuloPerfil(u.perfil) : (
                         <select aria-label={`Perfil de ${u.nome}`} value={u.perfil}
                                 onChange={e => agir(`/api/admin/usuarios/${u.id}`, { method: "PUT", body: JSON.stringify({ perfil: e.target.value }) },
                                                     `Perfil de ${u.nome} alterado.`)}>

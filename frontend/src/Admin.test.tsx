@@ -57,6 +57,22 @@ test("Usuários: bloqueio com Desbloquear, Redefinir senha e perfil editável (m
   expect(api).toHaveBeenCalledWith("/api/admin/usuarios/2/senha", { method: "POST", body: JSON.stringify({ senha: "senha-nova-456" }) });
 });
 
+test("Usuários: pessoa inativa mostra o perfil em texto, sem seletor, até ser reativada", async () => {
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/admin/usuarios") return [
+      { id: 1, nome: "Administrador", email: "a@exemplo.com.br", perfil: "admin", ativo: 1 },
+      { id: 2, nome: "Engenheira", email: "e@exemplo.com.br", perfil: "engenharia", ativo: 0 },
+      { id: 3, nome: "Diretor", email: "d@exemplo.com.br", perfil: "diretoria", ativo: 1 }];
+    if (url === "/api/admin/contas-microsoft") return [];
+    return { ok: true };
+  });
+  render(<Admin aba="usuarios" eu={1} />);
+  expect(await screen.findByRole("combobox", { name: /Perfil de Diretor/ })).toBeTruthy();
+  expect(screen.queryByRole("combobox", { name: /Perfil de Engenheira/ })).toBeNull();
+  const linha = screen.getByText("Engenheira", { selector: ".adm-pessoa__nome" }).closest("tr") as HTMLElement;
+  expect(within(linha).getByText("Engenharia")).toBeTruthy();
+});
+
 // Issue #5: a auditoria passava de 500 eventos sem acesso aos anteriores; "Carregar mais" busca a página seguinte pelo cursor
 test("Auditoria: Carregar mais busca a página anterior pelo cursor, mantém os filtros e some no primeiro evento", async () => {
   const ev = (id: number, acao: string) => ({ id, acao, entidade: null, criado_em: "2026-10-10 12:00:00", usuario_id: null });
