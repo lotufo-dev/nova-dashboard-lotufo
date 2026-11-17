@@ -27,14 +27,13 @@ function deltaBR(centavos: number): string {
   return (centavos > 0 ? "+" : centavos < 0 ? "−" : "") + brl(Math.abs(centavos));
 }
 
+// Quantos instrumentos aparecem antes do "Ver todos": os recentes respondem quase tudo; o resto e' historico.
+const RECENTES = 10;
+
 function Situacao({ a }: { a: AditivoApi }) {
   if (a.cancelado_em) return <Selo>Cancelado</Selo>;
-  if (a.status === "assinado") return (
-    <Selo situacao="feito"
-      sufixo={<IconeCadeado className="icone icone--p" titulo="Congelado" />}>
-      Assinado
-    </Selo>
-  );
+  // assinado e' o estado comum da lista (dezenas de linhas na obra antiga): so' a palavra e o cadeado, sem selo
+  if (a.status === "assinado") return <span className="instrumentos__assinado">Assinado <IconeCadeado className="icone icone--p" titulo="Congelado" /></span>;
   return <Selo situacao="andamento">Em andamento</Selo>;
 }
 
@@ -70,7 +69,10 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
   }, [contratoId]);
 
   const carregando = (aditivos === null && !erro) || (cadastro === null && !erroCadastro);
-  const linhas = instrumentosDaObra(aditivos ?? [], cadastro ?? [], prazo);
+  const todas = instrumentosDaObra(aditivos ?? [], cadastro ?? [], prazo);
+  // a obra antiga tem dezenas de instrumentos: os mais novos primeiro, o resto a um clique
+  const [verTodos, setVerTodos] = useState(false);
+  const linhas = verTodos ? todas : todas.slice(0, RECENTES);
 
   return (
     <section className="cartao" aria-labelledby="titulo-instrumentos" id="instrumentos">
@@ -144,6 +146,11 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
             </tbody>
           </table>
         </Rolagem>
+      )}
+      {!carregando && todas.length > RECENTES && !verTodos && (
+        <div className="cartao__rodape">
+          <button type="button" className="btn btn--pequeno" onClick={() => setVerTodos(true)}>Ver todos os {todas.length}</button>
+        </div>
       )}
     </section>
   );

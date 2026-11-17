@@ -79,6 +79,9 @@ describe("As peças da lista de Obras que vieram da Carteira (#748, redesenho #7
     const tabela = screen.getByRole("table", { name: /QDOP, na cota da Lotufo/ });
     expect(within(tabela).getByText("Ação")).toBeTruthy();
     expect(within(tabela).getByText("Atenção")).toBeTruthy();
+    // a obra em dia fica só com a palavra, sem selo
+    expect(within(tabela).getByText("Em dia").closest(".selo")).toBeNull();
+    expect(within(tabela).getByText("Ação").closest(".selo")).not.toBeNull();
     const filtros = screen.getByRole("group", { name: "Filtrar o QDOP pelo farol" });
     expect(within(filtros).getAllByRole("button").map(b => (b.textContent ?? "").replace(/\s+/g, " ")))
       .toEqual(["Todas 3", "Com problema 2", "Crítico 0", "Ação 1", "Atenção 1", "Em dia 1"]);

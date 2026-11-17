@@ -141,9 +141,13 @@ function temMedicao(p: Ponto): boolean {
 
 /* ---------------------------------------------------------------- componente */
 
+// Quantos meses a Evolucao mensal mostra antes do "Ver os meses anteriores".
+const MESES_RECENTES = 12;
+
 export default function Cronograma({ contratoId, podeEditar }:
     { contratoId: number; podeEditar: boolean }) {
   const [versao, setVersao] = useState<Versao | null>(null);
+  const [verTodos, setVerTodos] = useState(false);   // a Evolucao mensal inteira, e nao so' os ultimos meses
   const [versoes, setVersoes] = useState<VersaoLista[]>([]);
   const [dados, setDados] = useState<Curva | null>(null);
   const [texto, setTexto] = useState("");
@@ -267,6 +271,9 @@ export default function Cronograma({ contratoId, podeEditar }:
     projeto: a.projeto + p.medido_projeto_centavos,
   }), { pedido: 0, aprovado: 0, reajuste: 0, projeto: 0 });
 
+  // a obra antiga tem dezenas de meses: os ultimos doze e, a um clique, os anteriores; o total e' sempre de todos
+  const anteriores = verTodos ? 0 : Math.max(0, pontos.length - MESES_RECENTES);
+
   return (
     <>
     {/* issue #647: o que a obra pediu e o que o orgao aprovou, mes a mes; aberta, sem o previsto */}
@@ -328,7 +335,16 @@ export default function Cronograma({ contratoId, podeEditar }:
               </tr>
             </thead>
             <tbody>
-              {pontos.map((p, i) => {
+              {anteriores > 0 && (
+                <tr>
+                  <td colSpan={6}>
+                    <button type="button" className="btn btn--pequeno" onClick={() => setVerTodos(true)}>
+                      Ver os {anteriores} meses anteriores
+                    </button>
+                  </td>
+                </tr>
+              )}
+              {pontos.slice(anteriores).map((p, i) => {
                 const semValor = (p.pedido_execucao_centavos ?? 0) === 0 && (p.aprovado_execucao_centavos ?? 0) === 0
                   && p.medido_reajuste_centavos === 0 && p.medido_projeto_centavos === 0;
                 const pend = (p.atestado_pendente && p.medido_execucao_centavos > 0) || pendenteOutras(p);
@@ -341,7 +357,8 @@ export default function Cronograma({ contratoId, podeEditar }:
                     <td className="col-num dinheiro num">{valorOuTraco(p.medido_projeto_centavos)}</td>
                     <td>
                       {/* a situacao da competencia, com glifo e palavra; em aberto fica neutra */}
-                      {semValor ? <Selo>em aberto</Selo> : pend ? <Selo situacao="andamento">provisório</Selo> : <Selo situacao="feito">atestado</Selo>}
+                      {/* atestado e' o estado comum (a obra antiga tem dezenas de meses assim): so' a palavra */}
+                      {semValor ? <Selo>em aberto</Selo> : pend ? <Selo situacao="andamento">provisório</Selo> : "Atestado"}
                     </td>
                   </tr>
                 );

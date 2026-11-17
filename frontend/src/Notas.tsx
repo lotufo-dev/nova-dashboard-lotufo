@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { CaixaJustificativa } from "./CaixaAviso";
 import { brl } from "./formato";
 import { api, apiForm, mensagemDeErro } from "./api";
@@ -275,7 +275,7 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
 
       {dados && dados.esperadas.length > 0 && (
         <Rolagem rotulo="Notas esperadas da medição">
-          <table className="tabela tabela--densa notas__tabela" aria-label={rotulo ? `Notas esperadas: ${rotulo}` : undefined}>
+          <table className={`tabela tabela--densa notas__tabela${mostraImpostos ? " notas__tabela--impostos" : ""}`} aria-label={rotulo ? `Notas esperadas: ${rotulo}` : undefined}>
             <thead>
               <tr>
                 <th scope="col">Empresa</th><th scope="col">Município</th><th scope="col" className="col-num num">Valor</th>
@@ -307,8 +307,12 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
                   );
                 };
                 const empresa = variasNaturezas ? `${naturezaNome(e.natureza, e.rotulo)} · ${emissorNome(e.emissor)}` : emissorNome(e.emissor);
+                // a divergencia vai numa linha propria, na largura da tabela: dentro da celula da nota ela quebrava em
+                // cinco linhas e empurrava os impostos para fora da caixa
+                const diferenca = n ? conferencia(n) : null;
                 return (
-                  <tr key={e.chave}>
+                  <Fragment key={e.chave}>
+                  <tr className={diferenca ? "notas__linha--diverge" : undefined}>
                     <td>{empresa}</td>
                     <td>{diverge("municipio", e.municipio)
                       ? <span className="notas__celula--diverge" title={`Na nota: ${lidos.get("municipio") ?? "não lido"}`}>
@@ -316,7 +320,7 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
                         </span>
                       : e.municipio}</td>
                     {celula("valor", e.valor)}
-                    <td>{n ? <>{situacaoNota(n)}{conferencia(n)}{botaoDesfazer(n)}</> : (
+                    <td>{n ? <>{situacaoNota(n)}{botaoDesfazer(n)}</> : (
                       <span className="notas__falta">
                         <Selo situacao="breve">aguardando</Selo>
                         {podeEditar && (
@@ -334,6 +338,12 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
                       {celula("liquido", e.liquido)}
                     </>}
                   </tr>
+                  {diferenca && (
+                    <tr className="notas__diferenca">
+                      <td colSpan={4 + (mostraImpostos ? 4 + (temIbsCbs ? 2 : 0) : 0)}>{diferenca}</td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>

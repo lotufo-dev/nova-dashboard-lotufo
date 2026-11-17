@@ -389,10 +389,13 @@ describe("boletim da MT-PAR (issue #753)", () => {
     const doReajuste = screen.getByRole("region", { name: "Boletim · Reajuste da 7ª Medição" });
     expect(doReajuste.textContent).toContain("Não anexado");
     expect(doReajuste.querySelector("form[aria-label='Registrar boletim']")).not.toBeNull();
+    // o título do formulário diz de quem é o boletim: no cartão do reajuste, do reajuste
+    expect(doReajuste.querySelector("form .painel__titulo")!.textContent).toBe("Registrar o boletim do reajuste da 7ª medição");
     expect(daMedicao.querySelector("form")).toBeNull();
     // um formulário por vez: abrir o da medição (boletim novo) fecha o do reajuste
     fireEvent.click(screen.getByRole("button", { name: "Registrar boletim novo" }));
     expect(daMedicao.querySelector("form[aria-label='Registrar boletim']")).not.toBeNull();
+    expect(daMedicao.querySelector("form .painel__titulo")!.textContent).toBe("Registrar o boletim da 7ª medição");
     expect(doReajuste.querySelector("form")).toBeNull();
     expect(screen.getByRole("button", { name: "Anexar o boletim" })).toBeTruthy();
   });

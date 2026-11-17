@@ -3,6 +3,7 @@ import { destinoDoAviso, semEmpresa, semObra, type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
 import { daAgenda, diasAteOAviso, porSecao, semRSOrfao, type Secao } from "./avisos";
 import Contador from "./Contador";
+import Falha from "./Falha";
 import { brl, contar } from "./formato";
 import LegendaCor from "./LegendaCor";
 import type { Usuario } from "./Login";
@@ -295,7 +296,7 @@ function CaixaAvisos({ avisos, ir }: { avisos: Aviso[] | null | undefined; ir: I
         <Link para={{ tela: "avisos" }} ir={ir} className="ini-ver-todos" aria-label="Ver todos os avisos">Ver todos</Link>
       </header>
       {avisos === undefined && <p className="ini-carregando">Carregando…</p>}
-      {avisos === null && <p className="erro" role="alert">Não foi possível verificar os avisos. Recarregue a página para tentar de novo.</p>}
+      {avisos === null && <Falha>Não foi possível verificar os avisos. Recarregue a página para tentar de novo.</Falha>}
       {avisos && total === 0 && <p className="ini-vazio">Nenhum aviso.</p>}
       {avisos && total > 0 && (
         <div className="ini-avisos__secoes">
@@ -343,7 +344,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
     return (
       <div className="ini">
         {titulo}
-        {erro ? <p className="erro" role="alert">Não foi possível carregar o início: {erro}</p>
+        {erro ? <Falha>Não foi possível carregar o início: {erro}</Falha>
           : <p className="ini-carregando">Carregando…</p>}
       </div>
     );

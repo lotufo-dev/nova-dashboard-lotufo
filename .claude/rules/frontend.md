@@ -43,6 +43,7 @@ montadas pelo dono: onde outra tela divergir delas, valem elas.
 | formulário ou ação fora do fluxo da página | `Janela` |
 | bloco com título | painel (`.cartao`) |
 | lista de valores | `.tabela` dentro de `.tabela-wrap`; valor em `.col-num` |
+| escolha entre opções (filtro, vista, ano) | `.escolha` dentro de `.escolhas`; a quantidade em `.escolha__n` |
 | botão | `button`/`.btn` (40 px); `.btn--primario` para a ação principal; `.btn--pequeno` (32 px) em linha de tabela; `.btn--destrutivo` para apagar |
 
 - **Situação: uma das quatro de `situacao.ts`** (feito, andamento, breve, critico), sempre com o glifo; ponto de cor

@@ -74,16 +74,6 @@
 .sg__trilha .icone { flex: none; }
 .sg__filtros { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--espaco-p); }
 .sg__busca { width: calc(var(--alvo-minimo) * 8); max-width: 100%; }
-/* filtro por tipo: botoes de escolha, o escolhido em tinta cheia */
-.sg__chips { display: flex; flex-wrap: wrap; gap: var(--espaco-mini); }
-.sg__chip {
-  display: inline-flex; align-items: center; gap: var(--espaco-pp); height: var(--alvo-minimo); padding: 0 var(--espaco-p);
-  border: var(--borda-campo); border-radius: var(--raio-controle); background: var(--cor-superficie); box-shadow: none;
-  color: var(--cor-tinta); font-size: var(--texto-meta); font-weight: var(--peso-medio);
-}
-.sg__chip:hover:not(:disabled) { background: var(--cor-papel-sombreado); }
-.sg__chip[aria-pressed="true"], .sg__chip[aria-pressed="true"]:hover:not(:disabled) { background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel); }
-.sg__chip .num { font-weight: var(--peso-numero); }
 .sg__abrir { display: inline-flex; align-items: center; gap: var(--espaco-pp); }
 /* a movimentacao que pos o processo no setor atual: fundo sombreado e a regua de tinta do lado */
 .sg__mov--atual td { background: var(--cor-papel-sombreado); }

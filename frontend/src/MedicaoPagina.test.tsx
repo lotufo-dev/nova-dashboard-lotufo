@@ -563,6 +563,15 @@ describe("Página da medição: as etapas se atualizam entre si", () => {
     expect(api.mock.calls.some(c => c[0] === "/api/notas/6/numero-orgao")).toBe(false);   // o SIGA do reajuste nao e' sobrescrito
   });
 
+  it("onde o órgão junta e as duas já foram recebidas, o passo abre só com o registro, sem o campo do número", async () => {
+    abrirEtapa(4);
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "recebida", protocolos: [REGISTRADO] }, { ...REAJ, estado: "recebida" }],
+      "/api/medicoes/5/par": par(true) });
+    pagina();
+    expect((await screen.findAllByText("Fora do sistema")).length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText(/Nº do protocolo no órgão/)).toBeNull();
+  });
+
   it("onde o órgão junta, um campo só grava o número nas duas medições; falha no meio diz qual já ficou", async () => {
     abrirEtapa(4);
     responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, protocolos: [REGISTRADO] }, { ...REAJ, protocolos: [{ ...REGISTRADO, id: 10 }] }],
@@ -984,9 +993,10 @@ describe("Boletim do órgão na página da medição (issue #290)", () => {
     expect(itens.findIndex(t => t.includes("Planilha/carta enviada"))).toBeLessThan(itens.findIndex(t => t.includes("Boletim nº 7")));
     expect(itens.findIndex(t => t.includes("Boletim nº 7"))).toBeLessThan(itens.findIndex(t => t.includes("assinado no DocuSign")));
     const boletim = itens.find(t => t.includes("Boletim nº 7"))!;
-    expect(boletim).toContain("aprovado R$ 12.000,01");
-    expect(boletim).toContain("pedido R$ 12.345,67");
-    expect(boletim).toContain("diferença -R$ 345,66");
+    // o R$ não se separa do valor na quebra de linha
+    expect(boletim).toContain("aprovado R$\u00a012.000,01");
+    expect(boletim).toContain("pedido R$\u00a012.345,67");
+    expect(boletim).toContain("diferença -R$\u00a0345,66");
     expect(within(tempo).getByRole("link", { name: "Ver o boletim" }).getAttribute("href")).toBe("/api/medicoes/5/boletins/9");
   });
 
