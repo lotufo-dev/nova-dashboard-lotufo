@@ -73,6 +73,22 @@ Recriar o ambiente igual ao testado: `.venv\Scripts\python -m pip install -r req
 A CI (`.github/workflows/ci.yml`) roda tudo isso em cada PR e em `master`; a branch `master` só aceita merge
 por PR, pela fila de merge, com os checks obrigatórios `backend`, `frontend` e `vazamento` verdes.
 
+### Ponta a ponta e prova de uma entrega
+
+- **Ponta a ponta** (job `ponta-a-ponta` da CI; na máquina, o mesmo comando): `python3 scripts/prova/ponta_a_ponta.py`
+  monta o frontend, sobe o sistema num banco novo com o `cadastro-exemplo/` e o e-mail no simulador, entra como admin,
+  engenharia e diretoria e abre cada tela de `scripts/prova/telas.mjs` (a lista única de telas e perfis). Reprova com
+  erro de console, resposta 4xx/5xx, tela de erro ou tela em branco. Navegador: o do Playwright
+  (`cd frontend && npx playwright install --only-shell chromium`) ou, sem ele, o Chrome da máquina.
+- **Prova de uma entrega** numa cópia do banco, com `DASH_DB_PATH` (a cópia, fora do repositório) e `DASH_CADASTRO_DIR`
+  definidas: `python3 scripts/prova/servidor.py --copia` sobe o servidor de prova (o `--copia` é pedido na primeira
+  subida sobre um banco que já tem contratos: a prova roda as migrações e cria três usuários de teste nele);
+  `python3 scripts/prova/retrato.py tirar antes`, `tirar depois` e `comparar antes depois` dizem o que mudou nas
+  respostas da API; `node scripts/prova/capturar.mjs` captura as telas por perfil a 1440, 1024 e 390. O cabeçalho de
+  cada roteiro tem as opções; nada sai para dentro do repositório (senha de teste, correio simulado e saídas ficam ao
+  lado do banco, ou em `DASH_PROVA_SAIDA`). O banco de uma instalação (o da produção, que tem
+  `segredos/instalacao.json` na pasta acima da dele) é recusado: a prova só roda numa cópia.
+
 ### Dado real no repositorio
 
 A regra (o que não pode entrar) está em `CLAUDE.md` e em `.claude/rules/dados-de-teste.md`. Quem confere é
