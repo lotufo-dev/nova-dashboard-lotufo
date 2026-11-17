@@ -37,12 +37,26 @@ Consequências:
 - O a receber do Início e da lista de Obras (na cota) segue esta exceção desde 17/11/2026, pela mesma função que
   decide quais notas contam (`fechamento._notas_da_conta`): a medição que espera o pagamento entra pelo em aberto da
   nota da empresa; a que o órgão já pagou, pelo repasse sem baixa; e a fatura do consórcio da mesma medição não entra
-  de novo como cobrança do RM. O a receber da página da obra é em valor cheio (o que o órgão deve ao contrato) e não
-  leva o repasse.
+  de novo como cobrança do RM.
+- O recebido do Início (o "Recebido no mês" e os doze meses) segue a mesma escolha desde 17/11/2026
+  (`diretoria._pct_do_recebido`): com a nota da empresa ligada à medição, entra a baixa do título dela, pela face e
+  no mês em que foi baixada, e a baixa da fatura do consórcio da mesma medição não entra. As duas telas escolhem as
+  mesmas notas; continuam diferentes na base, por desenho: o Início mostra o líquido baixado, pelo mês da baixa, e o
+  Fechamento o bruto, pela competência. Na cópia da produção de 17/11/2026 a troca tirou dos meses de março a setembro
+  o que o órgão pagou ao consórcio de uma obra e pôs em outubro, quando o repasse foi baixado, e tirou de outubro as
+  faturas de duas medições cujo repasse ainda não tem baixa. Cada diferença foi conferida nota a nota.
 - No passo Pagamento da página da medição, a medição de consórcio sem espelho conta pelos títulos da nota da empresa
   ligada e, sem ela, pelos títulos da fatura do consórcio vezes a cota; a fatura que a nota da empresa tirou da conta
-  aparece sem valor. Com espelho, o passo continua pelas saídas do espelho.
-- O que ainda não segue (a cobertura das notas vigentes, o recebido por mês do Início) está no `docs/backlog.md`.
+  aparece sem valor.
+
+O que fica como está, por decisão de 17/11/2026:
+- **A medição de consórcio continua virando recebida pela fatura do consórcio** (`sincronizacao_rm._recebimentos` só
+  olha as notas da coligada do contrato, e a cobertura das notas vigentes também). O estado diz que o órgão pagou;
+  o repasse é outra pergunta, respondida pelo recebido. Trocar a regra para a baixa da nota da empresa contradiria o
+  estado de medições já recebidas: na cópia da produção, duas medições recebidas têm a nota da empresa sem baixa, e é
+  delas o grupo "repasse sem baixa" do Fechamento.
+- **O complemento do medido pelas notas do RM** (`diretoria.complemento_rm`) só olha a nota sem medição ligada. Sem
+  medição não há nota da empresa ligada, e vale a regra geral: a fatura do consórcio vezes a cota.
 
 ## O a receber do Início e o em aberto do Fechamento (conciliação de 17/11/2026)
 

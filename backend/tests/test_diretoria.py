@@ -731,8 +731,9 @@ def test_tipo_extra_nao_muda_a_regra_da_coligada_no_consorcio(cenario):
     contas, ligada a uma medicao dele ou solta, com titulo aberto e com baixa. A fatura do consorcio (a coligada
     dele) do mesmo tipo e' a que entra.
     Issue #756 (docs/adr/0006): com a chave, a nota da empresa LIGADA a' medicao passa a ser cobranca nela, e o a
-    receber do Inicio e da lista de Obras (na cota) segue a conta do Fechamento: a medicao que o orgao ja' pagou
-    entra pelo que falta baixar nos titulos da nota da empresa (o repasse). A solta continua fora."""
+    receber e o recebido do Inicio e o a receber da lista de Obras (na cota) seguem a conta do Fechamento: a medicao
+    que o orgao ja' pagou entra no a receber pelo que falta baixar nos titulos da nota da empresa (o repasse), e o
+    que ja' foi baixado neles entra no recebido. A solta continua fora."""
     c, ids = cenario
     k = ids["consorcio"]
     c.execute("UPDATE entidades SET coligada_rm=12 WHERE chave='cons'")
@@ -749,7 +750,10 @@ def test_tipo_extra_nao_muda_a_regra_da_coligada_no_consorcio(cenario):
     assert sem_a_chave[:3] == ([], 700_000 + 300_000, ({}, {}))
     _tipos_extras(c, k, "2.2.03")
     com_a_chave = retrato()
-    assert com_a_chave[0] == sem_a_chave[0] and com_a_chave[2:5] == sem_a_chave[2:5]
+    assert com_a_chave[0] == sem_a_chave[0] and com_a_chave[3:5] == sem_a_chave[3:5]
+    # o recebido do Inicio segue a mesma conta desde 17/11/2026 (docs/adr/0006): a baixa do titulo da nota da empresa
+    # ligada, pela face, no mes da baixa; o faturado do RM (sem tela) continua so' com a coligada do contrato
+    assert com_a_chave[2] == ({}, {"2026-09": 50_000_000})
     # o repasse sem baixa da nota ligada: dos dois titulos, falta o de 1.500.000,01 (ja' e' a cota: sem o percentual)
     assert com_a_chave[1] == sem_a_chave[1] + 150_000_001
     assert com_a_chave[5] == {**sem_a_chave[5], k: sem_a_chave[5].get(k, 0) + 150_000_001}

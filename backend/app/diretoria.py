@@ -306,19 +306,39 @@ def notas_gemeas_de_tipo_extra(conn, contrato_id: int, tipos) -> list[dict]:
     return pares
 
 
+def _pct_do_recebido(conn) -> dict[int, int | None]:
+    """A UNICA definicao de quais notas entram no recebido do RM do Inicio (o do mes e o dos 12 meses) e com que
+    percentual a baixa de cada uma conta: nota -> percentual (nulo = integral).
+    - As notas de cobranca da coligada da entidade do contrato (`_notas_do_rm`), pelo percentual do contrato: na obra
+      propria, a nota da empresa; em consorcio, a fatura do consorcio vezes a cota.
+    - Em consorcio com a nota da PROPRIA empresa ligada a' medicao (decisao do dono de 17/11/2026, issue #756,
+      docs/adr/0006), a mesma escolha do Fechamento (`fechamento.notas_do_recebido_em_consorcio`, sobre
+      `fechamento._notas_da_conta`): conta a baixa do titulo da nota da empresa, pela face (ela ja' e' a cota: o
+      dinheiro entrou quando o consorcio repassou), e a fatura do consorcio da mesma medicao nao entra. Nunca as duas.
+    O recebido do Inicio continua sendo o LIQUIDO baixado, pelo mes da baixa; o do Fechamento, o bruto, pela
+    competencia. A regra de quais notas contam e' a mesma nas duas telas."""
+    from app import fechamento   # import local: fechamento importa este modulo
+    da_empresa, preteridas = fechamento.notas_do_recebido_em_consorcio(conn)
+    pct: dict[int, int | None] = {n["id"]: c["pct"] for n, c, _ in _notas_do_rm(conn) if n["id"] not in preteridas}
+    pct.update(dict.fromkeys(da_empresa))
+    return pct
+
+
 def rm_por_mes(conn) -> tuple[dict[str, int], dict[str, int]]:
     """(faturado, recebido) por mes, na cota, direto do RM (06/11/2026, telas da diretoria). O cadastro de medicoes pode
     estar atrasado; a nota e a baixa chegam sozinhas do RM, entao a serie mensal da diretoria sai delas.
 
     Faturado: o bruto das notas ativas do RM, pelo mes da emissao. Recebido: o que foi baixado nos titulos da nota
     (`sincronizacao_rm.STATUS_RECEBIDO`), pelo mes da baixa; e' o liquido que entrou (o titulo nasce sem as retencoes).
-    A obra de cada nota e' a de `_notas_do_rm`. Issue #755: a nota e o titulo excluidos no RM (o que o RM deixou de
+    A obra de cada nota e' a de `_notas_do_rm`; quais notas entram no recebido, e com que percentual, e' de
+    `_pct_do_recebido` (em consorcio com a nota da propria empresa ligada, a baixa dela, e nao a da fatura do
+    consorcio). O faturado nao tem tela e continua pela fatura do consorcio (docs/backlog.md). Issue #755: a nota e o
+    titulo excluidos no RM (o que o RM deixou de
     devolver) ficam fora das duas contas: a nota marcada nao e' ativa, e o titulo marcado nao e' lido."""
-    pct_da_nota: dict[int, int] = {}
+    pct_da_nota = _pct_do_recebido(conn)
     faturado: dict[str, int] = {}
     recebido: dict[str, int] = {}
     for n, c, _ in _notas_do_rm(conn):
-        pct_da_nota[n["id"]] = c["pct"]
         if n["situacao"] == "ativa" and n["emissao"]:
             mes = n["emissao"][:7]
             faturado[mes] = faturado.get(mes, 0) + (contratos.cota(n["valor_centavos"], c["pct"]) or 0)
@@ -334,9 +354,9 @@ def rm_por_mes(conn) -> tuple[dict[str, int], dict[str, int]]:
 
 def recebido_rm_no_mes(conn, mes: str) -> dict:
     """Issue #642 (faixa do ciclo no Inicio): o recebido de UM mes pela conta de `rm_por_mes` (baixa com status de
-    `sincronizacao_rm.STATUS_RECEBIDO`, pelo mes da baixa, na cota, nota a nota de `_notas_do_rm`), com quantas notas
-    tiveram baixa com valor no mes (a nota com dois titulos baixados conta uma vez)."""
-    pct_da_nota = {n["id"]: c["pct"] for n, c, _ in _notas_do_rm(conn)}
+    `sincronizacao_rm.STATUS_RECEBIDO`, pelo mes da baixa, na cota, nota a nota de `_pct_do_recebido`), com quantas
+    notas tiveram baixa com valor no mes (a nota com dois titulos baixados conta uma vez)."""
+    pct_da_nota = _pct_do_recebido(conn)
     valor, notas = 0, set()
     for b in conn.execute("SELECT nota_id, valor_baixado_centavos, status_lan FROM baixas "
                           "WHERE nota_id IS NOT NULL AND excluida_rm_em IS NULL AND substr(data_baixa, 1, 7)=?", (mes,)):

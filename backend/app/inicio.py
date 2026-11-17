@@ -4,7 +4,8 @@ Nada e' calculado de novo aqui: cada numero vem do modulo que ja' o calcula para
 - obras protocoladas: `avisos.resumo_mes` (o mesmo "X de N obras ativas" da fila de Medicoes);
 - a receber: a regra da Carteira (`diretoria`), na COTA da Lotufo, so' com o total liberado;
 - faixa do ciclo (#642): `_ciclo`, na cota, so' com a data do evento de cada etapa;
-- recebido em 12 meses (#652): as baixas do RM de `diretoria.rm_por_mes`, mes a mes;
+- recebido em 12 meses (#652): as baixas do RM de `diretoria.rm_por_mes`, mes a mes; quais notas contam e' de
+  `diretoria._pct_do_recebido` (em consorcio com a nota da propria empresa ligada, a baixa dela: docs/adr/0006);
 - previsao de entrada (#652): `_previsao`, as protocoladas da faixa do ciclo pela data esperada (protocolo + prazo
   do orgao, o terceiro quartil de `diretoria.prazos_do_orgao`, docs/adr/0007);
 - matriz obra por competencia (#659): `_matriz`, a etapa da medicao de cada mes pelo estado dela; a atrasada e' a da
