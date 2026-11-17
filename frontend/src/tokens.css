@@ -1658,6 +1658,8 @@ a.contagem:hover .dado__valor { color: var(--cor-menu-realce); text-decoration: 
 /* F-96: a linha do cartao "Avisos desta obra" e' um link inteiro; o destino em texto de apoio e o chevron no fim dizem isso.
    O chevron e' absoluto para nao virar coluna da grade do .alerta (que muda no celular); o respiro da direita e' dele. */
 .alerta--seta { position: relative; padding-right: 48px; }
+/* no cartao lateral a regra do .alerta vencia esta e o texto passava por baixo do chevron */
+.alertas--lateral .alerta--seta { padding-right: 48px; }
 .alerta__seta { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); flex: none; color: var(--cor-texto-secundario); }
 a.alerta:hover .alerta__seta { color: var(--cor-tinta); }
 
