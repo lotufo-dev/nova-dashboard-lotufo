@@ -15,8 +15,9 @@ parcela; os totais sao somas dessas parcelas, entao fecham ao centavo com as lin
 - Aprovado: `_aprovado` (o valor do boletim; sem ele gravado, o pedido so' quando a nota ja' foi emitida, que e' a
   prova de que o orgao aprovou; antes disso a medicao fica so' no medido).
 - Protocolado: as notas das medicoes protocoladas (`ESTADOS_PROTOCOLADO`), pelo valor bruto da nota. So' contam as
-  notas ligadas ativas, nao desconsideradas, de tipo de cobranca (`diretoria.CODTMV_COBRANCA`) ou ainda so' lidas do
-  PDF (`_notas_por_medicao`), e, delas, as que `_notas_da_conta` escolhe, a UNICA definicao de quais notas contam e
+  notas ligadas ativas, nao desconsideradas, que sao cobranca ao orgao no contrato da medicao
+  (`cobranca_orgao.e_cobranca`, docs/adr/0015: a lista geral de tipos de movimento e os tipos extras que o cadastro
+  daquele contrato declara) ou ainda so' lidas do PDF (`_notas_por_medicao`), e, delas, as que `_notas_da_conta` escolhe, a UNICA definicao de quais notas contam e
   com que percentual:
   - obra propria: as notas da empresa, pelo valor da nota;
   - consorcio COM a nota da propria empresa ao consorcio ligada a' medicao (decisao do dono de 17/11/2026, issue
@@ -48,7 +49,9 @@ parcela; os totais sao somas dessas parcelas, entao fecham ao centavo com as lin
   (a) + (a'): o painel "Em aberto" da tela segue o ano escolhido e fecha com o numero do alto e com o total do ano
   na tabela do mes. Com o total a receber ainda nao
   liberado no cadastro (`geral.yaml: diretoria.total_a_receber_liberado`, `diretoria._liberado`), o em aberto nao sai
-  do servidor, nem o recebido, que o deixaria deduzir (`_esconder_a_receber`).
+  do servidor, nem o recebido, que o deixaria deduzir (`_esconder_a_receber`). O estado da medicao nao sai na
+  resposta, com ou sem a trava (revisao da PR #754): a tela nao o usa, e com ele e o protocolado dava para refazer o
+  em aberto que a trava esconde (protocolada = em aberto; recebida = paga).
 - Cobertura do vinculo, por ano: quanto do aprovado das medicoes com nota emitida (ou alem) tem nota ligada que
   conta (`_notas_da_conta`; em consorcio, a nota da empresa ou a fatura do consorcio).
 - Nota da empresa diferente da cota (`notas_diferem`): a cobertura so' diz se ha' nota ligada, nao se o valor fecha.
@@ -63,7 +66,7 @@ anteriores a 2025 fica contado a' parte.
 """
 from decimal import ROUND_HALF_UP, Decimal
 
-from app import contratos, db, diretoria, dinheiro, medicoes, notas as notas_fiscais, sincronizacao_rm
+from app import cobranca_orgao, contratos, db, diretoria, dinheiro, medicoes, notas as notas_fiscais, sincronizacao_rm
 
 ANOS = ("2025", "2026")
 ESTADOS_APROVADO = ("boletim_recebido", "espelho_gerado", "espelho_enviado", "nota_emitida", "protocolada",
@@ -165,14 +168,20 @@ def _notas_por_medicao(conn, ids: set[int]) -> dict[int, list[dict]]:
     """As notas de cobranca ligadas a cada medicao (vinculo vigente; ativas, nao desconsideradas, de tipo de cobranca
     ou so' lidas do PDF), de qualquer coligada, com o valor de cada vinculo e a situacao nos titulos do RM. `valor` e
     `falta` estao na base da propria nota (valor cheio na fatura do consorcio; ja' a cota na nota da empresa ao
-    consorcio). Quais delas contam em cada medicao, e com que percentual, e' de `_notas_da_conta`."""
-    cobranca = diretoria.CODTMV_COBRANCA
+    consorcio). Quais delas contam em cada medicao, e com que percentual, e' de `_notas_da_conta`.
+    "De tipo de cobranca" e' de `cobranca_orgao.e_cobranca` (docs/adr/0015), com o contrato da MEDICAO a que a nota
+    esta' ligada: a lista geral vale em toda obra, e o tipo extra so' na obra cujo cadastro o declara. A mesma nota
+    ligada a medicoes de dois contratos e' julgada em cada um. A consulta so' estreita por `tipos_buscados`."""
+    extras = cobranca_orgao.extras_por_contrato(conn)
+    tipos = cobranca_orgao.tipos_buscados(extras)
     linhas = [dict(r) for r in conn.execute(
-        f"""SELECT a.medicao_id, a.valor_alocado_centavos, n.id AS nota_id, n.numero, n.valor_centavos, n.coligada
-            FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
+        f"""SELECT a.medicao_id, a.valor_alocado_centavos, n.id AS nota_id, n.numero, n.valor_centavos, n.coligada,
+                   n.codtmv, m.contrato_id
+            FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id JOIN medicoes m ON m.id=a.medicao_id
             WHERE a.desfeita_em IS NULL AND n.situacao='ativa' AND n.desconsiderada_em IS NULL
-              AND (n.codtmv IS NULL OR n.codtmv IN ({','.join('?' * len(cobranca))}))
-            ORDER BY n.emissao, n.id""", cobranca) if r["medicao_id"] in ids]
+              AND (n.codtmv IS NULL OR n.codtmv IN ({','.join('?' * len(tipos))}))
+            ORDER BY n.emissao, n.id""", tipos)
+        if r["medicao_id"] in ids and (r["codtmv"] is None or cobranca_orgao.e_cobranca(r["codtmv"], r["contrato_id"], extras))]
     vinculos: dict[int, int] = {}
     for x in linhas:
         vinculos[x["nota_id"]] = vinculos.get(x["nota_id"], 0) + 1
@@ -290,7 +299,7 @@ def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
         n["sem_nota_centavos"] = n["medido_centavos"]
         n["em_aberto_centavos"] += n["sem_nota_centavos"]
     return {"medicao_id": m["id"], "contrato_id": m["contrato_id"], "obra": m["obra"], "numero": m["numero"],
-            "tipo": m["tipo"], "estado": m["estado"], "competencia": m["competencia"],
+            "tipo": m["tipo"], "competencia": m["competencia"],
             "protocolo_em": (m["protocolo_em"] or "")[:10] or None, **n, "notas": saida,
             "notas_fora_da_conta": saida_fora, "sem_nota": sem_nota,
             # cobertura do vinculo: o aprovado das medicoes que ja' deveriam ter nota, e se alguma que conta esta' ligada
@@ -421,7 +430,8 @@ def _esconder_a_receber(f: dict) -> None:
     o em aberto nao sai do servidor, nem o que deixa deduzi-lo: o recebido (protocolado - recebido e' o em aberto das
     notas), a marca de recebida de cada nota, a de medicao sem nota ligada e as listas do em aberto. Como no Inicio,
     o bloco inteiro vem vazio, e a tela diz a trava em uma frase. Medido, aprovado e protocolado ficam, e os avisos
-    `notas_diferem` e `pares_mistos` tambem (comparam nota com medicao; nada do recebido)."""
+    `notas_diferem` e `pares_mistos` tambem (comparam nota com medicao; nada do recebido). O estado da medicao, que
+    tambem deixaria deduzir, nao esta' na resposta em caso nenhum (`_linha_medicao`)."""
     def nulo(x):
         for k in ESCONDIDOS:
             x[k] = None

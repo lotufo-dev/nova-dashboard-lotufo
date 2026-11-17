@@ -1,5 +1,6 @@
 """Pagina Fechamento (issue #748): medido, aprovado, protocolado e recebido por mes de competencia de 2025 e 2026, na
 cota, com o em aberto nota a nota. Os totais fecham ao centavo com as linhas abertas. Dados sinteticos."""
+import json
 import pathlib
 
 import pytest
@@ -97,6 +98,11 @@ def _numeros(x):
     return tuple(x[k] for k in NUMEROS)
 
 
+def _estado(c, medicao_id):
+    """O estado da medicao no banco: a resposta da pagina nao o traz (revisao da PR #754)."""
+    return c.execute("SELECT estado FROM medicoes WHERE id=?", (medicao_id,)).fetchone()[0]
+
+
 def _confere_soma(f):
     """Os totais da pagina fecham com a soma das linhas abertas, ao centavo, em todos os niveis."""
     for m in f["meses"]:
@@ -109,8 +115,9 @@ def _confere_soma(f):
                     assert n["recebido_centavos"] >= 0 and n["em_aberto_centavos"] >= 0
                     assert n["recebida"] == (n["em_aberto_centavos"] == 0)
                     assert n["paga_em_parte"] == (0 < n["em_aberto_centavos"] < n["valor_centavos"])
-                    # repasse sem baixa: so' nota em aberto de medicao recebida (a nota da empresa ao consorcio)
-                    assert not n["aguarda_repasse"] or (md["estado"] == "recebida" and n["em_aberto_centavos"] > 0)
+                    # repasse sem baixa: so' nota em aberto (da medicao recebida, que cada teste confere no banco)
+                    assert not n["aguarda_repasse"] or n["em_aberto_centavos"] > 0
+                assert "estado" not in md                   # o estado da medicao nao sai na resposta (PR #754)
                 # a nota fora da conta (fatura do consorcio preterida pela nota da empresa) nao leva valor nem soma
                 assert all(set(n) == {"nota_id", "numero"} for n in md["notas_fora_da_conta"])
                 assert md["notas_fora_da_conta"] == [] or md["notas"]
@@ -432,6 +439,101 @@ def test_sem_o_total_a_receber_liberado_nem_o_em_aberto_nem_o_que_deixa_deduzi_l
     # nenhum numero do recebido nem do em aberto sobra na resposta
     texto = json.dumps(f)
     assert all(str(v) not in texto for v in (435_000, 65_000, 525_000, 135_000, 83_000))
+    # nem o estado da medicao (revisao da PR #754): com ele e o protocolado dava para refazer o em aberto ao centavo
+    assert '"estado"' not in texto and '"protocolada"' not in texto and '"recebida"' not in texto.replace('"recebida":', "")
+
+
+def test_o_estado_da_medicao_nao_sai_na_resposta_com_ou_sem_a_trava(cenario):
+    """Revisao da PR #754: a tela nao usa o estado da medicao, e ele deixava deduzir o em aberto com o total a receber
+    nao liberado (medicao protocolada: as notas dela em aberto; recebida: pagas). O campo saiu da resposta nos dois
+    casos, e duas medicoes que so' diferem no estado saem iguais com a trava."""
+    c, ids = cenario
+    aberta = medir(c, ids["propria"], 1, "2026-03", "protocolada", 500_001, protocolo="2026-04-01")
+    paga = medir(c, ids["propria"], 2, "2026-03", "recebida", 500_001, protocolo="2026-04-01")
+    for mid in (aberta, paga):
+        nota(c, 500_001, [mid], titulos=[])                # sem titulo no RM: so' o estado separa as duas
+    def linhas():
+        f = fechamento.fechamento(c)
+        return f, {md["medicao_id"]: md for md in _mes(f, "2026-03")["obras"][0]["medicoes"]}
+    f, por = linhas()
+    assert all("estado" not in md for md in por.values())
+    assert (por[aberta]["em_aberto_centavos"], por[paga]["em_aberto_centavos"]) == (500_001, 0)   # liberado: a tela diz
+    c.execute("UPDATE cadastro_geral SET valor=? WHERE chave='diretoria'", (json.dumps({"total_a_receber_liberado": False}),))
+    c.commit()
+    f, por = linhas()
+    sem_o_que_identifica = lambda md: {k: v for k, v in md.items() if k not in ("medicao_id", "numero", "notas")} | {
+        "notas": [{k: v for k, v in n.items() if k not in ("nota_id", "numero")} for n in md["notas"]]}
+    assert sem_o_que_identifica(por[aberta]) == sem_o_que_identifica(por[paga])
+    assert '"estado"' not in json.dumps(f)
+
+
+def _tipos_extras(c, contrato_id, *tipos):
+    """O que o `cadastro aplicar` grava em `contratos.tipos_cobranca_extras_rm` (docs/adr/0015)."""
+    c.execute("UPDATE contratos SET tipos_cobranca_extras_rm=? WHERE id=?",
+              (json.dumps(list(tipos)) if tipos else None, contrato_id))
+    c.commit()
+
+
+def test_nota_de_tipo_extra_conta_so_no_contrato_que_o_declara(cenario):
+    """docs/adr/0015: a pagina decide se a nota ligada e' cobranca por `cobranca_orgao.e_cobranca`, com o contrato da
+    medicao. A nota de tipo 2.2.03 conta no protocolado, no recebido, no em aberto e na cobertura so' na obra cujo
+    cadastro declara o tipo; na obra que nao declara, a medicao segue "sem nota ligada", mesmo com a outra obra
+    declarando. Tipo que ninguem declara (2.2.15) fica fora nas duas. Consorcio a 50% com centavo impar."""
+    c, ids = cenario
+    p, k = ids["propria"], ids["consorcio"]
+    a = medir(c, p, 1, "2026-03", "protocolada", 250_001, aprovado=250_001, protocolo="2026-04-05")
+    b = medir(c, k, 1, "2026-03", "protocolada", 333_333, aprovado=333_333, protocolo="2026-04-06")
+    na = nota(c, 250_001, [a], codtmv="2.2.03", titulos=PAGO(250_001))
+    nb = nota(c, 333_333, [b], coligada=12, codtmv="2.2.03")               # a fatura do consorcio, titulo aberto
+    nota(c, 60_001, [a], codtmv="2.2.15")                                  # nota do fornecedor: em nenhuma
+    nota(c, 60_001, [b], coligada=12, codtmv="2.2.15")
+
+    def retrato():
+        f = fechamento.fechamento(c)
+        _confere_soma(f)
+        por = {md["medicao_id"]: md for o in _mes(f, "2026-03")["obras"] for md in o["medicoes"]}
+        return ({x: (_numeros(por[x])[2:], por[x]["sem_nota"], [n["numero"] for n in por[x]["notas"]]) for x in (a, b)},
+                _numeros(f["por_ano"]["2026"]), f["cobertura"]["2026"]["medicoes_sem_nota"])
+    # (protocolado, recebido, em aberto); 333.333 x 50% = 166.666,5 -> 166.667
+    sem_nota_a, sem_nota_b = ((0, 0, 250_001), True, []), ((0, 0, 166_667), True, [])
+    com_nota_a, com_nota_b = ((250_001, 250_001, 0), False, [na]), ((166_667, 0, 166_667), False, [nb])
+    medido = 250_001 + 166_667
+    ninguem = ({a: sem_nota_a, b: sem_nota_b}, (medido, medido, 0, 0, medido), 2)
+    assert retrato() == ninguem                    # ninguem declara: como antes da regra
+    _tipos_extras(c, p, "2.2.03")                  # so' a propria declara: a do consorcio continua fora
+    assert retrato() == ({a: com_nota_a, b: sem_nota_b}, (medido, medido, 250_001, 250_001, 166_667), 1)
+    _tipos_extras(c, p)
+    _tipos_extras(c, k, "2.2.03")                  # so' o consorcio declara: a da propria continua fora
+    assert retrato() == ({a: sem_nota_a, b: com_nota_b}, (medido, medido, 166_667, 0, medido), 1)
+    _tipos_extras(c, p, "2.2.03")                  # as duas declaram
+    assert retrato() == ({a: com_nota_a, b: com_nota_b}, (medido, medido, medido, 250_001, 166_667), 0)
+    _tipos_extras(c, p)
+    _tipos_extras(c, k)
+    assert retrato() == ninguem
+
+
+def test_nota_da_empresa_de_tipo_extra_conta_pela_face_no_consorcio_que_o_declara(cenario):
+    """docs/adr/0015 com a regra da #756: no contrato em nome do consorcio, a nota da PROPRIA empresa (outra coligada)
+    de tipo 2.2.03, ligada a' medicao, so' conta quando o contrato declara o tipo; ai' vale a regra da cota: pela
+    face, sem multiplicar pelo percentual, e a fatura do consorcio ligada a' mesma medicao sai da conta. Sem a
+    declaracao, a medicao conta pela fatura do consorcio vezes a cota, como se a nota da empresa nao estivesse la'."""
+    c, ids = cenario
+    k = ids["consorcio"]
+    mid = medir(c, k, 1, "2026-03", "protocolada", 333_333, aprovado=333_333, protocolo="2026-04-06")
+    fatura = nota(c, 333_333, [mid], coligada=12)                          # do consorcio, tipo da lista geral, aberta
+    da_empresa = nota(c, 166_667, [mid], coligada=1, codtmv="2.2.03", titulos=PAGO(166_667))
+
+    def retrato():
+        f = fechamento.fechamento(c)
+        _confere_soma(f)
+        md = _mes(f, "2026-03")["obras"][0]["medicoes"][0]
+        return (_numeros(md)[2:], [n["numero"] for n in md["notas"]], [n["numero"] for n in md["notas_fora_da_conta"]])
+    assert retrato() == ((166_667, 0, 166_667), [fatura], [])
+    _tipos_extras(c, k, "2.2.03")
+    assert retrato() == ((166_667, 166_667, 0), [da_empresa], [fatura])
+    _tipos_extras(c, ids["propria"], "2.2.03")     # declarado em OUTRA obra nao vale para esta
+    _tipos_extras(c, k)
+    assert retrato() == ((166_667, 0, 166_667), [fatura], [])
 
 
 def test_nota_paga_em_parte_ligada_a_medicao_fica_em_aberto_pelo_que_falta_nos_titulos(cenario):
@@ -799,8 +901,7 @@ def test_consorcio_medicao_recebida_a_nota_da_empresa_so_entra_no_recebido_pela_
             for n in p["notas"] + i["notas"]] == [(n2, 242_001, 358_001, False, True), (n3, 400_001, 0, True, False)]
     # a fatura do consorcio quitada continua fora da conta: nao leva a nota da empresa ao recebido
     assert [n["numero"] for n in a["notas_fora_da_conta"]] == [fat]
-    # o estado da medicao e' o mesmo, na pagina e no banco; nenhuma vira "sem nota ligada"
-    assert {a["estado"], p["estado"], i["estado"]} == {"recebida"}
+    # o estado da medicao no banco nao muda; nenhuma vira "sem nota ligada"
     assert [r[0] for r in c.execute("SELECT estado FROM medicoes ORDER BY id")] == ["recebida"] * 3
     assert not (a["sem_nota"] or p["sem_nota"] or i["sem_nota"])
     # o em aberto da medicao recebida entra no mes, no ano e na lista, nota a nota, com a data do protocolo
@@ -842,7 +943,7 @@ def test_consorcio_medicao_recebida_nota_da_empresa_sem_baixa_com_valor_fica_int
     assert {e["tipo_aberto"] for e in f["em_aberto"]} == {"repasse"}
     for mid, face in ((sem_titulo, 1_000_001), (do_pdf, 300_001), (glosa, 200_001), (teto, 100_001), (a_mao, 500_001)):
         md = _medicao(f, mid)
-        assert md["estado"] == "recebida" and _numeros(md)[2:] == (face, 0, face)
+        assert _estado(c, mid) == "recebida" and _numeros(md)[2:] == (face, 0, face)
     assert _numeros(_medicao(f, quase))[2:] == (300_002, 300_002, 0)
     _confere_soma(f)
 

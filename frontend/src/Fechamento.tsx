@@ -34,7 +34,7 @@ type NotaLinha = { nota_id: number; numero: string; valor_centavos: number; rece
 /** Em consorcio com a nota da propria empresa ligada, a fatura do consorcio ligada a' mesma medicao: sem valor, nao soma. */
 type NotaFora = { nota_id: number; numero: string };
 type MedicaoLinha = Numeros & {
-  medicao_id: number; contrato_id: number; obra: string; numero: number; tipo: string; estado: string;
+  medicao_id: number; contrato_id: number; obra: string; numero: number; tipo: string;
   competencia: string; protocolo_em: string | null; notas: NotaLinha[]; notas_fora_da_conta?: NotaFora[]; sem_nota?: boolean;
 };
 type ObraLinha = Numeros & { contrato_id: number; obra: string; medicoes: MedicaoLinha[] };

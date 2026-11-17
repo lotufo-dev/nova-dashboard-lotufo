@@ -29,7 +29,7 @@ import json
 import re
 from collections import Counter
 
-from app import db, rm, sincronizacao_rm
+from app import cobranca_orgao, db, rm, sincronizacao_rm
 
 _NUM = re.compile(r"(\d{2,4})/(\d{4})")
 _CRO = re.compile(r"CRO\.ENG\.(\d+)\.(\d+)", re.I)
@@ -76,9 +76,9 @@ def _mapa_obra_contrato(conn, cadastro):
 def importar(conn, usuario_id, itens, cadastro, aplicar: bool = False) -> dict:
     """Liga as NFs do RM do ledger antigo as medicoes. `itens`/`cadastro` = caminho JSON
     ou lista ja carregada. `aplicar=False` = dry-run (nao grava)."""
-    from app import diretoria   # import local: diretoria importa sincronizacao_rm
     itens = _carregar(itens)
     cadastro = _carregar(cadastro)
+    extras = cobranca_orgao.extras_por_contrato(conn)
     obra2ct = _mapa_obra_contrato(conn, cadastro)
     obra2colig = {}
     for oid, ct in obra2ct.items():
@@ -143,9 +143,9 @@ def importar(conn, usuario_id, itens, cadastro, aplicar: bool = False) -> dict:
                             (nf["id"],)).fetchone():
                 resumo["ja_alocada"] += 1
                 continue
-            # Issue #598: so' nota de cobranca ao orgao (`diretoria.CODTMV_COBRANCA`, a lista do a receber, #563)
-            # vira vinculo automatico; nota de outro tipo ou sem tipo fica de fora e vai no relato.
-            if nf["codtmv"] not in diretoria.CODTMV_COBRANCA:
+            # Issue #598: so' nota de cobranca ao orgao no contrato da medicao (`cobranca_orgao.e_cobranca`, a regra do
+            # a receber, #563) vira vinculo automatico; nota de outro tipo ou sem tipo fica de fora e vai no relato.
+            if not cobranca_orgao.e_cobranca(nf["codtmv"], ct, extras):
                 resumo["fora_da_cobranca"] += 1
                 resumo["puladas_fora_da_cobranca"].append({"medicao_id": mids[0], "nota_id": nf["id"],
                                                            "numero_nf": it.get("NumNF"), "codtmv": nf["codtmv"]})
@@ -220,9 +220,10 @@ def criar_medicoes_faltantes(conn, usuario_id, itens, cadastro, aplicar: bool = 
     - Montagem do plano e criacao na MESMA transacao (`db.mutacao` = BEGIN IMMEDIATE), pra
       a NF nao ser cancelada entre a conferencia e a gravacao.
     """
-    from app import diretoria, medicoes   # import local: diretoria importa sincronizacao_rm
+    from app import medicoes
     itens = _carregar(itens)
     cadastro = _carregar(cadastro)
+    extras = cobranca_orgao.extras_por_contrato(conn)
 
     resumo = {"itens": len(itens), "grupos": 0, "criadas": 0, "nfs_cobertas": 0,
               "sem_idmov": 0, "sem_contrato": 0, "ja_tem_medicao": 0, "chave_ruim": 0,
@@ -294,8 +295,9 @@ def criar_medicoes_faltantes(conn, usuario_id, itens, cadastro, aplicar: bool = 
                               (colig, int(idmov))).fetchone()
             if not nf:
                 return ("fail", "sem_nf_rm")
-            # Issue #598: nota fora da cobranca ao orgao nao vira medicao (o `importar` tambem nao a ligaria)
-            if nf["codtmv"] not in diretoria.CODTMV_COBRANCA:
+            # Issue #598: nota fora da cobranca ao orgao no contrato da obra nao vira medicao (o `importar` tambem nao a
+            # ligaria)
+            if not cobranca_orgao.e_cobranca(nf["codtmv"], obra2ct.get(it.get("ObraId")), extras):
                 return ("fail", "fora_da_cobranca")
             if rm.centavos(it.get("ValorBruto")) != nf["valor_centavos"]:
                 return ("fail", "valor_divergente")

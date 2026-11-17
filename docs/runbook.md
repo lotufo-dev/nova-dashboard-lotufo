@@ -532,6 +532,25 @@ A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_US
 5. **Vínculo NF → medição** (`docs/adr/0005`): automático só por valor exato, entre as medições em andamento que ainda faltam nota, nesta ordem. (a) Valor de uma saída do espelho vigente, na obra do centro de custo da nota (ou na carteira inteira quando o centro não aponta obra: nota da Lotufo ao órgão em obra de consórcio), com uma medição só. Duas travas. De data: a medição que espera nota do espelho só recebe, por esta regra e pelas duas seguintes, a nota emitida no dia do primeiro envio do espelho dela ao faturamento ou depois (nota mais antiga, nota sem data de emissão, ou medição cujo espelho não saiu pelo sistema: não liga a ela por valor). De nota repetida: se há mais notas ativas e livres daquele valor, posteriores ao envio e que alcançam a medição (centro de custo da obra, ou centro que não aponta obra nenhuma), do que saídas daquele valor esperando nota, nenhuma liga e todas contam em "Ambíguas" (a nota cancelada na prática e reemitida, que o RM mantém ativa); espelho que pede duas notas do mesmo valor liga as duas. (b) Na obra do centro de custo, o valor da medição com candidata única, ou o par de notas do mesmo dia que soma o valor de uma medição. (c) Em coligada sem centro cadastrado (consórcio de uma obra só), o valor da medição com candidata única. O campo livre do RM (`CAMPOLIVRE1`) não liga nota: continua guardado e aparece em "NFs sem medição" só como informação. Os vínculos já gravados não são refeitos. A medição recebida à mão pelo administrador ("Registrar recebimento") que ainda falta nota continua candidata (`docs/adr/0006`), mas só fica com a nota que nenhuma medição em andamento quis, e só por valor exato (as regras (a), (b) e (c), com as mesmas travas; valor parecido não conta em "Ambíguas"): a nota que chega depois liga a ela, o estado e a data do recebimento ficam, e a nota sai do a receber (com o título ainda aberto no RM, vira o aviso "Notas de recebimentos à mão sem baixa no RM"). Não recebem nota nova a medição recebida pela baixa do RM, a fechada pelo corte, a recebida pela correção de cadastro e a do legado. Nessa medição o vínculo não se resolve pela tela: anexar o PDF e "Desfazer vínculo" recusam medição recebida; ligar ou desligar nota nela é pela correção de cadastro (`ligar_nf`, `desligar_nf`). A NF que fica sem vínculo automático (anterior ao envio do espelho, repetida ou com mais de uma medição candidata; cada caso deixa uma linha no log `app.rm`, e os dois últimos contam na coluna "Ambíguas" das rodadas) aparece em "NFs sem medição" e a pessoa anexa o PDF da nota na medição; o aviso "nota ausente do RM" cobre a medição que ficou sem nota. Recebimento (`docs/adr/0006`): a medição protocolada vira "recebida", com a maior data de baixa, quando as notas vigentes da coligada da entidade do contrato cobrem o valor dela (o aprovado, senão o pedido; soma exata do valor atual das notas, sem tolerância) e os títulos de todas estão quitados (baixas de status 1, 3 ou 4; até R$ 1,00 a menos na soma dos títulos). Medição sem valor segue só pelos títulos. Medição faturada em mais de uma nota com uma cancelada no RM, desligada ou ainda não ligada continua protocolada mesmo com as outras pagas, até a nota que falta ser ligada e quitada (ou o administrador registrar o recebimento à mão); data implausível do RM (ano fora da faixa) fica guardada como bruta e não conta.
 6. **Primeira rodada**: Administração → Sincronizar agora; conferir a reconciliação (NFs sem medição, medições sem NF, divergências) e o `dashboard.log` (`app.rm`).
 
+## Gravação de dado na produção
+
+Vale para todo comando do `app.cli` que grava dado no banco de produção e tem `--ensaio` (hoje: carga e correção de medições, `cadastro aplicar`, `legado remapear`, `documentos importar`, `medicoes planilhas` e `conciliacao`), rodado fora de um deploy. Essa gravação não espera autorização do dono (`docs/adr/0014`); quem a segura são estes passos, nesta ordem. Conta de acesso (`criar-admin`, senha, proteção) não é dado: fica fora deste rito e continua só com a autorização do dono na hora. A gravação pedida junto de um deploy segue a skill `deploy`.
+
+1. **Ensaio em produção** (`--ensaio`) e o relatório lido inteiro. Erro, conflito ou linha que não se esperava: parar e corrigir a origem. O código de saída do ensaio não substitui a leitura.
+2. **Backup do banco** logo antes de gravar, no mesmo script da gravação; sem ele a gravação não roda:
+
+   ```powershell
+   $backup = & C:\DashboardLotufo\app\scripts\backup_pre_migracao.ps1 -Banco C:\DashboardLotufo\dados\dashboard.db -PastaBackups C:\DashboardLotufo\dados\backups -Python C:\DashboardLotufo\app\backend\.venv\Scripts\python.exe -Rotulo GRAVACAO
+   if ($LASTEXITCODE -ne 0 -or -not $backup) { exit 1 }
+   Write-Host "BACKUP: $backup"
+   ```
+
+   O arquivo `dashboard-PRE-GRAVACAO-<data>-<hora>.db` não entra na rotação do backup: fica no disco até alguém apagar.
+3. **Gravação**, com o código de saída conferido.
+4. **Conferência**: `/api/health` com `banco: ok`, o efeito na tela e a linha do `audit_log`. Depois, o relato ao dono: o que foi gravado e o nome do backup.
+
+Voltar atrás pelo backup só serve logo depois da gravação: restaurar (seção "Restaurar o banco a partir de um snapshot") para a produção e apaga o que a equipe gravou depois dele. O que já saiu para fora com o dado errado (e-mail, documento enviado) não volta.
+
 ## Cadastro versionado
 
 O cadastro de obras mora em `cadastro/` (YAML), é editado pelo dononardo com o Claude e entra no banco por comando. Não há tela.
@@ -543,7 +562,8 @@ A pasta vem de `DASH_CADASTRO_DIR` (produção: `C:\DashboardLotufo\cadastro`, c
    (`scripts\deploy.ps1`) só atualiza o código e não toca esse clone.
 3. No checkout de produção (`C:\DashboardLotufo\app\backend`), com `DASH_DB_PATH` (banco de produção) e `DASH_CADASTRO_DIR` (ou `--raiz`) definidos:
    `.venv\Scripts\python -m app.cli cadastro aplicar --usuario <e-mail do admin> --ensaio` e conferir o relatório;
-   repetir sem `--ensaio`. O snapshot horário do backup cobre o antes.
+   repetir sem `--ensaio`. Fora de um deploy, com o backup da seção "Gravação de dado na produção" antes; no
+   deploy, o snapshot horário do backup cobre o antes.
 4. Instrumento assinado já aplicado não se altera: correção é instrumento novo com `corrige: <chave>`.
 
 O esquema de cada tipo de instrumento (apostilamento de reajuste SINFRA e MT-PAR, retificação, paralisação e reinício, endosso de garantia, aditivo de reajuste, `datas_base` com `aplica_a`, `pleitos_anteriores`) está comentado em `cadastro-exemplo/contratos/obra-propria.yaml`.
@@ -599,8 +619,8 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
    - `erro`: a linha não se lê (valor, data, meio, competência); o relatório traz o número da linha do arquivo.
 
    Qualquer `erro` ou `conflito` faz a gravação recusar o arquivo inteiro, sem gravar nada.
-3. **OK do dono** sobre o relatório do ensaio, antes de qualquer gravação.
-4. **Produção, pela VM, em dois scripts**: o `--ensaio` sai com 0 mesmo com linhas `correção` ou `valor diferente`, então o código de saída não substitui a leitura do relatório. Por isso o ensaio de produção e a gravação nunca ficam no mesmo script: primeiro o script 1 (atualizar o clone e ensaiar), depois a leitura do relatório e a conferência do `planilha_enviada_em`, e só com o OK o script 2 (gravar). A sessão `ssh` abre na pasta do perfil da conta, não em `C:\DashboardLotufo\app\backend`; por isso os dois começam com `Set-Location`. Comando nativo não encontrado não altera `$LASTEXITCODE`, então o `Set-Location` vem antes e cada comando nativo é seguido da checagem.
+3. **Relatório do ensaio conferido**, antes de qualquer gravação: nenhum `erro`, nenhum `conflito`, nenhuma linha inesperada. A gravação não espera autorização do dono (`docs/adr/0014`); quem a segura é o relatório, e o backup do script 2 vem antes dela (seção "Gravação de dado na produção").
+4. **Produção, pela VM, em dois scripts**: o `--ensaio` sai com 0 mesmo com linhas `correção` ou `valor diferente`, então o código de saída não substitui a leitura do relatório. Por isso o ensaio de produção e a gravação nunca ficam no mesmo script: primeiro o script 1 (atualizar o clone e ensaiar), depois a leitura do relatório e a conferência do `planilha_enviada_em`, e só com o relatório conferido o script 2 (backup e gravar). A sessão `ssh` abre na pasta do perfil da conta, não em `C:\DashboardLotufo\app\backend`; por isso os dois começam com `Set-Location`. Comando nativo não encontrado não altera `$LASTEXITCODE`, então o `Set-Location` vem antes e cada comando nativo é seguido da checagem.
 
    **Script 1, pull e ensaio** (não grava nada):
 
@@ -617,12 +637,15 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
 
    **Entre os dois**: ler o relatório do ensaio de produção (o que mudou desde o ensaio do Mac, categorias do passo 2) e, em cada linha `correção`, conferir o `planilha_enviada_em` (seção "Regra: competência de medição com planilha ou carta enviada"). Qualquer `erro`, `conflito` ou linha inesperada: parar, corrigir o CSV no repositório privado e repetir o script 1. O `-ErrorAction Stop` no `Set-Location` é necessário: no PowerShell 5.1 um `Set-Location` que falha só mostra o erro e o script segue na pasta errada. "Arquivo não encontrado" no script 1 significa que o CSV não está nesse caminho (ainda não chegou ao repositório privado, ou o `<slug>` está errado). "Banco não encontrado" com o caminho certo indica que a conta de deploy não tem leitura no arquivo do banco; "Banco ilegível" fica para banco corrompido ou `-wal`/`-shm` sem leitura.
 
-   **Script 2, gravação** (só depois do OK sobre o relatório de produção):
+   **Script 2, backup e gravação** (só depois de conferido o relatório de produção; sem o backup a gravação não roda):
 
    ```powershell
    Set-Location C:\DashboardLotufo\app\backend -ErrorAction Stop
    $env:DASH_CADASTRO_DIR = "C:\DashboardLotufo\cadastro"
    $env:DASH_DB_PATH = "C:\DashboardLotufo\dados\dashboard.db"
+   $backup = & C:\DashboardLotufo\app\scripts\backup_pre_migracao.ps1 -Banco $env:DASH_DB_PATH -PastaBackups C:\DashboardLotufo\dados\backups -Python C:\DashboardLotufo\app\backend\.venv\Scripts\python.exe -Rotulo GRAVACAO
+   if ($LASTEXITCODE -ne 0 -or -not $backup) { exit 1 }
+   Write-Host "BACKUP: $backup"
    $csv = "C:\DashboardLotufo\cadastro\medicoes\<slug>.csv"
    .venv\Scripts\python -m app.cli cadastro carregar-medicoes $csv --usuario <e-mail do admin>
    if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -633,7 +656,7 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
 
 ### Correção de medições existentes (`cadastro corrigir-medicoes`)
 
-O que a carga por CSV não alcança (medição cancelada por engano, tipo trocado, NF ligada na medição errada, protocolo que faltou) se corrige por um YAML no repositório privado (`<pasta do cadastro>/correcoes/<data>.yaml`), com o mesmo caminho da carga: ensaio no Mac, ensaio em produção, OK, gravação.
+O que a carga por CSV não alcança (medição cancelada por engano, tipo trocado, NF ligada na medição errada, protocolo que faltou) se corrige por um YAML no repositório privado (`<pasta do cadastro>/correcoes/<data>.yaml`), com o mesmo caminho da carga: ensaio no Mac, ensaio em produção, relatório conferido, backup (as três linhas da seção "Gravação de dado na produção", antes da segunda linha abaixo), gravação e conferência.
 
 ```
 .venv\Scripts\python -m app.cli cadastro corrigir-medicoes <arquivo.yaml> --ensaio --usuario <e-mail do admin>
@@ -702,7 +725,7 @@ pastas vão pela cópia dos arquivos do backup (issues #55 e #441). O caminho gr
    "Emissão NF" na caixa) ou do último modelo preenchido. Suíte verde ao centavo; 1 centavo de diferença
    é política de arredondamento errada, nunca se ajusta o gabarito.
 5. Gerar o `.docx` no scratchpad com a regra real e abrir no Word contra o espelho real.
-6. Trocar para `situacao: ativa`, commit, merge com OK do dono, `deploy.ps1 -SemFrontend`,
+6. Trocar para `situacao: ativa`, commit, merge pela PR (conferência fechada e CI verde), `deploy.ps1 -SemFrontend`,
    `cadastro aplicar --ensaio` (espera `espelho: 1 alterados`) e `aplicar` em produção.
 7. Avisar as operadoras; desligar o fluxo do Power Automate daquela obra só depois do primeiro
    espelho real sair pelo sistema e o faturamento emitir a nota sem ressalva.

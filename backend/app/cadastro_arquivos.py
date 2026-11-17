@@ -15,7 +15,7 @@ from pathlib import Path
 
 import yaml
 
-from app import dinheiro, entidades, espelho, espelho_docx, reajuste, tempo
+from app import cobranca_orgao, dinheiro, entidades, espelho, espelho_docx, reajuste, tempo
 from app.leitura_planilha_medicao import titulo_comparavel
 from app.medicoes import CHAVES_PASSO
 
@@ -878,8 +878,36 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
         else:
             c["pecas_no_oficio"] = list(pno)
     c["passos_medicao"] = _passos_medicao(bruto.get("passos_medicao"), falha)
+    c["tipos_cobranca_extras_rm"] = _tipos_cobranca_extras(bruto.get("tipos_cobranca_extras_rm"), falha)
     c["custo"] = _custo(bruto.get("custo"), falha)
     return c
+
+
+def _tipos_cobranca_extras(bruto, falha) -> list[str]:
+    """docs/adr/0015: os tipos de movimento do RM que, so' nesta obra, tambem sao cobranca ao orgao, alem da lista
+    geral (`cobranca_orgao.CODTMV_COBRANCA`). Sem a chave ou com a lista vazia, nenhum. Recusa o que nao tem o formato
+    de tipo de movimento de nota (`2.2.NN`, o unico que a sincronizacao com o RM traz), o tipo que ja' esta' na lista
+    geral (a chave nao muda nada e esconde a regra) e o repetido."""
+    if bruto is None:
+        return []
+    campo = "tipos_cobranca_extras_rm"
+    if not isinstance(bruto, list):
+        falha(campo, "use uma lista de tipos de movimento do RM entre aspas (ex.: ['2.2.03']); [] para nenhum")
+        return []
+    ruins = [x for x in bruto if not isinstance(x, str) or not cobranca_orgao.FORMATO_CODTMV.fullmatch(x)]
+    textos = [x for x in bruto if isinstance(x, str)]
+    gerais = [x for x in textos if x in cobranca_orgao.CODTMV_COBRANCA]
+    repetidos = list(dict.fromkeys(x for x in textos if textos.count(x) > 1))
+    if ruins:
+        falha(campo, f"tipo de movimento malformado: {', '.join(repr(x) for x in ruins)} (use o código do tipo de "
+                     "movimento de nota do RM, entre aspas, no formato 2.2.NN, como '2.2.03')")
+    elif gerais:
+        falha(campo, f"{', '.join(gerais)} já é cobrança ao órgão em toda obra (lista geral); tire daqui")
+    elif repetidos:
+        falha(campo, f"tipo repetido: {', '.join(repetidos)}")
+    else:
+        return sorted(textos)
+    return []
 
 
 def _passos_medicao(bruto, falha) -> list[str] | None:

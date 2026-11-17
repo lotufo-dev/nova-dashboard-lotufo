@@ -31,6 +31,10 @@ backend/scratch_*
 .ui-review/loop1-2026-09-25/
 .ui-review/referencias/
 
+# Roteiros de prova (scripts/prova): retratos da API e capturas de tela. O padrao e' gravar fora do repositorio;
+# aqui e' a unica pasta de dentro que DASH_PROVA_SAIDA aceita (a saida de uma copia do banco tem dado real)
+.prova/
+
 # Monitor SIGA: cookies do login e leituras
 monitor-siga/dados/
 

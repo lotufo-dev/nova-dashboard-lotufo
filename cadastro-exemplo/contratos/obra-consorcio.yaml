@@ -29,4 +29,16 @@ fiscais:
   desde: '2025-06-02'
 destinatarios_extras: []
 copia_extras: []
+# Opcional (docs/adr/0015): tipos de movimento do RM que, SÓ nesta obra, também são cobrança ao órgão, além da lista
+# geral do sistema (2.2.01, 2.2.02, 2.2.07 e 2.2.16). Vale para a nota atribuída a este contrato: ligada a uma medição
+# dele ou, sem vínculo, com o centro de custo dele (aqui, sem centro, pela coligada do consórcio). Em outra obra, ou
+# sem obra, a mesma nota continua fora de tudo. O que a chave faz depende de quem emitiu a nota:
+# - a fatura do próprio consórcio (a coligada da entidade do contrato) entra no a receber e no faturado do RM,
+#   liga-se sozinha à medição e deixa a medição ser recebida pela baixa;
+# - a nota da própria empresa (outra coligada) continua fora do a receber e do faturado, com ou sem a chave: para
+#   ela a chave vale no vínculo automático (pela saída do espelho), na nota repetida e na página Fechamento.
+# Sem a chave ou com [], nenhum. Código entre aspas, no formato 2.2.NN; tipo que já está na lista geral é recusado
+# pelo `cadastro validar`. O `cadastro aplicar` recusa declarar o tipo enquanto houver nota reclassificada em dobro
+# na obra (a nova e a antiga ativas): a antiga é desconsiderada antes.
+tipos_cobranca_extras_rm: ['2.2.03']
 instrumentos: []
