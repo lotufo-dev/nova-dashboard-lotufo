@@ -9,10 +9,11 @@ describe("navegação por perfil", () => {
   });
 
   it("trilho sem grupos, na ordem do trabalho, com o recorte do perfil; as Notas saíram (viraram abas de Medições)", () => {
-    expect(menuDe("engenharia")).toEqual(["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "fechamento", "ancoras-docusign"]);
-    // decisão 3: a diretoria sem Medições; #748: o Fechamento no lugar de A receber e da Carteira
-    expect(menuDe("diretoria")).toEqual(["inicio", "obras", "avisos", "documentos", "fechamento"]);
-    expect(menuDe("admin")).toEqual(["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "fechamento", "ancoras-docusign", "admin"]);
+    expect(menuDe("engenharia")).toEqual(["inicio", "medicoes", "resumo-medicoes", "obras", "avisos", "siga", "documentos", "fechamento", "ancoras-docusign"]);
+    // decisão 3: a diretoria sem Medições; #748: o Fechamento no lugar de A receber e da Carteira; #749: o Resumo das
+    // medições (só leitura) para todos os perfis
+    expect(menuDe("diretoria")).toEqual(["inicio", "resumo-medicoes", "obras", "avisos", "documentos", "fechamento"]);
+    expect(menuDe("admin")).toEqual(["inicio", "medicoes", "resumo-medicoes", "obras", "avisos", "siga", "documentos", "fechamento", "ancoras-docusign", "admin"]);
   });
 
   it("o item fica marcado também abaixo dele na hierarquia", () => {
@@ -28,6 +29,7 @@ describe("navegação por perfil", () => {
     expect(itemDe({ tela: "notas-envio", id: 55 })).toBe("medicoes");
     expect(itemDe({ tela: "documentos-empresa", id: 3, aba: "garantia" })).toBe("documentos");      // #161
     expect(itemDe({ tela: "medicoes" })).toBe("medicoes");
+    expect(itemDe({ tela: "resumo-medicoes" })).toBe("resumo-medicoes");                            // #749
   });
 
   it("a barra superior diz a seção, não o objeto", () => {
@@ -36,6 +38,7 @@ describe("navegação por perfil", () => {
     expect(tituloDaSecao({ tela: "medicoes" })).toBe("Medições");
     expect(tituloDaSecao({ tela: "conta" })).toBe("Minha conta");
     expect(tituloDaSecao({ tela: "fechamento" })).toBe("Fechamento");
+    expect(tituloDaSecao({ tela: "resumo-medicoes" })).toBe("Resumo das medições");
     expect(tituloDaSecao({ tela: "siga" })).toBe("SIGA");
     expect(tituloDe("siga")).toBe("SIGA");
   });

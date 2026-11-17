@@ -15,7 +15,7 @@ paths:
   da pessoa: código interno, nome de exceção e "Failed to fetch" ficam fora da tela.
 - **Quem só consulta** (diretoria) não vê botão de escrita; o 403 vira "Seu perfil só consulta esta tela…".
 - **Largura.** A 1024 px a página não rola de lado; tabela larga rola dentro da própria caixa. Celular (390 px) é
-  requisito nas telas de leitura da diretoria: Início, Obras, página da obra e Fechamento. As telas de operação
-  são de computador.
+  requisito nas telas de leitura da diretoria: Início, Obras, página da obra, Fechamento e Resumo das medições. As
+  telas de operação são de computador.
 - **Acessibilidade mínima:** foco visível, teclado, `aria-live` em confirmação, tabela `sr-only` para gráfico.
 - Teste ao lado do componente (`X.test.tsx`, vitest + jsdom).

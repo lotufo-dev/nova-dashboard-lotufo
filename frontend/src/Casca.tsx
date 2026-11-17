@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { api } from "./api";
-import { IconeAjustes, IconeAlerta, IconeArquivo, IconeCifrao, IconeDocumento, IconeInicio, IconeMedicoes, IconeObras, IconeSiga,
+import { IconeAjustes, IconeAlerta, IconeArquivo, IconeCifrao, IconeDocumento, IconeGrade, IconeInicio, IconeMedicoes, IconeObras, IconeSiga,
   IconeSeta, IconeSino, IconeVoltar } from "./icones";
 import type { Usuario } from "./Login";
 import { menuDe, ROTULO, rotaDoItem, type ItemMenu } from "./navegacao";
@@ -31,7 +31,7 @@ function estadoInicial(): "largo" | "recolhido" {
 }
 
 const ICONES: Record<ItemMenu, (p: { className?: string }) => React.ReactElement> = {
-  inicio: IconeInicio, medicoes: IconeMedicoes, obras: IconeObras, avisos: IconeSino, siga: IconeSiga, documentos: IconeDocumento,
+  inicio: IconeInicio, medicoes: IconeMedicoes, "resumo-medicoes": IconeGrade, obras: IconeObras, avisos: IconeSino, siga: IconeSiga, documentos: IconeDocumento,
   fechamento: IconeCifrao, "ancoras-docusign": IconeArquivo, admin: IconeAjustes,
 };
 
