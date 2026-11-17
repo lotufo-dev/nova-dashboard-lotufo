@@ -1120,15 +1120,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
   border-top: 1px solid var(--cor-linha);
 }
 
-/* A falha e' a peca Falha.tsx (.aviso--critico, com o octogono). `.erro` fica so' para os dois avisos de falha do
-   Inicio, que ainda nao passaram para a peca: a mesma caixa de critico, sem o simbolo. */
-.erro {
-  max-width: none; margin: 0; padding: var(--espaco-p) var(--espaco-m);
-  border: var(--borda-situacao-critico);
-  background: var(--situacao-critico-fundo);
-  color: var(--situacao-critico-texto);
-  font-size: var(--texto-corpo); font-weight: var(--peso-forte);
-}
+/* A falha e' a peca Falha.tsx (.aviso--critico, com o octogono); a caixa `.erro` saiu. */
 
 .vazio { padding: 32px 20px; text-align: center; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 /* Vazio que e' BOA noticia (nenhum alerta): a mesma linguagem, sem o palco de 32px —

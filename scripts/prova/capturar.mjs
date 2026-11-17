@@ -184,8 +184,7 @@ async function estadoDaTela(pagina) {
       login: !!document.querySelector("form.entrar__form"),
       falha: falha ? limpo(falha) : null,
       // a falha de leitura ou de acao e' a peca Falha (.aviso--falha); o aviso critico de estado nao e' erro
-      avisosDeErro: [...document.querySelectorAll("#conteudo .aviso--falha [role=alert], #conteudo .erro[role=alert], "
-        + "dialog[open] .aviso--falha [role=alert]")].filter(visivel).map(limpo),
+      avisosDeErro: [...document.querySelectorAll("#conteudo .aviso--falha [role=alert], dialog[open] .aviso--falha [role=alert]")].filter(visivel).map(limpo),
       texto: (conteudo?.innerText ?? "").trim().length,
       larguraDaPagina: document.documentElement.scrollWidth,
       larguraDaJanela: window.innerWidth,
