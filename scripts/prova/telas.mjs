@@ -8,7 +8,7 @@
 // Cada tela diz:
 //   id       nome curto; vira o nome do arquivo da captura e o que `--telas` aceita
 //   caminho  a URL. `:obra`, `:medicao` e `:empresa` sao trocados por um registro do banco da prova: a primeira
-//            obra com medicao, a primeira medicao dela e a primeira empresa (ver `capturar.mjs`)
+//            obra com medicao, a primeira medicao dela e uma empresa com documento exigido (`empresaDaProva`)
 //   perfis   quem abre a tela na prova (o menu de cada perfil esta' em frontend/src/navegacao.ts)
 //   espera   seletor do conteudo principal: sem ele visivel, a tela nao carregou
 //   menu     so' quando o link do menu e' outro endereco que leva a esta tela (Avisos: `/avisos` abre Obras)
@@ -62,6 +62,16 @@ export const RESPOSTAS_ESPERADAS = [
   { metodo: "GET", caminho: /^\/api\/contratos\/\d+\/custo$/, status: 404,
     motivo: "a obra sem cadastro de custo responde 404 e a aba Medicoes so' deixa de mostrar a coluna do custo (#748)" },
 ];
+
+// A empresa da tela `documentos-empresa`, tirada do painel de Documentos (GET /api/documentos). A pagina so' mostra
+// as abas para empresa que o painel lista; num banco real a primeira de /api/entidades pode nao ter documento
+// exigido e a tela ficava em "Nenhum documento exigido", reprovando a prova. Vale a primeira com certidao ou
+// regularidade exigida; sem nenhuma assim, a primeira do painel; painel vazio (ou ilegivel), null: a tela e' pulada.
+export function empresaDaProva(painel) {
+  const empresas = Array.isArray(painel?.empresas) ? painel.empresas : [];
+  const exigida = empresas.find(e => e.regularidade_exigida || (e.certidoes ?? []).some(c => c.exigida));
+  return (exigida ?? empresas[0])?.entidade_id ?? null;
+}
 
 export function telasDoPerfil(perfil) {
   return TELAS.filter(t => t.perfis.includes(perfil));

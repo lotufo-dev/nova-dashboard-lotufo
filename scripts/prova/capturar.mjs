@@ -25,7 +25,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { LARGURAS, LOGIN, PERFIS, RESPOSTAS_ESPERADAS, TELAS, telasDoPerfil } from "./telas.mjs";
+import { empresaDaProva, LARGURAS, LOGIN, PERFIS, RESPOSTAS_ESPERADAS, TELAS, telasDoPerfil } from "./telas.mjs";
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ESPERA = 15000;          // ms para o conteudo principal aparecer
@@ -259,8 +259,9 @@ async function registros(contexto) {
     if (medicoes.length) { obra = c.id; medicao = medicoes[0].id; break; }
   }
   obra ??= contratos[0]?.id ?? null;
-  const empresas = await ler("/api/entidades");
-  return { obra, medicao, empresa: empresas[0]?.id ?? null };
+  // a empresa vem do painel de Documentos, e nao de /api/entidades: a pagina da empresa so' abre para quem o painel lista
+  const empresa = empresaDaProva(await ler("/api/documentos"));
+  return { obra, medicao, empresa };
 }
 
 async function abrirTela(contexto, perfil, largura, tela, reg) {

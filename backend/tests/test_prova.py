@@ -1,5 +1,6 @@
 """Roteiros de prova (scripts/prova, issue #702): as recusas do ambiente, o ambiente do servidor de prova, o
 comparador do retrato e as listas de rotas do retrato conferidas contra as rotas de verdade do backend."""
+import json
 import os
 import shutil
 import socket
@@ -312,6 +313,27 @@ def test_capturar_recusa_lista_vazia_de_perfis_ou_de_telas():
                                capture_output=True, text=True, encoding="utf-8", env=sem_prova)
         assert feito.returncode == 2, feito.stderr
         assert f"{opcao} veio vazio" in feito.stderr
+
+
+def test_empresa_da_prova_e_a_que_tem_documento_exigido():
+    """A tela `documentos-empresa` abria a primeira empresa de /api/entidades, que num banco real pode nao ter
+    documento exigido (a pagina fica em "Nenhum documento exigido" e a prova reprova). A escolha sai do painel de
+    Documentos: a primeira com certidao ou regularidade exigida; sem nenhuma, a primeira do painel; vazio, nenhuma."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("sem Node nesta máquina")
+    sem = {"entidade_id": 3, "regularidade_exigida": False, "certidoes": [{"exigida": False}]}
+    com_certidao = {"entidade_id": 7, "regularidade_exigida": False, "certidoes": [{"exigida": False}, {"exigida": True}]}
+    com_regularidade = {"entidade_id": 9, "regularidade_exigida": True, "certidoes": []}
+    casos = [({"empresas": [sem, com_certidao, com_regularidade]}, 7), ({"empresas": [sem, com_regularidade]}, 9),
+             ({"empresas": [sem]}, 3), ({"empresas": []}, None), ([], None)]
+    roteiro = ("import { empresaDaProva } from " + json.dumps((RAIZ / "scripts" / "prova" / "telas.mjs").as_uri()) + ";"
+               "const casos = JSON.parse(process.argv[1]);"
+               "console.log(JSON.stringify(casos.map(c => empresaDaProva(c))));")
+    feito = subprocess.run([node, "--input-type=module", "-e", roteiro, json.dumps([c for c, _ in casos])],
+                           capture_output=True, text=True, encoding="utf-8")
+    assert feito.returncode == 0, feito.stderr
+    assert json.loads(feito.stdout) == [esperado for _, esperado in casos]
 
 
 def test_cadastro_faltando_ou_inexistente_recusa(repo):
