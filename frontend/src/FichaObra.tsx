@@ -4,6 +4,7 @@ import { Link } from "./Link";
 import Selo, { Glifo } from "./Selo";
 import { fmtDataPura } from "./tempo";
 import "./obra.css";
+import Falha from "./Falha";
 
 // O alto da pagina da obra (#646), redesenhado na #774: a pagina responde "como esta' esta obra hoje": quanto falta
 // executar, se cabe no prazo, onde esta' a medicao e o que pede acao. Tres pecas, na ordem da pergunta:
@@ -36,7 +37,7 @@ export function mesAno(c: string): string {
 }
 const diaMes = (iso: string) => { const m = /^\d{4}-(\d{2})-(\d{2})/.exec(iso); return m ? `${m[2]}/${m[1]}` : iso; };
 const data = (iso: string | null) => (iso ? fmtDataPura(iso.slice(0, 10)) : "—");
-const INDISPONIVEL = <p className="erro" role="alert">indisponível agora</p>;
+const INDISPONIVEL = <Falha>indisponível agora</Falha>;
 const CARREGANDO = <p className="obra-nota">Carregando…</p>;
 
 /** A faixa de numeros da obra, na base de execucao (sem o aditivo de reajuste) e na cota da Lotufo: os numeros vem do

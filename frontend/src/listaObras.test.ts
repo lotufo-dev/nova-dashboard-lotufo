@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Aviso } from "./Alertas";
-import { avisoPrincipal, contratantesDe, escopoDaUrl, filtrarObras, gruposPorContratante, pctExecutado, posicaoDe, prazoDaObra, resumoContratante, totaisDe, type ObraLista } from "./listaObras";
+import { avisoPrincipal, contratantesDe, escopoDaUrl, filtrarObras, gruposPorContratante, pctExecutado, pctPiso, posicaoDe, prazoDaObra, resumoContratante, totaisDe, type ObraLista } from "./listaObras";
 
 const o = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => ({
   id, orgao: "SINFRA", numero_instrumento: `${id}/2026`, nome_curto: nome, estado: "ativo", ...extra });
@@ -60,6 +60,12 @@ describe("contratantes (entrada de Obras, #159)", () => {
     expect(pctExecutado(lista[0])).toBe(25);
     expect(pctExecutado(cheia(9, "X", 0, 0))).toBeNull();
     expect(pctExecutado(o(9, "Sem valor"))).toBeNull();
+    // por piso: 99,6% e' 99%; so' quem concluiu mostra 100%
+    expect(pctExecutado(cheia(9, "X", 1000_00, 996_00))).toBe(99);
+    expect(pctExecutado(cheia(9, "X", 1000_00, 1000_00))).toBe(100);
+    expect(pctPiso(2_66, 4_00)).toBe(66);
+    expect(pctPiso(1, 0)).toBeNull();
+    expect(resumoContratante([cheia(9, "X", 1000_00, 999_99)]).pct).toBe(99);
   });
 
   it("com aditivo de reajuste, % e saldo usam o vigente de execução, como a página da obra (#262)", () => {
@@ -129,7 +135,8 @@ describe("lista de Obras na cota da Lotufo, por contratante (#645)", () => {
 
   it("obra sem `posicao` conta zero e o % executado sai da posição", () => {
     expect(posicaoDe(o(9, "Sem posição", { valor_vigente_centavos: 500_00 }))).toEqual({ vigente_centavos: 0, medido_centavos: 0, saldo_centavos: 0, a_receber_centavos: null });
-    expect(pctExecutado(lista[0])).toBe(25);
+    // por piso: a cota arredonda os centavos e a razao fica um fio abaixo de 25%
+    expect(pctExecutado(lista[0])).toBe(24);
   });
 
   it("agrupa por contratante na ordem do nome, as obras na ordem do nome, com o subtotal do grupo", () => {

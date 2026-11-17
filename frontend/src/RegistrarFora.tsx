@@ -2,11 +2,11 @@ import { useState } from "react";
 import { CaixaJustificativa } from "./CaixaAviso";
 import { api, apiForm, ApiErro } from "./api";
 import ConfirmarFaltas from "./ConfirmarFaltas";
-import { IconeAlerta } from "./icones";
 import Janela from "./Janela";
 import { MIN_JUSTIFICATIVA } from "./JustificativaEnvio";
 import { avisoPorFora, mensagem, notasDe, type Envio, type Irma } from "./NotasAEnviar";
 import { hojeLocal } from "./tempo";
+import Falha from "./Falha";
 
 // "Registrar envio feito fora do sistema" (16/10/2026): UMA acao so', na etapa 4 da pagina da medicao, para o que ja'
 // saiu por fora (e-mail pelo Outlook, protocolo no balcao do orgao). Junta o antigo "Registrar envio feito por fora"
@@ -177,7 +177,7 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
             </div>
           ))}
         </fieldset>
-        {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+        {erro && <Falha>{erro}</Falha>}
         <div className="iniciar__rodape">
           <button type="submit" className="btn btn--primario" disabled={ocupado || !data || !obs.trim() || motivoCurto}>{ocupado ? "Gravando…" : "Registrar"}</button>
           <button type="button" className="btn" onClick={fechar}>Cancelar</button>

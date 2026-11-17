@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Contador from "./Contador";
-import { IconeAlerta, IconeClipe, IconeEnviarNuvem, IconeLinkExterno } from "./icones";
+import { IconeClipe, IconeEnviarNuvem, IconeLinkExterno } from "./icones";
 import LegendaCor, { type ItemLegenda } from "./LegendaCor";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
@@ -13,6 +13,7 @@ import { Glifo } from "./Selo";
 import { fmtCompetencia, fmtDataPura, fmtMesCurto, fmtMesExtenso } from "./tempo";
 import { AnexarCertidoes, type AnexarRef } from "./documentosComum";
 import { usePainel } from "./documentosDados";
+import Falha from "./Falha";
 
 /* Documentos (#513; fundacao do redesenho na #767): a tela responde "o que renovar ou anexar para o proximo protocolo
  * sair". Tres abas com contador, uma linha por empresa (ou por obra) e a situacao de cada documento com o glifo dela. Certidoes (dias que faltam), Regularidade mensal (os seis ultimos meses do DP) e Garantias
@@ -347,7 +348,7 @@ export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; 
 
   return (
     <div className="pagina doc">
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
       <p className="sr-only" role="status">{anuncio}</p>
 
       {/* o alto da pagina: a regua grossa, as abas com o contador do que pede acao e o Anexar */}

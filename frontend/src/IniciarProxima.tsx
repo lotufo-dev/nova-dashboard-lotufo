@@ -4,6 +4,7 @@ import { api, mensagemDeErro } from "./api";
 import { IconeMais } from "./icones";
 import { Link } from "./Link";
 import { NovaMedicaoManual, type Medicao } from "./Medicoes";
+import Falha from "./Falha";
 
 // Na aba Medicoes da obra, o antigo cartao "Gerar espelho" virou o atalho "Iniciar a Nª medição" (16/10/2026): a
 // medicao se inicia na pagina dela, no primeiro passo. Com medicao prevista no cronograma, o atalho abre a pagina
@@ -27,7 +28,7 @@ export default function IniciarProxima({ contratoId, versao, aoCriar, inicial }:
     return () => { vivo = false; };
   }, [contratoId, versao]);
 
-  if (ativa === null) return erro ? <p className="erro" role="alert">Não foi possível ver como iniciar a medição: {erro}</p> : null;
+  if (ativa === null) return erro ? <Falha>Não foi possível ver como iniciar a medição: {erro}</Falha> : null;
   if (!ativa) {
     return (
       <section className="cartao" aria-labelledby="titulo-nova-medicao" id="nova-medicao">

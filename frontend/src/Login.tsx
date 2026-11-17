@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiErro, setCsrf } from "./api";
-import CaixaAviso from "./CaixaAviso";
 import Simbolo from "./Simbolo";
 import "./login.css";
+import Falha from "./Falha";
 
 export interface Usuario { id: number; nome: string; perfil: string; email: string; }   // /api/auth/eu
 
@@ -83,7 +83,7 @@ export default function Login({ aoEntrar }: { aoEntrar: (u: Usuario) => void }) 
                        value={senha} onChange={e => setSenha(e.target.value)} />
               </label>
               {/* o papel de alerta fica no texto: a caixa acrescenta a palavra do nivel para o leitor de tela */}
-              {erro && <CaixaAviso nivel="critico"><span role="alert">{erro}</span></CaixaAviso>}
+              {erro && <Falha>{erro}</Falha>}
               <button type="submit" className="btn btn--primario entrar__botao" disabled={enviando}>{enviando ? "Entrando…" : "Entrar"}</button>
             </form>
           </div>

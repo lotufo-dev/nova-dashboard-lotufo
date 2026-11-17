@@ -143,6 +143,7 @@
   /* tamanhos */
   --texto-corpo: 1rem;
   --texto-meta: 0.875rem;            /* rotulo de apoio, selo, contador, legenda */
+  --texto-tabela: var(--texto-meta); /* celula de tabela: dado denso, 7 a 9 colunas tem de caber em 792 px a 1024 */
   --texto-mini: 0.75rem;             /* mes, ano, valor das colunas, nome de grupo na grade */
   --texto-rotulo: 1rem;              /* rotulo de linha (etapa, prazo) */
   --texto-valor: 1.44rem;            /* valor em reais de uma linha */
@@ -250,8 +251,9 @@
   --borda-situacao-feito: var(--borda-fina) solid var(--situacao-feito-texto);
   --borda-erro: var(--borda-grossa) solid var(--situacao-critico-texto);   /* campo com erro de validacao */
   --altura-area-texto: calc(var(--alvo-minimo) * 2.4);                     /* area de texto da justificativa: 96px */
+  /* o lapis antes do rotulo da justificativa (mascara: a cor vem do texto) */
+  --icone-lapis: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='square'%3E%3Cpath d='M4 20h4L19 9l-4-4L4 16z'/%3E%3Cpath d='m13 7 4 4'/%3E%3C/svg%3E");
   --tamanho-icone: var(--tamanho-icone-conta);                             /* icone de traco em botao e em faixa */
-  --altura-controle-menor: 28px;                                           /* botao dentro de linha de tabela */
 
   /* telas de leitura no celular (Inicio, #721): o titulo da pagina desce um passo da escala */
   --texto-titulo-pagina-estreito: 1.728rem;
@@ -277,8 +279,8 @@ body {
   background: var(--cor-papel);
   color: var(--cor-tinta);
   font-family: var(--fonte-texto);
-  font-size: var(--texto-meta);
-  line-height: 20px;
+  font-size: var(--texto-corpo);
+  line-height: var(--entrelinha);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   caret-color: var(--cor-tinta);
@@ -379,18 +381,14 @@ code {
 
 table { border-collapse: collapse; }
 
-/* --------------------------------------------------------------- utilidades */
-
 /* Todo numero e valor passa por aqui: a mesma fonte do texto, algarismos de mesma
    largura, senao a coluna alinhada a direita "dança" a cada centavo. */
-.num, .col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor,
-.total-receber__valor, .alerta__valor {
+.num, .col-num, .dinheiro, .entrada--num, .saldo__valor, .alerta__valor {
   font-variant-numeric: tabular-nums lining-nums; font-feature-settings: "tnum" 1, "lnum" 1;
 }
 /* `.num` tambem marca frases com contagem ("19 obras · a nova medicao..."): ali fica a Sans com algarismos
    de mesma largura. A largura fixa vai so' no valor: celula numerica da tabela, campo numerico e os valores de KPI. */
-td.col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor,
-.total-receber__valor, .alerta__valor {
+td.col-num, .dinheiro, .entrada--num, .saldo__valor, .alerta__valor {
   font-family: var(--fonte-numero); font-stretch: var(--largura-numero);
 }
 
@@ -398,9 +396,6 @@ td.col-num, .dinheiro, .entrada--num, .saldo__valor, .totais__valor, .kpi__valor
    critico. Toda situacao aparece com cor E forma: o glifo (--situacao-*-forma) diz a situacao sem depender da cor.
    `.info--*` pinta um texto solto (numero, data, frase curta); o selo e o contador sao as pecas Selo.tsx e
    Contador.tsx; a legenda e' LegendaCor.tsx. O que nao tem situacao nao leva classe e fica em tinta. */
-.info--feito { color: var(--situacao-feito-texto); }
-.info--andamento { color: var(--situacao-andamento-texto); }
-.info--breve { color: var(--situacao-breve-texto); }
 .info--critico { color: var(--situacao-critico-texto); }
 .glifo { display: inline-block; flex: none; width: var(--tamanho-glifo); height: var(--tamanho-glifo); background: center / contain no-repeat; }
 .glifo--feito { background-image: var(--situacao-feito-forma); }
@@ -462,28 +457,8 @@ td, th { font-variant-numeric: tabular-nums; }
 /* Nome de obra em tabela DENSA (Medicoes em andamento, Obras, obras da Diretoria): mais estreito,
    para a coluna que quebra (Motivo, Proximo passo) nao ser espremida a 1366. */
 .truncar--nome { max-width: clamp(20ch, 13vw, 40ch); }
-/* Orgao numa tabela densa (Obras, A receber): mais estreito que o nome da obra, que e' quem identifica a
-   linha. Com o nome cortado sem quebrar, o teto de 18vw passava da largura do cartao a 1366 (round-02). */
-.truncar--orgao { max-width: clamp(12ch, 9vw, 40ch); }
-/* Ate' 2 linhas e reticencias (F-48): numa tabela larga, o nome que corta numa linha so' deixava de ceder
-   largura e a tabela passava a rolar a 1366. Assim a coluna encolhe como antes e a linha nunca passa de
-   duas linhas de texto. */
-.truncar-2l { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: break-word; }
-/* Na grade de largura fixa (F-47) a coluna ja' da' o teto: o nome ocupa a celula inteira e corta nela. */
-.tabela--grade .truncar { display: block; max-width: 100%; }
 /* Numero, data e instrumento numa celula nao quebram no meio ("161/2022/00/00-" / "SINFRA"). */
 .tabela td.num { white-space: nowrap; }
-/* Dado de identificacao (nº de certidao, código de controle): passa de 30 caracteres,
-   nao se le por inteiro na tabela e era ele que empurrava a coluna de acoes para fora
-   do cartao. 12ch mostram o comeco, que e' o que distingue uma emissao da outra; o
-   valor inteiro fica no `title` e no PDF. */
-.truncar--curto { max-width: 12ch; }
-
-/* Documento que NAO quebra no meio: "11.444.777/0001-61" partido em duas linhas vira
-   dois numeros que nao existem. Quem rola, quando nao couber, e' o `.tabela-wrap`. */
-.cnpj { white-space: nowrap; }
-
-/* --------------------------------------------------------------------- shell */
 
 /* Casca (Casca.tsx, #720): o menu lateral escuro e' FIXO a' esquerda e a pagina fica na coluna ao lado. Aberto (o
    padrao no computador) ocupa --largura-menu do fluxo da pagina; recolhido, a coluna do icone. No celular so' existe
@@ -674,7 +649,6 @@ td, th { font-variant-numeric: tabular-nums; }
 .topbar__meta { color: var(--cor-texto-secundario); font-size: var(--texto-meta); line-height: 20px; max-width: 100%; }
 .topbar > .topbar__meta { max-width: 110ch; }
 .topbar > .selo, .topbar > .btn--voltar { flex: none; }
-.topbar__acoes { margin-left: auto; display: flex; gap: 8px; }
 /* Detalhe (obra): duas linhas na faixa fixa — de onde se veio e onde se esta' (breadcrumb) em cima, o
    titulo com orgao e status embaixo. */
 .topbar--detalhe { align-items: stretch; gap: 8px; padding-top: 24px; }
@@ -684,11 +658,6 @@ td, th { font-variant-numeric: tabular-nums; }
 .topbar__linha > .topbar__titulo { flex: 0 1 auto; }
 .topbar__trilha > .topbar__meta, .topbar__linha > .topbar__meta { flex: 0 3 auto; min-width: 12ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar__trilha > .topbar__meta { font-size: var(--texto-meta); }
-/* fora da aba Medicoes da obra, o essencial dela na linha do breadcrumb, a direita; e a base dos valores ao
-   lado do orgao. Os dois cedem com reticencias (o texto inteiro no `title`) antes de a faixa estourar a
-   largura na tela estreita: a meta comum e' `flex: none`. */
-.topbar__resumo { margin-left: auto; }
-.topbar__resumo { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* B-13 (10/10/2026): na pagina da medicao, no celular, o titulo virava "Es…" espremido pela meta; abaixo de 600px
    a meta (orgao, base dos valores) desce para baixo do titulo e o titulo quebra linha em vez de cortar */
 @media (max-width: 600px) {
@@ -696,16 +665,7 @@ td, th { font-variant-numeric: tabular-nums; }
   .topbar__linha--quebra > .topbar__titulo { flex: 1 1 100%; white-space: normal; }
   .topbar__linha--quebra > .topbar__meta { flex: 0 1 auto; white-space: normal; }
 }
-/* a base dos valores (principio 7) nunca corta: quem cede e' o orgao · instrumento ao lado (F-50) */
-.topbar__base { flex: none; }
-/* Filtros da tela de Avisos: as opcoes separadas, e a escolhida diz que e' a escolhida (negrito, sem sublinhado) */
-.filtros-avisos__linhas { display: grid; gap: 10px; }
-.filtros-avisos__linha { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin: 0; max-width: none; }
-.filtros-avisos__linha a[aria-current="true"] { color: var(--cor-tinta); font-weight: 600; text-decoration: none; }
 /* o numero de avisos da obra, depois da linha do resumo: link inteiro, nunca cortado */
-.topbar__avisos { flex: none; }
-a.topbar__avisos { color: var(--cor-tinta); text-decoration: underline; text-underline-offset: 3px; }
-a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 .topbar__linha > .selo, .topbar__trilha > .btn--voltar { flex: none; }
 
 .migalhas { min-width: 0; font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
@@ -727,9 +687,6 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
   padding: 24px 32px 40px;
   display: flex; flex-direction: column; gap: 24px;
 }
-/* A descricao da tela de lista, no alto do conteudo: era a linha cinza embaixo do h1, que subiu para a barra. */
-
-/* ------------------------------------------------------------------- cartao */
 
 /* PAINEL: caixa com borda grossa de tinta e sombra dura. O titulo fica dentro, sem regua embaixo. */
 .cartao {
@@ -768,7 +725,7 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
    justamente no botao que a trava desliga. */
 .btn--primario:disabled, .btn--destrutivo:disabled { background: var(--cor-papel-escuro); border-color: var(--cor-papel-escuro); color: var(--cor-texto-terciario); }
 /* dentro de linha de tabela: uma linha de tabela vale uma linha de altura */
-.btn--pequeno { height: var(--altura-controle-menor); padding: 0 var(--espaco-p); font-size: var(--texto-meta); }
+.btn--pequeno { height: var(--alvo-menor); padding: 0 var(--espaco-p); font-size: var(--texto-meta); }
 .btn--voltar {
   /* botao ou link ("← Medicoes" e' um <a>, volta para a tela de onde se veio) */
   display: inline-flex; align-items: center; gap: 4px; text-decoration: none; border-radius: var(--raio-controle);
@@ -778,8 +735,6 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 }
 .btn--voltar:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
 
-/* ------------------------------------------------------------------ tabela */
-
 /* `position: relative` NAO e' enfeite: e' o que faz o wrapper ser o BLOCO CONTINENTE
    dos descendentes absolutos — os `span.sr-only` dentro das celulas. Com o wrapper
    estatico, o bloco continente deles era o documento, e a posicao estatica de um
@@ -788,16 +743,10 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
    678 num viewport de 375 na tela de Certidoes. Rolagem interna so' e' interna se o
    que esta' posicionado dentro dela tambem for. */
 .tabela-wrap { overflow-x: auto; position: relative; }
-/* Tabela de mais de uma tela (F-49): a caixa para na altura da janela (menos topbar, abas e respiro), o
-   cabecalho fica fixo no topo dela e a barra horizontal fica a' vista. A coluna ancorada do cabecalho fica
-   por cima das duas direcoes. */
-.tabela-wrap--alta { overflow: auto; max-height: calc(100vh - 200px); scroll-padding-top: 40px; }
-.tabela-wrap--alta thead th { position: sticky; top: 0; z-index: 2; }
-.tabela-wrap--alta thead th.col-fixa, .tabela-wrap--alta thead th.col-acoes--fixa { z-index: 3; }
 
 /* TABELA: linhas separadas por fio, cabecalho discreto sobre uma regua de tinta, coluna de valor a' direita com
    algarismos tabulares. Tabela larga rola dentro do `.tabela-wrap`, nunca a pagina. */
-.tabela { width: 100%; font-size: var(--texto-meta); }
+.tabela { width: 100%; font-size: var(--texto-tabela); line-height: var(--entrelinha); }
 .tabela thead th {
   padding: var(--espaco-pp) var(--espaco-p);
   background: var(--cor-superficie);
@@ -866,7 +815,6 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 /* Coluna de acoes: botao de 28px + 6px de folga = os mesmos 40px das outras
    linhas. Os botoes NAO quebram linha (uma linha de tabela vale uma linha de
    altura); se a largura nao couber, quem rola e' o .tabela-wrap. */
-.tabela tbody td.col-acoes { text-align: right; padding-top: 6px; padding-bottom: 6px; }
 .acoes { display: flex; flex-wrap: nowrap; gap: 6px; justify-content: flex-end; }
 .acoes > * { flex: none; }
 .acoes--inicio { justify-content: flex-start; margin-top: 12px; }
@@ -879,7 +827,6 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
    acao quando a tabela de fato nao cabe (zoom, janela estreita, nome comprido).
    Fundo OPACO por estado da linha (branco, zebra, hover): a celula fixa fica por cima
    das outras, e transparente ela mostraria as colunas passando por baixo do texto. */
-.tabela th.col-acoes--fixa, .tabela td.col-acoes--fixa,
 .tabela th.col-fixa, .tabela td.col-fixa {
   position: sticky; right: 0; z-index: 1;
   background: var(--cor-superficie);
@@ -889,18 +836,8 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
    O `text-align` esta' aqui pela razao inversa: o th leva `.col-num`, mas quem vence e'
    `.tabela thead th` (`text-align: left`), e o rotulo ficava a' esquerda enquanto as
    celulas da coluna alinhavam a' direita. */
-.tabela thead th.col-acoes--fixa, .tabela thead th.col-fixa { background: var(--cor-superficie); text-align: right; }
-.tabela tbody tr.linha:hover > td.col-acoes--fixa, .tabela tbody tr.linha:hover > td.col-fixa { background: var(--cor-papel-sombreado); }
-/* A linha so' aparece com coluna escondida (classe posta pelo React ao medir
-   `scrollWidth > clientWidth`): numa tabela que cabe inteira ela seria uma divisoria
-   inventada. E' SINAL DE BORDA, nao uma segunda sombra — o sistema tem uma so; o
-   `box-shadow` inset de 1px e' a borda pintada por outro caminho, porque `border-left`
-   numa celula `position: sticky` sob `border-collapse: collapse` nao pinta no Chrome
-   (conferido em captura: nenhuma linha aparecia). */
-.tabela-wrap--rola th.col-acoes--fixa, .tabela-wrap--rola td.col-acoes--fixa,
-.tabela-wrap--rola th.col-fixa, .tabela-wrap--rola td.col-fixa {
-  box-shadow: inset 1px 0 0 var(--cor-borda-controle);
-}
+.tabela thead th.col-fixa { background: var(--cor-superficie); text-align: right; }
+.tabela tbody tr.linha:hover > td.col-fixa { background: var(--cor-papel-sombreado); }
 
 /* valor editavel na propria celula: o alvo de clique e' o numero */
 .valor-btn {
@@ -912,54 +849,19 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 .valor-btn:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-menu-realce); }
 .valor-btn--vazio { color: var(--cor-texto-secundario); }
 
-/* Linha inteira clicavel (carteira do painel). O cursor sozinho nao basta — o hover
-   ja vem de `.linha` — e o clique de mouse na linha nao alcanca o teclado: o NOME do
-   registro e' um botao de verdade (`.nome-btn`), que da' o mesmo destino sem custar
-   uma coluna "Abrir" so para isso. */
-.tabela tbody tr.abrivel { cursor: pointer; }
-.nome-btn {
-  height: auto; padding: 2px 6px; margin: -2px -6px;
-  border: 0; box-shadow: none; background: none;
-  border-radius: var(--raio-canto);
-  color: var(--cor-tinta); font-size: var(--texto-meta); font-weight: 600;
-}
-.nome-btn:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-menu-realce); }
-.tabela tbody tr.abrivel:hover .nome-btn { color: var(--cor-menu-realce); }
-
-/* Numero negativo onde negativo e' um PROBLEMA (saldo estourado): cor de acao. Nunca
-   so' a cor — quem usa isso poe o icone de alerta com `title` ao lado. */
 /* `.tabela tbody td` (cor --texto-2) vence `.negativo` sozinho por especificidade: a celula do corpo
    entra aqui junto com a do rodape, senao o saldo negativo da Diretoria saia no cinza dos positivos. */
 .negativo, .tabela tbody td.negativo, .tabela tfoot td.negativo { color: var(--situacao-critico-texto); }
 .negativo .icone { vertical-align: -3px; margin-right: 4px; }
 
-/* --------------------------------------------------------- estado (badge) */
+/* --------------------------------------------------------- estado da medicao
 
-/* Estado nunca e' so cor: ponto + rotulo, sempre. */
-.estado { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; color: var(--cor-tinta); }
-.estado__ponto { width: 6px; height: 6px; border-radius: var(--raio-selo); flex: none; background: var(--cor-texto-terciario); }
-.estado--prevista    .estado__ponto { background: var(--previsao-sem); }
-.estado--planilha_gerada .estado__ponto { background: var(--previsao-sem); }
-.estado--planilha_enviada .estado__ponto { background: var(--cor-texto-secundario); }
-.estado--boletim_recebido .estado__ponto { background: var(--cor-texto-secundario); }
-.estado--espelho_gerado  .estado__ponto { background: var(--previsao-sem); }
-.estado--espelho_enviado .estado__ponto { background: var(--cor-texto-secundario); }
-.estado--protocolada .estado__ponto { background: var(--cor-texto-secundario); }
-/* passo normal do fluxo: ponto neutro. O acento e' de interacao, nao de situacao. */
-.estado--nf_emitida  .estado__ponto { background: var(--cor-texto-secundario); }
-.estado--nota_emitida .estado__ponto { background: var(--cor-texto-secundario); }
-.estado--recebida    .estado__ponto { background: var(--situacao-feito-ponto); }
-/* situacao de uma COMPETENCIA na curva (T8): mesma gramatica ponto + rotulo */
-.estado--aberto     .estado__ponto { background: var(--previsao-sem); }
-.estado--provisorio .estado__ponto { background: var(--situacao-breve-ponto); }
-.estado--atestado   .estado__ponto { background: var(--situacao-feito-ponto); }
-.estado--aberto { color: var(--cor-texto-secundario); }
-.estado--excecao { color: var(--cor-texto-secundario); text-decoration: line-through; text-decoration-color: var(--cor-texto-terciario); }
-.estado--excecao .estado__ponto { background: var(--cor-texto-terciario); text-decoration: none; }
+   O estado e' um Selo (Medicoes.tsx > SeloDoEstado): glifo e palavra nas situacoes da fundacao. O ponto de cor
+   sozinho (.estado) saiu. Cancelada e desistida ficam neutras e riscadas. */
+.estado-medicao { display: inline-flex; flex-wrap: wrap; gap: var(--espaco-mini); max-width: 100%; }
+.selo--riscado .selo__texto { text-decoration: line-through; }
 
 .cadeado { color: var(--cor-texto-secundario); display: inline-flex; margin-left: 6px; vertical-align: -2px; }
-
-/* --------------------------------------------------------- alertas do painel */
 
 /* SELO (Selo.tsx): a situacao de uma linha (prazo, documento, medicao). Fundo claro da situacao, texto no tom dela e
    o glifo antes do rotulo; sem situacao, neutro e sem glifo. */
@@ -1043,14 +945,15 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 .form-inline { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; max-width: 100%; }
 /* filtro com opcao longa (nome de obra do consorcio) nao estica o select pela linha inteira */
 .form-inline select { max-width: 32ch; }
-.campo { display: grid; gap: 4px; }
+/* a coluna pode encolher: sem isso o campo largo (320 px) passava da caixa estreita em vez de caber nela */
+.campo { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 /* `min-width: 0` DESTRAVA o encolhimento: o padrao `auto` impede o campo de ficar
    menor que o controle dentro dele, e a `.entrada--larga` (320px) num cartao de
    303px em 375 estourava a pagina inteira — o `max-width: 100%` da entrada nunca
    chegava a valer porque o proprio campo ja media 320. Vale so' na linha de campos:
    os controles de 168px continuam cada um na sua linha (o flex so' encolhe o item
    que sozinho nao cabe). */
-.form-inline > .campo { min-width: 0; }
+.form-inline > .campo { min-width: 0; max-width: 100%; }
 .campo__rotulo { font-size: var(--texto-meta); font-weight: var(--peso-medio); color: var(--cor-tinta); }
 /* Medida de corpo: 78ch e' o mesmo teto do `.aviso`. Sem ele a
    nota de 12px do formulario de certidao corria ~170ch numa tela larga. */
@@ -1111,6 +1014,12 @@ span.aviso { display: inline-flex; }
 .aviso--trava { border: var(--borda-trava); background: var(--situacao-critico-ponto); color: var(--cor-sobre-ponto); }
 .justificativa { display: grid; gap: var(--espaco-mini); padding: var(--espaco-m); border: var(--borda-justificativa); background: var(--cor-papel-sombreado); }
 .justificativa textarea { width: 100%; max-width: none; min-height: var(--altura-area-texto); }
+/* o lapis antes do rotulo: a caixa e' onde se ESCREVE o motivo (pagina da medicao montada pelo dono, #722) */
+.justificativa > label:first-child { display: flex; align-items: center; gap: var(--espaco-pp); }
+.justificativa > label:first-child::before {
+  content: ""; flex: none; width: var(--tamanho-icone); height: var(--tamanho-icone); background: currentColor;
+  -webkit-mask: var(--icone-lapis) center / contain no-repeat; mask: var(--icone-lapis) center / contain no-repeat;
+}
 
 /* linha expandida com o formulario da acao — substitui prompt()/confirm().
    Prefixada com `.tabela tbody` de proposito: sem isso `.tabela tbody td` (que e'
@@ -1124,7 +1033,6 @@ span.aviso { display: inline-flex; }
 .painel__titulo { font-size: var(--texto-mini); font-weight: 600; color: var(--cor-tinta); margin: 0 0 10px; }
 .painel__rodape { margin: 12px 0 0; }
 
-/* dois cartoes empilhados no mesmo painel de aba (espelho + medicoes) */
 /* minmax(0,1fr): sem isto a coluna cresce ate a tabela mais larga e a pagina inteira passa da tela. */
 .pilha { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
 /* Botao filho direto de uma grade (.pilha, .campo) nao estica ate' a largura da
@@ -1143,8 +1051,6 @@ span.aviso { display: inline-flex; }
 .tabela.espelho__notas th.col-num:not(:last-child), .tabela.espelho__notas td.col-num:not(:last-child) { padding-left: 8px; padding-right: 8px; }
 .tabela.espelho__notas th.col-num:last-child, .tabela.espelho__notas td.col-num:last-child { padding-left: 8px; }
 .espelho__medicoes { margin: 10px 0; }
-.espelho__email { display: grid; gap: 10px; max-width: 78ch; }
-.espelho__email textarea, .espelho__email input { width: 100%; box-sizing: border-box; }
 .espelho__item .form-inline { margin-top: 10px; }
 /* botao de arquivo: o <label> e' o botao; o input fica fora da tela, mas focavel */
 .espelho__anexar { position: relative; overflow: hidden; cursor: pointer; }
@@ -1163,36 +1069,18 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
   * { transition-duration: .01ms !important; }
 }
 
-/* ---------------------------------------------------------------- grafico */
-
 /* O SVG e' desenhado no tamanho natural (px = px): esticar por width:100% levaria o
    texto do eixo junto e os 11px legiveis do contrato virariam 4px ou 30px conforme
    o numero de meses. Passando da largura do cartao, rola na horizontal. */
-.grafico { padding: 16px 20px 8px; overflow-x: auto; }
-.grafico__svg { display: block; }
 
 .g-grade { stroke: var(--cor-linha); }
 .g-base  { stroke: var(--cor-borda-controle); }
 .g-eixo   { fill: var(--cor-texto-secundario); font-size: var(--texto-mini); }
 .g-eixo-x { fill: var(--cor-texto-secundario); font-size: var(--texto-mini); }
-.g-eixo--pendente, .g-eixo-x--pendente { fill: var(--situacao-breve-texto); font-weight: 600; }
-
-/* D14 (F-101): a barra prevista leva contorno de 1px em --linha-hover para passar de 3:1 (o #cbd5e1 sozinho da' 1,5:1) */
-.g-previsto { fill: var(--previsao-sem); stroke: var(--cor-tinta); stroke-width: 1; }
-.g-execucao { fill: var(--cor-tinta); }
-/* reajuste e projeto: mesma familia do medido, um tom acima — a distincao entre as
-   series nao pode depender de dois indigos vizinhos. */
-.g-outras   { fill: var(--cor-tinta); }
-/* competencia sem lancamento: talo no zero, nunca barra de altura zero */
-.g-talo     { fill: var(--cor-borda-controle); }
 
 /* provisorio (protocolado sem atestado): hachura CLARA por cima da barra, que fica
    com a cor da propria serie — sobre o indigo, ambar escuro seria invisivel;
    o ambar de sinal aparece no selo e no rotulo do eixo, sobre branco. */
-.g-hachura { stroke: var(--situacao-breve-ponto); stroke-width: 2; }
-.g-provisorio { stroke: var(--situacao-breve-ponto); stroke-width: 1.25; stroke-dasharray: 4 3; }
-.g-selo { fill: var(--situacao-breve-fundo); stroke: var(--situacao-breve-texto); stroke-width: 1.25; }
-.g-selo__marca { stroke: var(--situacao-breve-texto); stroke-width: 1.6; stroke-linecap: round; fill: none; }
 
 .legenda {
   display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
@@ -1206,16 +1094,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 .legenda__chave { width: 11px; height: 11px; border-radius: var(--raio-canto); flex: none; }
 .legenda__chave--previsto { background: var(--previsao-sem); box-shadow: inset 0 0 0 1px var(--cor-tinta); }
 .legenda__chave--execucao { background: var(--cor-tinta); }
-.legenda__chave--outras   { background: var(--cor-tinta); }
 .legenda__chave--anterior { background: repeating-linear-gradient(90deg, var(--cor-texto-secundario) 0 4px, transparent 4px 7px); }
-.legenda__chave--provisorio {
-  background:
-    repeating-linear-gradient(45deg, var(--situacao-breve-ponto) 0 2px, transparent 2px 6px),
-    var(--cor-tinta);
-  border: 1px dashed var(--situacao-breve-texto);
-}
-
-/* ------------------------------------------------------------------ saldo */
 
 /* A formula do saldo fica VISIVEL como conta: vigente − medido = saldo, com os tres
    numeros na tela. A frase que define a regra vem do servidor. */
@@ -1232,8 +1111,6 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 /* #262: o aditivo de reajuste fica fora da conta; separado por um filete, nao por um operador */
 .saldo__parcela--aparte { padding-left: 14px; border-left: 1px solid var(--cor-linha); }
 
-/* ----------------------------------------------------------------- totais */
-
 /* Faixa de totais de um periodo — irma do `.saldo`, sem a leitura de CONTA (o saldo
    mostra "vigente − medido = saldo"; aqui sao grandezas lado a lado, cada uma com
    seu rotulo). Serve para dar numero proprio a serie que o grafico empilha. */
@@ -1242,27 +1119,16 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
   padding: 14px 20px;
   border-top: 1px solid var(--cor-linha);
 }
-.totais__item { display: grid; gap: 1px; }
-.totais__valor { font-size: var(--texto-corpo); font-weight: 600; color: var(--cor-tinta); }
 
-/* --------------------------------------------------------- erro e vazio */
-
+/* A falha e' a peca Falha.tsx (.aviso--critico, com o octogono). `.erro` fica so' para os dois avisos de falha do
+   Inicio, que ainda nao passaram para a peca: a mesma caixa de critico, sem o simbolo. */
 .erro {
-  display: flex; align-items: flex-start; gap: 8px;
-  margin: 0; padding: 10px 12px;
+  max-width: none; margin: 0; padding: var(--espaco-p) var(--espaco-m);
   border: var(--borda-situacao-critico);
-  border-radius: var(--raio-controle);
   background: var(--situacao-critico-fundo);
   color: var(--situacao-critico-texto);
-  font-size: var(--texto-meta);
+  font-size: var(--texto-corpo); font-weight: var(--peso-forte);
 }
-.erro .icone { margin-top: 1px; }
-/* relatorio de erro POR LINHA (importacao de CSV): o mesmo bloco de erro, com a
-   lista das linhas recusadas dentro dele. min-width:0 para o texto longo quebrar
-   em vez de esticar a caixa. */
-.erro > div { min-width: 0; }
-.erro__titulo { margin: 0; font-weight: 600; }
-.erro__linhas { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 2px; }
 
 .vazio { padding: 32px 20px; text-align: center; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 /* Vazio que e' BOA noticia (nenhum alerta): a mesma linguagem, sem o palco de 32px —
@@ -1281,11 +1147,6 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
   color: var(--cor-texto-secundario);
   margin-bottom: 3px;
 }
-/* resumo com mais itens do que cabem numa linha (Situacao do prazo): quebra em vez de estourar a largura */
-.resumo--quebra { flex-wrap: wrap; row-gap: 14px; }
-/* Grupo de cartoes que sao uma coisa so' (a data-base e os oficios dela; os pedidos de prazo e as cartas): o
-   filete a esquerda diz que andam juntos, sem cartao dentro de cartao. */
-.grupo-cartoes { display: flex; flex-direction: column; gap: 12px; padding-left: 14px; border-left: 3px solid var(--cor-borda-controle); }
 /* indice das data-bases no topo do Reajuste: cada uma com a situacao, um link para o grupo dela */
 .indice-db { display: grid; gap: 6px; }
 .indice-db li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
@@ -1301,27 +1162,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 .linhas { display: grid; gap: 6px; }
 .linhas > p { margin: 0; }
 .linhas .resumo__rotulo { display: inline; margin-right: 6px; }
-.resumo__objeto { max-width: 72ch; }
-.resumo__objeto p { margin: 0; }
-.resumo__valor { margin-left: auto; text-align: right; }
-/* Degrau Numero (15px/600, tabular). Era 18px de uso unico — um TERCEIRO tamanho
-   para o trabalho de "numero grande" que Display (22px) e Numero (15px) ja cobrem.
-   Display fica com o total do saldo, que mora na mesma pagina (aba Medicoes) e e' o
-   maior numero da tela; o valor vigente e' uma grandeza entre outras. */
-.resumo__valor strong { font-size: var(--texto-corpo); font-weight: 600; }
 
-/* Pagina com coluna lateral (medicao: o ciclo no principal, a linha do tempo ao lado). Abaixo de 1400px
-   a lateral desce para depois do principal: a 1366 as duas colunas deixavam as tabelas do espelho e das
-   notas rolando por dentro, e o ciclo e' o que se le primeiro. */
-.com-lateral { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); gap: 20px; align-items: start; }
-/* A receber: o nome do orgao e' um `.nome-btn` que abre as obras dele; a seta gira quando abre. O cabecalho de
-   linha do corpo leva o respiro e a borda das celulas (`.tabela tbody td` so' alcanca td). */
-.nome-btn { gap: 4px; text-align: left; }
-.nome-btn .seta { flex: none; transition: transform .15s ease; }
-.nome-btn[aria-expanded="true"] .seta { transform: rotate(90deg); }
-/* F-48: no botao do orgao (A receber), a seta fica no topo e o nome corta ao lado dela. */
-.nome-btn { max-width: 100%; align-items: center; }
-.nome-btn .truncar { min-width: 0; }
 /* Cabecalho de LINHA (F-59): mesmo respiro e mesma divisoria da celula. `.tabela tbody td` so' alcanca td, e a
    matriz de Documentos e o A receber tinham cada um um remendo (ou nenhum): o nome de uma empresa encostava no
    da proxima sem divisoria. */
@@ -1329,32 +1170,6 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
   text-align: left; font-weight: 400; color: var(--cor-tinta); vertical-align: middle; }
 .tabela tbody th[scope="row"]:first-child { padding-left: 20px; }
 .tabela tbody tr:last-child > th[scope="row"] { border-bottom: 0; }
-/* Carteira › Resumo: os blocos pequenos (Terminam, Avisos da diretoria) lado a lado; a obra com problema numa
-   linha (farol, obra, o primeiro motivo, "mais N") */
-.cartoes-lado { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
-.lista-simples.obras-problema { padding-left: 20px; list-style: none; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 12px; }
-/* F-84: cada li e' subgrade da lista: a coluna do selo tem a largura do maior selo e o texto corre ao lado dele */
-.obras-problema li { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; }
-/* Carteira › QDOP: nove colunas; o cabecalho quebra linha para caber a 1366, e os motivos vem um por linha */
-.tabela.qdop thead th { white-space: normal; vertical-align: bottom; }
-.tabela.qdop td { vertical-align: top; }
-/* F-63 (R3): Motivos com 28ch (com 136px a Regiao Oeste ficava com 240px de altura a 1366); a tabela pode rolar na horizontal dentro da caixa, com a coluna Obra ancorada (regra no fim do arquivo) */
-.tabela.qdop .motivos { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; min-width: 28ch; }
-/* menos respiro entre as colunas para as nove caberem a 1366; as pontas mantem o recuo do cartao */
-.tabela.qdop th, .tabela.qdop td { padding-left: 8px; padding-right: 8px; }
-.tabela.qdop th:first-child, .tabela.qdop td:first-child { padding-left: 20px; }
-.tabela.qdop th:last-child, .tabela.qdop td:last-child { padding-right: 20px; }
-/* o nome longo da obra corta com reticencias (o nome inteiro fica no title) */
-.tabela.qdop .truncar--nome { max-width: 18ch; }
-/* Lista de Obras: nove colunas; o cabecalho quebra linha ("Pedido de prorrogacao") para caber a 1366 sem rolar */
-.tabela.obras-lista thead th { white-space: normal; vertical-align: bottom; }
-.tabela.obras-lista td { vertical-align: top; }
-.tabela.obras-lista th, .tabela.obras-lista td { padding-left: 8px; padding-right: 8px; }
-/* o recuo das pontas volta (a regra acima o tiraria): a tabela alinha com o titulo e os filtros do cartao */
-.tabela.obras-lista th:first-child, .tabela.obras-lista td:first-child { padding-left: 20px; }
-.tabela.obras-lista th:last-child, .tabela.obras-lista td:last-child { padding-right: 20px; }
-/* o instrumento nao parte no hifen (161/2022/00/00-SINFRA), e o oficio tambem nao */
-.tabela.obras-lista .campo__nota.num, .sem-quebra { white-space: nowrap; }
 /* "vencida ha N dias": a cor de acao ganha da cor da nota */
 .campo__nota.negativo { color: var(--situacao-critico-texto); }
 /* Matriz de Documentos: a empresa (CNPJ, obras que a exigem, ZIP) na primeira coluna; cada celula com a situacao
@@ -1366,35 +1181,16 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
 .tabela.matriz th, .tabela.matriz td { padding-left: 8px; padding-right: 8px; }
 .tabela.matriz th:first-child, .tabela.matriz td:first-child { padding-left: 20px; }
 .tabela.matriz th:last-child, .tabela.matriz td:last-child { padding-right: 16px; }
-.matriz__empresa > * + * { margin-top: 4px; }
-.matriz__acoes { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; font-size: var(--texto-meta); }
-.matriz__cnpj { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.matriz__cnpj .num { user-select: all; }
-/* o CNPJ ocupa a linha inteira em qualquer largura (N4-02); o Copiar e o ZIP ficam lado a lado embaixo dele, e a nota da copia (N04-06) tambem tem linha propria */
-.matriz__cnpj .campo__nota { flex-basis: 100%; }
 /* nome do arquivo escolhido dentro do botao: corta com reticencias em vez de alargar a linha (o inteiro no title) */
 .arquivo-nome { display: inline-block; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
-/* Medicoes: a fila e a lateral (avisos e protocolos do mes) ficam lado a lado ate' 1100px, para os criticos e quem
-   falta protocolar aparecerem sem rolar tambem a 1366. */
-.com-lateral--fila { grid-template-columns: minmax(0, 1fr) minmax(300px, 420px); }
-.familias { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 /* a cabeca da fila: o titulo e os filtros, sem cartao so' deles (os grupos sao os cartoes) */
-.fila__cabeca { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 24px; }
-.fila__titulo { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
-.fila__zero { margin: 0; }
-.lateral__mes { margin: 0; font-size: var(--texto-meta); }
 .faltam { display: grid; gap: 12px; }
 /* O que a lateral mostra ganha, na tela estreita, uma versao curta logo depois do que falta. */
-.so-estreito { display: none; }
 @media (max-width: 1400px) {
-  .com-lateral { grid-template-columns: minmax(0, 1fr); }
-  .com-lateral.com-lateral--fila { grid-template-columns: minmax(0, 1fr) minmax(240px, 290px); }
-  /* na lateral estreita, 3 criticos (o mapa diz "ate' 5"); o resto esta' em "Ver todos os avisos" */
+      /* na lateral estreita, 3 criticos (o mapa diz "ate' 5"); o resto esta' em "Ver todos os avisos" */
   .alertas--lateral li:nth-child(n + 4) { display: none; }
-  .so-largo { display: none; }
-  .so-estreito { display: block; }
-}
-@media (max-width: 1100px) { .com-lateral.com-lateral--fila { grid-template-columns: minmax(0, 1fr); } }
+    }
+@media (max-width: 1100px) {  }
 /* "Ver os N acontecimentos": o summary e' um controle, com a seta que diz se esta' aberto */
 .detalhes > summary { cursor: pointer; color: var(--cor-tinta); font-size: var(--texto-meta); width: fit-content; }
 .detalhes > summary:hover { color: var(--cor-menu-realce); text-decoration: underline; }
@@ -1410,51 +1206,13 @@ details.cartao[open] > summary .seta { transform: rotate(90deg); }
 .opcoes { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }
 .opcoes > legend { padding: 0; margin-bottom: 6px; }
 
-/* Cabecalho da medicao: estado, proximo passo e valor lado a lado; os atos que nao sao de uma etapa a
-   direita, na mesma faixa (descem para a linha de baixo quando nao cabem). */
-/* (o resumo da obra e da medicao agora e' a grade .resumo-grade, no fim deste arquivo) */
-
-
 /* rotulo que leva ao lar do numero (o saldo, ao cronograma): cor e sublinhado de link */
 a.resumo__rotulo { color: var(--cor-tinta); text-decoration: underline; }
 a.resumo__rotulo:hover { color: var(--cor-menu-realce); }
 
-
 .linha-tempo { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; font-size: var(--texto-meta); }
 .linha-tempo li { display: grid; gap: 2px; padding-left: 12px; border-left: 2px solid var(--cor-linha); min-width: 0; overflow-wrap: anywhere; }
 .linha-tempo__data { color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
-
-/* -------------------------------------------------------------- certidoes */
-
-/* Campo de ARQUIVO: o unico controle do sistema que traz um botao do proprio
-   navegador dentro de si. Sem estilizar `::file-selector-button`, o formulario de
-   certidao ganharia um botao cinza de outro mundo no meio de uma linha de controles
-   de 32px. A altura vira `auto` porque o botao interno e o nome do arquivo mandam;
-   os 2px de sangria vertical devolvem os mesmos ~32px do resto da linha (a conta
-   esta' logo abaixo, junto do proprio `padding`). */
-.entrada--arquivo {
-  height: auto; max-width: 100%; min-width: 0;
-  /* borda 1 + 2 + botao de 26 + 2 + borda 1 = os mesmos 32px do resto da linha
-     (o `box-sizing: border-box` global faz a borda contar na altura) */
-  padding: 2px 10px 2px 2px;
-  font-size: var(--texto-meta); color: var(--cor-texto-secundario);
-}
-/* Degrau Controle (13px, herdado do campo) e altura 26px — o mesmo degrau do botao
-   voltar. A escala de controles do sistema e' 32 / 28 / 26 e nao tem 24. */
-.entrada--arquivo::file-selector-button {
-  box-sizing: border-box;
-  height: 26px; padding: 0 9px; margin-right: 10px;
-  border: 1px solid var(--cor-borda-controle);
-  border-radius: var(--raio-controle);
-  background: var(--cor-superficie);
-  color: var(--cor-tinta);
-  font: inherit; font-weight: 500;
-  cursor: pointer;
-  transition: background .12s ease, border-color .12s ease;
-}
-.entrada--arquivo::file-selector-button:hover {
-  background: var(--cor-papel-sombreado); border-color: var(--cor-tinta);
-}
 
 /* Campo de observacao/nome: mais larga que a media (168px) porque o conteudo e'
    frase, nao dado. Continua um degrau de largura nomeado, como as outras. */
@@ -1466,10 +1224,6 @@ a.resumo__rotulo:hover { color: var(--cor-menu-realce); }
    proprio, que e' exatamente o que ele e': uma pendencia deixada para a pessoa. */
 .sugestao { display: grid; gap: 8px; justify-items: start; }
 .sugestao p { margin: 0; }
-.sugestao__avisos {
-  list-style: none; margin: 0; padding: 0;
-  display: grid; gap: 6px; justify-items: start;
-}
 
 /* ------------------------------------------------------- responsividade */
 
@@ -1477,8 +1231,7 @@ a.resumo__rotulo:hover { color: var(--cor-menu-realce); }
   .topbar, .pagina { padding-left: 16px; padding-right: 16px; }
   .topbar { padding-top: 24px; }
   .resumo { flex-direction: column; gap: 14px; }
-  .resumo__valor { margin-left: 0; text-align: left; }
-  /* selo em cima da mensagem: a coluna fixa de 152px comeria metade da largura */
+    /* selo em cima da mensagem: a coluna fixa de 152px comeria metade da largura */
   .alerta {
     grid-template-columns: minmax(0, 1fr);
     justify-items: start; gap: 5px;
@@ -1488,41 +1241,11 @@ a.resumo__rotulo:hover { color: var(--cor-menu-realce); }
   /* Coluna de acoes ancorada e' remedio de tela LARGA (janela em que a matriz quase
      cabe). Em 375 ela comeria dois tercos da largura visivel: aqui a tabela inteira
      rola por dentro do cartao, como as outras. */
-  .tabela th.col-acoes--fixa, .tabela td.col-acoes--fixa,
   .tabela th.col-fixa, .tabela td.col-fixa {
     position: static; box-shadow: none;
   }
 }
 
-/* ------------------------------------------------------- fase 3,5: contadores */
-
-/* Faixa de contadores do Painel da Engenharia e do Painel geral: cada um e' um LINK
-   para onde a acao acontece (fila, secao da pagina). Mesmo cartao da casa, so' que
-   em grade; o numero e' o dado (Display), o rotulo diz o que ele conta. */
-/* D13 (F-100): KPIs em FAIXA dentro do cartao, com divisoria de 1px --linha entre eles, no lugar de um cartao com
-   sombra por numero (a sombra de nivel 1 fica so' no cartao). Uma coluna de 200 a 320px por KPI, lado a lado: a
-   faixa nao quebra em duas linhas (quatro KPIs com "R$ 12.345.678,90" em Display cabem a 1366) e, com tres, cada
-   um ganha ate' 320px em vez de esticar pela largura toda (1600px). */
-.kpis {
-  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, 320px);
-  list-style: none; margin: 0; padding: 16px 0;
-}
-.kpi {
-  display: grid; gap: 2px; align-content: start;
-  padding: 0 24px;
-  color: var(--cor-tinta);
-  text-decoration: none;
-}
-.kpi + .kpi { border-left: 1px solid var(--cor-linha); }
-.kpi:first-child { padding-left: 20px; }
-/* Degrau Display (DESIGN.md › Typography) em TODO KPI, inclusive o de dinheiro: o valor do mes em
-   15px ao lado de uma contagem em 22px invertia a hierarquia da tela inicial. */
-.kpi__valor { font-size: var(--texto-valor); font-weight: 600; letter-spacing: -.02em; line-height: 1.2; white-space: nowrap; }
-.kpi__rotulo { font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
-.kpi__acao { font-size: var(--texto-mini); color: var(--cor-tinta); font-weight: 600; margin-top: 4px; }
-
-/* Link de identificacao numa celula (nº do instrumento): o mesmo destino do `.nome-btn`
-   das tabelas, so' que como ancora (a URL existe desde a fase 3,5). */
 /* N05-08: sublinhado fino em --linha-forte para se ler como o mesmo link da obra em outros cartoes; vira --acento no hover */
 .nome-link { font-weight: 600; color: var(--cor-tinta); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-color: var(--cor-borda-controle); }
 .nome-link:hover { color: var(--cor-menu-realce); text-decoration-color: var(--cor-tinta); }
@@ -1565,14 +1288,12 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .notas__celula--diverge { color: var(--situacao-critico-texto); font-weight: 600; text-decoration: underline wavy; text-underline-offset: 3px; }
 .notas__feito { color: var(--cor-texto-secundario); }
 
-/* Documentos de protocolo (bloco 4): fila de conferencia das certidoes arrastadas e um cartao
-   por empresa, no mesmo ritmo dos paineis de Notas. */
 /* coluna minmax(0, 1fr): a matriz, mais larga que a tela estreita, rola dentro do quadro dela (Rolagem) em vez de
    alargar a pagina inteira */
 .documentos { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .documentos__fila { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
 .documentos__item { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--cor-linha);
-  border-radius: 8px; font-size: var(--texto-meta); }
+  border-radius: var(--raio-controle); font-size: var(--texto-meta); }
 .documentos__arquivo { font-weight: 600; overflow-wrap: anywhere; }
 
 /* ---- Envio de e-mail no desenho do Outlook (2026-09-25, pedido do dono) ----------------------------------
@@ -1580,53 +1301,54 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
    para quem envia reconhecer a tela; cores e letra sao as da fundacao desde #719. */
 .ol-janela {
   font-family: var(--fonte-texto); color: var(--cor-tinta);
-  background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: 8px; box-shadow: 0 2px 4px color-mix(in srgb, var(--cor-tinta) 8%, transparent);
+  background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: var(--raio-controle); box-shadow: 0 2px 4px color-mix(in srgb, var(--cor-tinta) 8%, transparent);
   font-size: var(--texto-meta); }
 .ol-topo { display: flex; align-items: center; gap: 16px; padding: 12px 12px 8px; }
 .ol-enviar { display: inline-flex; align-items: center; gap: 6px; background: var(--cor-tinta); color: var(--cor-papel); border: 0;
-  border-radius: 4px; padding: 6px 16px; font: inherit; font-weight: 600; cursor: pointer; }
+  border-radius: var(--raio-controle); padding: 6px 16px; font: inherit; font-weight: 600; cursor: pointer; }
 .ol-enviar:hover:not(:disabled), .ol-enviar:active:not(:disabled) { background: var(--cor-menu-realce); color: var(--cor-papel); }
 .ol-enviar:disabled { background: var(--cor-papel-escuro); color: var(--cor-texto-terciario); cursor: not-allowed; }
-.ol-botao { background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: 4px; padding: 6px 16px; font: inherit; cursor: pointer; }
+.ol-botao { background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); padding: 6px 16px; font: inherit; cursor: pointer; }
 .ol-de { color: var(--cor-tinta); }
-.ol-icone { border: 0; background: none; color: var(--cor-texto-secundario); cursor: pointer; padding: 4px; border-radius: 4px;
+.ol-icone { border: 0; background: none; color: var(--cor-texto-secundario); cursor: pointer; padding: 4px; border-radius: var(--raio-controle);
   font-size: var(--texto-valor-menor); line-height: 1; display: inline-flex; }
 .ol-icone:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
 .ol-descartar { margin-left: auto; }
 .ol-confirmar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 4px 12px 8px; }
 .ol-linha { display: flex; align-items: center; gap: 10px; padding: 4px 12px; }
-.ol-rotulo { min-width: 42px; background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: 4px; padding: 4px 10px;
+.ol-rotulo { min-width: 42px; background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); padding: 4px 10px;
   font: inherit; color: var(--cor-tinta); cursor: pointer; }
 .ol-rotulo:hover { background: var(--cor-papel-sombreado); }
 .ol-campo { position: relative; flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 32px;
   border-bottom: 1px solid var(--cor-linha); cursor: text; }
 .ol-campo:focus-within { border-bottom: 2px solid var(--cor-foco); }
 .ol-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--cor-papel-sombreado); border: 1px solid var(--cor-linha);
-  border-radius: 4px; padding: 1px 4px 1px 6px; white-space: nowrap; }
+  border-radius: var(--raio-controle); padding: 1px 4px 1px 6px; white-space: nowrap; }
 .ol-chip__icone { color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
 .ol-chip button { border: 0; background: none; cursor: pointer; color: var(--cor-tinta); font-size: var(--texto-corpo); line-height: 1; padding: 0 2px; }
 .ol-entrada { flex: 1; min-width: 140px; border: 0; outline: 0; font: inherit; padding: 4px 0; background: transparent; }
-.ol-cco { border: 0; background: none; color: var(--cor-tinta); font: inherit; cursor: pointer; padding: 4px 6px; border-radius: 4px; }
+.ol-cco { border: 0; background: none; color: var(--cor-tinta); font: inherit; cursor: pointer; padding: 4px 6px; border-radius: var(--raio-controle); }
 .ol-cco:hover { background: var(--cor-papel-sombreado); }
 .ol-sugestoes { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; width: 300px; margin: 0; padding: 4px 0;
-  list-style: none; background: var(--cor-superficie); border-radius: 4px; box-shadow: 0 8px 16px color-mix(in srgb, var(--cor-tinta) 14%, transparent), 0 0 2px color-mix(in srgb, var(--cor-tinta) 12%, transparent); }
+  list-style: none; background: var(--cor-superficie); border-radius: var(--raio-controle); box-shadow: 0 8px 16px color-mix(in srgb, var(--cor-tinta) 14%, transparent), 0 0 2px color-mix(in srgb, var(--cor-tinta) 12%, transparent); }
 .ol-sugestao { display: flex; align-items: center; gap: 10px; padding: 6px 10px; cursor: pointer; }
-.ol-sugestao--ativa { background: var(--cor-papel-sombreado); outline: 2px solid var(--cor-tinta); outline-offset: -2px; border-radius: 4px; }
+.ol-sugestao--ativa { background: var(--cor-papel-sombreado); outline: 2px solid var(--cor-tinta); outline-offset: -2px; border-radius: var(--raio-controle); }
 .ol-sugestao__texto { display: grid; }
 .ol-sugestao__nome { color: var(--cor-tinta); }
 .ol-sugestao__email { color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
-.ol-avatar { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: var(--texto-mini);
+.ol-avatar { flex: none; width: 28px; height: 28px; border-radius: var(--raio-avatar); display: grid; place-items: center; font-size: var(--texto-mini);
   font-weight: 600; color: var(--cor-tinta); }
 .ol-assunto { padding: 4px 12px; }
 /* o nome do campo a' vista so' onde a pagina o pede (a da medicao, #722): o campo ja' se chama "Assunto" */
 .ol-assunto__rotulo { display: none; }
-.ol-assunto input { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--cor-linha); outline: 0;
-  font: inherit; padding: 8px 0; background: transparent; }
-.ol-assunto input:focus { border-bottom: 2px solid var(--cor-foco); }
+/* o assunto e' uma area de texto de uma linha que cresce com o conteudo (field-sizing): o texto longo quebra */
+.ol-assunto textarea { display: block; width: 100%; max-width: none; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--cor-linha); outline: 0;
+  font: inherit; line-height: var(--entrelinha); padding: 8px 0; background: transparent; resize: none; overflow: hidden; field-sizing: content; }
+.ol-assunto textarea:focus { border-bottom: 2px solid var(--cor-foco); }
 .ol-anexos { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 8px 12px 0; list-style: none; }
 .ol-anexo { display: flex; align-items: center; gap: 8px; max-width: 360px; border: 1px solid var(--cor-linha);
-  border-radius: 4px; padding: 6px 10px; }
-.ol-anexo__tipo { flex: none; min-width: 32px; padding: 3px 4px; border-radius: 3px; font-size: var(--texto-mini); font-weight: 700;
+  border-radius: var(--raio-controle); padding: 6px 10px; }
+.ol-anexo__tipo { flex: none; min-width: 32px; padding: 3px 4px; border-radius: var(--raio-controle); font-size: var(--texto-mini); font-weight: 700;
   text-align: center; color: var(--cor-papel); background: var(--cor-texto-secundario); }
 .ol-anexo__tipo--docx, .ol-anexo__tipo--doc { background: var(--cor-tinta); }
 .ol-anexo__tipo--pdf { background: var(--cor-tinta); }
@@ -1650,8 +1372,8 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
   border-bottom: 1px solid var(--cor-linha); }
 .ol-barra--flutuante { position: absolute; z-index: 20; transform: translateY(calc(-100% - 6px)); margin: 0; padding: 4px;
   max-width: 100%; box-sizing: border-box;
-  background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: 6px; box-shadow: 0 4px 14px color-mix(in srgb, var(--cor-tinta) 14%, transparent); }
-.ol-formato { min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px;
+  background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); box-shadow: 0 4px 14px color-mix(in srgb, var(--cor-tinta) 14%, transparent); }
+.ol-formato { min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--raio-controle);
   background: transparent; color: var(--cor-tinta); font: var(--texto-meta) var(--fonte-texto); cursor: pointer;
   display: inline-grid; place-items: center; }
 .ol-formato:hover { background: var(--cor-papel-sombreado); }
@@ -1661,21 +1383,21 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-formato__realce { background: #FFFF00; padding: 0 2px; line-height: 1.2; }
 .ol-paleta { position: relative; display: inline-block; }
 .ol-paleta__cores { position: absolute; z-index: 21; top: calc(100% + 4px); left: 0; display: flex; gap: 4px; padding: 6px;
-  background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: 6px; box-shadow: 0 4px 14px color-mix(in srgb, var(--cor-tinta) 14%, transparent); }
-.ol-cor { width: 22px; height: 22px; padding: 0; border: 1px solid var(--cor-borda-controle); border-radius: 3px; background: var(--cor-superficie);
+  background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); box-shadow: 0 4px 14px color-mix(in srgb, var(--cor-tinta) 14%, transparent); }
+.ol-cor { width: 22px; height: 22px; padding: 0; border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); background: var(--cor-superficie);
   cursor: pointer; font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
 .ol-cor:focus-visible { outline: 2px solid var(--cor-foco); outline-offset: 1px; }
 .ol-assinatura img { display: block; max-width: 600px; width: 100%; height: auto; margin-top: 8px; }
-.ol-sem-assinatura { color: var(--cor-texto-secundario); font-size: var(--texto-mini); border: 1px dashed var(--cor-linha); border-radius: 4px;
+.ol-sem-assinatura { color: var(--cor-texto-secundario); font-size: var(--texto-mini); border: 1px dashed var(--cor-linha); border-radius: var(--raio-controle);
   padding: 8px 10px; max-width: 60ch; }
 .ol-modal-fundo { position: fixed; inset: 0; z-index: 100; background: var(--cor-veu); display: grid; place-items: center; }
 .ol-modal { width: min(1100px, 94vw); height: min(640px, 88vh); display: grid; grid-template-rows: auto 1fr auto;
-  background: var(--cor-superficie); border-radius: 8px; box-shadow: 0 25px 60px color-mix(in srgb, var(--cor-tinta) 30%, transparent); font-family: var(--fonte-texto);
+  background: var(--cor-superficie); border-radius: var(--raio-controle); box-shadow: 0 25px 60px color-mix(in srgb, var(--cor-tinta) 30%, transparent); font-family: var(--fonte-texto);
   color: var(--cor-tinta); font-size: var(--texto-meta); overflow: hidden; }
 .ol-modal__cabeca { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px;
   background: var(--cor-papel-sombreado); font-size: var(--texto-titulo-sub); }
 .ol-modal__corpo { display: grid; grid-template-rows: auto 1fr auto; gap: 8px; padding: 12px 16px; min-height: 0; }
-.ol-busca { border: 1px solid var(--cor-borda-controle); border-radius: 4px; padding: 6px 10px; font: inherit; }
+.ol-busca { border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); padding: 6px 10px; font: inherit; }
 .ol-busca:focus { outline: 2px solid var(--cor-foco); outline-offset: -1px; }
 .ol-tabela-wrap { overflow: auto; min-height: 0; overscroll-behavior: contain; }
 .ol-tabela { width: 100%; border-collapse: collapse; }
@@ -1706,42 +1428,32 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .confirmar-faltas__lista { margin: 8px 0; padding-left: 20px; display: grid; gap: 4px; overflow-wrap: anywhere; }
 .confirmar-faltas__pergunta { font-weight: 600; }
 .confirmar-faltas__acoes { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
-.assinatura-previa { display: block; max-width: 600px; width: 100%; height: auto; border: 1px solid var(--cor-linha); border-radius: 4px; }
 .ol-corpo .ol-editor { height: auto; padding: 0; border-radius: 0; max-width: none; }
 .ol-janela input, .ol-janela textarea { box-shadow: none; }
 .ol-entrada { height: auto; padding: 4px 0; border-radius: 0; }
-.ol-assunto input { height: auto; border-radius: 0; padding: 8px 0; }
-.assinatura-alvo { border: 1px dashed var(--cor-borda-controle); border-radius: 6px; padding: 14px; text-align: center; color: var(--cor-texto-secundario); cursor: pointer; }
+.ol-assunto textarea { height: auto; border-radius: 0; padding: 8px 0; }
+.assinatura-alvo { border: 1px dashed var(--cor-borda-controle); border-radius: var(--raio-controle); padding: 14px; text-align: center; color: var(--cor-texto-secundario); cursor: pointer; }
 .assinatura-alvo:focus { outline: 2px solid var(--cor-tinta); outline-offset: 2px; }
 /* Ajuste fino das linhas Para/Cc/Cco contra o print do Outlook (2026-09-25): botao branco com borda e texto
    semibold alinhado a primeira linha, etiqueta branca com borda fina, linha do campo cinza escura. */
 .ol-janela .ol-linha { align-items: flex-start; padding: 6px 12px; }
-.ol-janela .ol-rotulo { background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: 4px; min-width: 52px; height: 32px;
+.ol-janela .ol-rotulo { background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); min-width: 52px; height: 32px;
   padding: 0 12px; font-weight: 600; color: var(--cor-tinta); box-shadow: none; }
 .ol-janela .ol-rotulo:hover { background: var(--cor-papel-sombreado); border-color: var(--cor-tinta); }
 .ol-janela .ol-campo { gap: 6px; min-height: 32px; padding: 2px 0 6px; border-bottom: 1px solid var(--cor-borda-controle); }
 .ol-janela .ol-campo:focus-within { border-bottom: 2px solid var(--cor-foco); padding-bottom: 5px; }
-.ol-janela .ol-chip { background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: 4px; height: 26px; box-sizing: border-box;
+.ol-janela .ol-chip { background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: var(--raio-controle); height: 26px; box-sizing: border-box;
   padding: 0 4px 0 6px; gap: 4px; color: var(--cor-tinta); font-size: var(--texto-meta); }
 .ol-janela .ol-chip:hover { background: var(--cor-papel-sombreado); }
 .ol-janela .ol-chip__icone { color: var(--cor-texto-secundario); flex: none; }
 .ol-janela .ol-chip__nome { line-height: 24px; }
 .ol-janela .ol-chip button { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
-  margin-left: 6px; border: 0; border-radius: 3px; background: none; color: var(--cor-texto-secundario); padding: 0; }
+  margin-left: 6px; border: 0; border-radius: var(--raio-controle); background: none; color: var(--cor-texto-secundario); padding: 0; }
 .ol-janela .ol-chip button:hover { background: var(--cor-papel-escuro); }
 .ol-janela .ol-entrada { height: 26px; min-width: 120px; }
 .ol-janela .ol-campo__direita { margin-left: auto; align-self: center; }
 .ol-janela .ol-cco { height: 26px; padding: 0 6px; color: var(--cor-tinta); }
 
-/* --------------------------------------------------------- login (F-43) */
-/* Mesmo sistema das telas de dentro: cartao de superficie, campo com rotulo visivel e primario que
-   nao estica. A logo repete a da sidebar. */
-.login { min-height: 100vh; display: grid; place-items: start center; padding: 12vh 16px 24px; background: var(--cor-papel); }
-.login__cartao { width: min(360px, 100%); padding: 24px; display: grid; gap: 16px; }
-.login__cartao > .btn { justify-self: start; }
-.login__titulo { margin: 0; font-size: var(--texto-titulo-bloco); line-height: 1.3; }
-
-/* --------------------------------------------------------- pendencias (F-46) */
 /* Lista de pendencias com o nivel no selo: o selo numa coluna, o texto ao lado, alinhados pela linha
    de base; sem marcador de lista (o selo ja' e' o marcador). */
 .pendencias { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 10px; align-items: baseline; }
@@ -1754,30 +1466,6 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .link-selo { text-decoration: none; border-radius: var(--raio-selo); }
 .link-selo:hover .selo__texto { text-decoration: underline; }
 
-/* --------------------------------------------------------- grade de tabelas irmas (F-47) */
-/* Tabelas empilhadas (grupos da fila, cartoes de avisos, Em andamento x Anteriores) dividem a mesma
-   grade: layout fixo e colunas com largura em px pelo `colgroup`; a coluna sem classe fica com a sobra
-   (nome da obra, texto do aviso, proximo passo). As larguras cabem o conteudo mais longo de cada coluna
-   (a 23a medicao de reajuste, o selo "Nota diverge", um valor na casa dos milhoes) sem quebrar no meio. */
-.tabela--grade { table-layout: fixed; }
-.tabela--grade .selo, .tabela--grade .estado { white-space: nowrap; }
-.tabela--grade col.c-medicao { width: 184px; }
-.tabela--grade col.c-medicao-obra { width: 200px; }
-/* 112px: o cabecalho COMPETENCIA em caixa alta nao cabe em menos (N3-07) */
-.tabela--grade col.c-comp { width: 112px; }
-.tabela--grade col.c-estado { width: 160px; }
-.tabela--grade col.c-valor { width: 152px; }
-.tabela--grade col.c-ha { width: 96px; }
-.tabela--grade col.c-marcas { width: 148px; }
-/* #748: com a coluna "Custo lançado no RM" (aba Medicoes da obra com cadastro de custo), a coluna livre (proximo passo,
-   notas) ainda precisa de lugar: a tabela cresce e rola dentro da caixa, em vez de espremer a coluna livre a zero. */
-.tabela--grade.tabela--com-custo { min-width: calc(var(--alvo-minimo) * 31); }
-.tabela--grade col.c-nivel { width: 112px; }
-.tabela--grade col.c-quando { width: 150px; }
-.tabela--grade col.c-valor-aviso { width: 136px; }
-.tabela--grade col.c-situacao { width: 220px; }
-.tabela--grade col.c-data { width: 132px; }
-.tabela--grade col.c-acao { width: 120px; }
 /* Documentos da obra (#661): o que falta para protocolar, uma linha por documento; o documento a esquerda e a
    empresa (link para Documentos) a direita; no celular a empresa desce para a linha de baixo, sem cortar o nome */
 .docs-falta { list-style: none; margin: 0; padding: 4px 20px 8px; }
@@ -1785,32 +1473,14 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .docs-falta li + li { border-top: 1px solid var(--cor-linha); }
 .docs-falta__item { font-weight: 600; }
 .docs-falta li > a { min-width: 0; overflow-wrap: anywhere; }
-/* tabela dentro de um details que e' o corpo do cartao: sem o recuo do corpo, na grade dos outros cartoes */
-.detalhes--tabela > .tabela-wrap { margin-left: -20px; margin-right: -20px; }
 /* No notebook a fila divide a largura com a lateral: as colunas de dado apertam para a Obra nao cair abaixo
    de ~160px (round-02: a Obra ficava com ~110px e cortava ate' "Coxipó 3ª Etapa"). */
 @media (max-width: 1400px) {
-  .tabela--grade col.c-medicao { width: 128px; }
-  .tabela--grade col.c-ha { width: 92px; }
-  .tabela--grade col.c-marcas { width: 144px; }
-  /* N4-04: a Obra da fila nao perde largura a 1366; 148px para um valor na casa do bilhao caber (N04-03) */
-  .tabela--grade col.c-valor { width: 148px; }
-}
-/* A receber (N3-04): o orgao e' quem identifica a linha; fica com ao menos 16rem e quebra em ate' 2 linhas */
-.tabela th.col-orgao { min-width: 12rem; }
-/* Avisos por obra (F-55): a contagem ao lado do nome, no peso normal e na cor de apoio */
-
-/* A receber (F-60): o total e' o numero principal da tela, em Display 22/600 na cabeca do cartao "Por orgao", com o
-   rotulo embaixo e uma linha de apoio (quanto passa de 60 dias, quantas medicoes e notas). */
-.total-receber__valor { font-size: var(--texto-valor); font-weight: 600; letter-spacing: -.02em; line-height: 1.2; color: var(--cor-tinta); white-space: nowrap; }
-.total-receber__rotulo, .total-receber__apoio { font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
-.total-receber__apoio { margin-top: 2px; }
-.total-receber__nota { margin: 10px 0 0; }
+  }
 
 /* A receber (F-62): as obras do orgao aberto sao linhas-filha da tabela, nas mesmas colunas. O recuo de +20px
    (40px no total) mostra de quem sao, e o fundo do tom acima as agrupa sob a linha do orgao. `col-obra` na regra
    vence o padding-left: 20px do primeiro th do corpo por especificidade. */
-.tabela tbody th[scope="row"].col-obra:first-child { padding-left: 40px; }
 .tabela tbody tr.obra-filha > th[scope="row"], .tabela tbody tr.obra-filha > td { background: var(--cor-papel-sombreado); }
 
 /* ----------------------------------------------------------------- resumo em grade (F-53, D11)
@@ -1818,18 +1488,14 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
    lugar entre obras (flex-wrap as embaralhava e separava os pares). Rotulo em cima (resumo__rotulo), valor embaixo.
    Degraus: o valor principal da tela em Display 22/600; os demais valores e as datas em Valor 15/600. */
 .resumo-grade { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 24px; align-items: start; }
-.resumo-grade__par { display: grid; gap: 14px; align-content: start; min-width: 0; }
 .dado { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
 .dado .resumo__rotulo { margin-bottom: 1px; }
 .dado__valor { font-size: var(--texto-corpo); font-weight: 600; line-height: 1.3; color: var(--cor-tinta); overflow-wrap: anywhere; }
 /* .negativo sozinho empata em especificidade com .dado__valor: este repoe o vermelho do saldo negativo */
 .dado__valor.negativo { color: var(--situacao-critico-texto); }
-.dado__valor--principal { font-size: var(--texto-valor); letter-spacing: -.02em; line-height: 1.2; }
 .dado .campo__nota { margin-top: 2px; }
 /* o botao de editar o valor fica logo abaixo dele, com um respiro */
 .dado .btn { margin-top: 6px; }
-/* os atos da medicao (marcar final, cancelar, desistir) numa faixa propria abaixo da grade */
-.resumo-medicao__atos { margin-top: 14px; }
 /* tela estreita: a grade cai para 2 colunas (so' o par de cada coluna anda junto) e depois para 1 */
 @media (max-width: 1100px) { .resumo-grade { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .resumo-grade { grid-template-columns: minmax(0, 1fr); } }
@@ -1839,54 +1505,17 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .link.forte, a.link.forte { color: var(--cor-tinta); font-weight: 600; }
 .link.forte:hover, a.link.forte:hover { color: var(--cor-menu-realce); }
 
-/* Avisos (N4-05): o fato do aviso na cor principal, para ficar acima do apoio (destino e quando); a obra segue em .forte */
-.tabela tbody td.aviso__fato { color: var(--cor-tinta); }
-/* resumo recolhido da Atencao: so' "Atencao (N)" fica no acento de link; o mais atrasado e' apoio (N4-05) */
-
-/* Fila de Medicoes (F-57): o filtro Proximo passo e' uma linha de links com contagem, sob o rotulo; pede largura
-   para os 5 links ficarem na mesma linha e so' quebra quando nao cabem */
-.form-inline > .campo--passos { flex: 1 1 28rem; }
-
 /* Protocolos do mes (F-56b): rotulo em 600 sem caixa alta; obra em 600 e, sob ela, uma linha por medicao aberta
    (titulo a esquerda, "ha N dias" a direita); sem marcador de lista, recuo de 20px como o corpo do cartao */
-.faltam__rotulo { margin: 0; font-weight: 600; }
-.faltam__rotulo.cartao__corpo { padding-bottom: 6px; }
 .lista-simples.faltam { list-style: none; padding: 0 20px 14px; }
-.faltam__obra > a { font-weight: 600; }
-.faltam__medicoes { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; }
-.faltam__medicoes li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-.faltam__ha { flex: none; white-space: nowrap; font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
-.faltam__nota { display: block; margin-top: 2px; }
 
-/* Resumo da medicao (N04-01): o 4o par (valor + atestado) ocupa 2 linhas da coluna 4 e os atos ficam na linha 2,
-   sob as colunas 1 a 3, sem o vazio que a faixa solta deixava. So' vale com o modificador --medicao (a obra nao muda). */
-.resumo-grade--medicao .resumo-grade__par--valor { grid-column: 4; grid-row: 1 / span 2; }
-.resumo-grade--medicao .resumo-medicao__atos { grid-column: 1 / 4; grid-row: 2; align-self: end; margin-top: 0; }
-/* rotulo a esquerda e botao pequeno a direita na mesma linha, alinhados pela base do texto; quebra se faltar largura */
-.dado__cabeca { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; align-self: stretch; min-width: 0; }
-.dado__cabeca .resumo__rotulo { margin-bottom: 0; }
-/* o botao pequeno nao empurra o rotulo e o valor para baixo (N05-03): a linha fica na altura do rotulo */
-.dado__cabeca .btn { margin-top: -6px; margin-bottom: -6px; }
 /* tela estreita: o par do valor volta ao fluxo normal e os atos ocupam a linha inteira */
 @media (max-width: 1100px) {
-  .resumo-grade--medicao .resumo-grade__par--valor { grid-column: auto; grid-row: auto; }
-  .resumo-grade--medicao .resumo-medicao__atos { grid-column: 1 / -1; grid-row: auto; align-self: start; }
-}
-
-/* Matriz de Documentos (N04-02): o anel de foco da ancora da empresa (th#emp-N, foco programatico ao chegar por link)
-   vai para dentro da celula; com o recuo de 2px de fora a regiao de rolagem cortava tres lados dele */
-.matriz__empresa:focus-visible, .matriz__empresa:focus { outline-offset: -2px; }
-/* Copiar e ZIP da empresa (N4-02): 8px de respiro lateral nos dois, para caberem lado a lado nos ~123px da coluna */
-.matriz__cnpj .btn--pequeno { padding-left: 8px; padding-right: 8px; }
-
-/* A receber (N04-10): antes da conciliacao o Display mostra "—" e esta frase, em corpo, diz o motivo */
-.total-receber__conciliar { font-size: var(--texto-meta); line-height: 1.4; color: var(--cor-texto-secundario); margin-top: 4px; }
+    }
 
 /* F-36a: trecho de code que quebra de linha mantem a borda e o raio nas duas pontas */
 code { -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 
-/* Documentos (F-102, F-88, F-77): "em dia" sem fundo, data do ZIP na cabeca do cartao, nota da matriz sem quebra */
-.estado--ok .estado__ponto { background: var(--situacao-feito-ponto); }
 /* cabeca do cartao que ganha a data do ZIP: quebra linha em vez de espremer o titulo e a dica */
 .cartao__cabeca--quebra { flex-wrap: wrap; }
 /* rotulo e campo lado a lado (a data do ZIP na cabeca) */
@@ -1909,25 +1538,8 @@ a.contagem:hover .dado__valor { color: var(--cor-menu-realce); text-decoration: 
 /* Icone do "diverge do espelho" (Critico): forma alem da cor, alinhado ao texto de 12px */
 .notas__diverge .icone { vertical-align: -3px; margin-right: 4px; }
 
-
 /* Carteira: tabela de poucas colunas com largura pelo conteudo (F-83) */
 .tabela--estreita { max-width: 760px; }
-/* F-83: o SVG do grafico e' medido por este bloco (a largura do cartao, sem o respiro) */
-.grafico__medida { width: 100%; }
-/* D13: a faixa de KPIs leva uma divisoria em cima do que vem depois dela dentro do mesmo cartao */
-.kpis + .cartao__corpo, .kpis + .tabela-wrap { border-top: 1px solid var(--cor-linha); }
-/* F-84: o texto da obra com problema (nome, motivo, "mais N") corre na coluna ao lado do selo */
-.obras-problema__texto { min-width: 0; }
-.obras-problema__texto > * + * { margin-left: 8px; }
-
-/* F-73: esmaecimento de 24px na borda esquerda do grafico do contrato, SO' quando ele esta rolado (Cronograma.tsx poe data-esq).
-   E' sinal funcional de 'ha mais meses a esquerda', nao decoracao: a mascara so' age sobre o conteudo, nao troca cor. */
-.grafico[data-esq] {
-  -webkit-mask-image: linear-gradient(to right, transparent 0, var(--cor-tinta) 24px);
-  mask-image: linear-gradient(to right, transparent 0, var(--cor-tinta) 24px);
-}
-/* a mascara cortaria o anel de foco desenhado por fora da caixa: com ela ligada o anel fica por dentro */
-.grafico[data-esq]:focus-visible { outline-offset: -2px; }
 
 /* Checklist de pecas e anexos (F-67): peca, situacao em Selo e acao a direita; o nome do arquivo fica sob a peca. */
 .checklist-pecas { width: 100%; border: 1px solid var(--cor-linha); }
@@ -1980,15 +1592,20 @@ a.contagem:hover .dado__valor { color: var(--cor-menu-realce); text-decoration: 
 .secoes-pleito > .cartao__corpo, .secoes-pleito > .detalhes { border-top: 1px solid var(--cor-linha); }
 /* logo abaixo da cabeca do cartao pai a divisoria ja existe: a primeira secao nao dobra o traco */
 .cartao__cabeca + .secoes-pleito > :first-child { border-top: 0; }
-.pleito-linha { display: grid; gap: 4px; padding: 12px 20px; border-top: 1px solid var(--cor-linha); }
+.pleito-linha { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 12px 20px; border-top: 1px solid var(--cor-linha); }
 .pleito-linha__cabeca { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
-.pleito-linha__cabeca .selo { flex: none; }
+/* o selo do desfecho e comprido ("Atendido pelo apostilamento ..."): em caixa estreita quebra, em vez de alargar a pagina */
+.pleito-linha__cabeca .selo { flex: 0 1 auto; white-space: normal; }
+.pleito-linha__cabeca .selo__texto { white-space: normal; }
 .pleito-linha > p { margin: 0; }
 /* "Ciclos anteriores": o summary acompanha o respiro lateral das secoes e a lista abre colada nele */
 .pleito-anteriores > summary { padding: 12px 20px; }
 .pleito-anteriores[open] > summary { margin-bottom: 0; }
 /* issue #275: na tabela por competencia do reajuste, o estado e a marca do aviso na Situacao (ancorada a' direita,
    `.col-fixa`): lado a lado quando cabem, um embaixo do outro quando a tabela aperta */
+/* o cabecalho comprido ("Previsto no apostilamento") quebra: as oito colunas cabem na caixa sem rolar a 1440 px */
+.reajuste-competencias thead th { white-space: normal; }
+.tabela.tabela--densa.reajuste-competencias :is(th, td):not(:first-child):not(:last-child) { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
 .reajuste-competencias .selos { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 /* o nº da medicao que o termo cita, ao lado do valor apostilado */
 .reajuste-competencias__citada { color: var(--cor-texto-secundario); }
@@ -2008,18 +1625,10 @@ a.contagem:hover .dado__valor { color: var(--cor-menu-realce); text-decoration: 
 /* 3o loop: as celulas do meio de Obras e do A receber com 8px de respiro lateral ate' 1400px. O selo "N criticos"
    (F-58) e a nota "acima do prazo" (F-97) nao quebram, e com 12px as duas tabelas passavam a rolar 21px e 6px a 1366. */
 @media (max-width: 1400px) {
-  .tabela.obras-lista th:not(:first-child):not(:last-child), .tabela.obras-lista td:not(:first-child):not(:last-child),
   .tabela.a-receber th:not(:first-child):not(:last-child), .tabela.a-receber td:not(:first-child):not(:last-child) {
     padding-left: 8px; padding-right: 8px;
   }
 }
-/* F-58: a data do fim nao quebra (td.num), mas a nota embaixo ("vence em 187 dias", "Paralisada desde …") pode
-   quebrar: presa a' data, ela fazia a lista de Obras rolar 21px a 1366. */
-.tabela.obras-lista td.num .campo__nota { white-space: normal; }
-/* N07-02: a nota do prazo ("vence em 9 dias") volta a nao quebrar; so' "o orgao prorroga junto" e "Paralisada desde" quebram */
-
-/* Resumo da obra (N04-12): a curva falhou; a palavra "indisponivel" no lugar do valor, sem o peso nem o tamanho do Display */
-.dado__valor.dado__valor--indisponivel { font-size: var(--texto-corpo); font-weight: 400; letter-spacing: 0; color: var(--cor-texto-secundario); }
 
 /* F-81: "‹ Medicoes" (de onde se veio) e o breadcrumb (onde se esta') nao se leem mais como uma trilha so': o voltar vira botao pequeno com contorno */
 .topbar__trilha > .btn--voltar {
@@ -2028,18 +1637,8 @@ a.contagem:hover .dado__valor { color: var(--cor-menu-realce); text-decoration: 
 }
 .topbar__trilha > .btn--voltar:hover:not(:disabled) { border-color: var(--cor-texto-secundario); }
 
-/* Fila de Medicoes (N04-07/F-78): o rotulo do Obra e o do Proximo passo no mesmo y (a linha nao alinha mais pela base);
-   o grupo de links tem a altura do select (32px), com os links centralizados, e sem o teto de 78ch */
-.fila__cabeca .form-inline { align-items: flex-start; }
-.fila__cabeca .filtros-avisos__linha { min-height: 32px; align-items: center; max-width: none; }
-
-/* F-87: o estado na coluna Marcas da fila nao encosta no selo "nota diverge" (a margem final some se o selo quebra de linha) */
-.tabela--grade td .estado { margin-right: 8px; }
-
 /* F-93: o icone de seta do "onde se resolve" na lateral, no lugar do glifo */
 .alertas--lateral .campo__nota .icone { vertical-align: -3px; margin-right: 4px; }
-
-
 
 /* F-96: a linha do cartao "Avisos desta obra" e' um link inteiro; o destino em texto de apoio e o chevron no fim dizem isso.
    O chevron e' absoluto para nao virar coluna da grade do .alerta (que muda no celular); o respiro da direita e' dele. */
@@ -2047,57 +1646,24 @@ a.contagem:hover .dado__valor { color: var(--cor-menu-realce); text-decoration: 
 .alerta__seta { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); flex: none; color: var(--cor-texto-secundario); }
 a.alerta:hover .alerta__seta { color: var(--cor-tinta); }
 
-/* F-63 (R3): a coluna Obra do QDOP fica ancorada a' esquerda quando a tabela rola na horizontal (a 1366, com Motivos a 28ch).
-   Fundo OPACO (as linhas do QDOP nao tem zebra nem hover); o canto do cabecalho fica acima do thead sticky (z 2) e das celulas (z 1). */
-.tabela.qdop th:first-child, .tabela.qdop td:first-child { position: sticky; left: 0; z-index: 1; background: var(--cor-superficie); }
-.tabela.qdop thead th:first-child { z-index: 3; background: var(--cor-superficie); }
-.tabela-wrap--rola .tabela.qdop th:first-child, .tabela-wrap--rola .tabela.qdop td:first-child { box-shadow: inset -1px 0 0 var(--cor-borda-controle); }
-
-/* N07-03: eixo Y fixo do grafico do contrato, fora da caixa que rola (Cronograma.tsx). O quadro alinha o eixo
-   (SVG estreito, mesmas coordenadas y) ao lado da caixa .grafico; o respiro esquerdo do cartao (20px) passa para o quadro
-   e o topo do eixo repete os 16px de padding da caixa, para que o zero das duas coincida. Escopo em .grafico__quadro:
-   o .grafico da Diretoria nao muda. */
-.grafico__quadro { display: flex; align-items: flex-start; padding-left: 20px; }
-.grafico__eixo-y { display: block; flex: none; margin-top: 16px; }
-.grafico__quadro > .grafico { flex: 1 1 auto; min-width: 0; padding-left: 0; }
-
-/* N07-02 / F-58: o nivel do prazo em Obras vai em forma alem da cor. Triangulo (Critico) e ponto (Atencao) antes da
-   nota "vence em N dias"; o ponto e' o mesmo do selo (7px, currentColor), alinhado ao texto de 12px. */
 /* N07-02: abaixo de 1600px o selo de Status da lista de Obras pode quebrar ("Em / encerramento") se a tabela apertar;
    a folga que a nota do prazo (sem quebra) tomou sai dessa coluna, que so' encolhe quando falta espaco. */
 @media (max-width: 1599px) {
-  .tabela.obras-lista .selo__texto { white-space: normal; }
-}
+  }
 /* N07-06: a 1920 sobra largura; o cabecalho de data e o pedido ("CT-201-LT-2026, ha 23 dias") ficam em uma linha */
 @media (min-width: 1600px) {
-  .tabela.obras-lista thead th.col-data { white-space: nowrap; }
-  .tabela.obras-lista td.pedido { white-space: nowrap; }
-}
+    }
 
 /* N08-02: o selo de criticos em Obras diz a palavra (DESIGN › Selo) onde cabe; abaixo de 1600px fica o numero, com
    "N criticos" no title e no texto do leitor de tela (decisao pendente do dono: exceção ao "selo sempre com rotulo") */
-@media (max-width: 1599px) { .criticos__palavra { display: none; } }
-/* N08-02: "de N avisos" nao quebra; a regra que libera a quebra das notas do prazo (td.num .campo__nota) vencia o
-   .sem-quebra por especificidade */
-.tabela.obras-lista td.num .campo__nota.sem-quebra { white-space: nowrap; }
+@media (max-width: 1599px) {  }
 
 /* Redesenho (09/10/2026): a Mono e' so' do valor. A nota embaixo da data ("vence em 44 dias", "o orgao prorroga
    junto") e' frase e volta para a Sans; a pilula de situacao nao quebra linha. */
 td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .selo { white-space: nowrap; }
 
-/* Carteira (#163, opcao A): os tres numeros, a curva S, os cartoes por contratante e o painel do farol. */
-.cart-topo { display: flex; align-items: flex-end; gap: 12px 16px; flex-wrap: wrap; border-bottom: 1px solid var(--cor-linha); }
-.cart-topo .abas { border-bottom: 0; flex: 1 1 auto; min-width: 0; }
-.cart-topo .btn { margin-bottom: 8px; }
 /* #491: aba Custo da Carteira -- as medicoes ao lado da competencia, o grupo recuado sob ela */
-.custo__medicao { font-weight: 400; color: var(--cor-texto-secundario); }
-.custo__grupo { padding-left: 24px; font-weight: 400; }
-.cart-numeros { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); list-style: none; margin: 0; padding: 0; }
-.cart-numero { position: relative; padding: 18px 20px 16px 28px; display: grid; gap: 4px; }
-.cart-numero::before { content: ""; position: absolute; left: 14px; top: 18px; bottom: 18px; width: 4px; border-radius: var(--raio-selo); background: var(--cor-menu); }
-.cart-numero__rotulo { font-size: var(--texto-meta); font-weight: 500; color: var(--cor-texto-secundario); }
-.cart-numero__valor { font-size: var(--texto-titulo-pagina); line-height: 40px; font-weight: 500; letter-spacing: -.02em; color: var(--cor-tinta); white-space: nowrap; }
 .cart-curva { padding: 8px 20px 4px; }
 .cart-curva svg { display: block; width: 100%; }
 .cart-c-prev { fill: none; stroke: var(--cor-tinta); stroke-width: 2; }
@@ -2110,35 +1676,9 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .cart-c-guia { stroke: var(--cor-borda-controle); stroke-dasharray: 3 3; }
 .cart-leitura { font-size: var(--texto-mini); color: var(--cor-texto-secundario); padding-top: 4px; margin: 0; }
 .cart-leitura .num { color: var(--cor-tinta); }
-.cart-titulo-secao { margin: 8px 0 0; font-size: var(--texto-titulo-sub); line-height: 24px; }
-.cart-contratantes { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); list-style: none; margin: 0; padding: 0; }
-.cart-contratante { display: grid; gap: 6px; padding: 16px 20px 18px; text-align: left; text-decoration: none; color: var(--cor-tinta); height: 100%; box-sizing: border-box; }
-.cart-contratante:hover { border-color: var(--cor-borda-controle); }
-.cart-contratante__nome { margin: 0 0 6px; font-size: var(--texto-titulo-sub); font-weight: 600; color: var(--cor-tinta); }
-.cart-contratante__rotulo { font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
-.cart-contratante__valor { font-size: var(--texto-valor); line-height: 28px; font-weight: 500; color: var(--cor-tinta); }
-.cart-progresso { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; margin-top: 8px; }
-.cart-progresso__rotulo { grid-column: 1 / -1; font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
-.cart-progresso__trilho { height: 8px; border-radius: var(--raio-selo); background: var(--cor-contador-neutro); overflow: hidden; }
-.cart-progresso__feito { display: block; height: 100%; border-radius: var(--raio-selo); background: var(--cor-menu); }
-.cart-progresso__pct { font-size: var(--texto-mini); color: var(--cor-tinta); }
-.cart-nota-resumo { margin: 0; font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
-.cart-farois { display: flex; flex-wrap: wrap; gap: 8px; }
-.cart-farol-btn { height: 30px; border-radius: var(--raio-selo); padding: 0 12px; font-size: var(--texto-mini); }
 /* o filtro escolhido e' o mais forte: tinta cheia com texto papel (como o .sg__chip do SIGA) */
-.cart-farol-btn[aria-pressed="true"], .cart-farol-btn[aria-pressed="true"]:hover:not(:disabled) { background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel); }
-.cart-qdop-lado { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); }
-.cart-qdop-lado p { margin: 0 0 4px; }
-.cart-kpis--quebra { grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); row-gap: 16px; }
 @media (max-width: 767px) {
-  .cart-numero__valor { font-size: var(--texto-numero); line-height: 36px; }
-  .cart-topo { border-bottom: 0; }
-  .cart-topo .btn { margin-bottom: 0; width: 100%; justify-content: center; order: -1; }
-  .cart-topo .abas { border-bottom: 1px solid var(--cor-linha); flex-basis: 100%; }
-  .cart-kpis--quebra .kpi, .cart-kpis--quebra .kpi:first-child { padding: 0 16px; }
-  .cart-kpis--quebra .kpi + .kpi { border-left: 0; border-top: 1px solid var(--cor-linha); padding-top: 14px; }
-  .cart-kpis--quebra .kpi__valor { white-space: normal; }
-  .cart-curva { padding: 8px 8px 4px; }
+                .cart-curva { padding: 8px 8px 4px; }
 }
 
 /* ------------------------------------------------------------------- Pagina da obra (redesenho de 16/10/2026, #160)
@@ -2150,15 +1690,9 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .topbar__linha--quebra > .selo { margin-left: auto; }
 .topbar__meta--obra { margin: 0; }
 
-.obra-grade { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
-.obra-grade__principal, .obra-grade__lateral { display: grid; gap: 20px; min-width: 0; }
+/* pagina da obra: a disposicao das duas colunas mora em obra.css; aqui so' o que vale em qualquer largura */
 .obra-grade > * > * { min-width: 0; }
 @media (min-width: 1281px) { .obra-grade__lateral { position: sticky; top: 40px; } }
-@media (max-width: 1280px) {
-  .obra-grade { display: flex; flex-direction: column; align-items: stretch; gap: 20px; }
-  .obra-grade__principal, .obra-grade__lateral { display: contents; }
-  #ritmo { order: 1; } #secoes { order: 2; } #avisos-obra { order: 3; } #execucao { order: 4; }
-}
 
 /* Secoes em abas: a faixa dentro do cartao; o conteudo de cada aba (cartoes de hoje) fica num painel com respiro */
 .abas--obra { padding: 0 12px; overflow-x: auto; scrollbar-width: none; }
@@ -2197,7 +1731,6 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .coluna-conta .cartao__corpo > p { margin: 0 0 10px; }
 .coluna-conta .cartao__corpo > p:last-child { margin-bottom: 0; }
 .coluna-conta .aviso { margin: 0 0 12px; }
-.coluna-conta .erro { margin: 10px 0 0; }
 .coluna-conta .detalhes { margin-top: 12px; }
 .form-senha { display: grid; gap: 14px; }
 .form-senha .campo__erro:empty { display: none; }
@@ -2208,9 +1741,9 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .senha input[aria-invalid="true"] { border-color: var(--situacao-critico-texto); }
 .olho { position: absolute; right: 4px; top: 4px; width: 32px; height: 32px; padding: 0; justify-content: center; border: 0; background: none; color: var(--cor-texto-secundario); }
 .olho:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-tinta); border: 0; }
-.botao-largo { width: 100%; height: 40px; justify-content: center; font-size: var(--texto-meta); }
+.botao-largo { width: 100%; justify-content: center; }
 .par-botoes { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); margin-top: 16px; }
-.par-botoes > .btn { height: 40px; justify-content: center; font-size: var(--texto-meta); }
+.par-botoes > .btn { justify-content: center; }
 .feito-caixa { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 12px; border: var(--borda-situacao-feito); border-radius: var(--raio-controle); background: var(--situacao-feito-fundo); color: var(--situacao-feito-texto); font-size: var(--texto-meta); }
 .coluna-conta .cartao__corpo > .feito-caixa { margin-top: 12px; }
 .codigo { display: grid; gap: 6px; padding: 14px 16px; border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); background: var(--cor-papel-sombreado); margin-bottom: 12px; }

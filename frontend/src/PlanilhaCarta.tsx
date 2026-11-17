@@ -8,13 +8,14 @@ import Checklist, { type ItemChecklist } from "./Checklist";
 import ComporEmail, { type Mensagem } from "./ComporEmail";
 import ErroCampo from "./ErroCampo";
 import { brl, digitosParaBrl, fmtQuantidade, fmtTamanho } from "./formato";
-import { IconeAlerta, IconeSeta } from "./icones";
+import { IconeSeta } from "./icones";
 import { IconeCheck } from "./NotasAEnviar";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import Pendencias from "./Pendencias";
 import Selo from "./Selo";
 import { fmtData, fmtDataPura, fmtHora, hojeLocal } from "./tempo";
 import "./planilhaCarta.css";
+import Falha from "./Falha";
 
 // Planilha/carta da medicao (issue #289; spec 2026-10-20 §2.1, "Quem clica", passos 1 e 2). O cartao "Nova
 // planilha/carta" e' o primeiro passo da medicao: nº e periodo sugeridos, valor pedido, oficio e planilha arrastados,
@@ -234,14 +235,14 @@ export function NovaPlanilhaCarta({ contratoId, tipo: tipoInicial, tipoFixo = fa
     } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
   }
 
-  if (erroSug) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível abrir a planilha/carta: {erroSug}</p>;
+  if (erroSug) return <Falha>Não foi possível abrir a planilha/carta: {erroSug}</Falha>;
   if (!sug) return <p role="status">Carregando…</p>;
   const saldo = sugDoTipo ? saldoDoNumero(numero, sug, confDoTipo) : { acumulado: null, saldo: null };
 
   return (
     <form className="cartao__corpo pilha" onSubmit={registrar} aria-label="Nova planilha/carta">
       <p className="painel__titulo">Nova planilha/carta</p>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
       <div className="form-inline">
         <div className="campo">
           <label className="campo__rotulo" htmlFor="pl-tipo">Tipo</label>
@@ -510,7 +511,7 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
     } finally { setOcupado(false); }
   }
 
-  if (erro && !d) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível abrir a planilha/carta: {erro}</p>;
+  if (erro && !d) return <Falha>Não foi possível abrir a planilha/carta: {erro}</Falha>;
   if (!d) return null;
   // medicao que nao nasceu da planilha/carta (historico, espelho direto): o cartao nao aparece
   if (d.planilhas.length === 0) return null;
@@ -628,7 +629,7 @@ export function CartaoPlanilha({ medicaoId, estado, podeEditar, aoMudar, aoRevis
 
       <section className="cartao med-painel email-orgao" aria-labelledby={`${base}-email`}>
         <h3 className="med-painel__titulo" id={`${base}-email`}>E-mail ao órgão</h3>
-        {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+        {erro && <Falha>{erro}</Falha>}
         {feito && <p className="feito" role="status" aria-live="polite">{feito}</p>}
         {/* envio reservado e nao concluido (em andamento ou preso): a liberacao, como no protocolo e no pleito */}
         {podeEditar && s.reserva && (
@@ -861,7 +862,7 @@ export function NumeroSiga({ medicaoId, atual, podeEditar, aoGravar }: {
           {editando && <button type="button" className="btn" onClick={() => { setEditando(false); setNumero(atual ?? ""); }}>Voltar</button>}
         </form>
       )}
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
       {feito && <p className="feito" role="status" aria-live="polite">{feito}</p>}
     </div>
   );

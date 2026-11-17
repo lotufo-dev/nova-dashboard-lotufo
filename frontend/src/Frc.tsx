@@ -6,6 +6,7 @@ import { IconeCheck, mensagem } from "./NotasAEnviar";
 import "./notas.css";
 import Selo, { Glifo } from "./Selo";
 import { fmtDataPura } from "./tempo";
+import Falha from "./Falha";
 
 // FRC (Fatura de Recebimento de Consorcio) gerada pela dashboard (2026-10-09): na etapa 3 de obra de consorcio, a
 // lista das notas esperadas (empresa x municipio, lidas do CONTEUDO do PDF), a area de arrastar as notas e o bloco
@@ -51,7 +52,7 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
   }, [medicaoId]);
   useEffect(() => { carregar().catch(e => setErro(mensagem(e))); }, [carregar, versao]);
 
-  if (!s) return erro ? <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p> : null;
+  if (!s) return erro ? <Falha>{erro}</Falha> : null;
   if (!s.disponivel) return s.motivo ? <p className="campo__nota">FRC do {s.consorcio}: {s.motivo}.</p> : null;
 
   const itens = s.itens ?? [];
@@ -227,7 +228,7 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
         </div>
       </div>
       <p className={feito ? "notas__ok" : "sr-only"} role="status">{feito}</p>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
     </section>
   );
 }

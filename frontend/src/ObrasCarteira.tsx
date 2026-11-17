@@ -12,6 +12,7 @@ import { fmtCompetencia, fmtDataPura, fmtMesCurto as mesCurto } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import { situacaoDoNivel } from "./situacao";
+import Falha from "./Falha";
 
 // As pecas da lista de Obras que vieram da Carteira (#748; bloco 8, spec §10.5): a curva do previsto e do medido, os
 // reajustes esperando apostilamento e o QDOP. Tudo na COTA da Lotufo, com as regras em `app/diretoria.py`
@@ -32,13 +33,13 @@ export type Painel = {
   reajustes_apostilamento?: { competencias: number; valor_centavos: number; obras: ReajusteObra[] };
 };
 
-// O selo diz a palavra do nivel (D12, D10), a mesma do selo dos avisos: Critico, Acao e Atencao. Acao e Atencao
-// dividem a situacao "vence em breve" (o triangulo) e se separam pela palavra. So' o QDOP EXPORTADO (arquivo) segue
-// com o vocabulario oficial (verde, amarelo, vermelho).
+// O selo diz a palavra do nivel (D12, D10), a mesma do selo dos avisos, com a forma pelo mesmo criterio (Alertas.tsx
+// > SELO): Critico e Acao pedem acao agora e levam o octogono; Atencao leva o triangulo de "vence em breve". So' o
+// QDOP EXPORTADO (arquivo) segue com o vocabulario oficial (verde, amarelo, vermelho).
 type FarolObra = Obra["farol"];
 const FAROL: Record<FarolObra, { rotulo: string; classe: string }> = {
   verde: { rotulo: "Em dia", classe: "feito" },
-  acao: { rotulo: "Ação", classe: "breve" },
+  acao: { rotulo: "Ação", classe: "critico" },
   atencao: { rotulo: "Atenção", classe: "breve" },
   vermelho: { rotulo: "Crítico", classe: "critico" },
 };
@@ -348,7 +349,7 @@ export function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
             </Link>
           </li>
         </ul>
-        {lista === null && <p className="campo__nota">Não foi possível contar as obras; os links abrem a lista.</p>}
+        {lista === null && <Falha>Não foi possível contar as obras; os links abrem a lista.</Falha>}
       </footer>
     </section>
   );

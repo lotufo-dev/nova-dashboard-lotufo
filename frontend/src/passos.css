@@ -124,6 +124,8 @@
 .med-painel__titulo { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-pp) var(--espaco-p);
   border-top: var(--regua-secao); padding-top: var(--regua-secao-respiro); font-size: var(--texto-titulo-sub); line-height: var(--entrelinha-titulo); }
 .med-quadro .painel__titulo { margin: 0; max-width: none; font-size: var(--texto-corpo); }
+/* passo 3 com o e-mail aberto: o painel ja' se chama "Enviar ao faturamento"; o titulo de dentro repetia o nome */
+.med-painel:has(> #faturamento-titulo) .cartao__corpo > .painel__titulo:first-child { display: none; }
 .med-quadro .espelho-etapa .painel__titulo { margin: 0 0 var(--espaco-p); max-width: none; border-top: var(--regua-secao); padding-top: var(--regua-secao-respiro);
   font-family: var(--fonte-titulo); font-stretch: var(--largura-titulo); font-weight: var(--peso-titulo); font-size: var(--texto-titulo-sub);
   line-height: var(--entrelinha-titulo); text-transform: var(--caixa-titulo); letter-spacing: var(--espacamento-titulo); color: var(--cor-tinta); }
@@ -176,7 +178,6 @@
 .acoes-lista button:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
 .acoes-lista svg { width: 16px; height: 16px; color: var(--cor-texto-secundario); }
 
-/* ---------------------------------------------------------------- passo 2: analise do orgao */
 /* a faixa "com o orgao ha N dias uteis" */
 .orgao-faixa, .med-quadro .orgao-faixa { padding: var(--espaco-m) var(--espaco-g); border-left: var(--espaco-mini) solid var(--situacao-feito-ponto);
   display: flex; flex-direction: column; gap: var(--espaco-p); }
@@ -350,7 +351,7 @@
 .med .med-envio__cabeca > .btn { margin-left: auto; height: var(--alvo-menor); padding: 0 var(--espaco-p); font-size: var(--texto-meta); }
 .med .notas-v3.nota-envio { display: block; max-width: none; padding: 0; }
 .med .notas-v3.nota-envio > .aviso { margin-top: var(--espaco-m); }
-.med .notas-v3.nota-envio > .erro { margin-top: var(--espaco-m); }
+.med .notas-v3.nota-envio > .aviso--falha { margin-top: var(--espaco-m); }
 .med .notas-v3 .nota-secao { display: block; min-width: 0; padding: var(--espaco-g) 0 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
 .med .notas-v3 .nota-secao + .nota-secao { margin-top: var(--espaco-g); border-top: var(--borda-linha); }
 .med .notas-v3 .nota-secao__cabeca { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: var(--espaco-pp) var(--espaco-p); margin-bottom: var(--espaco-m); }
@@ -368,7 +369,7 @@
 
 /* o pacote: as paginas da carta e, ao lado, o que vai junto */
 .envio-pacote { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-m) var(--espaco-g); align-items: start; min-width: 0; }
-.envio-pacote > .erro { grid-column: 1 / -1; }
+.envio-pacote > .aviso--falha { grid-column: 1 / -1; }
 .med .notas-v3 .nota-paginas { display: block; margin: 0; padding-left: var(--espaco-g); list-style: decimal; color: var(--cor-tinta); font-size: var(--texto-meta); }
 .med .notas-v3 .nota-paginas li { padding: var(--espaco-traco) 0; }
 .med .notas-v3 .nota-paginas li::marker { color: var(--cor-texto-terciario); }
@@ -442,7 +443,7 @@
 .med .med-quadro .ol-janela .ol-chip button { width: var(--altura-contador); height: var(--altura-contador); margin: 0; border-radius: 0; color: var(--cor-texto-secundario); }
 .med .med-quadro .ol-janela .ol-chip button:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
 .med .med-quadro .ol-janela .ol-entrada { height: auto; min-height: var(--alvo-menor); min-width: 120px; padding: 0 var(--espaco-mini); font-size: var(--texto-corpo); }
-.med .med-quadro .ol-janela .ol-entrada:focus-visible, .med .med-quadro .ol-janela .ol-assunto input:focus-visible {
+.med .med-quadro .ol-janela .ol-entrada:focus-visible, .med .med-quadro .ol-janela .ol-assunto textarea:focus-visible {
   outline: var(--largura-foco) solid var(--cor-foco); outline-offset: var(--afastamento-foco); }
 .med .med-quadro .ol-janela .ol-cco { height: auto; padding: 0 var(--espaco-mini); color: var(--cor-tinta); font-size: var(--texto-corpo); font-weight: var(--peso-medio);
   text-decoration: underline; text-underline-offset: var(--afastamento-sublinhado); }
@@ -451,7 +452,7 @@
 .med .med-quadro .ol-janela .ol-assunto { display: grid; grid-template-columns: var(--largura-rotulo-email) minmax(0, 1fr); align-items: center; gap: 0 var(--espaco-pp);
   min-height: var(--alvo-minimo); margin: 0; padding: 0; border-bottom: var(--borda-campo); }
 .med .med-quadro .ol-janela .ol-assunto__rotulo { display: block; color: var(--cor-texto-secundario); font-weight: var(--peso-medio); }
-.med .med-quadro .ol-janela .ol-assunto input, .med .med-quadro .ol-janela .ol-assunto input:focus { width: 100%; height: auto; min-height: var(--alvo-menor); padding: var(--espaco-pp) var(--espaco-mini);
+.med .med-quadro .ol-janela .ol-assunto textarea, .med .med-quadro .ol-janela .ol-assunto textarea:focus { width: 100%; height: auto; min-height: var(--alvo-menor); padding: var(--espaco-pp) var(--espaco-mini);
   border: 0; border-radius: 0; background: none; box-shadow: none; font-size: var(--texto-corpo); font-weight: var(--peso-medio); }
 .med .med-quadro .ol-janela .ol-assunto .campo__erro { grid-column: 2; }
 .med .med-quadro .ol-janela .ol-anexos { margin: 0; padding: var(--espaco-p) 0; gap: var(--espaco-pp); }
@@ -472,7 +473,6 @@
 .med .med-quadro .ol-janela .ol-assinatura img { width: auto; max-width: 100%; height: auto; margin-top: var(--espaco-pp); padding-top: var(--espaco-p); border-top: var(--borda-linha); }
 .med .med-quadro .ol-janela + .aviso { margin-top: var(--espaco-m); }
 
-/* ---------------------------------------------------------------- passo 6: pagamento */
 /* o passo mede a propria largura: os numeros nunca se sobrepoem e notas e processo ficam lado a lado quando cabem */
 #passo-6 { container-type: inline-size; }
 .pag-numeros { display: flex; flex-wrap: wrap; gap: var(--espaco-m) var(--espaco-g); padding: 0; }

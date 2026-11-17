@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
-import { IconeAlerta } from "./icones";
 import { Link } from "./Link";
 import { substituir } from "./rota";
+import Falha from "./Falha";
 
 // O endereco antigo da pagina avulsa "Enviar a nota" (/notas/envio/:id, de e-mails e favoritos): a pagina saiu (16/10/2026)
 // e o envio mora na etapa 4 da pagina da medicao. Descobre a medicao do protocolo e troca o endereco, sem empilhar historico.
@@ -20,7 +20,7 @@ export default function AbrirEnvio({ protocoloId }: { protocoloId: number }) {
     <div className="pagina">
       {erro ? (
         <div className="pilha">
-          <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível abrir o envio: {erro}</p>
+          <Falha>Não foi possível abrir o envio: {erro}</Falha>
           <p><Link className="link" para={{ tela: "medicoes" }}>Ver as medições</Link></p>
         </div>
       ) : <p className="campo__nota" role="status">Abrindo o envio da nota da medição…</p>}

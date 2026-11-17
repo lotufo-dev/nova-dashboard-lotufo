@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
-import CaixaAviso from "./CaixaAviso";
 import Contador from "./Contador";
 import { brl, contar } from "./formato";
 import { IconeBaixar } from "./icones";
@@ -11,6 +10,7 @@ import { trocarBusca, type Busca, type Ir } from "./rota";
 import Selo, { Glifo } from "./Selo";
 import { fmtCompetencia, fmtDataCurta, fmtDataHora, fmtDataPura } from "./tempo";
 import "./resumoDasMedicoes.css";
+import Falha from "./Falha";
 
 // Resumo das medicoes (#749): em que etapa do ciclo (em analise, boletim, nota, protocolado, recebido) esta' a medicao
 // de cada obra na competencia em trabalho, quais obras nao tem medicao nela e o que ficou aberto de meses anteriores.
@@ -240,7 +240,7 @@ export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: 
 
   if (!d) {
     return erro
-      ? <CaixaAviso nivel="critico" role="alert">Não foi possível carregar o resumo das medições: {erro} Recarregue a página para tentar de novo.</CaixaAviso>
+      ? <Falha>Não foi possível carregar o resumo das medições: {erro} Recarregue a página para tentar de novo.</Falha>
       : <p className="rdm-vazio rdm-vazio--pagina">Carregando…</p>;
   }
   // a competencia fica na URL (F5 e o link copiado abrem o mesmo mes); a em trabalho e' a padrao e nao entra nela
@@ -275,7 +275,7 @@ export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: 
         </a>
       </div>
       <Atualizacao a={d.atualizacao} />
-      {erro && <CaixaAviso nivel="critico" role="alert" className="rdm-aviso">Não foi possível carregar {mes ? mesPorExtenso(mes) : "a competência"}: {erro}</CaixaAviso>}
+      {erro && <Falha className="rdm-aviso">Não foi possível carregar {mes ? mesPorExtenso(mes) : "a competência"}: {erro}</Falha>}
       <FaixaDasEtapas d={d} />
 
       <section className="cartao rdm-painel" aria-labelledby="rdm-obras">

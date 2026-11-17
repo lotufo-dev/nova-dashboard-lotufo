@@ -5,7 +5,7 @@ import Checklist, { CartaRecolhivel, type ItemChecklist } from "./Checklist";
 import ComporEmail, { type Mensagem } from "./ComporEmail";
 import ConfirmarFaltas from "./ConfirmarFaltas";
 import { api, apiForm, ApiErro, mensagemDeErro } from "./api";
-import { IconeAlerta, IconeSeta } from "./icones";
+import { IconeSeta } from "./icones";
 import { FormMotivo } from "./MedicaoAtos";
 import JustificativaEnvio, { conferirJustificativa, erroDaJustificativa, pedeJustificativa } from "./JustificativaEnvio";
 import { fmtTamanho as mb } from "./formato";
@@ -15,6 +15,7 @@ import { fmtCompetencia, fmtDataHora } from "./tempo";
 import Selo from "./Selo";
 import Pendencias from "./Pendencias";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
+import Falha from "./Falha";
 
 // Protocolo de medicao feito pelo sistema (bloco 5; spec §3 passos 4 a 7). A tela desenha o que o
 // servidor responde (etapas da familia, pecas do orgao, pendencias, conferencia do assinado): as
@@ -116,7 +117,7 @@ function Cartao({ p, pecasCfg, podeEditar, aoMudar, marcado, aoMarcar }: {
         )}
       </div>
       <div className="cartao__corpo pilha">
-        {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+        {erro && <Falha>{erro}</Falha>}
         {reserva && <LiberarEnvio tabela="protocolos" id={p.id} reserva={reserva}
           aoLiberar={() => { setErro(""); setReserva(null); aoMudar(); }} />}
 
@@ -391,7 +392,7 @@ function EnvioProtocolos({ marcados, protocolos, podeEditar, aoEnviado, nivel = 
 
   return (
     <>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
       <p className={feito ? "notas__ok" : "sr-only"} role="status">{feito}</p>
       {/* F-68: a acao esta' sempre a' vista enquanto ha protocolo aberto; primaria quando protocolar e' o proximo
           passo, e desabilitada, com a razao ao lado, enquanto nada foi marcado */}
@@ -524,7 +525,7 @@ export function NovoProtocolo({ contratoId, versao = 0, aoMudar }: { contratoId:
           )}
           <button type="submit" className="btn" disabled={ocupado || marcadas.length === 0}>{ocupado ? "Criando…" : "Criar protocolo"}</button>
         </div>
-        {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+        {erro && <Falha>{erro}</Falha>}
         <p className={criado ? "notas__ok" : "sr-only"} role="status">
           {criado && <>Protocolo criado. Monte e envie na{" "}
             <Link para={{ tela: "medicao", obra: contratoId, id: criado.id }} secao="protocolo">{criado.titulo}</Link>.</>}
@@ -590,7 +591,7 @@ export function CriarProtocolo({ contratoId, medicaoId, dados, carregar, primari
           {ocupado ? "Criando…" : "Criar protocolo"}
         </button>
       </div>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
     </form>
   );
 }
@@ -625,7 +626,7 @@ export function ProtocolosDaMedicao({ contratoId, medicaoId, dados, erro, carreg
         {!dados && !erro && <p className="campo__nota">Carregando os protocolos…</p>}
         {!dados && erro && (
           <div className="form-inline">
-            <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler os protocolos desta obra: {erro}</p>
+            <Falha>Não foi possível ler os protocolos desta obra: {erro}</Falha>
             <button type="button" className="btn btn--pequeno" onClick={() => void carregar()}>Tentar de novo</button>
           </div>
         )}
