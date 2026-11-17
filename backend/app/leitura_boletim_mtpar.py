@@ -32,7 +32,11 @@ O que o leitor faz, e por que:
 - **Os campos "acumulado das medicoes anteriores" e "saldo" do Visto nao entram** em conferencia nenhuma: vem
   errados em parte das obras.
 - **Reajuste.** No PDF proprio, a leitura do rotulo e' o "TOTAL REAJUSTE" e a do quadro e' o reajuste do periodo na
-  linha da medicao; o numero vem da carta ("Reajustamento da Nª Medição").
+  linha da medicao; o numero vem da carta ("Reajustamento da Nª Medição"). A maioria dos PDFs reais de reajuste vem
+  sem a carta (so' a planilha e o quadro, e o quadro pode vir antes da planilha): ai' o numero e' o da ultima linha
+  da planilha de reajustamento, e so' vale se essa linha traz a mesma quantia do "TOTAL REAJUSTE" (a planilha e' a
+  da medicao cujo reajuste ela totaliza). Com a carta e a planilha dizendo medicoes diferentes, nada e' proposto.
+  As linhas da planilha nao sao linhas do quadro: a pagina dela nao entra no controle financeiro.
 
 `contratos` devolve os numeros de instrumento ("45/2025") impressos na capa (ou na carta do reajuste), a fonte
 principal; `contratos_do_quadro`, os do quadro de controle financeiro. O quadro sozinho nao e' fonte confiavel (ja'
@@ -73,6 +77,9 @@ _CAMPO_NUMERO = re.compile(r"(?<![\d/.,])(\d{1,3}) ?[ao°] (" + _DATA + r") (" +
 _LINHA = re.compile(_ORDINAL + r" ?Medicao (" + _DATA + r") a (" + _DATA + r") -?\d{1,4} -?\d{1,5}"
                     r"((?: ?R\$ ?" + _VALOR + r"){2,12})", _I)
 _TOTAL_REAJUSTE = re.compile(r"TOTAL REAJUSTE[ .:_]*(?:R\$ ?)?(" + _VALOR + r")", _I)
+# a linha da planilha de reajustamento: so' o numero e o periodo (as colunas de valor mudam de obra para obra)
+_LINHA_PLANILHA = re.compile(_ORDINAL + r" ?Medicao " + _DATA + r" a " + _DATA, _I)
+_FIM_DA_LINHA_PLANILHA = re.compile(r"Importa|TOTAL REAJUSTE|PLANILHA DE MEDICAO", _I)
 _CARTA_REAJUSTE = re.compile(r"Reajustamento da " + _ORDINAL + r"(?: ?\([^)]{0,40}\))? ?Medicao", _I)
 _CONTRATO = re.compile(r"(?<![\d/.,])(\d{1,4})/(\d{4})(?!\d)(?!/\d)")
 _DATA_EXTENSO = re.compile(r"\b(\d{1,2}) de " + _MES + r" de (\d{4})\b", _I)
@@ -130,7 +137,8 @@ def _linhas_do_controle(planos: list[str]) -> dict[int, list[list[int]]]:
         return linhas
     for i, p in enumerate(planos[inicio:]):
         achadas = _LINHA.findall(p)
-        if not achadas and i > 0:
+        # a planilha de reajustamento (que pode vir depois do quadro) tem linhas parecidas e nao e' o quadro
+        if i > 0 and (not achadas or re.search(r"TOTAL REAJUSTE", p, _I)):
             break
         for numero, _ini, _fim, valores in achadas:
             linhas.setdefault(int(numero), []).append([_centavos(x) for x in re.findall(_VALOR, valores)])
@@ -169,7 +177,7 @@ def ler(paginas: list[str]) -> dict:
     e' o numero da medicao no rotulo do Visto (None no reajuste e no Visto com dois numeros): a reserva de `recusa`.
 
     `ok=False` com `motivo`: `sem-texto`, `modelo-nao-reconhecido` (nao e' boletim deste modelo), `numero-nao-lido`,
-    `numero-divergente` (a capa e o rotulo do Visto dizem medicoes diferentes), `valor-fora-do-rotulo` (o valor nao
+    `numero-divergente` (a capa e o rotulo do Visto, ou a carta e a planilha do reajuste, dizem medicoes diferentes), `valor-fora-do-rotulo` (o valor nao
     saiu ao lado do rotulo), `controle-nao-lido` (a linha da medicao nao foi lida no quadro) ou
     `leituras-divergentes` (as duas leituras existem e nao sao a mesma quantia).
     """
@@ -222,15 +230,39 @@ def _ler_medicao(planos: list[str], visto: str, linhas: dict) -> dict:
                    _contratos([capa] if capa else []), _contratos(quadro), do_rotulo)
 
 
+def _numero_da_planilha(planilha: str, total: int | None) -> int | None:
+    """O numero da medicao pela planilha de reajustamento, para o PDF sem a carta: o da ultima linha (a de maior
+    numero, uma so'), e so' se o trecho dela (ate' a linha seguinte, o "Importa ..." ou o total) traz a mesma quantia
+    do "TOTAL REAJUSTE". Sem isso, nenhum."""
+    achadas = list(_LINHA_PLANILHA.finditer(planilha))
+    if total is None or not achadas:
+        return None
+    numero = max(int(m.group(1)) for m in achadas)
+    da_ultima = [m for m in achadas if int(m.group(1)) == numero]
+    if numero <= 0 or len(da_ultima) != 1:
+        return None
+    inicio = da_ultima[0].end()
+    fins = [m.start() for m in achadas if m.start() > inicio]
+    corte = _FIM_DA_LINHA_PLANILHA.search(planilha, inicio)
+    if corte:
+        fins.append(corte.start())
+    trecho = planilha[inicio:min([*fins, inicio + 250])]
+    return numero if total in {_centavos(x) for x in re.findall(_VALOR, trecho)} else None
+
+
 def _ler_reajuste(planos: list[str], planilha: str, linhas: dict) -> dict:
     cartas = [p for p in planos if _CARTA_REAJUSTE.search(p)]
-    numero = _um(n for p in cartas for n in _CARTA_REAJUSTE.findall(p)) if cartas else None
+    da_carta = _um(n for p in cartas for n in _CARTA_REAJUSTE.findall(p)) if cartas else None
     totais = {_centavos(x) for x in _TOTAL_REAJUSTE.findall(planilha)}
     rotulo = totais.pop() if len(totais) == 1 else None
+    da_planilha = _numero_da_planilha(planilha, rotulo)
+    # com a carta, o numero e' o dela (se ela traz dois, nenhum: a planilha nao desempata); sem a carta, o da planilha
+    numero = da_planilha if not cartas else da_carta
+    divergente = da_carta is not None and da_planilha is not None and da_carta != da_planilha
     controle = _do_controle(linhas, numero, 2)
     quadro = [p for p in planos if re.search(r"CONTROLE FINANCEIRO", p, _I)]
     data = next((d for d in (_data(p) for p in cartas) if d), None)
-    return _fechar("reajuste", numero, False, data, rotulo, controle, _contratos(cartas), _contratos(quadro))
+    return _fechar("reajuste", numero, divergente, data, rotulo, controle, _contratos(cartas), _contratos(quadro))
 
 
 _ROTULO_TIPO = {"execucao": "execução", "projeto": "projeto", "reajuste": "reajuste"}

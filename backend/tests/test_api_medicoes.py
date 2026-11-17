@@ -3210,6 +3210,30 @@ def test_reajuste_da_mtpar_le_o_pdf_proprio(client_admin):
     assert r.status_code == 422 and r.json()["detail"] == frase
 
 
+def test_reajuste_da_mtpar_sem_a_carta_propoe_o_valor_e_recusa_o_de_outra_medicao(client_admin):
+    """Calibracao com os PDFs reais (PR #760): o PDF de reajuste sem a carta do fiscal. O numero vem da planilha, o
+    valor e' proposto (a data a pessoa digita, e por isso a origem e' `manual`), e o de outra medicao e' recusado."""
+    from tests import boletim_mtpar as bm
+    _, mid = _prevista_mtpar(client_admin, tipo="reajuste")
+    paginas = bm.reajuste(numero=7, valor=REAJUSTE_MTPAR, pi=VALOR_MTPAR, carta=False, anteriores=3)
+    corpo = _ler_mtpar(client_admin, mid, paginas)
+    assert (corpo["campos"], corpo["avisos"]) == ({"numero_orgao": "7", "valor_centavos": REAJUSTE_MTPAR}, [])
+    r = _registrar_mtpar(client_admin, mid, paginas, valor="12.345,67")
+    assert r.status_code == 201 and [e["origem"] for e in _atestos(mid)] == ["manual"]
+    de_outra = bm.reajuste(numero=6, valor=REAJUSTE_MTPAR, carta=False, anteriores=3)
+    frase = "Este boletim é da 6ª medição, e esta é a 7ª: escolha o PDF da 7ª medição"
+    assert _ler_mtpar(client_admin, mid, de_outra)["recusa"] == frase
+    r = _registrar_mtpar(client_admin, mid, de_outra, valor="1,00")
+    assert r.status_code == 422 and r.json()["detail"] == frase
+    # a carta e a planilha de medicoes diferentes: nada proposto, com a frase do reajuste
+    misto = bm.reajuste(numero=7, valor=REAJUSTE_MTPAR)
+    misto[1] = bm.planilha_reajuste(8, REAJUSTE_MTPAR)
+    corpo = _ler_mtpar(client_admin, mid, misto)
+    assert "valor_centavos" not in corpo["campos"]
+    assert corpo["avisos"] == ["A carta e a planilha do reajuste trazem medições diferentes: confira no PDF e digite o "
+                               "valor aprovado"]
+
+
 def test_pdf_sem_texto_na_mtpar_vai_para_a_fila_humana(client_admin):
     _, mid = _prevista_mtpar(client_admin)
     corpo = _ler_mtpar(client_admin, mid, ["", ""])

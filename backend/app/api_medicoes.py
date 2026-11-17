@@ -696,6 +696,9 @@ def _ler_boletim_mtpar(conn: sqlite3.Connection, medicao_id: int, pdf: bytes, us
     elif lido["motivo"] == "numero-nao-lido":
         avisos.append(f"{_SEM_VALOR_MTPAR['numero-nao-lido']}: confira no PDF se o boletim é desta medição e digite "
                       "o nº e o valor aprovado")
+    elif lido["motivo"] == "numero-divergente" and lido["documento"] == "reajuste":
+        avisos.append("A carta e a planilha do reajuste trazem medições diferentes: confira no PDF e digite o valor "
+                      "aprovado")
     elif not lido["ok"]:
         avisos.append(f"{_SEM_VALOR_MTPAR[lido['motivo']]}: confira no PDF e digite o valor aprovado")
     if nao_conferido:

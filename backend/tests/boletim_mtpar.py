@@ -130,22 +130,33 @@ def carta_reajuste(numero=7, valor=1_234_567, contrato=CONTRATO) -> str:
             f"N° {contrato}/MTPAR." + ENVELOPE)
 
 
-def planilha_reajuste(numero=7, valor=1_234_567, pi=12_345_679) -> str:
+def planilha_reajuste(numero=7, valor=1_234_567, pi=12_345_679, anteriores=0, na_ultima_linha: int | None = None) -> str:
+    """A planilha de reajustamento. `anteriores`: quantas medicoes anteriores vem antes da linha desta (a planilha real
+    traz todas, cada obra com as colunas de um jeito). `na_ultima_linha`: o reajuste que a linha desta medicao traz,
+    quando nao e' o do "TOTAL REAJUSTE"."""
+    antes = " ".join(f"{n}ª Medição 01/0{n % 9 + 1}/2026 a 28/0{n % 9 + 1}/2026 28 {150 + n} R$ 7.000.003,00 "
+                     f"R$ 77.654.321,00 R$ 700.001,00 R$ 2.100.003,00 1.100,00 0,1000 700.001,00"
+                     for n in range(numero - anteriores, numero))
+    da_linha = valor if na_ultima_linha is None else na_ultima_linha
     return (f"OBRA: ENDEREÇO: MUNICÍPIO: OBJETO: CONSTRUÇÃO Índice de exemplo - Mês Base do Orçamento: Io 1.000,000 "
-            f"PERIODO ACUMULADO PERIODO ACUMULADO "
-            f"{numero}ª medição 01/07/2026 a 31/07/2026 31 120 R$ {brl(pi)} R$ 900.000,00 {brl(valor)} R$ "
-            f"3.703.701,00 R$ 1.100,00 0,1000 R$ {brl(valor)} Importa a presente Medição em R$ {brl(valor)} "
+            f"PERIODO ACUMULADO PERIODO ACUMULADO {antes} "
+            f"{numero}ª medição 01/07/2026 a 31/07/2026 31 120 R$ {brl(pi)} R$ 900.000,00 {brl(da_linha)} R$ "
+            f"3.703.701,00 R$ 1.100,00 0,1000 R$ {brl(da_linha)} Importa a presente Medição em R$ {brl(valor)} "
             f"PLANILHA DE MEDIÇÃO PROVISÓRIA PARA REAJUSTAMENTO MEDIÇÃO PERÍODO DA MEDIÇÃO Valor do Reajuste (R) 500 "
             f"TOTAL REAJUSTE R$ {brl(valor)} PRAZO DIAS CORRIDOS MEDIÇÕES P.I MEDIÇÕES REAJUSTAMENTO" + ENVELOPE)
 
 
-def reajuste(numero=7, valor=1_234_567, pi=12_345_679, contrato=CONTRATO, no_quadro: int | None = 0) -> list[str]:
+def reajuste(numero=7, valor=1_234_567, pi=12_345_679, contrato=CONTRATO, no_quadro: int | None = 0,
+             carta=True, quadro_primeiro=False, **da_planilha) -> list[str]:
     """As tres paginas do PDF proprio do reajuste. `no_quadro=None`: o quadro sem as colunas de reajuste; 0: o quadro
-    traz o mesmo valor do "TOTAL REAJUSTE"; outro numero: o reajuste que o quadro traz no lugar."""
+    traz o mesmo valor do "TOTAL REAJUSTE"; outro numero: o reajuste que o quadro traz no lugar. `carta=False`: so' a
+    planilha e o quadro, como a maioria dos PDFs do orgao; `quadro_primeiro`: o quadro antes da planilha."""
     do_quadro = None if no_quadro is None else (no_quadro or valor)
-    return [carta_reajuste(numero, valor, contrato), planilha_reajuste(numero, valor, pi),
-            controle([linha(numero - 1, 7_000_003, None if do_quadro is None else 700_001, 77_654_321),
-                      linha(numero, pi, do_quadro)], contrato)]
+    planilha = planilha_reajuste(numero, valor, pi, **da_planilha)
+    quadro = controle([linha(numero - 1, 7_000_003, None if do_quadro is None else 700_001, 77_654_321),
+                       linha(numero, pi, do_quadro)], contrato)
+    return ([carta_reajuste(numero, valor, contrato)] if carta else []) + \
+        ([quadro, planilha] if quadro_primeiro else [planilha, quadro])
 
 
 def pdf(paginas: list[str]) -> bytes:

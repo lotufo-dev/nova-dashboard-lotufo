@@ -34,6 +34,10 @@ O reajuste vem em PDF próprio, e o aprovado dele é o "TOTAL REAJUSTE".
 - O número da medição vem da capa ou do campo "N.º da Medição", nunca do rodapé nem do nome do arquivo. O boletim
   de outra medição, de outra obra ou do outro tipo (o da medição no reajuste e o contrário) é recusado. Sem a capa
   e sem o campo, o número do rótulo do Visto só serve para recusar o boletim de outra medição: nada é proposto.
+- No reajuste o número vem da carta do fiscal. A maioria dos PDFs de reajuste vem sem a carta (só a planilha de
+  reajustamento e o quadro): aí o número é o da última linha da planilha, e só vale quando essa linha traz a
+  quantia do "TOTAL REAJUSTE". Carta e planilha com medições diferentes: nada é proposto. Sem a carta a data não é
+  lida, a pessoa digita e o registro sai como valor digitado.
 - A obra se confere pelo número do contrato da capa (no reajuste, da carta). O quadro de controle financeiro já
   veio com o ano do contrato trocado: sozinho ele não recusa. O que não dá para conferir não se propõe: quando só
   o quadro foi lido e discorda do cadastro, quando a capa e ele discordam e só ele traz o contrato da obra, quando

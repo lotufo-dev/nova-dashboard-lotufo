@@ -338,6 +338,59 @@ def test_reajuste_com_o_quadro_sem_as_colunas_de_reajuste_nao_e_proposto():
     assert r["leituras"] == {"rotulo_centavos": REAJUSTE, "controle_centavos": None}
 
 
+@pytest.mark.parametrize("quadro_primeiro", [False, True])
+def test_reajuste_sem_a_carta_tira_o_numero_da_ultima_linha_da_planilha(quadro_primeiro):
+    """Calibracao com os PDFs reais (PR #760): a maioria dos PDFs de reajuste vem sem a carta do fiscal, so' com a
+    planilha de reajustamento (todas as medicoes, a desta por ultimo) e o quadro, e o quadro pode vir antes da
+    planilha. O numero e' o da ultima linha da planilha, que traz a quantia do total; a data nao e' lida."""
+    paginas = bm.reajuste(numero=7, valor=REAJUSTE, pi=VALOR, carta=False, quadro_primeiro=quadro_primeiro, anteriores=4)
+    for r in (leitor.ler(paginas), leitor.ler_pdf(bm.pdf(paginas))):
+        assert (r["ok"], r["documento"]) == (True, "reajuste")
+        assert r["campos"] == {"numero": 7, "valor_centavos": REAJUSTE}
+        assert r["leituras"] == {"rotulo_centavos": REAJUSTE, "controle_centavos": REAJUSTE}
+        assert (r["contratos"], r["contratos_do_quadro"]) == ([], ["45/2025"])
+        # o reajuste de outra medicao passa a ser recusado tambem sem a carta
+        assert leitor.recusa(r, "reajuste", 7, "045/2025/MTPAR") is None
+        assert leitor.recusa(r, "reajuste", 8, "045/2025/MTPAR") == \
+            "Este boletim é da 7ª medição, e esta é a 8ª: escolha o PDF da 8ª medição"
+
+
+def test_reajuste_sem_a_carta_so_tem_numero_se_a_ultima_linha_traz_o_total():
+    """A ultima linha da planilha so' da' o numero quando o reajuste dela e' o do "TOTAL REAJUSTE": se nao e', a
+    planilha nao e' (so') desta medicao, nada e' proposto e nada e' recusado."""
+    r = leitor.ler(bm.reajuste(numero=7, valor=REAJUSTE, carta=False, anteriores=3, na_ultima_linha=REAJUSTE - 1))
+    assert (r["ok"], r["motivo"], r["campos"]) == (False, "numero-nao-lido", {})
+    assert leitor.recusa(r, "reajuste", 8, "045/2025/MTPAR") is None
+    # a quantia do total numa linha anterior nao serve: so' a ultima conta
+    paginas = bm.reajuste(numero=7, valor=700_001, carta=False, anteriores=3, na_ultima_linha=5)
+    assert leitor.ler(paginas)["motivo"] == "numero-nao-lido"
+    # a ultima linha repetida: nenhum numero
+    paginas = bm.reajuste(numero=7, valor=REAJUSTE, carta=False)
+    paginas[0] = paginas[0].replace("7ª medição 01/07/2026", "7ª medição 01/07/2026 a 31/07/2026 31 120 R$ 1,00 "
+                                    "7ª medição 01/07/2026")
+    assert leitor.ler(paginas)["motivo"] == "numero-nao-lido"
+    # sem o total lido, tambem nao
+    paginas = bm.reajuste(numero=7, valor=REAJUSTE, carta=False)
+    paginas[0] = paginas[0].replace(f"TOTAL REAJUSTE R$ {bm.brl(REAJUSTE)}", f"TOTAL REAJUSTE R$ {bm.brl(REAJUSTE)}1")
+    assert leitor.ler(paginas)["motivo"] == "numero-nao-lido"
+
+
+def test_reajuste_com_a_carta_e_a_planilha_de_medicoes_diferentes_nao_e_proposto():
+    paginas = bm.reajuste(numero=7, valor=REAJUSTE, pi=VALOR)
+    paginas[0] = bm.carta_reajuste(6, REAJUSTE)
+    r = leitor.ler(paginas)
+    assert (r["ok"], r["motivo"], r["campos"].get("numero")) == (False, "numero-divergente", 6)
+    assert "valor_centavos" not in r["campos"]
+
+
+def test_planilha_do_reajuste_depois_do_quadro_nao_entra_no_controle_financeiro():
+    """O quadro antes da planilha, com a carta: as linhas da planilha (parecidas com as do quadro) nao contam como
+    linha repetida do quadro."""
+    paginas = bm.reajuste(numero=7, valor=REAJUSTE, pi=VALOR, anteriores=2)
+    r = leitor.ler([paginas[0], paginas[2], paginas[1]])
+    assert (r["ok"], r["leituras"]["controle_centavos"]) == (True, REAJUSTE)
+
+
 def test_boletim_da_medicao_sem_reajuste_nao_gera_erro():
     """A obra sem reajuste na medicao: o quadro de cinco valores e nenhum PDF de reajuste; o boletim e' lido inteiro."""
     r = leitor.ler(bm.boletim(valor=VALOR, reajuste=None))
