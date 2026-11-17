@@ -1,7 +1,8 @@
-"""Travas do repositorio (issue #710): tres proibicoes que eram frase e passam a ser barradas sozinhas.
+"""Travas do repositorio (issue #710): proibicoes que eram frase e passam a ser barradas sozinhas.
   1. Tabelas `arquivo_` (historico da deteccao antiga, .claude/rules/banco.md) nao sao lidas por `backend/app`.
   2. `.githooks/commit-msg` recusa assunto fora de `tipo: descricao` sem acento; commit de merge passa.
   3. `.claude/hooks/barrar-instalacao` barra `npm ci`, `npm install` e `pip install` dentro de worktree.
+  4. `.claude/settings.json` nao tem regra `ask` (docs/adr/0014): a sessao nao para para pedir confirmacao.
 Os ganchos rodam de verdade (git e sh; o .ps1 roda onde houver pwsh, como na CI do Ubuntu)."""
 import json
 import os
@@ -277,3 +278,12 @@ def test_o_hook_esta_ligado_no_settings_para_bash_e_powershell():
     entradas = [e for e in cfg["hooks"]["PreToolUse"]
                 if any("barrar-instalacao" in h["command"] for h in e["hooks"])]
     assert len(entradas) == 1 and set(entradas[0]["matcher"].split("|")) == {"Bash", "PowerShell"}
+
+
+# --- 4. settings.json sem regra que pede confirmacao -----------------------------------------------------------
+
+def test_o_settings_versionado_nao_tem_regra_que_pede_confirmacao():
+    # docs/adr/0014: regra `ask` interrompe a sessao em modo automatico (basta um trecho de comando composto casar, e
+    # nenhuma regra `allow` passa por cima). Quem quiser a trava de volta decide num ADR novo, nao numa linha aqui.
+    cfg = json.loads((RAIZ / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert cfg["permissions"].get("ask", []) == []

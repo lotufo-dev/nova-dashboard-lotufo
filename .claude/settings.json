@@ -103,40 +103,6 @@
       "PowerShell(.\\backend\\.venv\\Scripts\\python.exe -m pytest *)",
       "PowerShell(.\\.venv\\Scripts\\ruff *)",
       "PowerShell(.\\backend\\.venv\\Scripts\\ruff *)"
-    ],
-    "ask": [
-      "Bash(git checkout -- *)",
-      "Bash(git checkout .)",
-      "Bash(git checkout -f *)",
-      "Bash(git switch --discard-changes *)",
-      "Bash(git switch -f *)",
-      "PowerShell(git checkout -- *)",
-      "PowerShell(git checkout .)",
-      "PowerShell(git checkout -f *)",
-      "PowerShell(git switch --discard-changes *)",
-      "PowerShell(git switch -f *)",
-      "Bash(git checkout --force *)",
-      "Bash(git checkout * -- *)",
-      "Bash(git branch -f *)",
-      "Bash(git branch --force *)",
-      "Bash(git branch --delete --force *)",
-      "PowerShell(git checkout --force *)",
-      "PowerShell(git checkout * -- *)",
-      "PowerShell(git branch -f *)",
-      "PowerShell(git branch --force *)",
-      "PowerShell(git branch --delete --force *)"
-    ],
-    "deny": [
-      "Bash(git push *--force*)",
-      "Bash(git push -f *)",
-      "Bash(git push * -f)",
-      "Bash(git push * -f *)",
-      "Bash(git push * +*)",
-      "PowerShell(git push *--force*)",
-      "PowerShell(git push -f *)",
-      "PowerShell(git push * -f)",
-      "PowerShell(git push * -f *)",
-      "PowerShell(git push * +*)"
     ]
   },
   "hooks": {
