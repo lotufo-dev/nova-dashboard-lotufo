@@ -91,8 +91,22 @@ describe("Obras: posição financeira na cota da Lotufo, por contratante", () =>
     expect(linha("Estações BRT").querySelector(".selo .glifo--critico")).toBeTruthy();
     expect(linha("Granito").querySelector(".selo--breve")!.textContent).toBe("Atenção");
     expect(linha("MT-388").querySelector(".selo")).toBeNull();
-    // o subtotal do contratante traz o executado dele: SINFRA 985,00 de 2.470,00
-    expect(grupos()[1].querySelector(".obras-exec__pct")!.textContent).toBe("40%");
+    // o subtotal do contratante traz o executado dele, por piso: SINFRA 985,00 de 2.470,00 (39,9%) e' 39%
+    expect(grupos()[1].querySelector(".obras-exec__pct")!.textContent).toBe("39%");
+  });
+
+  it("#779: o executado dos totais e do contratante e' por piso: 99,6% aparece como 99%, nunca 100% antes de concluir", async () => {
+    api.mockImplementation(async (caminho: string) => {
+      if (caminho === "/api/contratos") return [obra(1, "Estações BRT", { medido_centavos: 996_00, saldo_centavos: 4_00, posicao: posicao(1000_00, 996_00, null) })];
+      if (caminho === "/api/entidades") return [];
+      if (caminho === "/api/inicio") return { avisos: [] };
+      if (caminho === "/api/diretoria") return { ...PAINEL, obras: [] };
+      throw new Error(`chamada inesperada: ${caminho}`);
+    });
+    abrir("/obras");
+    await screen.findByRole("table", { name: /Obras, posição/ });
+    expect(totais()).toContain("Medido (99%)R$ 996,00");
+    expect(grupos()[0].querySelector(".obras-exec__pct")!.textContent).toBe("99%");
   });
 
   it("#774: ?termina=90 (os links do QDOP) recorta a lista pelo fim do prazo e oferece voltar a todas", async () => {

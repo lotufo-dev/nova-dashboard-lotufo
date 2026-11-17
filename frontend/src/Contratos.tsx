@@ -4,7 +4,7 @@ import { api, mensagemDeErro } from "./api";
 import AvisosPagina from "./AvisosPagina";
 import { IconeAlerta } from "./icones";
 import {
-  ehDoContratante, escopoDaUrl, filtrarObras, gruposPorContratante, nomeDaObra, pctExecutado, posicaoDe, totaisDe,
+  ehDoContratante, escopoDaUrl, filtrarObras, gruposPorContratante, nomeDaObra, pctExecutado, pctPiso, posicaoDe, totaisDe,
   type ObraLista, type TotaisObras,
 } from "./listaObras";
 import { brl } from "./Medicoes";
@@ -45,7 +45,8 @@ function Executado({ pct }: { pct: number | null }) {
   );
 }
 
-const pctDe = (t: TotaisObras) => (t.contratado > 0 ? Math.round((t.medido * 100) / t.contratado) : null);
+// o executado dos totais e do contratante, por piso como o de cada obra: 99,6% nao aparece como 100%
+const pctDe = (t: TotaisObras) => pctPiso(t.medido, t.contratado);
 
 export default function Contratos({ ir, busca = {}, aba = "posicao" }: { ir: Ir; busca?: Busca; aba?: AbaObras }) {
   const [lista, setLista] = useState<Obra[] | null>(null);
