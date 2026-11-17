@@ -8,18 +8,6 @@
   border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro);
 }
 .doc-topo__acoes { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-p); margin-left: auto; }
-/* as abas sao botoes de escolha, como os do Fechamento: a escolhida em tinta cheia, cantos retos */
-.doc-abas { display: flex; flex-wrap: wrap; gap: var(--espaco-mini); }
-.doc-aba {
-  display: inline-flex; align-items: center; gap: var(--espaco-pp);
-  height: auto; min-height: var(--alvo-minimo); padding: var(--espaco-mini) var(--espaco-m);
-  border: var(--borda-campo); border-radius: var(--raio-controle); background: var(--cor-superficie); box-shadow: none;
-  color: var(--cor-tinta); font-size: var(--texto-meta); font-weight: var(--peso-medio);
-}
-.doc-aba:hover:not(:disabled) { background: var(--cor-papel-sombreado); }
-.doc-aba[aria-selected="true"], .doc-aba[aria-selected="true"]:hover:not(:disabled) {
-  background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel); font-weight: var(--peso-forte);
-}
 .doc .legenda-cor { margin-top: calc(var(--espaco-p) * -1); }
 .doc-painel-aba { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-entre-blocos); }
 
@@ -183,7 +171,7 @@ a.doc-chip:focus-visible { outline: var(--largura-foco) solid var(--cor-foco); o
 .doc-cabeca__zip input { width: calc(var(--alvo-minimo) * 4); }
 
 .doc-abas-cartao { padding: 0; }
-.doc-abas-cartao > .abas { padding: 0 var(--espaco-m); overflow-x: auto; border-bottom: var(--regua-secao); }
+.doc-abas-cartao > .abas { position: relative; padding: 0 var(--espaco-m); overflow-x: auto; border-bottom: var(--regua-secao); }
 .doc-abas-cartao .aba { white-space: nowrap; gap: var(--espaco-pp); height: var(--alvo-minimo); }
 .doc-painel { padding: var(--espaco-m) 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-g); }
 .doc-painel > :not(.tabela-wrap) { margin-left: var(--espaco-g); margin-right: var(--espaco-g); }

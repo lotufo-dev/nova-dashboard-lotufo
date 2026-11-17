@@ -275,6 +275,8 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
             </div>
           )}
         </div>
+        {/* sem anterior, uma linha curta no lugar da tabela (o painel so' com o titulo parecia quebrado) */}
+        {anteriores.length === 0 && <div className="vazio vazio--curto"><p>Nenhuma medição anterior.</p></div>}
         {anteriores.length > 0 && (
           <Rolagem rotulo="Medições anteriores da obra" alta>
             <table className={classeTabela}>

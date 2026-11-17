@@ -258,8 +258,13 @@ _Avoid_: pílula, chip, badge
 A quantidade ao lado de um título. Com situação, leva o glifo dela.
 
 **Painel**:
-O bloco com moldura preta e sombra dura, com o título dentro.
-_Avoid_: cartão, card
+O bloco com moldura preta e sombra dura, com o título dentro. É peça de tela, não um tipo de tela.
+_Avoid_: cartão, card; painel como nome de tela (ver Tela de leitura)
+
+**Tela de leitura**:
+A tela de números que a diretoria abre para ler, sem operar: Início, Obras, página da obra, Fechamento e Resumo das
+medições. É a elas que `.claude/rules/paineis.md` se refere quando diz "painéis".
+_Avoid_: painel, dashboard, relatório
 
 **Régua**:
 A linha preta acima de um título: a de grupo, grossa, e a de seção, fina.

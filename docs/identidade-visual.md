@@ -102,7 +102,8 @@ Quatro caixas que se distinguem de relance (decisões 4, 10 e 17 da página da m
   seção:** linha preta de 1 px sob o cabeçalho da tabela, acima de subtítulo dentro de painel e na base de gráfico.
   Linhas de uma tabela se separam por um fio cinza, sem zebra.
 - **Painel:** moldura preta de 2 px e sombra dura (deslocada 8 px, sem desfoque), com o título dentro e sem régua
-  embaixo dele. A janela de diálogo é um painel por cima de um véu. Motivo: a moldura separa o painel do papel sem
+  embaixo dele. A janela de diálogo é um painel por cima de um véu; menu suspenso, lista de sugestões e a janela do
+  e-mail levam a mesma sombra, e não há sombra com desfoque. Motivo: a moldura separa o painel do papel sem
   mudar a cor do fundo (decisão 6 da Início; PRs #725, #772).
 - **Abas ficam direto na página, sem caixa em volta dos painéis da aba.** Motivo: caixa dentro de caixa perdia
   40 px de largura e cortava as tabelas da página da obra (PR #776).
@@ -119,8 +120,8 @@ Quatro caixas que se distinguem de relance (decisões 4, 10 e 17 da página da m
 - **De apagar ou revogar:** vermelho cheio do crítico.
 - **Campo:** borda fina cinza, cantos retos, 40 px. Com erro de validação, moldura grossa no tom do crítico.
 - **Foco:** contorno preto de 2 px no conteúdo; laranja dentro do menu escuro.
-- **Escolha entre opções** (filtro, vista): fileira de botões com moldura, a escolhida em tinta cheia (PRs #771,
-  #772).
+- **Escolha entre opções** (filtro, vista, ano): fileira de botões de 40 px com moldura fina, a escolhida em tinta
+  cheia. Uma forma só no Fechamento, no QDOP, no SIGA, em Documentos e na Reconciliação (PRs #771, #772).
 
 ## Casca e menu
 

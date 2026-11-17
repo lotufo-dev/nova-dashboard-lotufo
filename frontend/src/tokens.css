@@ -339,6 +339,25 @@ button:active:not(:disabled), .btn:active:not(:disabled) { background: var(--cor
 :where(button, .btn):disabled { background: var(--cor-papel-escuro); border-color: var(--cor-papel-escuro); }
 button:disabled, .btn:disabled { color: var(--cor-texto-terciario); cursor: not-allowed; box-shadow: none; }
 
+/* ESCOLHA ENTRE OPCOES (filtro, vista, ano): fileira de botoes com moldura fina, a escolhida em tinta cheia. Uma
+   classe so' para Fechamento, QDOP, SIGA, Documentos e Reconciliacao; serve em <button> (aria-pressed), em aba
+   (aria-selected) e em link (aria-current). A quantidade ao lado do rotulo vai em `.escolha__n`. */
+.escolhas { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini); }
+.escolha {
+  display: inline-flex; align-items: center; gap: var(--espaco-pp);
+  height: auto; min-height: var(--alvo-minimo); padding: var(--espaco-mini) var(--espaco-p);
+  border: var(--borda-campo); border-radius: var(--raio-controle);
+  background: var(--cor-superficie); color: var(--cor-tinta); box-shadow: none;
+  font-size: var(--texto-meta); font-weight: var(--peso-medio); line-height: var(--entrelinha-justa); text-decoration: none;
+}
+.escolha:hover:not(:disabled) { background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
+.escolha:is([aria-pressed="true"], [aria-selected="true"], [aria-current="true"]),
+.escolha:is([aria-pressed="true"], [aria-selected="true"], [aria-current="true"]):hover:not(:disabled) {
+  background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel);
+}
+.escolha__n { color: var(--cor-texto-secundario); font-weight: var(--peso-numero); }
+.escolha:is([aria-pressed="true"], [aria-selected="true"], [aria-current="true"]) .escolha__n { color: var(--cor-papel); }
+
 /* CAMPO: borda fina na cor de controle, cantos retos; o foco usa o contorno comum. */
 input, select, textarea {
   height: var(--alvo-minimo); padding: 0 var(--espaco-p);
@@ -618,7 +637,9 @@ td, th { font-variant-numeric: tabular-nums; }
   .casca:has(.menu[data-estado="largo"]) { padding-left: var(--largura-menu-recolhido); }
   .menu[data-estado="largo"] { box-shadow: var(--menu-sombra-sobreposto); }
   /* abas da obra e da Administracao: rolam na horizontal em vez de alargar a pagina */
-  .abas { overflow-x: auto; scrollbar-width: none; }
+  /* `position`: o texto so' para leitor de tela (absoluto) de um contador rolado para fora ficaria preso `a pagina e
+     a alargaria; preso `a faixa, rola com ela */
+  .abas { position: relative; overflow-x: auto; scrollbar-width: none; }
   .abas > .aba { flex: none; white-space: nowrap; }
   .topo { padding: 0 var(--espaco-pp) 0 var(--espaco-m); }
   /* no celular fica o avatar; o nome esta' no rotulo acessivel do botao */
@@ -684,7 +705,7 @@ td, th { font-variant-numeric: tabular-nums; }
 
 .pagina {
   width: 100%; max-width: var(--pagina-largura-max);
-  padding: 24px 32px 40px;
+  padding: var(--pagina-margem-topo) var(--pagina-margem-lado) var(--pagina-margem-base);
   display: flex; flex-direction: column; gap: 24px;
 }
 
@@ -1120,15 +1141,7 @@ label.btn:has(input[type="file"]:focus-visible) { outline: 2px solid var(--cor-f
   border-top: 1px solid var(--cor-linha);
 }
 
-/* A falha e' a peca Falha.tsx (.aviso--critico, com o octogono). `.erro` fica so' para os dois avisos de falha do
-   Inicio, que ainda nao passaram para a peca: a mesma caixa de critico, sem o simbolo. */
-.erro {
-  max-width: none; margin: 0; padding: var(--espaco-p) var(--espaco-m);
-  border: var(--borda-situacao-critico);
-  background: var(--situacao-critico-fundo);
-  color: var(--situacao-critico-texto);
-  font-size: var(--texto-corpo); font-weight: var(--peso-forte);
-}
+/* A falha e' a peca Falha.tsx (.aviso--critico, com o octogono); a caixa `.erro` saiu. */
 
 .vazio { padding: 32px 20px; text-align: center; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 /* Vazio que e' BOA noticia (nenhum alerta): a mesma linguagem, sem o palco de 32px —
@@ -1258,7 +1271,6 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .falha { max-width: 56ch; margin: 64px auto; padding: 0 24px; display: grid; gap: 12px; justify-items: start; }
 .falha__titulo { margin: 0; font-size: var(--texto-titulo-bloco); letter-spacing: -.018em; }
 .falha p { margin: 0; color: var(--cor-texto-secundario); }
-.falha__detalhe { font-size: var(--texto-mini); color: var(--cor-texto-terciario); word-break: break-word; }
 
 /* Rodape do painel de protocolo com o checklist acoplado: os blocos (veredito,
    assumir a pendencia, justificativa, aviso do congelamento) empilham. */
@@ -1281,6 +1293,14 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
    celulas, inclusive a primeira e a ultima: a tabela cai para 854 px, sem rolagem */
 .tabela.tabela--densa thead th, .tabela.tabela--densa tbody td { padding-left: 8px; padding-right: 8px; }
 .notas__conferencia { display: inline-flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+/* a divergencia da nota numa linha propria, colada na linha da nota (sem o fio entre as duas) */
+.notas__tabela tr.notas__linha--diverge > td { border-bottom: 0; }
+.notas__tabela tr.notas__diferenca > td { padding-top: 0; white-space: normal; }
+/* com os impostos a tabela tem oito colunas ou mais: colunas mais juntas, para o liquido caber na caixa a 1440 */
+.tabela.tabela--densa.notas__tabela--impostos :is(th, td):not(:first-child):not(:last-child) { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
+.tabela.tabela--densa.notas__tabela--impostos :is(th, td):first-child { padding-right: var(--espaco-mini); }
+.tabela.tabela--densa.notas__tabela--impostos :is(th, td):last-child { padding-left: var(--espaco-mini); }
+.tabela.tabela--densa.notas__tabela--impostos td { font-size: var(--texto-tabela); }
 .notas__ok { color: var(--situacao-feito-texto); font-size: var(--texto-mini); }
 /* divergencia e' CRITICO (D10): mesma cor do selo "Diverge do espelho" da aba Notas */
 .notas__diverge { color: var(--situacao-critico-texto); font-size: var(--texto-mini); }
@@ -1301,7 +1321,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
    para quem envia reconhecer a tela; cores e letra sao as da fundacao desde #719. */
 .ol-janela {
   font-family: var(--fonte-texto); color: var(--cor-tinta);
-  background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: var(--raio-controle); box-shadow: 0 2px 4px color-mix(in srgb, var(--cor-tinta) 8%, transparent);
+  background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: var(--raio-controle); box-shadow: var(--sombra-painel);
   font-size: var(--texto-meta); }
 .ol-topo { display: flex; align-items: center; gap: 16px; padding: 12px 12px 8px; }
 .ol-enviar { display: inline-flex; align-items: center; gap: 6px; background: var(--cor-tinta); color: var(--cor-papel); border: 0;
@@ -1330,7 +1350,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-cco { border: 0; background: none; color: var(--cor-tinta); font: inherit; cursor: pointer; padding: 4px 6px; border-radius: var(--raio-controle); }
 .ol-cco:hover { background: var(--cor-papel-sombreado); }
 .ol-sugestoes { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; width: 300px; margin: 0; padding: 4px 0;
-  list-style: none; background: var(--cor-superficie); border-radius: var(--raio-controle); box-shadow: 0 8px 16px color-mix(in srgb, var(--cor-tinta) 14%, transparent), 0 0 2px color-mix(in srgb, var(--cor-tinta) 12%, transparent); }
+  list-style: none; background: var(--cor-superficie); border-radius: var(--raio-controle); box-shadow: var(--sombra-painel); }
 .ol-sugestao { display: flex; align-items: center; gap: 10px; padding: 6px 10px; cursor: pointer; }
 .ol-sugestao--ativa { background: var(--cor-papel-sombreado); outline: 2px solid var(--cor-tinta); outline-offset: -2px; border-radius: var(--raio-controle); }
 .ol-sugestao__texto { display: grid; }
@@ -1372,7 +1392,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
   border-bottom: 1px solid var(--cor-linha); }
 .ol-barra--flutuante { position: absolute; z-index: 20; transform: translateY(calc(-100% - 6px)); margin: 0; padding: 4px;
   max-width: 100%; box-sizing: border-box;
-  background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); box-shadow: 0 4px 14px color-mix(in srgb, var(--cor-tinta) 14%, transparent); }
+  background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); box-shadow: var(--sombra-painel); }
 .ol-formato { min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--raio-controle);
   background: transparent; color: var(--cor-tinta); font: var(--texto-meta) var(--fonte-texto); cursor: pointer;
   display: inline-grid; place-items: center; }
@@ -1383,7 +1403,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-formato__realce { background: #FFFF00; padding: 0 2px; line-height: 1.2; }
 .ol-paleta { position: relative; display: inline-block; }
 .ol-paleta__cores { position: absolute; z-index: 21; top: calc(100% + 4px); left: 0; display: flex; gap: 4px; padding: 6px;
-  background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); box-shadow: 0 4px 14px color-mix(in srgb, var(--cor-tinta) 14%, transparent); }
+  background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); box-shadow: var(--sombra-painel); }
 .ol-cor { width: 22px; height: 22px; padding: 0; border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); background: var(--cor-superficie);
   cursor: pointer; font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
 .ol-cor:focus-visible { outline: 2px solid var(--cor-foco); outline-offset: 1px; }
@@ -1392,7 +1412,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
   padding: 8px 10px; max-width: 60ch; }
 .ol-modal-fundo { position: fixed; inset: 0; z-index: 100; background: var(--cor-veu); display: grid; place-items: center; }
 .ol-modal { width: min(1100px, 94vw); height: min(640px, 88vh); display: grid; grid-template-rows: auto 1fr auto;
-  background: var(--cor-superficie); border-radius: var(--raio-controle); box-shadow: 0 25px 60px color-mix(in srgb, var(--cor-tinta) 30%, transparent); font-family: var(--fonte-texto);
+  background: var(--cor-superficie); border-radius: var(--raio-controle); box-shadow: var(--sombra-painel); font-family: var(--fonte-texto);
   color: var(--cor-tinta); font-size: var(--texto-meta); overflow: hidden; }
 .ol-modal__cabeca { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px;
   background: var(--cor-papel-sombreado); font-size: var(--texto-titulo-sub); }
@@ -1643,6 +1663,8 @@ a.contagem:hover .dado__valor { color: var(--cor-menu-realce); text-decoration: 
 /* F-96: a linha do cartao "Avisos desta obra" e' um link inteiro; o destino em texto de apoio e o chevron no fim dizem isso.
    O chevron e' absoluto para nao virar coluna da grade do .alerta (que muda no celular); o respiro da direita e' dele. */
 .alerta--seta { position: relative; padding-right: 48px; }
+/* no cartao lateral a regra do .alerta vencia esta e o texto passava por baixo do chevron */
+.alertas--lateral .alerta--seta { padding-right: 48px; }
 .alerta__seta { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); flex: none; color: var(--cor-texto-secundario); }
 a.alerta:hover .alerta__seta { color: var(--cor-tinta); }
 
@@ -1676,7 +1698,6 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .cart-c-guia { stroke: var(--cor-borda-controle); stroke-dasharray: 3 3; }
 .cart-leitura { font-size: var(--texto-mini); color: var(--cor-texto-secundario); padding-top: 4px; margin: 0; }
 .cart-leitura .num { color: var(--cor-tinta); }
-/* o filtro escolhido e' o mais forte: tinta cheia com texto papel (como o .sg__chip do SIGA) */
 @media (max-width: 767px) {
                 .cart-curva { padding: 8px 8px 4px; }
 }

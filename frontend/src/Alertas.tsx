@@ -83,11 +83,8 @@ export function avisosDaObra(avisos: Aviso[], contratoId: number): Aviso[] {
 // O nivel vira palavra E forma no selo, por um criterio so' (#779): a forma diz se o aviso ja' pede acao. Critico e
 // Acao (os que o servidor trata como imediatos) levam o octogono; Atencao (o que se acompanha) leva o triangulo de
 // "vence em breve". A palavra separa o Critico da Acao. Vale tambem para o farol da obra (ObrasCarteira.tsx).
-export const SELO: Record<Nivel, { rotulo: string; classe: string }> = {
-  critico: { rotulo: "Crítico", classe: "critico" },
-  acao: { rotulo: "Ação", classe: "critico" },
-  atencao: { rotulo: "Atenção", classe: "breve" },
-};
+// A forma sai de `situacaoDoNivel` (situacao.ts), o unico mapa de nivel para situacao; aqui fica so' a palavra.
+export const ROTULO_DO_NIVEL: Record<Nivel, string> = { critico: "Crítico", acao: "Ação", atencao: "Atenção" };
 
 // Quantos avisos cabem antes de a lista virar "mostrar os outros": a tela inicial e' lida em
 // segundos. O resto continua a um clique, nunca escondido de vez.
@@ -125,12 +122,13 @@ export default function Alertas({ itens, ir, titulo = "Avisos", limite = LIMITE,
       ) : (
         <ul className={lateral ? "alertas alertas--lateral" : "alertas"}>
           {visiveis.map((a, i) => {
-            const selo = SELO[a.nivel] ?? SELO.atencao;
+            // nivel que o servidor inventar conta como Atencao
+            const rotulo = ROTULO_DO_NIVEL[a.nivel] ?? ROTULO_DO_NIVEL.atencao;
             const destino = destinoDoAviso(a);
             // F-96: a linha inteira e' o link; o chevron no fim diz isso.
             const conteudo = (
               <>
-                <Selo situacao={situacaoDoNivel(selo.classe)}>{selo.rotulo}</Selo>
+                <Selo situacao={situacaoDoNivel(a.nivel) ?? "breve"}>{rotulo}</Selo>
                 <span className="alerta__msg">{semRSOrfao(a.mensagem)}</span>
                 {/* valor em coluna propria, alinhado a' direita: da' para varrer os valores da lista */}
                 <span className="alerta__valor num">{a.valor_centavos !== null ? brl(a.valor_centavos) : ""}</span>

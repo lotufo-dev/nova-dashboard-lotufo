@@ -153,6 +153,10 @@
   .obra-medicoes tbody td:first-child { display: block; padding-bottom: var(--espaco-mini); text-align: left; }
   .obra-medicoes tbody td:not(:first-child)::before { content: attr(data-rotulo); flex: none; color: var(--cor-texto-secundario); font-weight: var(--peso-normal); text-align: left; }
   .estado-medicao { justify-content: flex-end; }
+  /* a celula com dois dados (as notas e, embaixo, "recebida em"): o segundo desce para a linha de baixo em vez de
+     dividir a largura com o primeiro (com quatro notas a data quebrava no meio da palavra) */
+  .obra-medicoes tbody td:not(:first-child) { flex-wrap: wrap; }
+  .obra-medicoes tbody td > .obra-medicoes__sub { flex-basis: 100%; text-align: right; overflow-wrap: normal; }
 }
 
 /* a trilha quebra linha em vez de cortar o nome do orgao e o da obra na borda da pagina */

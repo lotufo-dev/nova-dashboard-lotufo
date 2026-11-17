@@ -166,32 +166,6 @@ export function pctExecutado(o: ObraLista): number | null {
   return pctPiso(m, v);
 }
 
-export type ResumoContratante = {
-  obras: number; encerradas: number; vigente: number; medido: number; saldo: number; pct: number;
-  comAviso: number; criticos: number; nivelMax: Nivel | null;
-};
-
-/** O resumo de um grupo de obras: so' as em andamento (nem encerradas nem rescindidas) entram nos numeros; as
- *  encerradas (e rescindidas) sao so' contadas. O saldo e' vigente − medido somados, entao a linha "Todas as obras" e' a soma das
- *  linhas dos contratantes. `criticos`: avisos criticos; `comAviso`: obras com algum aviso. */
-export function resumoContratante(obras: ObraLista[], avisos: ReadonlyMap<number, Aviso[]> | null = null): ResumoContratante {
-  const ativas = obras.filter(o => !FORA.has(o.estado));
-  const r: ResumoContratante = { obras: ativas.length, encerradas: obras.filter(o => FORA.has(o.estado)).length,
-    vigente: 0, medido: 0, saldo: 0, pct: 0, comAviso: 0, criticos: 0, nivelMax: null };
-  for (const o of ativas) {
-    r.vigente += vigenteDe(o); r.medido += medidoDe(o); r.saldo += vigenteDe(o) - medidoDe(o);
-    const av = avisos?.get(o.id) ?? [];
-    if (av.length) r.comAviso += 1;
-    for (const a of av) {
-      if (a.nivel === "critico") r.criticos += 1;
-      const n: Nivel = GRAVIDADE[a.nivel] === undefined ? "atencao" : a.nivel;
-      if (r.nivelMax === null || GRAVIDADE[n] < GRAVIDADE[r.nivelMax]) r.nivelMax = n;
-    }
-  }
-  r.pct = pctPiso(r.medido, r.vigente) ?? 0;
-  return r;
-}
-
 /** O contratante da obra: a sigla do orgao do cadastro, a mesma de Medicoes ("SINFRA" para a familia toda); sem ela,
  *  o nome do orgao. */
 export const contratanteDaObra = (o: ObraLista) => o.contratante || o.orgao;

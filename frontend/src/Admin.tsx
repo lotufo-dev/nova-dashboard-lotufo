@@ -5,7 +5,7 @@ import { rotuloPerfil } from "./navegacao";
 import CaixaAviso from "./CaixaAviso";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import {
-  ABAS_ADMIN, type PendenciasCadastro, campoDoErroDeUsuario, CATEGORIAS_REC, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, pessoaDoEvento,
+  ABAS_ADMIN, type PendenciasCadastro, campoDoErroDeUsuario, CATEGORIAS_REC, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, pendenciasAgrupadas, pessoaDoEvento,
   quantidadeRec,
   reconciliacaoDaObra, rotaDoObjeto, rotuloAcao, rotuloObjeto, rotuloRec, urlPaginaRec,
   type CategoriaRec, type Evento, type Reconciliacao,
@@ -219,7 +219,7 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
 
       {status && status.rodadas.length > 0 && (
         <Rolagem rotulo="Rodadas de sincronização com o RM">
-          <table className="tabela">
+          <table className="tabela tabela--densa adm-rodadas">
             <caption className="sr-only">Últimas rodadas de sincronização com o RM</caption>
             <thead>
               <tr>
@@ -237,7 +237,8 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
                   <td>{r.disparo}</td>
                   <td className="num">{r.terminado_em ? fmtDuracao(r.iniciado_em, r.terminado_em) : "—"}</td>
                   <td>
-                    <SeloRodada estado={r.estado} />
+                    {/* a rodada que deu certo e' o estado comum: so' a palavra; o selo fica para a que falhou ou roda */}
+                    {r.estado === "success" ? ROTULO_ESTADO_RODADA.success : <SeloRodada estado={r.estado} />}
                     {r.erro && <div className="campo__nota situacao__erro">{r.erro}</div>}
                     {r.custo_erro && <div className="campo__nota situacao__erro">Custos e estoque não atualizados.</div>}
                   </td>
@@ -428,6 +429,19 @@ function Backup({ b, aoGerar }: { b: Backup | null | undefined; aoGerar: () => v
 // itens: undefined = carregando; null = nao deu para ler. Sem item, so' o selo na cabeca, como o Backup em dia; o selo
 // diz "nenhum alerta" e nao "OK" (gate Sol S1): o bloco confere os alertas que conhece, nao a seguranca inteira.
 // `fora`: quantos itens mais antigos a API deixou fora da lista (ela devolve no maximo 20, gate Sol S3).
+/** O mesmo alerta repetido (a conferencia roda todo dia e grava de novo o que continua errado) vira uma caixa so', com
+ *  a data da ultima vez, quantas vezes veio e desde quando. A ordem e' a do primeiro de cada grupo (o mais novo). */
+function alertasAgrupados(itens: ItemSeguranca[]): { nivel: string; mensagem: string; ultima: string; primeira: string; vezes: number }[] {
+  const grupos = new Map<string, { nivel: string; mensagem: string; ultima: string; primeira: string; vezes: number }>();
+  for (const i of itens) {
+    const chave = `${i.nivel}|${i.mensagem}`;
+    const g = grupos.get(chave);
+    if (!g) grupos.set(chave, { nivel: i.nivel, mensagem: i.mensagem, ultima: i.data, primeira: i.data, vezes: 1 });
+    else { g.vezes += 1; if (i.data > g.ultima) g.ultima = i.data; if (i.data < g.primeira) g.primeira = i.data; }
+  }
+  return [...grupos.values()];
+}
+
 function Seguranca({ itens, fora, aviso, alertas }: { itens: ItemSeguranca[] | null | undefined; fora: number; aviso?: string | null; alertas?: AlertasEmail | null }) {
   return (
     <section className="cartao" aria-labelledby="titulo-seguranca">
@@ -447,9 +461,9 @@ function Seguranca({ itens, fora, aviso, alertas }: { itens: ItemSeguranca[] | n
           {itens === undefined ? <p>Carregando…</p>
             : itens === null ? <Falha>Não foi possível ler a segurança; recarregue a página para tentar de novo.</Falha>
             : itens.length === 0 ? null : <>
-                {itens.map(i => (
-                  <CaixaAviso key={`${i.data}-${i.mensagem}`} nivel={i.nivel === "atencao" ? "atencao" : "critico"}>
-                    {i.mensagem}, em {fmtDataHora(i.data)}.
+                {alertasAgrupados(itens).map(g => (
+                  <CaixaAviso key={`${g.nivel}-${g.mensagem}`} nivel={g.nivel === "atencao" ? "atencao" : "critico"}>
+                    {g.mensagem}, em {fmtDataHora(g.ultima)}.{g.vezes > 1 && ` ${g.vezes} vezes desde ${fmtDataHora(g.primeira)}.`}
                   </CaixaAviso>
                 ))}
                 {fora > 0 && <p>Mais {contar(fora, "alerta anterior", "alertas anteriores")}.</p>}
@@ -630,11 +644,11 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
           <h2 className="cartao__titulo" id="titulo-rec-filtros">Reconciliação RM × dashboard</h2>
         </div>
         <div className="cartao__corpo adm-filtros">
-          <p className="adm-filtros__grupos">
+          <p className="escolhas adm-filtros__grupos">
             <span className="adm-filtros__rotulo">Grupo</span>
-            <Link para={aqui} busca={com({ categoria: null })} aria-current={categoria === null ? "true" : undefined}>todos</Link>
+            <Link className="escolha" para={aqui} busca={com({ categoria: null })} aria-current={categoria === null ? "true" : undefined}>todos</Link>
             {CATEGORIAS_REC.map(c => (
-              <Link key={c.id} para={aqui} busca={com({ categoria: c.id })} aria-current={categoria === c.id ? "true" : undefined}>{c.titulo}</Link>
+              <Link key={c.id} className="escolha" para={aqui} busca={com({ categoria: c.id })} aria-current={categoria === c.id ? "true" : undefined}>{c.titulo}</Link>
             ))}
           </p>
           <div className="form-inline">
@@ -726,7 +740,7 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
         <Grupo id="desfeitas" titulo="Alocações desfeitas" conta={conta("desfeitas")} carregadas={d.alocacoes_desfeitas.length}
           mostrando={quantas(d.alocacoes_desfeitas.length)} verTodas={verTodas("desfeitas")} mais={mais("desfeitas")}>
           <Rolagem rotulo="Alocações desfeitas">
-            <table className="tabela">
+            <table className="tabela adm-desfeitas">
               <caption className="sr-only">NFs cuja alocação a uma medição foi desfeita, da mais recente à mais antiga</caption>
               <thead><tr><th scope="col">Obra</th><th scope="col">Medição</th><th scope="col">NF</th><th scope="col">Desfeita em</th>
                 <th scope="col">Motivo</th><th scope="col">Situação da medição</th></tr></thead>
@@ -1144,7 +1158,7 @@ function PendenciasCadastro() {
     api<PendenciasCadastro>("/api/admin/pendencias-cadastro").then(setDados).catch(e => setErro(falhaDeCarga(e)));
   }, []);
   // `desde` e' o dia (garantia) ou a competencia (termo de apostilamento)
-  const lista = dados?.documentos, semData = dados?.sem_data ?? [];
+  const lista = dados ? pendenciasAgrupadas(dados.documentos) : undefined, semData = dados?.sem_data ?? [];
   const desde = (d: string | null) => (!d ? "—" : d.length === 7 ? fmtCompetencia(d) : fmtDataPura(d));
   return (
     <section className="cartao" aria-labelledby="titulo-pendencias">

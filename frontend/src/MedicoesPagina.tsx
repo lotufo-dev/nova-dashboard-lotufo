@@ -10,8 +10,7 @@ import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import { diaMes, PASSOS } from "./Passos";
 import { mesPorExtenso, somarMes, type LinhaAnterior, type LinhaQuadro, type ObraResumo, type PassoQuadro, type ResumoMedicoes, type SigaNoQuadro } from "./resumoMedicoes";
-import { nivelDias, tempoNoSetor } from "./siga";
-import type { Situacao } from "./situacao";
+import { situacaoDoAtraso, tempoNoSetor } from "./siga";
 import { fmtCompetencia, hojeLocal } from "./tempo";
 import "./medicoes.css";
 import Falha from "./Falha";
@@ -26,15 +25,13 @@ const traco = <span className="medicoes__traco">—</span>;
 
 // O tempo do processo no setor, na situação da fundação que o mostra (cor e forma): movimentou hoje = feito; parado além
 // do primeiro limiar de `nivelDias` = vence em breve; além do segundo = crítico. Dentro do prazo não tem situação.
-const SITUACAO_DO_TEMPO: Record<"hoje" | "atencao" | "acao", Situacao> = { hoje: "feito", atencao: "breve", acao: "critico" };
 
 /** #664: onde está o processo do SIGA da medição que está neste passo: sigla do setor e tempo no setor, com o texto da
  *  tela SIGA (o `NoSetor` de SigaPagina: "hoje" quando houve movimentação hoje; senão `tempoNoSetor`) e a situação do
  *  atraso de `nivelDias`. Sem data de entrada no setor, só a sigla. */
 function PosicaoSiga({ siga }: { siga: SigaNoQuadro | null }) {
   if (!siga) return null;
-  const nivel = siga.hoje > 0 ? "hoje" : nivelDias(siga.dias_uteis);
-  const situacao = nivel ? SITUACAO_DO_TEMPO[nivel] : undefined;
+  const situacao = situacaoDoAtraso(siga);
   const tempo = siga.hoje > 0 ? "hoje" : siga.desde === null || siga.dias_uteis === null ? "—" : tempoNoSetor(siga, new Date());
   return (
     <span className="quadro__siga">

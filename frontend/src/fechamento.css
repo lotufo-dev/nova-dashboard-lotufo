@@ -20,18 +20,6 @@
 }
 .fch-cota h2 { margin: 0; font-size: var(--texto-titulo-bloco); }
 
-/* botoes de escolha (ano, numero comparado): o escolhido em tinta cheia */
-.fch-botoes { display: flex; flex-wrap: wrap; gap: var(--espaco-mini); }
-.fch-botao {
-  height: var(--alvo-minimo); padding: 0 var(--espaco-m); border: var(--borda-campo); border-radius: var(--raio-controle);
-  background: var(--cor-superficie); color: var(--cor-tinta); box-shadow: none;
-  font-size: var(--texto-meta); font-weight: var(--peso-medio);
-}
-.fch-botao:hover:not(:disabled) { background: var(--cor-papel-sombreado); }
-.fch-botao[aria-pressed="true"], .fch-botao[aria-pressed="true"]:hover:not(:disabled) {
-  background: var(--cor-tinta); border-color: var(--cor-tinta); color: var(--cor-papel);
-}
-
 /* os cinco numeros do ano: so' rotulo e valor, sem moldura, como os numeros do mes da Inicio */
 .fch-numeros {
   display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--espaco-m) var(--espaco-g);
@@ -52,7 +40,7 @@
   padding: 0 var(--espaco-g); margin-bottom: var(--titulo-margem-base);
 }
 .fch-painel__cab h2 { margin: 0; font-size: var(--texto-titulo-sub); }
-.fch-painel__cab .fch-botoes { margin-left: auto; }
+.fch-painel__cab .escolhas { margin-left: auto; }
 
 /* tabela: a da fundacao, com a primeira coluna presa a' esquerda quando a caixa rola */
 .fch .fch-tabela th, .fch .fch-tabela td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
@@ -174,7 +162,7 @@
   .fch-numero { display: flex; align-items: baseline; justify-content: space-between; gap: var(--espaco-p); }
   /* o painel com a margem de dentro menor: sobra largura para dois valores de centenas de milhoes lado a lado */
   .fch-painel__cab { padding: 0 var(--espaco-pp); }
-  .fch-painel__cab .fch-botoes { margin-left: 0; }
+  .fch-painel__cab .escolhas { margin-left: 0; }
   .fch-vazio { padding: 0 var(--espaco-pp) var(--espaco-p); }
   .fch-soltas .fch-aviso, .fch-soltas__titulo, .fch-soltas__base { margin-left: var(--espaco-pp); margin-right: var(--espaco-pp); }
   .fch-aparte { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }

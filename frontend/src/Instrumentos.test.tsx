@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Instrumentos from "./Instrumentos";
 import type { InstrumentoCadastro } from "./obra";
@@ -24,6 +24,18 @@ describe("Instrumentos", () => {
       return [tr.querySelector(".instrumento__numero")!.textContent, td[2].textContent];
     }));
   }
+
+  it("obra com muitos instrumentos: os dez mais novos, e o resto a um clique", async () => {
+    api.mockImplementation(async (caminho: string) => caminho.endsWith("/aditivos") ? [] : { situacao: { instrumentos: [] } });
+    const cadastro = Array.from({ length: 13 }, (_, i) => ({ id: i + 1, chave: `ap-${i + 1}`, tipo: "apostilamento_reajuste",
+      numero: `AP-${i + 1}`, data: `2025-${String(i % 12 + 1).padStart(2, "0")}-10`, dados: {} }) as InstrumentoCadastro);
+    render(<Instrumentos contratoId={7} cadastro={cadastro} erroCadastro="" />);
+    const tabela = await screen.findByRole("table");
+    expect(within(tabela).getAllByRole("row").length).toBe(1 + 10);
+    fireEvent.click(screen.getByRole("button", { name: "Ver todos os 13" }));
+    expect(within(tabela).getAllByRole("row").length).toBe(1 + 13);
+    expect(screen.queryByRole("button", { name: /Ver todos/ })).toBeNull();
+  });
 
   it("o percentual do apostilamento de reajuste lê o que o cadastro guarda: número, texto e vírgula decimal", async () => {
     expect(await efeitos([

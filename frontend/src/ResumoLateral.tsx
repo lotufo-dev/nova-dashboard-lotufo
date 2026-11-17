@@ -1,3 +1,4 @@
+import { semRSOrfao } from "./avisos";
 import { brl } from "./formato";
 import { IconeCadeado } from "./icones";
 import { Link } from "./Link";
@@ -123,7 +124,7 @@ export function LinhaDoTempo({ eventos }: { eventos: Evento[] }) {
         <ol className="tempo">
           {[...eventos].reverse().map((e, i) => (
             <li key={i}><time>{quando(e.data)}</time>
-              <p>{e.texto}
+              <p>{semRSOrfao(e.texto)}
                 {e.href && <> <a className="link" href={e.href} target="_blank" rel="noopener noreferrer">Ver o boletim</a></>}</p></li>
           ))}
         </ol>

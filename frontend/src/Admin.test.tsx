@@ -762,6 +762,19 @@ test("Saúde: bloco Segurança mostra o administrador que entrou de origem nova;
   expect(within(vazio).queryByText(/origem nova/)).toBeNull();
 });
 
+test("Saúde: o mesmo alerta de segurança repetido vira uma caixa só, com a última data, as vezes e desde quando", async () => {
+  const status = { configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] };
+  saudeComRm(status, BACKUP_EM_DIA, SIGA_SEM_LEITURA, [
+    { nivel: "critico", mensagem: "Auditoria de arquivos desligada", data: "2026-11-07T04:00:00+00:00" },
+    { nivel: "critico", mensagem: "Pasta de dados sem registro de acesso", data: "2026-11-07T04:00:00+00:00" },
+    { nivel: "critico", mensagem: "Auditoria de arquivos desligada", data: "2026-11-06T04:00:00+00:00" },
+    { nivel: "critico", mensagem: "Auditoria de arquivos desligada", data: "2026-11-05T04:00:00+00:00" }]);
+  const bloco = await screen.findByRole("region", { name: "Segurança" });
+  expect(await within(bloco).findByText("Auditoria de arquivos desligada, em 07/11/2026 às 00:00. 3 vezes desde 05/11/2026 às 00:00.")).toBeTruthy();
+  expect(within(bloco).getByText("Pasta de dados sem registro de acesso, em 07/11/2026 às 00:00.")).toBeTruthy();
+  expect(bloco.querySelectorAll(".aviso--critico").length).toBe(2);
+});
+
 // Gate Sol S3: a API devolve no máximo 20 itens e diz quantos ficaram de fora
 test("Saúde: bloco Segurança diz quantos alertas anteriores ficaram de fora da lista", async () => {
   const status = { configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] };

@@ -107,12 +107,12 @@ export default function AvisosPagina({ busca, avisos, escopo = null, nome, onFec
       <div className="avs__filtros" role="group" aria-label="Filtros dos avisos">
         <div className="avs__tipo">
           <span className="campo__rotulo" id="avisos-tipo">Tipo</span>
-          <p className="avs__opcoes" aria-labelledby="avisos-tipo">
-            <Link para={aqui} busca={com({ familia: null })} aria-current={familia === null ? "true" : undefined}>Todas</Link>
+          <p className="escolhas avs__opcoes" aria-labelledby="avisos-tipo">
+            <Link className="escolha" para={aqui} busca={com({ familia: null })} aria-current={familia === null ? "true" : undefined}>Todas</Link>
             {FAMILIAS.map(f => {
               const n = filtrarAvisos(lista, { familia: f.id, obra }).length;
               return n === 0 && familia !== f.id ? null : (
-                <Link key={f.id} para={aqui} busca={com({ familia: f.id })} aria-current={familia === f.id ? "true" : undefined}>{f.rotulo}</Link>
+                <Link key={f.id} className="escolha" para={aqui} busca={com({ familia: f.id })} aria-current={familia === f.id ? "true" : undefined}>{f.rotulo}</Link>
               );
             })}
           </p>

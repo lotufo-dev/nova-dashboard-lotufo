@@ -13,14 +13,8 @@
 /* filtros: o tipo, em opcoes lado a lado (a escolhida em tinta cheia), e a obra */
 .avs__filtros { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--espaco-p) var(--espaco-g); margin-top: var(--espaco-m); }
 .avs__tipo { display: grid; gap: var(--espaco-mini); min-width: 0; }
-.avs__opcoes { display: flex; flex-wrap: wrap; gap: var(--espaco-mini); margin: 0; max-width: none; }
-.avs__opcoes a {
-  display: inline-flex; align-items: center; min-height: var(--alvo-minimo); padding: 0 var(--espaco-p);
-  border: var(--borda-campo); border-radius: var(--raio-controle); background: var(--cor-superficie);
-  color: var(--cor-tinta); font-weight: var(--peso-medio); text-decoration: none; white-space: nowrap;
-}
-.avs__opcoes a:hover { border-color: var(--cor-tinta); background: var(--cor-papel-sombreado); }
-.avs__opcoes a[aria-current="true"] { border-color: var(--cor-tinta); background: var(--cor-tinta); color: var(--cor-papel); font-weight: var(--peso-forte); }
+.avs__opcoes { margin: 0; max-width: none; }
+.avs__opcoes .escolha { white-space: nowrap; }
 .avs__obra { flex: 0 1 calc(var(--largura-menu) + var(--espaco-xxg)); min-width: 0; }
 .avs__obra select { width: 100%; min-width: 0; }
 
