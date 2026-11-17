@@ -3076,7 +3076,8 @@ def test_sem_fonte_do_numero_da_medicao_o_boletim_vai_para_a_conferencia_humana(
 def test_quadro_com_o_ano_do_contrato_trocado_nao_recusa_e_o_contrato_fica_por_conferir(client_admin):
     """Revisao da PR #760: com a capa nao reconhecida, o boletim CERTO da obra cujo quadro imprime o contrato com o
     ano trocado era recusado como "outra obra". O quadro sozinho nao recusa: o valor nao e' proposto, a tela diz que
-    o contrato nao pode ser conferido, o registro segue como digitado e a auditoria guarda a ressalva."""
+    o contrato nao pode ser conferido, o registro segue como digitado e a auditoria guarda a ressalva. Com o contrato
+    por conferir nenhuma leitura e' oferecida num clique (segunda revisao)."""
     import json
     from tests import boletim_mtpar as bm
     _, mid = _prevista_mtpar(client_admin, numero_instrumento="045/2025/MTPAR")
@@ -3086,9 +3087,9 @@ def test_quadro_com_o_ano_do_contrato_trocado_nao_recusa_e_o_contrato_fica_por_c
     assert corpo["recusa"] is None
     assert corpo["campos"] == {"numero_orgao": "7", "data": "2026-08-01"}          # o valor nao e' proposto
     assert corpo["avisos"] == [f"{frase}. Confira no PDF se o boletim é desta obra e digite o valor aprovado"]
-    # as duas leituras existem e sao a mesma quantia: a do quadro pode entrar num clique, como valor digitado
+    # as duas leituras existem e sao a mesma quantia, mas o contrato esta' por conferir: sem "Usar este valor"
     assert corpo["leituras"] == [{"fonte": "Visto", "valor_centavos": VALOR_MTPAR, "pode_usar": False},
-                                 {"fonte": "Controle financeiro", "valor_centavos": VALOR_MTPAR, "pode_usar": True}]
+                                 {"fonte": "Controle financeiro", "valor_centavos": VALOR_MTPAR, "pode_usar": False}]
     r = _registrar_mtpar(client_admin, mid, paginas)
     assert r.status_code == 201, r.text
     assert [(e["origem"], e["valor_centavos"]) for e in _atestos(mid)] == [("manual", VALOR_MTPAR)]
@@ -3124,6 +3125,72 @@ def test_boletim_de_outra_obra_e_recusado_na_leitura_e_no_registro(client_admin)
     r = _registrar_mtpar(client_admin, mid, paginas)
     assert r.status_code == 422 and r.json()["detail"] == frase
     assert _atestos(mid) == []
+
+
+def test_boletim_de_outra_obra_com_o_mesmo_numero_e_a_capa_nao_reconhecida_nao_ganha_o_botao(client_admin):
+    """Segunda revisao da PR #760: o boletim de OUTRA obra, de mesmo numero de medicao, com a capa nao reconhecida e
+    o campo dos dados gerais lido, entrava com o aviso e com "Usar este valor": um clique registrava o valor de
+    outra obra. Com o contrato por conferir nada e' proposto nem oferecido; a pessoa le o aviso e digita."""
+    import json
+    from tests import boletim_mtpar as bm
+    _, mid = _prevista_mtpar(client_admin, numero=7, numero_instrumento="045/2025/MTPAR")
+    de_outra = 7_654_321
+    for colado in (True, False):                # as duas leituras iguais, e so' a do quadro
+        paginas = bm.sem_capa_reconhecida(bm.boletim(numero=7, valor=de_outra, contrato="012/2023", colado=colado))
+        corpo = _ler_mtpar(client_admin, mid, paginas)
+        assert corpo["recusa"] is None
+        assert corpo["campos"] == {"numero_orgao": "7", "data": "2026-08-01"}, colado       # sem valor proposto
+        assert [x["pode_usar"] for x in corpo["leituras"]] == [False, False], colado
+        assert corpo["leituras"][1]["valor_centavos"] == de_outra                       # a leitura aparece, sem botao
+        assert corpo["avisos"][-1] == (
+            "O contrato não pôde ser conferido: só o controle financeiro traz o número (12/2023), e o desta obra é o "
+            "45/2025. Confira no PDF se o boletim é desta obra e digite o valor aprovado")
+    # quem digita o valor vendo o aviso registra como digitado, e a auditoria guarda a ressalva
+    r = _registrar_mtpar(client_admin, mid, paginas, valor="76.543,21")
+    assert r.status_code == 201, r.text
+    assert [(e["origem"], e["valor_centavos"]) for e in _atestos(mid)] == [("manual", de_outra)]
+    assert json.loads(_auditoria("medicao.valor_atestado")[-1][1])["boletim"]["contrato_nao_conferido"].startswith(
+        "O contrato não pôde ser conferido: só o controle financeiro traz o número (12/2023)")
+
+
+def test_sem_numero_de_contrato_lido_o_valor_nao_e_proposto_e_o_registro_nao_sai_aceito(client_admin):
+    """Segunda revisao da PR #760: sem numero de contrato lido em lugar nenhum (nem capa, nem quadro) o valor era
+    proposto e o registro saia `aceito`, sem aviso. Agora e' contrato nao conferido: sem valor proposto, sem botao,
+    com aviso, e o registro do mesmo PDF com o valor lido sai `manual`."""
+    import json
+    from tests import boletim_mtpar as bm
+    _, mid = _prevista_mtpar(client_admin, numero_instrumento="045/2025/MTPAR")
+    paginas = bm.sem_contrato_impresso(bm.boletim(numero=7, valor=VALOR_MTPAR))
+    frase = "O contrato não pôde ser conferido: o número do contrato não foi lido no boletim"
+    corpo = _ler_mtpar(client_admin, mid, paginas)
+    assert corpo["recusa"] is None
+    assert corpo["campos"] == {"numero_orgao": "7", "data": "2026-08-01"}
+    assert corpo["leituras"] == [{"fonte": "Visto", "valor_centavos": VALOR_MTPAR, "pode_usar": False},
+                                 {"fonte": "Controle financeiro", "valor_centavos": VALOR_MTPAR, "pode_usar": False}]
+    assert corpo["avisos"] == [f"{frase}. Confira no PDF se o boletim é desta obra e digite o valor aprovado"]
+    r = _registrar_mtpar(client_admin, mid, paginas)                    # o valor das duas leituras, o nº e a data lidos
+    assert r.status_code == 201, r.text
+    assert [(e["origem"], e["valor_centavos"]) for e in _atestos(mid)] == [("manual", VALOR_MTPAR)]
+    boletim = json.loads(_auditoria("medicao.valor_atestado")[-1][1])["boletim"]
+    assert boletim["contrato_nao_conferido"] == frase and "diferenca_das_leituras" not in boletim
+
+
+def test_obra_sem_numero_de_contrato_no_cadastro_nao_propoe_valor(client_admin):
+    """O cadastro da obra sem numero de instrumento reconhecivel: nao ha' como conferir a obra, entao nada e'
+    proposto nem oferecido, mesmo com o boletim completo; o registro sai `manual`."""
+    import json
+    from tests import boletim_mtpar as bm
+    _, mid = _prevista_mtpar(client_admin, numero_instrumento="CT S/N MTPAR")
+    frase = "O contrato não pôde ser conferido: o cadastro desta obra não traz o número do contrato"
+    for paginas in (bm.boletim(numero=7, valor=VALOR_MTPAR), bm.boletim(numero=7, valor=VALOR_MTPAR, colado=False)):
+        corpo = _ler_mtpar(client_admin, mid, paginas)
+        assert corpo["recusa"] is None and "valor_centavos" not in corpo["campos"]
+        assert [x["pode_usar"] for x in corpo["leituras"]] == [False, False]
+        assert corpo["avisos"][-1] == f"{frase}. Confira no PDF se o boletim é desta obra e digite o valor aprovado"
+    r = _registrar_mtpar(client_admin, mid, bm.boletim(numero=7, valor=VALOR_MTPAR))
+    assert r.status_code == 201, r.text
+    assert [e["origem"] for e in _atestos(mid)] == ["manual"]
+    assert json.loads(_auditoria("medicao.valor_atestado")[-1][1])["boletim"]["contrato_nao_conferido"] == frase
 
 
 def test_reajuste_da_mtpar_le_o_pdf_proprio(client_admin):

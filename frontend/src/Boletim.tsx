@@ -19,9 +19,10 @@ import "./planilhaCarta.css";
 // Issue #753: na MT-PAR o servidor le o boletim do modelo do orgao. O valor so' vem proposto quando as duas leituras
 // dele (a do rotulo e a do controle financeiro) batem; senao elas aparecem para a pessoa conferir e digitar
 // (`leituras`). O boletim de outra medicao ou de outra obra volta recusado (`recusa`) e o PDF nao fica no formulario.
-// Revisao da PR #760: a leitura que o servidor marca com `pode_usar` (a do controle financeiro, quando a linha fecha
-// e a do rotulo nao existe ou e' a mesma) entra num clique, "Usar este valor"; continua valor digitado (o servidor
-// grava `manual`). E o valor do campo diferente de uma leitura avisa antes do registro, com os dois valores, sem travar.
+// Revisao da PR #760: a leitura que o servidor marca com `pode_usar` (a do controle financeiro, quando o contrato foi
+// conferido, a linha fecha e a do rotulo nao existe ou e' a mesma) entra num clique, "Usar este valor"; continua valor
+// digitado (o servidor grava `manual`). E o valor do campo diferente de uma leitura avisa antes do registro, com os
+// dois valores, sem travar.
 
 type LeituraDoValor = { fonte: string; valor_centavos: number | null; pode_usar?: boolean };
 type Leitura = { lido: boolean; fonte: string | null; avisos: string[];

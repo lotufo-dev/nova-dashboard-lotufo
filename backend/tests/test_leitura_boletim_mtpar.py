@@ -258,9 +258,38 @@ def test_conferencia_do_contrato_pela_fonte_principal():
     assert leitor.recusa(carta_de_outra, "reajuste", 7, certo) == \
         "Este boletim é de outra obra: traz o contrato 12/2023, e o desta obra é o 45/2025"
     assert leitor.recusa(carta_de_outra, "reajuste", 7, outro) is None
-    # sem numero no cadastro, ou sem documento reconhecido, nao ha' o que conferir
-    assert leitor.contrato_nao_conferido(discordam, "contrato sem número") is None
+    # o PDF que nao e' deste modelo nao tem contrato a conferir (nada dele e' proposto)
     assert leitor.contrato_nao_conferido(leitor.ler(["Ofício qualquer"]), certo) is None
+    assert leitor.contrato_nao_conferido(leitor.ler([""]), certo) is None
+
+
+def test_sem_numero_de_contrato_no_pdf_ou_no_cadastro_o_contrato_fica_por_conferir():
+    """Segunda revisao da PR #760: o que nao da' para conferir nao se propoe. Sem numero de contrato lido em lugar
+    nenhum (nem capa/carta, nem quadro), ou com o cadastro da obra sem numero reconhecivel, o boletim nao e'
+    recusado, mas o contrato fica por conferir (antes era "nada a comparar" e o valor saia proposto)."""
+    certo = "045/2025/MTPAR"
+    sem_numero = leitor.ler(bm.sem_contrato_impresso(bm.boletim(numero=7, valor=VALOR)))
+    assert (sem_numero["ok"], sem_numero["campos"]["numero"]) == (True, 7)       # o leitor leu; quem chama nao propoe
+    assert (sem_numero["contratos"], sem_numero["contratos_do_quadro"]) == ([], [])
+    assert leitor.recusa(sem_numero, "execucao", 7, certo) is None
+    assert leitor.contrato_nao_conferido(sem_numero, certo) == \
+        "O contrato não pôde ser conferido: o número do contrato não foi lido no boletim"
+    do_pdf = leitor.ler_pdf(bm.pdf(bm.sem_contrato_impresso(bm.boletim(numero=7, valor=VALOR))))
+    assert leitor.contrato_nao_conferido(do_pdf, certo) == leitor.contrato_nao_conferido(sem_numero, certo)
+    # o reajuste sem a carta (so' a planilha e o quadro sem o numero)
+    do_reajuste = leitor.ler(bm.sem_contrato_impresso(bm.reajuste(numero=7, valor=REAJUSTE)))
+    assert (do_reajuste["documento"], do_reajuste["contratos"], do_reajuste["contratos_do_quadro"]) == ("reajuste", [], [])
+    assert leitor.contrato_nao_conferido(do_reajuste, certo) is not None
+    # o cadastro sem numero reconhecivel: mesmo com o contrato impresso na capa e no quadro, nao ha' como conferir
+    completo = leitor.ler(bm.boletim(numero=7, valor=VALOR))
+    for cadastro in ("contrato sem número", "", None):
+        assert leitor.recusa(completo, "execucao", 7, cadastro) is None
+        assert leitor.contrato_nao_conferido(completo, cadastro) == \
+            "O contrato não pôde ser conferido: o cadastro desta obra não traz o número do contrato"
+    # os casos legitimos continuam conferindo: a capa com o contrato da obra, com o quadro certo ou com o ano trocado
+    assert leitor.contrato_nao_conferido(completo, certo) is None
+    trocado = leitor.ler(bm.boletim(numero=7, valor=VALOR, contrato_no_quadro="045/2024"))
+    assert trocado["ok"] and leitor.contrato_nao_conferido(trocado, certo) is None
 
 
 def test_numero_do_instrumento_ignora_zeros_data_e_cnpj():

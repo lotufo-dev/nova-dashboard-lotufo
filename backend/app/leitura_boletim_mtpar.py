@@ -38,7 +38,8 @@ O que o leitor faz, e por que:
 principal; `contratos_do_quadro`, os do quadro de controle financeiro. O quadro sozinho nao e' fonte confiavel (ja'
 veio com o ano do contrato trocado): so' a capa ou a carta recusam o boletim de outra obra (`recusa`); quando o que
 ha' e' o quadro e ele discorda do cadastro, o boletim nao e' recusado, mas o contrato fica por conferir
-(`contrato_nao_conferido`) e quem chama nao propoe o valor.
+(`contrato_nao_conferido`) e quem chama nao propoe o valor. O mesmo quando nenhum numero de contrato foi lido no
+PDF, ou quando o cadastro da obra nao traz numero reconhecivel: o que nao da' para conferir nao se propoe.
 """
 import re
 from datetime import date
@@ -237,16 +238,19 @@ _ROTULO_TIPO = {"execucao": "execução", "projeto": "projeto", "reajuste": "rea
 
 def _contrato(lido: dict, instrumento: str | None) -> tuple[str | None, str | None]:
     """(situacao, numero do contrato da obra) da conferencia do contrato impresso contra o do cadastro. Situacao:
-    None (confere, ou nao ha' o que comparar: o PDF ou o cadastro sem numero), "outra-obra" (a capa ou a carta traz
-    outro contrato, e o quadro tambem nao traz o da obra) ou "nao-conferido" (so' o quadro foi lido e traz outro
-    numero, ou a capa/carta e o quadro discordam e so' o quadro traz o da obra)."""
+    None (confere: a capa ou a carta traz o contrato da obra, ou so' o quadro foi lido e traz o da obra),
+    "outra-obra" (a capa ou a carta traz outro contrato, e o quadro tambem nao traz o da obra) ou "nao-conferido"
+    (so' o quadro foi lido e traz outro numero; a capa/carta e o quadro discordam e so' o quadro traz o da obra;
+    nenhum numero de contrato foi lido no PDF; ou o cadastro da obra nao traz numero reconhecivel)."""
     da_obra = numero_do_instrumento(instrumento)
     principal, quadro = lido["contratos"], lido["contratos_do_quadro"]
-    if not da_obra or da_obra in principal or not (principal or quadro):
+    if da_obra and da_obra in principal:
         return None, da_obra
-    if principal:
+    if da_obra and principal:
         return ("nao-conferido" if da_obra in quadro else "outra-obra"), da_obra
-    return (None if da_obra in quadro else "nao-conferido"), da_obra
+    if da_obra and da_obra in quadro:
+        return None, da_obra
+    return "nao-conferido", da_obra
 
 
 def recusa(lido: dict, tipo: str, numero: int, instrumento: str | None) -> str | None:
@@ -254,7 +258,8 @@ def recusa(lido: dict, tipo: str, numero: int, instrumento: str | None) -> str |
     orgao, quando difere); `instrumento`, o numero do contrato no cadastro. So' recusa o que o PDF diz com todas as
     letras: o documento do outro tipo, a medicao de outro numero (o da capa ou do campo dos dados gerais; sem eles, o
     do rotulo do Visto) e o contrato de outra obra na capa ou na carta do reajuste. O quadro de controle financeiro
-    sozinho nao recusa (`contrato_nao_conferido`). O que nao foi lido nao recusa (a pessoa confere e digita)."""
+    sozinho nao recusa (`contrato_nao_conferido`). O que nao foi lido nao recusa (a pessoa confere e digita): sem
+    numero de contrato no PDF ou no cadastro o boletim entra, por conferir."""
     documento = lido.get("documento")
     if documento is None:
         return None
@@ -277,11 +282,15 @@ def recusa(lido: dict, tipo: str, numero: int, instrumento: str | None) -> str |
 
 def contrato_nao_conferido(lido: dict, instrumento: str | None) -> str | None:
     """A frase de quando o contrato impresso nao pode ser conferido com o do cadastro (None: conferiu, foi recusado
-    por `recusa` ou nao ha' o que comparar). O boletim nao e' recusado, mas quem chama nao propoe o valor: a pessoa
-    confere no PDF se o boletim e' da obra."""
+    por `recusa` ou o PDF nao e' deste modelo). O boletim nao e' recusado, mas quem chama nao propoe o valor nem
+    oferece leitura nenhuma: a pessoa confere no PDF se o boletim e' da obra e digita."""
     situacao, da_obra = _contrato(lido, instrumento)
     if lido.get("documento") is None or situacao != "nao-conferido":
         return None
+    if not da_obra:
+        return "O contrato não pôde ser conferido: o cadastro desta obra não traz o número do contrato"
+    if not (lido["contratos"] or lido["contratos_do_quadro"]):
+        return "O contrato não pôde ser conferido: o número do contrato não foi lido no boletim"
     onde = "a carta do reajuste" if lido["documento"] == "reajuste" else "a capa"
     if lido["contratos"]:
         return (f"O contrato não pôde ser conferido: {onde} traz o {', '.join(lido['contratos'])} e o controle "

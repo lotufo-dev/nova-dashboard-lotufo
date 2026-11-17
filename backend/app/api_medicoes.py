@@ -633,8 +633,8 @@ def registrar_boletim(medicao_id: ID,
 
 def _boletim_mtpar(conn: sqlite3.Connection, medicao_id: int, pdf: bytes) -> tuple[dict, str | None, str | None]:
     """Issue #753: o boletim da MT-PAR lido do PDF, a recusa dele para esta medicao (None: pode ser o dela) e, sem
-    recusa, a frase do contrato que nao pode ser conferido com o do cadastro (None: conferiu ou nao ha' o que
-    comparar)."""
+    recusa, a frase do contrato que nao pode ser conferido com o do cadastro (None: conferiu, ou o PDF nao e' deste
+    modelo)."""
     from app import leitura_boletim_mtpar
     m = conn.execute("SELECT m.numero, m.numero_orgao, m.tipo, c.numero_instrumento FROM medicoes m "
                      "JOIN contratos c ON c.id=m.contrato_id WHERE m.id=?", (medicao_id,)).fetchone()
@@ -659,9 +659,10 @@ def _ler_boletim_mtpar(conn: sqlite3.Connection, medicao_id: int, pdf: bytes, us
     """Issue #753: a leitura do boletim da MT-PAR para a tela. O valor so' e' proposto quando as duas leituras (a do
     rotulo e a do controle financeiro) sao a mesma quantia e o contrato pode ser conferido; senao a pessoa confere e
     digita, com as duas mostradas (`leituras`). A do controle financeiro vem com `pode_usar` quando a tela pode
-    oferece-la num clique ("Usar este valor"): o valor nao foi proposto, a linha do quadro foi lida (fecha) e a
-    leitura do rotulo nao existe ou e' a mesma quantia. O valor que entra por ela e' digitado pela pessoa (origem
-    `manual`). O boletim de outra medicao, de outra obra ou do outro tipo volta em `recusa` e nada e' proposto."""
+    oferece-la num clique ("Usar este valor"): o valor nao foi proposto, o contrato foi conferido, a linha do quadro
+    foi lida (fecha) e a leitura do rotulo nao existe ou e' a mesma quantia. Com o contrato por conferir nada e'
+    oferecido (um clique registraria o valor do boletim de outra obra): a pessoa digita. O valor que entra pelo
+    botao e' digitado pela pessoa (origem `manual`). O boletim de outra medicao, de outra obra ou do outro tipo volta em `recusa` e nada e' proposto."""
     lido, recusa, nao_conferido = _boletim_mtpar(conn, medicao_id, pdf)
     base = {"modelo": "mtpar", "lido": False, "fonte": None, "campos": {}, "avisos": [], "leituras": [], "recusa": None}
     if recusa:
@@ -685,7 +686,8 @@ def _ler_boletim_mtpar(conn: sqlite3.Connection, medicao_id: int, pdf: bytes, us
     rotulo, controle = lido["leituras"]["rotulo_centavos"], lido["leituras"]["controle_centavos"]
     leituras = [{"fonte": _LEITURA_DO_ROTULO[lido["documento"]], "valor_centavos": rotulo, "pode_usar": False},
                 {"fonte": "Controle financeiro", "valor_centavos": controle,
-                 "pode_usar": not proposto and controle is not None and rotulo in (None, controle)}]
+                 "pode_usar": (not proposto and not nao_conferido and controle is not None
+                               and rotulo in (None, controle))}]
     avisos = []
     if lido["motivo"] == "numero-nao-lido" and lido["numero_do_rotulo"] is not None:
         # o numero so' saiu no rotulo do Visto: serviu para a recusa de "outra medicao", mas nao e' o numero lido

@@ -116,6 +116,12 @@ def sem_capa_reconhecida(paginas: list[str], sem_campo=False) -> list[str]:
     return [capa_nova, *resto]
 
 
+def sem_contrato_impresso(paginas: list[str], contrato=CONTRATO) -> list[str]:
+    """As mesmas paginas sem a capa (so' dos dados gerais em diante) e com o quadro sem o numero do contrato: nenhum
+    numero de contrato sai da capa nem do quadro (o Visto nao e' fonte do contrato)."""
+    return [p.replace(f"CONTRATO TOTAL {contrato} ", "CONTRATO TOTAL ") for p in paginas[1:]]
+
+
 def carta_reajuste(numero=7, valor=1_234_567, contrato=CONTRATO) -> str:
     return (f"Cidade de Exemplo-MT, 01/08/2026 Reajustamento da {numero}a Medição Provisória {brl(valor)} R$ "
             f"Atenciosamente, Eng.º Civil: FISCAL DO CONTRATO CREA N.º EX0001/D Fiscal - MTPAR Encaminho para "
