@@ -1296,6 +1296,11 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 /* a divergencia da nota numa linha propria, colada na linha da nota (sem o fio entre as duas) */
 .notas__tabela tr.notas__linha--diverge > td { border-bottom: 0; }
 .notas__tabela tr.notas__diferenca > td { padding-top: 0; white-space: normal; }
+/* com os impostos a tabela tem oito colunas ou mais: colunas mais juntas, para o liquido caber na caixa a 1440 */
+.tabela.tabela--densa.notas__tabela--impostos :is(th, td):not(:first-child):not(:last-child) { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
+.tabela.tabela--densa.notas__tabela--impostos :is(th, td):first-child { padding-right: var(--espaco-mini); }
+.tabela.tabela--densa.notas__tabela--impostos :is(th, td):last-child { padding-left: var(--espaco-mini); }
+.tabela.tabela--densa.notas__tabela--impostos td { font-size: var(--texto-tabela); }
 .notas__ok { color: var(--situacao-feito-texto); font-size: var(--texto-mini); }
 /* divergencia e' CRITICO (D10): mesma cor do selo "Diverge do espelho" da aba Notas */
 .notas__diverge { color: var(--situacao-critico-texto); font-size: var(--texto-mini); }

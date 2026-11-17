@@ -275,7 +275,7 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
 
       {dados && dados.esperadas.length > 0 && (
         <Rolagem rotulo="Notas esperadas da medição">
-          <table className="tabela tabela--densa notas__tabela" aria-label={rotulo ? `Notas esperadas: ${rotulo}` : undefined}>
+          <table className={`tabela tabela--densa notas__tabela${mostraImpostos ? " notas__tabela--impostos" : ""}`} aria-label={rotulo ? `Notas esperadas: ${rotulo}` : undefined}>
             <thead>
               <tr>
                 <th scope="col">Empresa</th><th scope="col">Município</th><th scope="col" className="col-num num">Valor</th>
