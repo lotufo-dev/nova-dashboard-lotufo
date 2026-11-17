@@ -36,6 +36,34 @@ describe("Medições da obra", () => {
     expect(screen.getByText("NF 2322")).toBeTruthy();
   });
 
+  // #774: o estado nas situacoes da fundacao, com forma alem da cor; a competencia sob o nome e a marca sob o estado
+  it("o estado vira selo: em andamento e recebida com o glifo, cancelada neutra e riscada; nota diverge é crítico", async () => {
+    const divergente = { nota_id: 9, numero: "0000009", serie: null, emissao: null, valor_centavos: 1, coligada: 1, recebido_centavos: 0,
+      recebido_em: null, origem: "rm", regra: null, situacao: "ativa", confirmacao: "divergente", conferencia: [{ campo: "valor", espelho: 1, nota: 2, grau: "divergente" }] };
+    api.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/medicoes/andamento")) return [];
+      if (url === "/api/rm/status") return { configurado: false, ultima_sincronizacao: null, ultimo_erro: null };
+      return [medicao({ notas: [divergente], congelada: 1, final: 1 }), medicao({ id: 60, numero: 6, estado: "recebida", recebida_em: "2026-09-20" }),
+        medicao({ id: 50, numero: 5, estado: "cancelada" })];
+    });
+    render(<Medicoes contratoId={3} busca={{}} />);
+    await screen.findByRole("heading", { name: "Em andamento" });
+    const linha = (nome: string) => screen.getByRole("link", { name: nome }).closest("tr") as HTMLElement;
+    const estado = (nome: string) => linha(nome).querySelector(".obra-medicoes__estado .selo")!;
+    expect(estado("7ª Medição").className).toContain("selo--andamento");
+    expect(estado("7ª Medição").querySelector(".glifo--andamento")).toBeTruthy();
+    expect(within(estado("7ª Medição") as HTMLElement).getByText("Nota emitida")).toBeTruthy();
+    expect(within(linha("7ª Medição")).getByText("final").closest(".selo")!.className).toContain("selo--breve");
+    expect(within(linha("7ª Medição")).getByText("09/2026")).toBeTruthy();
+    expect(estado("6ª Medição").className).toContain("selo--feito");
+    expect(estado("6ª Medição").querySelector(".glifo--feito")).toBeTruthy();
+    expect(within(linha("6ª Medição")).getByText("recebida em 20/09/2026")).toBeTruthy();
+    expect(estado("5ª Medição").className).toBe("selo selo--riscado");
+    expect(estado("5ª Medição").querySelector(".glifo")).toBeNull();
+    // o ponto de cor sozinho saiu da lista da obra
+    expect(document.querySelector(".estado__ponto")).toBeNull();
+  });
+
   // issue #647: Pedido (protocolado) e Aprovado (atestado) em colunas próprias, nas duas tabelas
   it("mostra Pedido e Aprovado; medição sem aprovado mostra “—”", async () => {
     api.mockImplementation(async (url: string) => {
@@ -51,8 +79,8 @@ describe("Medições da obra", () => {
     const celulas = (tabela: HTMLElement, seletor: string) => within(tabela).getAllByRole("row")
       .map(l => Array.from(l.querySelectorAll(seletor), c => (c.textContent ?? "").replace(/\s/g, " ")).join("|"))
       .filter(Boolean);
-    expect(celulas(abertas, "th")[0]).toBe("Medição|Competência|Estado|Pedido|Aprovado|Próximo passo|Marcas");
-    expect(celulas(anteriores, "th")[0]).toBe("Medição|Competência|Estado|Pedido|Aprovado|Notas|Recebida em");
+    expect(celulas(abertas, "th")[0]).toBe("Medição|Estado|Pedido|Aprovado|Próximo passo");
+    expect(celulas(anteriores, "th")[0]).toBe("Medição|Estado|Pedido|Aprovado|Notas e recebimento");
     expect(celulas(abertas, "td")[0]).toContain("|R$ 250,01|—|");
     expect(celulas(anteriores, "td")[0]).toContain("|R$ 150,03|R$ 149,01|");
   });
@@ -76,7 +104,7 @@ describe("Medições da obra", () => {
     const [abertas, anteriores] = screen.getAllByRole("table");
     expect(within(abertas).getAllByRole("columnheader").map(h => h.textContent)).toContain("Custo lançado no RM");
     const linha = (tabela: HTMLElement, nome: string) => within(tabela).getByRole("link", { name: nome }).closest("tr") as HTMLElement;
-    const custo = (tr: HTMLElement) => (tr.children[5].textContent ?? "").replace(/\s/g, " ");
+    const custo = (tr: HTMLElement) => (tr.children[4].textContent ?? "").replace(/\s/g, " ");
     expect(custo(linha(abertas, "7ª Medição"))).toBe("R$ 1.234,57");
     expect(custo(linha(abertas, "Reajuste da 7ª Medição"))).toBe("—");      // uma vez só por competência
     expect(custo(linha(anteriores, "6ª Medição"))).toBe("R$ 987,01");

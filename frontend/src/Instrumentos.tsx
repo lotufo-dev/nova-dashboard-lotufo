@@ -34,7 +34,7 @@ function Situacao({ a }: { a: AditivoApi }) {
       Assinado
     </Selo>
   );
-  return <Selo situacao="breve">Em andamento</Selo>;
+  return <Selo situacao="andamento">Em andamento</Selo>;
 }
 
 /** O efeito do apostilamento de reajuste; a data-base leva ao ciclo dela na aba Reajuste. */
@@ -95,7 +95,7 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
             <caption className="sr-only">Instrumentos do contrato, do mais novo ao mais antigo</caption>
             <thead>
               <tr>
-                <th scope="col">Data</th><th scope="col">Instrumento</th><th scope="col">Número</th>
+                <th scope="col">Data</th><th scope="col">Instrumento</th>
                 <th scope="col">Efeito</th><th scope="col" className="col-num">Δ valor</th><th scope="col">Situação</th>
               </tr>
             </thead>
@@ -107,8 +107,7 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
                   return (
                     <tr key={l.chave} className={par}>
                       <td className="num">{data(i.data)}</td>
-                      <td>{TIPO_CADASTRO[i.tipo] ?? i.tipo}</td>
-                      <td className="forte">{i.numero ?? "s/n"}</td>
+                      <td>{TIPO_CADASTRO[i.tipo] ?? i.tipo}<div className="forte instrumento__numero">{i.numero ?? "s/n"}</div></td>
                       <td className="num"><EfeitoDoCadastro i={i} contratoId={contratoId} /></td>
                       <td className="col-num num">—</td>
                       <td>—</td>
@@ -121,8 +120,7 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
                 return (
                   <tr key={l.chave} className={par}>
                     <td className="num">{data(a.data_assinatura)}</td>
-                    <td>{a.forma === "apostilamento" ? "Apostilamento" : "Termo aditivo"} {ROTULO_TIPO[a.tipo] ?? a.tipo}</td>
-                    <td className="forte">{a.numero ?? "s/n"}</td>
+                    <td>{a.forma === "apostilamento" ? "Apostilamento" : "Termo aditivo"} {ROTULO_TIPO[a.tipo] ?? a.tipo}<div className="forte instrumento__numero">{a.numero ?? "s/n"}</div></td>
                     {/* o objeto inteiro, que quebra linha: nada so' no passar do mouse */}
                     <td className="efeito">
                       {a.objeto && <div>{a.objeto}</div>}

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type Aviso } from "./Alertas";
-import { api, mensagemDeErro } from "./api";
+import { api } from "./api";
 import { motivosDaLinha, porFarol, type Motivo } from "./carteira";
 import { fmtDias, fmtPercentual } from "./formato";
-import { IconeAlerta, IconeBaixar } from "./icones";
+import { IconeBaixar } from "./icones";
 import { filtrarObras, type ObraLista } from "./listaObras";
 import { brl } from "./Medicoes";
 import { type Ir } from "./rota";
@@ -13,9 +13,9 @@ import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import { situacaoDoNivel } from "./situacao";
 
-// O Resumo e o QDOP da lista de Obras (#748; vieram da Carteira, bloco 8, spec §10.5, redesenho #163): tudo na COTA da
-// Lotufo, com as regras em `app/diretoria.py` (`/api/diretoria`). A Producao saiu (o faturado por mes mora no
-// Fechamento) e o Custo virou coluna na aba Medicoes da obra.
+// As pecas da lista de Obras que vieram da Carteira (#748; bloco 8, spec §10.5): a curva do previsto e do medido, os
+// reajustes esperando apostilamento e o QDOP. Tudo na COTA da Lotufo, com as regras em `app/diretoria.py`
+// (`/api/diretoria`); quem pede o painel e' a lista (`Contratos.tsx`), uma vez para as duas vistas.
 
 /** Issue #296: a curva S da carteira (obras ativas, cada uma na cota), com o previsto anterior a ultima repactuacao. */
 type PontoCarteira = { competencia: string; previsto_centavos: number; previsto_anterior_centavos: number; medido_centavos: number };
@@ -36,25 +36,25 @@ export type Painel = {
   reajustes_apostilamento?: { competencias: number; valor_centavos: number; obras: ReajusteObra[] };
 };
 
-// O selo diz a palavra do nivel (D12, D10), a mesma do Selo dos avisos: Critico, Acao e Atencao. Acao e Atencao
-// dividem o ambar e se separam pela forma (contorno cheio na Acao), como em Alertas. So' o QDOP EXPORTADO
-// (arquivo) segue com o vocabulario oficial (verde, amarelo, vermelho).
-const FAROL: Record<Obra["farol"], { rotulo: string; classe: string }> = {
+// O selo diz a palavra do nivel (D12, D10), a mesma do selo dos avisos: Critico, Acao e Atencao. Acao e Atencao
+// dividem a situacao "vence em breve" (o triangulo) e se separam pela palavra. So' o QDOP EXPORTADO (arquivo) segue
+// com o vocabulario oficial (verde, amarelo, vermelho).
+type FarolObra = Obra["farol"];
+const FAROL: Record<FarolObra, { rotulo: string; classe: string }> = {
   verde: { rotulo: "Em dia", classe: "feito" },
   acao: { rotulo: "Ação", classe: "breve" },
   atencao: { rotulo: "Atenção", classe: "breve" },
   vermelho: { rotulo: "Crítico", classe: "critico" },
 };
 
+/** O farol da obra como selo: glifo e palavra. Farol que o servidor inventar conta como Atenção. */
+export function SeloFarol({ farol }: { farol: FarolObra }) {
+  const f = FAROL[farol] ?? FAROL.atencao;
+  return <Selo situacao={situacaoDoNivel(f.classe)}>{f.rotulo}</Selo>;
+}
+
 function pct(f: number): string {
   return fmtPercentual(f, 1);
-}
-/** "R$ 12,3 mi": o numero grande do Resumo; o valor exato vai no title. */
-function mi(centavos: number): string {
-  if (centavos === 0) return "R$ 0";
-  // abaixo de 1 milhao "R$ 0,0 mi" pareceria zero: nesse caso, em mil
-  if (Math.abs(centavos) < 100_000_000) return `R$ ${(centavos / 100_000).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} mil`;
-  return `R$ ${(centavos / 100_000_000).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} mi`;
 }
 function data(iso: string | null | undefined): string {
   return iso ? fmtDataPura(iso.slice(0, 10)) : "—";
@@ -192,80 +192,28 @@ function CurvaS({ serie }: { serie: PontoCarteira[] }) {
   );
 }
 
-/** Resumo: os números da carteira, a curva S e um cartão por contratante. */
-export function Resumo({ p, ir }: { p: Painel; ir: Ir }) {
-  const k = p.carteira;
-  // 06/11/2026 (tela da diretoria): o contratado e o executado saem da mesma soma dos cartoes por contratante
-  const contratado = k.por_orgao.reduce((t, o) => t + o.vigente_centavos, 0);
-  const executado = k.por_orgao.reduce((t, o) => t + o.medido_centavos, 0);
-  const pctExecutado = contratado > 0 ? Math.floor(Math.max(0, Math.min(1, executado / contratado)) * 100) : 0;
+/** O painel da curva: previsto e medido de execução acumulados em 12 meses, com a legenda. */
+export function CurvaDaCarteira({ serie }: { serie: PontoCarteira[] }) {
+  if (serie.length === 0) return null;
   return (
-    <>
-      <ul className="cart-numeros" aria-label="Os números da carteira">
-        <li className="cartao cart-numero">
-          <span className="cart-numero__rotulo">Contratado</span>
-          <span className="cart-numero__valor num" title={brl(contratado)}>{mi(contratado)}</span>
-        </li>
-        <li className="cartao cart-numero">
-          <span className="cart-numero__rotulo">Executado ({pctExecutado}%)</span>
-          <span className="cart-numero__valor num" title={brl(executado)}>{mi(executado)}</span>
-        </li>
-        <li className="cartao cart-numero">
-          <span className="cart-numero__rotulo">Saldo a executar</span>
-          <span className="cart-numero__valor num" title={brl(k.saldo_centavos)}>{mi(k.saldo_centavos)}</span>
-        </li>
-        <li className="cartao cart-numero">
-          <span className="cart-numero__rotulo">Medido em {p.medido_ano.ano}</span>
-          <span className="cart-numero__valor num" title={brl(p.medido_ano.valor_centavos)}>{mi(p.medido_ano.valor_centavos)}</span>
-        </li>
-      </ul>
-
-      <Secao id="dir-curva" titulo="Previsto e medido de execução acumulados nos últimos 12 meses">
-        <CurvaS serie={p.curva_carteira} />
-        <div className="legenda">
-          <span className="legenda__item"><span className="legenda__chave legenda__chave--previsto" aria-hidden="true" />previsto</span>
-          {temAnterior(p.curva_carteira) && (
-            <span className="legenda__item"><span className="legenda__chave legenda__chave--anterior" aria-hidden="true" />previsto anterior à última repactuação</span>
-          )}
-          <span className="legenda__item"><span className="legenda__chave legenda__chave--execucao" aria-hidden="true" />medido de execução</span>
-        </div>
-      </Secao>
-
-      <h2 className="cart-titulo-secao">Por contratante</h2>
-      {k.por_orgao.length === 0 ? <p className="cart-nota-resumo">Nenhum contratante com saldo a executar.</p> : (
-        <ul className="cart-contratantes" aria-label="Por contratante">
-          {k.por_orgao.map(o => {
-            const feito = o.vigente_centavos > 0 ? Math.max(0, Math.min(1, o.medido_centavos / o.vigente_centavos)) : 0;
-            return (
-              <li key={o.orgao}>
-                <Link className="cartao cart-contratante" para={{ tela: "obras" }} busca={o.orgao === "sem órgão" ? undefined : { orgao: o.orgao }} ir={ir}>
-                  <h3 className="cart-contratante__nome">{o.orgao}</h3>
-                  <span className="cart-contratante__rotulo">Saldo a executar</span>
-                  <span className="cart-contratante__valor num" title={brl(o.saldo_centavos)}>{mi(o.saldo_centavos)}</span>
-                  <span className="cart-progresso">
-                    <span className="cart-progresso__rotulo">% executado</span>
-                    <span className="cart-progresso__trilho" role="img" aria-label={`${Math.floor(feito * 100)}% executado`}>
-                      <span className="cart-progresso__feito" style={{ width: `${(feito * 100).toFixed(1)}%` }} />
-                    </span>
-                    <span className="cart-progresso__pct num">{Math.floor(feito * 100)}%</span>
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {/* #279 (spec 2026-10-20 §2.2): o reajuste já medido (pedido ou aprovado) das competências sem apostilamento,
-          por obra; a obra leva à aba Reajuste dela, com cada competência. Veio da Produção da Carteira (#748). */}
-      {p.reajustes_apostilamento && <Reajustes r={p.reajustes_apostilamento} ir={ir} />}
-    </>
+    <Secao id="dir-curva" titulo="Previsto e medido de execução acumulados nos últimos 12 meses">
+      <CurvaS serie={serie} />
+      <div className="legenda">
+        <span className="legenda__item"><span className="legenda__chave legenda__chave--previsto" aria-hidden="true" />previsto</span>
+        {temAnterior(serie) && (
+          <span className="legenda__item"><span className="legenda__chave legenda__chave--anterior" aria-hidden="true" />previsto anterior à última repactuação</span>
+        )}
+        <span className="legenda__item"><span className="legenda__chave legenda__chave--execucao" aria-hidden="true" />medido de execução</span>
+      </div>
+    </Secao>
   );
 }
 
-function Reajustes({ r, ir }: { r: NonNullable<Painel["reajustes_apostilamento"]>; ir: Ir }) {
+/** #279 (spec 2026-10-20 §2.2): o reajuste já medido (pedido ou aprovado) das competências sem apostilamento, por
+ *  obra; a obra leva à aba Reajuste dela, com cada competência. */
+export function Reajustes({ r, ir }: { r: NonNullable<Painel["reajustes_apostilamento"]>; ir: Ir }) {
   return (
-    <Secao id="dir-reajustes" titulo="Reajustes esperando apostilamento (cota)">
+    <Secao id="dir-reajustes" titulo="Reajustes esperando apostilamento">
       {r.obras.length === 0 ? (
         <div className="vazio vazio--curto"><p>Nenhum reajuste esperando apostilamento.</p></div>
       ) : (
@@ -293,10 +241,19 @@ function Reajustes({ r, ir }: { r: NonNullable<Painel["reajustes_apostilamento"]
   );
 }
 
-/** QDOP: o painel do farol (filtro, o que termina, avisos) e a tabela no leiaute do QDOP, pelo farol, com a linha de
- *  total e ate' 2 motivos por obra (o resto nos avisos da obra). */
+type Filtro = "todas" | "problema" | FarolObra;
+const FILTROS: { id: Filtro; rotulo: string }[] = [
+  { id: "todas", rotulo: "Todas" }, { id: "problema", rotulo: "Com problema" },
+  { id: "vermelho", rotulo: "Crítico" }, { id: "acao", rotulo: "Ação" },
+  { id: "atencao", rotulo: "Atenção" }, { id: "verde", rotulo: "Em dia" },
+];
+const noFiltro = (o: Obra, f: Filtro) => f === "todas" || (f === "problema" ? o.farol !== "verde" : o.farol === f);
+
+/** QDOP: um painel so'. No alto, o filtro pelo farol (cada botao com a contagem) e o arquivo exportado; a tabela no
+ *  leiaute do QDOP, pelo farol, com a linha de total e ate' 2 motivos por obra (o resto nos avisos da obra); embaixo,
+ *  o que termina e os avisos da diretoria, com os links. */
 export function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
-  const [filtro, setFiltro] = useState<"todas" | "problema" | Obra["farol"]>("todas");
+  const [filtro, setFiltro] = useState<Filtro>("todas");
   // o que termina vem da lista de Obras (/api/contratos); undefined = carregando; null = nao carregou
   const [lista, setLista] = useState<ObraLista[] | null | undefined>(undefined);
   useEffect(() => {
@@ -304,82 +261,55 @@ export function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
     api<ObraLista[]>("/api/contratos").then(l => { if (vivo) setLista(l); }).catch(() => { if (vivo) setLista(null); });
     return () => { vivo = false; };
   }, []);
-  const obras = porFarol(p.obras.filter(o => filtro === "todas" || (filtro === "problema" ? o.farol !== "verde" : o.farol === filtro)));
+  const obras = porFarol(p.obras.filter(o => noFiltro(o, filtro)));
   const soma = (f: (o: Obra) => number) => obras.reduce((t, o) => t + f(o), 0);
-  const FILTROS: { id: typeof filtro; rotulo: string }[] = [
-    { id: "todas", rotulo: "Todas" }, { id: "problema", rotulo: "Com problema" },
-    { id: "vermelho", rotulo: "Crítico" }, { id: "acao", rotulo: "Ação" },
-    { id: "atencao", rotulo: "Atenção" }, { id: "verde", rotulo: "Em dia" },
-  ];
   return (
-    <>
-      <Secao id="dir-problema" titulo="Obras pelo farol">
-        <div className="cartao__corpo pilha">
-          <div className="cart-farois" role="group" aria-label="Filtrar o QDOP pelo farol">
-            {FILTROS.map(f => (
-              <button key={f.id} type="button" className="cart-farol-btn" aria-pressed={filtro === f.id} onClick={() => setFiltro(f.id)}>
-                {f.rotulo}
-              </button>
-            ))}
-          </div>
-          <div className="cart-qdop-lado">
-            <div>
-              <p className="campo__rotulo">Terminam</p>
-              <ul className="lista-simples">
-                {PRAZOS.map(x => {
-                  const n = lista ? filtrarObras(lista, { termina: x.dias }).length : null;
-                  return (
-                    <li key={x.busca}>
-                      <Link para={{ tela: "obras" }} busca={{ termina: x.busca }} ir={ir}>
-                        {n === null ? `Obras que terminam ${x.quando}` : n === 1 ? `1 obra termina ${x.quando}` : `${n} obras terminam ${x.quando}`}
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-              {lista === null && <p className="campo__nota">Não foi possível contar as obras; os links abrem a lista.</p>}
-            </div>
-            <div>
-              <p className="campo__rotulo">Avisos da diretoria</p>
-              <p><strong className="num">{p.avisos.length}</strong> {p.avisos.length === 1 ? "aviso" : "avisos"}</p>
-              <p><Link para={{ tela: "avisos" }} ir={ir}>Ver os avisos</Link></p>
-            </div>
-          </div>
+    <section className="cartao qdop-painel" aria-labelledby="dir-qdop">
+      <div className="cartao__cabeca qdop-painel__cabeca">
+        <h2 className="cartao__titulo" id="dir-qdop">QDOP</h2>
+        <div className="cartao__acoes">
+          <a className="btn btn--pequeno" href="/api/diretoria/qdop.xlsx"><IconeBaixar className="icone icone--p" /> Exportar QDOP (.xlsx)</a>
         </div>
-      </Secao>
-
-      <Secao id="dir-qdop" titulo="QDOP"
-        acoes={<a className="btn" href="/api/diretoria/qdop.xlsx"><IconeBaixar className="icone icone--p" /> Exportar QDOP (.xlsx)</a>}>
-        <Rolagem rotulo="QDOP" alta>
-          <table className="tabela qdop">
-            <caption className="sr-only">QDOP, na cota da Lotufo: as obras pelo farol</caption>
-            <thead>
-              <tr>
-                <th scope="col">Obra</th><th scope="col">Empreita</th><th scope="col" className="col-num">Contratual de execução (PI+VA)</th>
-                <th scope="col" className="col-num">Faturado</th><th scope="col" className="col-num">Saldo (contratual de execução − medido)</th>
-                <th scope="col">Término e vigência</th><th scope="col">Status</th>
-                <th scope="col">Farol</th><th scope="col">Motivos</th>
-              </tr>
-            </thead>
-            <tbody>
-              {obras.length === 0 && <tr><td colSpan={9}>Nenhuma obra neste farol.</td></tr>}
-              {obras.map(o => {
-                const { visiveis, mais } = motivosDaLinha(o.motivos);
-                return (
-                  <tr key={o.contrato_id}>
-                    <td><Link className="nome-link truncar truncar--nome" title={o.obra} para={{ tela: "obra", id: o.contrato_id, aba: "medicoes" }} ir={ir}>{o.obra}</Link></td>
-                    <td>{o.empreita}{o.direito < 1 ? ` (${pct(o.direito)})` : ""}</td>
-                    <td className="col-num dinheiro num">{brl(o.pi_va)}</td><td className="col-num dinheiro num">{brl(o.faturados)}</td>
-                    <td className={`col-num dinheiro num${o.saldo < 0 ? " negativo" : ""}`}>{brl(o.saldo)}</td>
-                    {/* 06/11/2026: a coluna "Desvio (p.p.)" (#296) saiu da tela: dependia de cronograma e de medicao em dia
-                        em toda obra; o servidor continua mandando `desvio_pp` */}
-                    {/* as duas datas numa coluna so' (as colunas do QDOP cabem a 1366): o termino da execucao e,
-                        embaixo, a vigencia */}
-                    <td className="num">{data(o.termino)}<div className="campo__nota">vig. {data(o.vigencia)}</div></td>
-                    <td className="sem-quebra">{o.status}</td>
-                    <td><Selo situacao={situacaoDoNivel((FAROL[o.farol] ?? FAROL.atencao).classe)}>{(FAROL[o.farol] ?? FAROL.atencao).rotulo}</Selo></td>
-                    <td>{!o.motivos ? (o.motivo || "—") : visiveis.length === 0 ? "—" : (
-                      <ul className="motivos">
+      </div>
+      <div className="qdop-filtros" role="group" aria-label="Filtrar o QDOP pelo farol">
+        {FILTROS.map(f => {
+          const n = p.obras.filter(o => noFiltro(o, f.id)).length;
+          return (
+            <button key={f.id} type="button" className="qdop-filtro" aria-pressed={filtro === f.id} onClick={() => setFiltro(f.id)}>
+              {f.rotulo} <span className="qdop-filtro__n num">{n}</span>
+            </button>
+          );
+        })}
+      </div>
+      <Rolagem rotulo="QDOP" alta>
+        <table className="tabela qdop-tabela">
+          <caption className="sr-only">QDOP, na cota da Lotufo: as obras pelo farol</caption>
+          <thead>
+            <tr>
+              <th scope="col">Obra</th><th scope="col" className="col-num">Contratual de execução (PI+VA)</th>
+              <th scope="col" className="col-num">Faturado</th><th scope="col" className="col-num">Saldo</th>
+              <th scope="col">Término</th><th scope="col">Farol</th>
+            </tr>
+          </thead>
+          <tbody>
+            {obras.length === 0 && <tr><td colSpan={6}>Nenhuma obra neste farol.</td></tr>}
+            {obras.map(o => {
+              const { visiveis, mais } = motivosDaLinha(o.motivos);
+              return (
+                <tr key={o.contrato_id}>
+                  <td data-rotulo="Obra">
+                    <Link className="nome-link qdop-tabela__nome" para={{ tela: "obra", id: o.contrato_id, aba: "medicoes" }} ir={ir}>{o.obra}</Link>
+                    <div className="qdop-tabela__sub">{o.empreita}{o.direito < 1 ? ` (${pct(o.direito)})` : ""} · {o.status}</div>
+                  </td>
+                  <td data-rotulo="Contratual de execução (PI+VA)" className="col-num dinheiro num">{brl(o.pi_va)}</td>
+                  <td data-rotulo="Faturado" className="col-num dinheiro num">{brl(o.faturados)}</td>
+                  <td data-rotulo="Saldo" className={`col-num dinheiro num${o.saldo < 0 ? " negativo" : ""}`}>{brl(o.saldo)}</td>
+                  {/* 06/11/2026: a coluna "Desvio (p.p.)" (#296) saiu da tela */}
+                  <td data-rotulo="Término" className="num">{data(o.termino)}<div className="qdop-tabela__sub">vigência {data(o.vigencia)}</div></td>
+                  <td data-rotulo="Farol">
+                    <SeloFarol farol={o.farol} />
+                    {!o.motivos ? (o.motivo ? <div className="qdop-tabela__motivo">{o.motivo}</div> : null) : visiveis.length === 0 ? null : (
+                      <ul className="qdop-tabela__motivos">
                         {visiveis.map(x => <li key={`${x.tipo}-${x.texto}`}>{x.texto}</li>)}
                         {mais > 0 && (
                           <li><Link para={{ tela: "avisos" }} busca={{ obra: String(o.contrato_id) }} ir={ir}>
@@ -387,39 +317,43 @@ export function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
                           </Link></li>
                         )}
                       </ul>
-                    )}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            <tfoot>
-              <tr>
-                <th scope="row" colSpan={2}>Total</th>
-                <td className="col-num dinheiro num">{brl(soma(o => o.pi_va))}</td>
-                <td className="col-num dinheiro num">{brl(soma(o => o.faturados))}</td>
-                <td className={`col-num dinheiro num${soma(o => o.saldo) < 0 ? " negativo" : ""}`}>{brl(soma(o => o.saldo))}</td>
-                <td colSpan={4} />
-              </tr>
-            </tfoot>
-          </table>
-        </Rolagem>
-      </Secao>
-    </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr>
+              <th scope="row">Total</th>
+              <td data-rotulo="Contratual de execução (PI+VA)" className="col-num dinheiro num">{brl(soma(o => o.pi_va))}</td>
+              <td data-rotulo="Faturado" className="col-num dinheiro num">{brl(soma(o => o.faturados))}</td>
+              <td data-rotulo="Saldo" className={`col-num dinheiro num${soma(o => o.saldo) < 0 ? " negativo" : ""}`}>{brl(soma(o => o.saldo))}</td>
+              <td className="qdop-tabela__vazio" colSpan={2} />
+            </tr>
+          </tfoot>
+        </table>
+      </Rolagem>
+      <footer className="qdop-rodape">
+        <ul className="qdop-rodape__lista">
+          {PRAZOS.map(x => {
+            const n = lista ? filtrarObras(lista, { termina: x.dias }).length : null;
+            return (
+              <li key={x.busca}>
+                <Link para={{ tela: "obras" }} busca={{ termina: x.busca }} ir={ir}>
+                  {n === null ? `Obras que terminam ${x.quando}` : n === 1 ? `1 obra termina ${x.quando}` : `${n} obras terminam ${x.quando}`}
+                </Link>
+              </li>
+            );
+          })}
+          <li>
+            <Link para={{ tela: "avisos" }} ir={ir}>
+              {p.avisos.length === 1 ? "1 aviso da diretoria" : `${p.avisos.length} avisos da diretoria`}
+            </Link>
+          </li>
+        </ul>
+        {lista === null && <p className="campo__nota">Não foi possível contar as obras; os links abrem a lista.</p>}
+      </footer>
+    </section>
   );
-}
-
-/** As duas vistas que vieram da Carteira, com o painel pedido uma vez (`/api/diretoria`). */
-export default function ObrasCarteira({ ir, vista }: { ir: Ir; vista: "resumo" | "qdop" }) {
-  const [p, setP] = useState<Painel | null>(null);
-  const [erro, setErro] = useState("");
-  useEffect(() => {
-    let vivo = true;
-    api<Painel>("/api/diretoria")
-      .then(d => { if (vivo) setP(d); })
-      .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
-    return () => { vivo = false; };
-  }, []);
-  if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro} Recarregue a página para tentar de novo.</p>;
-  if (!p) return <section className="cartao"><div className="vazio"><p>Carregando…</p></div></section>;
-  return <div className="pilha">{vista === "resumo" ? <Resumo p={p} ir={ir} /> : <Qdop p={p} ir={ir} />}</div>;
 }

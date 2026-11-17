@@ -80,13 +80,13 @@ describe("Página da obra: o desenho novo", () => {
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="ficha" origem={null} busca={{}} />);
     expect(await screen.findByRole("heading", { level: 1, name: "Hospital" })).toBeTruthy();
     // o resumo: valor vigente, medido e saldo do topo da ficha
-    const contrato = await screen.findByRole("region", { name: "Contrato" });
+    const contrato = await screen.findByRole("region", { name: "Resumo da obra" });
     await waitFor(() => expect(within(contrato).getByText(/1\.000,00/)).toBeTruthy());
-    const execucao = screen.getByRole("region", { name: "Execução" });
+    const execucao = screen.getByRole("region", { name: "Resumo da obra" });
     expect(within(execucao).getByText(/450,00/)).toBeTruthy();
     expect(within(execucao).getByText(/550,00/)).toBeTruthy();
-    expect(within(execucao).getByText("45%")).toBeTruthy();
-    for (const nome of ["Prazo", "Última medição", "Medição em andamento", "Próximos vencimentos", "Ritmo e prazo"]) {
+    expect(within(execucao).getByText("45% executado")).toBeTruthy();
+    for (const nome of ["Prazo", "Medições"]) {
       expect(screen.getByRole("region", { name: nome })).toBeTruthy();
     }
     // as abas, na mesma pagina; sem aba na URL, a primeira (Medições)
@@ -100,9 +100,9 @@ describe("Página da obra: o desenho novo", () => {
     expect(screen.queryByRole("link", { name: /Ficha da obra/i })).toBeNull();
     expect(screen.queryByRole("list", { name: "Números da obra" })).toBeNull();
     expect(document.title).toBe("Hospital · grupolotufo");
-    // a lateral continua: avisos da obra e a linha do tempo
+    // os avisos da obra na lateral e as linhas do tempo no painel do prazo
     expect(screen.getByRole("heading", { name: "Avisos desta obra" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Execução do contrato" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Prazo" })).toBeTruthy();
   });
 
   it("/obras/:id/prazos abre a página única com a aba Prazos selecionada e o resumo no alto (#646)", async () => {
@@ -112,8 +112,8 @@ describe("Página da obra: o desenho novo", () => {
     const abas = screen.getByRole("navigation", { name: "Seções da obra" });
     expect(within(abas).getByRole("link", { name: "Prazos" }).getAttribute("aria-current")).toBe("page");
     expect(within(abas).getByRole("link", { name: "Medições" }).getAttribute("aria-current")).toBeNull();
-    expect(screen.getByRole("region", { name: "Contrato" })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Execução" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Resumo da obra" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Resumo da obra" })).toBeTruthy();
     expect(leituras("/api/contratos/1/medicoes")).toHaveLength(0);
     await waitFor(() => expect(document.title).toBe("Hospital · Prazos · grupolotufo"));
   });
@@ -155,7 +155,7 @@ describe("Página da obra: o desenho novo", () => {
       return base(url, opcoes);
     });
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="prazos" origem={null} busca={{}} />);
-    const execucao = await screen.findByRole("region", { name: "Execução" });
+    const execucao = await screen.findByRole("region", { name: "Resumo da obra" });
     expect((await within(execucao).findByRole("alert")).textContent).toBe("indisponível agora");
     expect(screen.getByRole("navigation", { name: "Seções da obra" })).toBeTruthy();
   });
@@ -163,7 +163,7 @@ describe("Página da obra: o desenho novo", () => {
   it("não há curva S nem previsto × medido; no lugar, o cartão Ritmo e prazo acima das abas (#655)", async () => {
     responderCompleto();
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
-    const ritmo = await screen.findByRole("region", { name: "Ritmo e prazo" });
+    const ritmo = await screen.findByRole("region", { name: "Prazo" });
     await waitFor(() => expect(within(ritmo).getByText(/110,00/)).toBeTruthy());
     expect(within(ritmo).getByText("15/03/2027")).toBeTruthy();
     expect(ritmo.querySelector(".selo--critico")!.textContent).toBe("74\u00a0dias além do prazo");
@@ -179,14 +179,34 @@ describe("Página da obra: o desenho novo", () => {
     expect(leituras("/api/contratos/1/curva")).toHaveLength(0);
   });
 
-  it("abaixo de 1280 px a ordem é resumo, Ritmo e prazo, abas e só depois avisos e linha do tempo (#655)", () => {
-    const css = readFileSync(join(process.cwd(), "src", "tokens.css"), "utf8");
-    const i = css.indexOf(".obra-grade { display: flex;");
-    const bloco = css.slice(css.lastIndexOf("@media", i), css.indexOf("\n}", i));
-    expect(bloco).toContain("@media (max-width: 1280px)");
+  it("em página estreita (uma coluna) a ordem é prazo, medições de agora, avisos, abas e legenda (#774)", () => {
+    const css = readFileSync(join(process.cwd(), "src", "obra.css"), "utf8");
+    const i = css.indexOf(".obra .obra-grade { display: flex;");
+    const bloco = css.slice(css.lastIndexOf("@container", i), css.indexOf("\n}", i));
+    // a pagina e' o container: a ordem muda pela largura do conteudo, com o menu aberto ou recolhido
+    expect(bloco).toContain("@container obra-pagina (max-width: 1000px)");
+    expect(css).toMatch(/\.obra\s*\{[^}]*container:\s*obra-pagina \/ inline-size/);
     const ordem = (id: string) => Number(new RegExp(`#${id} \\{ order: (\\d+); \\}`).exec(bloco)![1]);
-    expect([ordem("ritmo"), ordem("secoes"), ordem("avisos-obra"), ordem("execucao")]).toEqual([1, 2, 3, 4]);
+    expect([ordem("prazo"), ordem("agora"), ordem("avisos-obra"), ordem("secoes"), ordem("legenda-obra")]).toEqual([1, 2, 3, 4, 5]);
     expect(css).not.toMatch(/#curva\b|#curva-resumo/);
+  });
+
+  it("a medição em andamento e a última recebida ficam no cartão Medições, com o selo da situação (#774)", async () => {
+    responderCompleto();
+    const base = api.getMockImplementation()!;
+    api.mockImplementation(async (url: string, o?: { method?: string }) => url.endsWith("/ficha")
+      ? { ...FICHA,
+          em_andamento: { id: 9, titulo: "24ª Medição", rotulo: "24ª", competencia: "2026-10", valor_centavos: 123400, etapa: "Envio da nota", desde: "2026-10-20", outras: 0 },
+          ultima_medicao: { id: 8, titulo: "23ª Medição", rotulo: "23ª", competencia: "2026-09", valor_centavos: 500000, recebida_em: "2026-10-10", dias_apos_nota: 12 } }
+      : base(url, o));
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="prazos" origem={null} busca={{}} />);
+    const cartao = await screen.findByRole("region", { name: "Medições" });
+    const andamento = await within(cartao).findByRole("link", { name: "24ª · out/2026" });
+    expect(andamento.getAttribute("href")).toBe("/obras/1/medicoes/9");
+    expect(cartao.querySelector(".selo--andamento")!.textContent).toBe("Envio da nota desde 20/10");
+    expect(within(cartao).getByRole("link", { name: "23ª · set/2026" }).getAttribute("href")).toBe("/obras/1/medicoes/8");
+    expect(cartao.querySelector(".selo--feito")!.textContent).toBe("recebida em 10/10/2026");
+    expect(within(cartao).getByText(/^12.dias após a nota$/)).toBeTruthy();
   });
 
   it("o hoje das linhas do tempo vem da data do dia e anda sozinho com os dias", async () => {
@@ -194,7 +214,7 @@ describe("Página da obra: o desenho novo", () => {
     vi.setSystemTime(new Date("2026-10-16T15:00:00Z"));
     responderCompleto();
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
-    const cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
+    const cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
     expect(within(cartao).getAllByText("Hoje 16/10/2026")).toHaveLength(2);
     expect(within(cartao).getByText("01/01/2026")).toBeTruthy();
     expect(within(cartao).getByText("31/12/2026")).toBeTruthy();
@@ -218,7 +238,7 @@ describe("Página da obra: o desenho novo", () => {
     api.mockImplementation(async (url: string, o?: { method?: string }) =>
       url.endsWith("/cabecalho") ? { ...CABECALHO_COMPLETO, vigencia_inicio: null } : base(url, o));
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
-    const cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
+    const cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
     expect(within(cartao).getAllByText("vencida")).toHaveLength(2);
     expect(within(cartao).queryByText(/vencida há/)).toBeNull();
     expect(within(cartao).queryByText("Início não cadastrado.")).toBeNull();
@@ -240,7 +260,7 @@ describe("Página da obra: o desenho novo", () => {
     fixarDia("2027-01-05T15:00:00Z");     // execucao vencida (31/12/2026), vigencia em dia
     responderCom({ status: "suspenso" });
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
-    const cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
+    const cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
     expect(within(cartao).getByText("paralisada")).toBeTruthy();
     expect(within(cartao).queryByText("obra paralisada: o vencimento não conta")).toBeNull();
     expect(within(cartao).queryByText("vencida")).toBeNull();
@@ -250,12 +270,12 @@ describe("Página da obra: o desenho novo", () => {
     fixarDia("2027-02-05T15:00:00Z");
     responderCom({ status: "encerrado" });
     const { unmount } = render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
-    let cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
+    let cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
     expect(within(cartao).queryByText(/contrato encerrado|vencida|restantes/)).toBeNull();
     unmount();
     responderCom({ status: "rescindido" });
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
-    cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
+    cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
     expect(within(cartao).queryByText(/contrato rescindido|vencida/)).toBeNull();
   });
 
@@ -263,7 +283,7 @@ describe("Página da obra: o desenho novo", () => {
     fixarDia("2027-01-05T15:00:00Z");     // execucao registrada vencida (31/12/2026), vigencia em dia
     responderCom({ dias_execucao: null, execucao_sem_prazo: true });
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
-    const cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
+    const cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
     expect(within(cartao).getByText("31/12/2026")).toBeTruthy();
     expect(within(cartao).queryByText("vencida")).toBeNull();
     expect(within(cartao).getAllByText(/^Hoje /)).toHaveLength(1);     // so' a linha da vigencia tem trilho
@@ -273,7 +293,7 @@ describe("Página da obra: o desenho novo", () => {
     fixarDia("2026-10-17T03:30:00Z");   // 23h30 do dia 16 em Cuiabá
     responderCompleto();
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
-    const cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
+    const cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
     expect(within(cartao).getAllByText("Hoje 16/10/2026")).toHaveLength(2);
   });
 
@@ -281,7 +301,7 @@ describe("Página da obra: o desenho novo", () => {
     fixarDia("2026-10-16T15:00:00Z");
     responderCom({ execucao_fim: "31/12" });
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
-    const cartao = (await screen.findByRole("heading", { name: "Execução do contrato" })).closest("section")!;
+    const cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
     expect(within(cartao).getByText("31/12")).toBeTruthy();
     expect(cartao.textContent).not.toContain("NaN");
   });
@@ -302,7 +322,7 @@ describe("Página da obra: o desenho novo", () => {
     responderCompleto();
     const { rerender } = render(<ContratoPagina contratoId={1} usuario={{ ...usuario, perfil: "diretoria" }} aba="ficha" origem={null} busca={{}} />);
     await waitFor(() => expect(leituras("/api/contratos/1/medicoes")).toHaveLength(1));
-    await screen.findByRole("region", { name: "Execução" });
+    await screen.findByRole("region", { name: "Resumo da obra" });
     expect(screen.queryByRole("button", { name: "Gerar espelho (teste)" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Criar protocolo" })).toBeNull();
     rerender(<ContratoPagina contratoId={1} usuario={{ ...usuario, perfil: "engenharia" }} aba="ficha" origem={null} busca={{}} />);
@@ -334,7 +354,7 @@ describe("Página da obra: os cartões se atualizam entre si", () => {
   it("depois de gerar o espelho, o resumo do alto é lido de novo, sem voltar a 'Carregando' (#646)", async () => {
     responder();
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
-    const execucao = await screen.findByRole("region", { name: "Execução" });
+    const execucao = await screen.findByRole("region", { name: "Resumo da obra" });
     await waitFor(() => expect(within(execucao).getByText(/450,00/)).toBeTruthy());
     expect(leituras("/api/contratos/1/ficha")).toHaveLength(1);
     fireEvent.click(await screen.findByRole("button", { name: "Gerar espelho (teste)" }));
