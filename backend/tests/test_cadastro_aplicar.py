@@ -142,6 +142,44 @@ def test_passos_medicao_do_contrato_grava_a_lista_e_sem_a_chave_fica_nulo(conn):
     assert gravado() is None
 
 
+def test_tipos_cobranca_extras_rm_grava_audita_e_o_ensaio_mostra_a_troca_sem_gravar(conn):
+    """docs/adr/0015: o tipo extra do contrato entra pelo cadastro. O relatorio diz o antes e o depois ao lado da obra
+    (a troca muda o a receber e o faturado dela); o ensaio mostra o mesmo e nao grava; sem a chave ou com a lista
+    vazia, a coluna fica nula e so' vale a lista geral."""
+    from app import cobranca_orgao
+    def gravado():
+        return conn.execute("SELECT tipos_cobranca_extras_rm FROM contratos").fetchone()[0]
+    com = lambda *tipos: _cad(contratos=[_contrato(tipos_cobranca_extras_rm=list(tipos))])
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    assert gravado() is None
+    assert cadastro_aplicar.aplicar(conn, 1, com())["contratos"] == {"criados": [], "alterados": [], "iguais": 1}
+    r = cadastro_aplicar.aplicar(conn, 1, com("2.2.03"), ensaio=True)
+    assert r["ensaio"] is True
+    assert r["contratos"]["alterados"] == ["MT-402 (tipos de cobrança extras do RM: nenhum → 2.2.03)"]
+    assert gravado() is None and cobranca_orgao.extras_por_contrato(conn) == {}
+    r = cadastro_aplicar.aplicar(conn, 1, com("2.2.03"))
+    assert r["contratos"]["alterados"] == ["MT-402 (tipos de cobrança extras do RM: nenhum → 2.2.03)"]
+    cid = conn.execute("SELECT id FROM contratos").fetchone()[0]
+    assert gravado() == '["2.2.03"]' and cobranca_orgao.extras_por_contrato(conn) == {cid: frozenset({"2.2.03"})}
+    ev = conn.execute("SELECT usuario_id, antes, depois FROM audit_log WHERE acao='cadastro.contrato' "
+                      "ORDER BY id DESC LIMIT 1").fetchone()
+    assert ev["usuario_id"] == 1
+    assert (json.loads(ev["antes"]), json.loads(ev["depois"])) == (
+        {"tipos_cobranca_extras_rm": None}, {"tipos_cobranca_extras_rm": '["2.2.03"]'})
+    assert cadastro_aplicar.aplicar(conn, 1, com("2.2.03"))["contratos"] == {"criados": [], "alterados": [], "iguais": 1}
+    r = cadastro_aplicar.aplicar(conn, 1, com("2.2.03", "2.2.04"))
+    assert r["contratos"]["alterados"] == ["MT-402 (tipos de cobrança extras do RM: 2.2.03 → 2.2.03, 2.2.04)"]
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))       # a chave sai do arquivo: volta a nenhum
+    assert r["contratos"]["alterados"] == ["MT-402 (tipos de cobrança extras do RM: 2.2.03, 2.2.04 → nenhum)"]
+    assert gravado() is None and cobranca_orgao.extras_por_contrato(conn) == {}
+
+
+def test_contrato_novo_com_tipo_extra_diz_no_relatorio(conn):
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(tipos_cobranca_extras_rm=["2.2.03"])]))
+    assert r["contratos"]["criados"] == ["MT-402 (tipos de cobrança extras do RM: nenhum → 2.2.03)"]
+    assert conn.execute("SELECT tipos_cobranca_extras_rm FROM contratos").fetchone()[0] == '["2.2.03"]'
+
+
 def test_em_encerramento_mantem_ativo_e_grava_a_data(conn):
     cad = _cad(contratos=[_contrato(status="em_encerramento", status_desde="2026-07-17")])
     cadastro_aplicar.aplicar(conn, 1, cad)

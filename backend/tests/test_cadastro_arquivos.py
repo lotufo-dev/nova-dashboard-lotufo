@@ -225,6 +225,42 @@ def test_passos_medicao_do_contrato(tmp_path):
         assert len(erros) == 1 and erros[0].startswith(onde), ruim
 
 
+def test_tipos_cobranca_extras_rm_do_contrato(tmp_path):
+    """docs/adr/0015: os tipos de movimento do RM que so' nesta obra sao cobranca ao orgao. Vazio por padrao; recusa o
+    malformado, o que ja' esta' na lista geral e o repetido."""
+    def com(valor, pasta):
+        return _escrever(tmp_path / pasta, contratos=[{**CONTRATO, "tipos_cobranca_extras_rm": valor}])
+    def lido(raiz):
+        return ca.preparar(raiz)["contratos"][0]["tipos_cobranca_extras_rm"]
+    assert lido(_escrever(tmp_path / "a")) == []                    # sem a chave: so' a lista geral
+    assert lido(com([], "b")) == [] and lido(com(None, "c")) == []
+    assert lido(com(["2.2.03"], "d")) == ["2.2.03"]
+    assert lido(com(["2.2.04", "2.2.03"], "e")) == ["2.2.03", "2.2.04"]      # em ordem, para reaplicar dar "igual"
+    onde = "contratos/mt-402.yaml: tipos_cobranca_extras_rm:"
+    formato = ("(use o código do tipo de movimento de nota do RM, entre aspas, no formato 2.2.NN, como '2.2.03')")
+    assert _erros(com(["2.2.3"], "f")) == [f"{onde} tipo de movimento malformado: '2.2.3' {formato}"]
+    assert _erros(com(["2.2.03", "1.1.21", 2.2], "g")) == [
+        f"{onde} tipo de movimento malformado: '1.1.21', 2.2 {formato}"]
+    for i, ruim in enumerate((["2.2.03 "], ["2.3.03"], ["2.2.003"], [203], [None], [["2.2.03"]], ["2.2.x3"])):
+        erros = _erros(com(ruim, f"h{i}"))
+        assert len(erros) == 1 and erros[0].startswith(f"{onde} tipo de movimento malformado"), ruim
+    assert _erros(com(["2.2.01"], "i")) == [
+        f"{onde} 2.2.01 já é cobrança ao órgão em toda obra (lista geral); tire daqui"]
+    assert _erros(com(["2.2.03", "2.2.16", "2.2.07"], "j")) == [
+        f"{onde} 2.2.16, 2.2.07 já é cobrança ao órgão em toda obra (lista geral); tire daqui"]
+    assert _erros(com(["2.2.03", "2.2.03"], "k")) == [f"{onde} tipo repetido: 2.2.03"]
+    for i, ruim in enumerate(("2.2.03", {"2.2.03": True}, False, "", 2.2)):
+        erros = _erros(com(ruim, f"l{i}"))
+        assert erros == [f"{onde} use uma lista de tipos de movimento do RM entre aspas (ex.: ['2.2.03']); [] para "
+                         "nenhum"], ruim
+
+
+def test_cadastro_de_exemplo_declara_um_tipo_extra_so_na_obra_de_consorcio():
+    from tests.conftest import CADASTRO_EXEMPLO
+    tipos = {c["nome_curto"]: c["tipos_cobranca_extras_rm"] for c in ca.preparar(CADASTRO_EXEMPLO)["contratos"]}
+    assert tipos == {"Obra Própria": [], "Obra Consórcio": ["2.2.03"]}
+
+
 def test_orgao_com_cnpj_valido_normaliza_e_invalido_e_erro(tmp_path):
     cad = ca.preparar(_escrever(tmp_path, orgaos=[{**ORGAO, "cnpj": "31.300.101/0001-01"}]))
     assert cad["orgaos"][0]["cnpj"] == "31300101000101"

@@ -56,7 +56,7 @@ import time
 from collections import Counter
 from decimal import Decimal, InvalidOperation
 
-from app import auditoria, db, medicoes, rm, tempo
+from app import auditoria, cobranca_orgao, db, medicoes, rm, tempo
 
 log = logging.getLogger("app.rm")
 
@@ -403,6 +403,17 @@ def _recebido_da_nota(conn, nota_id: int) -> tuple[int, int, str | None]:
 COMPETENCIA_CORTE_RM = "2026-07"
 ESTADOS_CANDIDATOS = ("espelho_gerado", "espelho_enviado", "nota_emitida", "protocolada")
 _A_MAO = "recebidas a mao"      # chave do cache da rodada (as demais sao coligadas)
+_EXTRAS = "tipos extras de cobranca"    # idem: os tipos de movimento extras de cada contrato
+
+
+def _extras_de_cobranca(conn, cache: dict | None) -> dict[int, frozenset[str]]:
+    """Os tipos de movimento que cada contrato declara como cobranca alem da lista geral
+    (`cobranca_orgao.extras_por_contrato`, docs/adr/0015), lidos uma vez por rodada: o casador nao muda o cadastro."""
+    if cache is None:
+        return cobranca_orgao.extras_por_contrato(conn)
+    if _EXTRAS not in cache:
+        cache[_EXTRAS] = cobranca_orgao.extras_por_contrato(conn)
+    return cache[_EXTRAS]
 
 
 def _recebidas_a_mao(conn, cache: dict | None) -> set[int]:
@@ -512,23 +523,23 @@ def _depois_do_espelho(emissao, m: dict) -> bool:
     return bool(emissao) and bool(m.get("espelho_enviado_em")) and emissao >= m["espelho_enviado_em"]
 
 
-def _nota_repetida(conn, nf, m: dict) -> bool:
+def _nota_repetida(conn, nf, m: dict, extras: dict[int, frozenset[str]]) -> bool:
     """Issue #708 (docs/adr/0005): ha' mais notas para as saidas deste valor do que saidas esperando nota. Conta como
-    concorrente a OUTRA nota que o casador tambem ligaria a' mesma saida -- ativa, de cobranca ao orgao, livre (sem
+    concorrente a OUTRA nota que o casador tambem ligaria a' mesma saida -- ativa, de cobranca ao orgao NO CONTRATO
+    DESTA MEDICAO (`cobranca_orgao.e_cobranca`: a lista geral e os tipos extras dele, `extras`), livre (sem
     vinculo vigente nem vinculo desfeito a' mao), da mesma coligada, do mesmo valor, emitida depois do envio do
     espelho e que alcanca esta medicao: o centro de custo dela aponta a obra, ou nao aponta obra nenhuma (a nota sem
     obra concorre na carteira inteira). Nota de OUTRA obra nao concorre. E' o caso da nota cancelada na pratica e
     reemitida, que o RM mantem ativa: nenhuma liga sozinha, e a pessoa decide pelo PDF. Medicao com duas saidas do
     mesmo valor (parcelas iguais) e duas notas: cada nota tem a sua saida, as duas ligam; com tres, nenhuma. Nao
     depende da ordem em que as notas sao processadas."""
-    from app import diretoria   # import local: diretoria importa este modulo
     outras = conn.execute("""
         SELECT id, centro_custo, emissao, codtmv FROM notas_fiscais
         WHERE coligada=? AND id<>? AND situacao='ativa' AND valor_centavos=?
           AND NOT EXISTS (SELECT 1 FROM nf_alocacoes a WHERE a.nota_id=notas_fiscais.id AND a.desfeita_em IS NULL)
           AND NOT """ + _SQL_DESFEITA_A_MAO.format(nota="notas_fiscais.id"),
         (nf["coligada"], nf["id"], nf["valor_centavos"], MOTIVO_A_MAO + "%")).fetchall()
-    concorrentes = sum(1 for r in outras if r["codtmv"] in diretoria.CODTMV_COBRANCA
+    concorrentes = sum(1 for r in outras if cobranca_orgao.e_cobranca(r["codtmv"], m["contrato_id"], extras)
                        and _contrato_por_centro_custo(conn, nf["coligada"], r["centro_custo"]) in (None, m["contrato_id"])
                        and _depois_do_espelho(r["emissao"], m))
     return concorrentes + 1 > m["esperadas"].count(nf["valor_centavos"])
@@ -549,8 +560,9 @@ def _coligadas_com_centro(conn) -> set:
           AND e.coligada_rm IS NOT NULL""")}
 
 
-def _casar_soma_dia(conn, nf, candidatas) -> tuple[int, int] | None:
-    """PAR de NFs do mesmo centro e dia que soma o valor de UMA medicao candidata.
+def _casar_soma_dia(conn, nf, candidatas, contrato_id: int, extras: dict[int, frozenset[str]]) -> tuple[int, int] | None:
+    """PAR de NFs do mesmo centro e dia que soma o valor de UMA medicao candidata. `contrato_id` e' a obra do centro
+    de custo da nota (as `candidatas` ja' sao so' dela); `extras`, os tipos de movimento extras de cada contrato.
 
     Devolve (medicao_id, id_da_irma) so' quando o casamento e' inequivoco INDEPENDENTE da
     ordem de processamento; qualquer ambiguidade devolve None (fica sem alocacao). E' o
@@ -565,7 +577,6 @@ def _casar_soma_dia(conn, nf, candidatas) -> tuple[int, int] | None:
     - ELEGIBILIDADE: uma irma so' entra num par se NAO tiver destino proprio mais forte
       (valor que casa exato com uma medicao candidata) -- senao o par a roubaria de um
       casamento individual que valeria mais."""
-    from app import diretoria   # import local: diretoria importa este modulo
     if not nf["emissao"]:
         return None
     grupo = conn.execute("""
@@ -575,8 +586,9 @@ def _casar_soma_dia(conn, nf, candidatas) -> tuple[int, int] | None:
           AND NOT EXISTS (SELECT 1 FROM nf_alocacoes a WHERE a.nota_id=notas_fiscais.id AND a.desfeita_em IS NULL)
           AND NOT """ + _SQL_DESFEITA_A_MAO.format(nota="notas_fiscais.id"),
         (nf["coligada"], nf["centro_custo"] or "", nf["emissao"], MOTIVO_A_MAO + "%")).fetchall()
-    # Issue #584: irma so' entre as notas de cobranca ao orgao (nota a fornecedor do mesmo centro e dia nao fecha par)
-    grupo = [r for r in grupo if r["codtmv"] in diretoria.CODTMV_COBRANCA]
+    # Issue #584: irma so' entre as notas de cobranca ao orgao nesta obra (nota a fornecedor do mesmo centro e dia nao
+    # fecha par)
+    grupo = [r for r in grupo if cobranca_orgao.e_cobranca(r["codtmv"], contrato_id, extras)]
     # valor -> medicoes candidatas com aquele valor (a obra ja' esta' estreitada em cands)
     med_por_valor: dict = {}
     for m in candidatas:
@@ -604,13 +616,15 @@ def _casar(conn, nota_id: int, coligadas_com_centro: set, cache: dict | None = N
     """Tenta alocar a NF; devolve 'alocada', 'ambigua' ou None. `cache` = candidatas por coligada da
     rodada (limpo aqui a cada alocacao, porque a medicao alocada pode deixar de faltar nota)."""
     cache = {} if cache is None else cache
-    from app import diretoria   # import local: diretoria importa este modulo
     nf = conn.execute("SELECT * FROM notas_fiscais WHERE id=?", (nota_id,)).fetchone()
     if nf["situacao"] != "ativa":
         return None
-    # Issue #584: so' nota de cobranca ao orgao (a mesma lista do a receber, #563) e' candidata. Nota contra
+    # Issue #584: so' nota de cobranca ao orgao (a mesma regra do a receber, #563) e' candidata. Nota contra
     # fornecedor (2.2.15) ou pessoa fisica (2.2.10) com centro de obra nao vira nota da medicao, por nenhuma regra.
-    if nf["codtmv"] not in diretoria.CODTMV_COBRANCA:
+    # Aqui a nota ainda nao tem contrato: sai a de tipo que nao e' cobranca em obra nenhuma; a de tipo extra so' e'
+    # candidata, abaixo, as medicoes dos contratos que o declaram (docs/adr/0015).
+    extras = _extras_de_cobranca(conn, cache)
+    if nf["codtmv"] not in cobranca_orgao.tipos_buscados(extras):
         return None
     if conn.execute("SELECT 1 FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL", (nota_id,)).fetchone():
         return None
@@ -626,22 +640,27 @@ def _casar(conn, nota_id: int, coligadas_com_centro: set, cache: dict | None = N
         cache.pop(nf["coligada"], None)
         return "alocada"
 
-    todas = _candidatas(conn, nf["coligada"], cache)
+    # so' as medicoes dos contratos em que esta nota e' cobranca: todas, para o tipo da lista geral; para o tipo
+    # extra, so' as dos contratos que o declaram (nem o centro de custo de outra obra nem o valor exato a levam a outra)
+    todas = [m for m in _candidatas(conn, nf["coligada"], cache)
+             if cobranca_orgao.e_cobranca(nf["codtmv"], m["contrato_id"], extras)]
     recebidas = {m["id"] for m in todas if m["estado"] == "recebida"}
     # Issue #713 (segunda revisao): primeiro so' as medicoes em andamento, como sempre. A recebida a' mao nao disputa
     # nota com elas (nao as deixa ambiguas nem tira nota de um par do dia) e nao conta "proxima" (sem isso ela faria
     # toda nota de valor parecido da obra virar ambigua para sempre): so' fica com a nota que NENHUMA medicao em
     # andamento quis, e so' pelas regras de valor exato.
-    r = _casar_entre(conn, nf, [m for m in todas if m["id"] not in recebidas], coligadas_com_centro, _aloca)
+    r = _casar_entre(conn, nf, [m for m in todas if m["id"] not in recebidas], coligadas_com_centro, extras, _aloca)
     if r is None and recebidas:
-        r = _casar_entre(conn, nf, [m for m in todas if m["id"] in recebidas], coligadas_com_centro, _aloca,
+        r = _casar_entre(conn, nf, [m for m in todas if m["id"] in recebidas], coligadas_com_centro, extras, _aloca,
                          so_exato=True)
     return r
 
 
-def _casar_entre(conn, nf, candidatas: list[dict], coligadas_com_centro: set, _aloca, so_exato: bool = False) -> str | None:
-    """As regras de valor do casador para a nota `nf`, entre `candidatas`. Devolve 'alocada', 'ambigua' ou None.
-    `so_exato`: sem a contagem de medicoes proximas (ate' 5%) como ambiguas."""
+def _casar_entre(conn, nf, candidatas: list[dict], coligadas_com_centro: set, extras: dict[int, frozenset[str]],
+                 _aloca, so_exato: bool = False) -> str | None:
+    """As regras de valor do casador para a nota `nf`, entre `candidatas` (ja' so' as dos contratos em que a nota e'
+    cobranca ao orgao). Devolve 'alocada', 'ambigua' ou None. `extras`: os tipos de movimento extras de cada contrato,
+    para a nota concorrente e a irma do par. `so_exato`: sem a contagem de medicoes proximas (ate' 5%) como ambiguas."""
     alvo = _contrato_por_centro_custo(conn, nf["coligada"], nf["centro_custo"])
     # Bloco 3: saida esperada do espelho com o valor EXATO da NF -- a chave mais forte por valor (docs/adr/0005).
     # Com centro mapeado, dentro da obra; sem centro (NF Lotufo -> orgao em obra de consorcio,
@@ -661,7 +680,7 @@ def _casar_entre(conn, nf, candidatas: list[dict], coligadas_com_centro: set, _a
     candidatas = [m for m in candidatas if m["id"] not in antigas]
     if len(por_saida) == 1:
         # Issue #708, trava de nota repetida: mais notas do que saidas daquele valor, nenhuma liga sozinha.
-        if _nota_repetida(conn, nf, por_saida[0]):
+        if _nota_repetida(conn, nf, por_saida[0], extras):
             log.info("NF %s/%s da coligada %s (R$ %.2f) repetida para a mesma saida do espelho: sem alocacao automatica",
                      nf["numero"], nf["serie"] or "", nf["coligada"], nf["valor_centavos"] / 100)
             return "ambigua"
@@ -673,7 +692,7 @@ def _casar_entre(conn, nf, candidatas: list[dict], coligadas_com_centro: set, _a
         if len(exatas) == 1:
             # Centro + valor exato: a obra tambem bate; a auditoria registra a regra.
             return _aloca(exatas[0]["id"], 0.9, "centro_custo_valor")
-        par = _casar_soma_dia(conn, nf, candidatas)
+        par = _casar_soma_dia(conn, nf, candidatas, alvo, extras)
         if par is not None:
             medicao_id, irma_id = par
             # As DUAS notas do par sao alocadas AQUI (N:N, cada uma pelo seu valor). Deixar
@@ -736,7 +755,7 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
     if medicao_ids == []:
         return 0                        # "IN ()" nem e' SQL valido
     filtro = f" AND m.id IN ({','.join('?' * len(medicao_ids))})" if medicao_ids is not None else ""
-    cobranca = ",".join("?" * len(diretoria.CODTMV_COBRANCA))
+    extras = cobranca_orgao.extras_por_contrato(conn)
     passos_de = medicoes.passos_das_medicoes(conn)
     for m in conn.execute("""SELECT m.id, m.contrato_id, m.tipo, m.estado, m.planilha_enviada_em, e.coligada_rm,
                                     COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
@@ -755,11 +774,12 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
         if not notas:
             continue
         # Issue #584: vinculo automatico antigo com nota de tipo fora da cobranca ao orgao (2.2.15, 2.2.10) nao fecha
-        # a medicao sozinho; fica no relato `vinculos_fora_da_cobranca` para o dono decidir.
-        if conn.execute(f"""SELECT 1 FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
-                            WHERE a.medicao_id=? AND a.desfeita_em IS NULL AND a.origem='detectado'
-                              AND n.coligada=? AND n.codtmv IS NOT NULL AND n.codtmv NOT IN ({cobranca})""",
-                        (m["id"], m["coligada_rm"], *diretoria.CODTMV_COBRANCA)).fetchone():
+        # a medicao sozinho; fica no relato `vinculos_fora_da_cobranca` para o dono decidir. O tipo extra que o contrato
+        # da medicao declara no cadastro e' cobranca nela (`cobranca_orgao.e_cobranca`, docs/adr/0015) e nao a segura.
+        tipos = conn.execute("""SELECT n.codtmv FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
+                                WHERE a.medicao_id=? AND a.desfeita_em IS NULL AND a.origem='detectado'
+                                  AND n.coligada=? AND n.codtmv IS NOT NULL""", (m["id"], m["coligada_rm"])).fetchall()
+        if any(not cobranca_orgao.e_cobranca(r["codtmv"], m["contrato_id"], extras) for r in tipos):
             continue
         # Issue #714 (docs/adr/0006): a medicao so' vira recebida quando as notas VIGENTES cobrem o valor dela. Faturada
         # em mais de uma nota, com uma cancelada no RM (o vinculo e' desfeito), desfeita a' mao (gate Sol S1, PR #202)
@@ -808,20 +828,20 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
 
 
 def vinculos_fora_da_cobranca(conn) -> list[dict]:
-    """Issue #584: vinculos automaticos vigentes (origem `detectado`) cuja nota tem tipo de movimento do RM fora de
-    `diretoria.CODTMV_COBRANCA` (os mesmos que `_recebimentos` nao fecha sozinho; nota sem tipo nao veio do RM).
+    """Issue #584: vinculos automaticos vigentes (origem `detectado`) cuja nota tem tipo de movimento do RM que nao e'
+    cobranca ao orgao no contrato da medicao (`cobranca_orgao.e_cobranca`: fora da lista geral e dos tipos extras
+    daquele contrato; os mesmos que `_recebimentos` nao fecha sozinho; nota sem tipo nao veio do RM).
     So' le: o dono decide cada um (correcao e' evento novo)."""
-    from app import diretoria   # import local: diretoria importa este modulo
-    cobranca = ",".join("?" * len(diretoria.CODTMV_COBRANCA))
-    return [dict(r) for r in conn.execute(f"""
+    extras = cobranca_orgao.extras_por_contrato(conn)
+    linhas = conn.execute("""
         SELECT n.numero, n.idmov, n.coligada, n.codtmv, n.emissao, a.valor_alocado_centavos AS valor_centavos,
                a.regra, a.medicao_id, c.numero_instrumento, m.numero AS medicao_numero, m.tipo AS medicao_tipo,
-               m.estado AS medicao_estado
+               m.estado AS medicao_estado, m.contrato_id
         FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
         JOIN medicoes m ON m.id=a.medicao_id JOIN contratos c ON c.id=m.contrato_id
-        WHERE a.desfeita_em IS NULL AND a.origem='detectado'
-          AND n.codtmv IS NOT NULL AND n.codtmv NOT IN ({cobranca})
-        ORDER BY c.numero_instrumento, m.numero, m.tipo, n.emissao, n.id""", diretoria.CODTMV_COBRANCA)]
+        WHERE a.desfeita_em IS NULL AND a.origem='detectado' AND n.codtmv IS NOT NULL
+        ORDER BY c.numero_instrumento, m.numero, m.tipo, n.emissao, n.id""")
+    return [dict(r) for r in linhas if not cobranca_orgao.e_cobranca(r["codtmv"], r["contrato_id"], extras)]
 
 
 # ------------------------------------------------------------------ custo e estoque (issue #488)

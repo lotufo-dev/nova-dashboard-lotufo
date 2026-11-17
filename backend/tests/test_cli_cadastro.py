@@ -50,6 +50,39 @@ def test_aplicar_grava_e_ensaio_nao(tmp_path, monkeypatch, capsys):
     assert "ENSAIO" in capsys.readouterr().out
 
 
+def test_validar_recusa_tipo_de_cobranca_malformado_e_o_da_lista_geral(tmp_path, capsys):
+    """docs/adr/0015: `cadastro validar` recusa `tipos_cobranca_extras_rm` malformado e o tipo que ja' e' geral."""
+    raiz = _cadastro(tmp_path / "a", {**CONTRATO, "tipos_cobranca_extras_rm": ["2.2.3"]})
+    assert cli.main(["cadastro", "validar", "--raiz", str(raiz)]) == 1
+    saida = capsys.readouterr().out
+    assert "tipos_cobranca_extras_rm: tipo de movimento malformado: '2.2.3'" in saida
+    raiz = _cadastro(tmp_path / "b", {**CONTRATO, "tipos_cobranca_extras_rm": ["2.2.02"]})
+    assert cli.main(["cadastro", "validar", "--raiz", str(raiz)]) == 1
+    assert "2.2.02 já é cobrança ao órgão em toda obra (lista geral)" in capsys.readouterr().out
+    raiz = _cadastro(tmp_path / "c", {**CONTRATO, "tipos_cobranca_extras_rm": ["2.2.03"]})
+    assert cli.main(["cadastro", "validar", "--raiz", str(raiz)]) == 0
+
+
+def test_ensaio_mostra_a_troca_dos_tipos_de_cobranca_e_so_o_aplicar_grava(tmp_path, monkeypatch, capsys):
+    """docs/adr/0015: `cadastro aplicar --ensaio` mostra a obra com o antes e o depois dos tipos extras e nao grava."""
+    conn = _banco(tmp_path, monkeypatch)
+    auth.criar_usuario(conn, "Dono", "dono@exemplo.com.br", "senha-forte-123", "admin")
+    antes = str(_cadastro(tmp_path / "antes"))
+    depois = str(_cadastro(tmp_path / "depois", {**CONTRATO, "tipos_cobranca_extras_rm": ["2.2.03"]}))
+    assert cli.main(["cadastro", "aplicar", "--raiz", antes, "--usuario", "dono@exemplo.com.br"]) == 0
+    capsys.readouterr()
+    gravado = lambda: conn.execute("SELECT tipos_cobranca_extras_rm FROM contratos").fetchone()[0]
+    assert cli.main(["cadastro", "aplicar", "--raiz", depois, "--usuario", "dono@exemplo.com.br", "--ensaio"]) == 0
+    saida = capsys.readouterr().out
+    assert "ENSAIO (nada foi gravado)" in saida and "contratos: 0 criados, 1 alterados, 0 iguais" in saida
+    assert "~ MT-402 (tipos de cobrança extras do RM: nenhum → 2.2.03)" in saida
+    assert gravado() is None
+    assert cli.main(["cadastro", "aplicar", "--raiz", depois, "--usuario", "dono@exemplo.com.br"]) == 0
+    saida = capsys.readouterr().out
+    assert "APLICADO" in saida and "~ MT-402 (tipos de cobrança extras do RM: nenhum → 2.2.03)" in saida
+    assert gravado() == '["2.2.03"]'
+
+
 def test_ensaio_lista_as_versoes_de_cronograma_por_obra(tmp_path, monkeypatch, capsys):
     """Issue #256: `cadastro aplicar --ensaio` diz quais versoes de cronograma entrariam, por obra."""
     conn = _banco(tmp_path, monkeypatch)

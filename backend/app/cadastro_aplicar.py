@@ -158,7 +158,8 @@ _CAMPOS_CONTRATO = ("nome_curto", "orgao", "orgao_id", "entidade_id", "objeto", 
                     "copia_extras",
                     "estado", "documentos", "objeto_completo", "cno_arquivo", "folga_vigencia_dias",
                     "centros_custo_anteriores_rm", "objeto_carta", "garantia_apolice", "garantia_vigencia_fim",
-                    "garantia_arquivo", "indice_reajuste", "pecas_no_oficio", "passos_medicao")
+                    "garantia_arquivo", "indice_reajuste", "pecas_no_oficio", "passos_medicao",
+                    "tipos_cobranca_extras_rm")
 _CAMPOS_FISCAL = ("cargo", "tratamento", "portaria")
 
 
@@ -268,8 +269,19 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             # issue #462: a lista vazia e' gravada ('[]': nenhuma vai no oficio); ausente, NULL (segue o orgao)
             "pecas_no_oficio": None if c.get("pecas_no_oficio") is None else _json(c["pecas_no_oficio"]),
             # issue #660: como acima; '[]' e' a obra sem fluxo de medicao, NULL segue a familia do orgao
-            "passos_medicao": None if c.get("passos_medicao") is None else _json(c["passos_medicao"])}
+            "passos_medicao": None if c.get("passos_medicao") is None else _json(c["passos_medicao"]),
+            # docs/adr/0015: tipos de movimento do RM que so' nesta obra tambem sao cobranca ao orgao; sem nenhum, NULL
+            "tipos_cobranca_extras_rm": _json(c["tipos_cobranca_extras_rm"])
+            if c.get("tipos_cobranca_extras_rm") else None}
     mudou = False
+    # A troca dos tipos de cobranca muda o a receber, o faturado e o vinculo das notas da obra: o relatorio (e o
+    # ensaio) diz o antes e o depois ao lado do nome, em vez de so' "alterado".
+    tipos_antes = json.loads(dict(ja or {}).get("tipos_cobranca_extras_rm") or "[]")
+    tipos_depois = c.get("tipos_cobranca_extras_rm") or []
+    rotulo = c["nome_curto"]
+    if tipos_antes != tipos_depois:
+        rotulo += (f" (tipos de cobrança extras do RM: {', '.join(tipos_antes) or 'nenhum'} → "
+                   f"{', '.join(tipos_depois) or 'nenhum'})")
     if ja is None:
         colunas = ["numero_instrumento", *_CAMPOS_CONTRATO]
         cur = conn.execute(
@@ -277,7 +289,7 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             [c["numero_instrumento"], *[novo[k] for k in _CAMPOS_CONTRATO]])
         cid = cur.lastrowid
         mudou = True
-        rel["contratos"]["criados"].append(c["nome_curto"])
+        rel["contratos"]["criados"].append(rotulo)
         auditoria.registrar(conn, usuario_id, "cadastro.contrato", "contrato", cid, None,
                             {"numero_instrumento": c["numero_instrumento"], **novo})
     else:
@@ -334,7 +346,7 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
 
     if ja is not None:
         if mudou:
-            rel["contratos"]["alterados"].append(c["nome_curto"])
+            rel["contratos"]["alterados"].append(rotulo)
         else:
             rel["contratos"]["iguais"] += 1
     _instrumentos(conn, usuario_id, cid, c, rel["instrumentos"])

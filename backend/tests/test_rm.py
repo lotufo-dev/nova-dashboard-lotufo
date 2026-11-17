@@ -712,6 +712,141 @@ def test_cli_rm_vinculos_fora_da_cobranca_imprime_e_nao_grava(conn, cid, tmp_pat
     assert conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == antes
 
 
+# --- docs/adr/0015: tipo de movimento extra por contrato (`tipos_cobranca_extras_rm` do cadastro) ---
+
+def _declarar_tipos_extras(conn, contrato_id, *tipos):
+    """O que o `cadastro aplicar` grava no contrato que declara tipos de movimento extras (sem tipos: nenhum)."""
+    conn.execute("UPDATE contratos SET tipos_cobranca_extras_rm=? WHERE id=?",
+                 (json.dumps(list(tipos)) if tipos else None, contrato_id))
+    conn.commit()
+
+
+def _outra_obra_com_centro(conn, centro="2.001.013"):
+    return contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "CT 10", "objeto": "Obra 3",
+                                     "valor_original_centavos": 100_000_00, "centro_custo_rm": centro})
+
+
+def test_casador_liga_nota_de_tipo_extra_so_na_obra_que_o_declara(conn, cid, tmp_path):
+    """A nota 2.2.03 com o centro de custo e o valor exato da medicao liga na obra cujo cadastro declara o tipo; na
+    obra que nao declara, nas mesmas condicoes, nao liga nem conta como ambigua (como qualquer nota fora da cobranca)."""
+    declara, nao_declara = _obra_com_centro(conn), _outra_obra_com_centro(conn)
+    _declarar_tipos_extras(conn, declara, "2.2.03")
+    m1 = _medicao(conn, declara, 1, 500_01)             # centavo impar
+    m2 = _medicao(conn, nao_declara, 1, 700_03)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [
+        _nf(7, 500.01, centro_custo="2.001.012", codtmv="2.2.03"),
+        _nf(8, 700.03, centro_custo="2.001.013", codtmv="2.2.03")], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (1, 0), r
+    assert medicoes.detalhe(conn, m1)["notas"][0]["regra"] == "centro_custo_valor"
+    assert not _tem_nf(conn, m2)
+    # sem a chave em contrato nenhum, a mesma nota nao liga em lugar nenhum
+    _declarar_tipos_extras(conn, declara)
+    m3 = _medicao(conn, declara, 2, 900_05)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [
+        _nf(9, 900.05, centro_custo="2.001.012", codtmv="2.2.03")], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0) and not _tem_nf(conn, m3), r
+
+
+def test_nota_de_tipo_extra_com_centro_de_outra_obra_nao_liga_pelo_valor(conn, cid, tmp_path):
+    """O centro de custo aponta a obra que NAO declara o tipo; o valor e' exatamente o da medicao da obra que declara.
+    A nota nao e' cobranca na obra dela, e o valor sozinho nao a leva para a outra: fica sem vinculo, sem ambiguidade."""
+    declara, nao_declara = _obra_com_centro(conn), _outra_obra_com_centro(conn)
+    _declarar_tipos_extras(conn, declara, "2.2.03")
+    m1 = _medicao(conn, declara, 1, 500_01)
+    m2 = _medicao(conn, nao_declara, 1, 500_01)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [
+        _nf(7, 500.01, centro_custo="2.001.013", codtmv="2.2.03")], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0), r
+    assert not _tem_nf(conn, m1) and not _tem_nf(conn, m2)
+
+
+@pytest.mark.parametrize("declara", [True, False])
+def test_fatura_de_tipo_extra_do_consorcio_liga_pelo_valor_exato_so_com_a_chave(conn, cid, tmp_path, declara):
+    """Consorcio sem centro de custo (a coligada isola a obra): a nota 2.2.03 da coligada dele liga pelo valor exato
+    quando o contrato declara o tipo, e fica solta sem a chave."""
+    eid = entidades.criar(conn, 1, {"nome": "Consórcio Exemplo", "cnpj": "11444777000161",
+                                    "papel": "consorcio", "coligada_rm": 12})
+    c2 = contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 9", "objeto": "Obra",
+                                   "valor_original_centavos": 100_00, "entidade_id": eid})
+    if declara:
+        _declarar_tipos_extras(conn, c2, "2.2.03")
+    m = _medicao(conn, c2, 1, 333_333)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(7, 3333.33, coligada=12, codtmv="2.2.03")], []))
+    assert r["alocacoes"] == (1 if declara else 0) and r["sugestoes"] == 0, r
+    assert _tem_nf(conn, m) is declara
+    if declara:
+        assert medicoes.detalhe(conn, m)["notas"][0]["regra"] == "valor_exato"
+
+
+@pytest.mark.parametrize("declara", [True, False])
+def test_soma_do_dia_usa_irma_de_tipo_extra_so_na_obra_que_o_declara(conn, cid, tmp_path, declara):
+    """O par do dia entre uma nota da lista geral e uma 2.2.03 do mesmo centro: fecha a medicao na obra que declara o
+    tipo (as duas ligam, cada uma pelo seu valor); na obra sem a chave, a 2.2.03 nao e' irma e nenhuma liga (issue
+    #584), mesmo com outra obra declarando o tipo."""
+    c2 = _obra_com_centro(conn, "4.003.025")
+    _declarar_tipos_extras(conn, c2 if declara else _outra_obra_com_centro(conn), "2.2.03")
+    m = _medicao(conn, c2, 1, 300_01)
+    dia = "2026-08-03T00:00:00-04:00"
+    cli = _simulador(tmp_path, [_nf(1, 120.0, centro_custo="4.003.025", emissao=dia),
+                                _nf(2, 180.01, centro_custo="4.003.025", emissao=dia, codtmv="2.2.03")], [])
+    r = sincronizacao_rm.sincronizar(conn, cli)
+    assert r["alocacoes"] == (1 if declara else 0), r        # o par conta uma alocacao na rodada
+    notas = medicoes.detalhe(conn, m)["notas"]
+    assert sorted((n["idmov"], n["valor_alocado_centavos"], n["regra"]) for n in notas) == (
+        [(1, 120_00, "centro_custo_soma_dia"), (2, 180_01, "centro_custo_soma_dia")] if declara else [])
+
+
+@pytest.mark.parametrize("declara", [True, False])
+def test_nota_reclassificada_para_tipo_extra_recebe_pela_baixa_so_na_obra_que_o_declara(conn, cid, tmp_path, declara):
+    """O caso que motivou a regra: a nota nasceu num tipo da lista geral, foi ligada a' medicao, e o RM a reclassificou
+    para 2.2.03. A sincronizacao traz a nota reclassificada e o titulo dela do mesmo jeito (as consultas trazem todo
+    `2.2.%`). Sem a chave no contrato, o vinculo automatico vira "fora da cobranca": a baixa nao fecha a medicao e o
+    relato o lista. Com a chave, a medicao e' recebida pela baixa, na data dela, e o relato fica vazio."""
+    c2 = _obra_com_centro(conn)
+    m = _medicao(conn, c2, 3, 500_01)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nf(7, 500.01, centro_custo="2.001.012", numero="77")], []))
+    assert r["alocacoes"] == 1, r
+    if declara:
+        _declarar_tipos_extras(conn, c2, "2.2.03")
+    reclassificada = [_nf(7, 500.01, centro_custo="2.001.012", numero="77", codtmv="2.2.03")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, reclassificada, [
+        _baixa(1, 7, 470.01, 470.01, 1, "2026-09-01T00:00:00-04:00")]))
+    nota = conn.execute("SELECT id, codtmv FROM notas_fiscais WHERE idmov=7").fetchone()
+    assert nota["codtmv"] == "2.2.03"
+    assert [tuple(b) for b in conn.execute("SELECT valor_original_centavos, valor_baixado_centavos, status_lan FROM baixas "
+                                           "WHERE nota_id=?", (nota["id"],))] == [(470_01, 470_01, 1)]
+    d = medicoes.detalhe(conn, m)
+    fora = sincronizacao_rm.vinculos_fora_da_cobranca(conn)
+    if declara:
+        assert r["recebimentos"] == 1, r
+        assert (d["estado"], d["recebida_em"]) == ("recebida", "2026-09-01") and fora == []
+    else:
+        assert r["recebimentos"] == 0, r
+        assert d["estado"] == "protocolada" and len(d["notas"]) == 1        # o vinculo fica; a medicao nao fecha
+        assert [(v["idmov"], v["medicao_id"], v["codtmv"]) for v in fora] == [(7, m, "2.2.03")]
+
+
+def test_vinculo_de_tipo_extra_em_obra_que_nao_o_declara_continua_no_relato(conn, cid, tmp_path):
+    """Duas obras com vinculo automatico de nota 2.2.03: so' a que declara o tipo sai do relato dos vinculos fora da
+    cobranca; a outra continua nele, com a medicao segura."""
+    declara, nao_declara = _obra_com_centro(conn), _outra_obra_com_centro(conn)
+    _declarar_tipos_extras(conn, declara, "2.2.03")
+    m1 = _medicao(conn, declara, 1, 500_01)
+    m2 = _medicao(conn, nao_declara, 1, 700_03)
+    nfs = [_nf(7, 500.01, centro_custo="2.001.012", codtmv="2.2.03"),
+           _nf(8, 700.03, centro_custo="2.001.013", codtmv="2.2.03")]
+    sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
+    nid = conn.execute("SELECT id FROM notas_fiscais WHERE idmov=8").fetchone()[0]
+    with db.mutacao(conn):          # vinculo automatico antigo, que o casador de hoje nao faria
+        sincronizacao_rm.alocar(conn, None, nid, m2, "detectado", 0.9, "centro_custo_valor")
+    pago = "2026-09-01T00:00:00-04:00"
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, [_baixa(1, 7, 500.01, 500.01, 1, pago),
+                                                                      _baixa(2, 8, 700.03, 700.03, 1, pago)]))
+    assert r["recebimentos"] == 1, r
+    assert medicoes.detalhe(conn, m1)["estado"] == "recebida" and medicoes.detalhe(conn, m2)["estado"] == "protocolada"
+    assert [(v["idmov"], v["medicao_id"]) for v in sincronizacao_rm.vinculos_fora_da_cobranca(conn)] == [(8, m2)]
+
+
 def test_centro_custo_nao_cadastrado_fica_ambiguo(conn, cid, tmp_path):
     """Sem contrato com aquele centro de custo o casamento nao estreita: as duas obras de
     valor igual voltam a ser candidatas ambiguas -- a NF fica sem alocacao, nao chute."""
@@ -1779,6 +1914,57 @@ def test_travas_valem_para_a_nota_da_lotufo_em_obra_de_consorcio(conn, tmp_path,
     r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, duas, []))
     assert r["alocacoes"] == 1, r
     assert [(n["idmov"], n["regra"]) for n in medicoes.detalhe(conn, mid)["notas"]] == [(940, "saida_espelho")]
+
+
+@pytest.mark.parametrize("declara", [True, False])
+def test_nota_da_empresa_de_tipo_extra_liga_pela_saida_so_no_consorcio_que_o_declara(conn, tmp_path, espelho_consorcio,
+                                                                                     declara):
+    """docs/adr/0015, o caminho sem obra: a nota da empresa ao orgao em obra de consorcio fica na coligada 1, com
+    centro que nao aponta contrato. Em 2.2.03, liga pela saida do espelho da medicao do consorcio cujo cadastro declara
+    o tipo (o `cadastro-exemplo/` declara na Obra Consorcio e o fixture o aplica); sem a chave, fica solta."""
+    mid = espelho_consorcio
+    if not declara:
+        conn.execute("UPDATE contratos SET tipos_cobranca_extras_rm=NULL"); conn.commit()
+    else:
+        assert conn.execute("SELECT tipos_cobranca_extras_rm FROM contratos WHERE nome_curto='Obra Consórcio'"
+                            ).fetchone()[0] == '["2.2.03"]'
+    faltavam = medicoes.detalhe(conn, mid)["notas_faltam"]       # notas da empresa que o espelho espera (issue #514)
+    nota = dict(_nota_propria_no_consorcio(940), CODTMV="2.2.03")
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [nota], []))
+    assert (r["alocacoes"], r["sugestoes"]) == ((1, 0) if declara else (0, 0)), r
+    m = medicoes.detalhe(conn, mid)
+    assert [(n["idmov"], n["regra"], n["da_cota"]) for n in m["notas"]] == (
+        [(940, "saida_espelho", True)] if declara else [])
+    # o que a pagina da medicao mostra: uma nota da empresa a menos por chegar, so' com a chave
+    assert faltavam >= 1 and m["notas_faltam"] == (faltavam - 1 if declara else faltavam)
+
+
+@pytest.mark.parametrize("declara", [True, False])
+def test_nota_de_tipo_extra_so_concorre_pela_saida_na_obra_que_o_declara(conn, tmp_path, espelho_consorcio, declara):
+    """Issue #708 com o tipo extra: duas notas do valor da saida, uma 2.2.01 e uma 2.2.03. Na obra que declara o
+    2.2.03, as duas ligariam a' mesma saida e nenhuma liga sozinha; sem a chave, a 2.2.03 nao e' cobranca, nao
+    concorre, e a 2.2.01 liga."""
+    mid = espelho_consorcio
+    if not declara:
+        conn.execute("UPDATE contratos SET tipos_cobranca_extras_rm=NULL"); conn.commit()
+    notas = [_nota_propria_no_consorcio(940), dict(_nota_propria_no_consorcio(942, emissao="2026-08-12"), CODTMV="2.2.03")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, notas, []))
+    assert (r["alocacoes"], r["sugestoes"]) == ((0, 2) if declara else (1, 0)), r
+    assert [n["idmov"] for n in medicoes.detalhe(conn, mid)["notas"]] == ([] if declara else [940])
+
+
+def test_nota_de_tipo_extra_de_outra_obra_nao_liga_pela_saida_do_espelho(conn, tmp_path, espelho_mt402):
+    """A Obra Propria nao declara o 2.2.03 (a Obra Consorcio do mesmo cadastro declara): a nota 2.2.03 com o centro de
+    custo dela e o valor exato da saida do espelho nao liga, e ao lado de uma 2.2.01 do mesmo valor nao a deixa
+    ambigua."""
+    _, mid = espelho_mt402
+    assert len(sincronizacao_rm._extras_de_cobranca(conn, None)) == 1          # so' a Obra Consorcio declara
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910, codtmv="2.2.03")], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0) and not _tem_nf(conn, mid), r
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910, codtmv="2.2.03"),
+                                                                 _nota_da_27a(911, emissao="2026-09-15")], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (1, 0), r
+    assert [(n["idmov"], n["regra"]) for n in medicoes.detalhe(conn, mid)["notas"]] == [(911, "saida_espelho")]
 
 
 # --- desalocacao manual (issue #71) ---

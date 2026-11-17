@@ -15,7 +15,8 @@ import json
 import math
 from decimal import ROUND_HALF_UP, Decimal
 
-from app import avisos as _av, conciliacao, contratos, cronograma, medicoes, paineis, qdop, reajuste, sincronizacao_rm, tempo
+from app import (avisos as _av, cobranca_orgao, conciliacao, contratos, cronograma, medicoes, paineis, qdop, reajuste,
+                 sincronizacao_rm, tempo)
 
 # Prazo do orgao (docs/adr/0007, issue #711): o terceiro quartil dos dias entre o protocolo e o recebimento, com no
 # minimo cinco recebimentos em doze meses. A conta e' uma so' (`prazos_do_orgao`); nao ha' numero padrao.
@@ -29,11 +30,11 @@ FORA = ("cancelada", "desistida", "prevista", "planilha_gerada")
 FAIXAS = (("ate_30", 0, 30), ("de_31_a_60", 31, 60), ("mais_60", 61, None))
 COMPETENCIA_NOTA_VALE = "2026-06"   # `complemento_rm`: a carga do historico trouxe as medicoes ate' 05/2026
 TOLERANCIA_CENTAVOS = 100      # titulo pago com ate R$ 1,00 de diferenca nao e' divida (arredondamento do RM)
-# Issue #563: tipos de movimento do RM (codtmv) que sao cobranca ao orgao. So' eles entram no a receber e no faturado
-# do RM; 2.2.15 (nota do fornecedor, saida contra fornecedor) e 2.2.10 (pessoas fisicas) ficam fora. 2.2.07 e' o do
-# consorcio do Leblon com tomador SINFRA. Tipo novo so' entra por decisao.
-CODTMV_COBRANCA = ("2.2.01", "2.2.02", "2.2.07", "2.2.16")
-_FILTRO_COBRANCA = f"codtmv IN ({','.join('?' * len(CODTMV_COBRANCA))})"
+# Issue #563: so' a nota de cobranca ao orgao entra no a receber e no faturado do RM. A regra mora em
+# `app/cobranca_orgao.py` (docs/adr/0015): a lista geral abaixo e os tipos extras de cada contrato, decididos por
+# `cobranca_orgao.e_cobranca` com o contrato da nota. O nome continua aqui para quem ja' o le deste modulo; conta
+# nova pergunta a `e_cobranca`, nao a esta lista.
+CODTMV_COBRANCA = cobranca_orgao.CODTMV_COBRANCA
 
 
 def _quantil(valores: list[int], q: float) -> int:
@@ -122,13 +123,17 @@ def _notas_em_aberto(conn) -> list[dict]:
     Nota ligada a medicao recebida a mao fica fora (issue #203): o registro manual vale, e o titulo ainda aberto
     no RM aparece na Saude, nao de novo no a receber. Issue #713: a nota que chega DEPOIS do recebimento a mao e'
     ligada a' medicao pelo casador do RM (`sincronizacao_rm._candidatas`) e sai daqui por esta mesma regra; antes
-    ficava solta e somava, pelo centro de custo, um dinheiro que ja' entrou. So' notas de `CODTMV_COBRANCA` (#563)."""
+    ficava solta e somava, pelo centro de custo, um dinheiro que ja' entrou. So' nota de cobranca ao orgao (#563):
+    a de tipo da lista geral e, na obra a que a nota foi atribuida, a dos tipos extras dela
+    (`cobranca_orgao.e_cobranca`, docs/adr/0015)."""
     em_aberto = set(ESPERANDO_NOTA + ESPERANDO_PROTOCOLO + PROTOCOLADAS)
     a_mao = conciliacao.recebidas_a_mao(conn)
     contr, por_centro, por_coligada = _mapa_contratos(conn)
+    extras = cobranca_orgao.extras_por_contrato(conn)
+    tipos = cobranca_orgao.tipos_buscados(extras)
     out = []
     for n in conn.execute("SELECT * FROM notas_fiscais WHERE idmov IS NOT NULL AND situacao='ativa' AND emissao IS NOT NULL "
-                          "AND " + _FILTRO_COBRANCA, CODTMV_COBRANCA):
+                          f"AND codtmv IN ({','.join('?' * len(tipos))})", tipos):
         ligadas = conn.execute("""SELECT m.id, m.contrato_id, m.estado FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id
                                   WHERE a.nota_id=? AND a.desfeita_em IS NULL""", (n["id"],)).fetchall()
         if any(r["estado"] in em_aberto for r in ligadas):
@@ -145,6 +150,8 @@ def _notas_em_aberto(conn) -> list[dict]:
         c = contr.get(cid)
         if c is None or c["col"] != n["coligada"]:
             continue
+        if not cobranca_orgao.e_cobranca(n["codtmv"], c["id"], extras):
+            continue                                        # tipo extra de outra obra: nesta nao e' cobranca
         # Issue #253: a falta e' contada titulo a titulo (a conta da #35 e da #251): juros num titulo nao
         # escondem outro titulo aberto da mesma nota.
         falta = sincronizacao_rm._falta_por_titulo(conn, n["id"], aberto_inteiro=True, baixa_total_quita=True)
@@ -163,15 +170,18 @@ def _notas_do_rm(conn) -> list[tuple]:
     """As notas do RM com o contrato de cada uma: `(nota, contrato, tem_medicao_ativa)`. A obra da nota e' a de
     `_notas_em_aberto`: a medicao ligada, senao o centro de custo (atual ou anterior), senao a coligada do consorcio sem
     centro; so' notas da coligada da entidade do contrato (a NFS-e da Lotufo em obra de consorcio e' repassada pelo
-    consorcio). Nota que nao cai em nenhum contrato cadastrado fica fora, e so' as de `CODTMV_COBRANCA` (#563)."""
+    consorcio). Nota que nao cai em nenhum contrato cadastrado fica fora, e so' entra a de cobranca ao orgao (#563) no
+    contrato em que caiu (`cobranca_orgao.e_cobranca`: a lista geral e os tipos extras daquele contrato)."""
     contr, por_centro, por_coligada = _mapa_contratos(conn)
+    extras = cobranca_orgao.extras_por_contrato(conn)
+    tipos = cobranca_orgao.tipos_buscados(extras)
     ligadas: dict[int, list] = {}
     for r in conn.execute("SELECT a.nota_id, m.contrato_id, m.estado FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id "
                           "WHERE a.desfeita_em IS NULL ORDER BY a.id"):
         ligadas.setdefault(r["nota_id"], []).append((r["contrato_id"], r["estado"]))
     out = []
-    for n in conn.execute("SELECT id, coligada, centro_custo, emissao, valor_centavos, situacao FROM notas_fiscais "
-                          "WHERE idmov IS NOT NULL AND " + _FILTRO_COBRANCA, CODTMV_COBRANCA):
+    for n in conn.execute("SELECT id, coligada, centro_custo, emissao, valor_centavos, situacao, codtmv FROM notas_fiscais "
+                          f"WHERE idmov IS NOT NULL AND codtmv IN ({','.join('?' * len(tipos))})", tipos):
         lig = ligadas.get(n["id"], [])
         if lig:
             cid = lig[0][0]
@@ -179,7 +189,7 @@ def _notas_do_rm(conn) -> list[tuple]:
             ids = por_centro.get((n["coligada"], (n["centro_custo"] or "").strip())) or por_coligada.get(n["coligada"]) or []
             cid = ids[0] if len(ids) == 1 else None
         c = contr.get(cid)
-        if c is None or c["col"] != n["coligada"]:
+        if c is None or c["col"] != n["coligada"] or not cobranca_orgao.e_cobranca(n["codtmv"], c["id"], extras):
             continue
         # #561: so' a medicao que mede (`medicoes.ESTADOS_NO_MEDIDO`) representa a nota; a planilha gerada, nao
         out.append((n, c, any(estado in medicoes.ESTADOS_NO_MEDIDO for _, estado in lig)))
