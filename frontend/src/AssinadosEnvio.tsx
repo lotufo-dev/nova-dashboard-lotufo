@@ -4,12 +4,12 @@ import { ApiErro, apiForm, mensagemDeErro } from "./api";
 import ComporEmail, { type Mensagem } from "./ComporEmail";
 import ConfirmarFaltas from "./ConfirmarFaltas";
 import ErroCampo from "./ErroCampo";
-import { IconeAlerta } from "./icones";
 import LiberarEnvio from "./LiberarEnvio";
 import type { Agir } from "./MedicaoAtos";
 import Pendencias from "./Pendencias";
 import { CampoArquivo } from "./PlanilhaCarta";
 import { fmtHora, hojeLocal } from "./tempo";
+import Falha from "./Falha";
 
 // Issue #627 (SINFRA): depois do boletim, os documentos assinados vao ao orgao na conversa da planilha/carta, pelo
 // sistema ou registrados por fora. Toda regra mora no servidor (`assinados_envio`); a tela so' confere o tamanho do
@@ -63,7 +63,7 @@ function EscolhaSoReajuste({ so, setSo }: { so: boolean; setSo: (v: boolean) => 
 }
 
 function Erro({ erro }: { erro?: string }) {
-  return erro ? <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p> : null;
+  return erro ? <Falha>{erro}</Falha> : null;
 }
 
 /** Os arquivos no formulario: a recusa de tamanho aparece antes de qualquer envio (a mesma frase do servidor). */

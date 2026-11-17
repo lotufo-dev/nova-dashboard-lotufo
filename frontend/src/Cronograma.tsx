@@ -2,7 +2,7 @@ import { useRascunho } from "./rascunho";
 import { useEffect, useRef, useState } from "react";
 import CaixaAviso from "./CaixaAviso";
 import { api, mensagemDeErro } from "./api";
-import { IconeAlerta, IconeMais } from "./icones";
+import { IconeMais } from "./icones";
 import { brl } from "./Medicoes";
 // A data de publicacao da versao e' decisao de CALENDARIO: vale no fuso do escritorio (America/Cuiaba),
 // nao no do navegador nem no UTC em que o carimbo esta gravado. Ver tempo.ts.
@@ -10,6 +10,7 @@ import { brl } from "./Medicoes";
 import { fmtCompetencia as competenciaBR, fmtData, fmtDataPura } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
+import Falha from "./Falha";
 
 type ItemVersao = { competencia: string; valor_previsto_centavos: number };
 type Versao = { numero: number; criado_em: string; origem: string; itens: ItemVersao[] };
@@ -274,9 +275,7 @@ export default function Cronograma({ contratoId, podeEditar }:
         <h2 className="cartao__titulo" id="titulo-evolucao-mensal">Evolução mensal</h2>
       </div>
 
-      {erro && <div className="cartao__corpo"><p className="erro" role="alert">
-        <IconeAlerta className="icone icone--p" />{erro}
-      </p></div>}
+      {erro && <div className="cartao__corpo"><Falha>{erro}</Falha></div>}
 
       {carregando && <div className="vazio"><p>Carregando…</p></div>}
 

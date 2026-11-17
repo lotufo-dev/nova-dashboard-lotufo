@@ -174,7 +174,7 @@ describe("Resumo em faixa e Linha do tempo (#722)", () => {
     cleanup();
     r = resumo(com({ estado: "cancelada" }));
     expect(celula(r, "Situação").querySelector(".glifo")).toBeNull();
-    expect(celula(r, "Situação").querySelector(".estado--excecao")).not.toBeNull();
+    expect(celula(r, "Situação").querySelector(".selo--riscado")).not.toBeNull();
   });
 
   it("no par, o valor de cada metade fica no resumo (o total é o valor grande); o passo que abre janela vira botão", () => {

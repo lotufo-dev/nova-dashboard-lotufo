@@ -99,10 +99,8 @@
 .obra-medicoes--com-custo col.c-om-valor { width: 15%; }
 .obra-medicoes--com-custo { min-width: calc(var(--alvo-minimo) * 19); }
 .obra-medicoes__sub { color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
-.obra-medicoes__estado { display: inline-flex; flex-wrap: wrap; gap: var(--espaco-mini); max-width: 100%; }
 .obra-medicoes .selo { max-width: 100%; }
 .obra-medicoes .link-selo { display: inline-flex; max-width: 100%; margin-top: var(--espaco-mini); }
-.selo--riscado .selo__texto { text-decoration: line-through; }
 
 /* tabelas largas das abas (instrumentos, evolucao mensal, reajuste): colunas mais juntas, para caber na caixa */
 .obra-secoes .tabela:not(.obra-medicoes) th, .obra-secoes .tabela:not(.obra-medicoes) td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
@@ -154,10 +152,9 @@
   }
   .obra-medicoes tbody td:first-child { display: block; padding-bottom: var(--espaco-mini); text-align: left; }
   .obra-medicoes tbody td:not(:first-child)::before { content: attr(data-rotulo); flex: none; color: var(--cor-texto-secundario); font-weight: var(--peso-normal); text-align: left; }
-  .obra-medicoes__estado { justify-content: flex-end; }
+  .estado-medicao { justify-content: flex-end; }
 }
 
-/* ---------------------------------------------------------------- o cabecalho da obra em tela estreita */
 /* a trilha quebra linha em vez de cortar o nome do orgao e o da obra na borda da pagina */
 .topbar--obra .topbar__trilha { flex-wrap: wrap; row-gap: var(--espaco-pp); }
 .topbar--obra .migalhas ol { flex-wrap: wrap; }

@@ -256,6 +256,14 @@ describe("App: o menu lateral no celular (375 px)", () => {
     expect(nav.getAttribute("data-estado")).toBe("largo");
     await act(async () => { ouvintes.forEach(f => f({ matches: true })); });
     expect(nav.getAttribute("data-estado")).toBe("recolhido");
+    // #779: alargar de volta devolve a escolha guardada (largo), em vez de deixar recolhido ate' recarregar
+    await act(async () => { ouvintes.forEach(f => f({ matches: false })); });
+    expect(nav.getAttribute("data-estado")).toBe("largo");
+    // quem escolheu recolhido no computador continua recolhido depois de estreitar e alargar
+    try { localStorage.setItem("menu-lateral", "recolhido"); } catch { /* sem armazenamento */ }
+    await act(async () => { ouvintes.forEach(f => f({ matches: true })); });
+    await act(async () => { ouvintes.forEach(f => f({ matches: false })); });
+    expect(nav.getAttribute("data-estado")).toBe("recolhido");
   });
 
   it("recolhido no computador, cada link ganha o nome como dica", async () => {

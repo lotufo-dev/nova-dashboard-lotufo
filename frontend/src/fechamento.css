@@ -112,8 +112,8 @@
 .fch .fch-tabela--aberto td, .fch .fch-tabela--aberto tbody th { white-space: nowrap; }
 /* a obra e a nota (numero e selo) quebram antes de a coluna Valor sair da caixa */
 .fch .fch-tabela--aberto td:is(.fch-a-obra, .fch-a-nota) { white-space: normal; }
-/* a linha sem a data: o texto diz a verdade, em letra de apoio, e pode quebrar */
-.fch .fch-tabela--aberto tbody th.fch-sem-data { white-space: normal; color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
+/* a linha sem a data: o texto diz a verdade, no tamanho das datas e em tom de apoio, e pode quebrar */
+.fch .fch-tabela--aberto tbody th.fch-sem-data { white-space: normal; color: var(--cor-texto-secundario); }
 .fch-nota { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-pp); }
 .fch-aparte { display: grid; gap: var(--espaco-mini); margin: 0; padding: var(--espaco-m) var(--espaco-g) var(--espaco-m); border-top: var(--borda-linha); font-size: var(--texto-meta); }
 .fch-aparte > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--espaco-mini) var(--espaco-m); }
@@ -162,6 +162,8 @@
   .fch .fch-tabela--aberto .fch-a-medicao .fch-sub { display: inline; margin-left: var(--espaco-pp); }
   .fch .fch-tabela--aberto .fch-a-nota { grid-area: nota; }
   .fch .fch-tabela--aberto.tabela tr > .fch-a-data { grid-area: data; color: var(--cor-texto-secundario); font-weight: var(--peso-normal); }
+  /* o selo da nota no tamanho do texto do bloco: maior que ele, caia para a linha de baixo */
+  .fch .fch-tabela--aberto .selo { font-size: var(--texto-mini); }
   .fch .fch-tabela--aberto [data-rotulo]::before { content: attr(data-rotulo) " "; color: var(--cor-texto-secundario); font-family: var(--fonte-texto); }
 }
 

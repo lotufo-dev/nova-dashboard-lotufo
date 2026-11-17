@@ -4,12 +4,12 @@ import CampoValor from "./CampoValor";
 import ErroCampo from "./ErroCampo";
 import { api, apiForm, mensagemDeErro } from "./api";
 import { brl } from "./formato";
-import { IconeAlerta } from "./icones";
 import { brlCampo, type Agir } from "./MedicaoAtos";
 import type { Medicao } from "./Medicoes";
 import Selo from "./Selo";
 import { hojeLocal } from "./tempo";
 import "./planilhaCarta.css";
+import Falha from "./Falha";
 
 // Issue #290 (spec 2026-10-20 §2.1 passo 3 e §2.3): "Registrar boletim". A pessoa arrasta o PDF do orgao, o leitor
 // da capa do SMO (#285) propoe nº, data e valor, marcados como lidos; ela confere e aceita (origem `aceito`). Sem
@@ -61,7 +61,7 @@ export function AceiteDiferenca({ m, podeEditar, salvando, agir, aoFechar, erro 
   return (
     <form className="pilha" onSubmit={salvar} noValidate aria-label="Aceitar a diferença"
       onKeyDown={ev => ev.key === "Escape" && fechar()}>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
       {/* #286 (revisor, rodada 1 da PR #606): o aceite vale para o boletim inteiro; o que a capa diverge e' aceito junto */}
       {capaDiverge && (
         <ul aria-label="Divergências da capa do SMO aceitas junto">
@@ -188,7 +188,7 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
   return (
     <form className="pilha" onSubmit={salvar} noValidate aria-label="Registrar boletim" onKeyDown={ev => ev.key === "Escape" && aoFechar()}>
       <p className="painel__titulo">Registrar o boletim da {m.numero}ª medição</p>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
       <div className="campo">
         <span className="campo__rotulo" id="bol-arquivo-rotulo">PDF do boletim</span>
         <div className={`planilha__soltar${sobre ? " planilha__soltar--sobre" : ""}`} data-testid="soltar-boletim"
@@ -206,7 +206,7 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
         </div>
       </div>
       <p className={lendo ? "" : "sr-only"} role="status">{lendo ? "Lendo a capa…" : ""}</p>
-      {erroLeitura && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler o PDF: {erroLeitura}</p>}
+      {erroLeitura && <Falha>Não foi possível ler o PDF: {erroLeitura}</Falha>}
       {avisos.map(a => <CaixaAviso nivel="atencao" key={a}>{a}</CaixaAviso>)}
       <div className="form-inline">
         <div className="campo">

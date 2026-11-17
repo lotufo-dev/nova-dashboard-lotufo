@@ -26,7 +26,6 @@
 
 .med-etapa__corpo { display: flex; flex-direction: column; gap: var(--espaco-g); min-width: 0; }
 .med-sub { margin: 0 0 var(--espaco-pp); font-size: var(--texto-titulo-sub); line-height: var(--entrelinha); font-weight: var(--peso-forte); }
-.med-bloco { display: flex; flex-direction: column; gap: var(--espaco-p); padding-top: var(--espaco-g); border-top: var(--borda-linha); }
 /* tabela mais larga que a caixa rola dentro dela, em vez de ser cortada */
 .med-caixa { border: var(--borda-linha); border-radius: var(--raio-canto); overflow-x: auto; }
 .med-caixa .tabela thead th { background: var(--cor-papel-sombreado); }
@@ -48,7 +47,6 @@
 .envios__acao { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--espaco-mini) var(--espaco-p); }
 .envios__motivo { font-size: var(--texto-mini); color: var(--cor-texto-secundario); max-width: 26ch; text-align: right; }
 .envios__motivo--atencao { color: var(--situacao-breve-texto); }
-.envios__receber { margin-top: var(--espaco-pp); }
 
 /* certidoes, com a validade de cada uma */
 .certidoes-bloco { display: flex; flex-direction: column; gap: var(--espaco-pp); }
@@ -76,8 +74,6 @@
 .janela .painel__titulo { display: none; }
 .janela .form-inline { align-items: flex-end; }
 .janela textarea, .janela input[type="text"], .janela input[type="date"] { max-width: 100%; }
-
-.btn--grande { height: 44px; padding: 0 22px; font-size: var(--texto-corpo); }
 
 @media (max-width: 767px) {
   .pagina.med { padding: var(--espaco-m) var(--espaco-m) var(--espaco-gg); }

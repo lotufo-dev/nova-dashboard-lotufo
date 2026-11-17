@@ -15,6 +15,7 @@ import { fmtCompetencia as competenciaBR, fmtDataHora as dataHoraBR, fmtDataPura
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
+import Falha from "./Falha";
 
 // Espelho de NF (bloco 2, spec §3 passos 1-2): a medicao nasce aqui. A pessoa digita numero,
 // competencia e os valores da regra da obra; o sistema calcula uma linha por nota, gera os
@@ -159,7 +160,7 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
     if (parte) {
       return (
         <section className="espelho-etapa pilha" id={idSecao}>
-          {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}{falhou ? " Recarregue a página para tentar de novo." : ""}</p>}
+          {erro && <Falha>{erro}{falhou ? " Recarregue a página para tentar de novo." : ""}</Falha>}
           {!falhou && (medicao ? <div className="vazio"><p>Nenhum espelho.</p></div> : semRegra)}
         </section>
       );
@@ -169,8 +170,7 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
         <div className="cartao__cabeca">
           <h2 className="cartao__titulo" id="titulo-espelho">{titulo}</h2>
         </div>
-        {erro && <div className="cartao__corpo"><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />
-          {erro}{falhou ? " Recarregue a página para tentar de novo." : ""}</p></div>}
+        {erro && <div className="cartao__corpo"><Falha>{erro}{falhou ? " Recarregue a página para tentar de novo." : ""}</Falha></div>}
         {!falhou && (medicao ? <div className="vazio"><p>Nenhum espelho.</p></div> : semRegra)}
       </section>
     );
@@ -435,7 +435,7 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
       {parte && !medicao && podeEditar && passo.tipo === "lista" && (
         <div><button type="button" className="btn btn--primario" onClick={() => abrirForm()}><IconeMais className="icone icone--p" /> Gerar espelho</button></div>
       )}
-      {erro && <div className="cartao__corpo"><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p></div>}
+      {erro && <div className="cartao__corpo"><Falha>{erro}</Falha></div>}
       {passo.tipo === "envio" && reservado?.id === passo.espelho.id && (
         <div className="cartao__corpo"><LiberarEnvio tabela="espelhos" id={reservado.id} reserva={reservado.reserva}
           aoLiberar={() => { setErro(""); void carregar(); }} /></div>

@@ -21,15 +21,17 @@ describe("ComporEmail", () => {
     const aoEnviar = vi.fn();
     render(<ComporEmail ocupado={false} anexos={[]} aoEnviar={aoEnviar} aoDescartar={() => {}}
       inicial={{ para: ["orgao@exemplo.com.br"], copia: [], cco: [], assunto: "Contrato 018/2026 · 5ª Medição", corpo: "Prezados," }} />);
-    const assunto = screen.getByLabelText("Assunto") as HTMLInputElement;
-    expect(assunto.tagName).toBe("INPUT");
+    // #779: area de texto de uma linha, que cresce: o assunto longo quebra em duas linhas em vez de esconder o fim
+    const assunto = screen.getByLabelText("Assunto") as HTMLTextAreaElement;
+    expect(assunto.tagName).toBe("TEXTAREA");
+    expect(assunto.rows).toBe(1);
     const rotulo = assunto.parentElement!.querySelector(".ol-assunto__rotulo")!;
     expect(rotulo.textContent).toBe("Assunto");
     expect(rotulo.getAttribute("aria-hidden")).toBe("true");
-    // o campo de uma linha pode esconder o fim do assunto (o numero do oficio): o `title` traz o assunto inteiro
-    expect(assunto.title).toBe("Contrato 018/2026 · 5ª Medição");
-    fireEvent.change(assunto, { target: { value: "Contrato 018/2026 · 5ª Medição · Ofício 061/2026" } });
-    expect(assunto.title).toBe("Contrato 018/2026 · 5ª Medição · Ofício 061/2026");
+    // o assunto continua uma linha so': a quebra colada vira espaco e o Enter nao entra no texto
+    fireEvent.change(assunto, { target: { value: "Contrato 018/2026 · 5ª Medição\nOfício 061/2026" } });
+    expect(assunto.value).toBe("Contrato 018/2026 · 5ª Medição Ofício 061/2026");
+    expect(fireEvent.keyDown(assunto, { key: "Enter" })).toBe(false);
     fireEvent.change(assunto, { target: { value: "Contrato 018/2026 · 5ª Medição" } });
     fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
     expect(aoEnviar).toHaveBeenCalledWith({ para: ["orgao@exemplo.com.br"], copia: [], cco: [], assunto: "Contrato 018/2026 · 5ª Medição", corpo: "Prezados," });

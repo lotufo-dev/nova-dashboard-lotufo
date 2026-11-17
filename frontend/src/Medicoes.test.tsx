@@ -49,7 +49,7 @@ describe("Medições da obra", () => {
     render(<Medicoes contratoId={3} busca={{}} />);
     await screen.findByRole("heading", { name: "Em andamento" });
     const linha = (nome: string) => screen.getByRole("link", { name: nome }).closest("tr") as HTMLElement;
-    const estado = (nome: string) => linha(nome).querySelector(".obra-medicoes__estado .selo")!;
+    const estado = (nome: string) => linha(nome).querySelector(".estado-medicao .selo")!;
     expect(estado("7ª Medição").className).toContain("selo--andamento");
     expect(estado("7ª Medição").querySelector(".glifo--andamento")).toBeTruthy();
     expect(within(estado("7ª Medição") as HTMLElement).getByText("Nota emitida")).toBeTruthy();

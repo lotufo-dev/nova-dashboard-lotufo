@@ -151,19 +151,15 @@ export function resumoEmpresa(e: EmpresaDoc, obras: ObraDoc[] = []): { texto: st
     nivel: vencidas || faltas || o.garantiasVencidas ? "acao" : partes.length ? "atencao" : "ok", pendencias: pendenciasDa(e, obras) };
 }
 
-/** A pendencia mais urgente da tabela da empresa: a unica que leva o botao principal ("Emitir"). Sem dias (vencida
- *  ou faltando) vem antes de quem ainda vigora. */
-export function pendenciaMaisUrgente(e: EmpresaDoc): LinhaCertidao | null {
-  return certidoesOrdenadas(e).filter(certidaoPendente).sort((a, b) => (a.dias ?? -999) - (b.dias ?? -999))[0] ?? null;
-}
-
-/** A garantia de uma obra como a tela a diz (texto do selo, nota embaixo e nivel). `ate` ja' vem em dd/mm/aaaa. */
+/** A garantia de uma obra como a tela a diz (texto do selo, nota embaixo e nivel). `ate` ja' vem em dd/mm/aaaa.
+ *  Como na certidao, a forma segue o tempo: a vencida e' "acao" (critico) e a que ainda vai vencer e' "atencao"
+ *  (vence em breve), em qualquer prazo: as duas nao dividem a mesma forma (#779). */
 export function situacaoGarantia(g: Garantia | null, ate: string): { texto: string; nota: string; nivel: Nivel } {
   if (!g) return { texto: "sem vigência no cadastro", nota: "", nivel: "neutro" };
   const nota = `${g.dias < 0 ? `venceu em ${ate}` : `até ${ate}`}${g.origem === "endosso" ? " (endosso)" : ""}${g.apolice ? ` · apólice ${g.apolice}` : ""}`;
   if (g.situacao === "baixada") return { texto: "baixada", nota, nivel: "neutro" };
   if (g.situacao === "vencida") return { texto: "vencida", nota, nivel: "acao" };
-  if (g.situacao === "vencendo") return { texto: venceEm(g.dias), nota, nivel: g.dias <= 15 ? "acao" : "atencao" };
+  if (g.situacao === "vencendo") return { texto: venceEm(g.dias), nota, nivel: "atencao" };
   return { texto: "em dia", nota, nivel: "ok" };
 }
 

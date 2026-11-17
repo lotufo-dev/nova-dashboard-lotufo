@@ -3,11 +3,11 @@ import CaixaAviso, { CaixaJustificativa } from "./CaixaAviso";
 import CampoValor from "./CampoValor";
 import ErroCampo from "./ErroCampo";
 import { api, apiForm } from "./api";
-import { IconeAlerta } from "./icones";
 import { Link } from "./Link";
 import { DA_PLANILHA, DO_ESPELHO, EXCECOES, type Metade } from "./medicao";
 import type { Medicao } from "./Medicoes";
 import Selo from "./Selo";
+import Falha from "./Falha";
 
 // Os atos de UMA medicao (valor, recebimento, cancelar ou desistir, medicao final), num formulario
 // que a pagina da medicao abre numa janela. O protocolo feito fora virou o "Registrar envio feito fora do sistema"
@@ -43,7 +43,7 @@ export function valorEditavel(m: Medicao, campo: "protocolado" | "atestado", pod
 type Base = { m: Medicao; salvando: boolean; agir: Agir; aoFechar: () => void; erro?: string };
 
 function Erro({ erro }: { erro?: string }) {
-  return erro ? <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p> : null;
+  return erro ? <Falha>{erro}</Falha> : null;
 }
 
 type PropsValor = Base & { campo: "protocolado" | "atestado" };

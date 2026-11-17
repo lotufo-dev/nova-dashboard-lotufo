@@ -21,7 +21,7 @@
 .sg__avisos { flex-basis: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: var(--espaco-pp); }
 .sg__acoes { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-p); margin-top: var(--espaco-pp); }
 .sg__acoes > .sg__novo { flex-basis: 100%; }
-.sg__novo { padding: var(--espaco-m); border: var(--borda-linha); background: var(--cor-papel-sombreado); }
+.sg__novo { min-width: 0; max-width: 100%; padding: var(--espaco-m); border: var(--borda-linha); background: var(--cor-papel-sombreado); }
 .sg__gravado { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .sg__gravado:empty { display: none; }
 

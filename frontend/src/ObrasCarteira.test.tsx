@@ -45,11 +45,11 @@ describe("As peças da lista de Obras que vieram da Carteira (#748, redesenho #7
     expect(container.textContent).toBe("");
   });
 
-  it("o farol vira selo com glifo e palavra; Ação e Atenção se separam pela palavra (D10)", () => {
+  it("o farol vira selo com glifo e palavra; Ação pede ação agora (octógono) e Atenção se acompanha (triângulo)", () => {
     const { container } = render(<><SeloFarol farol="vermelho" /><SeloFarol farol="acao" /><SeloFarol farol="atencao" /><SeloFarol farol="verde" /></>);
     const selos = [...container.querySelectorAll(".selo")];
     expect(selos.map(s => s.textContent)).toEqual(["Crítico", "Ação", "Atenção", "Em dia"]);
-    expect(selos.map(s => s.className)).toEqual(["selo selo--critico", "selo selo--breve", "selo selo--breve", "selo selo--feito"]);
+    expect(selos.map(s => s.className)).toEqual(["selo selo--critico", "selo selo--critico", "selo selo--breve", "selo selo--feito"]);
     // forma alem da cor: todo selo de farol leva o glifo da situacao
     expect(selos.every(s => s.querySelector(".glifo"))).toBe(true);
   });

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import { CartaoPleito, NovoPleito, type Pleito, type Reemissao } from "./FluxoOficio";
-import { IconeAlerta } from "./icones";
 import { focarPorId } from "./foco";
 import { cicloDoApostilamento, reajustePorDataBase, termosCorrigidos, type BaseDoTermo, type CicloApi,
   type InstrumentoCadastro } from "./obra";
@@ -12,6 +11,7 @@ import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import { LinhaPleito, partesDoEnvio, pleitoEmLinha, type DesfechoPleito } from "./Prazos";
 import { situacaoDoNivel } from "./situacao";
+import Falha from "./Falha";
 
 // Aba Reajuste da obra (bloco 7; spec §7.2; NAVEGACAO.md › Obra): um grupo por data-base, com ancora
 // (`#db-2023-01`): o cartao do ciclo corrente (situacao, pleito e apostilamento, a tabela por competencia e a
@@ -149,7 +149,7 @@ function FormResposta({ pleito, anulavel, aoGravar, aoCancelar }: { pleito: Plei
         <button type="submit" className="btn btn--pequeno btn--primario" disabled={gravando}>Registrar resposta</button>
         <button type="button" className="btn btn--pequeno" onClick={aoCancelar}>Cancelar</button>
       </div>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
     </form>
   );
 }
@@ -393,7 +393,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   // o pleito criado so' existe depois que a lista recarrega: tenta de novo a cada leitura
   useEffect(() => { if (foco && focarPorId(foco)) setFoco(null); }, [foco, dados]);
 
-  if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>;
+  if (erro) return <Falha>{erro}</Falha>;
   if (!dados) return <section className="cartao"><div className="vazio"><p>Carregando…</p></div></section>;
   const grupos = dados.competencias_por_ciclo ?? [];
   if (dados.ciclos.length === 0 && dados.pleitos.length === 0 && apostilamentos.length === 0 && grupos.length === 0) {

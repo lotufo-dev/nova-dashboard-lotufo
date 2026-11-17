@@ -5,7 +5,6 @@ import Checklist, { CartaRecolhivel, type ItemChecklist } from "./Checklist";
 import ComporEmail, { type Mensagem } from "./ComporEmail";
 import ErroCampo from "./ErroCampo";
 import { api, apiForm, mensagemDeErro } from "./api";
-import { IconeAlerta } from "./icones";
 import { FormMotivo } from "./MedicaoAtos";
 import { brl, fmtTamanho as mb } from "./formato";
 import { fmtCompetencia, fmtDataPura } from "./tempo";
@@ -13,6 +12,7 @@ import Selo from "./Selo";
 import Pendencias from "./Pendencias";
 import PleitoPrevisao from "./PleitoPrevisao";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
+import Falha from "./Falha";
 
 // Fluxo do oficio (bloco 7): pleito de reajuste, pedido de prorrogacao e comunicacao de conclusao. Mesmo caminho
 // do protocolo (bloco 5), com um documento so': numero do oficio -> anexos -> carta -> assinado -> previa -> envio.
@@ -119,7 +119,7 @@ export function NovoPleito({ contratoId, tipo, dataBase, reemite, sugestao, aoCr
 
   return (
     <form className="cartao__corpo pilha" onSubmit={criar} aria-label="Novo ofício">
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
       {dataBase && <p>Data-base <span className="num">{fmtCompetencia(dataBase)}</span></p>}
       <div className="campo">
         <label className="campo__rotulo" htmlFor={`oficio-${tipo}`}>Nº do ofício (CT)</label>
@@ -236,7 +236,7 @@ export function CartaoPleito({ p, podeEditar, aoMudar, desfecho, contexto }: {
       {cadeiaDoPleito(p).map((t, i) => <p key={i} className="cartao__corpo campo__nota">{t}</p>)}
       {p.origem === "sistema" && p.situacao !== "enviado" && (
         <div className="cartao__corpo pilha">
-          {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+          {erro && <Falha>{erro}</Falha>}
           {reserva && <LiberarEnvio tabela="pleitos" id={p.id} reserva={reserva} aoLiberar={() => { setErro(""); aoMudar(); }} />}
 
           {itens.length > 0 && (

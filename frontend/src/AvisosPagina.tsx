@@ -1,6 +1,5 @@
 import { destinoDoAviso, semEmpresa, semObra, type Aviso } from "./Alertas";
 import { FAMILIAS, familiaDaBusca, daAgenda, filtrarAvisos, porSecao, diasAteOAviso, semRSOrfao, type Secao } from "./avisos";
-import CaixaAviso from "./CaixaAviso";
 import Contador from "./Contador";
 import LegendaCor, { type ItemLegenda } from "./LegendaCor";
 import { trocarBusca, type Busca } from "./rota";
@@ -8,6 +7,7 @@ import { Link } from "./Link";
 import Selo from "./Selo";
 import type { Situacao } from "./situacao";
 import "./avisosPagina.css";
+import Falha from "./Falha";
 
 // Avisos (redesenho #511, aprovado em 06/11/2026): "o que vence quando". Quatro secoes exclusivas pelo tempo
 // (Vencido · Esta semana · Este mes · Depois). Agenda (#656): so' o aviso com data, do que ja' venceu (todos, sem
@@ -129,7 +129,7 @@ export default function AvisosPagina({ busca, avisos, escopo = null, nome, onFec
 
       {avisos === undefined && <p className="avs__vazio" role="status">Carregando os avisos…</p>}
       {avisos === null && (
-        <CaixaAviso nivel="critico" role="alert" className="avs__erro">Não foi possível verificar os avisos. Recarregue a página para tentar de novo.</CaixaAviso>
+        <Falha className="avs__erro">Não foi possível verificar os avisos. Recarregue a página para tentar de novo.</Falha>
       )}
       {avisos && filtrados.length === 0 && (
         <p className="avs__vazio">

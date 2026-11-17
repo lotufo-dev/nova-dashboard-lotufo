@@ -3,7 +3,7 @@ import { api, mensagemDeErro } from "./api";
 import { brl } from "./formato";
 import CampoCompetencia from "./CampoCompetencia";
 import CampoReajuste, { type ValorReajuste } from "./CampoReajuste";
-import { IconeAlerta, IconeBaixar, IconeCadeado, IconeMais } from "./icones";
+import { IconeBaixar, IconeCadeado, IconeMais } from "./icones";
 import { EXCECOES, notasDivergentes, passoDe, resumoNotas, separarMedicoes, tituloMedicao } from "./medicao";
 import { type Busca } from "./rota";
 import { Link } from "./Link";
@@ -11,6 +11,7 @@ import { Link } from "./Link";
 import { fmtCompetencia as competenciaBR, fmtDataPura as dataBR } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
+import Falha from "./Falha";
 
 // As medicoes da obra (NAVEGACAO.md › Obra › aba Medicoes): "Em andamento", com o proximo passo e o link para
 // a secao dele na pagina da medicao, e "Anteriores" (recebidas, canceladas e desistidas), as 6 mais recentes
@@ -94,32 +95,24 @@ export const ROTULO_ESTADO: Record<string, string> = {
   recebida: "Recebida", cancelada: "Cancelada", desistida: "Desistida",
 };
 
-export function Estado({ m }: { m: Medicao }) {
-  const excecao = EXCECOES.includes(m.estado);
+/** O estado de uma medicao nas situacoes da fundacao: recebida e' "feito", cancelada e desistida ficam neutras e
+ *  riscadas, e o resto esta' em andamento. Glifo e palavra, nunca so' cor. Um desenho so' para a lista da obra, o
+ *  resumo ao lado da medicao e a reconciliacao da Administracao. */
+export function SeloDoEstado({ estado, sufixo }: { estado: string; sufixo?: React.ReactNode }) {
+  const excecao = EXCECOES.includes(estado);
   return (
-    <span className={`estado estado--${m.estado}${excecao ? " estado--excecao" : ""}`}>
-      <span className="estado__ponto" aria-hidden="true" />
-      {ROTULO_ESTADO[m.estado] ?? m.estado}
-      {m.final === 1 && <Selo situacao="breve">final</Selo>}
-      {m.congelada === 1 && (
-        <span className="cadeado">
-          <IconeCadeado className="icone icone--p" titulo="Congelada" />
-        </span>
-      )}
-    </span>
+    <Selo situacao={excecao ? undefined : estado === "recebida" ? "feito" : "andamento"} className={excecao ? "selo--riscado" : undefined}
+      sufixo={sufixo}>
+      {ROTULO_ESTADO[estado] ?? estado}
+    </Selo>
   );
 }
 
-/** O estado na lista de medicoes da obra, nas situacoes da fundacao: recebida e' "feito", cancelada e desistida ficam
- *  neutras e riscadas, e o resto esta' em andamento. Glifo e palavra, nunca so' cor. */
-function EstadoDaLinha({ m }: { m: Medicao }) {
-  const excecao = EXCECOES.includes(m.estado);
+/** O estado com o que o acompanha: o cadeado da congelada e o selo da medicao final. */
+export function Estado({ m }: { m: Medicao }) {
   return (
-    <span className="obra-medicoes__estado">
-      <Selo situacao={excecao ? undefined : m.estado === "recebida" ? "feito" : "andamento"} className={excecao ? "selo--riscado" : undefined}
-        sufixo={m.congelada === 1 ? <IconeCadeado className="icone icone--p" titulo="Congelada" /> : undefined}>
-        {ROTULO_ESTADO[m.estado] ?? m.estado}
-      </Selo>
+    <span className="estado-medicao">
+      <SeloDoEstado estado={m.estado} sufixo={m.congelada === 1 ? <IconeCadeado className="icone icone--p" titulo="Congelada" /> : undefined} />
       {m.final === 1 && <Selo situacao="breve">final</Selo>}
     </span>
   );
@@ -193,7 +186,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
   const celulaCusto = (m: Medicao) => comCusto
     && <td data-rotulo="Custo lançado no RM" className="col-num dinheiro num">{custos.has(m.id) ? brl(custos.get(m.id) as number) : "—"}</td>;
 
-  if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>;
+  if (erro) return <Falha>{erro}</Falha>;
   if (carregando) return <section className="cartao"><div className="vazio"><p>Carregando medições…</p></div></section>;
 
   // as duas tabelas dividem as mesmas colunas (o dinheiro cai na mesma coluna em "Em andamento" e em "Anteriores")
@@ -243,7 +236,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
                         <div className="obra-medicoes__sub num">{competenciaBR(m.competencia)}</div>
                       </td>
                       <td data-rotulo="Estado">
-                        <EstadoDaLinha m={m} />
+                        <Estado m={m} />
                         {notasDivergentes(m).length > 0
                           && <Link className="link-selo" para={destino} secao="notas"><Selo situacao="critico">nota diverge</Selo></Link>}
                       </td>
@@ -285,7 +278,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
                       <Link className="link forte" para={{ tela: "medicao", obra: contratoId, id: m.id }}>{tituloMedicao(m)}</Link>
                       <div className="obra-medicoes__sub num">{competenciaBR(m.competencia)}</div>
                     </td>
-                    <td data-rotulo="Estado"><EstadoDaLinha m={m} /></td>
+                    <td data-rotulo="Estado"><Estado m={m} /></td>
                     <td data-rotulo="Pedido" className="col-num dinheiro num">{brl(m.valor_protocolado_centavos)}</td>
                     <td data-rotulo="Aprovado" className="col-num dinheiro num">{brl(m.valor_atestado_centavos)}</td>
                     {celulaCusto(m)}
@@ -374,7 +367,7 @@ export function NovaMedicaoManual({ contratoId, aoCriar, inicial }: {
       {novo.tipo === "reajuste" && (
         <CampoReajuste contratoId={contratoId} competencia={novo.competencia} prefixo="nova" valor={reaj} aoMudar={setReaj} />
       )}
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
       <p className={feito ? "notas__ok" : "sr-only"} role="status">
         {feito && <>Medição criada:{" "}
           <Link para={{ tela: "medicao", obra: contratoId, id: feito.id }}>{tituloMedicao(feito)}</Link>.</>}

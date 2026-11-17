@@ -10,7 +10,6 @@ import { diaMes, FaixaPasso, PassoCartao, passoDe as passoDoEstado, passoInicial
 import PassoAnalise from "./PassoAnalise";
 import PassoPagamento from "./PassoPagamento";
 import { FrcConsorcio } from "./Frc";
-import { IconeAlerta } from "./icones";
 import Janela from "./Janela";
 import LiberarEnvio from "./LiberarEnvio";
 import type { Usuario } from "./Login";
@@ -31,6 +30,7 @@ import { fmtDataHora, fmtDataPura, fmtMesExtenso } from "./tempo";
 import { Migalhas, VoltarOrigem } from "./Topo";
 import "./etapas.css";
 import "./passos.css";
+import Falha from "./Falha";
 
 // Pagina da obra em medicao (issue #508, aprovada em 06/11/2026): "Nª Medição + Reajuste" numa pagina so', com o
 // cabecalho (obra, medicao, mes e o valor grande), a BARRA DE PASSOS -- Planilha e carta, Analise do orgao,
@@ -280,7 +280,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     return (
       <>{cabeca}<div className="pagina">
         <div className="form-inline">
-          <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível abrir a medição: {erro}</p>
+          <Falha>Não foi possível abrir a medição: {erro}</Falha>
           <button type="button" className="btn" onClick={() => { setErro(""); void carregar().catch(e => setErro(mensagemDeErro(e))); }}>Tentar de novo</button>
         </div>
       </div></>
@@ -383,8 +383,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
         aoRevisaoPendente={p => setRevisaoDe({ chave: chaveRevisao, valor: p === null ? "falhou" : p ? "pendente" : "livre" })}
         aoEnvioReservado={r => setReservaDe({ chave: chaveRevisao, reservado: r })} />}
       {comPlanilha && (enviada || gerada) && revisao === "falhou" && (
-        <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
-          <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
+        <Falha>Não foi possível conferir a planilha/carta.
+          <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></Falha>
       )}
       {gerada && !espelhoEspera && <CaixaAviso nivel="atencao">Envio da planilha/carta não registrado.</CaixaAviso>}
     </>
@@ -405,8 +405,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
         aoMudarSiga={() => { setFeito("Número gravado."); recarregar(); }}
         aoRevisar={() => { setRevisaoDe(null); setPlanilhaDe(null); }} />
       {comPlanilha && enviada && revisao === "falhou" && (
-        <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
-          <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
+        <Falha>Não foi possível conferir a planilha/carta.
+          <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></Falha>
       )}
       {podeEditar && m.estado === "planilha_enviada" && !espelhoEspera && !espVigente && (
         semBoletim ? formEspelho
@@ -427,8 +427,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       {!temPassosPlanilha && blocoPlanilha}
       {/* depois do boletim o cartao mora no passo 1: a falha da conferencia avisa aqui, onde o espelho esperaria */}
       {temPassosPlanilha && comPlanilha && enviada && revisao === "falhou" && (
-        <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
-          <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
+        <Falha>Não foi possível conferir a planilha/carta.
+          <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></Falha>
       )}
       {!novaPlanilha && !espelhoEspera && (
         <div className={antesDoEspelho ? undefined : "med-duas"}>
@@ -569,7 +569,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
           contratoId={contratoId} aoAcao={a => abrir(a as Painel)} podeEditar={podeEditar} salvando={salvando} aoEditarValor={() => abrir("protocolado")} />
 
         {/* com uma janela aberta, o erro aparece dentro dela, perto de onde se agiu */}
-        {erro && painel === null && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+        {erro && painel === null && <Falha>{erro}</Falha>}
         {/* regiao viva sempre montada: o leitor de tela so' anuncia o texto que CHEGA numa regiao ja' existente */}
         <p className={feito ? "notas__ok" : "sr-only"} role="status">{feito}</p>
         {desatualizadas.map(x => {

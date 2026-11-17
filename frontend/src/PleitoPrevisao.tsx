@@ -2,8 +2,8 @@ import { useState } from "react";
 import CampoValor from "./CampoValor";
 import { api, apiForm, mensagemDeErro } from "./api";
 import { brl, contar } from "./formato";
-import { IconeAlerta } from "./icones";
 import { fmtCompetencia } from "./tempo";
+import Falha from "./Falha";
 
 // Previsao de reajuste do pleito (issue #272; spec 2026-10-20 §2.2): a pessoa arrasta a planilha do modelo
 // "Mem. e Cron. - Prev. de Reajuste", o servidor le (`app/leitura_planilha_reajuste.py`) e a tela mostra
@@ -104,10 +104,10 @@ export default function PleitoPrevisao({ pleitoId, dataBase, ciclo, aoGravar }: 
         <p className="campo__nota num">Data-base {fmtCompetencia(dataBase)}{ciclo ? `, ciclo ${ciclo}` : ""}</p>
       )}
       <p aria-live="polite" className="campo__nota">{ok}</p>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
       {naoReconhecida && (
-        <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{naoReconhecida.mensagem}
-          {naoReconhecida.motivo ? ` (${naoReconhecida.motivo}).` : "."}</p>
+        <Falha>{naoReconhecida.mensagem}
+          {naoReconhecida.motivo ? ` (${naoReconhecida.motivo}).` : "."}</Falha>
       )}
 
       {lidas && (

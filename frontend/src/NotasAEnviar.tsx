@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import CaixaAviso from "./CaixaAviso";
 import { api, apiForm, baixarArquivo, mensagemDeErro } from "./api";
 import { brl } from "./formato";
-import { IconeAlerta } from "./icones";
 import { trocarBusca, type Busca } from "./rota";
 import { Link } from "./Link";
 import Selo, { Glifo } from "./Selo";
@@ -10,6 +9,7 @@ import { fmtDataPura } from "./tempo";
 import "./notas.css";
 import "./enviarNota.css";
 import { situacaoDoNivel } from "./situacao";
+import Falha from "./Falha";
 
 // Notas a enviar (2026-10-09; plano docs/superpowers/plans/2026-10-09-notas-envio.md): as notas emitidas que
 // ainda nao foram ao contratante, por grupo de orgao, e o painel do envio escolhido. As regras (o que vai junto,
@@ -184,7 +184,7 @@ export function ItensEnvio({ itens, aoMudar, podeEditar = true }: { itens: ItemE
           );
         })}
       </ul>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
     </>
   );
 }
@@ -332,7 +332,7 @@ function ItensLeitura({ e, certidoes }: { e: Envio; certidoes: ItemCertidao[] | 
           </span>
         </li>
       ))}
-      {erroBaixar && <li><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroBaixar}</p></li>}
+      {erroBaixar && <li><Falha>{erroBaixar}</Falha></li>}
     </ul>
   );
 }
@@ -405,7 +405,7 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
 
   if (!dados) {
     return erro
-      ? <div className="form-inline"><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler as notas a enviar: {erro}</p>
+      ? <div className="form-inline"><Falha>Não foi possível ler as notas a enviar: {erro}</Falha>
           <button type="button" className="btn btn--pequeno" onClick={() => void carregar()}>Tentar de novo</button></div>
       : <p className="campo__nota">Carregando as notas…</p>;
   }
