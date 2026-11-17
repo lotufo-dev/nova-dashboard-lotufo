@@ -23,7 +23,7 @@ import { useLeituraDasRespostas } from "./respostasOrgao";
 import { buscaDosAvisosEmObras, caminhoDe, ehDetalhe, useRolarAteSecao, useRota } from "./rota";
 
 // Menu e entrada por perfil moram em navegacao.ts (NAVEGACAO.md › Perfis e tela de entrada); o trilho e a barra
-// superior, em Casca.tsx. O App so' escolhe a tela. Todo perfil entra pelo Inicio (decisao do Leonardo, 08/10/2026).
+// superior, em Casca.tsx. O App so' escolhe a tela. Todo perfil entra pelo Inicio (decisao do dono, 08/10/2026).
 
 // Issue #417: fora do servidor oficial a dashboard sobe em modo copia (sem envio de e-mail e sem RM) e o
 // /api/health diz `instalacao: nao-autorizada`. A faixa fica em toda tela, inclusive no login, presa ao pe da janela.

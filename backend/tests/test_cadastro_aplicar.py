@@ -167,6 +167,23 @@ def test_valor_original_nao_muda_com_medicao_congelada(conn):
     assert conn.execute("SELECT valor_original_centavos FROM contratos").fetchone()[0] == 1512720000
 
 
+def test_valor_original_congela_com_a_nota_emitida_recebida_sem_protocolo(conn):
+    """Issue #743 (segunda revisao): na obra sem o passo "Envio da nota", a medicao recebida sem protocolo congela como
+    a protocolada; o valor original do contrato deixa de mudar pelo cadastro."""
+    sem_envio = _contrato(passos_medicao=["espelhos", "notas", "pagamento"])
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[sem_envio]))
+    mid = medicoes.criar(conn, 1, {"contrato_id": 1, "numero": 1, "tipo": "execucao", "competencia": "2026-08"})
+    medicoes.definir_valor(conn, 1, mid, "protocolado", 1000_01, "manual")
+    conn.execute("UPDATE medicoes SET estado='nota_emitida', nota_emitida_em='2026-09-14' WHERE id=?", (mid,))
+    conn.commit()
+    # com a nota emitida e sem protocolo, o valor original ainda muda
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[{**sem_envio, "valor_original_centavos": 1512720001}]))
+    medicoes.mudar_estado(conn, 1, mid, "recebida", "baixa conferida no extrato", "2026-10-01", origem="manual")
+    with pytest.raises(ValueError, match="valor original"):
+        cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[{**sem_envio, "valor_original_centavos": 1}]))
+    assert conn.execute("SELECT valor_original_centavos FROM contratos").fetchone()[0] == 1512720001
+
+
 def test_datas_base_sincronizam_e_fiscal_novo_nao_apaga_o_antigo(conn):
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
     novo = _contrato(datas_base=[{"mes": "2022-01", "indice": "SINAPI"}, {"mes": "2022-03", "indice": "SICRO"}],

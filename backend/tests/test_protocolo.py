@@ -765,7 +765,7 @@ def test_mapa_do_pacote_so_compara_quando_o_texto_cita_o_termo(cenario):
     assert {k: mapa[k] for k in ("cita", "apostilamentos")} == {"cita": False, "apostilamentos": []} and mapa["timbre"]
     _termo(c, ids["mtpar"])
     assert protocolo.previa_envio(c, [pid])["bloqueio"] is None                     # (D) nada muda no oficio
-    _cartas(c, com_campo)                                                             # o Leo poe o campo no texto
+    _cartas(c, com_campo)                                                             # o dono poe o campo no texto
     assert protocolo.previa_envio(c, [pid])["bloqueio"] == protocolo.APOSTILAMENTO_MUDOU
     assert FRASE in _carta_montada(c, ids, pid)
     assert protocolo.previa_envio(c, [pid])["bloqueio"] is None
@@ -990,7 +990,7 @@ def test_peca_art_do_protocolo_continua_aceita_no_orgao():
 
 
 def test_carta_da_ses_le_o_aprovado_senao_o_pedido(tmp_path, monkeypatch):
-    """#284 (decisao do Leo de 03/11/2026): o pedido fica congelado; a nota sai pelo aprovado do boletim, e a carta
+    """#284 (decisao do dono de 03/11/2026): o pedido fica congelado; a nota sai pelo aprovado do boletim, e a carta
     da SES ("Nota Fiscal – R$" e as linhas "Sendo") mostra o valor da nota: aprovado, senao pedido."""
     monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
     c = db.get_conn()

@@ -71,7 +71,7 @@ def test_login_de_administrador_de_origem_nova_manda_alerta_na_rodada(ambiente):
     with db.mutacao(conn):
         auditoria.registrar(conn, uid, "auth.login", depois={"origem": "10.0.0.9", "navegador": "x", "perfil": "admin"})
     agora = tempo.agora_utc()
-    assert [i["nivel"] for i in seguranca.itens(conn, agora)] == ["acao"]   # decisao do Leo de 08/11/2026
+    assert [i["nivel"] for i in seguranca.itens(conn, agora)] == ["acao"]   # decisao do dono de 08/11/2026
     alertas_seguranca.rodada(conn, agora)
     [m] = _alertas(tmp)
     assert m["assunto"] == ("Dashboard Lotufo: alerta de segurança: Administrador Dono entrou de uma origem nova "

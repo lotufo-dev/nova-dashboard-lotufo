@@ -4,7 +4,7 @@ RM, cobranca ao orgao). As telas Carteira e A receber sairam na issue #748. Tudo
 fixo: medido, faturado (nota emitida), protocolado, recebido. O total a receber (valor do protocolado) so' aparece com o cadastro
 liberando (`geral.yaml: diretoria.total_a_receber_liberado`), depois da conciliacao com a controladoria.
 
-Corte de 2026-09-25 (decisao do Leonardo): o faturado ate o QDOP de 22/09/2026 conta como pago, menos o que o RM
+Corte de 2026-09-25 (decisao do dono): o faturado ate o QDOP de 22/09/2026 conta como pago, menos o que o RM
 mostra em aberto. O "a receber" soma as medicoes protocoladas e as cobrancas do RM ainda nao pagas que nenhuma
 medicao em aberto representa (`_notas_em_aberto`), com a idade contada da emissao da nota.
 
@@ -72,7 +72,8 @@ def prazos_do_orgao(ms: list[dict], hoje: datetime.date) -> dict[str, int]:
     aconteceu, sem interpolar) dos dias entre o primeiro protocolo da nota e o recebimento, das medicoes recebidas nos
     ultimos 365 dias. O contratante e' a sigla de `_contratante` (a SINFRA inteira, nao cada superintendencia).
     Cada medicao recebida e' um caso (execucao e reajuste pagos juntos contam dois). Nao e' caso a recebida sem data
-    de protocolo ou sem `recebida_em` (o corte de 25/09/2026), a de recebimento anterior ao protocolo nem a de
+    de protocolo ou sem `recebida_em` (o corte de 25/09/2026; e a recebida sem protocolo da obra sem o passo "Envio
+    da nota", issue #743, docs/adr/0007), a de recebimento anterior ao protocolo nem a de
     recebimento com data depois de hoje. Contratante com menos de PRAZO_MINIMO_CASOS recebimentos fica FORA do
     dicionario: e' "sem previsao", e ninguem preenche com numero padrao."""
     desde = hoje - datetime.timedelta(days=PRAZO_JANELA_DIAS)
@@ -259,12 +260,12 @@ def complemento_rm(conn) -> dict[int, dict[str, int]]:
     return out
 
 
-def _complemento_de_execucao(conn, ms: list[dict], compl: dict[int, dict[str, int]], cache: dict) -> dict[int, dict[str, int]]:
-    """O complemento que entra no medido de EXECUCAO (saldo, executado, curva): a nota do RM nao diz se e' execucao ou
-    reajuste, entao o complemento de cada contrato para no que ainda falta executar (vigente de execucao - medido de
-    execucao das medicoes), das competencias mais antigas para as mais novas. Assim uma nota de reajuste de obra ja'
-    toda medida nao deixa o saldo negativo."""
-    medido = _medido_execucao(ms)
+def _complemento_no_medido(conn, ms: list[dict], compl: dict[int, dict[str, int]], cache: dict) -> dict[int, dict[str, int]]:
+    """O complemento que entra no medido da obra (saldo, executado, curva): a nota do RM nao diz se e' execucao, projeto
+    ou reajuste, entao o complemento de cada contrato para no que ainda falta executar (vigente de execucao - medido
+    das medicoes, execucao e projeto, #742), das competencias mais antigas para as mais novas. Assim uma nota de
+    reajuste de obra ja' toda medida nao deixa o saldo negativo."""
+    medido = _medido_por_contrato(ms)
     out: dict[int, dict[str, int]] = {}
     for cid, por_comp in compl.items():
         falta = max(0, _vigente(conn, cid, cache)["valor_vigente_execucao_centavos"] - medido.get(cid, 0))
@@ -389,12 +390,13 @@ def _vigente(conn, contrato_id: int, cache: dict) -> dict:
     return cache[chave]
 
 
-def _medido_execucao(ms: list[dict], compl: dict[int, dict[str, int]] | None = None) -> dict[int, int]:
-    """#262: o medido de execucao CHEIO por contrato (`paineis.mede_execucao`, a regra de `paineis.saldo`), tirado da
-    mesma leitura de medicoes do painel (`ms`), para a carteira e a tabela de obras nao divergirem na mesma resposta."""
+def _medido_por_contrato(ms: list[dict], compl: dict[int, dict[str, int]] | None = None) -> dict[int, int]:
+    """#262: o medido CHEIO por contrato (`paineis.mede_no_medido`, a regra de `paineis.saldo`: execucao e projeto,
+    #742), tirado da mesma leitura de medicoes do painel (`ms`), para a carteira e a tabela de obras nao divergirem na
+    mesma resposta."""
     medido: dict[int, int] = {}
     for m in ms:
-        if paineis.mede_execucao(m):
+        if paineis.mede_no_medido(m):
             valor = m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"] or 0
             medido[m["contrato_id"]] = medido.get(m["contrato_id"], 0) + valor
     # o que o RM mostra e ainda nao foi lancado (`complemento_rm`) conta como medido da obra
@@ -407,10 +409,11 @@ def _carteira(conn, ms: list[dict], cache: dict, compl: dict[int, dict[str, int]
     """Contratos ativos sem encerramento iniciado: o que ainda vai ser executado (o Resumo da lista de Obras). Por
     contratante, o vigente, o medido e o saldo de execucao na cota, para os cartoes e os tres numeros do alto."""
     linhas = []
-    medidos = _medido_execucao(ms, compl)
+    medidos = _medido_por_contrato(ms, compl)
     for c in (x for x in _ativos(conn) if not x["encerramento_iniciado_em"]):
         v = _vigente(conn, c["id"], cache)
-        # #262: o medido e' o de `paineis.saldo` (execucao nos estados que medem), na mesma base do vigente de execucao
+        # #262: o medido e' o de `paineis.saldo` (execucao e projeto nos estados que medem, #742), na mesma base do
+        # vigente de execucao
         medido = medidos.get(c["id"], 0)
         pct = v["percentual_direito_bp"]   # #262: o percentual do mesmo vigente que a tabela de obras reaproveita
         # #262: saldo a precos iniciais -- o aditivo de reajuste fica fora, como no saldo da obra (`paineis.saldo`)
@@ -440,9 +443,10 @@ def _medido_ano(ms: list[dict], hoje: datetime.date, compl: dict[str, int]) -> d
 
 def _curva_obra(conn, contrato_id: int, cache: dict) -> tuple[dict, str, dict, dict]:
     """A curva S da obra (issue #295), por competencia e em valor CHEIO: o previsto vigente; a linha de base ("anterior"
-    quando a obra tem repactuacao, com o previsto anterior a ela; senao "vigente", com o vigente: decisao do Leo de
+    quando a obra tem repactuacao, com o previsto anterior a ela; senao "vigente", com o vigente: decisao do dono de
     28/10/2026); e o medido de execucao nos estados que medem (`paineis._medido`). O vigente sai do mesmo `cache` de
-    `cache` por contrato, para nao ler o cronograma duas vezes."""
+    `cache` por contrato, para nao ler o cronograma duas vezes. #742: so' a execucao, de proposito: a curva compara
+    o realizado com o cronograma, como `paineis.curva_s`; o projeto entra no medido e no saldo (docs/adr/0012)."""
     chave = ("curva", contrato_id)
     if chave not in cache:
         if contrato_id not in cache:
@@ -457,7 +461,7 @@ def _curva_obra(conn, contrato_id: int, cache: dict) -> tuple[dict, str, dict, d
 def _curva_carteira(conn, hoje: datetime.date, cache: dict, compl: dict[int, dict[str, int]] | None = None) -> list[dict]:
     """Issue #296 (spec 2026-10-20 §4 item 5): a curva S da carteira, a soma das curvas das obras ativas nos ultimos
     12 meses, cada obra na sua cota (D8). A obra sem repactuacao entra na linha anterior com o previsto vigente
-    (decisao do Leo de 28/10/2026), para as duas linhas somarem as mesmas obras."""
+    (decisao do dono de 28/10/2026), para as duas linhas somarem as mesmas obras."""
     meses = [_mes(hoje, k) for k in range(-11, 1)]
     out = {m: {"competencia": m, "previsto_centavos": 0, "previsto_anterior_centavos": 0, "medido_centavos": 0} for m in meses}
     for c in _ativos(conn):
@@ -473,7 +477,8 @@ def _curva_carteira(conn, hoje: datetime.date, cache: dict, compl: dict[int, dic
 def _a_precos_iniciais(conn, linha: dict, medido: int, cache: dict) -> dict:
     """#262 (gate Sol): a linha da tabela de obras na base do saldo da obra (`paineis.saldo`) e da carteira, logo
     acima na tela: PI+VA, VA, saldo e percentuais com o vigente de execucao, sem o aditivo de reajuste, que fica so' na coluna do
-    reajuste. `medido` e' o de execucao nos estados que medem, CHEIO (`_medido_execucao`, da mesma
+    reajuste. `medido` e' o da obra (execucao e projeto, #742) nos estados que medem, CHEIO
+    (`_medido_por_contrato`, da mesma
     leitura de medicoes e do mesmo vigente da carteira); a coluna "faturados" continua a do QDOP. O saldo aplica a
     cota uma vez sobre o saldo cheio, como a carteira. O QDOP exportado continua com o vigente cheio (#352)."""
     v = _vigente(conn, linha["contrato_id"], cache)
@@ -489,14 +494,14 @@ def _a_precos_iniciais(conn, linha: dict, medido: int, cache: dict) -> dict:
 
 def _obras(conn, ms: list[dict], hoje: datetime.date, avisos: list[dict], cache: dict,
            compl: dict[int, dict[str, int]] | None = None, faturado_a_mais: dict[int, dict[str, int]] | None = None) -> list[dict]:
-    """`compl`: o complemento de execucao (`_complemento_de_execucao`), que entra no medido e no saldo; `faturado_a_mais`:
+    """`compl`: o complemento do medido (`_complemento_no_medido`), que entra no medido e no saldo; `faturado_a_mais`:
     o complemento inteiro (`complemento_rm`), que entra na coluna "faturados"."""
     por_obra: dict = {}
     for a in avisos:
         if a.get("contrato_id"):
             por_obra.setdefault(a["contrato_id"], []).append(a)
     out = []
-    medido = _medido_execucao(ms, compl)
+    medido = _medido_por_contrato(ms, compl)
     for linha in qdop.linhas(conn, hoje):
         # a nota do RM sem medicao lancada e' faturado por definicao: entra na coluna "faturados" da tela, na cota
         falta = sum((faturado_a_mais or {}).get(linha["contrato_id"], {}).values())
@@ -580,10 +585,10 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
         avisos = _av.listar(conn, hoje, publico="diretoria")
         # 06/11/2026: o que o RM mostra e ainda nao tem medicao lancada entra no medido da diretoria (`complemento_rm`)
         compl = complemento_rm(conn)
-        execucao = _complemento_de_execucao(conn, ms, compl, cache)
+        no_medido = _complemento_no_medido(conn, ms, compl, cache)
         return {"hoje": hoje.isoformat(), "medido_ano": _medido_ano(ms, hoje, _complemento_na_cota(conn, compl)),
-                "carteira": _carteira(conn, ms, cache, execucao),
-                "curva_carteira": _curva_carteira(conn, hoje, cache, execucao),
+                "carteira": _carteira(conn, ms, cache, no_medido),
+                "curva_carteira": _curva_carteira(conn, hoje, cache, no_medido),
                 # #279: o reajuste ja' medido das competencias sem apostilamento, por obra (bloco do Resumo de Obras)
                 "reajustes_apostilamento": _reajustes_sem_apostilamento(conn),
-                "obras": _obras(conn, ms, hoje, avisos, cache, execucao, compl), "avisos": avisos}
+                "obras": _obras(conn, ms, hoje, avisos, cache, no_medido, compl), "avisos": avisos}

@@ -50,7 +50,7 @@ describe("prazo da obra paralisada", () => {
 
 describe("contratantes (entrada de Obras, #159)", () => {
   const cheia = (id: number, orgao: string, vigente: number, medido: number, extra: Partial<ObraLista> = {}) =>
-    o(id, `Obra ${id}`, { orgao, valor_vigente_centavos: vigente, medido_execucao_centavos: medido, ...extra });
+    o(id, `Obra ${id}`, { orgao, valor_vigente_centavos: vigente, medido_centavos: medido, ...extra });
   const lista = [
     cheia(1, "SINFRA", 1000_00, 250_00), cheia(2, "SINFRA", 3000_00, 750_00),
     cheia(3, "MTPAR", 2000_00, 1000_00), cheia(4, "MTPAR", 500_00, 500_00, { estado: "encerrado" }),
@@ -114,7 +114,7 @@ describe("contratantes (entrada de Obras, #159)", () => {
 describe("lista de Obras na cota da Lotufo, por contratante (#645)", () => {
   // `posicao` vem do servidor já na cota; os cheios ao lado são de propósito outros, para a soma não os usar
   const naCota = (id: number, nome: string, contratante: string, vigente: number, medido: number, aReceber: number | null) =>
-    o(id, nome, { contratante, orgao: `${contratante} - SUP`, valor_vigente_centavos: vigente * 2, valor_vigente_execucao_centavos: vigente * 2, medido_execucao_centavos: medido * 2,
+    o(id, nome, { contratante, orgao: `${contratante} - SUP`, valor_vigente_centavos: vigente * 2, valor_vigente_execucao_centavos: vigente * 2, medido_centavos: medido * 2,
       posicao: { vigente_centavos: vigente, medido_centavos: medido, saldo_centavos: vigente - medido, a_receber_centavos: aReceber } });
   const lista = [
     naCota(1, "Ponte", "SINFRA", 1000_01, 250_00, 100_01), naCota(2, "Avenida", "SINFRA", 3000_00, 750_33, 0),

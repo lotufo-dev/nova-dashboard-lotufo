@@ -1,11 +1,11 @@
 # Spike RM — conduto API + Consulta SQL provado fim a fim
 
-**Task 3 da Fase 0** · Executado em 2026-08-31, inline com o Leonardo (cadastro das consultas feito por computer-use no RM.exe local; execução da API pelo Leonardo com a credencial dele via `scripts/spike_rm.ps1`).
+**Task 3 da Fase 0** · Executado em 2026-08-31, inline com o dono (cadastro das consultas feito por computer-use no RM.exe local; execução da API pelo dono com a credencial dele via `scripts/spike_rm.ps1`).
 
 ## 1. Auth e URL que funcionaram
 
 - **Endpoint:** `GET http://<servidor-rm>:<porta-da-api>/api/framework/v1/consultaSQLServer/RealizaConsulta/{codigo}/{coligada}/{sistema}`
-- **Auth:** HTTP Basic. Usuário = **código do usuário no RM** — para o Leonardo é `<código do usuário no RM>` (pode ter espaço, como mostrado em "Código do Usuário" no painel Sistema do RM). O formato Windows (`nome.sobrenome`, `DOMINIO\...`) retorna **401**.
+- **Auth:** HTTP Basic. Usuário = **código do usuário no RM** — para o dono é `<código do usuário no RM>` (pode ter espaço, como mostrado em "Código do Usuário" no painel Sistema do RM). O formato Windows (`nome.sobrenome`, `DOMINIO\...`) retorna **401**.
 - **Sistema:** a instalação da Lotufo **não licencia a aplicação "Global" (G)** — o dropdown do cadastro só oferece Chronus, Fluxus, Bis, Agilis, Solum e Nucleus. As consultas do spike foram cadastradas em **RM Fluxus → sistema `F`** na URL. (O plano previa `G`; ajuste registrado.)
 - **Coligada na URL:** `0`, com a consulta marcada "**Visível a todas Coligadas**" no cadastro.
 - Consultas cadastradas (módulo Serviços Globais > Gestão > Visões de Dados, todas com `(NOLOCK)`): `DASH01` coligadas, `DASH02` NFs recentes TMOV, `DASH03` baixas FLAN, `DASH04` NFs por coligada, `DASH05` agregado STATUSLAN/parciais, `DASH06` campos livres preenchidos.

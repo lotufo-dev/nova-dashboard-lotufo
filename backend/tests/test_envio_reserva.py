@@ -275,6 +275,59 @@ def test_modo_copia_recusa_antes_da_reserva(cenario, monkeypatch, tmp_path):
     _nada_saiu(c, tmp_path)
 
 
+def _protocolo_pronto(c, ids):
+    from tests.test_protocolo import _assinar, _montado
+    pid = _protocolo(c, ids)
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    return pid, protocolo.previa_envio(c, [pid], remetente="maria@l.com")
+
+
+def _dev_sem_simulador(monkeypatch, liberado: bool):
+    from app import instalacao
+    monkeypatch.setenv("DASH_DEV", "1")
+    monkeypatch.delenv("DASH_GRAPH_SIMULADOR", raising=False)
+    if liberado:
+        monkeypatch.setenv(instalacao.LIBERAR_EMAIL_REAL_EM_DEV, "1")
+    else:
+        monkeypatch.delenv(instalacao.LIBERAR_EMAIL_REAL_EM_DEV, raising=False)
+
+
+def test_dev_sem_simulador_e_sem_liberacao_recusa_o_protocolo_antes_da_reserva(cenario, monkeypatch):
+    """Issue #707: com DASH_DEV=1 o e-mail real so' sai com DASH_EMAIL_REAL_EM_DEV=1; sem ela, nada fica reservado."""
+    from app import envio_reserva, instalacao
+    c, ids = cenario
+    pid, pv = _protocolo_pronto(c, ids)
+    falso = CorreioFalso()                   # no lugar do cliente real do Graph: se a trava falhar, conta o e-mail
+    monkeypatch.setattr(correio, "cliente", falso)
+    _dev_sem_simulador(monkeypatch, liberado=False)
+    with pytest.raises(instalacao.EmailRealTravadoEmDev, match="DASH_GRAPH_SIMULADOR"):
+        envio_reserva.reservar(c, "protocolos", pid, ids["uid"])
+    with pytest.raises(instalacao.EmailRealTravadoEmDev):
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"])
+    assert _reserva(c, pid) == (None, None)
+    assert protocolo.detalhe(c, pid)["situacao"] != "enviado"
+    assert falso.enviados == []
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    # com a liberacao o mesmo envio sai pelo cliente real (aqui, o falso no lugar dele)
+    _dev_sem_simulador(monkeypatch, liberado=True)
+    protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"])
+    assert protocolo.detalhe(c, pid)["situacao"] == "enviado" and len(falso.enviados) == 1
+
+
+def test_sem_dash_dev_o_protocolo_sai_sem_liberacao(cenario, monkeypatch):
+    """Producao (sem DASH_DEV): a trava do #707 nao existe."""
+    from app import instalacao
+    c, ids = cenario
+    pid, pv = _protocolo_pronto(c, ids)
+    falso = CorreioFalso()
+    monkeypatch.setattr(correio, "cliente", falso)
+    monkeypatch.delenv("DASH_DEV", raising=False)
+    monkeypatch.delenv("DASH_GRAPH_SIMULADOR", raising=False)
+    monkeypatch.delenv(instalacao.LIBERAR_EMAIL_REAL_EM_DEV, raising=False)
+    protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"])
+    assert protocolo.detalhe(c, pid)["situacao"] == "enviado" and len(falso.enviados) == 1
+
+
 def test_modo_copia_recusa_o_protocolo_inteiro_sem_reservar(cenario, monkeypatch, tmp_path):
     from app import instalacao
     from tests.test_protocolo import _assinar, _montado

@@ -1,6 +1,6 @@
 # Inventário das regras do Power Automate (e de onde as regras realmente moram)
 
-**Task 4 da Fase 0** · Executado em 2026-08-31 com o Leonardo (conta dele no make.powerautomate.com; definições exportadas em pacote .zip e lidas do `definition.json`; regras extraídas do Office Script `Motor Multi.osts` e do `cadastro-obras.json` no OneDrive corporativo).
+**Task 4 da Fase 0** · Executado em 2026-08-31 com o dono (conta dele no make.powerautomate.com; definições exportadas em pacote .zip e lidas do `definition.json`; regras extraídas do Office Script `Motor Multi.osts` e do `cadastro-obras.json` no OneDrive corporativo).
 
 ## 1. Descoberta central (muda o desenho das fases 7–8)
 

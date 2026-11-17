@@ -192,6 +192,72 @@ def test_simulador_grava_em_pasta_e_nao_usa_rede(conn, tmp_path, monkeypatch):
     assert gravado["assunto"] == "Assunto" and gravado["anexos"][0]["nome"] == "a.txt"
 
 
+# --- issue #707: em dev o e-mail real so' sai com liberacao explicita ------------------------------------------
+
+def _envio_real(conn):
+    return correio.enviar_e_registrar(conn, {"id": 1}, "teste", ["a@exemplo.com.br"], [], "Assunto", "<p/>",
+                                      [("a.txt", b"oi")])
+
+
+def _ambiente(monkeypatch, dev: bool, liberacao: str | None, simulador: str | None = None):
+    from app import instalacao
+    if dev:
+        monkeypatch.setenv("DASH_DEV", "1")
+    else:
+        monkeypatch.delenv("DASH_DEV", raising=False)
+    if simulador:
+        monkeypatch.setenv("DASH_GRAPH_SIMULADOR", simulador)
+    else:
+        monkeypatch.delenv("DASH_GRAPH_SIMULADOR", raising=False)
+    if liberacao is None:
+        monkeypatch.delenv(instalacao.LIBERAR_EMAIL_REAL_EM_DEV, raising=False)
+    else:
+        monkeypatch.setenv(instalacao.LIBERAR_EMAIL_REAL_EM_DEV, liberacao)
+
+
+def test_dev_sem_simulador_e_sem_liberacao_recusa_o_envio_real_sem_tocar_a_rede(conn, rede, monkeypatch):
+    from app import instalacao
+    _ambiente(monkeypatch, dev=True, liberacao=None)
+    with pytest.raises(instalacao.EmailRealTravadoEmDev) as erro:
+        _envio_real(conn)
+    assert "DASH_GRAPH_SIMULADOR=dados/correio-simulado" in str(erro.value)
+    assert "DASH_EMAIL_REAL_EM_DEV=1" in str(erro.value)
+    assert rede.chamadas == []
+    assert conn.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("valor", ["0", "", "sim"])
+def test_dev_com_liberacao_diferente_de_1_continua_recusando(conn, rede, monkeypatch, valor):
+    from app import instalacao
+    _ambiente(monkeypatch, dev=True, liberacao=valor)
+    with pytest.raises(instalacao.EmailRealTravadoEmDev):
+        _envio_real(conn)
+    assert rede.chamadas == []
+
+
+def test_dev_com_liberacao_envia_de_verdade_como_antes(conn, rede, monkeypatch):
+    _ambiente(monkeypatch, dev=True, liberacao="1")
+    eid = _envio_real(conn)
+    assert ("POST", "/me/messages/RASCUNHO/send") in [(m, u) for m, u, *_ in rede.chamadas]
+    assert conn.execute("SELECT mensagem_id FROM envios WHERE id=?", (eid,)).fetchone()[0] == "<abc@outlook>"
+
+
+def test_sem_dash_dev_o_envio_real_nao_muda(conn, rede, monkeypatch):
+    """Producao: sem DASH_DEV a liberacao nao e' lida e o envio real segue como sempre."""
+    _ambiente(monkeypatch, dev=False, liberacao=None)
+    eid = _envio_real(conn)
+    assert ("POST", "/me/messages/RASCUNHO/send") in [(m, u) for m, u, *_ in rede.chamadas]
+    assert conn.execute("SELECT COUNT(*) FROM envios WHERE id=?", (eid,)).fetchone()[0] == 1
+
+
+def test_dev_com_simulador_nao_precisa_de_liberacao(conn, tmp_path, monkeypatch):
+    _ambiente(monkeypatch, dev=True, liberacao=None, simulador=str(tmp_path / "sim"))
+    monkeypatch.setattr(correio, "_http", lambda *a, **k: pytest.fail("rede usada no simulador"))
+    correio.enviar_e_registrar(conn, {"id": 1, "email": "maria@l.com"}, "teste", ["a@exemplo.com.br"], [],
+                               "Assunto", "<p/>", [])
+    assert len(list((tmp_path / "sim" / "enviados").glob("*.json"))) == 1
+
+
 PNG = _png()
 JPG = _jpg()
 # Segmento entre varreduras (tabela de Huffman) cujo conteudo tem os bytes FF D9, que nao sao o fim da imagem

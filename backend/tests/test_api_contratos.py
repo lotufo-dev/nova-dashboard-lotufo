@@ -33,7 +33,7 @@ def test_escrita_de_contrato_pela_api_saiu(client_admin):
                              json={"estado": "suspenso", "data": "2026-08-01"}).status_code == 404
 
 
-def test_listar_traz_o_medido_de_execucao_e_o_saldo(client_admin):
+def test_listar_traz_o_medido_e_o_saldo(client_admin):
     """Redesenho de Obras (#159): o % executado e o saldo a executar de cada obra vem da lista, em valor cheio."""
     from app import db, medicoes
     cid = novo_contrato(NOVO)
@@ -45,16 +45,16 @@ def test_listar_traz_o_medido_de_execucao_e_o_saldo(client_admin):
     conn.close()
     outro = novo_contrato({**NOVO, "numero_instrumento": "IC 083/2025"})
     lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
-    assert lista[cid]["medido_execucao_centavos"] == 240_000_00      # o atestado vale
+    assert lista[cid]["medido_centavos"] == 240_000_00      # o atestado vale
     assert lista[cid]["saldo_centavos"] == 100_000_000 - 240_000_00
     # a mesma conta do saldo do cronograma da obra
     from app import paineis
     conn = db.get_conn()
     for i in (cid, outro):
         s = paineis.saldo(conn, i)
-        assert (lista[i]["medido_execucao_centavos"], lista[i]["saldo_centavos"]) == (s["atestado_execucao_centavos"], s["saldo_centavos"])
+        assert (lista[i]["medido_centavos"], lista[i]["saldo_centavos"]) == (s["medido_centavos"], s["saldo_centavos"])
     conn.close()
-    assert lista[outro]["medido_execucao_centavos"] == 0 and lista[outro]["saldo_centavos"] == 100_000_000
+    assert lista[outro]["medido_centavos"] == 0 and lista[outro]["saldo_centavos"] == 100_000_000
 
 
 def test_listar_saldo_exclui_o_aditivo_de_reajuste(client_admin):
@@ -376,7 +376,7 @@ def test_listar_traz_a_posicao_na_cota_igual_ao_topo_da_pagina_da_obra(client_ad
     assert p["vigente_centavos"] == 588_000_00            # 49% de 1.200.000,01, sem o aditivo de reajuste
     assert p["medido_centavos"] == 196_000_16             # 49% de 400.000,33
     assert p["saldo_centavos"] == 391_999_84 == p["vigente_centavos"] - p["medido_centavos"]
-    assert lista[consorcio]["medido_execucao_centavos"] == 400_000_33     # o cheio de antes nao mudou
+    assert lista[consorcio]["medido_centavos"] == 400_000_33     # o cheio de antes nao mudou
     assert lista[propria]["posicao"]["vigente_centavos"] == 1_200_000_01
     for cid in (consorcio, propria):
         topo = client_admin.get(f"/api/contratos/{cid}/ficha").json()["topo"]

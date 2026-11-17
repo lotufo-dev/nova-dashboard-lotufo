@@ -26,13 +26,13 @@ def _existe(conn: sqlite3.Connection, contrato_id: int) -> None:
 def listar(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
            conn: sqlite3.Connection = Depends(conexao)):
     # A9: os dias ate' o fim da execucao e da vigencia e o pedido de prorrogacao em curso, por obra.
-    # Redesenho de Obras (#159): o medido de execucao e o saldo a executar, em valor cheio (a mesma conta do saldo
-    # do cronograma da obra, `paineis.saldo`), para o % executado e para a soma por contratante.
+    # Redesenho de Obras (#159): o medido (execucao e projeto, #742) e o saldo a executar, em valor cheio (a mesma
+    # conta do saldo do cronograma da obra, `paineis.saldo`), para o % executado e para a soma por contratante.
     # O contratante e' o mesmo de Medicoes ("SINFRA" para toda a familia, com a superintendencia em `orgao_sub`).
     hoje = tempo.hoje_local()
     orgaos = {r["id"]: r for r in conn.execute(
         "SELECT c.id, c.orgao AS orgao_texto, o.familia, o.chave, o.nome FROM contratos c LEFT JOIN orgaos o ON o.id=c.orgao_id")}
-    medido = paineis.medido_execucao_por_contrato(conn)       # uma consulta so', nao uma por obra
+    medido = paineis.medido_por_contrato(conn)       # uma consulta so', nao uma por obra
     # #645: a lista de Obras le `posicao`, na cota da Lotufo: vigente, medido e saldo pela conta do topo da pagina da
     # obra (`paineis.posicao_na_cota`) e o a receber cobranca a cobranca, como a tela A receber; sem o total
     # liberado, nulo (a tela mostra "—"). O a receber cheio saiu da lista (so' ela o lia).
@@ -43,7 +43,7 @@ def listar(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
         contratante, orgao_sub = medicoes.contratante(o["familia"], o["chave"], o["nome"], o["orgao_texto"])
         feito = medido.get(c["id"], 0)
         saida.append({**c, **prazos.resumo(conn, c["id"], hoje), "contratante": contratante, "orgao_sub": orgao_sub,
-                      "medido_execucao_centavos": feito, "saldo_centavos": c["valor_vigente_execucao_centavos"] - feito,
+                      "medido_centavos": feito, "saldo_centavos": c["valor_vigente_execucao_centavos"] - feito,
                       "posicao": {**paineis.posicao_na_cota(c["valor_vigente_execucao_centavos"], feito, c["percentual_direito_bp"]),
                                   "a_receber_centavos": None if a_receber is None else a_receber.get(c["id"], 0)}})
     return saida

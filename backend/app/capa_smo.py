@@ -1,4 +1,4 @@
-"""Conferencia da capa do SMO contra o cadastro (issue #286; spec 2026-10-20 §2.3 e §4 item 6, D5; decisao do Leo de
+"""Conferencia da capa do SMO contra o cadastro (issue #286; spec 2026-10-20 §2.3 e §4 item 6, D5; decisao do dono de
 08/11/2026). O instrumento so' entra pelo YAML; a dashboard so' avisa.
 
 No "Registrar boletim" o servidor le a capa do PDF (so' o texto, `leitura_smo.ler_pdf_texto`) e grava os campos em
