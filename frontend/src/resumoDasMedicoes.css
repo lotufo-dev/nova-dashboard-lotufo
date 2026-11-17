@@ -17,7 +17,7 @@
 .rdm-vazio--pagina { padding: 0; }
 .rdm-aviso { margin: 0; }
 
-/* as cores das etapas (as da fundacao), uma vez: a faixa do alto, a faixa de cada linha, a trilha e a chave */
+/* as cores das etapas (as da fundacao), uma vez: a faixa do alto, a faixa de cada linha e a chave */
 .rdm-cor--em_analise { --rdm-cor: var(--etapa-analise); --rdm-contorno: inset 0 0 0 var(--etapa-borda-largura) var(--etapa-analise-borda); }
 .rdm-cor--boletim { --rdm-cor: var(--etapa-boletim); }
 .rdm-cor--nota { --rdm-cor: var(--etapa-nota); }
@@ -100,10 +100,10 @@ a.rdm-obra:hover { text-decoration: underline; text-underline-offset: var(--afas
 .rdm-antes { margin-top: var(--espaco-mini); display: flex; width: fit-content; }
 .rdm-sub { margin-left: var(--espaco-pp); color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
 
-/* variante A: uma coluna por etapa. A barra no alto de cada celula e' a faixa da linha: as celulas encostam uma na
+/* a faixa das etapas da linha: uma coluna por etapa. A barra no alto de cada celula e' a faixa da linha: as celulas encostam uma na
    outra (um traco de vao), entao as barras formam uma trilha so'. */
-.rdm .rdm-tabela--a thead th.rdm-th-etapa { width: 11%; padding-left: 0; padding-right: var(--espaco-pp); }
-.rdm .rdm-tabela--a tbody td.rdm-etapa { padding: var(--espaco-p) var(--espaco-traco) var(--espaco-p) 0; font-size: var(--texto-mini); white-space: nowrap; }
+.rdm .rdm-tabela--etapas thead th.rdm-th-etapa { width: 11%; padding-left: 0; padding-right: var(--espaco-pp); }
+.rdm .rdm-tabela--etapas tbody td.rdm-etapa { padding: var(--espaco-p) var(--espaco-traco) var(--espaco-p) 0; font-size: var(--texto-mini); white-space: nowrap; }
 .rdm-etapa::before {
   content: ""; display: block; height: var(--altura-barra-etapa); margin-bottom: var(--espaco-pp);
   border-radius: var(--raio-canto); background: var(--rdm-cor); box-shadow: var(--rdm-contorno, none);
@@ -112,16 +112,6 @@ a.rdm-obra:hover { text-decoration: underline; text-underline-offset: var(--afas
 .rdm-etapa__nome { display: none; }
 .rdm-etapa__dado { display: inline-flex; align-items: center; gap: var(--espaco-mini); }
 .rdm-etapa--atual .rdm-etapa__dado { font-weight: var(--peso-forte); }
-
-/* variante B: a trilha curta (uma celula por etapa), o selo da etapa atual e a data dela */
-.rdm-b-etapa { white-space: nowrap; }
-.rdm-trilha { display: inline-flex; gap: var(--espaco-traco); margin-right: var(--espaco-p); vertical-align: middle; }
-.rdm-trilha__celula {
-  width: var(--largura-min-celula); height: var(--tamanho-chave); border-radius: var(--raio-canto);
-  background: var(--rdm-cor); box-shadow: var(--rdm-contorno, none);
-}
-.rdm-trilha__celula--fora { background: none; }
-.rdm .rdm-tabela--b td.rdm-b-desde { white-space: nowrap; }
 
 /* a etapa da ultima medicao (obras sem medicao): a chave de cor e o nome */
 .rdm-chave-etapa { display: inline-flex; align-items: center; gap: var(--espaco-pp); white-space: nowrap; }
@@ -138,7 +128,6 @@ a.rdm-obra:hover { text-decoration: underline; text-underline-offset: var(--afas
   .rdm-painel__cab { padding: 0 var(--espaco-m); }
   .rdm-vazio { padding: 0 var(--espaco-m) var(--espaco-m); }
   .rdm-primeira { width: 26%; }
-  .rdm-trilha__celula { width: var(--espaco-m); }
 }
 
 /* ---------------------------------------------------------------- faixa estreita (celular)
@@ -168,16 +157,11 @@ a.rdm-obra:hover { text-decoration: underline; text-underline-offset: var(--afas
   .rdm-antes, .rdm-antes .selo__texto { white-space: normal; }
   .rdm-obra--repetida { position: static; width: auto; height: auto; overflow: visible; clip: auto; white-space: normal; }
 
-  /* variante A: as etapas alcancadas, tres por linha; as barras continuam formando a trilha */
-  .rdm .rdm-tabela--a.tabela tr > .rdm-etapa { order: 3; flex: 0 0 33.333%; padding-right: var(--espaco-traco); }
-  .rdm .rdm-tabela--a.tabela tr > :is(.rdm-etapa--futuro, .rdm-etapa--fora) { display: none; }
+  /* as etapas alcancadas, tres por linha; as barras continuam formando a trilha */
+  .rdm .rdm-tabela--etapas.tabela tr > .rdm-etapa { order: 3; flex: 0 0 33.333%; padding-right: var(--espaco-traco); }
+  .rdm .rdm-tabela--etapas.tabela tr > :is(.rdm-etapa--futuro, .rdm-etapa--fora) { display: none; }
   .rdm-etapa::before { margin-bottom: var(--espaco-mini); }
   .rdm-etapa__nome { display: block; color: var(--cor-texto-secundario); }
-
-  /* variante B: a trilha e o selo numa linha, a data ao lado com o rotulo */
-  .rdm .rdm-tabela--b.tabela tr > .rdm-b-etapa { order: 3; flex: 1 1 auto; }
-  .rdm .rdm-tabela--b.tabela tr > .rdm-b-desde { order: 4; flex: 0 0 auto; margin-left: auto; white-space: nowrap; }
-  .rdm-trilha__celula { width: var(--espaco-p); }
 
   /* obras sem medicao: a obra em cima; orgao, ultima medicao e etapa dela embaixo, com o rotulo antes do dado */
   .rdm .rdm-tabela--sem.tabela tr > :is(th, td) { order: 2; flex: 1 1 100%; }

@@ -162,35 +162,18 @@ describe("Resumo das medições (#749)", () => {
     expect(api).toHaveBeenCalledWith("/api/resumo-medicoes");
   });
 
-  it("variante B (?variante=b): a trilha, o selo da etapa atual e só a data dela", async () => {
-    api.mockResolvedValue({ ...RESUMO, grupos: [...RESUMO.grupos, { contratante: "Secretaria de Exemplo 2", linhas: [
-      linha({ contrato_id: 11, obra: "Obra Quarta", medicao_id: 111, titulo: "1ª Medição", etapa: "antes", valor_centavos: 9_000,
-        etapas: [e("em_analise", "futuro"), e("boletim", "futuro"), e("nota", "futuro"), e("protocolado", "futuro"), e("recebido", "futuro")] })] }] });
-    render(<ResumoDasMedicoes ir={() => {}} busca={{ variante: "b" }} />);
-    const tabela = await screen.findByRole("table", { name: /Etapa da medição de cada obra em outubro de 2026/ });
-    expect(within(tabela).getAllByRole("columnheader").map(texto)).toEqual(["Obra", "Etapa", "Desde", "Medido"]);
-    const linhas = within(tabela).getAllByRole("row");
-    expect(celulas(linhas[2])).toEqual(["Boletim", "—sem data registrada", "R$ 3.333,00"]);
-    expect(celulas(linhas[3])).toEqual(["Recebido", "12/11/2026", "R$ 500,00"]);
-    expect(celulas(linhas[5])).toEqual(["Protocolado", "10/11/2026", "R$ 101.000,01"]);
-    expect(celulas(linhas[7])).toEqual(["Planilha/carta a enviar", "—", "R$ 90,00"]);
-    // o selo leva a forma da situacao; a trilha tem uma celula por etapa, sem cor na que a obra nao tem
-    expect(linhas[3].querySelector(".selo--feito .glifo--feito")).not.toBeNull();
-    expect(linhas[5].querySelector(".selo--andamento .glifo--andamento")).not.toBeNull();
-    expect([...linhas[2].querySelectorAll(".rdm-trilha__celula")].map(c => c.className.replace("rdm-trilha__celula ", ""))).toEqual(
-      ["rdm-trilha__celula--fora", "rdm-cor--boletim", "rdm-cor--vazia", "rdm-cor--vazia", "rdm-cor--vazia"]);
-  });
-
-  it("na variante A, a planilha/carta ainda não enviada fica dita na linha e na faixa", async () => {
+  it("a planilha/carta ainda não enviada fica dita na linha e na faixa, sem valor no medido", async () => {
+    // a medicao ainda nao enviada nao conta no medido: o servidor manda a linha sem valor e a etapa com zero
     api.mockResolvedValue({ ...RESUMO,
-      etapas: RESUMO.etapas.map(x => (x.etapa === "antes" ? { ...x, medicoes: 1, valor_centavos: 9_000 } : x)),
+      etapas: RESUMO.etapas.map(x => (x.etapa === "antes" ? { ...x, medicoes: 1 } : x)),
       grupos: [{ contratante: "Secretaria de Exemplo", linhas: [
-        linha({ contrato_id: 11, obra: "Obra Quarta", medicao_id: 111, titulo: "1ª Medição", etapa: "antes", valor_centavos: 9_000,
+        linha({ contrato_id: 11, obra: "Obra Quarta", medicao_id: 111, titulo: "1ª Medição", etapa: "antes",
           etapas: [e("em_analise", "futuro"), e("boletim", "futuro"), e("nota", "futuro"), e("protocolado", "futuro"), e("recebido", "futuro")] })] }] });
     render(<ResumoDasMedicoes ir={() => {}} />);
     const tabela = await screen.findByRole("table", { name: /Etapa da medição de cada obra/ });
     expect(texto(within(tabela).getAllByRole("rowheader")[1])).toBe("Obra Quarta1ª MediçãoPlanilha/carta a enviar");
-    expect(texto(within(screen.getByRole("list", { name: /por etapa/ })).getAllByRole("listitem")[0])).toBe("Planilha/carta a enviar1 mediçãoR$ 90,00");
+    expect(celulas(within(tabela).getAllByRole("row")[2])).toEqual(["ainda não", "ainda não", "ainda não", "ainda não", "ainda não", "—"]);
+    expect(texto(within(screen.getByRole("list", { name: /por etapa/ })).getAllByRole("listitem")[0])).toBe("Planilha/carta a enviar1 medição—");
   });
 
   it("erro ao carregar vira aviso com o que fazer", async () => {

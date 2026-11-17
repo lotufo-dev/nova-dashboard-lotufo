@@ -14,8 +14,16 @@ a data do evento que o sistema registrou (envio da planilha/carta, boletim, emis
 nota, recebimento); sem o registro, a data vem nula e a tela mostra o traco. Nada e' estimado.
 
 Valor: o medido (o aprovado e, sem boletim, o pedido) na COTA da Lotufo, medicao a medicao, com o arredondamento
-unico de `contratos.cota`; medicao sem valor nenhum vem nula. A prevista, a cancelada e a desistida nao contam: a obra
-so' com elas esta' sem medicao no mes (a regra do quadro do mes, `medicoes._quadro_do_mes`).
+unico de `contratos.cota`; medicao sem valor nenhum vem nula. So' mede a medicao enviada ao orgao
+(`medicoes.ESTADOS_NO_MEDIDO`, a regra do glossario e de `docs/adr/0012`): a planilha/carta gerada e ainda nao enviada
+aparece na linha, sem valor, e a soma do mes fecha com o medido do Fechamento (`fechamento.py`). Execucao, projeto e
+reajuste tem linha e valor: aqui o medido e' o de cada medicao, nao o medido da obra (que deixa o reajuste fora).
+
+A prevista, a cancelada e a desistida nao contam: a obra so' com elas esta' sem medicao no mes (a regra do quadro do
+mes, `medicoes._quadro_do_mes`).
+
+Obra sem o passo "Envio da nota" (#743): nao tem a etapa protocolado; a nota emitida fica na etapa da nota, desde a
+emissao, ate' a baixa do RM (ou o registro do administrador) leva'-la a recebido, sem protocolo.
 """
 import datetime
 
@@ -53,6 +61,9 @@ def etapa_da_vez(estado: str, passos) -> str | None:
 
 
 def _cota(m: dict) -> int | None:
+    """O medido da medicao na cota; nulo sem valor e na medicao que ainda nao mede (planilha/carta nao enviada)."""
+    if m["estado"] not in medicoes.ESTADOS_NO_MEDIDO:
+        return None
     valor = m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"]
     return None if valor is None else contratos.cota(valor, m["pct"])
 

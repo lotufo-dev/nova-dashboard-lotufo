@@ -4,7 +4,7 @@ import datetime
 
 import pytest
 
-from app import auditoria, auth, db, resumo_medicoes
+from app import auditoria, auth, db, fechamento, medicoes, resumo_medicoes
 from tests.conftest import novo_contrato
 
 HOJE = datetime.date(2026, 11, 16)
@@ -146,7 +146,75 @@ def test_planilha_gerada_ainda_nao_entrou_no_ciclo(conn, cenario):
     assert x["etapa"] == "antes" and {e["situacao"] for e in x["etapas"]} == {"futuro"}
     assert all(e["data"] is None for e in x["etapas"])
     assert "Obra Parada" not in [o["obra"] for o in r["sem_medicao"]]
-    assert next(e for e in r["etapas"] if e["etapa"] == "antes") == {"etapa": "antes", "medicoes": 1, "valor_centavos": 9_000}
+    # a medicao ainda nao enviada ao orgao nao mede (`medicoes.ESTADOS_NO_MEDIDO`): a linha existe, sem valor
+    assert x["valor_centavos"] is None
+    assert next(e for e in r["etapas"] if e["etapa"] == "antes") == {"etapa": "antes", "medicoes": 1, "valor_centavos": 0}
+
+
+def test_medido_do_mes_fecha_com_o_do_fechamento(conn, cenario):
+    """A soma do medido das linhas da competencia e' o medido do mes no Fechamento: a mesma regra (a medicao enviada
+    ao orgao, o aprovado e, sem boletim, o pedido, na cota), com a planilha/carta so' gerada fora das duas."""
+    c, ids = conn, cenario
+    _medicao(c, ids["parada"], 7, "planilha_gerada", 9_001)
+    _medicao(c, ids["consorcio"], 7, "planilha_enviada", 500_001, tipo="reajuste")       # reajuste: linha e valor proprios
+    c.commit()
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    soma = sum(x["valor_centavos"] or 0 for g in r["grupos"] for x in g["linhas"])
+    [mes] = [m for m in fechamento.fechamento(conn)["meses"] if m["competencia"] == MES]
+    # consorcio a 33,33%: 333.300 da execucao + 166.650 do reajuste (500.001 x 33,33% = 166.650,33), cada um com o
+    # arredondamento dele
+    assert soma == mes["medido_centavos"] == 99_999 + 333_300 + 166_650 + 50_000 + 70_000
+    assert sum(e["valor_centavos"] for e in r["etapas"]) == soma
+
+
+def test_medicao_de_projeto_tem_linha_valor_e_conta_como_ultima(conn, cenario):
+    """#742: a medicao de projeto entra no medido. Aqui ela tem a linha e o valor dela e, na obra sem medicao no mes,
+    e' a ultima medicao."""
+    c, ids = conn, cenario
+    proj = _medicao(c, ids["propria"], 1, "planilha_enviada", 40_001, tipo="projeto", planilha_enviada_em="2026-11-04")
+    antigo = _medicao(c, ids["parada"], 2, "recebida", 10_000, tipo="projeto", comp="2026-09", recebida_em="2026-10-28")
+    c.execute("UPDATE medicoes SET estado='recebida', recebida_em='2026-10-27' WHERE id=?", (ids["x5"],))
+    c.commit()
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    linhas = [x for g in r["grupos"] for x in g["linhas"] if x["obra"] == "Obra Própria"]
+    assert [(x["medicao_id"], x["tipo"], x["etapa"], x["valor_centavos"]) for x in linhas] == [
+        (ids["p12"], "execucao", "protocolado", 99_999), (proj, "projeto", "em_analise", 40_001)]
+    assert next(e for e in r["etapas"] if e["etapa"] == "em_analise") == {
+        "etapa": "em_analise", "medicoes": 2, "valor_centavos": 333_300 + 40_001}
+    # execucao e projeto na mesma competencia: a de maior numero e' a ultima (a 5ª), seja qual for o tipo
+    [parada] = r["sem_medicao"]
+    assert parada["ultima"]["medicao_id"] == ids["x5"]
+    c.execute("UPDATE medicoes SET competencia='2026-08' WHERE id=?", (ids["x5"],))
+    c.commit()
+    [parada] = resumo_medicoes.resumo(conn, HOJE, mes=MES)["sem_medicao"]
+    assert parada["ultima"] == {"medicao_id": antigo, "titulo": medicoes.titulo({"numero": 2, "tipo": "projeto"}),
+                                "competencia": "2026-09", "etapa": "recebido"}
+
+
+def test_obra_sem_envio_da_nota_vai_da_nota_ao_recebido_pela_baixa(conn, cenario):
+    """#743: na obra sem o passo "Envio da nota", a medicao com nota emitida e' recebida sem protocolo. Na pagina ela
+    sai da etapa da nota para a do recebido, sem a etapa do protocolado, e deixa os meses anteriores em aberto."""
+    c, ids = conn, cenario
+    uid = auth.criar_usuario(c, "Administrador Exemplo", "admin@exemplo.com.br", "senha-forte-123", "admin")
+    antiga = _medicao(c, ids["sem_envio"], 3, "nota_emitida", 60_001, comp="2026-09", nota_emitida_em="2026-10-06")
+    c.commit()
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    [aberta] = [x for g in r["anteriores"] for x in g["linhas"] if x["medicao_id"] == antiga]
+    assert _etapas(aberta) == [("boletim", "feito", None), ("nota", "atual", "2026-10-06"), ("recebido", "futuro", None)]
+    for mid, dia in ((ids["s4"], "2026-11-13"), (antiga, "2026-11-12")):
+        assert "recebida" in medicoes.alcancaveis(c, medicoes.detalhe(c, mid))
+        medicoes.mudar_estado(c, uid, mid, "recebida", "baixa conferida no extrato", dia, origem="manual")
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    s = _linha(r, "Obra Sem Envio")
+    assert s["etapa"] == "recebido" and _etapas(s) == [
+        ("em_analise", "feito", "2026-11-02"), ("boletim", "feito", "2026-11-04"), ("nota", "feito", "2026-11-08"),
+        ("recebido", "feito", "2026-11-13")]
+    assert antiga not in [x["medicao_id"] for g in r["anteriores"] for x in g["linhas"]]
+    assert next(e for e in r["etapas"] if e["etapa"] == "recebido") == {"etapa": "recebido", "medicoes": 1, "valor_centavos": 70_000}
+    # na obra com o passo, a nota emitida continua sem caminho para recebida: fica na etapa da nota ate' o protocolo
+    outra = _medicao(c, ids["propria"], 13, "nota_emitida", 30_000, nota_emitida_em="2026-11-12")
+    c.commit()
+    assert "recebida" not in medicoes.alcancaveis(c, medicoes.detalhe(c, outra))
 
 
 def test_recebida_tem_todas_as_etapas_feitas(conn, cenario):

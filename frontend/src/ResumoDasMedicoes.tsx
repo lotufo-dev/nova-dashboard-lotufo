@@ -18,8 +18,8 @@ import "./resumoDasMedicoes.css";
 // soma nem estima data. A obra so' tem as etapas do fluxo dela, e cada etapa alcancada leva a data que o sistema
 // registrou.
 //
-// A fundacao nao tinha a faixa das etapas de uma linha. Duas variantes: A (ligada) tem uma coluna por etapa, com a data
-// de cada uma; B (`?variante=b`) tem uma trilha curta, o selo da etapa atual e so' a data dela.
+// A fundacao nao tinha a faixa das etapas de uma linha: aqui ela e' uma coluna por etapa, com a data de cada uma
+// (decisao do dono de 17/11/2026).
 
 type Etapa = "em_analise" | "boletim" | "nota" | "protocolado" | "recebido";
 /** `antes`: a planilha/carta foi gerada e ainda nao foi enviada ao orgao (a medicao existe, o ciclo nao comecou). */
@@ -41,7 +41,6 @@ export type RespostaResumo = {
   sem_medicao: SemMedicao[];
   anteriores: { competencia: string; linhas: Linha[] }[];
 };
-type Variante = "a" | "b";
 type Grupo = { chave: string; titulo: string; linhas: Linha[] };
 
 const ETAPAS: { chave: Etapa; rotulo: string }[] = [
@@ -109,7 +108,7 @@ function SemData() {
   return <><span aria-hidden="true">—</span><span className="sr-only">sem data registrada</span></>;
 }
 
-/** Variante A: uma celula por etapa. A barra de cima e' a faixa da linha (cheia na cor da etapa alcancada, vazia na
+/** Uma celula por etapa. A barra de cima e' a faixa da linha (cheia na cor da etapa alcancada, vazia na
  *  que falta, sem barra na etapa que a obra nao tem); embaixo, so' na etapa alcancada, a situacao com a forma dela e a
  *  data registrada. */
 function CelulaEtapa({ etapa, l }: { etapa: { chave: Etapa; rotulo: string }; l: Linha }) {
@@ -131,51 +130,27 @@ function CelulaEtapa({ etapa, l }: { etapa: { chave: Etapa; rotulo: string }; l:
   );
 }
 
-/** Variante B: a faixa da linha numa trilha curta, o selo da etapa atual e a data em que a medicao chegou nela. */
-function CelulasDaTrilha({ l }: { l: Linha }) {
-  const atual = l.etapas.find(e => e.etapa === l.etapa);
-  return (
-    <>
-      <td className="rdm-b-etapa">
-        <span className="rdm-trilha" aria-hidden="true">
-          {ETAPAS.map(e => {
-            const x = l.etapas.find(y => y.etapa === e.chave);
-            return <span key={e.chave} className={`rdm-trilha__celula ${!x ? "rdm-trilha__celula--fora" : x.situacao === "futuro" ? "rdm-cor--vazia" : `rdm-cor--${e.chave}`}`} />;
-          })}
-        </span>
-        {l.etapa === "antes" ? <Selo>{ANTES}</Selo> : <Selo situacao={l.etapa === "recebido" ? "feito" : "andamento"}>{ROTULO[l.etapa]}</Selo>}
-      </td>
-      <td className="rdm-b-desde" data-rotulo="Desde">
-        {atual?.data ? fmtDataPura(atual.data) : l.etapa === "antes" ? "—" : <SemData />}
-      </td>
-    </>
-  );
-}
-
-function TabelaDeLinhas({ grupos, variante, rotulo, legenda, ir }:
-    { grupos: Grupo[]; variante: Variante; rotulo: string; legenda: string; ir: Ir }) {
-  const colunas = variante === "a" ? ETAPAS.length + 2 : 4;
+function TabelaDeLinhas({ grupos, rotulo, legenda, ir }: { grupos: Grupo[]; rotulo: string; legenda: string; ir: Ir }) {
   return (
     <Rolagem rotulo={rotulo} className="tabela-wrap rdm-rolagem">
-      <table className={`tabela rdm-tabela rdm-tabela--${variante}`}>
+      <table className="tabela rdm-tabela rdm-tabela--etapas">
         <caption className="sr-only">{legenda}</caption>
         <thead>
           <tr>
             <th scope="col" className="rdm-primeira">Obra</th>
-            {variante === "a" ? ETAPAS.map(e => <th key={e.chave} scope="col" className="rdm-th-etapa">{e.rotulo}</th>)
-              : <><th scope="col">Etapa</th><th scope="col">Desde</th></>}
+            {ETAPAS.map(e => <th key={e.chave} scope="col" className="rdm-th-etapa">{e.rotulo}</th>)}
             <th scope="col" className="col-num">Medido</th>
           </tr>
         </thead>
         {grupos.map(g => (
           <tbody key={g.chave}>
-            <tr className="rdm-grupo"><th scope="rowgroup" colSpan={colunas}>{g.titulo}</th></tr>
+            <tr className="rdm-grupo"><th scope="rowgroup" colSpan={ETAPAS.length + 2}>{g.titulo}</th></tr>
             {g.linhas.map((l, i) => (
               <tr key={l.medicao_id} className="rdm-linha">
                 <Primeira l={l} repetida={i > 0 && g.linhas[i - 1].contrato_id === l.contrato_id} ir={ir}>
-                  {variante === "a" && l.etapa === "antes" && <Selo className="rdm-antes">{ANTES}</Selo>}
+                  {l.etapa === "antes" && <Selo className="rdm-antes">{ANTES}</Selo>}
                 </Primeira>
-                {variante === "a" ? ETAPAS.map(e => <CelulaEtapa key={e.chave} etapa={e} l={l} />) : <CelulasDaTrilha l={l} />}
+                {ETAPAS.map(e => <CelulaEtapa key={e.chave} etapa={e} l={l} />)}
                 <td className="col-num dinheiro num rdm-valor" data-rotulo="Medido">{valor(l.valor_centavos)}</td>
               </tr>
             ))}
@@ -246,7 +221,6 @@ export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: 
   const [erro, setErro] = useState("");
   // a competencia pedida; sem ela, o servidor responde a competencia em trabalho (o mes anterior ao de hoje)
   const [mes, setMes] = useState<string | null>(() => (busca.mes && MES.test(busca.mes) ? busca.mes : null));
-  const variante: Variante = busca.variante === "b" ? "b" : "a";
 
   useEffect(() => {
     let vivo = true;
@@ -302,7 +276,7 @@ export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: 
           {nMes > 0 && <Contador rotulo={contar(nMes, "medição", "medições")}>{nMes}</Contador>}
         </div>
         {doMes.length === 0 ? <p className="rdm-vazio">Nenhuma medição em {nomeMes}.</p>
-          : <TabelaDeLinhas grupos={doMes} variante={variante} ir={ir} rotulo={`Medições de ${nomeMes} por obra`}
+          : <TabelaDeLinhas grupos={doMes} ir={ir} rotulo={`Medições de ${nomeMes} por obra`}
               legenda={`Etapa da medição de cada obra em ${nomeMes}, por órgão, com a data registrada de cada etapa e o medido na cota da Lotufo`} />}
       </section>
 
@@ -314,7 +288,7 @@ export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: 
           {nAnt > 0 && <Contador rotulo={contar(nAnt, "medição", "medições")}>{nAnt}</Contador>}
         </div>
         {anteriores.length === 0 ? <p className="rdm-vazio">Nenhuma medição aberta de meses anteriores.</p>
-          : <TabelaDeLinhas grupos={anteriores} variante={variante} ir={ir} rotulo="Medições abertas de meses anteriores"
+          : <TabelaDeLinhas grupos={anteriores} ir={ir} rotulo="Medições abertas de meses anteriores"
               legenda={`Medições de competências anteriores a ${nomeMes} ainda não recebidas, por competência, com a etapa de cada uma e o medido na cota da Lotufo`} />}
       </section>
     </div>
