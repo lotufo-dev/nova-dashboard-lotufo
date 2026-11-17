@@ -16,7 +16,7 @@ import type { Usuario } from "./Login";
 import MaisAcoes, { type ItemAcao } from "./MaisAcoes";
 import { DA_PLANILHA, eventosDaMedicao, EXCECOES, FINAIS, metadeQueEspera, passoDe, PROXIMOS, rotuloDoBloco, tituloMedicao,
          type EspelhoResumo, type MedicaoBase, type ParDaMedicao } from "./medicao";
-import { AceiteDiferenca, FormBoletim } from "./Boletim";
+import { AceiteDiferenca, FormBoletim, PassoBoletim } from "./Boletim";
 import { FormAssinadosPorFora, FormEnviarAssinados, type SituacaoAssinados, type SoReajuste } from "./AssinadosEnvio";
 import { FormAssinatura, FormDesmarcarFinal, FormEstado, FormFinal, FormProtocoloManual, FormRecebimento, FormSemAOutra, FormValor, valorEditavel, type Agir } from "./MedicaoAtos";
 import type { Medicao } from "./Medicoes";
@@ -34,7 +34,8 @@ import Falha from "./Falha";
 
 // Pagina da obra em medicao (issue #508, aprovada em 06/11/2026): "Nª Medição + Reajuste" numa pagina so', com o
 // cabecalho (obra, medicao, mes e o valor grande), a BARRA DE PASSOS -- Planilha e carta, Analise do orgao,
-// Espelhos, Notas, Envio da nota e Pagamento; a MT-PAR comeca em Espelhos -- e so' o passo da vez aberto (os feitos
+// Espelhos, Notas, Envio da nota e Pagamento; a MT-PAR comeca em Analise do orgao, que nela e' o passo do boletim
+// (#753) -- e so' o passo da vez aberto (os feitos
 // abrem no lugar dele, com a faixa para voltar). Resumo e Linha do tempo ficam abaixo. Cada acao se faz num lugar
 // so', no passo onde acontece; as listas de Medicoes, o Inicio e a obra so' levam ate' aqui (#passo-N abre o passo;
 // as ancoras antigas #etapa-N continuam valendo).
@@ -252,6 +253,9 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const temPassosPlanilha = !!m && (m.passos ? m.passos.includes(1) : comPlanilha && m.com_envio_planilha !== false
     && (regraAtiva || DA_PLANILHA.includes(m.estado) || !!m.planilha_enviada_em));
   const passos = m?.passos ?? passosDa(temPassosPlanilha);
+  // #753: na MT-PAR o passo 2 e' o do boletim assinado pelo fiscal, sem planilha/carta enviada antes dele: a pessoa
+  // arrasta o PDF e o servidor le o valor aprovado. O passo nao trava (a medicao segue sem boletim, com a pendencia).
+  const passoBoletim = m?.boletim_modelo === "mtpar" && passos.includes(2) && !passos.includes(1);
   // quando o passo da vez muda (enviou, a nota chegou), a pagina acompanha: o clique num passo so' vale ate' la'.
   // A revisao registrada e nao enviada devolve a vez ao passo 1 (e' la' que ela sai).
   const atual = !m ? 0 : temPassosPlanilha && m.estado === "planilha_enviada" && revisao === "pendente" ? 1
@@ -323,11 +327,12 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const preso = (envios.envios ?? []).filter(e => e.protocolo_id !== null && !!e.envio_reservado_em);
   // #290: o boletim do orgao (spec §2.1 passo 3) vem depois do envio da planilha/carta; na planilha enviada ele mora
   // no passo 2 ("Aprovou a medição", #508), nos outros estados (prevista do fluxo antigo, glosa depois do espelho, a
-  // MT-PAR sem o passo 2) em Mais acoes. Com revisao registrada e nao enviada a vez volta ao passo 1 e o passo 2 nao
+  // obra sem o passo 2) em Mais acoes. Com revisao registrada e nao enviada a vez volta ao passo 1 e o passo 2 nao
   // abre: o boletim (o orgao pode aprovar a versao que recebeu) volta a Mais acoes (revisor, PR #553). A assinatura
   // do DocuSign e' a do boletim: so' aparece depois dele.
   const comBoletim = (m.boletins ?? []).some(b => b.tem_arquivo);
-  const boletimNaEtapa = podeEditar && m.estado === "planilha_enviada" && temPassosPlanilha && atual === 2;
+  // #753: na MT-PAR o boletim mora sempre no passo dele (tambem o boletim novo, depois do espelho)
+  const boletimNaEtapa = passoBoletim || (podeEditar && m.estado === "planilha_enviada" && temPassosPlanilha && atual === 2);
   const podeBoletim = podeEditar && !EXCECOES.includes(m.estado) && m.estado !== "planilha_gerada";
   // #286: tambem a capa do SMO divergente do cadastro, que se aceita pelo mesmo ato
   const diferencaAAceitar = comBoletim && !EXCECOES.includes(m.estado) && !m.diferenca_aceita
@@ -344,7 +349,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     ...(!EXCECOES.includes(m.estado) && comBoletim ? [{ id: "assinatura", rotulo: "Registrar assinatura" }] : []),
     ...(assinados?.disponivel ? [{ id: "assinados", rotulo: "Enviar documentos assinados" },
       { id: "assinados_fora", rotulo: "Registrar envio dos assinados por fora" }] : []),
-    // #288: sem o passo 2 (MT-PAR, SES, prefeituras), o aceite da diferenca do boletim mora aqui
+    // #288: sem o passo 2 (SES, prefeituras), o aceite da diferenca do boletim mora aqui
     ...(!passos.includes(2) && diferencaAAceitar ? [{ id: "diferenca", rotulo: "Aceitar a diferença" }] : []),
     ...(m.final !== 1 && !EXCECOES.includes(m.estado) ? [{ id: "final", rotulo: "Marcar como medição final" }] : []),
     ...(m.final === 1 ? [{ id: "desfinal", rotulo: "Desmarcar a medição final" }] : []),
@@ -386,7 +391,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
         <Falha>Não foi possível conferir a planilha/carta.
           <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></Falha>
       )}
-      {gerada && !espelhoEspera && <CaixaAviso nivel="atencao">Envio da planilha/carta não registrado.</CaixaAviso>}
+      {/* #753: na MT-PAR nao ha' envio da planilha/carta a registrar */}
+      {gerada && !espelhoEspera && !passoBoletim && <CaixaAviso nivel="atencao">Envio da planilha/carta não registrado.</CaixaAviso>}
     </>
   );
   // passo 1: a planilha/carta; a so' gerada sem o envio registrado segue para o espelho daqui mesmo (#460)
@@ -398,7 +404,19 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     </section>
   );
   // passo 2: a analise do orgao; o espelho sem o boletim (#284) continua possivel, a pedido
-  const corpoPasso2 = (
+  // #753: na MT-PAR, a planilha/carta (que nao vai ao orgao) e o boletim de cada medicao da pagina; antes do boletim,
+  // o espelho so' a pedido, como nos outros orgaos
+  const corpoPasso2 = passoBoletim ? (
+    <section className="med-passo" id="passo-2" aria-labelledby="passo-2-titulo">
+      <div className="med-quadro__cab"><h2 className="med-quadro__titulo" id="passo-2-titulo">Análise do órgão</h2></div>
+      {blocoPlanilha}
+      <PassoBoletim key={grupo.map(x => x.id).join("-")} ms={grupo} podeEditar={podeEditar} salvando={salvando} agir={agir} />
+      {podeEditar && ["prevista", "planilha_gerada", "planilha_enviada"].includes(m.estado) && !novaPlanilha && !espelhoEspera && !espVigente && (
+        semBoletim || comBoletim ? formEspelho
+          : <div><button type="button" className="botao-link" onClick={() => setSemBoletim(true)}>Gerar o espelho sem o boletim</button></div>
+      )}
+    </section>
+  ) : (
     <section className="med-passo" id="passo-2" aria-labelledby="passo-2-titulo">
       <div className="med-quadro__cab"><h2 className="med-quadro__titulo" id="passo-2-titulo">Análise do órgão</h2></div>
       <PassoAnalise m={m} planilha={planilha} podeEditar={podeEditar} salvando={salvando} agir={agir}
@@ -424,7 +442,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
         {/* a data do espelho vigente (a versao mais nova desta medicao) */}
         {!novaPlanilha && !espelhoEspera && (espVigente || m.espelho_em) && <Selo situacao="feito">Gerado em {fmtDataHora(espVigente?.criado_em ?? m.espelho_em!)}</Selo>}
       </div>
-      {!temPassosPlanilha && blocoPlanilha}
+      {!temPassosPlanilha && !passoBoletim && blocoPlanilha}
       {/* depois do boletim o cartao mora no passo 1: a falha da conferencia avisa aqui, onde o espelho esperaria */}
       {temPassosPlanilha && comPlanilha && enviada && revisao === "falhou" && (
         <Falha>Não foi possível conferir a planilha/carta.
@@ -607,6 +625,15 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
             </CaixaAviso>
           );
         })}
+
+        {/* #753: a medicao da MT-PAR que seguiu sem o boletim; com o passo dele aberto, o proprio passo diz */}
+        {aberta !== 2 && grupo.filter(x => x.boletim_pendente).map(x => (
+          <CaixaAviso key={`boletim-${x.id}`} nivel="atencao">
+            {grupo.length > 1 ? `${tituloMedicao(x)}: boletim não anexado, ` : "Boletim não anexado: "}
+            <Link className="link" para={aqui} secao="passo-2"
+              ir={(p, o) => { setVendo(2); ir(p, o); }}>{podeEditar ? "anexe o boletim" : "ver o passo"}</Link>
+          </CaixaAviso>
+        ))}
 
         <div className="med-corpo">
           <div className="med-passo-col">

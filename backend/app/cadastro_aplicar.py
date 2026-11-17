@@ -133,7 +133,7 @@ def aplicar(conn: sqlite3.Connection, usuario_id: int, cad: dict, ensaio: bool =
             for c in cad["contratos"]:
                 _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel)
             if declara_tipos:
-                _recusar_notas_gemeas(conn, tipos_antes)
+                _conferir_notas_gemeas(conn, tipos_antes, rel["avisos"])
             _geral(conn, usuario_id, _materializar_geral(cad.get("geral"), ensaio), rel["geral"])
             _espelhos(conn, usuario_id, cad.get("espelho") or [], rel["espelho"], ensaio)
             _frcs(conn, usuario_id, cad.get("frc") or [], rel["frc"], ensaio)
@@ -151,35 +151,50 @@ def aplicar(conn: sqlite3.Connection, usuario_id: int, cad: dict, ensaio: bool =
     return rel
 
 
-def _recusar_notas_gemeas(conn, tipos_antes: dict[int, frozenset[str]]) -> None:
-    """docs/adr/0015: trava a declaracao de tipo extra que faria nota contar duas vezes. Com os contratos ja' gravados
-    na transacao, procura, em cada contrato que GANHOU tipo extra nesta aplicacao, as notas gemeas
-    (`diretoria.notas_gemeas_de_tipo_extra`: a reclassificada, que chegou do RM como movimento novo, e a antiga, que
-    continua ativa). Havendo alguma, recusa o cadastro inteiro (vale tambem para o ensaio) dizendo quais sao: o
-    numero sairia errado nas telas sem ninguem notar, e a saida e' tirar a antiga da conta antes. Tipo que o contrato
-    ja' declarava nao e' reconferido: as notas dele ja' contam, e a nota que para de vir do RM e' da issue #755."""
+def _linha_do_par(p: dict) -> str:
+    return (f"{p['obra']}: nota {p['numero']} (coligada {p['coligada']}) de {_data_br(p['emissao'])}, "
+            f"{dinheiro.format_brl(p['valor_centavos'])}: idmov {p['idmov_antiga']} (tipo {p['tipo_antiga']}) e "
+            f"idmov {p['idmov_nova']} (tipo {p['tipo_nova']})")
+
+
+def _conferir_notas_gemeas(conn, tipos_antes: dict[int, frozenset[str]], avisos: list[str]) -> None:
+    """docs/adr/0015: as notas gemeas das obras com tipo extra (`diretoria.notas_gemeas_de_tipo_extra`: a nota com o
+    movimento refeito no RM e a antiga, as duas ativas e contando). Com os contratos ja' gravados na transacao:
+
+    - no contrato que GANHOU tipo extra nesta aplicacao, havendo par, RECUSA o cadastro inteiro (vale tambem para o
+      ensaio) dizendo quais sao: o numero sairia em dobro nas telas sem ninguem notar;
+    - no contrato que JA' declarava o tipo, o par que apareceu depois vira AVISO em toda aplicacao e em todo ensaio,
+      sem recusar: travar prenderia mudanca sem relacao com o par.
+
+    A antiga que o RM deixou de devolver sai sozinha: a sincronizacao a marca como excluida (issue #755) e o par some.
+    Sobra o par que o RM ainda devolve inteiro, e esse se resolve pela correcao de cadastro ou no proprio RM."""
     from app import diretoria   # import local: so' este passo precisa da conta do faturado
     pares = []
     for contrato_id, tipos in sorted(cobranca_orgao.extras_por_contrato(conn).items()):
         novos = tipos - tipos_antes.get(contrato_id, frozenset())
         if novos:
             pares += diretoria.notas_gemeas_de_tipo_extra(conn, contrato_id, novos)
+        if tipos - novos:
+            ja = diretoria.notas_gemeas_de_tipo_extra(conn, contrato_id, tipos - novos)
+            avisos += [f"{_linha_do_par(p)}: a nota conta duas vezes no a receber e no faturado. Se o RM deixou de "
+                       "devolver a mais antiga, ela sai sozinha na sincronização; se devolve as duas, tire uma da conta "
+                       "(`desconsiderar_nf`) ou cancele no RM"
+                       for p in sorted(ja, key=lambda p: (str(p["numero"]), p["idmov_antiga"], p["idmov_nova"]))]
     if not pares:
         return
-    pares.sort(key=lambda p: (p["obra"], str(p["numero"]), p["idmov_extra"], p["idmov_geral"]))
+    pares.sort(key=lambda p: (p["obra"], str(p["numero"]), p["idmov_antiga"], p["idmov_nova"]))
     obras = list(dict.fromkeys(p["obra"] for p in pares))
-    tipos = sorted({p["tipo_extra"] for p in pares})
-    linhas = [f"  - {p['obra']}: nota {p['numero']} (coligada {p['coligada']}) de {_data_br(p['emissao'])}, "
-              f"{dinheiro.format_brl(p['valor_centavos'])}: idmov {p['idmov_geral']} (tipo {p['tipo_geral']}) e "
-              f"idmov {p['idmov_extra']} (tipo {p['tipo_extra']})" for p in pares]
+    tipos = sorted({t for p in pares for t in (p["tipo_antiga"], p["tipo_nova"])
+                    if t not in cobranca_orgao.CODTMV_COBRANCA})
     raise ValueError(
         f"declarar o tipo de movimento {', '.join(tipos)} em {', '.join(obras)} faria "
         + ("1 nota contar" if len(pares) == 1 else f"{len(pares)} notas contarem")
-        + " duas vezes no a receber e no faturado: a nota reclassificada chegou do RM como movimento novo e a antiga "
-        "continua ativa.\n" + "\n".join(linhas) + "\n"
-        "Antes de declarar o tipo, tire da conta a nota de tipo da lista geral de cada par, em `cadastro "
-        "corrigir-medicoes`: `desligar_nf` se ela estiver ligada a uma medição e `desconsiderar_nf` com {idmov: N}. "
-        "Depois aplique o cadastro de novo.")
+        + " duas vezes no a receber e no faturado: o movimento foi refeito no RM, chegou como nota nova e a mais "
+        "antiga continua ativa.\n" + "\n".join(f"  - {_linha_do_par(p)}" for p in pares) + "\n"
+        "Se o RM deixou de devolver a mais antiga, a sincronização a marca como excluída depois de duas rodadas "
+        "completas: espere e aplique de novo. Se o RM devolve as duas, tire da conta a mais antiga de cada par, em "
+        "`cadastro corrigir-medicoes`: `desligar_nf` se ela estiver ligada a uma medição e `desconsiderar_nf` com "
+        "{idmov: N}; com baixa, a nota só sai cancelada no RM. Depois aplique o cadastro de novo.")
 
 
 def _data_br(iso: str | None) -> str:
@@ -317,13 +332,16 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
     # A troca dos tipos de cobranca muda o a receber, o faturado e o vinculo das notas da obra: o relatorio (e o
     # ensaio) diz o antes e o depois ao lado do nome, em vez de so' "alterado".
     # leitura tolerante (`cobranca_orgao.tipos_gravados`): celula ilegivel vale "nenhum" e e' regravada abaixo
-    tipos_antes = sorted(cobranca_orgao.tipos_gravados(dict(ja or {}).get("tipos_cobranca_extras_rm"),
-                                                       ja["id"] if ja is not None else None))
+    celula = dict(ja or {}).get("tipos_cobranca_extras_rm")
+    tipos_antes = sorted(cobranca_orgao.tipos_gravados(celula, ja["id"] if ja is not None else None))
     tipos_depois = c.get("tipos_cobranca_extras_rm") or []
     rotulo = c["nome_curto"]
     if tipos_antes != tipos_depois:
         rotulo += (f" (tipos de cobrança extras do RM: {', '.join(tipos_antes) or 'nenhum'} → "
                    f"{', '.join(tipos_depois) or 'nenhum'})")
+    if not cobranca_orgao.legivel(celula):
+        # a regravacao da celula sem o motivo apareceria no relatorio so' como "~ Obra"
+        rotulo += " (tipos de cobrança extras do RM: a célula gravada estava ilegível e foi regravada pelo arquivo)"
     if ja is None:
         colunas = ["numero_instrumento", *_CAMPOS_CONTRATO]
         cur = conn.execute(

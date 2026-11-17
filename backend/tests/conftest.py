@@ -36,7 +36,9 @@ def conferencias_zeradas(monkeypatch):
     "Sem registro do ultimo deploy" de um teste aparecia no bloco Seguranca do teste seguinte do mesmo worker do xdist.
     Cada teste comeca como o processo recem-subido: sem conferencia. As threads que preenchiam isso no meio de outro
     teste (subida com jobs em test_instalacao) nao sobem mais nos testes."""
-    from app import integridade, seguranca
+    from app import cobranca_orgao, integridade, seguranca
+    # o aviso de celula ilegivel sai uma vez por processo (issue #755): cada teste comeca sem nenhum avisado
+    monkeypatch.setattr(cobranca_orgao, "_AVISADOS", set())
     monkeypatch.setattr(integridade, "ESTADO", None)
     monkeypatch.setattr(integridade, "_anterior", None)
     monkeypatch.setattr(seguranca, "_conferencia", [])      # a conferencia da protecao de usuarios (#422), idem

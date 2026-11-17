@@ -29,16 +29,17 @@ def test_em_andamento_traz_o_passo_e_com_quem_esta(conn, cenario):
     assert set(medicoes.PROXIMO_PASSO.values()) <= set(medicoes.PASSOS)
 
 
-def test_obra_sem_planilha_e_carta_comeca_em_espelhos(conn, cenario):
-    """#653: a obra que nao manda planilha/carta ao orgao (MTPAR) nao tem os passos 1 e 2: a medicao dela nos estados
-    do motor esta' em "Espelhos", como na barra da pagina da medicao; o reajuste tambem nao tem esses passos."""
+def test_obra_sem_planilha_e_carta_comeca_no_passo_do_boletim(conn, cenario):
+    """#653: a obra que nao manda planilha/carta ao orgao (MTPAR) nao tem o passo 1. #753: ela tem o passo do boletim
+    ("Análise do órgão"), e a medicao dela nos estados do motor esta' nele, como na barra da pagina da medicao; o
+    reajuste de um orgao que recebe a planilha/carta continua sem os passos 1 e 2."""
     ids = cenario
     b = _medicao(conn, ids["b"], 31, "execucao", "planilha_gerada", 2000)
     r = _medicao(conn, ids["a"], 31, "reajuste", "planilha_enviada", 100, planilha_enviada_em="2026-10-07")
     a = _medicao(conn, ids["a"], 32, "execucao", "planilha_enviada", 100, planilha_enviada_em="2026-10-07")
     conn.commit()
     por = {m["id"]: m for m in medicoes.em_andamento(conn)}
-    assert por[b]["proximo_passo"] == "Espelhos" and por[b]["passo"] == {"numero": 3, "nome": "Espelhos"}
+    assert por[b]["proximo_passo"] == "Análise do órgão" and por[b]["passo"] == {"numero": 2, "nome": "Análise do órgão"}
     assert por[r]["proximo_passo"] == "Espelhos"
     assert por[a]["proximo_passo"] == "Análise do órgão" and por[a]["passo"] == {"numero": 2, "nome": "Análise do órgão"}
 

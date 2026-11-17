@@ -14,6 +14,7 @@ EMISSOR_LOTUFO = "lotufo"
 CAMPOS_CONFERIDOS = ("valor", "iss", "inss", "irrf", "ibs", "cbs", "liquido")   # liquido por ultimo: tolera os tributos
 DIAS_AUSENTE_RM = 5
 MOTIVO_CANCELADA_RM = "NF cancelada no RM"
+MOTIVO_EXCLUIDA_RM = "NF excluída no RM"     # issue #755; o mesmo texto de `sincronizacao_rm.MOTIVO_EXCLUIDA_RM`
 
 
 # ------------------------------------------------------------------ esperadas
@@ -482,15 +483,17 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                         "medicao_id": r["medicao_id"], "contrato_id": r["contrato_id"], "dias": dias,
                         "mensagem": f"nota {r['numero']} protocolada há {dias} dias e ainda não apareceu no RM"})
     for r in conn.execute("""
-        SELECT DISTINCT a.medicao_id, m.contrato_id, n.numero_int AS numero, n.id AS nota_id
+        SELECT DISTINCT a.medicao_id, m.contrato_id, n.numero_int AS numero, n.id AS nota_id, a.motivo_desfazer
         FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id JOIN medicoes m ON m.id=a.medicao_id
-        WHERE a.desfeita_em IS NOT NULL AND a.motivo_desfazer=?
+        WHERE a.desfeita_em IS NOT NULL AND a.motivo_desfazer IN (?, ?)
           AND m.estado NOT IN ('cancelada','desistida','recebida')
           AND NOT EXISTS (SELECT 1 FROM nf_alocacoes b WHERE b.medicao_id=m.id AND b.desfeita_em IS NULL
-                          AND b.criado_em >= a.desfeita_em)""", (MOTIVO_CANCELADA_RM,)):
+                          AND b.criado_em >= a.desfeita_em)""", (MOTIVO_CANCELADA_RM, MOTIVO_EXCLUIDA_RM)):
+        # issue #755: a nota que o RM deixou de devolver pede a mesma acao da cancelada (mesmo tipo de aviso)
+        como = "excluída" if r["motivo_desfazer"] == MOTIVO_EXCLUIDA_RM else "cancelada"
         out.append({"tipo": "nota_cancelada_rm", "nota_id": r["nota_id"], "numero": r["numero"], "medicao_id": r["medicao_id"],
                     "contrato_id": r["contrato_id"], "dias": None,
-                    "mensagem": f"nota {r['numero']} foi cancelada no RM e nenhuma nota nova foi vinculada"})
+                    "mensagem": f"nota {r['numero']} foi {como} no RM e nenhuma nota nova foi vinculada"})
     return out
 
 

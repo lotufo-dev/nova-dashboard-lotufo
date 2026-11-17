@@ -349,6 +349,31 @@ def test_boletim_com_aprovado_diferente_do_espelho_avisa_sem_dizer_glosa(ambient
     assert [m["espelho_desatualizado"] for m in medicoes.listar(conn, cid)] == ["aprovado_mudou"]
 
 
+def test_obra_da_mtpar_boletim_com_outro_valor_depois_do_espelho_enviado_avisa(ambiente):
+    """Issue #753 (revisao da PR #760): na MT-PAR o boletim pode chegar depois do espelho. O aprovado diferente do
+    valor do espelho enviado da' o mesmo aviso dos outros orgaos, e o boletim tira a pendencia "boletim não anexado"."""
+    conn, u, cid = ambiente
+    conn.execute("UPDATE orgaos SET familia='mtpar' WHERE id=(SELECT orgao_id FROM contratos WHERE id=?)", (cid,))
+    conn.commit()
+    assert medicoes.modelo_do_boletim(conn, cid) == "mtpar"
+    mid = _espelho_enviado(conn, u, cid, 100_01)
+
+    def pendente():
+        m = dict(conn.execute("SELECT * FROM medicoes WHERE id=?", (mid,)).fetchone())
+        return medicoes.boletim_pendente(conn, m, medicoes.passos_das_medicoes(conn)(m))
+    assert pendente() is True and _desatualizados(conn) == []           # seguiu sem o boletim: so' a pendencia
+    _boletim(conn, u, mid, 99_99)                                       # dois centavos abaixo do espelho
+    [a] = _desatualizados(conn)
+    assert (a["medicao_id"], a["contrato_id"], a["nivel"], a["valor_centavos"]) == (mid, cid, "acao", 99_99)
+    assert a["mensagem"] == "23ª Medição: o aprovado mudou depois do espelho, gere o espelho de novo"
+    assert medicoes.detalhe(conn, mid)["espelho_desatualizado"] == "aprovado_mudou"
+    assert [m["espelho_desatualizado"] for m in medicoes.listar(conn, cid)] == ["aprovado_mudou"]
+    assert pendente() is False
+    # o boletim com o valor do espelho nao avisa
+    _boletim(conn, u, mid, 100_01, sha="b")
+    assert _desatualizados(conn) == [] and medicoes.detalhe(conn, mid)["espelho_desatualizado"] is None
+
+
 def test_boletim_com_o_mesmo_valor_do_espelho_nao_avisa(ambiente):
     conn, u, cid = ambiente
     mid = _espelho_enviado(conn, u, cid, 100_01)
@@ -389,9 +414,16 @@ def test_espelho_de_antes_da_migracao_usa_as_entradas_gravadas(ambiente):
     _boletim(conn, u, mid, 99_99, sha="b")
     assert [a["medicao_id"] for a in _desatualizados(conn)] == [mid]
 
-    # a regra trocada depois do espelho pode ter outras chaves: sem a do espelho, nao ha' como comparar
-    conn.execute("UPDATE espelho_regras SET sha256='outra' WHERE contrato_id=?", (cid,)); conn.commit()
-    assert _desatualizados(conn) == []
+    # a regra trocada depois do espelho pode ter outras chaves: as entradas deixam de valer e a referencia passa a ser
+    # o que o espelho travou ao ser gerado (PR #474), aqui o pedido, posto em 99,99 para diferir das entradas.
+    # O espelho ganha data anterior a dos boletins: `criado_em` tem resolucao de segundo e, sem isso, o resultado
+    # dependia de o espelho e os dois boletins caberem no mesmo segundo (o boletim contava como anterior ao espelho)
+    conn.execute("UPDATE espelho_regras SET sha256='outra' WHERE contrato_id=?", (cid,))
+    conn.execute("UPDATE espelhos SET criado_em='2026-01-05 10:00:00'")
+    conn.execute("UPDATE medicoes SET valor_protocolado_centavos=? WHERE id=?", (99_99, mid)); conn.commit()
+    assert _desatualizados(conn) == [] and _nao_conferidos(conn) == []
+    conn.execute("UPDATE medicoes SET valor_protocolado_centavos=? WHERE id=?", (100_01, mid)); conn.commit()
+    assert [a["medicao_id"] for a in _desatualizados(conn)] == [mid]
 
 
 def _nao_conferidos(conn):
