@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, mensagemDeErro } from "./api";
+import { api, comPontoFinal, mensagemDeErro } from "./api";
 import CaixaAviso from "./CaixaAviso";
 import { Link } from "./Link";
 import { NovaMedicaoManual } from "./Medicoes";
@@ -27,7 +27,7 @@ export default function IniciarMedicao({ obra, mes }: { obra: ObraResumo; mes: s
     return () => { vivo = false; };
   }, [obra.contrato_id]);
 
-  if (erroRegra) return <CaixaAviso nivel="critico" role="alert">Não foi possível ler a regra da obra: {erroRegra} Escolha a obra de novo para tentar outra vez.</CaixaAviso>;
+  if (erroRegra) return <CaixaAviso nivel="critico" role="alert">Não foi possível ler a regra da obra: {comPontoFinal(erroRegra)} Escolha a obra de novo para tentar outra vez.</CaixaAviso>;
   if (regraAtiva === null) return <p role="status" className="iniciar-med__carregando">Carregando…</p>;
 
   const abrir = (id: number) => ir({ tela: "medicao", obra: obra.contrato_id, id }, { forcar: true });
