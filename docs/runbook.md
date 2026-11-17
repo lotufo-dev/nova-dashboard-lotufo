@@ -508,6 +508,21 @@ A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_US
    como excluído o que só deixou de ser consultado. Encurtar a janela de 24 meses não marca nada: a janela é medida
    pela nota mais antiga que veio.
 
+   **Exclusão em massa recusada.** Se uma rodada afetaria mais notas do que o teto (o maior entre 30 e 5% das notas
+   que vieram), ela não marca nada, a Saúde mostra o cartão do RM em atenção com o aviso, e as rodadas seguintes
+   recusam de novo. Quase sempre é a consulta: conferir no RM se a `DASH10` e a `DASH11` continuam como acima, se a
+   conta de serviço ainda enxerga todas as coligadas e se a resposta traz todas elas. Consertada a consulta, a
+   rodada seguinte volta ao normal sozinha, sem nada marcado. Só quando a exclusão é verdadeira (o faturamento
+   refez mesmo dezenas de notas, conferido no RM), o administrador libera, no servidor, com ensaio antes:
+   ```
+   python -m app.cli rm liberar-exclusao --usuario <e-mail do administrador> --ensaio
+   python -m app.cli rm liberar-exclusao --usuario <e-mail do administrador>
+   ```
+   O ensaio lista cada nota que seria marcada e quantas têm vínculo com medição (a marca desfaz o vínculo). Para
+   valer, marca sem o teto o que a última rodada completa não trouxe e que já não vinha na anterior, grava quem
+   liberou na auditoria e limpa o aviso. É gravação em produção: pede a autorização do dono, como as outras. Se a
+   nota voltar a vir depois, ela volta a contar e recupera o vínculo.
+
    Confirmar na primeira execução: (a) `FLAN.IDMOV` existe na 12.1.2510 — se não, trocar o vínculo por `TMOVLAN` (`IDMOV` ↔ `IDLAN`) na `DASH11`; (b) `PAGREC = 1` é o lado **a receber** do razão (spec §15.3) — conferir com uma NF conhecida; (c) o `LEFT JOIN FCFO` (tomador) é opcional: se a coluna do cliente for outra, remover o join e o campo `TOMADOR`.
 
    `DASH25` — custo a pagar por coligada, centro de custo, projeto, tarefa, natureza e mês (issue #488, cadastrada em 06/11/2026):

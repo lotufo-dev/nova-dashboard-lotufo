@@ -34,6 +34,8 @@ def test_089_nota_e_titulo_existentes_nascem_sem_a_marca_e_nada_mais_muda(tmp_pa
     with contextlib.closing(conn):
         for tabela in ("notas_fiscais", "baixas"):
             assert "excluida_rm_em" not in [r[1] for r in conn.execute(f"PRAGMA table_info({tabela})")]
+        assert "exclusao_aviso" not in [r[1] for r in conn.execute("PRAGMA table_info(rm_sincronizacoes)")]
+        conn.execute("INSERT INTO rm_sincronizacoes (id, disparo, estado, nfs, baixas) VALUES (3, 'agendado', 'success', 2, 4)")
         _semear(conn)
         antes = {t: [dict(r) for r in conn.execute(f"SELECT * FROM {t}")] for t in ("notas_fiscais", "baixas")}
         _aplicar(conn, pasta, ARQUIVO)
@@ -41,6 +43,8 @@ def test_089_nota_e_titulo_existentes_nascem_sem_a_marca_e_nada_mais_muda(tmp_pa
             depois = [dict(r) for r in conn.execute(f"SELECT * FROM {tabela}")]
             assert [d.pop("excluida_rm_em") for d in depois] == [None] * len(linhas)
             assert depois == linhas and len(depois) == 1
+        assert tuple(conn.execute("SELECT id, estado, nfs, baixas, exclusao_aviso FROM rm_sincronizacoes").fetchone()) == (
+            3, "success", 2, 4, None)
 
 
 def test_089_reexecutavel_sem_perder_a_marca(conn):

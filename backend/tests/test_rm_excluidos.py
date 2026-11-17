@@ -227,7 +227,7 @@ def test_nota_que_some_e_marcada_e_a_substituta_assume(conn, cid, tmp_path, decl
 
 def test_nota_que_volta_a_vir_volta_a_contar_com_os_titulos(conn, cid, tmp_path):
     """A nota marcada que o RM volta a devolver: a marca sai dela e dos titulos, ela volta a ser ativa e a contar, e
-    o casador a liga de novo a' medicao que ficou sem nota."""
+    o vinculo que a exclusao desfez e' refeito, com a mesma regra e o mesmo valor."""
     c2 = _obra_com_centro(conn, CENTRO)
     m = _medicao(conn, c2, 3, 500_01)
     com_ela = ([_nota_77(7)], [_baixa(1, 7, 470.03, 0.0, 0)])
@@ -241,14 +241,184 @@ def test_nota_que_volta_a_vir_volta_a_contar_com_os_titulos(conn, cid, tmp_path)
     assert d["notas"] == [] and len(d["notas_excluidas_rm"]) == 1
 
     r = _rodada(conn, tmp_path, com_ela[0] + outra[0], com_ela[1] + outra[1])
-    assert _marcados(conn) == ([], []) and r["alocacoes"] == 1
+    assert _marcados(conn) == ([], []) and (r["vinculos_refeitos"], r["alocacoes"]) == (1, 0)
     assert tuple(_nota(conn, 7))[1:] == ("ativa", None)
     d = medicoes.detalhe(conn, m)
-    assert [n["idmov"] for n in d["notas"]] == [7] and d["notas_excluidas_rm"] == []
+    assert [(n["idmov"], n["regra"], n["valor_alocado_centavos"]) for n in d["notas"]] == [
+        (7, "centro_custo_valor", 500_01)] and d["notas_excluidas_rm"] == []
     assert d["notas"][0]["devido_centavos"] == 470_03
     assert diretoria.rm_por_mes(conn)[0] == {"2026-08": 500_01 + 123_45}
     assert _acoes(conn) == ["rm.nota_excluida", "rm.titulo_excluido", "rm.nota_voltou", "rm.titulo_voltou"]
     assert auditoria.verificar_cadeia(conn)
+
+
+def test_nota_que_volta_recupera_o_vinculo_feito_a_mao_em_medicao_ja_recebida(conn, cid, tmp_path):
+    """O vinculo que mais custa perder: feito a' mao, em medicao ja' recebida, de nota sem centro de custo. O vinculo
+    automatico nunca o refaria. A nota marcada por engano (o RM deixou de devolve-la por duas rodadas) volta a vir: o
+    vinculo e' refeito como vinculo novo, com a origem, a regra e o valor alocado de antes, e fica na auditoria; a
+    medicao continua recebida, com a data dela."""
+    m = _medicao(conn, cid, 3, 600_00)          # outro valor: so' a mao liga esta nota a ela
+    ela = ([_nf(7, 500.01, numero="77")], [_baixa(1, 7, 470.03, 0.0, 0)])
+    outra = ([_nf(9, 123.45)], [_baixa(3, 9, 120.0, 0.0, 0)])
+    _rodada(conn, tmp_path, ela[0] + outra[0], ela[1] + outra[1])
+    nid = _nota(conn, 7)["id"]
+    sincronizacao_rm.alocar(conn, 1, nid, m, "manual", None, "manual")
+    medicoes.mudar_estado(conn, 1, m, "recebida", "pago por fora do RM", "2026-09-05")
+    for _ in range(2):
+        _rodada(conn, tmp_path, *outra)
+    assert _marcados(conn) == ([7], [1]) and medicoes.detalhe(conn, m)["notas"] == []
+
+    r = _rodada(conn, tmp_path, ela[0] + outra[0], ela[1] + outra[1])
+    assert (r["vinculos_refeitos"], r["alocacoes"], r["recebimentos"]) == (1, 0, 0), r
+    d = medicoes.detalhe(conn, m)
+    assert (d["estado"], d["recebida_em"]) == ("recebida", "2026-09-05")
+    assert [(n["idmov"], n["origem"], n["regra"], n["valor_alocado_centavos"], n["situacao"]) for n in d["notas"]] == [
+        (7, "manual", "manual", 500_01, "ativa")]
+    assert [(tuple(a)) for a in conn.execute("SELECT desfeita_em IS NULL, motivo_desfazer FROM nf_alocacoes "
+                                             "WHERE nota_id=? ORDER BY id", (nid,))] == [(0, "NF excluída no RM"), (1, None)]
+    import json
+    refeito = json.loads(conn.execute("SELECT depois FROM audit_log WHERE acao='nf.alocar' ORDER BY id DESC LIMIT 1").fetchone()[0])
+    assert (refeito["motivo"], refeito["valor_centavos"], refeito["estado_medicao"]) == (
+        "a nota voltou a vir do RM", 500_01, "recebida")
+    assert auditoria.verificar_cadeia(conn)
+
+
+def test_nota_que_volta_com_a_substituta_ligada_nao_recupera_o_vinculo(conn, cid, tmp_path):
+    """A nota antiga foi marcada, a substituta ligou e a medicao foi recebida pela baixa dela. Se o RM volta a
+    devolver a antiga, ela volta a ser ativa e a contar (e' o que o RM diz), mas o lugar na medicao e' da substituta:
+    o vinculo nao e' refeito, e a auditoria diz por que^."""
+    c2 = _obra_com_centro(conn, CENTRO)
+    m = _medicao(conn, c2, 3, 500_01)
+    _declarar_tipos_extras(conn, c2, "2.2.03")
+    antiga = ([_nota_77(7)], [_baixa(1, 7, 470.03, 0.0, 0)])
+    nova = ([_nota_77(8, codtmv="2.2.03")], [_baixa(2, 8, 470.03, 470.03, 1, PAGO_EM_01_09)])
+    _rodada(conn, tmp_path, *antiga)
+    for _ in range(2):
+        r = _rodada(conn, tmp_path, *nova)
+    assert _marcados(conn) == ([7], [1]) and (r["alocacoes"], r["recebimentos"]) == (1, 1)
+
+    r = _rodada(conn, tmp_path, antiga[0] + nova[0], antiga[1] + nova[1])
+    assert (r["vinculos_refeitos"], r["alocacoes"]) == (0, 0), r
+    assert tuple(_nota(conn, 7))[1:] == ("ativa", None)
+    d = medicoes.detalhe(conn, m)
+    assert [n["idmov"] for n in d["notas"]] == [8] and d["estado"] == "recebida"
+    import json
+    nao = conn.execute("SELECT entidade_id, depois FROM audit_log WHERE acao='rm.vinculo_nao_refeito'").fetchall()
+    assert [(int(x["entidade_id"]), json.loads(x["depois"])["motivo"]) for x in nao] == [
+        (m, "outra nota ocupou o lugar na medição")]
+    assert diretoria.notas_gemeas_de_tipo_extra(conn, c2, {"2.2.03"}) != []      # as duas vem do RM: o par e' de la'
+    assert auditoria.verificar_cadeia(conn)
+
+
+# ------------------------------------------------------------------ trava contra exclusao em massa
+
+def _coligada_inteira(n=40, coligada=7):
+    """`n` notas de outra coligada, cada uma com um titulo (idmov e idlan a partir de 5000)."""
+    nfs = [_nf(5000 + i, 100.0 + i, coligada=coligada, numero=str(5000 + i)) for i in range(n)]
+    return nfs, [_baixa(5000 + i, 5000 + i, 90.0 + i, 0.0, 0, coligada=coligada) for i in range(n)]
+
+
+def test_coligada_inteira_que_deixa_de_vir_nao_e_marcada_e_a_recusa_fica_registrada(conn, cid, tmp_path):
+    """A resposta parcial que nao e' vazia: uma coligada inteira deixa de vir (consulta editada, permissao da conta).
+    Passa pelas provas de ausencia, e marcar desfaria de uma vez os vinculos de todas as notas dela. Acima do teto (o
+    maior entre 30 notas e 5% das que vieram), a rodada nao marca NADA: nem as da coligada, nem a exclusao pequena e
+    verdadeira que veio junto. O resto da rodada segue; a recusa vai para o aviso da rodada e, uma vez, para a
+    auditoria. As rodadas seguintes recusam de novo. Quando a coligada volta, a exclusao pequena e' marcada."""
+    c2 = _obra_com_centro(conn, CENTRO)
+    m = _medicao(conn, c2, 3, 500_01)
+    da_obra = ([_nota_77(7)], [_baixa(1, 7, 470.03, 0.0, 0)])
+    refeito = [_baixa(2, 7, 470.03, 0.0, 0)]                 # a exclusao pequena e verdadeira
+    outras_n, outras_b = _coligada_inteira()
+    r = _rodada(conn, tmp_path, da_obra[0] + outras_n, da_obra[1] + outras_b)
+    assert r["alocacoes"] == 1 and r["exclusao_aviso"] is None
+    ligada = _nota(conn, 5003)["id"]
+    sincronizacao_rm.alocar(conn, 1, ligada, _medicao(conn, cid, 9, 103_00), "manual", None, "manual")
+    aviso = ("Exclusão em massa recusada: 41 notas deixaram de vir do RM, inteiras ou em algum título (teto de 30). "
+             "Nada foi marcado como excluído. Ver docs/runbook.md, TOTVS RM.")
+    for rodada in range(4):
+        r = _rodada(conn, tmp_path, da_obra[0], refeito if rodada < 3 else [_baixa(2, 7, 470.03, 100.0, 4, PAGO_EM_01_09)])
+        assert r["estado"] == "success" and (r["notas_excluidas"], r["titulos_excluidos"]) == (0, 0)
+        assert _marcados(conn) == ([], [])
+        assert r["exclusao_aviso"] == (aviso if rodada else None)        # a primeira rodada sem elas ainda nao decide
+        assert sincronizacao_rm.aviso_da_exclusao(conn) == r["exclusao_aviso"]
+    assert conn.execute("SELECT COUNT(*) FROM notas_fiscais WHERE coligada=7 AND situacao='ativa'").fetchone()[0] == 40
+    assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL", (ligada,)).fetchone()[0] == 1
+    assert conn.execute("SELECT valor_baixado_centavos FROM baixas WHERE idlan=2").fetchone()[0] == 100_00   # os upserts seguiram
+    assert medicoes.detalhe(conn, m)["notas"][0]["devido_centavos"] == 2 * 470_03                # o antigo ainda conta
+    import json
+    recusas = [json.loads(x[0]) for x in conn.execute(
+        "SELECT depois FROM audit_log WHERE acao='rm.exclusao_em_massa_recusada' ORDER BY id")]
+    assert recusas == [{"notas_afetadas": 41, "teto": 30, "notas_a_marcar": 40, "titulos_a_marcar": 41,
+                        "notas_na_rodada": 2}]                           # uma vez, nao a cada rodada
+    assert _acoes(conn) == ["rm.exclusao_em_massa_recusada"]
+
+    r = _rodada(conn, tmp_path, da_obra[0] + outras_n, refeito + outras_b)       # a coligada voltou
+    assert r["exclusao_aviso"] is None and sincronizacao_rm.aviso_da_exclusao(conn) is None
+    assert (r["notas_excluidas"], r["titulos_excluidos"]) == (0, 1) and _marcados(conn) == ([], [1])
+    assert medicoes.detalhe(conn, m)["notas"][0]["devido_centavos"] == 470_03
+    assert auditoria.verificar_cadeia(conn)
+
+
+def test_teto_da_exclusao_e_o_maior_entre_o_piso_e_cinco_por_cento_das_notas_da_rodada():
+    assert [sincronizacao_rm._teto_de_exclusao(n) for n in (0, 2, 600, 619, 620, 2185)] == [30, 30, 30, 30, 31, 109]
+
+
+def test_exclusao_no_limite_do_teto_marca_e_uma_a_mais_recusa(conn, cid, tmp_path):
+    for n, marca in ((30, True), (31, False)):
+        conn.execute("UPDATE notas_fiscais SET excluida_rm_em=NULL, situacao='ativa'")
+        conn.execute("UPDATE baixas SET excluida_rm_em=NULL"); conn.commit()
+        outras_n, outras_b = _coligada_inteira(n)
+        _rodada(conn, tmp_path, outras_n, outras_b)
+        for _ in range(2):
+            r = _rodada(conn, tmp_path, [], [])
+        assert (r["notas_excluidas"], r["exclusao_aviso"] is None) == ((n, True) if marca else (0, False))
+
+
+def test_administrador_libera_a_exclusao_grande_que_e_verdadeira(conn, cid, tmp_path, capsys):
+    """A exclusao em massa recusada que e' verdadeira: `rm liberar-exclusao`, com ensaio antes. Marca sem o teto o
+    que a rodada recusou, com quem liberou na auditoria, e limpa o aviso; a rodada seguinte nao tem mais o que
+    recusar."""
+    from app import cli
+    outras_n, outras_b = _coligada_inteira()
+    _rodada(conn, tmp_path, outras_n, outras_b)
+    ligada = _nota(conn, 5003)["id"]
+    sincronizacao_rm.alocar(conn, 1, ligada, _medicao(conn, cid, 9, 103_00), "manual", None, "manual")
+    for _ in range(2):
+        r = _rodada(conn, tmp_path, [], [])
+    assert r["exclusao_aviso"] is not None and _marcados(conn) == ([], [])
+    antes = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+
+    assert cli.main(["rm", "liberar-exclusao"]) == 1
+    assert cli.main(["rm", "liberar-exclusao", "--usuario", "ninguem@l.com"]) == 1
+    assert cli.main(["rm", "liberar-exclusao", "--usuario", "u@l.com", "--ensaio"]) == 0
+    saida = capsys.readouterr().out
+    assert "ENSAIO (nada foi gravado)" in saida
+    assert "40 notas e 40 títulos marcados como excluídos no RM (40 notas afetadas; teto da rodada: 30)" in saida
+    assert "vínculos com medição desfeitos: 1" in saida and "nota 5003 de 2026-08-10 (idmov 5003), ligada a medição" in saida
+    assert _marcados(conn) == ([], []) and conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == antes
+    assert sincronizacao_rm.aviso_da_exclusao(conn) is not None
+
+    assert cli.main(["rm", "liberar-exclusao", "--usuario", "u@l.com"]) == 0
+    assert "APLICADO" in capsys.readouterr().out
+    assert [len(x) for x in _marcados(conn)] == [40, 40] and sincronizacao_rm.aviso_da_exclusao(conn) is None
+    assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL", (ligada,)).fetchone()[0] == 0
+    quem = conn.execute("SELECT DISTINCT usuario_id FROM audit_log WHERE acao IN ('rm.exclusao_em_massa_liberada', "
+                        "'rm.nota_excluida', 'rm.titulo_excluido')").fetchall()
+    assert [x[0] for x in quem] == [1]
+    r = _rodada(conn, tmp_path, [], [])
+    assert r["exclusao_aviso"] is None and (r["notas_excluidas"], r["titulos_excluidos"]) == (0, 0)
+    # voltando a vir, as notas voltam a contar e o vinculo e' recuperado
+    r = _rodada(conn, tmp_path, outras_n, outras_b)
+    assert _marcados(conn) == ([], []) and r["vinculos_refeitos"] == 1
+    assert auditoria.verificar_cadeia(conn)
+
+
+def test_liberar_exclusao_sem_duas_rodadas_completas_recusa(conn, cid, tmp_path):
+    with pytest.raises(ValueError, match="duas rodadas completas"):
+        sincronizacao_rm.liberar_exclusao(conn, 1)
+    _rodada(conn, tmp_path, [], [])
+    with pytest.raises(ValueError, match="duas rodadas completas"):
+        sincronizacao_rm.liberar_exclusao(conn, 1)
 
 
 def test_nota_fora_da_janela_da_consulta_nao_e_exclusao(conn, cid, tmp_path):

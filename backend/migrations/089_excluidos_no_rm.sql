@@ -7,3 +7,6 @@
 -- So' acrescenta: nota e titulo existentes nascem sem a marca, e nenhuma linha muda.
 ALTER TABLE notas_fiscais ADD COLUMN excluida_rm_em TEXT;
 ALTER TABLE baixas ADD COLUMN excluida_rm_em TEXT;
+-- Trava contra exclusao em massa: quando a rodada afetaria notas demais, ela nao marca nada e deixa aqui o aviso que
+-- a Saude mostra (NULL = sem recusa). Rodada existente nasce sem aviso.
+ALTER TABLE rm_sincronizacoes ADD COLUMN exclusao_aviso TEXT;

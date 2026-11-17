@@ -36,10 +36,23 @@ volta a contar.
   falha ou vem vazia não marca nada. E a marca pede ausência em duas rodadas completas seguidas: as consultas do RM
   leem sem bloqueio e uma linha pode faltar numa leitura, e um título aberto que some por uma hora fecharia a
   medição pela baixa dos outros, estado que não volta sozinho. Custa uma hora de atraso.
+- **Teto contra exclusão em massa.** A resposta parcial que não é vazia (uma coligada inteira que deixa de vir, a
+  consulta editada no RM, a permissão da conta) passa pelas provas acima, e marcar desfaria de uma vez centenas de
+  vínculos, muitos feitos à mão. Se a rodada afetaria mais notas distintas (as que seriam marcadas e as que têm
+  título a marcar) do que o maior entre 30 e 5% das notas que vieram, ela não marca nada: nem aos poucos, nem a
+  parte pequena que seria verdadeira. O resto da rodada segue; a recusa vai para a auditoria e para a Saúde, como
+  atenção, e se repete enquanto durar. A exclusão grande que é verdadeira é liberada pelo administrador, com ensaio
+  antes (`rm liberar-exclusao`, no `docs/runbook.md`). O piso de trinta foi conferido numa cópia da produção: a
+  primeira rodada, que marca de uma vez o que sumiu desde o começo, cabe nele.
 - **A nota marcada vale como cancelada**: deixa de ser ativa, o vínculo com a medição é desfeito e auditado ("NF
   excluída no RM") e a medição não volta de estado sozinha, como na nota cancelada no RM. A substituta liga pelas
   regras de sempre (`docs/adr/0005`); medição aberta que fica sem nota ganha o aviso da nota cancelada, dito como
-  excluída. A nota que volta a vir passa pelo vínculo automático como qualquer nota.
+  excluída.
+- **A nota que volta a vir recupera o vínculo.** A marca sai, a situação volta à que o RM diz e o vínculo que a
+  exclusão desfez é refeito como vínculo novo, com o mesmo valor, a mesma origem e a mesma regra, auditado. Não é
+  refeito, e a auditoria diz por quê, quando a nota voltou cancelada ou está desconsiderada, quando ela já teve
+  outro vínculo depois, quando a medição foi encerrada ou quando outra nota ocupou o lugar (a saída do espelho já
+  tem nota, ou as notas vigentes com ela passariam do valor da medição).
 - **A baixa da nota que saiu** fica gravada e marcada, fora do recebido. Quando há substituta, o dinheiro conta
   pelo título dela, uma vez. A medição que já estava recebida continua recebida.
 - **Na tela**, a página da medição mostra a nota e o título marcados, ditos como excluídos no RM, fora dos totais.

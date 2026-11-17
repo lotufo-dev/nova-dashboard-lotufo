@@ -114,15 +114,18 @@ def _confirmar_nota_do_pdf(conn, coligada: int, idmov: int, numero_int, emissao,
     return r["id"]
 
 
-def _upsert_nf(conn, linha: dict) -> int:
+def _upsert_nf(conn, linha: dict, refeitos: list | None = None) -> int:
     """Issue #638: a nota desconsiderada pela correcao de cadastro (`desconsiderada_em`) continua vindo ativa do RM e
-    fica 'cancelada' aqui; o que o RM diz dela segue em `status_rm`, e e' ele que vale se a marca for retirada."""
+    fica 'cancelada' aqui; o que o RM diz dela segue em `status_rm`, e e' ele que vale se a marca for retirada.
+    Issue #755: a nota marcada como excluida no RM que volta a vir perde a marca, volta a' situacao que o RM diz e
+    recupera o vinculo que a exclusao desfez (`_refazer_vinculo_da_que_voltou`; a medicao entra em `refeitos`)."""
     coligada, idmov = int(linha["CODCOLIGADA"]), int(linha["IDMOV"])
     situacao = "cancelada" if str(linha.get("STATUS", "")).upper() == "C" else "ativa"
     numero = str(linha.get("NUMEROMOV") or "")
     ja = conn.execute("SELECT id, excluida_rm_em FROM notas_fiscais WHERE coligada=? AND idmov=?",
                       (coligada, idmov)).fetchone()
-    if ja is not None and ja["excluida_rm_em"] is not None:
+    voltou = ja is not None and ja["excluida_rm_em"] is not None
+    if voltou:
         # issue #755: a nota marcada como excluida voltou a vir: a marca sai abaixo e ela volta a contar
         auditoria.registrar(conn, None, "rm.nota_voltou", "nota_fiscal", ja["id"],
                             {"excluida_rm_em": ja["excluida_rm_em"]}, {"coligada": coligada, "idmov": idmov})
@@ -149,8 +152,12 @@ def _upsert_nf(conn, linha: dict) -> int:
          rm.data(linha.get("DATAEMISSAO")), rm.centavos(linha.get("VALORBRUTO")),
          linha.get("CODTMV"), linha.get("STATUS"), linha.get("CAMPOLIVRE1"),
          linha.get("CODCCUSTO"), linha.get("TOMADOR"), situacao))
-    return conn.execute("SELECT id FROM notas_fiscais WHERE coligada=? AND idmov=?",
-                        (coligada, idmov)).fetchone()[0]
+    nid = conn.execute("SELECT id FROM notas_fiscais WHERE coligada=? AND idmov=?", (coligada, idmov)).fetchone()[0]
+    if voltou:
+        medicao_id = _refazer_vinculo_da_que_voltou(conn, nid)
+        if medicao_id is not None and refeitos is not None:
+            refeitos.append(medicao_id)
+    return nid
 
 
 def _upsert_baixa(conn, linha: dict) -> None:
@@ -241,6 +248,72 @@ def _desfazer_alocacoes_de_nf_cancelada(conn, nota_id: int, numero: str, motivo:
                             {"nota_id": nota_id}, {"motivo": motivo, "nf": numero})
         n += 1
     return n
+
+
+def _refazer_vinculo_da_que_voltou(conn, nota_id: int) -> int | None:
+    """Issue #755: a nota marcada como excluida no RM voltou a vir (a marca ja' saiu e a situacao e' a que o RM diz).
+    O vinculo que a exclusao desfez (`MOTIVO_EXCLUIDA_RM`, o mais recente da nota) e' refeito como vinculo NOVO, com o
+    mesmo valor alocado, a mesma origem e a mesma regra, auditado. O vinculo pode ter sido feito a' mao, e a rodada
+    seguinte nao o reencontraria sozinha (medicao ja' recebida, nota sem centro de custo). Nao refaz, e deixa na
+    auditoria (`rm.vinculo_nao_refeito`) o porque^, quando:
+
+    - a nota nao voltou ativa (cancelada no RM, ou desconsiderada pela correcao de cadastro);
+    - a nota ja' tem outro vinculo vigente, ou teve um vinculo depois da exclusao (alguem decidiu por ela);
+    - a medicao foi encerrada (cancelada ou desistida);
+    - outra nota ocupou o lugar: na medicao que espera notas do espelho desta coligada, nao ha' mais saida sem nota
+      do valor dela; nas demais, as notas vigentes da mesma coligada, com ela, passariam do valor da medicao (a
+      cobertura da issue #714) ou, sem valor na medicao, ja' ha' nota da mesma coligada.
+
+    Devolve a medicao religada, ou None."""
+    from app import notas   # import local: notas importa este modulo
+    nf = conn.execute("SELECT * FROM notas_fiscais WHERE id=?", (nota_id,)).fetchone()
+    a = conn.execute("""SELECT * FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NOT NULL AND motivo_desfazer=?
+                        ORDER BY id DESC LIMIT 1""", (nota_id, MOTIVO_EXCLUIDA_RM)).fetchone()
+    if a is None:
+        return None                     # a nota nao estava ligada quando foi marcada: nada a recuperar
+    mid = a["medicao_id"]
+
+    def nao(porque: str) -> None:
+        auditoria.registrar(conn, None, "rm.vinculo_nao_refeito", "medicao", mid,
+                            {"alocacao_id": a["id"], "nota_id": nota_id},
+                            {"motivo": porque, "nf": f"{nf['numero']}/{nf['serie'] or ''}", "coligada": nf["coligada"],
+                             "valor_centavos": a["valor_alocado_centavos"]})
+        log.info("NF %s/%s da coligada %s voltou a vir do RM e o vinculo com a medicao %s nao foi refeito: %s",
+                 nf["numero"], nf["serie"] or "", nf["coligada"], mid, porque)
+
+    if nf["situacao"] != "ativa":
+        return nao("a nota voltou desconsiderada" if nf["desconsiderada_em"] is not None
+                   else "a nota voltou cancelada no RM")
+    if conn.execute("SELECT 1 FROM nf_alocacoes WHERE nota_id=? AND id>?", (nota_id, a["id"])).fetchone():
+        return nao("a nota teve outro vínculo depois da exclusão")
+    m = conn.execute("""SELECT m.id, m.estado, e.coligada_rm,
+                               COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
+                        FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
+                        JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1) WHERE m.id=?""", (mid,)).fetchone()
+    if m["estado"] in ESTADOS_ENCERRADOS:
+        return nao(f"a medição está {m['estado']}")
+    esperadas = notas.esperadas(conn, mid)
+    if esperadas and notas.coligada_esperada(conn, mid) == nf["coligada"]:
+        if not any(e["nota_id"] is None and e["valor"] == nf["valor_centavos"] for e in esperadas):
+            return nao("outra nota ocupou a saída do espelho")
+    else:
+        vigentes = [r["valor_centavos"] for r in conn.execute(
+            """SELECT n.valor_centavos FROM nf_alocacoes x JOIN notas_fiscais n ON n.id=x.nota_id
+               WHERE x.medicao_id=? AND x.desfeita_em IS NULL AND n.coligada=?""", (mid, nf["coligada"]))]
+        valor = medicoes.valor_do_par(conn, mid, m["valor"])
+        if (vigentes and valor is None) or (valor is not None and sum(vigentes) + nf["valor_centavos"] > valor):
+            return nao("outra nota ocupou o lugar na medição")
+    cur = conn.execute(
+        "INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, confianca, regra) "
+        "VALUES (?,?,?,?,?,?)", (mid, nota_id, a["valor_alocado_centavos"], a["origem"], a["confianca"], a["regra"]))
+    auditoria.registrar(conn, None, "nf.alocar", "medicao", mid, None,
+                        {"nota_id": nota_id, "nf": f"{nf['numero']}/{nf['serie'] or ''}", "coligada": nf["coligada"],
+                         "valor_centavos": a["valor_alocado_centavos"], "origem": a["origem"],
+                         "confianca": a["confianca"], "regra": a["regra"], "estado_medicao": m["estado"],
+                         "motivo": "a nota voltou a vir do RM", "alocacao_anterior": a["id"],
+                         "alocacao_id": cur.lastrowid})
+    notas.fechar_se_completa(conn, None, mid)
+    return mid
 
 
 # Prefixo do motivo de quem desfez o vinculo a' mao: o casador nao volta a casar sozinho essa NF.
@@ -1029,6 +1102,60 @@ def _rodada_completa_anterior(conn, rodada_id: int) -> str | None:
     return r["iniciado_em"] if r else None
 
 
+# Issue #755, trava contra exclusao em massa: uma rodada que afetaria mais notas do que isto nao marca nada. O teto e'
+# o maior entre o piso e a fracao das notas que vieram na rodada.
+PISO_EXCLUSAO_NOTAS = 30
+TETO_EXCLUSAO_PCT = 5
+
+
+def _teto_de_exclusao(notas_na_rodada: int) -> int:
+    return max(PISO_EXCLUSAO_NOTAS, notas_na_rodada * TETO_EXCLUSAO_PCT // 100)
+
+
+def _candidatos_a_exclusao(conn, anterior: str, notas_vistas: set, titulos_vistos: set,
+                           janela: str | None) -> tuple[list, list]:
+    """(notas, titulos) que a regra da #755 marcaria: fora dos conjuntos vistos e nao vistos desde antes de `anterior`
+    (o inicio da rodada completa anterior). So' le. Nota: a de emissao posterior a `janela`; titulo: aquele cuja nota
+    foi vista, ja' esta' marcada ou esta' entre as notas a marcar."""
+    notas = []
+    if janela:
+        notas = [n for n in conn.execute(
+            """SELECT id, coligada, idmov, numero, serie, emissao, valor_centavos, situacao
+               FROM notas_fiscais WHERE idmov IS NOT NULL AND excluida_rm_em IS NULL
+                 AND ultimo_visto_em < ? AND emissao IS NOT NULL AND emissao > ? ORDER BY id""", (anterior, janela))
+            if (n["coligada"], n["idmov"]) not in notas_vistas]
+    a_marcar = {n["id"] for n in notas}
+    titulos = [b for b in conn.execute(
+        """SELECT b.id, b.coligada, b.idlan, b.nota_id, b.valor_original_centavos, b.valor_baixado_centavos,
+                  b.status_lan, n.coligada AS coligada_nota, n.idmov AS idmov_nota, n.excluida_rm_em AS nota_excluida
+           FROM baixas b JOIN notas_fiscais n ON n.id=b.nota_id
+           WHERE b.excluida_rm_em IS NULL AND b.ultimo_visto_em < ? ORDER BY b.id""", (anterior,))
+        if (b["coligada"], b["idlan"]) not in titulos_vistos
+        # a nota que saiu pela janela (ou so' nao veio) nao prova a exclusao do titulo
+        and (b["nota_excluida"] is not None or b["nota_id"] in a_marcar
+             or (b["coligada_nota"], b["idmov_nota"]) in notas_vistas)]
+    return notas, titulos
+
+
+def _marcar(conn, usuario_id, rodada_id: int | None, notas: list, titulos: list) -> None:
+    com_a_nota = {n["id"] for n in notas}
+    for n in notas:
+        conn.execute("UPDATE notas_fiscais SET excluida_rm_em=datetime('now'), situacao='cancelada' WHERE id=?",
+                     (n["id"],))
+        auditoria.registrar(conn, usuario_id, "rm.nota_excluida", "nota_fiscal", n["id"], {"situacao": n["situacao"]},
+                            {"coligada": n["coligada"], "idmov": n["idmov"], "numero": n["numero"],
+                             "emissao": n["emissao"], "valor_centavos": n["valor_centavos"], "rodada": rodada_id})
+        _desfazer_alocacoes_de_nf_cancelada(conn, n["id"], n["numero"], MOTIVO_EXCLUIDA_RM)
+    for b in titulos:
+        conn.execute("UPDATE baixas SET excluida_rm_em=datetime('now') WHERE id=?", (b["id"],))
+        auditoria.registrar(conn, usuario_id, "rm.titulo_excluido", "baixa", b["id"], None,
+                            {"coligada": b["coligada"], "idlan": b["idlan"], "nota_id": b["nota_id"],
+                             "valor_original_centavos": b["valor_original_centavos"],
+                             "valor_baixado_centavos": b["valor_baixado_centavos"], "status_lan": b["status_lan"],
+                             "com_a_nota": b["nota_excluida"] is not None or b["nota_id"] in com_a_nota,
+                             "rodada": rodada_id})
+
+
 def _marcar_excluidos(conn, rodada_id: int, nfs: list[dict], baixas: list[dict]) -> dict:
     """Issue #755 (docs/adr/0006): marca como excluidos no RM a nota e o titulo que o RM deixou de devolver. O
     faturamento exclui o titulo e o refaz, ou refaz o movimento inteiro; o antigo some das consultas sem ser cancelado,
@@ -1046,12 +1173,19 @@ def _marcar_excluidos(conn, rodada_id: int, nfs: list[dict], baixas: list[dict])
       mais antiga que veio). A consulta traz 24 meses: nota mais antiga, ou sem data, saiu pela janela, nao foi
       excluida;
     - TITULO: so' aquele cuja nota veio nesta rodada (o titulo foi excluido e a nota ficou) ou esta' marcada como
-      excluida (o movimento saiu inteiro e os titulos com ele). Titulo de nota que saiu pela janela fica como esta'.
+      excluida (o movimento saiu inteiro e os titulos com ele). Titulo de nota que saiu pela janela fica como esta';
+    - TETO: a resposta parcial que nao e' vazia (uma coligada inteira que deixa de vir, a consulta editada no RM, a
+      permissao da conta) passaria pelas provas acima e desfaria de uma vez os vinculos de centenas de notas. Se a
+      rodada afetaria mais notas distintas (as a marcar e as que tem titulo a marcar) do que `_teto_de_exclusao`, NADA
+      e' marcado: o resto da rodada segue, a recusa vai para a auditoria (`rm.exclusao_em_massa_recusada`) e para o
+      aviso da rodada (`exclusao_aviso`, que a Saude mostra). As rodadas seguintes recusam de novo enquanto o conjunto
+      nao couber no teto; nada e' marcado aos poucos. Exclusao grande que seja verdadeira se libera a' mao
+      (`liberar_exclusao`, pelo `app.cli rm liberar-exclusao`).
 
     A nota marcada fica com `situacao` 'cancelada' (como a desconsiderada, #638: sai de toda conta que le nota ativa),
     com o vinculo a' medicao desfeito e auditado (`MOTIVO_EXCLUIDA_RM`; a medicao nao volta de estado sozinha, como na
-    nota cancelada). Devolve {notas_excluidas, titulos_excluidos} desta rodada."""
-    out = {"notas_excluidas": 0, "titulos_excluidos": 0}
+    nota cancelada). Devolve {notas_excluidas, titulos_excluidos, exclusao_aviso} desta rodada."""
+    out = {"notas_excluidas": 0, "titulos_excluidos": 0, "exclusao_aviso": None}
     if not nfs or not baixas:
         return out
     anterior = _rodada_completa_anterior(conn, rodada_id)
@@ -1060,42 +1194,84 @@ def _marcar_excluidos(conn, rodada_id: int, nfs: list[dict], baixas: list[dict])
     notas_vistas = {(int(x["CODCOLIGADA"]), int(x["IDMOV"])) for x in nfs}
     titulos_vistos = {(int(x["CODCOLIGADA"]), int(x["IDLAN"])) for x in baixas}
     emissoes = [e for e in (rm.data(x.get("DATAEMISSAO")) for x in nfs) if e]
-    if emissoes:
-        janela = min(emissoes)
-        for n in conn.execute("""SELECT id, coligada, idmov, numero, serie, emissao, valor_centavos, situacao
-                                 FROM notas_fiscais WHERE idmov IS NOT NULL AND excluida_rm_em IS NULL
-                                   AND ultimo_visto_em < ? AND emissao IS NOT NULL AND emissao > ?
-                                 ORDER BY id""", (anterior, janela)).fetchall():
-            if (n["coligada"], n["idmov"]) in notas_vistas:
-                continue
-            conn.execute("UPDATE notas_fiscais SET excluida_rm_em=datetime('now'), situacao='cancelada' WHERE id=?",
-                         (n["id"],))
-            auditoria.registrar(conn, None, "rm.nota_excluida", "nota_fiscal", n["id"], {"situacao": n["situacao"]},
-                                {"coligada": n["coligada"], "idmov": n["idmov"], "numero": n["numero"],
-                                 "emissao": n["emissao"], "valor_centavos": n["valor_centavos"], "rodada": rodada_id})
-            _desfazer_alocacoes_de_nf_cancelada(conn, n["id"], n["numero"], MOTIVO_EXCLUIDA_RM)
-            out["notas_excluidas"] += 1
-    for b in conn.execute("""SELECT b.id, b.coligada, b.idlan, b.nota_id, b.valor_original_centavos,
-                                    b.valor_baixado_centavos, b.status_lan, n.coligada AS coligada_nota,
-                                    n.idmov AS idmov_nota, n.excluida_rm_em AS nota_excluida
-                             FROM baixas b JOIN notas_fiscais n ON n.id=b.nota_id
-                             WHERE b.excluida_rm_em IS NULL AND b.ultimo_visto_em < ? ORDER BY b.id""",
-                          (anterior,)).fetchall():
-        if (b["coligada"], b["idlan"]) in titulos_vistos:
-            continue
-        if b["nota_excluida"] is None and (b["coligada_nota"], b["idmov_nota"]) not in notas_vistas:
-            continue                    # a nota saiu pela janela (ou nao veio): nao e' exclusao do titulo
-        conn.execute("UPDATE baixas SET excluida_rm_em=datetime('now') WHERE id=?", (b["id"],))
-        auditoria.registrar(conn, None, "rm.titulo_excluido", "baixa", b["id"], None,
-                            {"coligada": b["coligada"], "idlan": b["idlan"], "nota_id": b["nota_id"],
-                             "valor_original_centavos": b["valor_original_centavos"],
-                             "valor_baixado_centavos": b["valor_baixado_centavos"], "status_lan": b["status_lan"],
-                             "com_a_nota": b["nota_excluida"] is not None, "rodada": rodada_id})
-        out["titulos_excluidos"] += 1
-    if out["notas_excluidas"] or out["titulos_excluidos"]:
-        log.info("rodada %s: %d nota(s) e %d titulo(s) marcados como excluidos no RM", rodada_id,
-                 out["notas_excluidas"], out["titulos_excluidos"])
+    notas, titulos = _candidatos_a_exclusao(conn, anterior, notas_vistas, titulos_vistos,
+                                            min(emissoes) if emissoes else None)
+    afetadas = len({n["id"] for n in notas} | {b["nota_id"] for b in titulos})
+    teto = _teto_de_exclusao(len(notas_vistas))
+    if afetadas > teto:
+        out["exclusao_aviso"] = (
+            f"Exclusão em massa recusada: {afetadas} notas deixaram de vir do RM, inteiras ou em algum título "
+            f"(teto de {teto}). Nada foi marcado como excluído. Ver docs/runbook.md, TOTVS RM.")
+        log.warning("rodada %s: exclusao em massa recusada (%d notas afetadas, teto %d; %d notas e %d titulos a marcar)",
+                    rodada_id, afetadas, teto, len(notas), len(titulos))
+        # na auditoria, uma vez por recusa (e de novo se as contagens mudarem), nao a cada rodada horaria
+        if aviso_da_exclusao(conn) != out["exclusao_aviso"]:
+            auditoria.registrar(conn, None, "rm.exclusao_em_massa_recusada", "rm_sincronizacao", rodada_id, None,
+                                {"notas_afetadas": afetadas, "teto": teto, "notas_a_marcar": len(notas),
+                                 "titulos_a_marcar": len(titulos), "notas_na_rodada": len(notas_vistas)})
+        return out
+    _marcar(conn, None, rodada_id, notas, titulos)
+    out["notas_excluidas"], out["titulos_excluidos"] = len(notas), len(titulos)
+    if notas or titulos:
+        log.info("rodada %s: %d nota(s) e %d titulo(s) marcados como excluidos no RM", rodada_id, len(notas),
+                 len(titulos))
     return out
+
+
+def aviso_da_exclusao(conn) -> str | None:
+    """O aviso de exclusao em massa recusada da ultima rodada que terminou bem (None quando ela marcou ou nao tinha o
+    que marcar). Rodada que falha nao apaga o aviso da anterior."""
+    r = conn.execute("SELECT exclusao_aviso FROM rm_sincronizacoes WHERE estado='success' ORDER BY id DESC LIMIT 1").fetchone()
+    return r["exclusao_aviso"] if r else None
+
+
+class _EnsaioDaLiberacao(Exception):
+    pass
+
+
+def liberar_exclusao(conn, usuario_id: int, ensaio: bool = False) -> dict:
+    """Issue #755: o administrador libera a exclusao em massa que a rodada recusou e que e' verdadeira (o faturamento
+    refez mesmo dezenas de notas). Sem falar com o RM: marca, sem teto, o que a ultima rodada completa nao trouxe e
+    que ja' nao vinha na completa anterior (`ultimo_visto_em`), pela mesma regra da rodada. Audita com quem liberou
+    (`rm.exclusao_em_massa_liberada` e cada marca) e limpa o aviso. `ensaio` mostra o que marcaria e desfaz.
+
+    Devolve {ensaio, rodada, notas, titulos, notas_afetadas, teto, com_vinculo, linhas}: `linhas` descreve cada nota a
+    marcar e `com_vinculo` diz quantas tem vinculo com medicao, que a marca desfaz."""
+    rel = {"ensaio": ensaio, "rodada": None, "notas": 0, "titulos": 0, "notas_afetadas": 0, "teto": None,
+           "com_vinculo": 0, "linhas": []}
+    try:
+        with db.mutacao(conn):
+            if conn.execute("SELECT 1 FROM rm_sincronizacoes WHERE estado='running' LIMIT 1").fetchone():
+                raise ValueError("Há uma sincronização com o RM em andamento: espere terminar e rode de novo")
+            ultima = conn.execute("""SELECT id, iniciado_em FROM rm_sincronizacoes WHERE estado='success' AND nfs>0
+                                     AND baixas>0 ORDER BY id DESC LIMIT 1""").fetchone()
+            anterior = _rodada_completa_anterior(conn, ultima["id"]) if ultima else None
+            if anterior is None:
+                raise ValueError("Não há duas rodadas completas do RM para decidir o que deixou de vir")
+            vistas = conn.execute("SELECT coligada, idmov, emissao FROM notas_fiscais WHERE idmov IS NOT NULL "
+                                  "AND ultimo_visto_em>=?", (ultima["iniciado_em"],)).fetchall()
+            notas_vistas = {(r["coligada"], r["idmov"]) for r in vistas}
+            titulos_vistos = {(r["coligada"], r["idlan"]) for r in conn.execute(
+                "SELECT coligada, idlan FROM baixas WHERE ultimo_visto_em>=?", (ultima["iniciado_em"],))}
+            emissoes = [r["emissao"] for r in vistas if r["emissao"]]
+            notas, titulos = _candidatos_a_exclusao(conn, anterior, notas_vistas, titulos_vistos,
+                                                    min(emissoes) if emissoes else None)
+            ligadas = {r[0] for r in conn.execute("SELECT nota_id FROM nf_alocacoes WHERE desfeita_em IS NULL")}
+            rel.update(rodada=ultima["id"], notas=len(notas), titulos=len(titulos),
+                       notas_afetadas=len({n["id"] for n in notas} | {b["nota_id"] for b in titulos}),
+                       teto=_teto_de_exclusao(len(notas_vistas)),
+                       com_vinculo=sum(1 for n in notas if n["id"] in ligadas),
+                       linhas=[f"coligada {n['coligada']}, nota {n['numero']} de {n['emissao']} (idmov {n['idmov']})"
+                               + (", ligada a medição" if n["id"] in ligadas else "") for n in notas])
+            _marcar(conn, usuario_id, ultima["id"], notas, titulos)
+            conn.execute("UPDATE rm_sincronizacoes SET exclusao_aviso=NULL WHERE exclusao_aviso IS NOT NULL")
+            auditoria.registrar(conn, usuario_id, "rm.exclusao_em_massa_liberada", "rm_sincronizacao", ultima["id"],
+                                None, {k: rel[k] for k in ("notas", "titulos", "notas_afetadas", "teto", "com_vinculo")})
+            if ensaio:
+                raise _EnsaioDaLiberacao
+    except _EnsaioDaLiberacao:
+        pass
+    return rel
 
 
 # ------------------------------------------------------------------ rodada
@@ -1127,18 +1303,20 @@ def sincronizar(conn: sqlite3.Connection, cliente, disparo: str = "manual") -> d
         nfs = cliente.consultar(rm.CONSULTA_NF)
         baixas = cliente.consultar(rm.CONSULTA_BAIXA)
         resumo = {"nfs": 0, "baixas": 0, "alocacoes": 0, "sugestoes": 0, "recebimentos": 0,
-                  "notas_excluidas": 0, "titulos_excluidos": 0}
+                  "notas_excluidas": 0, "titulos_excluidos": 0, "vinculos_refeitos": 0, "exclusao_aviso": None}
         with db.mutacao(conn):
             _garantir_posse(conn, rodada_id)
             ids = []
+            refeitos: list = []
             for linha in nfs:
-                nid = _upsert_nf(conn, linha)
+                nid = _upsert_nf(conn, linha, refeitos)
                 ids.append(nid)
                 resumo["nfs"] += 1
             for linha in baixas:
                 _upsert_baixa(conn, linha)
                 resumo["baixas"] += 1
             # Issue #755: o que o RM deixou de devolver sai da conta ANTES do casador e dos recebimentos desta rodada
+            resumo["vinculos_refeitos"] = len(refeitos)
             resumo.update(_marcar_excluidos(conn, rodada_id, nfs, baixas))
             # Uma vez por rodada: quais coligadas cadastram centro (gatilho do modo estrito) e as
             # candidatas por coligada (cache, limpo a cada alocacao).
@@ -1157,9 +1335,10 @@ def sincronizar(conn: sqlite3.Connection, cliente, disparo: str = "manual") -> d
             resumo["recebimentos"] = _recebimentos(conn)
             conn.execute("""UPDATE rm_sincronizacoes SET estado='success', terminado_em=datetime('now'),
                             nfs=?, baixas=?, alocacoes=?, sugestoes=?, recebimentos=?, custo_erro=?,
-                            custo_aviso=? WHERE id=? AND estado='running'""",
+                            custo_aviso=?, exclusao_aviso=? WHERE id=? AND estado='running'""",
                          (resumo["nfs"], resumo["baixas"], resumo["alocacoes"], resumo["sugestoes"],
-                          resumo["recebimentos"], custo["custo_erro"], custo["custo_aviso"], rodada_id))
+                          resumo["recebimentos"], custo["custo_erro"], custo["custo_aviso"], resumo["exclusao_aviso"],
+                          rodada_id))
             auditoria.registrar(conn, None, "rm.sincronizacao", "rm_sincronizacao", rodada_id, None,
                                 {"disparo": disparo, **resumo, **custo})
         ESTADO["ultima_sincronizacao"] = tempo.para_local(tempo.agora_utc()).isoformat(timespec="seconds")
