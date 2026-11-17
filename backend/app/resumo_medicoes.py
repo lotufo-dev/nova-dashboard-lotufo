@@ -11,7 +11,9 @@ emitida = nota; protocolada = protocolado; recebida = recebido. A planilha/carta
 OS PASSOS (`medicoes.passos_das_medicoes`: a familia do orgao e a chave `passos_medicao` do contrato) so' dizem quais
 etapas a obra tem (`etapas_do_fluxo`):
 
-- em analise: a obra tem o passo "Análise do órgão";
+- em analise: a obra tem os passos "Planilha e carta" e "Análise do órgão" (a planilha/carta vai ao orgao e espera a
+  analise dele). Na MT-PAR (#753) a "Análise do órgão" vem sem "Planilha e carta": e' o passo do boletim assinado, a
+  planilha/carta nao vai ao orgao e a obra nao tem a etapa "em analise";
 - boletim: tem "Espelhos" ou "Notas" (a medicao aprovada espera a nota);
 - nota e recebido: sempre (o passo "Pagamento" e' obrigatorio no cadastro, e so' se paga contra a nota);
 - protocolado: tem "Envio da nota" (a obra sem esse passo vai da nota ao recebido).
@@ -63,7 +65,8 @@ _ORDEM_TIPO = ("execucao", "projeto", "reajuste")
 def etapas_do_fluxo(passos) -> tuple[str, ...]:
     """As etapas do ciclo que a obra tem, pelos passos da medicao (numeros de `medicoes.PASSOS`)."""
     tem = set(passos)
-    return tuple(e for e, vale in (("em_analise", 2 in tem), ("boletim", bool(tem & {3, 4})), ("nota", True),
+    # #753: o passo 2 sem o 1 e' o do boletim da MT-PAR, nao a espera pela analise da planilha/carta
+    return tuple(e for e, vale in (("em_analise", {1, 2} <= tem), ("boletim", bool(tem & {3, 4})), ("nota", True),
                                    ("protocolado", 5 in tem), ("recebido", True)) if vale)
 
 

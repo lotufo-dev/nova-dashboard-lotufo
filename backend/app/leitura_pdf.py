@@ -536,10 +536,11 @@ def paginas_por_ocr(pdf: bytes, exe: str, tessdata: str, pacote: bool = False) -
     return partes
 
 
-def primeiras_paginas(pdf: bytes) -> list[str]:
-    """Texto das primeiras `OCR_PAGINAS` paginas, sem teto de paginas (capa do SMO, #285: o pacote do DocuSign tem
-    centenas). Guarda de streams do pacote. Roda no filho de `com_limite`."""
-    return [_texto_da_pagina(p) for p in leitor_de_pdf(pdf, pacote=True).pages[:OCR_PAGINAS]]
+def primeiras_paginas(pdf: bytes, quantas: int | None = None) -> list[str]:
+    """Texto das primeiras `quantas` paginas (sem dizer, `OCR_PAGINAS`), sem teto de paginas (capa do SMO, #285: o
+    pacote do DocuSign tem centenas; boletim da MT-PAR, #753: o Visto e o controle financeiro vem nas primeiras).
+    Guarda de streams do pacote. Roda no filho de `com_limite`."""
+    return [_texto_da_pagina(p) for p in leitor_de_pdf(pdf, pacote=True).pages[:quantas or OCR_PAGINAS]]
 
 
 def _texto_da_pagina(p) -> str:
@@ -585,8 +586,8 @@ def _trabalho(pdf: bytes, modo: str, envia, opcoes=None) -> None:
             valor = texto_por_ocr(pdf, *opcoes)
         elif modo == "ocr_pacote":       # capa do SMO (#285): envelope inteiro, OCR so' das primeiras paginas
             valor = paginas_por_ocr(pdf, *opcoes, pacote=True)
-        elif modo == "primeiras_paginas":
-            valor = primeiras_paginas(pdf)
+        elif modo == "primeiras_paginas":    # `opcoes` = quantas paginas (sem dizer, as do OCR)
+            valor = primeiras_paginas(pdf, opcoes)
         elif modo == "paginas_texto":
             valor = textos_por_pagina(pdf, opcoes)
         elif modo == "primeira_pagina":    # regularidade do DP (32 a 160 p.): so' o cabecalho da 1a pagina
@@ -759,6 +760,11 @@ def paginas_com_limite(pdf: bytes, pacote: bool = False) -> int:
 def primeiras_paginas_com_limite(pdf: bytes) -> list[str]:
     """`primeiras_paginas` em subprocesso, com o prazo do pacote (ver `com_limite`)."""
     return com_limite(pdf, "primeiras_paginas", TEMPO_PACOTE_S)
+
+
+def paginas_iniciais_com_limite(pdf: bytes, quantas: int) -> list[str]:
+    """Texto das primeiras `quantas` paginas, em subprocesso, com o prazo do pacote (ver `com_limite`). Issue #753."""
+    return com_limite(pdf, "primeiras_paginas", TEMPO_PACOTE_S, quantas)
 
 
 def textos_por_pagina_com_limite(pdf: bytes, teto_paginas: int = 400) -> list[str]:

@@ -32,21 +32,40 @@ CODTMV_COBRANCA = ("2.2.01", "2.2.02", "2.2.07", "2.2.16")
 FORMATO_CODTMV = re.compile(r"2\.2\.\d{2}")
 
 
+# Celulas ilegiveis ja' avisadas no log, por (contrato, valor): cada tela e cada rodada leem a coluna, e a mesma
+# celula ruim repetiria a linha sem parar. O aviso volta se a celula mudar ou o processo reiniciar.
+_AVISADOS: set[tuple] = set()
+
+
+def _lista(valor) -> list[str] | None:
+    """A lista de tipos da celula, ou None quando ela nao e' uma lista JSON de textos."""
+    try:
+        lista = json.loads(valor)
+    except (TypeError, ValueError):
+        return None
+    return lista if isinstance(lista, list) and all(isinstance(x, str) for x in lista) else None
+
+
+def legivel(valor) -> bool:
+    """A celula de `contratos.tipos_cobranca_extras_rm` esta' nula ou traz uma lista JSON de textos."""
+    return valor is None or _lista(valor) is not None
+
+
 def tipos_gravados(valor, contrato_id=None) -> frozenset[str]:
     """Os tipos extras de um contrato, lidos da coluna `contratos.tipos_cobranca_extras_rm` com tolerancia. A coluna so'
     recebe valor pelo `cadastro aplicar`, que valida; se mesmo assim ela trouxer algo que nao e' uma lista JSON de
     textos (texto vazio, texto que nao e' JSON, `null`, um texto no lugar da lista), vale "nenhum tipo extra", com
-    aviso no log: uma celula ruim nao pode derrubar o a receber, o faturado nem a rodada da sincronizacao com o RM. O
-    proximo `cadastro aplicar` regrava a coluna pelo arquivo."""
+    aviso no log (uma vez por celula, nao a cada leitura): uma celula ruim nao pode derrubar o a receber, o faturado
+    nem a rodada da sincronizacao com o RM. O proximo `cadastro aplicar` regrava a coluna pelo arquivo."""
     if valor is None:
         return frozenset()
-    try:
-        lista = json.loads(valor)
-    except (TypeError, ValueError):
-        lista = None
-    if not isinstance(lista, list) or not all(isinstance(x, str) for x in lista):
-        log.warning("contrato %s: tipos_cobranca_extras_rm ilegivel (%.80r); vale nenhum tipo extra ate' o proximo "
-                    "cadastro aplicar", contrato_id, valor)
+    lista = _lista(valor)
+    if lista is None:
+        marca = (contrato_id, str(valor))
+        if marca not in _AVISADOS:
+            _AVISADOS.add(marca)
+            log.warning("contrato %s: tipos_cobranca_extras_rm ilegivel (%.80r); vale nenhum tipo extra ate' o proximo "
+                        "cadastro aplicar", contrato_id, valor)
         return frozenset()
     return frozenset(lista)
 

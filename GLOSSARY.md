@@ -77,7 +77,9 @@ medições abrem.
 Etapa em que a planilha/carta foi enviada ao órgão e ele ainda não aprovou.
 
 **Boletim**:
-O documento em que o órgão aprova a medição; também a etapa em que a medição aprovada espera a nota.
+O documento em que o órgão aprova a medição; também a etapa em que a medição aprovada espera a nota. Na MT-PAR é a
+empresa que o preenche, no modelo do órgão, e o fiscal do órgão assina; o reajuste tem boletim próprio
+(`docs/adr/0013`).
 _Avoid_: atestado, atesto
 
 **Nota**:
@@ -105,8 +107,10 @@ O valor que a planilha/carta pede ao órgão.
 _Avoid_: valor protocolado
 
 **Aprovado**:
-O valor que o órgão fixa no boletim. Sem o valor do boletim gravado, a medição só conta como aprovada depois da nota
-emitida (a nota prova que o órgão aprovou), pelo valor do pedido; antes disso fica só no medido.
+O valor que o órgão fixa no boletim. Na MT-PAR, o "Valor Total da Nª Medição" da página do "Visto" do boletim
+assinado e, no reajuste, o "TOTAL REAJUSTE" do boletim dele. Sem o valor do boletim gravado, a medição só conta como
+aprovada depois da nota emitida (a nota prova que o órgão aprovou), pelo valor do pedido; antes disso fica só no
+medido.
 _Avoid_: valor atestado
 
 **Faturado**:
@@ -180,6 +184,17 @@ _Avoid_: NFS-e da consorciada (quando a nota é a da própria construtora)
 
 **Baixa**:
 O registro no RM de que um título foi pago. A data da baixa é o dia do pagamento.
+
+**Título**:
+O lançamento a receber que o RM cria para uma nota, no valor líquido (sem as retenções). Uma nota pode ter mais de
+um. O devido, o recebido e a falta da nota são somados nos títulos, nunca no bruto da nota.
+
+**Excluído no RM**:
+A nota ou o título que o RM deixou de devolver sem cancelar: o faturamento excluiu o título e o refez, ou refez o
+movimento inteiro. Fica marcado, não se apaga, e sai de toda soma; se voltar a vir, volta a contar. Só a
+sincronização marca, depois de duas rodadas completas seguidas sem ele; nota mais antiga do que a consulta alcança
+não é exclusão (`docs/adr/0006`).
+_Avoid_: apagado, removido (a linha continua no banco); cancelado (é o que o RM diz de uma nota que ele ainda devolve)
 
 **Tipo de movimento**:
 A classificação que o RM dá a cada nota (`2.2.01`, `2.2.03`), escolhida pelo faturamento ao lançar.

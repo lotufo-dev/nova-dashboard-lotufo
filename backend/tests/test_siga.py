@@ -750,6 +750,9 @@ def test_rodada_de_pedido_le_so_os_processos_pedidos(conn, robo):
 
 def test_so_pedidos_nunca_abre_rodada_automatica(conn, robo):
     # o robo fora do horario (#347): sem pedido nada a ler, mesmo sem rodada completa ha' mais de 59 minutos
+    with db.mutacao(conn):                  # ja' lidos: o processo sem leitura e sem rodada e' novo, e iria sozinho
+        conn.executemany("INSERT INTO siga_leituras (processo_id, lido_em) VALUES (?, '2026-10-27 14:00:00')",
+                         [(i,) for i in robo.ids])
     assert siga.iniciar_rodada(conn, AGORA, so_pedidos=True) == {"rodada_id": None, "tipo": None, "processos": []}
     assert _conta(conn, "siga_rodadas") == 0
     _pedir(conn, robo, robo.ids[1], AGORA)
@@ -761,6 +764,44 @@ def test_so_pedidos_nunca_abre_rodada_automatica(conn, robo):
     _pedir(conn, robo, None, AGORA + _min(30))
     r = siga.iniciar_rodada(conn, AGORA + _min(30), so_pedidos=True)
     assert r["tipo"] == "pedido" and len(r["processos"]) == 3
+
+
+def _processo_novo(conn, codigo="NOVO123456"):
+    return siga.acompanhar_avulso(conn, None, codigo, None, "outros", None, complemento="Pedido de paralisação")
+
+
+def test_processo_novo_e_lido_na_pergunta_seguinte_do_robo_e_uma_vez_so(conn, robo):
+    # o processo que acabou de entrar nao espera a rodada da hora: vai sozinho na pergunta seguinte, a qualquer hora
+    r = siga.iniciar_rodada(conn, AGORA)
+    siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(2))
+    _processo_novo(conn)
+    r2 = siga.iniciar_rodada(conn, AGORA + _min(5), so_pedidos=True)
+    assert r2["tipo"] == "pedido" and [p["codigo"] for p in r2["processos"]] == ["NOVO123456"]
+    # chamado uma vez: o que o robo nao conseguiu ler nao volta a cada pergunta, fica para a rodada da hora
+    siga.terminar_rodada(conn, r2["rodada_id"], [{"codigo": "NOVO123456", "motivo": "o login não chegou na página"}],
+                         AGORA + _min(6))
+    assert siga.iniciar_rodada(conn, AGORA + _min(7))["rodada_id"] is None
+    r3 = siga.iniciar_rodada(conn, AGORA + _min(59))
+    assert r3["tipo"] == "automatica" and len(r3["processos"]) == 4
+
+
+def test_processo_que_entra_com_a_rodada_em_andamento_e_lido_quando_ela_termina(conn, robo):
+    # o caso de 17/11/2026: cadastrado 32 segundos depois de a rodada da hora comecar, esperou a hora seguinte
+    r = siga.iniciar_rodada(conn, AGORA)
+    _processo_novo(conn)
+    assert siga.iniciar_rodada(conn, AGORA + _min(0, 40)) == r          # a rodada aberta nao muda
+    siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(1))
+    # o robo pergunta de novo antes de encerrar
+    r2 = siga.iniciar_rodada(conn, AGORA + _min(1))
+    assert r2["tipo"] == "pedido" and [p["codigo"] for p in r2["processos"]] == ["NOVO123456"]
+
+
+def test_processo_que_chegou_pela_leitura_do_robo_nao_e_novo(conn, robo):
+    r = siga.iniciar_rodada(conn, AGORA)
+    siga.terminar_rodada(conn, r["rodada_id"], [], AGORA + _min(2))
+    siga.gravar_leitura(conn, AGORA + _min(3), [{"codigo": None, "numero": "ORGAO-PRO-2026/00099",
+                                                "nome": "Processo Delta", "situacao": None, "movimentacoes": []}])
+    assert siga.iniciar_rodada(conn, AGORA + _min(5))["rodada_id"] is None
 
 
 def test_pedido_repetido_nao_duplica_e_todos_cobre_o_de_um_processo(conn, robo):

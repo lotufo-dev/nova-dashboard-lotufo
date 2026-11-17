@@ -1421,3 +1421,130 @@ def test_passo_pagamento_em_consorcio_conta_a_nota_da_empresa_ou_a_fatura_pela_c
     da_casa = medir(c, p, 1, "2026-09", "protocolada", 500_001, aprovado=500_001, protocolo="2026-10-10")
     nota(c, 500_001, [da_casa], coligada=EMPRESA)
     assert sincronizacao_rm.pagamento_cota(c, da_casa) is None and fora(da_casa) == [(EMPRESA, False)]
+
+
+# --- issue #755 (docs/adr/0006): nota e titulo excluidos no RM ficam fora de todo numero do Fechamento ------------
+
+def _titulo(c, numero, k):
+    """O id do k-esimo titulo (na ordem em que `nota` os criou) da nota de numero `numero`."""
+    return c.execute("SELECT id FROM baixas WHERE idlan=?", (int(numero) * 10 + k,)).fetchone()[0]
+
+
+def _marcar_titulos(c, *ids, marca="2026-09-10 12:00:00"):
+    c.execute(f"UPDATE baixas SET excluida_rm_em=? WHERE id IN ({','.join('?' * len(ids))})", (marca, *ids))
+    c.commit()
+
+
+def _retrato_do_mes(f, comp):
+    m = _mes(f, comp)
+    return m["protocolado_centavos"], m["recebido_centavos"], m["em_aberto_centavos"]
+
+
+def test_titulo_excluido_no_rm_nao_entra_no_devido_no_recebido_nem_na_falta(cenario):
+    """O titulo que o RM deixou de devolver (`baixas.excluida_rm_em`) sai da situacao da nota nos titulos: o aberto
+    antigo deixa de somar na falta, e o pago antigo deixa de ser recebimento. Obra propria e consorcio a 50% com
+    centavo impar; a nota sem medicao ligada segue a mesma leitura. Tirada a marca, tudo volta."""
+    c, ids = cenario
+    p, k = ids["propria"], ids["consorcio"]
+    # o titulo foi refeito: o vigente pago em parte (faltam 500.001) e o antigo, aberto, que dobrava a falta
+    a = medir(c, p, 1, "2026-05", "protocolada", 1_000_001, aprovado=1_000_001, protocolo="2026-06-01")
+    dobrada = nota(c, 1_000_001, [a], titulos=[(930_001, 430_000, 4), (930_001, 0, 0)])
+    # consorcio: o titulo antigo tinha baixa; o vigente esta' aberto. A baixa do antigo nao e' recebimento
+    b = medir(c, k, 2, "2026-05", "protocolada", 2_000_001, aprovado=2_000_001, protocolo="2026-06-02")
+    estornada = nota(c, 2_000_001, [b], coligada=12, titulos=[(1_860_001, 1_860_001, 1), (1_860_001, 0, 0)])
+    # o vigente foi pago inteiro; o antigo, aberto, segurava a nota como paga em parte
+    d = medir(c, p, 3, "2026-05", "protocolada", 600_001, aprovado=600_001, protocolo="2026-06-03")
+    quitada = nota(c, 600_001, [d], titulos=[(558_001, 558_001, 1), (558_001, 0, 0)])
+    # sem medicao ligada: uma com a baixa no titulo antigo, outra quitada no vigente com o antigo aberto
+    solta = nota(c, 80_001, centro="9.001.001", titulos=[(74_001, 74_001, 1), (74_001, 0, 0)])
+    solta_paga = nota(c, 90_001, centro="9.001.001", titulos=[(83_001, 83_001, 1), (83_001, 0, 0)])
+    protocolado = 1_000_001 + 1_000_001 + 600_001               # 2.000.001 x 50% = 1.000.000,5 -> 1.000.001
+
+    def retrato():
+        f = fechamento.fechamento(c)
+        _confere_soma(f)
+        s_m = f["notas_sem_medicao"]
+        return (_retrato_do_mes(f, "2026-05"),
+                [(e["numero"], e["valor_centavos"], e["paga_em_parte"]) for e in f["em_aberto"]],
+                [(e["numero"], e["valor_centavos"], e["paga_em_parte"]) for e in s_m["em_aberto"]], s_m["pagas"])
+
+    # antes da marca: a falta em dobro passa do valor da nota (limitada a ele), a baixa do titulo antigo conta como
+    # recebimento (falta 1.860.001 x 50% = 930.000,5 -> 930.001) e a nota quitada aparece paga em parte
+    em_dobro = retrato()
+    assert em_dobro == (
+        (protocolado, 112_000, 1_000_001 + 930_001 + 558_001),
+        [(dobrada, 1_000_001, False), (estornada, 930_001, True), (quitada, 558_001, True)],
+        [(solta, 74_001, True), (solta_paga, 83_001, True)], {"quantidade": 0, "valor_centavos": 0})
+
+    _marcar_titulos(c, _titulo(c, dobrada, 1), _titulo(c, estornada, 0), _titulo(c, quitada, 1), _titulo(c, solta, 0),
+                    _titulo(c, solta_paga, 1))
+    assert retrato() == (
+        (protocolado, 500_000 + 600_001, 500_001 + 1_000_001),
+        # a paga em parte, pelo que falta no titulo vigente; a que so' tinha baixa no antigo, inteira, pelo bruto
+        [(dobrada, 500_001, True), (estornada, 1_000_001, False)],
+        [(solta, 80_001, False)], {"quantidade": 1, "valor_centavos": 90_001})
+    # a pagina da medicao le os mesmos titulos: devido, recebido e falta sem o excluido, que aparece a' parte
+    n = sincronizacao_rm.notas_da_medicao(c, a)[0]
+    assert (n["devido_centavos"], n["recebido_centavos"], n["falta_centavos"]) == (930_001, 430_000, 500_001)
+    assert [t["valor_original_centavos"] for t in n["titulos_excluidos_rm"]] == [930_001]
+
+    c.execute("UPDATE baixas SET excluida_rm_em=NULL")
+    c.commit()
+    assert retrato() == em_dobro
+
+
+def _excluir_notas_no_rm(c, *numeros):
+    """Marca as notas como a sincronizacao marca (`sincronizacao_rm._marcar`): a nota deixa de ser ativa, o vinculo e'
+    desfeito e os titulos dela saem junto."""
+    marcas = ",".join("?" * len(numeros))
+    alvo = [f"{int(n):09d}" for n in numeros]
+    notas = c.execute(f"SELECT id, coligada, idmov, numero, serie, emissao, valor_centavos, situacao FROM notas_fiscais "
+                      f"WHERE numero IN ({marcas}) ORDER BY id", alvo).fetchall()
+    assert len(notas) == len(numeros)
+    titulos = c.execute(f"""SELECT b.id, b.coligada, b.idlan, b.nota_id, b.valor_original_centavos, b.valor_baixado_centavos,
+                                   b.status_lan, n.excluida_rm_em AS nota_excluida
+                            FROM baixas b JOIN notas_fiscais n ON n.id=b.nota_id WHERE n.numero IN ({marcas})
+                            ORDER BY b.id""", alvo).fetchall()
+    with db.mutacao(c):
+        sincronizacao_rm._marcar(c, None, None, notas, titulos)
+
+
+def test_nota_excluida_no_rm_nao_entra_no_protocolado_nem_no_em_aberto(cenario):
+    """A nota que o RM deixou de devolver (movimento refeito) sai do protocolado e do em aberto. Com a substituta
+    ligada, a medicao conta uma vez; a medicao que fica sem nota volta ao em aberto pelo valor dela ("sem nota
+    ligada"); a nota sem medicao some da lista a' parte e da contagem das pagas, e do a receber da lista de Obras."""
+    c, ids = cenario
+    p = ids["propria"]
+    a = medir(c, p, 1, "2026-05", "protocolada", 1_000_001, aprovado=1_000_001, protocolo="2026-06-01")
+    antiga = nota(c, 1_000_001, [a], titulos=[(930_001, 0, 0)])
+    nova = nota(c, 1_000_001, [a], titulos=[(930_001, 0, 0)])               # a substituta, com o movimento refeito
+    b = medir(c, p, 2, "2026-05", "protocolada", 500_001, aprovado=500_001, protocolo="2026-06-02")
+    unica = nota(c, 500_001, [b])
+    solta = nota(c, 80_001, centro="9.001.001")
+    solta_paga = nota(c, 90_001, centro="9.001.001", titulos=PAGO(83_001))
+
+    def retrato():
+        f = fechamento.fechamento(c)
+        _confere_soma(f)
+        s_m = f["notas_sem_medicao"]
+        return (_retrato_do_mes(f, "2026-05"), f["por_ano"]["2026"]["sem_nota_centavos"],
+                sorted((e["tipo_aberto"], e["numero"], e["valor_centavos"]) for e in f["em_aberto"]),
+                [(e["numero"], e["valor_centavos"]) for e in s_m["em_aberto"]], s_m["pagas"],
+                diretoria.a_receber_por_obra(c, na_cota=True))
+
+    # antes da marca: a nota antiga dobra o protocolado e o em aberto da medicao
+    assert retrato() == (
+        (2_000_002 + 500_001, 0, 2_000_002 + 500_001), 0,
+        sorted([("nota", antiga, 1_000_001), ("nota", nova, 1_000_001), ("nota", unica, 500_001)]),
+        [(solta, 80_001)], {"quantidade": 1, "valor_centavos": 90_001},
+        {p: 1_000_001 + 500_001 + 80_001})
+
+    _excluir_notas_no_rm(c, antiga, unica, solta, solta_paga)
+    assert retrato() == (
+        (1_000_001, 0, 1_000_001 + 500_001), 500_001,
+        sorted([("nota", nova, 1_000_001), ("sem_nota", None, 500_001)], key=lambda e: (e[0], e[1] or "")),
+        [], {"quantidade": 0, "valor_centavos": 0},
+        {p: 1_000_001 + 500_001})
+    # a pagina da medicao diz a nota como excluida no RM, fora da lista das que contam
+    assert [n["numero"] for n in sincronizacao_rm.notas_da_medicao(c, a)] == [f"{int(nova):09d}"]
+    assert [n["numero"] for n in sincronizacao_rm.notas_excluidas_da_medicao(c, a)] == [f"{int(antiga):09d}"]

@@ -570,6 +570,20 @@ def test_rodadas_escolhe_o_que_ler(client_admin, com_token, schtasks, relogio_mo
     assert r["tipo"] == "automatica" and len(r["processos"]) == 2
 
 
+def test_processo_colado_na_tela_vai_na_pergunta_seguinte_do_robo_sem_a_tarefa(client_admin, com_token, relogio_movel):
+    # sem `DASH_SIGA_TAREFA` (o robo em outra maquina): o processo novo nao depende de botao nem de disparo
+    _com_processos(client_admin)
+    _fim(client_admin, _rodada(client_admin)["rodada_id"])
+    relogio_movel(2)
+    r = client_admin.post("/api/siga/processos-avulsos", json={"link": "AbCdEf1234", "categoria": "outros",
+                                                               "complemento": "Pedido de paralisação"})
+    assert r.status_code == 200, r.text
+    r = client_admin.post("/api/siga/rodadas", json={"so_pedidos": True}, headers=_robo()).json()
+    assert r["tipo"] == "pedido" and [p["codigo"] for p in r["processos"]] == ["AbCdEf1234"]
+    _fim(client_admin, r["rodada_id"])
+    assert _rodada(client_admin)["rodada_id"] is None
+
+
 def test_rodadas_so_pedidos_atende_o_pedido_e_nao_abre_rodada_automatica(client_admin, com_token, schtasks):
     alfa, _beta = _com_processos(client_admin)
     so_pedidos = {"json": {"so_pedidos": True}, "headers": _robo()}

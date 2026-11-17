@@ -66,6 +66,11 @@ parcela; os totais sao somas dessas parcelas, entao fecham ao centavo com as lin
   pela nota da empresa e a outra pela fatura do consorcio. A fatura unica do consorcio cobre as duas: enquanto a
   nota da empresa nao e' ligada tambem a' outra, a mesma cobranca pode estar somada duas vezes. So' avisa.
 
+Excluido no RM (issue #755, docs/adr/0006): a nota e o titulo que o RM deixou de devolver (`excluida_rm_em`) ficam
+fora de todo numero desta pagina. A nota marcada deixa de ser ativa e perde o vinculo, entao sai do protocolado, do
+em aberto e das notas sem medicao; o titulo marcado nao entra na situacao da nota nos titulos (`_no_rm`), nem no
+recebido, nem na falta.
+
 So' aparece o que tem lancamento: mes sem medicao nao vira linha, e nada e' estimado. O em aberto de competencias
 anteriores a 2025 fica contado a' parte.
 """
@@ -242,6 +247,7 @@ def _notas_por_medicao(conn, ids: set[int]) -> dict[int, list[dict]]:
                    n.codtmv, m.contrato_id
             FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id JOIN medicoes m ON m.id=a.medicao_id
             WHERE a.desfeita_em IS NULL AND n.situacao='ativa' AND n.desconsiderada_em IS NULL
+              AND n.excluida_rm_em IS NULL
               AND (n.codtmv IS NULL OR n.codtmv IN ({','.join('?' * len(tipos))}))
             ORDER BY n.emissao, n.id""", tipos)
         if r["medicao_id"] in ids and (r["codtmv"] is None or cobranca_orgao.e_cobranca(r["codtmv"], r["contrato_id"], extras))]
@@ -266,15 +272,16 @@ def _notas_por_medicao(conn, ids: set[int]) -> dict[int, list[dict]]:
 
 
 def _no_rm(conn, nota_id: int) -> tuple[str, int]:
-    """A nota nos titulos (nao cancelados) do RM: ("paga", 0), ("parte", o que falta) ou ("aberta", 0). A falta vem
-    na base da propria nota: valor cheio na fatura do consorcio, ja' a cota na nota da empresa ao consorcio.
+    """A nota nos titulos (nao cancelados nem excluidos no RM, issue #755) do RM: ("paga", 0), ("parte", o que falta)
+    ou ("aberta", 0). A falta vem na base da propria nota: valor cheio na fatura do consorcio, ja' a cota na nota da
+    empresa ao consorcio.
     Sem nenhuma baixa COM VALOR, aberta (sem titulo, titulo sem baixa ou baixado sem valor: glosa e compensacao nao
     sao recebimento). Com alguma, conta o que falta titulo a titulo (`sincronizacao_rm._falta_por_titulo`; o titulo
     sem baixa com valor entra inteiro, e juros num titulo nao cobrem outro): ate' `diretoria.TOLERANCIA_CENTAVOS`,
     paga; acima, paga em parte."""
     recebido = sincronizacao_rm.STATUS_RECEBIDO
     if not conn.execute(f"SELECT 1 FROM baixas WHERE nota_id=? AND status_lan IN ({','.join('?' * len(recebido))}) "
-                        "AND valor_baixado_centavos>0", (nota_id, *recebido)).fetchone():
+                        "AND valor_baixado_centavos>0 AND excluida_rm_em IS NULL", (nota_id, *recebido)).fetchone():
         return "aberta", 0
     falta = sincronizacao_rm._falta_por_titulo(conn, nota_id, aberto_inteiro=True) or 0
     return ("paga", 0) if falta <= diretoria.TOLERANCIA_CENTAVOS else ("parte", falta)

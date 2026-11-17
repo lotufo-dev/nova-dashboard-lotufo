@@ -45,6 +45,8 @@ type StatusRm = {
   em_andamento: boolean; rodadas: Rodada[];
   // #603: aviso do retrato de custo vigente (linhas puladas), da última rodada que trouxe o custo
   custo_aviso?: string | null;
+  // #755: a última rodada recusou uma exclusão em massa (notas demais deixaram de vir do RM); null sem recusa
+  exclusao_aviso?: string | null;
 };
 // Bloco 9: fica so' quem conectou a propria conta para enviar e-mail; a conexao e' feita por cada pessoa em Minha conta.
 type Conta = { usuario_id: number; nome: string; email: string; perfil: string; conectada: boolean; token_em: string | null };
@@ -179,6 +181,9 @@ function Situacoes({ status, erroCarga, rodando, b, siga }: {
     : ultima === null ? neutro(T_RM, "—", "")
     : ultima.estado === "failed"
       ? [T_RM, `falhou em ${fmtDataHora(ultima.iniciado_em)}`, "", "critico"]
+    // #755: a rodada terminou, mas recusou uma exclusao em massa; o aviso inteiro esta' no cartao das rodadas
+    : status.exclusao_aviso
+      ? [T_RM, fmtDataHora(ultima.terminado_em ?? ultima.iniciado_em), "exclusão em massa recusada", "breve"]
     : [T_RM, fmtDataHora(ultima.terminado_em ?? ultima.iniciado_em), "", "feito"];
   // 4. monitor do SIGA (issue #330): a hora da ultima leitura e quantos processos ele acompanha
   const monitor: Cartao = siga === undefined ? neutro(T_SIGA, "carregando…", "")
@@ -208,6 +213,7 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
       {erroCarga && <Erro texto={erroCarga} />}
 
       {status?.custo_aviso && <div className="cartao__corpo"><CaixaAviso nivel="atencao" role="status">{status.custo_aviso}</CaixaAviso></div>}
+      {status?.exclusao_aviso && <div className="cartao__corpo"><CaixaAviso nivel="atencao" role="status">{status.exclusao_aviso}</CaixaAviso></div>}
 
       {status?.configurado && ultima === null && <div className="vazio vazio--curto"><p>Nenhuma rodada.</p></div>}
 
