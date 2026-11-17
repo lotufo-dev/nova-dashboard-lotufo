@@ -12,10 +12,11 @@ describe("ErrorBoundary", () => {
   beforeEach(() => { vi.spyOn(console, "error").mockImplementation(() => {}); });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-  it("mostra a tela de falha com a mensagem e o botão de recarregar", () => {
+  it("mostra a tela de falha com o botão de recarregar; a mensagem da exceção fica só no console", () => {
     render(<ErrorBoundary><Quebra /></ErrorBoundary>);
-    expect(screen.getByRole("alert")).toBeTruthy();
-    expect(screen.getByText("dado inesperado")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("A tela parou de responder");
+    expect(screen.queryByText(/dado inesperado/)).toBeNull();
+    expect(vi.mocked(console.error).mock.calls.some(c => c.some(x => x instanceof Error && x.message === "dado inesperado"))).toBe(true);
     expect(screen.getByRole("button", { name: "Recarregar a página" })).toBeTruthy();
   });
 

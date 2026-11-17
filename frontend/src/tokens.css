@@ -1291,6 +1291,9 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
    celulas, inclusive a primeira e a ultima: a tabela cai para 854 px, sem rolagem */
 .tabela.tabela--densa thead th, .tabela.tabela--densa tbody td { padding-left: 8px; padding-right: 8px; }
 .notas__conferencia { display: inline-flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+/* a divergencia da nota numa linha propria, colada na linha da nota (sem o fio entre as duas) */
+.notas__tabela tr.notas__linha--diverge > td { border-bottom: 0; }
+.notas__tabela tr.notas__diferenca > td { padding-top: 0; white-space: normal; }
 .notas__ok { color: var(--situacao-feito-texto); font-size: var(--texto-mini); }
 /* divergencia e' CRITICO (D10): mesma cor do selo "Diverge do espelho" da aba Notas */
 .notas__diverge { color: var(--situacao-critico-texto); font-size: var(--texto-mini); }
