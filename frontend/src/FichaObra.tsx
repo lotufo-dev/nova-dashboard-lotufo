@@ -1,4 +1,4 @@
-import { LinhasDoTempo, type StatusDaObra } from "./ExecucaoContrato";
+import { LinhasDoTempo, type Nivel, type StatusDaObra } from "./ExecucaoContrato";
 import { brl, fmtDias, fmtPercentual } from "./formato";
 import { Link } from "./Link";
 import Selo, { Glifo } from "./Selo";
@@ -12,9 +12,9 @@ import Falha from "./Falha";
 //  - `PrazoDaObra`: um painel so' para o prazo (os dias da execucao, as duas linhas do tempo e o ritmo), no lugar
 //    dos cartoes "Prazo", "Proximos vencimentos", "Ritmo e prazo" e "Execucao do contrato", que repetiam as datas;
 //  - `MedicoesAgora`: a medicao em andamento e a ultima recebida, na coluna do lado.
-// Quem decide o nivel de prazo e' o servidor (`ficha_obra`); o selo das linhas do tempo segue `seloDoPrazo`.
+// Quem decide o nivel de prazo e' o servidor (`prazos.situacao` no servidor), para o numero dos dias e para o selo das
+// linhas do tempo.
 
-type Nivel = "critico" | "atencao" | "normal";
 type Vencimento = { chave: "execucao"; rotulo: string; data: string | null; dias: number | null; nivel: Nivel };
 type Medicao = { id: number; titulo: string; rotulo: string; competencia: string; valor_centavos: number | null };
 export type Ficha = {
@@ -91,7 +91,7 @@ export default function FichaObra({ ficha }: { ficha: Ficha | null | undefined }
 
 type PrazosDaObra = {
   execucao_inicio?: string | null; vigencia_inicio?: string | null; execucao_fim: string | null; vigencia_fim: string | null;
-  status: StatusDaObra; execucao_sem_prazo?: boolean;
+  status: StatusDaObra; execucao_sem_prazo?: boolean; nivel_execucao?: Nivel; nivel_vigencia?: Nivel;
 };
 
 /** O prazo da obra num painel so': quantos dias faltam para o fim da execucao (o nivel e' do servidor, com o glifo
@@ -119,7 +119,7 @@ export function PrazoDaObra({ ficha, prazos }: { ficha: Ficha | null | undefined
         </div>
         <LinhasDoTempo execucaoInicio={prazos.execucao_inicio ?? null} execucaoFim={prazos.execucao_fim}
           vigenciaInicio={prazos.vigencia_inicio ?? null} vigenciaFim={prazos.vigencia_fim} status={prazos.status}
-          execucaoSemPrazo={prazos.execucao_sem_prazo} />
+          execucaoSemPrazo={prazos.execucao_sem_prazo} nivelExecucao={prazos.nivel_execucao} nivelVigencia={prazos.nivel_vigencia} />
       </div>
       {ficha !== undefined && r && (
         <dl className="obra-ritmo" aria-label="Ritmo e prazo">

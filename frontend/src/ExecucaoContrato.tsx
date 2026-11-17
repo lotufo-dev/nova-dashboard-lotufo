@@ -6,11 +6,13 @@ import { situacaoDoNivel } from "./situacao";
 
 // "Execucao do contrato" (#160, prototipo aprovado): duas linhas do tempo, Execucao e Vigencia. Cada uma mostra a
 // data de inicio, o marcador "Hoje" (calculado pela data do dia em Cuiaba: anda sozinho, e a tela o refaz na virada
-// do dia sem recarregar) e a data final; o prazo perto do fim ou vencido vira selo (seloDoPrazo; texto na tela,
-// 26/10/2026: quantos dias restam nao se escreve).
+// do dia sem recarregar) e a data final; o prazo perto do fim ou vencido vira selo (texto na tela, 26/10/2026:
+// quantos dias restam nao se escreve). O nivel do selo e' o do servidor (`nivel_execucao` e `nivel_vigencia` do
+// cabecalho da obra, `prazos.situacao` no servidor), o mesmo do numero dos dias: a tela so' mostra.
 
 type Status = "ativo" | "suspenso" | "em_encerramento" | "encerrado" | "rescindido";
 export type StatusDaObra = Status;
+export type Nivel = "critico" | "atencao" | "normal";
 
 /** A data do dia, relida a cada minuto: o marcador muda de lugar na virada do dia sem a pessoa recarregar. */
 export function useHoje(): string {
@@ -22,8 +24,8 @@ export function useHoje(): string {
   return hoje;
 }
 
-function Linha({ titulo, inicio, fim, status, hoje, paralisada, soData }:
-    { titulo: string; inicio: string | null; fim: string | null; status: Status; hoje: string; paralisada?: boolean;
+function Linha({ titulo, inicio, fim, nivel, hoje, paralisada, soData }:
+    { titulo: string; inicio: string | null; fim: string | null; nivel?: Nivel | null; hoje: string; paralisada?: boolean;
       soData?: boolean }) {
   // data final ausente ou ilegivel: so' a data, como a tela antiga (nunca "vencida ha NaN dias"). #662: tambem quando
   // o prazo de execucao de hoje nao e' conhecido (`soData`): a data registrada, sem trilho nem selo de vencida
@@ -36,9 +38,8 @@ function Linha({ titulo, inicio, fim, status, hoje, paralisada, soData }:
     );
   }
   const { posicao, restantes } = linhaDoTempo(inicio, fim, hoje);
-  // D16: obra paralisada nao conta o vencimento da execucao (Lei 14.133, art. 115, par. 5o). Prazo vencido so' em
-  // obra ativa (a mesma regra da lista de Obras); nos outros casos o servidor nao avisa de proposito.
-  const selo = status === "ativo" && !paralisada ? seloDoPrazo(restantes) : null;
+  // o servidor decide se ha' prazo a cobrar (so' em obra ativa; D16: a paralisada nao conta o vencimento da execucao)
+  const selo = seloDoPrazo(nivel, restantes);
   const pos = posicao ?? 0;
   return (
     <div className="lt">
@@ -65,16 +66,17 @@ function Linha({ titulo, inicio, fim, status, hoje, paralisada, soData }:
 }
 
 type Props = { execucaoInicio: string | null; execucaoFim: string | null; vigenciaInicio: string | null; vigenciaFim: string | null;
-  status: Status; execucaoSemPrazo?: boolean };
+  status: Status; execucaoSemPrazo?: boolean; nivelExecucao?: Nivel | null; nivelVigencia?: Nivel | null };
 
 /** As duas linhas do tempo, sem moldura: o painel "Prazo" da pagina da obra as traz dentro dele. */
-export function LinhasDoTempo({ execucaoInicio, execucaoFim, vigenciaInicio, vigenciaFim, status, execucaoSemPrazo }: Props) {
+export function LinhasDoTempo({ execucaoInicio, execucaoFim, vigenciaInicio, vigenciaFim, status, execucaoSemPrazo,
+    nivelExecucao, nivelVigencia }: Props) {
   const hoje = useHoje();
   return (
     <div className="linhas-tempo">
-      <Linha titulo="Execução" inicio={execucaoInicio} fim={execucaoFim} status={status} hoje={hoje} paralisada={status === "suspenso"}
+      <Linha titulo="Execução" inicio={execucaoInicio} fim={execucaoFim} nivel={nivelExecucao} hoje={hoje} paralisada={status === "suspenso"}
         soData={execucaoSemPrazo} />
-      <Linha titulo="Vigência" inicio={vigenciaInicio} fim={vigenciaFim} status={status} hoje={hoje} />
+      <Linha titulo="Vigência" inicio={vigenciaInicio} fim={vigenciaFim} nivel={nivelVigencia} hoje={hoje} />
     </div>
   );
 }

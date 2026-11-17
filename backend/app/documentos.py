@@ -156,16 +156,23 @@ def _um_mes_depois(d: datetime.date) -> datetime.date:
 def proximos_protocolos(conn: sqlite3.Connection, hoje: datetime.date | None = None) -> dict[int, datetime.date | None]:
     """{contrato ativo: data prevista do proximo protocolo de nota}. Um mes depois do ultimo protocolo de nota da obra
     (medicao cancelada ou desistida nao conta); com nota emitida esperando protocolo, hoje; previsto que ja' passou
-    tambem e' hoje (o protocolo atrasado pode sair a qualquer dia). None = obra sem protocolo anterior."""
+    tambem e' hoje (o protocolo atrasado pode sair a qualquer dia). None = obra sem protocolo anterior.
+
+    A nota emitida da obra cujo cadastro nao tem o passo "Envio da nota" nao espera protocolo (#743): a decisao e' a
+    mesma do dinheiro, `medicoes.recebe_sem_protocolo`."""
+    from app import medicoes        # import local: medicoes importa checklist, que importa este modulo
     hoje = hoje or tempo.hoje_local()
+    passos_de = medicoes.passos_das_medicoes(conn)
+    esperando = {m["contrato_id"] for m in conn.execute(
+        "SELECT contrato_id, tipo, estado, planilha_enviada_em FROM medicoes WHERE estado='nota_emitida'")
+        if not medicoes.recebe_sem_protocolo(m["estado"], passos_de(m))}
     out: dict[int, datetime.date | None] = {}
     for r in conn.execute(
             "SELECT c.id, "
             "(SELECT MAX(mp.data) FROM medicao_protocolos mp JOIN medicoes m ON m.id=mp.medicao_id "
-            " WHERE m.contrato_id=c.id AND mp.etapa='nota' AND m.estado NOT IN ('cancelada','desistida')) AS ultimo, "
-            "EXISTS (SELECT 1 FROM medicoes m WHERE m.contrato_id=c.id AND m.estado='nota_emitida') AS esperando "
+            " WHERE m.contrato_id=c.id AND mp.etapa='nota' AND m.estado NOT IN ('cancelada','desistida')) AS ultimo "
             "FROM contratos c WHERE c.estado='ativo' ORDER BY c.id").fetchall():
-        if r["esperando"]:
+        if r["id"] in esperando:
             out[r["id"]] = hoje
         elif r["ultimo"]:
             out[r["id"]] = max(hoje, _um_mes_depois(_d(r["ultimo"][:10])))

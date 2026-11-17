@@ -28,6 +28,7 @@ type Cabecalho = {
   execucao_inicio?: string | null; vigencia_inicio?: string | null;
   execucao_fim: string | null; dias_execucao: number | null; vigencia_fim: string | null; dias_vigencia: number | null;
   execucao_sem_prazo?: boolean;      // #662: execucao registrada vencida e aditivo posterior so' de vigencia
+  nivel_execucao?: "critico" | "atencao" | "normal"; nivel_vigencia?: "critico" | "atencao" | "normal";   // `prazos.situacao` no servidor
   status: StatusObra;
   sem_fluxo_medicao?: boolean;       // #660: `passos_medicao: []` no cadastro: a obra não inicia medição
 };

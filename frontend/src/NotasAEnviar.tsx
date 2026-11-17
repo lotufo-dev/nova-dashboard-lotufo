@@ -199,7 +199,9 @@ export function avisoPorFora(juntas: Irma[], qtdEnvio: number): string {
 /* ------------------------------------------------------ certidoes, com a validade de cada uma */
 
 export type ItemCertidao = { entidade_id: number; entidade: string | null; tipo: string; chave?: string | null; situacao: string;
-  validade: string | null; dias: number | null; competencia?: string | null };
+  validade: string | null; dias: number | null; competencia?: string | null;
+  /** `pendente` porque nunca foi cadastrada (falta, nao trava o envio), e nao porque venceu (checklist.py) */
+  nunca_cadastrada?: boolean };
 
 /** A natureza que decide quais documentos o orgao exige deste envio: reajuste so' quando o envio e' so' de reajuste. */
 export const naturezaDoEnvio = (e: Envio) => (e.notas.length > 0 && e.notas.every(n => n.natureza === "reajuste") ? "reajuste" : "execucao");
@@ -219,21 +221,27 @@ export function useCertidoes(contratoId: number, natureza: string): ItemCertidao
   return itens;
 }
 
+/** A certidao que nunca foi cadastrada: falta, e nao trava o envio. A vencida trava (docs/adr/0002). */
+const faltaCadastrar = (i: ItemCertidao) => i.situacao === "pendente" && i.nunca_cadastrada === true;
+const estaVencida = (i: ItemCertidao) => i.situacao === "pendente" && !i.nunca_cadastrada;
+
 function textoCertidao(i: ItemCertidao): string | null {
+  if (faltaCadastrar(i)) return "não cadastrada";
   if (i.situacao === "pendente") return "sem validade hoje";
   // em dia, o ponto verde basta: a data so' aparece quando esta' para vencer
   return i.situacao === "vencendo" && i.validade ? `vence em ${fmtDataPura(i.validade.slice(0, 10))}` : null;
 }
 
-/** Uma linha por certidao: o ponto (verde, ambar, vermelho) e a validade so' da que vence, por empresa quando ha mais de uma. O
- *  caminho para emitir a nova so' aparece com certidao vencida. */
+/** Uma linha por certidao: o ponto (verde, ambar, vermelho) e a validade so' da que vence, por empresa quando ha mais de uma. A
+ *  vencida sai no critico e a nunca cadastrada, em atencao; cada uma com a frase dela e o caminho para Documentos. */
 export function ListaCertidoes({ itens, semTitulo = false, semNota = false }: {
   itens: ItemCertidao[]; semTitulo?: boolean;
   /** quem chama ja' diz, na trava do alto, "Certidão vencida: emita a nova em Documentos." */
   semNota?: boolean;
 }) {
   const empresas = [...new Map(itens.map(i => [i.entidade_id, i.entidade] as const)).entries()];
-  const vencida = itens.some(i => i.situacao === "pendente");
+  const vencida = itens.some(estaVencida);
+  const semCadastro = itens.some(faltaCadastrar);
   return (
     <div className="certidoes-bloco">
       {!semTitulo && <p className="med-sub">Certidões</p>}
@@ -243,15 +251,17 @@ export function ListaCertidoes({ itens, semTitulo = false, semNota = false }: {
           <ul className="certidoes">
             {itens.filter(i => i.entidade_id === eid).map(i => (
               <li key={`${i.entidade_id}-${i.tipo}`}>
-                <Glifo situacao={i.situacao === "pendente" ? "critico" : i.situacao === "vencendo" ? "breve" : "feito"} />
+                <Glifo situacao={estaVencida(i) ? "critico" : i.situacao === "vencendo" || faltaCadastrar(i) ? "breve" : "feito"} />
                 <span>{i.tipo}</span>
-                {textoCertidao(i) && <small className={i.situacao === "pendente" ? "info--critico" : undefined}>{textoCertidao(i)}</small>}
+                {textoCertidao(i) && <small className={estaVencida(i) ? "info--critico" : undefined}>{textoCertidao(i)}</small>}
               </li>
             ))}
           </ul>
         </div>
       ))}
       {vencida && !semNota && <p className="campo__nota certidoes__nota">Certidão vencida: emita a nova em{" "}
+        <Link para={{ tela: "documentos" }}>Documentos</Link>.</p>}
+      {semCadastro && <p className="campo__nota certidoes__nota">Certidão não cadastrada: anexe em{" "}
         <Link para={{ tela: "documentos" }}>Documentos</Link>.</p>}
     </div>
   );

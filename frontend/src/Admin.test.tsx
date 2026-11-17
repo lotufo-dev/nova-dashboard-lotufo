@@ -57,6 +57,22 @@ test("Usuários: bloqueio com Desbloquear, Redefinir senha e perfil editável (m
   expect(api).toHaveBeenCalledWith("/api/admin/usuarios/2/senha", { method: "POST", body: JSON.stringify({ senha: "senha-nova-456" }) });
 });
 
+test("Usuários: pessoa inativa mostra o perfil em texto, sem seletor, até ser reativada", async () => {
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/admin/usuarios") return [
+      { id: 1, nome: "Administrador", email: "a@exemplo.com.br", perfil: "admin", ativo: 1 },
+      { id: 2, nome: "Engenheira", email: "e@exemplo.com.br", perfil: "engenharia", ativo: 0 },
+      { id: 3, nome: "Diretor", email: "d@exemplo.com.br", perfil: "diretoria", ativo: 1 }];
+    if (url === "/api/admin/contas-microsoft") return [];
+    return { ok: true };
+  });
+  render(<Admin aba="usuarios" eu={1} />);
+  expect(await screen.findByRole("combobox", { name: /Perfil de Diretor/ })).toBeTruthy();
+  expect(screen.queryByRole("combobox", { name: /Perfil de Engenheira/ })).toBeNull();
+  const linha = screen.getByText("Engenheira", { selector: ".adm-pessoa__nome" }).closest("tr") as HTMLElement;
+  expect(within(linha).getByText("Engenharia")).toBeTruthy();
+});
+
 // Issue #5: a auditoria passava de 500 eventos sem acesso aos anteriores; "Carregar mais" busca a página seguinte pelo cursor
 test("Auditoria: Carregar mais busca a página anterior pelo cursor, mantém os filtros e some no primeiro evento", async () => {
   const ev = (id: number, acao: string) => ({ id, acao, entidade: null, criado_em: "2026-10-10 12:00:00", usuario_id: null });
@@ -619,6 +635,18 @@ test("Saúde: falha só na cópia externa dos arquivos também deixa o cartão d
   expect(cartaoDe("Último backup").className).toMatch(/situacao--critico/);
   // a situacao tem forma alem da cor: o selo com o glifo do critico e a palavra
   expect(cartaoDe("Último backup").querySelector(".selo--critico .glifo--critico")).not.toBeNull();
+  expect(cartaoDe("Último backup").querySelector(".situacao__nota")?.textContent).toBe("a cópia dos arquivos falhou");
+});
+
+test("Saúde: backup em dia com a cópia do dono atrasada não aparece como falho; o item diz o que atrasou", async () => {
+  saudeComRm({ configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] },
+    { ...BACKUP_EM_DIA, copia_dono_configurada: true, copia_dono_atrasada: true, ultima_copia_dono: "2026-09-01T08:00:00-04:00" });
+  await waitFor(() => expect(cartaoDe("Último backup").querySelector(".situacao__nota")?.textContent).toBe("cópia do dono atrasada"));
+  const cartao = cartaoDe("Último backup");
+  expect(cartao.className).toMatch(/situacao--breve/);
+  expect(within(cartao).queryByText("Falhou")).toBeNull();
+  expect(within(cartao).getByText("Atenção")).toBeTruthy();
+  expect(cartao.textContent).not.toMatch(/uma das cópias falhou/);
 });
 
 test("Saúde: sem rodada, uma linha curta; rodando, o botão desliga com o motivo e o motivo some quando para", async () => {

@@ -1,20 +1,11 @@
 """Ficha executiva da obra (#510): o que a pagina da obra mostra alem do cabecalho e da curva. So' leitura.
 
-A cor da informacao (semaforo, decidido em 06/11/2026) e' decidida AQUI, num lugar so': `critico` (vermelho),
-`atencao` (ambar), `normal` (preto)."""
+A cor da informacao (semaforo, decidido em 06/11/2026): `critico` (vermelho), `atencao` (ambar), `normal` (preto).
+O nivel do prazo vem de `prazos.situacao` (`prazos.nivel_do_prazo`), a mesma regra dos avisos e da aba Prazos."""
 import datetime
 import sqlite3
 
 from app import contratos, medicoes, paineis, prazos, tempo
-
-CRITICO_DIAS = 30      # prazo de execucao/vigencia a ate' 30 dias (ou ja' vencido): vermelho
-ATENCAO_DIAS = 90      # ate' 90 dias: ambar
-
-
-def nivel_do_prazo(dias: int | None) -> str:
-    if dias is None:
-        return "normal"
-    return "critico" if dias <= CRITICO_DIAS else "atencao" if dias <= ATENCAO_DIAS else "normal"
 
 
 def _d(iso: str | None) -> datetime.date | None:
@@ -65,7 +56,7 @@ def da_obra(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | No
     # da execucao (os dias e o nivel); o item da vigencia saiu com o cartao "Proximos vencimentos" (a data da
     # vigencia esta' na linha do tempo, pelo cabecalho da obra).
     venc = [{"chave": "execucao", "rotulo": "Fim da execução", "data": cab["execucao_fim"],
-             "dias": cab["dias_execucao"], "nivel": nivel_do_prazo(cab["dias_execucao"])}]
+             "dias": cab["dias_execucao"], "nivel": cab["nivel_execucao"]}]
     # #646: o topo numa base so'. Valor vigente, medido e saldo na base de execucao (a precos iniciais, sem o aditivo
     # de reajuste: a mesma de `paineis.saldo`) e na cota da Lotufo. Vigente e medido arredondam uma vez cada e o saldo
     # e' a diferenca dos dois, para a conta da tela fechar ao centavo. O reajuste contratado vai a parte. O medido soma
