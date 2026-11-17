@@ -195,9 +195,10 @@ def test_custo_rm_exige_ver_paineis(client, monkeypatch):
     assert client.get(f"/api/contratos/{cid}/custo-rm").status_code == 403
 
 
-def test_ficha_traz_ultima_medicao_em_andamento_e_vencimentos(client_admin, monkeypatch):
+def test_ficha_traz_ultima_medicao_em_andamento_e_o_fim_da_execucao(client_admin, monkeypatch):
     """#510: a ficha executiva da obra. Ultima = a recebida mais nova; em andamento = a aberta mais nova, com a etapa
-    e o desde; vencimentos = fim da execucao e fim da vigencia, com o nivel do semaforo (sem certidao: #661)."""
+    e o desde; vencimentos = o fim da execucao, com o nivel do semaforo (sem certidao: #661; o fim da vigencia e a
+    contagem das outras medicoes abertas sairam com os cartoes que os mostravam)."""
     import datetime
     from app import db, medicoes, tempo
     hoje = datetime.date(2026, 11, 6)
@@ -222,7 +223,7 @@ def test_ficha_traz_ultima_medicao_em_andamento_e_vencimentos(client_admin, monk
     assert f["em_andamento"]["etapa"] == "Pagamento"
     v = {x["chave"]: x for x in f["vencimentos"]}
     assert v["execucao"]["data"] == "2026-11-18" and v["execucao"]["dias"] == 12 and v["execucao"]["nivel"] == "critico"
-    assert v["vigencia"]["data"] == "2027-02-16" and v["vigencia"]["nivel"] == "normal"
+    assert set(v) == {"execucao"} and "outras" not in f["em_andamento"]
     assert f["contrato"]["original_igual"] is True and f["contrato"]["tas"] == 0
     conn = db.get_conn()
     conn.execute("UPDATE medicoes SET estado='espelho_enviado' WHERE id=?", (b,))
@@ -344,9 +345,10 @@ def test_ficha_original_igual_compara_com_o_vigente_de_execucao(client_admin):
     assert f["topo"]["vigente_centavos"] == 100_000_000 and f["topo"]["reajuste_centavos"] == 500
 
 
-def test_ficha_ritmo_e_prazo_na_cota_e_com_o_saldo_do_topo(client_admin, monkeypatch):
-    """#655: o cartao "Ritmo e prazo" fala na mesma base do resto do resumo: ritmo na cota da Lotufo e o saldo do
-    topo (o mesmo numero do cartao Execucao). Conclusao, situacao e dias sao os de `prazos.ritmo_e_prazo`."""
+def test_ficha_ritmo_e_prazo_na_cota(client_admin, monkeypatch):
+    """#655: o ritmo do painel "Prazo" fala na mesma base do resto do resumo: na cota da Lotufo. Conclusao, situacao
+    e dias sao os de `prazos.ritmo_e_prazo`. O saldo e o fim da execucao sairam do bloco: a tela os tem no topo e na
+    linha do tempo."""
     import datetime
     from app import contratos, db, prazos, tempo
     hoje = datetime.date(2026, 10, 15)   # janela 04 a 09/2026: as duas medicoes do cenario estao nela
@@ -361,9 +363,9 @@ def test_ficha_ritmo_e_prazo_na_cota_e_com_o_saldo_do_topo(client_admin, monkeyp
     r = f["ritmo"]
     assert cheio["ritmo_centavos"] == 66_666_72 and cheio["situacao"] == "atrasa" and cheio["dias_alem"] > 0
     assert r["ritmo_centavos"] == contratos.cota(66_666_72, 4900) == 32_666_69
-    assert r["saldo_centavos"] == f["topo"]["saldo_centavos"] == 391_999_84
-    assert (r["conclusao"], r["execucao_fim"], r["situacao"], r["dias_alem"]) == (
-        cheio["conclusao"], "2026-12-20", "atrasa", cheio["dias_alem"])
+    assert f["topo"]["saldo_centavos"] == 391_999_84
+    assert set(r) == {"ritmo_centavos", "conclusao", "situacao", "dias_alem"}
+    assert (r["conclusao"], r["situacao"], r["dias_alem"]) == (cheio["conclusao"], "atrasa", cheio["dias_alem"])
 
 
 def test_listar_traz_a_posicao_na_cota_igual_ao_topo_da_pagina_da_obra(client_admin):
@@ -421,4 +423,4 @@ def test_ficha_vencimentos_sem_certidao_da_empresa(client_admin, monkeypatch):
     finally:
         conn.close()
     venc = client_admin.get(f"/api/contratos/{cid}/ficha").json()["vencimentos"]
-    assert [x["chave"] for x in venc] == ["execucao", "vigencia"]
+    assert [x["chave"] for x in venc] == ["execucao"]

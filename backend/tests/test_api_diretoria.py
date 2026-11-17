@@ -24,7 +24,7 @@ def test_painel_e_qdop_para_a_diretoria_e_401_sem_sessao(client):
     _login(client, "dir@l.com")
     r = client.get("/api/diretoria")
     # #748: so' o que o Resumo e o QDOP da lista de Obras mostram
-    assert r.status_code == 200 and set(r.json()) == {"hoje", "medido_ano", "curva_carteira", "carteira", "obras", "avisos",
+    assert r.status_code == 200 and set(r.json()) == {"hoje", "medido_ano", "curva_carteira", "obras", "avisos",
                                                       "reajustes_apostilamento"}
     x = client.get("/api/diretoria/qdop.xlsx")
     assert x.status_code == 200 and "QDOP" in x.headers["content-disposition"]

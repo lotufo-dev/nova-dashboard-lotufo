@@ -223,6 +223,14 @@ describe("Fechamento (#748)", () => {
     expect(within(tabela).getAllByRole("row").map(l => texto(l))[4]).toBe("sem data de protocoloObra Alfa17ª Medição05/2026sem nota ligadaR$ 2.000,00");
   });
 
+  it("obra sem o passo Envio da nota: a linha sem protocolo diz a data da emissão da nota, de onde a espera conta (#743)", async () => {
+    api.mockResolvedValue({ ...TRES_PARTES, em_aberto: TRES_PARTES.em_aberto.map(e => e.tipo_aberto === "sem_nota"
+      ? { ...e, protocolo_em: null, emitida_em: "2026-09-01" } : e) });
+    render(<Fechamento ir={() => {}} />);
+    const tabela = await screen.findByRole("table", { name: /Em aberto de 2026/ });
+    expect(within(tabela).getAllByRole("row").map(l => texto(l))[4]).toBe("nota emitida em 01/09/2026Obra Alfa17ª Medição05/2026sem nota ligadaR$ 2.000,00");
+  });
+
   it("aviso de cobertura do vínculo: só quando falta nota ligada, com valor e percentual", async () => {
     api.mockResolvedValue(TRES_PARTES);
     render(<Fechamento ir={() => {}} />);

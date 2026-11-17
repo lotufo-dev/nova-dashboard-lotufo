@@ -141,6 +141,14 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
                 {notas.map(({ n, m }) => {
                   // o valor e' o nominal da NF (bruto); a situacao no financeiro e' a dos titulos (liquidos)
                   const falta = faltaDaNota(n);
+                  // #756: a fatura do consorcio que a nota da propria empresa tirou da conta: o bruto dela nao e' o
+                  // cobrado e nao entra em numero nenhum; aparece sem valor e sem situacao, como no Fechamento
+                  if (n.fora_da_conta) return (
+                    <tr key={n.nota_id}>
+                      <td>NF {Number(n.numero) || n.numero}{grupo.length > 1 ? ` · ${m.tipo === "reajuste" ? "reajuste" : "medição"}` : ""}</td>
+                      <td colSpan={2}>fatura do consórcio, não entra na conta</td>
+                    </tr>
+                  );
                   return (
                     <tr key={n.nota_id}>
                       <td>NF {Number(n.numero) || n.numero}{grupo.length > 1 ? ` · ${m.tipo === "reajuste" ? "reajuste" : "medição"}` : ""}

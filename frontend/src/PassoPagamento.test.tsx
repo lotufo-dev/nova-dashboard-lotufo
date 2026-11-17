@@ -91,6 +91,16 @@ describe("Passo Pagamento (#514)", () => {
     expect(screen.getByText("Recebido", { selector: ".selo__texto" }).closest(".selo")!.className).toContain("selo--feito");
   });
 
+  it("consórcio com a nota da empresa ligada: a fatura do consórcio aparece sem valor e sem situação (#756)", () => {
+    montar({ grupo: [com({ notas: [nota(1, "2351", 418330386, 384863955),
+      nota(3, "21", 990529648, 911287276, 911287276, { coligada: 90, da_lotufo: false, da_cota: false, fora_da_conta: true })],
+      pagamento_cota: cota(384863955, 0, 384863955) })] });
+    const linhas = within(screen.getByRole("region", { name: "Notas e pagamento" })).getAllByRole("row")
+      .map(l => (l.textContent ?? "").replace(/ /g, " "));
+    expect(linhas.slice(1)).toEqual(["NF 2351R$ 4.183.303,86em aberto", "NF 21fatura do consórcio, não entra na conta"]);
+    expect(screen.getByLabelText("A receber: R$ 3.848.639,55")).toBeTruthy();
+  });
+
   it("nota sem título no RM: a linha mostra “—”; a nota de outra coligada é marcada na tabela, sem dizer que é a fatura", () => {
     montar({ grupo: [com({ notas: [nota(1, "2351", 418330386, 0), nota(3, "21", 990529648, 911287276, 0, { coligada: 90, da_lotufo: false, da_cota: false })],
       pagamento_cota: cota(null, null, null) })] });

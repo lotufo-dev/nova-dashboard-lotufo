@@ -59,7 +59,11 @@ continua contando na nota).
   continuam só com a nota da coligada da entidade do contrato. No contrato em nome do consórcio, a nota da
   própria empresa, de tipo extra ou não, fica fora dessas contas com ou sem a chave. Para ela a chave vale no
   vínculo automático (pela saída do espelho), na nota repetida e na página Fechamento. Em obra
-  da própria empresa e na fatura do próprio consórcio, a chave vale em tudo.
+  da própria empresa e na fatura do próprio consórcio, a chave vale em tudo. Desde 17/11/2026 (#756, `docs/adr/0006`)
+  o a receber do Início e da lista de Obras segue a conta do Fechamento na medição de consórcio com a nota da empresa
+  ligada: ali a nota da empresa, de tipo extra declarado ou da lista geral, entra pelo que falta baixar nos títulos
+  dela. O faturado e o recebido do RM, as cobranças do RM sem medição e o recebimento pela baixa continuam só com a
+  nota da coligada da entidade do contrato.
 - A sincronização com o RM traz toda nota `2.2.NN` e os títulos dela, com ou sem a chave. O tipo decide o que
   conta, não o que entra no banco: declarar o tipo vale também para as notas já sincronizadas.
 - Ao aplicar o cadastro com a chave, o vínculo automático antigo de nota desse tipo, da coligada da entidade do

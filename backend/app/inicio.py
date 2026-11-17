@@ -20,6 +20,7 @@ import datetime
 from app import avisos, diretoria, tempo
 
 FORA = diretoria.FORA
+MAIS_DE_DIAS = 60       # a faixa "ha' mais de 60 dias" do a receber (as outras faixas sairam com a tela A receber, #748)
 
 
 def _dia_local(utc: str | None) -> datetime.date | None:
@@ -70,7 +71,13 @@ def _ciclo(conn, hoje: datetime.date) -> list[dict]:
     ms = diretoria._medicoes(conn)
     out = []
     for etapa, estados, campo in CICLO:
-        com_data = [(m, d) for m, d in ((m, diretoria._d(m[campo])) for m in ms if m["estado"] in estados) if d]
+        if etapa == "protocolado":
+            # #743: na obra sem o passo "Envio da nota", a nota emitida ja' e' a cobranca; a medicao esta' aqui, com
+            # a data da emissao da nota (`diretoria.cobrada_em`), e nao na etapa "Nota", que espera o protocolo
+            datadas = [(m, diretoria._d(diretoria.cobrada_em(m))) for m in ms if diretoria.espera_pagamento(m)]
+        else:
+            datadas = [(m, diretoria._d(m[campo])) for m in ms if m["estado"] in estados and not m["sem_protocolo"]]
+        com_data = [(m, d) for m, d in datadas if d]
         out.append({"etapa": etapa, "valor_centavos": sum(diretoria._cota(m) for m, _ in com_data),
                     "quantidade": len(com_data),
                     "mais_antigo_dias": max(0, max((hoje - d).days for _, d in com_data)) if com_data else None})
@@ -103,10 +110,11 @@ def _previsao(conn, hoje: datetime.date) -> dict:
     neste, proximo = diretoria._mes(hoje), diretoria._mes(hoje, 1)
     out = {k: {"valor_centavos": 0, "quantidade": 0} for k in ("neste_mes", "proximo_mes", "atrasado", "sem_previsao", "depois")}
     for m in ms:
-        protocolo = diretoria._d(m["protocolo_em"])
-        if m["estado"] not in diretoria.PROTOCOLADAS or not protocolo:
+        # as mesmas medicoes da etapa "Protocolado" de `_ciclo`; a que espera o pagamento sem protocolo (#743) nao tem
+        # data esperada (o prazo do orgao conta do protocolo, docs/adr/0007) e cai em `sem_previsao`
+        if not diretoria.espera_pagamento(m) or not diretoria._d(diretoria.cobrada_em(m)):
             continue
-        esperada = diretoria.esperada(m, prazos_)
+        esperada = None if m["sem_protocolo"] else diretoria.esperada(m, prazos_)
         if esperada is None:
             linha = "sem_previsao"
         else:
@@ -137,7 +145,9 @@ def _matriz(conn, hoje: datetime.date) -> dict:
         etapa = _ETAPA_DO_ESTADO.get(m["estado"])
         if etapa is None or m["competencia"] not in competencias:
             continue
-        if etapa == "protocolado":
+        if m["sem_protocolo"]:
+            etapa = "protocolado"       # #743: a nota emitida da obra sem o passo "Envio da nota" espera o pagamento
+        elif etapa == "protocolado":
             esperada = diretoria.esperada(m, prazos_)
             etapa = "atrasado" if esperada is not None and esperada < hoje else etapa
         chave, nova = (m["contrato_id"], m["competencia"]), (ETAPAS_MATRIZ.index(etapa), m["id"])
@@ -156,16 +166,18 @@ def _matriz(conn, hoje: datetime.date) -> dict:
 
 
 def _a_receber(conn, hoje: datetime.date) -> dict:
-    """O "protocolado" da Carteira: medicoes protocoladas e cobrancas do RM em aberto, na cota, com a faixa de
-    mais de 60 dias. Sem o total liberado (antes da conciliacao), nulo, como na Carteira."""
+    """O a receber, na cota, com a faixa de mais de 60 dias: a lista unica de `diretoria.a_receber_na_cota` (as
+    medicoes que esperam o pagamento, as cobrancas do RM em aberto e, em consorcio com a nota da propria empresa
+    ligada, o em aberto dela, #756), a mesma da lista de Obras. A idade conta do protocolo; na medicao sem protocolo
+    da obra sem o passo "Envio da nota" (#743) e na nota do RM, da emissao. Sem o total liberado (antes da
+    conciliacao), nulo."""
     liberado = diretoria._liberado(conn)
     if not liberado:
         return {"liberado": False, "valor_centavos": None, "mais_60_centavos": None}
-    ms = [m for m in diretoria._medicoes(conn) if m["estado"] in diretoria.PROTOCOLADAS]
-    todas = ms + diretoria._notas_em_aberto(conn)
-    faixas = diretoria._faixas(todas, hoje, True)
-    return {"liberado": True, "valor_centavos": diretoria._grupo_rec(todas)["valor_centavos"],
-            "mais_60_centavos": faixas["mais_60"]["valor_centavos"]}
+    todas = diretoria.a_receber_na_cota(conn)
+    datas = [(x, diretoria._d(x["protocolo_em"])) for x in todas]
+    return {"liberado": True, "valor_centavos": sum(diretoria._a_receber_cota(x) for x in todas),
+            "mais_60_centavos": sum(diretoria._a_receber_cota(x) for x, d in datas if d and (hoje - d).days > MAIS_DE_DIAS)}
 
 
 def _protocoladas_dia(conn) -> list[dict]:
