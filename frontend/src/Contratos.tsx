@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
 import AvisosPagina from "./AvisosPagina";
-import { IconeAlerta } from "./icones";
 import {
   ehDoContratante, escopoDaUrl, filtrarObras, gruposPorContratante, nomeDaObra, pctExecutado, pctPiso, posicaoDe, totaisDe,
   type ObraLista, type TotaisObras,
@@ -125,7 +124,7 @@ export default function Contratos({ ir, busca = {}, aba = "posicao" }: { ir: Ir;
 
         {vista === "posicao" && <>
         {!lista && !erro && <div className="vazio"><p>Carregando as obras…</p></div>}
-        {erro && <Falha><IconeAlerta className="icone icone--p" />{erro} Recarregue a página para tentar de novo.</Falha>}
+        {erro && <Falha>{erro} Recarregue a página para tentar de novo.</Falha>}
         {lista && (empresas === null || avisos === null) && avisosAbertos && (
           <Falha>Não foi possível carregar {[empresas === null && "os nomes das empresas", avisos === null && "os avisos"].filter(Boolean).join(" nem ")};
             recarregue a página para tentar de novo.</Falha>

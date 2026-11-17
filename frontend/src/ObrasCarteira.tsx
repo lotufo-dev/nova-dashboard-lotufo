@@ -20,10 +20,6 @@ import Falha from "./Falha";
 
 /** Issue #296: a curva S da carteira (obras ativas, cada uma na cota), com o previsto anterior a ultima repactuacao. */
 type PontoCarteira = { competencia: string; previsto_centavos: number; previsto_anterior_centavos: number; medido_centavos: number };
-type Carteira = {
-  saldo_centavos: number;
-  por_orgao: { orgao: string; saldo_centavos: number; vigente_centavos: number; medido_centavos: number }[];
-};
 type Obra = {
   contrato_id: number; seq: number; obra: string; contratante: string; empreita: string; direito: number;
   pi_va: number; faturados: number; saldo: number; status: string; termino: string | null;
@@ -33,7 +29,7 @@ type Obra = {
 type ReajusteObra = { contrato_id: number; obra: string; competencias: number; valor_centavos: number };
 export type Painel = {
   hoje: string; medido_ano: { ano: string; valor_centavos: number }; curva_carteira: PontoCarteira[];
-  carteira: Carteira; obras: Obra[]; avisos: Aviso[];
+  obras: Obra[]; avisos: Aviso[];
   reajustes_apostilamento?: { competencias: number; valor_centavos: number; obras: ReajusteObra[] };
 };
 

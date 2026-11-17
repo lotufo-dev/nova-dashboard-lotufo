@@ -45,6 +45,8 @@ type Mes = Numeros & { competencia: string; obras: ObraLinha[] };
 type EmAberto = {
   tipo_aberto: "nota" | "repasse" | "sem_nota"; nota_id: number | null; numero: string | null; contrato_id: number; obra: string;
   medicao_id: number; medicao_numero: number; tipo: string; competencia: string; protocolo_em: string | null;
+  /** #743: na obra sem o passo "Envio da nota" nao ha' protocolo; a espera conta da emissao da nota */
+  emitida_em?: string | null;
   valor_centavos: number; paga_em_parte: boolean;
 };
 /** (c) nota de cobranca em aberto no RM sem medicao ligada: sem competencia, fora dos meses e do total. */
@@ -299,7 +301,9 @@ function LinhaEmAberto({ e, ir }: { e: EmAberto; ir: Ir }) {
     <tr>
       {e.protocolo_em
         ? <th scope="row" className="fch-primeira fch-a-data num" data-rotulo="Protocolo">{fmtDataPura(e.protocolo_em)}</th>
-        : <th scope="row" className="fch-primeira fch-a-data fch-sem-data">sem data de protocolo</th>}
+        : e.emitida_em
+          ? <th scope="row" className="fch-primeira fch-a-data fch-sem-data">nota emitida em {fmtDataPura(e.emitida_em)}</th>
+          : <th scope="row" className="fch-primeira fch-a-data fch-sem-data">sem data de protocolo</th>}
       <td className="fch-a-obra">{e.obra}</td>
       <td className="fch-a-medicao">
         <Link className="link" para={{ tela: "medicao", obra: e.contrato_id, id: e.medicao_id }} ir={ir}>

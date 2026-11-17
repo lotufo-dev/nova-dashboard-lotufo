@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
-import { IconeAlerta, IconeCadeado } from "./icones";
+import { IconeCadeado } from "./icones";
 import { brl } from "./Medicoes";
 import { instrumentosDaObra, type AditivoApi, type InstrumentoCadastro, type InstrumentoPrazo } from "./obra";
 import { Link } from "./Link";
@@ -78,7 +78,7 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
         <h2 className="cartao__titulo" id="titulo-instrumentos">Instrumentos</h2>
       </div>
 
-      {erro && <div className="cartao__corpo"><Falha><IconeAlerta className="icone icone--p" />{erro}</Falha></div>}
+      {erro && <div className="cartao__corpo"><Falha>{erro}</Falha></div>}
       {erroCadastro && <div className="cartao__corpo"><Falha>Não foi possível ler os instrumentos do cadastro.</Falha></div>}
 
       {!carregando && !erro && !erroCadastro && linhas.length === 0 && (

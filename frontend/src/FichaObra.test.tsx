@@ -13,14 +13,13 @@ const FICHA: Ficha = {
   ultima_medicao: { id: 15, titulo: "15ª Medição", rotulo: "15ª", competencia: "2026-09", valor_centavos: 5000011,
     recebida_em: "2026-10-16", dias_apos_nota: 14 },
   em_andamento: { id: 16, titulo: "16ª Medição", rotulo: "16ª", competencia: "2026-10", valor_centavos: 6000022,
-    etapa: "Pagamento", desde: "2026-11-05", outras: 0 },
+    etapa: "Pagamento", desde: "2026-11-05" },
   // ritmo 50.000,00/mes para 187.654,34 de saldo: conclusao depois do fim da execucao
-  ritmo: { ritmo_centavos: 5000000, saldo_centavos: 18765434, conclusao: "2027-03-08", execucao_fim: "2026-11-18",
+  ritmo: { ritmo_centavos: 5000000, conclusao: "2027-03-08",
     situacao: "atrasa", dias_alem: 110 },
   // #661: so' o que e' da obra; a certidao da empresa saiu daqui
   vencimentos: [
-    { chave: "execucao", rotulo: "Fim da execução", data: "2026-11-18", dias: 12, nivel: "critico" },
-    { chave: "vigencia", rotulo: "Fim da vigência", data: "2027-02-16", dias: 102, nivel: "normal" }],
+    { chave: "execucao", rotulo: "Fim da execução", data: "2026-11-18", dias: 12, nivel: "critico" }],
 };
 
 const regiao = (nome: string) => screen.getByRole("region", { name: nome });

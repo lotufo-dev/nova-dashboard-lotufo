@@ -33,7 +33,7 @@ const farol = (contrato_id: number, obra: string, f: "verde" | "atencao" | "verm
   farol: f, motivo: "", motivos: [] });
 const PAINEL = { hoje: "2026-09-24", medido_ano: { ano: "2026", valor_centavos: 100_00 },
   curva_carteira: [{ competencia: "2026-09", previsto_centavos: 200_00, previsto_anterior_centavos: 200_00, medido_centavos: 150_00 }],
-  carteira: { saldo_centavos: 0, por_orgao: [] }, avisos: [],
+  avisos: [],
   obras: [farol(1, "Estações BRT", "vermelho"), farol(2, "MT-388", "verde"), farol(3, "Granito", "atencao")],
   reajustes_apostilamento: { competencias: 2, valor_centavos: 300_00, obras: [{ contrato_id: 2, obra: "MT-388", competencias: 2, valor_centavos: 300_00 }] } };
 

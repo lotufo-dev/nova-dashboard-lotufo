@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { IconeAlerta, IconeSeta, IconeSino } from "./icones";
+import { IconeSeta, IconeSino } from "./icones";
 import Selo from "./Selo";
 import { semRSOrfao } from "./avisos";
 import { brl } from "./Medicoes";
@@ -116,8 +116,7 @@ export default function Alertas({ itens, ir, titulo = "Avisos", limite = LIMITE,
 
       {itens === undefined ? null : itens === null ? (
         <div className="cartao__corpo">
-          <Falha><IconeAlerta className="icone icone--p" />
-            Não foi possível verificar os avisos. Recarregue a página para tentar de novo.</Falha>
+          <Falha>Não foi possível verificar os avisos. Recarregue a página para tentar de novo.</Falha>
         </div>
       ) : itens.length === 0 ? (
         <div className="vazio vazio--curto">

@@ -288,8 +288,9 @@ def sugestao_dias(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
 
 
 def ritmo_e_prazo(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict:
-    """Issue #655: o cartao "Ritmo e prazo" da pagina da obra. E' a conta de `sugestao_dias`, so' mostrada: ritmo
-    mensal, saldo a executar, conclusao estimada nesse ritmo e fim da execucao vigente. `situacao` e' "no_prazo"
+    """Issue #655: o ritmo do painel "Prazo" da pagina da obra. E' a conta de `sugestao_dias`, so' mostrada: ritmo
+    mensal e conclusao estimada nesse ritmo (o saldo a executar e o fim da execucao sairam daqui com os cartoes que
+    os mostravam: a tela os tem no topo e na linha do tempo). `situacao` e' "no_prazo"
     (a conclusao cai ate' o fim da execucao) ou "atrasa", com `dias_alem` (os dias que faltariam); None quando a
     conta nao fecha (sem fim de execucao, sem saldo ou sem medicao na janela). Acima do teto do pedido (`TETO_DIAS`)
     a conta tambem nao fecha: ritmo tao baixo (obra que mal comecou ou quase parada) nao representa a obra, e uma
@@ -303,9 +304,8 @@ def ritmo_e_prazo(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
     # #662: sem prazo de execucao conhecido nao ha' com o que comparar a conclusao (a conta nao fecha); a data fica
     if dias is not None and execucao_sem_prazo(conn, contrato_id, hoje):
         conclusao = dias = None
-    return {"ritmo_centavos": s["ritmo_centavos"], "saldo_centavos": s["saldo_centavos"],
+    return {"ritmo_centavos": s["ritmo_centavos"],
             "conclusao": conclusao.isoformat() if conclusao and dias is not None else None,
-            "execucao_fim": s["execucao_fim"],
             "situacao": None if dias is None else "atrasa" if dias > 0 else "no_prazo",
             "dias_alem": dias if dias is not None and dias > 0 else None}
 

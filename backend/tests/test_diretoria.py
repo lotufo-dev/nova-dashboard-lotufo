@@ -3,7 +3,6 @@ lista de Obras (as telas Carteira e A receber sairam na #748)."""
 import datetime
 import json
 import pathlib
-import sys
 
 import pytest
 
@@ -156,65 +155,53 @@ def test_medido_do_ano_no_resumo_na_cota(cenario):
         "ano": "2026", "valor_centavos": 800_000 + 1_000_000 + 700_000 + 300_000 + 500_000 + 200_000_000 + 5_000_000}
 
 
-def test_carteira_saldo_a_executar_na_cota(cenario):
+def _saldo_das_obras(c):
+    """O saldo a executar de cada obra na tabela de Obras (QDOP na tela), na cota."""
+    return {o["contrato_id"]: o["saldo"] for o in diretoria.painel(c, HOJE)["obras"]}
+
+
+def test_saldo_a_executar_da_tabela_de_obras_na_cota(cenario):
+    """O bloco `carteira` (saldo total e por contratante) saiu com a tela Carteira: o painel nao o calcula mais."""
     c, ids = cenario
-    k = diretoria.painel(c, HOJE)["carteira"]
+    p = diretoria.painel(c, HOJE)
+    assert "carteira" not in p
     # proprio: 1.000.000,00 - 39.000,00 medidos; consorcio: 50% de (12.000.000,00 - 4.010.000,00). #262 (gate Sol S2):
     # #561: o espelho gerado (10 mil, propria) e o enviado (10 mil, consorcio) medem, como em `paineis.saldo`
-    assert k["saldo_centavos"] == 96_100_000 + 399_500_000
-    assert set(k) == {"saldo_centavos", "por_orgao"}        # #748: ritmo e meses de producao sairam (sem tela)
+    assert _saldo_das_obras(c) == {ids["propria"]: 96_100_000, ids["consorcio"]: 399_500_000}
 
 
-def test_carteira_mede_execucao_e_projeto_nos_estados_que_medem(cenario):
-    """#262 (gate Sol S2): saldo e medido da carteira contam o que `paineis.saldo` conta: execucao e projeto (#742) a
+def test_saldo_da_tabela_mede_execucao_e_projeto_nos_estados_que_medem(cenario):
+    """#262 (gate Sol S2): o saldo da tabela de Obras conta o que `paineis.saldo` conta: execucao e projeto (#742) a
     partir do envio da planilha/carta (#561). Planilha gerada (ainda nao enviada), projeto cancelado ou desistido e
-    reajuste nao reduzem o saldo. O ritmo e os meses de producao da carteira sairam com a tela (#748); o ritmo so' com
-    a execucao (decisao do dono de 16/11/2026) fica no da obra (`prazos`, test_medido_da_obra.py)."""
+    reajuste nao reduzem o saldo."""
     c, ids = cenario
-    antes = diretoria.painel(c, HOJE)["carteira"]
+    antes = _saldo_das_obras(c)
     for numero, tipo, estado in ((51, "execucao", "planilha_gerada"), (53, "projeto", "cancelada"),
                                  (54, "projeto", "desistida"), (55, "reajuste", "protocolada")):
         c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
                   "VALUES (?, ?, ?, '2026-08', ?, 4000001)", (ids["propria"], numero, tipo, estado))
     c.commit()
-    depois = diretoria.painel(c, HOJE)["carteira"]
-    assert depois["saldo_centavos"] == antes["saldo_centavos"]
-    assert ({o["orgao"]: o["medido_centavos"] for o in depois["por_orgao"]}
-            == {o["orgao"]: o["medido_centavos"] for o in antes["por_orgao"]})
+    assert _saldo_das_obras(c) == antes
     # o projeto recebido conta no medido e no saldo (#742): 30.000,01 (centavo impar)
     c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
               "VALUES (?, 50, 'projeto', '2026-08', 'recebida', 3000001)", (ids["propria"],))
     c.commit()
-    com_projeto = diretoria.painel(c, HOJE)["carteira"]
-    assert com_projeto["saldo_centavos"] == antes["saldo_centavos"] - 3_000_001
-    medido ={o["orgao"]: o["medido_centavos"] for o in com_projeto["por_orgao"]}
-    assert medido["SINFRA"] == {o["orgao"]: o["medido_centavos"] for o in antes["por_orgao"]}["SINFRA"] + 3_000_001
-    antes = com_projeto
+    assert _saldo_das_obras(c) == {**antes, ids["propria"]: antes[ids["propria"]] - 3_000_001}
     # e a execucao protocolada conta: 1,01 (centavo impar) a menos no saldo da propria
     c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
               "VALUES (?, 52, 'execucao', '2026-08', 'protocolada', 101)", (ids["propria"],))
     c.commit()
-    assert diretoria.painel(c, HOJE)["carteira"]["saldo_centavos"] == antes["saldo_centavos"] - 101
+    assert _saldo_das_obras(c)[ids["propria"]] == antes[ids["propria"]] - 3_000_001 - 101
 
 
-def test_carteira_saldo_exclui_o_aditivo_de_reajuste(cenario):
+def test_saldo_da_tabela_exclui_o_aditivo_de_reajuste(cenario):
     """#262: o aditivo de reajuste entra no vigente do contrato, mas o saldo a executar e' a precos iniciais."""
     c, ids = cenario
     c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza) "
               "VALUES (?, 'valor', 50_000_001, 'assinado', '2026-03-01', 'reajuste')", (ids["consorcio"],))
     c.commit()
-    k = diretoria.painel(c, HOJE)["carteira"]
-    assert k["saldo_centavos"] == 96_100_000 + 399_500_000
-    por = {o["orgao"]: o for o in k["por_orgao"]}
-    assert por["MTPAR"]["vigente_centavos"] == 600_000_000      # 50% de 12.000.000,00, sem o reajuste
-
-
-def test_carteira_por_orgao_traz_vigente_e_medido_para_o_cartao(cenario):
-    c, ids = cenario
-    por = {o["orgao"]: o for o in diretoria.painel(c, HOJE)["carteira"]["por_orgao"]}
-    # 06/11/2026: o cartao e' do contratante ("SINFRA" junta as superintendencias), nao de cada orgao do cadastro
-    assert (por["SINFRA"]["vigente_centavos"], por["SINFRA"]["medido_centavos"]) == (100_000_000, 3_900_000)
-    assert (por["MTPAR"]["vigente_centavos"], por["MTPAR"]["medido_centavos"]) == (600_000_000, 200_500_000)
+    o = {x["contrato_id"]: x for x in diretoria.painel(c, HOJE)["obras"]}[ids["consorcio"]]
+    assert (o["saldo"], o["pi_va"]) == (399_500_000, 600_000_000)      # 50% de 12.000.000,00, sem o reajuste
 
 
 def test_protocolada_ha_200_dias_nao_gera_aviso(cenario):
@@ -738,10 +725,14 @@ def test_tipo_extra_vale_pela_medicao_a_que_a_nota_esta_ligada(cenario):
 
 
 def test_tipo_extra_nao_muda_a_regra_da_coligada_no_consorcio(cenario):
-    """Segunda revisao da PR #764: no a receber e no faturado do RM so' conta a nota da coligada da entidade do
-    contrato. No contrato em nome do consorcio que declara o 2.2.03, a nota da propria empresa (outra coligada) desse
-    tipo continua fora das duas somas, ligada a uma medicao dele ou solta, com titulo aberto e com baixa: os numeros
-    sao os mesmos com e sem a chave. A fatura do consorcio (a coligada dele) do mesmo tipo e' a que entra."""
+    """Segunda revisao da PR #764: no faturado e no recebido do RM, nas cobrancas do RM em aberto e no a receber da
+    pagina da obra (valor cheio) so' conta a nota da coligada da entidade do contrato. No contrato em nome do
+    consorcio que declara o 2.2.03, a nota da propria empresa (outra coligada) desse tipo continua fora dessas
+    contas, ligada a uma medicao dele ou solta, com titulo aberto e com baixa. A fatura do consorcio (a coligada
+    dele) do mesmo tipo e' a que entra.
+    Issue #756 (docs/adr/0006): com a chave, a nota da empresa LIGADA a' medicao passa a ser cobranca nela, e o a
+    receber do Inicio e da lista de Obras (na cota) segue a conta do Fechamento: a medicao que o orgao ja' pagou
+    entra pelo que falta baixar nos titulos da nota da empresa (o repasse). A solta continua fora."""
     c, ids = cenario
     k = ids["consorcio"]
     c.execute("UPDATE entidades SET coligada_rm=12 WHERE chave='cons'")
@@ -757,7 +748,11 @@ def test_tipo_extra_nao_muda_a_regra_da_coligada_no_consorcio(cenario):
     sem_a_chave = retrato()
     assert sem_a_chave[:3] == ([], 700_000 + 300_000, ({}, {}))
     _tipos_extras(c, k, "2.2.03")
-    assert retrato() == sem_a_chave
+    com_a_chave = retrato()
+    assert com_a_chave[0] == sem_a_chave[0] and com_a_chave[2:5] == sem_a_chave[2:5]
+    # o repasse sem baixa da nota ligada: dos dois titulos, falta o de 1.500.000,01 (ja' e' a cota: sem o percentual)
+    assert com_a_chave[1] == sem_a_chave[1] + 150_000_001
+    assert com_a_chave[5] == {**sem_a_chave[5], k: sem_a_chave[5].get(k, 0) + 150_000_001}
     assert diretoria.notas_gemeas_de_tipo_extra(c, k, {"2.2.03"}) == []
     # a fatura do proprio consorcio, do mesmo tipo, entra (na cota: 333.333 x 50% = 166.666,5 -> 166.667)
     _nota_do_rm(c, 9823, "2.2.03", 333_333, [(333_333, 0, 0, None)], coligada=12)
@@ -869,30 +864,29 @@ def _medir(c, contrato, numero, estado, valor, tipo="execucao", comp="2026-08"):
 def _saldos(c):
     p = diretoria.painel(c, HOJE)
     tabela = {o["contrato_id"]: o["saldo"] for o in p["obras"]}
-    carteira = {o["orgao"]: o["saldo_centavos"] for o in p["carteira"]["por_orgao"]}
-    return tabela, carteira, {o["contrato_id"]: o for o in p["obras"]}
+    return tabela, {o["contrato_id"]: o for o in p["obras"]}
 
 
-def test_tabela_de_obras_mede_como_a_carteira(cenario):
-    """#262 (revisao, rodada 3): o saldo da tabela de obras desconta o mesmo medido da carteira, logo acima na tela
-    (`paineis.mede_no_medido`): projeto recebido abate o saldo (#742); execucao com nota emitida abate (#561)."""
+def test_tabela_de_obras_mede_execucao_e_projeto(cenario):
+    """#262 (revisao, rodada 3): o saldo da tabela de obras desconta o medido de `paineis.mede_no_medido`
+    (a carteira, que usava o mesmo medido, saiu com a tela dela): projeto recebido abate o saldo (#742); execucao com nota emitida abate (#561)."""
     c, ids = cenario
     _medir(c, ids["propria"], 60, "recebida", 50_000_000, tipo="projeto")
     _medir(c, ids["propria"], 61, "nota_emitida", 3_000_001)
     c.commit()
-    tabela, carteira, obras = _saldos(c)
+    tabela, obras = _saldos(c)
     # 1.000.000,00 - 39.000,00 - 500.000,00 (projeto) - 30.000,01
-    assert tabela[ids["propria"]] == carteira["SINFRA"] == 43_099_999
-    assert tabela[ids["consorcio"]] == carteira["MTPAR"] == 399_500_000
+    assert tabela[ids["propria"]] == 43_099_999
+    assert tabela[ids["consorcio"]] == 399_500_000
     # os percentuais na mesma base: medido (execucao e projeto) sobre o vigente de execucao
     assert obras[ids["propria"]]["pct_recebido"] == 56_900_001 / 100_000_000
     assert obras[ids["propria"]]["pct_a_receber"] == 43_099_999 / 100_000_000
     assert obras[ids["propria"]]["faturados"] == 2_900_000 + 50_000_000 + 3_000_001   # a coluna do QDOP fica
 
 
-def test_tabela_e_carteira_leem_as_mesmas_medicoes(cenario, monkeypatch):
-    """#262 (gate Sol, rodada 3): a tabela de obras tira o medido da mesma leitura de medicoes da carteira. Uma
-    medicao que passa de planilha gerada a protocolada no meio do painel nao deixa os dois saldos diferentes."""
+def test_tabela_le_as_medicoes_uma_vez_so(cenario, monkeypatch):
+    """#262 (gate Sol, rodada 3): a tabela de obras tira o medido da leitura de medicoes do comeco do painel. Uma
+    medicao que passa de planilha gerada a protocolada no meio do painel nao muda o saldo daquela resposta."""
     c, ids = cenario
     _medir(c, ids["propria"], 60, "planilha_gerada", 5_000_000)
     c.commit()
@@ -903,61 +897,18 @@ def test_tabela_e_carteira_leem_as_mesmas_medicoes(cenario, monkeypatch):
         conn.commit()
         return original(conn, *a, **k)
     monkeypatch.setattr(avisos, "listar", protocola_no_meio)
-    tabela, carteira, _ = _saldos(c)
-    assert tabela[ids["propria"]] == carteira["SINFRA"] == 96_100_000
+    tabela, _ = _saldos(c)
+    assert tabela[ids["propria"]] == 96_100_000
 
 
-def test_medido_da_tabela_e_da_carteira_vale_o_atestado(cenario):
+def test_medido_da_tabela_vale_o_atestado(cenario):
     """#262 (gate Sol, rodada 3): com atestado, o medido de execucao e' o atestado, nao o protocolado."""
     c, ids = cenario
     _medir(c, ids["propria"], 60, "protocolada", 10_000_000)
     c.execute("UPDATE medicoes SET valor_atestado_centavos=3000001 WHERE contrato_id=? AND numero=60", (ids["propria"],))
     c.commit()
-    tabela, carteira, _ = _saldos(c)
-    assert tabela[ids["propria"]] == carteira["SINFRA"] == 96_100_000 - 3_000_001
-
-
-def test_carteira_usa_o_percentual_do_vigente_que_a_tabela_reaproveita(cenario, monkeypatch):
-    """#262 (gate Sol, rodada 3): a carteira aplica a cota com o percentual do mesmo `contratos.vigente` que a tabela
-    reaproveita, nao com o da linha lida antes. O percentual do consorcio muda de 50% para 40% logo depois da lista
-    de contratos da carteira: as duas mostram 40% de (12.000.000,00 - 4.010.000,00) = 3.196.000,00."""
-    c, ids = cenario
-    original = diretoria._ativos
-
-    def muda_depois_da_lista(conn):
-        linhas = original(conn)
-        if sys._getframe(1).f_code.co_name in ("_carteira", "<genexpr>") and not getattr(muda_depois_da_lista, "feito", False):
-            conn.execute("UPDATE contratos SET percentual_direito_bp=4000 WHERE id=?", (ids["consorcio"],))
-            conn.commit()
-            muda_depois_da_lista.feito = True
-        return linhas
-    monkeypatch.setattr(diretoria, "_ativos", muda_depois_da_lista)
-    p = diretoria.painel(c, HOJE)
-    assert muda_depois_da_lista.feito
-    o = {x["contrato_id"]: x for x in p["obras"]}[ids["consorcio"]]
-    por = {x["orgao"]: x for x in p["carteira"]["por_orgao"]}["MTPAR"]
-    assert o["saldo"] == por["saldo_centavos"] == 319_600_000
-    assert o["pi_va"] == por["vigente_centavos"] == 480_000_000
-
-
-def test_aditivo_entre_a_carteira_e_as_obras_nao_muda_a_base(cenario, monkeypatch):
-    """#262 (gate Sol, rodada 3): carteira e tabela usam o mesmo vigente do painel. Um aditivo de execucao de
-    2.400.000,00 que chega depois da carteira nao entra na tabela."""
-    c, ids = cenario
-    _repactuar_consorcio(c, ids["consorcio"])
-    original = diretoria._curva_carteira
-
-    def aditivo_no_meio(conn, *a, **k):              # roda depois da carteira e antes das obras
-        conn.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza) "
-                     "VALUES (?, 'valor', 240000000, 'assinado', '2026-03-01', 'execucao')", (ids["consorcio"],))
-        conn.commit()
-        return original(conn, *a, **k)
-    monkeypatch.setattr(diretoria, "_curva_carteira", aditivo_no_meio)
-    p = diretoria.painel(c, HOJE)
-    o = {x["contrato_id"]: x for x in p["obras"]}[ids["consorcio"]]
-    por = {x["orgao"]: x for x in p["carteira"]["por_orgao"]}["MTPAR"]
-    assert o["pi_va"] == por["vigente_centavos"] == 600_000_000
-    assert o["saldo"] == por["saldo_centavos"] == 399_500_000
+    tabela, _ = _saldos(c)
+    assert tabela[ids["propria"]] == 96_100_000 - 3_000_001
 
 
 def test_painel_le_uma_fotografia_do_banco(cenario, monkeypatch):
@@ -1003,8 +954,8 @@ def test_saldo_da_tabela_aplica_a_cota_uma_vez(cenario):
     c, ids = cenario
     _medir(c, ids["consorcio"], 60, "protocolada", 1)
     c.commit()
-    tabela, carteira, _ = _saldos(c)
-    assert tabela[ids["consorcio"]] == carteira["MTPAR"] == 399_500_000
+    tabela, _ = _saldos(c)
+    assert tabela[ids["consorcio"]] == 399_500_000
 
 
 def test_faturado_e_recebido_reais_saem_do_rm_por_mes_na_cota(cenario):
@@ -1075,7 +1026,8 @@ def test_nota_do_rm_sem_medicao_lancada_entra_no_medido_da_diretoria(cenario):
     assert depois["medido_ano"]["valor_centavos"] - antes["medido_ano"]["valor_centavos"] == cota
     # o saldo a executar cai o mesmo tanto (no consorcio, a cota e' aplicada uma vez sobre o saldo cheio: o meio centavo
     # do 1.000.001 cai do outro lado); a curva da carteira ganha o medido de 07/2026
-    assert antes["carteira"]["saldo_centavos"] - depois["carteira"]["saldo_centavos"] == 900_001 + 500_000
+    saldo = lambda p: sum(o["saldo"] for o in p["obras"])
+    assert saldo(antes) - saldo(depois) == 900_001 + 500_000
     curva = lambda p: {s["competencia"]: s["medido_centavos"] for s in p["curva_carteira"]}
     assert curva(depois)["2026-07"] - curva(antes)["2026-07"] == cota
     # na tabela de obras (QDOP na tela), a nota sem medicao e' faturado e baixa o saldo da obra
