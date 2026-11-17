@@ -228,12 +228,12 @@ async function entrar(contexto, perfil, largura) {
     await pagina.locator("#conteudo").waitFor({ state: "visible", timeout: ESPERA });
     entrou = true;
     // item do menu sem tela na lista reprova: e' o que mantem `telas.mjs` em dia quando o menu muda
-    const menu = await pagina.locator("nav.trilho a.trilho__item").evaluateAll(as => as.map(a => new URL(a.href).pathname));
+    const menu = await pagina.locator("nav.menu a.menu__item").evaluateAll(as => as.map(a => new URL(a.href).pathname));
     const cobertos = telasDoPerfil(perfil).map(t => t.menu ?? t.caminho);
     for (const item of menu.filter(m => !cobertos.includes(m))) {
       problemas.push(`o menu de ${perfil} tem ${item} e scripts/prova/telas.mjs não tem tela para ele`);
     }
-    if (menu.length === 0) problemas.push("o menu não tem nenhum item (mudou o seletor nav.trilho a.trilho__item?)");
+    if (menu.length === 0) problemas.push("o menu não tem nenhum item (mudou o seletor nav.menu a.menu__item?)");
   } catch (e) {
     problemas.push(`não entrou como ${perfil}: ${String(e.message ?? e).split("\n")[0]}`);
     if (capturas !== "nenhuma") {
