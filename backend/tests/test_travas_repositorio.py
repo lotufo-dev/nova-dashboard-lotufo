@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 from pathlib import Path
 
@@ -166,8 +167,21 @@ def _implementacoes():
     return [sh, ps]
 
 
+@pytest.fixture(scope="session")
+def cache_do_pwsh(tmp_path_factory):
+    """Pasta de cache do PowerShell so' deste processo de teste. O pwsh grava em `$XDG_CACHE_HOME/powershell` o
+    perfil de arranque do .NET e o le de volta ao abrir; com `-n 4`, quatro pwsh abrindo juntos na mesma pasta
+    (`~/.cache`) leem o arquivo que outro esta' gravando. Cada trabalhador do xdist roda os seus em fila, entao uma
+    pasta por trabalhador basta."""
+    return tmp_path_factory.mktemp("cache-pwsh")
+
+
+# O pwsh que morre ao abrir (SIGABRT com esta excecao do .NET, antes de ler o script) nao diz nada sobre o gancho
+ABORTO_DO_PWSH = "The given assembly name was invalid"
+
+
 @pytest.fixture(params=_implementacoes())
-def barrar(request):
+def barrar(request, cache_do_pwsh):
     comando_do_hook = request.param
 
     def rodar(cwd, comando, entrada=None):
@@ -175,8 +189,13 @@ def barrar(request):
             entrada = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": str(cwd),
                                   "tool_input": {"command": comando}})
         env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
-        return subprocess.run(comando_do_hook, input=entrada, env=env, capture_output=True, text=True,
-                              encoding="utf-8", timeout=60)
+        env["XDG_CACHE_HOME"] = str(cache_do_pwsh)
+        r = subprocess.run(comando_do_hook, input=entrada, env=env, capture_output=True, text=True,
+                           encoding="utf-8", timeout=60)
+        if comando_do_hook[0] == PWSH and r.returncode == -signal.SIGABRT and ABORTO_DO_PWSH in r.stderr:
+            pytest.skip("o pwsh abortou ao abrir, antes de rodar o gancho (excecao do .NET ao carregar assembly, "
+                        "vista na CI com varios pwsh em paralelo); a variante sh cobre a mesma regra")
+        return r
     return rodar
 
 
