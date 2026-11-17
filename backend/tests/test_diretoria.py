@@ -137,13 +137,14 @@ def test_total_a_receber_escondido_ate_liberar(cenario):
     c, ids = cenario
     assert diretoria.a_receber_por_obra(c, na_cota=True) is None
     f = fechamento.fechamento(c)
-    assert f["total_a_receber_liberado"] is False and f["em_aberto_centavos"] is None
-    assert [e["valor_centavos"] for e in f["em_aberto"]] == [None, None]
+    assert f["total_a_receber_liberado"] is False and f["em_aberto"] == []
+    assert all(t["em_aberto_centavos"] is None and t["recebido_centavos"] is None for t in f["por_ano"].values())
     ids["liberar"]()
     assert diretoria.a_receber_por_obra(c, na_cota=True)[ids["propria"]] == 1_000_000
     f = fechamento.fechamento(c)
     # as protocoladas 14 (7 mil) e 15 (3 mil) nao tem nota ligada: entram pelo valor da medicao
-    assert f["em_aberto_centavos"] == 1_000_000 and {e["tipo_aberto"] for e in f["em_aberto"]} == {"sem_nota"}
+    assert sum(t["em_aberto_centavos"] for t in f["por_ano"].values()) == 1_000_000
+    assert {e["tipo_aberto"] for e in f["em_aberto"]} == {"sem_nota"}
 
 
 def test_medido_do_ano_no_resumo_na_cota(cenario):

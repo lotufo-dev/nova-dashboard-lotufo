@@ -33,7 +33,10 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 - 2026-11-16 #748: com a aba Custo fora, `custo_obra.custo_da_obra` ainda calcula o detalhe por grupo e o item-chave (`itens_chave`) que nenhuma tela mostra; só o custo por competência vira coluna. Enxugar ou dar tela.
 - 2026-11-16 #748: CSS sem uso depois da saída de A receber e Carteira em `tokens.css` (`.tabela.a-receber`, `.custo__*`, `.cart-topo`, `.cart-kpis--quebra`); limpar na etapa das regras de design.
 - 2026-11-16 #748, depois de juntar o master na `redesenho`: a medição com nota emitida da obra sem o passo "Envio da nota" (o órgão não recebe protocolo da nota) tem de entrar no em aberto do Fechamento a partir da emissão da nota; hoje `fechamento.py` só conta a partir do protocolo.
-- 2026-11-16 #748, decisões do dono pendentes no Fechamento: o que fazer com as notas sem vínculo (medição sem nota ligada e nota sem medição ligada) e se "recebido" é bruto por competência (como está, `fechamento._recebimento`) ou líquido pelo mês do pagamento.
+- 2026-11-16 #748: o Início e a lista de Obras calculam o a receber por outra regra (`diretoria._notas_em_aberto` e as medições protocoladas pelo valor da medição) e mostram total diferente do em aberto do Fechamento (`fechamento.py`); o produto responde à mesma pergunta com dois números.
+- 2026-11-16 #748: a cobertura do vínculo (`fechamento._cobertura`) conta como coberta a medição com qualquer nota ligada, mesmo quando as notas ligadas somam bem menos que a medição; o aviso do ano não mostra essa diferença.
+- 2026-11-16 #748: a nota com título em aberto no RM ligada a medição de competência anterior a 2025 já recebida não aparece no Fechamento (a medição está fora dos anos da página e a nota não é "sem medição ligada").
+- 2026-11-16 #748: no Fechamento, a medição paga sem nota ligada não tem marca na linha dela (aparece com aprovado, sem protocolado nem recebido); só o aviso de cobertura do ano diz.
 - 2026-11-16 #748: a tabela de medições da obra (`tabela--grade`, larguras fixas) já não cabia na caixa a 1024 e a 1440 antes da coluna de custo; o próximo passo quebra em várias linhas. Rever no redesenho da página da obra.
 
 ## Cadastro (dono)

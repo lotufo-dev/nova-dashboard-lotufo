@@ -2,7 +2,11 @@
    o selo, o contador e a caixa de aviso sao pecas de base de tokens.css. Cor, familia, tamanho, espaco e borda so'
    por variavel. */
 
+/* A pagina e' o container: os blocos mudam de forma pela largura que sobra para o conteudo (com o menu lateral aberto
+   ou recolhido), e nao pela largura da janela. Tres faixas: larga, media (ate' 900 px: a 1024 com o menu aberto) e
+   estreita (ate' 560 px: o celular). */
 .fch {
+  container: fch-pagina / inline-size;
   min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); row-gap: var(--espaco-entre-blocos);
   color: var(--cor-tinta); font-family: var(--fonte-texto); font-size: var(--texto-corpo); line-height: var(--entrelinha);
 }
@@ -30,7 +34,7 @@
 
 /* os cinco numeros do ano: so' rotulo e valor, sem moldura, como os numeros do mes da Inicio */
 .fch-numeros {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr)); gap: var(--espaco-m) var(--espaco-g);
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--espaco-m) var(--espaco-g);
   margin: 0;
 }
 .fch-numero { min-width: 0; }
@@ -50,7 +54,7 @@
 .fch-painel__cab h2 { margin: 0; font-size: var(--texto-titulo-sub); }
 .fch-painel__cab .fch-botoes { margin-left: auto; }
 
-/* tabela: a da fundacao, com a primeira coluna presa a' esquerda quando a caixa rola (celular) */
+/* tabela: a da fundacao, com a primeira coluna presa a' esquerda quando a caixa rola */
 .fch .fch-tabela th, .fch .fch-tabela td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
 .fch .fch-tabela th:first-child, .fch .fch-tabela td:first-child { padding-left: var(--espaco-g); }
 .fch .fch-tabela th:last-child, .fch .fch-tabela td:last-child { padding-right: var(--espaco-g); }
@@ -78,7 +82,7 @@
 }
 .fch-abre[aria-expanded="true"] .fch-abre__seta { transform: rotate(90deg); }
 
-/* variante A: obra e medicao como linhas da mesma tabela, recuadas */
+/* obra e medicao como linhas da mesma tabela, recuadas */
 .fch-linha--mes > th, .fch-linha--mes > td { font-weight: var(--peso-forte); }
 .fch .fch-tabela .fch-linha--obra > th, .fch .fch-tabela .fch-linha--obra > td,
 .fch .fch-tabela .fch-linha--medicao > th, .fch .fch-tabela .fch-linha--medicao > td { background: var(--cor-papel-sombreado); }
@@ -89,20 +93,6 @@
 
 .fch-notas { list-style: none; margin: var(--espaco-mini) 0 0; padding: 0; display: grid; gap: var(--espaco-mini); }
 .fch-notas li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-pp); font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
-
-/* variante B: o mes abre um quadro com uma tabela curta por obra */
-.fch-quadro > td { padding: 0; background: var(--cor-papel-sombreado); }
-.fch-quadro__corpo { display: grid; gap: var(--espaco-m); padding: var(--espaco-m) var(--espaco-g) var(--espaco-m) var(--espaco-xg); }
-.fch-quadro__obra { min-width: 0; }
-.fch-quadro__titulo { margin: 0 0 var(--espaco-pp); font-size: var(--texto-meta); }
-.fch-quadro__tabela { background: var(--cor-superficie); }
-.fch-quadro__tabela th:first-child, .fch-quadro__tabela td:first-child { padding-left: var(--espaco-p); }
-.fch-quadro__tabela th:last-child, .fch-quadro__tabela td:last-child { padding-right: var(--espaco-p); }
-.fch-quadro__tabela tbody th { text-align: left; font-weight: var(--peso-normal); }
-
-/* variante B da comparacao: o mesmo mes do outro ano embaixo do valor */
-.fch-outro { display: block; margin-top: var(--espaco-traco); color: var(--cor-texto-secundario); font-size: var(--texto-mini); font-weight: var(--peso-normal); }
-.fch-acumulado > th, .fch-acumulado > td { font-weight: var(--peso-medio); color: var(--cor-texto-secundario); border-top: var(--borda-linha); }
 
 /* a base dos numeros, uma vez, sob o titulo do grupo */
 .fch-base { margin: calc(var(--espaco-entre-blocos) * -0.5) 0 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
@@ -116,39 +106,104 @@
   background: var(--cor-papel-sombreado); font-weight: var(--peso-forte); border-top: var(--borda-linha);
 }
 .fch-soltas { border-top: var(--regua-secao); margin-top: var(--espaco-m); padding-top: var(--espaco-m); }
+.fch-soltas__base { margin: 0 var(--espaco-g) var(--espaco-m); color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .fch-soltas__titulo { margin: 0 var(--espaco-g) var(--espaco-p); font-size: var(--texto-meta); }
 .fch-sub { display: block; color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
 .fch .fch-tabela--aberto td, .fch .fch-tabela--aberto tbody th { white-space: nowrap; }
+/* a obra e a nota (numero e selo) quebram antes de a coluna Valor sair da caixa */
+.fch .fch-tabela--aberto td:is(.fch-a-obra, .fch-a-nota) { white-space: normal; }
+/* a linha sem a data: o texto diz a verdade, em letra de apoio, e pode quebrar */
+.fch .fch-tabela--aberto tbody th.fch-sem-data { white-space: normal; color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
+.fch-nota { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-pp); }
 .fch-aparte { display: grid; gap: var(--espaco-mini); margin: 0; padding: var(--espaco-m) var(--espaco-g) var(--espaco-m); border-top: var(--borda-linha); font-size: var(--texto-meta); }
 .fch-aparte > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--espaco-mini) var(--espaco-m); }
 .fch-aparte dt { color: var(--cor-texto-secundario); }
 .fch-aparte dd { margin: 0; font-weight: var(--peso-forte); }
 
-@media (max-width: 760px) {
-  /* no celular a tabela do mes mostra o medido e o recebido; os outros numeros estao no alto e no em aberto */
-  .fch .fch-tabela--meses .fch-col-opcional { display: none; }
-  .fch .fch-tabela { font-size: var(--texto-mini); }
-  .fch .fch-tabela .fch-abre { font-size: var(--texto-mini); gap: var(--espaco-mini); }
-  /* colunas mais juntas: o mes e os dois numeros cabem nos 294 px do conteudo, sem rolar */
-  .fch .fch-tabela th, .fch .fch-tabela td { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
-  .fch .fch-tabela tbody th[scope="row"]:first-child, .fch .fch-tabela thead th:first-child, .fch .fch-tabela tfoot th:first-child {
-    padding-left: var(--espaco-pp);
+/* ---------------------------------------------------------------- faixa media (a 1024 com o menu aberto) */
+@container fch-pagina (max-width: 900px) {
+  /* os cinco numeros em 3 + 2, sem deixar um sozinho na segunda linha */
+  .fch-numeros { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* as seis colunas da tabela do mes cabem na caixa: letra de apoio, colunas mais juntas e o nome quebrando */
+  .fch .fch-tabela--meses, .fch .fch-tabela--meses .fch-abre { font-size: var(--texto-mini); }
+  .fch .fch-tabela--meses th, .fch .fch-tabela--meses td { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
+  .fch .fch-tabela--meses th:first-child { padding-left: var(--espaco-m); }
+  .fch .fch-tabela--meses th:last-child, .fch .fch-tabela--meses td:last-child { padding-right: var(--espaco-m); }
+  .fch .fch-tabela--meses tbody .fch-linha--obra > th[scope="row"]:first-child { padding-left: var(--espaco-g); }
+  .fch .fch-tabela--meses tbody .fch-linha--medicao > th[scope="row"]:first-child { padding-left: var(--espaco-gg); }
+  .fch .fch-tabela--meses .fch-primeira { white-space: normal; }
+  .fch .fch-tabela--meses .fch-abre { white-space: normal; text-align: left; }
+}
+
+/* ---------------------------------------------------------------- em aberto em blocos (ate' 640 px)
+   As cinco colunas do em aberto nao cabem: a tabela vira blocos (como a lista de Obras no celular), com a obra e o
+   valor em cima e a medicao, a nota e a data embaixo, o rotulo escrito antes do dado. */
+@container fch-pagina (max-width: 640px) {
+  .fch .fch-tabela--aberto, .fch .fch-tabela--aberto :is(tbody, tfoot) { display: block; width: 100%; }
+  .fch .fch-tabela--aberto thead { position: absolute; width: var(--espaco-fio); height: var(--espaco-fio); overflow: hidden; clip: rect(0 0 0 0); }
+  .fch .fch-tabela--aberto tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--espaco-p); row-gap: var(--espaco-traco);
+    grid-template-areas: "obra valor" "medicao medicao" "nota nota" "data data"; align-items: start;
+    padding: var(--espaco-pp) var(--espaco-g); border-bottom: var(--borda-linha);
   }
-  .fch .fch-tabela th:last-child, .fch .fch-tabela td:last-child { padding-right: var(--espaco-pp); }
-  .fch .fch-tabela--meses td:nth-child(5) { padding-right: var(--espaco-pp); }
-  /* o nome da obra e da medicao quebra em vez de alargar a primeira coluna */
-  .fch .fch-tabela--meses .fch-primeira { width: 5.25rem; max-width: 5.25rem; white-space: normal; hyphens: auto; }
+  .fch .fch-tabela--soltas tbody tr { grid-template-areas: "obra valor" "nota nota" "data data"; }
+  .fch .fch-tabela--aberto tfoot tr { border-top: var(--regua-secao); border-bottom: 0; }
+  .fch .fch-tabela--aberto tbody:last-of-type tr:last-child { border-bottom: 0; }
+  .fch .fch-tabela--aberto.tabela tr > :is(th, td) {
+    display: block; min-width: 0; padding: 0; border: 0; position: static; background: none;
+    white-space: normal; text-align: left; font-size: var(--texto-mini);
+  }
+  .fch .fch-tabela--aberto :is(tr.fch-grupo, tfoot tr) { grid-template-areas: "obra valor"; align-items: baseline; }
+  .fch .fch-tabela--aberto.tabela :is(tr.fch-grupo, tfoot tr) > th { grid-area: obra; }
+  .fch .fch-tabela--aberto tbody tr.fch-grupo { background: var(--cor-papel-sombreado); border-top: var(--borda-linha); }
+  .fch .fch-tabela--aberto .fch-a-obra { grid-area: obra; font-weight: var(--peso-forte); }
+  .fch .fch-tabela--aberto.tabela tr > td.col-num { grid-area: valor; text-align: right; white-space: nowrap; }
+  .fch .fch-tabela--aberto .fch-a-medicao { grid-area: medicao; }
+  .fch .fch-tabela--aberto .fch-a-medicao .fch-sub { display: inline; margin-left: var(--espaco-pp); }
+  .fch .fch-tabela--aberto .fch-a-nota { grid-area: nota; }
+  .fch .fch-tabela--aberto.tabela tr > .fch-a-data { grid-area: data; color: var(--cor-texto-secundario); font-weight: var(--peso-normal); }
+  .fch .fch-tabela--aberto [data-rotulo]::before { content: attr(data-rotulo) " "; color: var(--cor-texto-secundario); font-family: var(--fonte-texto); }
+}
+
+/* ---------------------------------------------------------------- faixa estreita (celular) */
+@container fch-pagina (max-width: 560px) {
+  /* os cinco numeros em lista: rotulo a' esquerda, valor a' direita */
+  .fch-numeros { grid-template-columns: minmax(0, 1fr); gap: var(--espaco-pp); }
+  .fch-numero { display: flex; align-items: baseline; justify-content: space-between; gap: var(--espaco-p); }
+  /* o painel com a margem de dentro menor: sobra largura para dois valores de centenas de milhoes lado a lado */
+  .fch-painel__cab { padding: 0 var(--espaco-pp); }
+  .fch-painel__cab .fch-botoes { margin-left: 0; }
+  .fch-vazio { padding: 0 var(--espaco-pp) var(--espaco-p); }
+  .fch-soltas .fch-aviso, .fch-soltas__titulo, .fch-soltas__base { margin-left: var(--espaco-pp); margin-right: var(--espaco-pp); }
+  .fch-aparte { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
+  .fch .fch-tabela--aberto tr { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
+
+  /* A tabela do mes e a da comparacao tambem viram blocos: cada linha e' uma grade com as mesmas tres colunas, entao
+     os numeros continuam alinhados. Na do mes ficam o medido e o recebido (os outros numeros estao no alto e no em
+     aberto). */
+  .fch :is(.fch-tabela--meses, .fch-tabela--comparacao), .fch :is(.fch-tabela--meses, .fch-tabela--comparacao) :is(thead, tbody, tfoot) {
+    display: block; width: 100%;
+  }
+  .fch :is(.fch-tabela--meses, .fch-tabela--comparacao) { font-size: var(--texto-mini); }
+  .fch :is(.fch-tabela--meses, .fch-tabela--comparacao) tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) 38% 38%; align-items: start;
+    padding: 0 var(--espaco-pp); border-bottom: var(--borda-linha);
+  }
+  .fch :is(.fch-tabela--meses, .fch-tabela--comparacao) thead tr { align-items: end; border-bottom: var(--regua-secao); }
+  .fch :is(.fch-tabela--meses, .fch-tabela--comparacao) tfoot tr { border-top: var(--regua-secao); border-bottom: 0; }
+  .fch :is(.fch-tabela--meses, .fch-tabela--comparacao) tbody tr:last-child { border-bottom: 0; }
+  .fch :is(.fch-tabela--meses, .fch-tabela--comparacao).tabela tr > :is(th, td) {
+    display: block; min-width: 0; padding: var(--espaco-pp) 0; border: 0; position: static; background: none;
+  }
+  .fch :is(.fch-tabela--meses, .fch-tabela--comparacao).tabela tr > :is(th, td):not(:first-child) { padding-left: var(--espaco-mini); }
+  .fch .fch-tabela--meses.tabela tr > .fch-col-opcional { display: none; }
+  .fch .fch-tabela .fch-abre { font-size: var(--texto-mini); gap: var(--espaco-mini); margin: calc(var(--espaco-pp) * -1) 0; white-space: normal; }
   .fch .fch-mes-longo { display: none; }
   .fch .fch-mes-curto { display: inline; }
-  .fch .fch-tabela .fch-abre { white-space: normal; text-align: left; }
-  .fch .fch-tabela tbody .fch-linha--obra > th[scope="row"]:first-child { padding-left: var(--espaco-p); }
-  .fch .fch-tabela tbody .fch-linha--medicao > th[scope="row"]:first-child { padding-left: var(--espaco-m); }
-  .fch-soltas .fch-aviso, .fch-soltas__titulo { margin-left: var(--espaco-p); margin-right: var(--espaco-p); }
-  .fch-painel__cab { padding: 0 var(--espaco-p); }
-  .fch-painel__cab .fch-botoes { margin-left: 0; }
-  .fch .fch-tabela th:first-child, .fch .fch-tabela td:first-child { padding-left: var(--espaco-p); }
-  .fch .fch-tabela th:last-child, .fch .fch-tabela td:last-child { padding-right: var(--espaco-p); }
-  .fch .fch-tabela tbody .fch-linha--obra > th[scope="row"]:first-child { padding-left: var(--espaco-g); }
-  .fch .fch-tabela tbody .fch-linha--medicao > th[scope="row"]:first-child { padding-left: var(--espaco-xg); }
-  .fch-quadro__corpo { padding: var(--espaco-p); }
+  /* obra e medicao: o nome na linha de cima, inteiro, e os numeros embaixo, nas colunas deles */
+  .fch .fch-tabela--meses :is(.fch-linha--obra, .fch-linha--medicao) { background: var(--cor-papel-sombreado); }
+  .fch .fch-tabela--meses.tabela :is(.fch-linha--obra, .fch-linha--medicao) > th { grid-column: 1 / -1; padding-bottom: 0; white-space: normal; }
+  .fch .fch-tabela--meses tbody .fch-linha--obra > th[scope="row"]:first-child { padding-left: var(--espaco-m); }
+  .fch .fch-tabela--meses tbody .fch-linha--medicao > th[scope="row"]:first-child { padding-left: var(--espaco-g); }
+  .fch .fch-tabela--meses :is(.fch-linha--obra, .fch-linha--medicao) > th + td { grid-column: 2; }
 }

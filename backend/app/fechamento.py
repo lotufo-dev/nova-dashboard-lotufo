@@ -20,17 +20,20 @@ parcela; os totais sao somas dessas parcelas, entao fecham ao centavo com as lin
   de tipo de cobranca (`diretoria.CODTMV_COBRANCA`) ou ainda so' lida do PDF. A nota ligada a mais de uma medicao
   entra em cada uma pelo valor do vinculo (`valor_alocado_centavos`); ligada a uma so', pelo valor atual da nota.
 - Recebido: `_recebimento`, a UNICA definicao (bruto por competencia: das notas do protocolado, as pagas, pelo mesmo
-  valor bruto).
+  valor bruto; da nota paga em parte, o valor bruto menos o que falta nos titulos do RM).
 - Em aberto (a receber), em tres partes que a tela diz uma a uma:
-  a) nota protocolada e nao paga, nota a nota, com a data do protocolo;
+  a) nota protocolada e nao paga, nota a nota, com a data do protocolo. A nota paga em parte (alguma baixa com valor
+     no RM e falta acima da tolerancia) entra pelo que falta nos titulos, marcada "paga em parte";
   b) medicao protocolada (e nao recebida) SEM nota ligada, pelo valor da medicao (aprovado, senao o pedido), com a
      data do protocolo. Entra no em aberto do mes;
   c) nota de cobranca em aberto no RM SEM medicao ligada (`_notas_sem_medicao`), com a data da emissao. Nao tem
      competencia: fica fora dos meses e do total, como subtotal a' parte. Pode ser a mesma cobranca de uma medicao de
-     (b) enquanto o vinculo nao e' feito; nao se casa por valor (`docs/adr/0005`), a tela diz isso numa frase.
-  O total do em aberto e' (a) + (b). Com o total a receber ainda nao liberado no cadastro
-  (`geral.yaml: diretoria.total_a_receber_liberado`, `diretoria._liberado`), os valores do em aberto vem nulos, como
-  na lista de Obras.
+     (b) enquanto o vinculo nao e' feito; nao se casa por valor (`docs/adr/0005`), a tela diz isso numa frase. A
+     paga em parte entra pelo que falta nos titulos, como em (a).
+  O total do em aberto e' (a) + (b), por ano de competencia (`por_ano`): o painel "Em aberto" da tela segue o ano
+  escolhido e fecha com o numero do alto e com o total do ano na tabela do mes. Com o total a receber ainda nao
+  liberado no cadastro (`geral.yaml: diretoria.total_a_receber_liberado`, `diretoria._liberado`), o em aberto nao sai
+  do servidor, nem o recebido, que o deixaria deduzir (`_esconder_a_receber`).
 - Cobertura do vinculo, por ano: quanto do aprovado das medicoes com nota emitida (ou alem) tem nota ligada.
 
 So' aparece o que tem lancamento: mes sem medicao nao vira linha, e nada e' estimado. O em aberto de competencias
@@ -38,7 +41,7 @@ anteriores a 2025 fica contado a' parte.
 """
 from decimal import ROUND_HALF_UP, Decimal
 
-from app import contratos, db, diretoria, medicoes, sincronizacao_rm
+from app import contratos, db, diretoria, dinheiro, medicoes, sincronizacao_rm
 
 ANOS = ("2025", "2026")
 ESTADOS_APROVADO = ("boletim_recebido", "espelho_gerado", "espelho_enviado", "nota_emitida", "protocolada",
@@ -48,7 +51,9 @@ ESTADOS_COM_NOTA = ("nota_emitida", "protocolada", "nf_emitida", "recebida")
 ESTADOS_PROTOCOLADO = ("protocolada", "nf_emitida", "recebida")
 ESTADOS_EM_COBRANCA = ("protocolada", "nf_emitida")       # protocolada e ainda nao recebida
 NUMEROS = ("medido_centavos", "aprovado_centavos", "protocolado_centavos", "recebido_centavos", "em_aberto_centavos")
-SOMAS = NUMEROS + ("sem_nota_centavos",)                    # sem_nota: a parte (b) do em aberto, ja' dentro dele
+# as duas partes que somam o em aberto: (a) `em_aberto_notas` e (b) `sem_nota`
+SOMAS = NUMEROS + ("em_aberto_notas_centavos", "sem_nota_centavos")
+ESCONDIDOS = ("recebido_centavos", "em_aberto_centavos", "em_aberto_notas_centavos", "sem_nota_centavos")   # pela trava
 
 
 def _zero() -> dict:
@@ -71,15 +76,25 @@ def _aprovado(m: dict) -> int | None:
     return m["pedido"] if m["estado"] in ESTADOS_COM_NOTA else None
 
 
-def _recebimento(conn, m: dict, nota: dict, valor_cota: int) -> tuple[bool, int]:
-    """A UNICA definicao do recebido desta pagina: (recebida, valor que entra no recebido). Hoje e' "bruto por
-    competencia": a nota da medicao recebida (baixa no RM ou registro do administrador, docs/adr/0006) ou a nota com
-    todos os titulos baixados no RM, faltando ate' `diretoria.TOLERANCIA_CENTAVOS`, entra pelo seu valor bruto (o
-    mesmo do protocolado), no mes da competencia da medicao. Titulo baixado sem valor (glosa, compensacao) nao e'
-    recebimento; nota paga em parte fica inteira em aberto. Trocar para outra base (o liquido baixado, pelo mes do
-    pagamento) e' trocar esta funcao e o mes em `_fechamento`."""
-    recebida = m["estado"] == "recebida" or _quitada(conn, nota["nota_id"])
-    return recebida, valor_cota if recebida else 0
+def _recebimento(m: dict, nota: dict, valor_cota: int) -> tuple[int, int]:
+    """A UNICA definicao do recebido desta pagina: (valor que entra no recebido, valor que fica em aberto), que somam
+    o valor bruto da nota (o mesmo do protocolado), no mes da competencia da medicao. "Bruto por competencia":
+    - a nota da medicao recebida (baixa no RM ou registro do administrador, docs/adr/0006) e a nota com os titulos
+      baixados no RM, faltando ate' `diretoria.TOLERANCIA_CENTAVOS`, entram inteiras no recebido;
+    - a nota paga em parte (alguma baixa com valor e falta acima da tolerancia, `_no_rm`) fica em aberto pelo que
+      falta nos titulos do RM, na cota, limitado ao valor da nota; o recebido e' o valor bruto menos essa falta;
+    - a nota sem nenhuma baixa com valor fica inteira em aberto, pelo bruto. Titulo baixado sem valor (glosa,
+      compensacao) nao e' recebimento.
+    Trocar para outra base (o liquido baixado, pelo mes do pagamento) e' trocar esta funcao e o mes em `_fechamento`."""
+    if m["estado"] == "recebida" or nota["no_rm"] == "paga":
+        return valor_cota, 0
+    aberto = _falta_na_cota(nota["falta_cheio"], m["pct"], valor_cota) if nota["no_rm"] == "parte" else valor_cota
+    return valor_cota - aberto, aberto
+
+
+def _falta_na_cota(falta_cheio: int, pct: int | None, teto: int) -> int:
+    """O que falta nos titulos de uma nota paga em parte, na cota, sem passar do valor da nota (`teto`)."""
+    return min(contratos.cota(falta_cheio, pct) or 0, teto)
 
 
 def _medicoes(conn) -> list[dict]:
@@ -109,18 +124,34 @@ def _notas_por_medicao(conn, ids: set[int]) -> dict[int, list[dict]]:
     for x in linhas:
         vinculos[x["nota_id"]] = vinculos.get(x["nota_id"], 0) + 1
     out: dict[int, list[dict]] = {}
+    por_nota: dict[int, list[dict]] = {}
     for x in linhas:
         valor = x["valor_centavos"] if vinculos[x["nota_id"]] == 1 else x["valor_alocado_centavos"]
-        out.setdefault(x["medicao_id"], []).append({**x, "valor_cheio": valor})
+        y = {**x, "valor_cheio": valor}
+        out.setdefault(x["medicao_id"], []).append(y)
+        por_nota.setdefault(x["nota_id"], []).append(y)
+    for nota_id, xs in por_nota.items():
+        no_rm, falta = _no_rm(conn, nota_id)
+        # a falta e' da nota: ligada a mais de uma medicao, reparte-se na proporcao do valor de cada vinculo
+        pesos = [max(0, x["valor_cheio"] or 0) for x in xs]
+        partes = dinheiro.ratear_proporcional(falta, pesos) if len(xs) > 1 and sum(pesos) > 0 else [falta] * len(xs)
+        for x, parte in zip(xs, partes):
+            x["no_rm"], x["falta_cheio"] = no_rm, parte
     return out
 
 
-def _quitada(conn, nota_id: int) -> bool:
-    """Todos os titulos (nao cancelados) da nota baixados no RM, faltando ate' a tolerancia. Sem titulo, nao."""
-    if not conn.execute("SELECT 1 FROM baixas WHERE nota_id=? AND status_lan<>2", (nota_id,)).fetchone():
-        return False
-    falta = sincronizacao_rm._falta_por_titulo(conn, nota_id)
-    return falta is not None and falta <= diretoria.TOLERANCIA_CENTAVOS
+def _no_rm(conn, nota_id: int) -> tuple[str, int]:
+    """A nota nos titulos (nao cancelados) do RM: ("paga", 0), ("parte", o que falta, em valor cheio) ou ("aberta", 0).
+    Sem nenhuma baixa COM VALOR, aberta (sem titulo, titulo sem baixa ou baixado sem valor: glosa e compensacao nao
+    sao recebimento). Com alguma, conta o que falta titulo a titulo (`sincronizacao_rm._falta_por_titulo`; o titulo
+    sem baixa com valor entra inteiro, e juros num titulo nao cobrem outro): ate' `diretoria.TOLERANCIA_CENTAVOS`,
+    paga; acima, paga em parte."""
+    recebido = sincronizacao_rm.STATUS_RECEBIDO
+    if not conn.execute(f"SELECT 1 FROM baixas WHERE nota_id=? AND status_lan IN ({','.join('?' * len(recebido))}) "
+                        "AND valor_baixado_centavos>0", (nota_id, *recebido)).fetchone():
+        return "aberta", 0
+    falta = sincronizacao_rm._falta_por_titulo(conn, nota_id, aberto_inteiro=True) or 0
+    return ("paga", 0) if falta <= diretoria.TOLERANCIA_CENTAVOS else ("parte", falta)
 
 
 def _numero_nota(numero) -> str:
@@ -128,7 +159,7 @@ def _numero_nota(numero) -> str:
     return str(int(s)) if s.isdigit() else s
 
 
-def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
+def _linha_medicao(m: dict, notas: list[dict]) -> dict:
     cota = lambda v: contratos.cota(v, m["pct"]) or 0
     valor = m["aprovado"] if m["aprovado"] is not None else m["pedido"]
     aprovado = _aprovado(m)
@@ -141,12 +172,14 @@ def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
     if m["estado"] in ESTADOS_PROTOCOLADO:
         for x in ligadas:
             v = cota(x["valor_cheio"])
-            recebida, recebido = _recebimento(conn, m, x, v)
+            recebido, aberto = _recebimento(m, x, v)
             n["protocolado_centavos"] += v
             n["recebido_centavos"] += recebido
-            n["em_aberto_centavos"] += v - recebido
+            n["em_aberto_notas_centavos"] += aberto
+            n["em_aberto_centavos"] += aberto
             saida.append({"nota_id": x["nota_id"], "numero": _numero_nota(x["numero"]), "valor_centavos": v,
-                          "recebida": recebida})
+                          "recebido_centavos": recebido, "em_aberto_centavos": aberto,
+                          "recebida": aberto == 0, "paga_em_parte": 0 < aberto < v})
     sem_nota = m["estado"] in ESTADOS_EM_COBRANCA and not ligadas
     if sem_nota and valor is not None:                       # (b): protocolada sem nota ligada, pelo valor da medicao
         n["sem_nota_centavos"] = n["medido_centavos"]
@@ -161,22 +194,26 @@ def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
 
 def _notas_sem_medicao(conn) -> dict:
     """Notas de cobranca ativas sem vinculo com medicao enviada, na obra pelo centro de custo
-    (`diretoria._notas_do_rm`), na cota e pelo valor bruto. Em aberto no RM (nenhum titulo, ou titulo nao baixado):
-    uma linha por nota, com a data da emissao, de qualquer ano (e' cobranca que ainda nao entrou). Paga: so' contada,
-    das emitidas em 2025 e 2026. Nenhuma das duas tem competencia, entao ficam fora dos meses e dos totais."""
+    (`diretoria._notas_do_rm`), na cota. Em aberto no RM (`_no_rm`): uma linha por nota, com a data da emissao, de
+    qualquer ano (e' cobranca que ainda nao entrou), pelo valor bruto; a paga em parte, pelo que falta nos titulos,
+    limitado ao valor da nota, e marcada. Paga: so' contada, das emitidas em 2025 e 2026, pelo bruto. Nenhuma das
+    duas tem competencia, entao ficam fora dos meses e dos totais, e nao dependem do ano escolhido na tela."""
     abertas, pagas = [], {"quantidade": 0, "valor_centavos": 0}
     for n, c, tem_medicao in diretoria._notas_do_rm(conn):
         if tem_medicao or n["situacao"] != "ativa":
             continue
         v = contratos.cota(n["valor_centavos"], c["pct"]) or 0
-        if _quitada(conn, n["id"]):
+        no_rm, falta = _no_rm(conn, n["id"])
+        if no_rm == "paga":
             if (n["emissao"] or "")[:4] in ANOS:
                 pagas["quantidade"] += 1
                 pagas["valor_centavos"] += v
             continue
+        aberto = _falta_na_cota(falta, c["pct"], v) if no_rm == "parte" else v
         numero = conn.execute("SELECT numero FROM notas_fiscais WHERE id=?", (n["id"],)).fetchone()[0]
         abertas.append({"nota_id": n["id"], "numero": _numero_nota(numero), "contrato_id": c["id"], "obra": c["obra"],
-                        "emissao": (n["emissao"] or "")[:10] or None, "valor_centavos": v})
+                        "emissao": (n["emissao"] or "")[:10] or None, "valor_centavos": aberto,
+                        "paga_em_parte": no_rm == "parte" and aberto < v})
     abertas.sort(key=lambda e: (e["emissao"] or "9999", e["obra"], e["numero"]))
     return {"em_aberto": abertas, "em_aberto_centavos": sum(e["valor_centavos"] for e in abertas), "pagas": pagas}
 
@@ -204,7 +241,7 @@ def fechamento(conn) -> dict:
 def _fechamento(conn) -> dict:
     ms = _medicoes(conn)
     notas = _notas_por_medicao(conn, {m["id"] for m in ms})
-    linhas = [_linha_medicao(conn, m, notas.get(m["id"], [])) for m in ms]
+    linhas = [_linha_medicao(m, notas.get(m["id"], [])) for m in ms]
     cobertura = _cobertura(linhas)
 
     meses: dict[str, dict] = {}
@@ -214,9 +251,11 @@ def _fechamento(conn) -> dict:
         x.pop("_base_cobertura"); x.pop("_coberta")
         ano = x["competencia"][:4]
         abertas = [{"tipo_aberto": "nota", "nota_id": nt["nota_id"], "numero": nt["numero"],
-                    "valor_centavos": nt["valor_centavos"]} for nt in x["notas"] if not nt["recebida"]]
+                    "valor_centavos": nt["em_aberto_centavos"], "paga_em_parte": nt["paga_em_parte"]}
+                   for nt in x["notas"] if not nt["recebida"]]
         if x["sem_nota_centavos"]:
-            abertas.append({"tipo_aberto": "sem_nota", "nota_id": None, "numero": None, "valor_centavos": x["sem_nota_centavos"]})
+            abertas.append({"tipo_aberto": "sem_nota", "nota_id": None, "numero": None,
+                            "valor_centavos": x["sem_nota_centavos"], "paga_em_parte": False})
         if ano < ANOS[0]:
             anteriores["quantidade"] += len(abertas)
             anteriores["valor_centavos"] += sum(e["valor_centavos"] for e in abertas)
@@ -251,35 +290,36 @@ def _fechamento(conn) -> dict:
             if m["competencia"][5:7] <= ate:
                 _somar(acumulado[m["competencia"][:4]], m)
     em_aberto.sort(key=lambda e: (e["protocolo_em"] or "9999", e["obra"], e["competencia"], e["numero"] or ""))
+    # o em aberto (a) + (b), linha a linha; o total e as duas partes de cada ano estao em `por_ano` (a tela mostra o
+    # painel do ano escolhido). (c) e o em aberto de antes de 2025 ficam a' parte, de qualquer ano.
     saida = {"anos": list(ANOS), "meses": lista, "por_ano": por_ano, "acumulado": {"ate_mes": ate, **acumulado},
-             "em_aberto": em_aberto, "em_aberto_centavos": sum(e["valor_centavos"] for e in em_aberto),
-             # as duas partes que somam o total: (a) nota protocolada nao paga e (b) medicao protocolada sem nota ligada
-             "em_aberto_notas_centavos": sum(e["valor_centavos"] for e in em_aberto if e["tipo_aberto"] == "nota"),
-             "em_aberto_sem_nota_centavos": sum(e["valor_centavos"] for e in em_aberto if e["tipo_aberto"] == "sem_nota"),
-             "em_aberto_anteriores": anteriores, "notas_sem_medicao": _notas_sem_medicao(conn),
+             "em_aberto": em_aberto, "em_aberto_anteriores": anteriores, "notas_sem_medicao": _notas_sem_medicao(conn),
              "cobertura": cobertura, "total_a_receber_liberado": diretoria._liberado(conn)}
     if not saida["total_a_receber_liberado"]:
-        _esconder_em_aberto(saida)
+        _esconder_a_receber(saida)
     return saida
 
 
-def _esconder_em_aberto(f: dict) -> None:
-    """Sem o total a receber liberado no cadastro, o em aberto nao mostra valor (a trava de `diretoria._liberado`, a
-    mesma da lista de Obras): as linhas continuam, com o valor nulo. Medido, aprovado, protocolado e recebido ficam."""
+def _esconder_a_receber(f: dict) -> None:
+    """Sem o total a receber liberado no cadastro (a trava de `diretoria._liberado`, a da lista de Obras e do Inicio),
+    o em aberto nao sai do servidor, nem o que deixa deduzi-lo: o recebido (protocolado - recebido e' o em aberto das
+    notas), a marca de recebida de cada nota, a de medicao sem nota ligada e as listas do em aberto. Como no Inicio,
+    o bloco inteiro vem vazio, e a tela diz a trava em uma frase. Medido, aprovado e protocolado ficam."""
     def nulo(x):
-        x["em_aberto_centavos"] = None
-        x["sem_nota_centavos"] = None
+        for k in ESCONDIDOS:
+            x[k] = None
     for m in f["meses"]:
         nulo(m)
         for o in m["obras"]:
             nulo(o)
             for md in o["medicoes"]:
                 nulo(md)
+                md["sem_nota"] = False
+                for nt in md["notas"]:
+                    nt["recebido_centavos"] = nt["em_aberto_centavos"] = nt["recebida"] = nt["paga_em_parte"] = None
     for a in f["anos"]:
         nulo(f["por_ano"][a])
         nulo(f["acumulado"][a])
-    for e in f["em_aberto"] + f["notas_sem_medicao"]["em_aberto"]:
-        e["valor_centavos"] = None
-    f["em_aberto_centavos"] = f["em_aberto_notas_centavos"] = f["em_aberto_sem_nota_centavos"] = None
-    f["notas_sem_medicao"]["em_aberto_centavos"] = None
-    f["em_aberto_anteriores"]["valor_centavos"] = None
+    f["em_aberto"] = []
+    f["em_aberto_anteriores"] = {"quantidade": 0, "valor_centavos": None}
+    f["notas_sem_medicao"] = {"em_aberto": [], "em_aberto_centavos": None, "pagas": {"quantidade": 0, "valor_centavos": None}}

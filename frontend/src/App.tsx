@@ -123,7 +123,7 @@ export default function App() {
           {rota.tela === "siga" && usuario.perfil !== "diretoria" && <SigaPagina busca={busca} podeEditar={usuario.perfil !== "diretoria"} />}
           {rota.tela === "ancoras-docusign" && usuario.perfil !== "diretoria" && <div className="pagina"><AncorasDocusign /></div>}
           {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}
-          {rota.tela === "fechamento" && <div className="pagina"><Fechamento ir={ir} busca={busca} /></div>}
+          {rota.tela === "fechamento" && <div className="pagina"><Fechamento ir={ir} /></div>}
           {rota.tela === "obras" && <Contratos ir={ir} busca={busca} aba={rota.aba} />}
           {rota.tela === "obra" && (
             // `key` no id: trocar de obra REMONTA a pagina em vez de reaproveitar a

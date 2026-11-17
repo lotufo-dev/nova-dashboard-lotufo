@@ -10,9 +10,15 @@ const n = (medido: number, aprovado: number, protocolado: number, recebido: numb
   medido_centavos: medido, aprovado_centavos: aprovado, protocolado_centavos: protocolado, recebido_centavos: recebido,
   em_aberto_centavos: protocolado - recebido,
 });
-const medicao = (id: number, numero: number, comp: string, x: ReturnType<typeof n>, notas: { id: number; numero: string; v: number; ok: boolean }[]) => ({
+const medicao = (id: number, numero: number, comp: string, x: ReturnType<typeof n>,
+    notas: { id: number; numero: string; v: number; ok: boolean; parte?: boolean }[]) => ({
   ...x, medicao_id: id, contrato_id: 7, obra: "Obra Alfa", numero, tipo: "execucao", estado: "protocolada", competencia: comp,
-  protocolo_em: `${comp}-28`, notas: notas.map(t => ({ nota_id: t.id, numero: t.numero, valor_centavos: t.v, recebida: t.ok })),
+  protocolo_em: `${comp}-28`,
+  notas: notas.map(t => ({ nota_id: t.id, numero: t.numero, valor_centavos: t.v, recebida: t.ok, paga_em_parte: !!t.parte })),
+});
+// o total do ano, com as duas partes do em aberto: (a) notas e (b) medicoes sem nota ligada
+const ano = (x: ReturnType<typeof n>, meses: number, semNota = 0) => ({
+  ...x, em_aberto_centavos: x.em_aberto_centavos + semNota, em_aberto_notas_centavos: x.em_aberto_centavos, sem_nota_centavos: semNota, meses,
 });
 const MAR26 = n(1_500_001, 1_400_001, 1_400_001, 1_000_000);
 const FECHAMENTO: RespostaFechamento = {
@@ -27,11 +33,10 @@ const FECHAMENTO: RespostaFechamento = {
     { competencia: "2026-05", ...n(200_000, 0, 0, 0),
       obras: [{ contrato_id: 7, obra: "Obra Alfa", ...n(200_000, 0, 0, 0), medicoes: [medicao(3, 16, "2026-05", n(200_000, 0, 0, 0), [])] }] },
   ],
-  por_ano: { "2025": { ...n(900_000, 900_000, 900_000, 900_000), meses: 1 }, "2026": { ...n(1_700_001, 1_400_001, 1_400_001, 1_000_000), meses: 2 } },
+  por_ano: { "2025": ano(n(900_000, 900_000, 900_000, 900_000), 1), "2026": ano(n(1_700_001, 1_400_001, 1_400_001, 1_000_000), 2) },
   acumulado: { ate_mes: "05", "2025": n(900_000, 900_000, 900_000, 900_000), "2026": n(1_700_001, 1_400_001, 1_400_001, 1_000_000) },
   em_aberto: [{ tipo_aberto: "nota", nota_id: 22, numero: "602", contrato_id: 7, obra: "Obra Alfa", medicao_id: 2, medicao_numero: 15,
-    tipo: "execucao", competencia: "2026-03", protocolo_em: "2026-03-28", valor_centavos: 400_001 }],
-  em_aberto_centavos: 400_001, em_aberto_notas_centavos: 400_001, em_aberto_sem_nota_centavos: 0,
+    tipo: "execucao", competencia: "2026-03", protocolo_em: "2026-03-28", valor_centavos: 400_001, paga_em_parte: false }],
   em_aberto_anteriores: { quantidade: 0, valor_centavos: 0 },
   notas_sem_medicao: { em_aberto: [], em_aberto_centavos: 0, pagas: { quantidade: 2, valor_centavos: 700_002 } },
   cobertura: {
@@ -44,9 +49,11 @@ const FECHAMENTO: RespostaFechamento = {
 const TRES_PARTES: RespostaFechamento = {
   ...FECHAMENTO,
   em_aberto: [...FECHAMENTO.em_aberto, { tipo_aberto: "sem_nota", nota_id: null, numero: null, contrato_id: 7, obra: "Obra Alfa",
-    medicao_id: 4, medicao_numero: 17, tipo: "execucao", competencia: "2026-05", protocolo_em: "2026-06-02", valor_centavos: 200_000 }],
-  em_aberto_centavos: 600_001, em_aberto_sem_nota_centavos: 200_000,
-  notas_sem_medicao: { em_aberto: [{ nota_id: 31, numero: "777", contrato_id: 7, obra: "Obra Alfa", emissao: "2026-06-01", valor_centavos: 200_000 }],
+    medicao_id: 4, medicao_numero: 17, tipo: "execucao", competencia: "2026-05", protocolo_em: "2026-06-02", valor_centavos: 200_000,
+    paga_em_parte: false }],
+  por_ano: { ...FECHAMENTO.por_ano, "2026": ano(n(1_700_001, 1_400_001, 1_400_001, 1_000_000), 2, 200_000) },
+  notas_sem_medicao: { em_aberto: [{ nota_id: 31, numero: "777", contrato_id: 7, obra: "Obra Alfa", emissao: "2026-06-01", valor_centavos: 200_000,
+    paga_em_parte: false }],
     em_aberto_centavos: 200_000, pagas: { quantidade: 2, valor_centavos: 700_002 } },
   cobertura: { ...FECHAMENTO.cobertura,
     "2026": { aprovado_centavos: 1_600_001, com_nota_centavos: 1_400_001, sem_nota_centavos: 200_000, medicoes_sem_nota: 1, percentual: 87.5 } },
@@ -108,9 +115,11 @@ describe("Fechamento (#748)", () => {
     const [, grupo, linha, total] = within(tabela).getAllByRole("row");
     expect(texto(grupo)).toBe("Nota protocolada não pagaR$ 4.000,01");
     expect(texto(linha)).toBe("28/03/2026Obra Alfa15ª Medição03/2026602R$ 4.000,01");
-    expect(texto(total)).toBe("Total em abertoR$ 4.000,01");
+    expect(texto(total)).toBe("Total em aberto de 2026R$ 4.000,01");
+    expect(valorDe("Em aberto")).toBe("R$ 4.000,01");                 // o total do painel é o número do alto
     expect(texto(screen.getByText("Notas pagas sem medição ligada (2025 e 2026)").nextElementSibling)).toBe("2 notas · R$ 7.000,02");
     expect(screen.queryByText(/anteriores a 2025/)).toBeNull();
+    expect(screen.queryByText(/não dependem do ano escolhido/)).toBeNull();
     expect(screen.queryByText("Nota sem medição ligada")).toBeNull();
     expect(screen.queryByText(/podem ser a mesma cobrança/)).toBeNull();
   });
@@ -122,13 +131,76 @@ describe("Fechamento (#748)", () => {
     const linhas = within(tabela).getAllByRole("row").map(l => texto(l));
     expect(linhas).toEqual(["ProtocoloObraMediçãoNotaValor", "Nota protocolada não pagaR$ 4.000,01",
       "28/03/2026Obra Alfa15ª Medição03/2026602R$ 4.000,01", "Medição protocolada sem nota ligadaR$ 2.000,00",
-      "02/06/2026Obra Alfa17ª Medição05/2026sem nota ligadaR$ 2.000,00", "Total em abertoR$ 6.000,01"]);
+      "02/06/2026Obra Alfa17ª Medição05/2026sem nota ligadaR$ 2.000,00", "Total em aberto de 2026R$ 6.000,01"]);
     const soltas = screen.getByRole("table", { name: "Nota sem medição ligada" });
     expect(within(soltas).getAllByRole("row").map(l => texto(l))).toEqual(
       ["EmissãoObraNotaValor", "01/06/2026Obra Alfa777R$ 2.000,00", "Subtotal à parteR$ 2.000,00"]);
     // a mesma cobrança pode estar nas duas listas: uma frase diz, e o total não soma a nota solta
     expect(screen.getByText(/Medição sem nota ligada e nota sem medição ligada podem ser a mesma cobrança/)).toBeTruthy();
-    expect(valorDe("Em aberto")).toBe("R$ 4.000,01");                 // o do ano vem do servidor, não da tela
+    // um total só de em aberto na tela: o do painel é o do alto e o da linha "Total de 2026" da tabela do mês
+    expect(valorDe("Em aberto")).toBe("R$ 6.000,01");
+    const meses = screen.getByRole("table", { name: /por mês de competência de 2026/ });
+    expect(texto(meses.querySelector("tfoot"))).toBe("Total de 2026R$ 17.000,01R$ 14.000,01R$ 14.000,01R$ 10.000,00R$ 6.000,01");
+  });
+
+  it("o painel Em aberto segue o ano escolhido; nota sem medição e em aberto anterior a 2025 não, e a tela diz", async () => {
+    const dois: RespostaFechamento = {
+      ...TRES_PARTES,
+      em_aberto: [...TRES_PARTES.em_aberto, { tipo_aberto: "nota", nota_id: 12, numero: "502", contrato_id: 7, obra: "Obra Alfa",
+        medicao_id: 5, medicao_numero: 9, tipo: "execucao", competencia: "2025-11", protocolo_em: "2025-12-15", valor_centavos: 30_003,
+        paga_em_parte: false }],
+      por_ano: { ...TRES_PARTES.por_ano, "2025": ano(n(930_003, 930_003, 930_003, 900_000), 2) },
+      em_aberto_anteriores: { quantidade: 1, valor_centavos: 50_000 },
+    };
+    api.mockResolvedValue(dois);
+    render(<Fechamento ir={() => {}} />);
+    const linhasDe = (t: HTMLElement) => within(t).getAllByRole("row").map(l => texto(l));
+    const de2026 = await screen.findByRole("table", { name: /Em aberto de 2026/ });
+    expect(screen.getByRole("heading", { name: "Em aberto de 2026" })).toBeTruthy();
+    expect(linhasDe(de2026).at(-1)).toBe("Total em aberto de 2026R$ 6.000,01");
+    expect(linhasDe(de2026).join(" ")).not.toContain("502");
+    const soltas = linhasDe(screen.getByRole("table", { name: "Nota sem medição ligada" }));
+    fireEvent.click(screen.getByRole("button", { name: "2025" }));
+    const de2025 = screen.getByRole("table", { name: /Em aberto de 2025/ });
+    expect(linhasDe(de2025)).toEqual(["ProtocoloObraMediçãoNotaValor", "Nota protocolada não pagaR$ 300,03",
+      "15/12/2025Obra Alfa9ª Medição11/2025502R$ 300,03", "Total em aberto de 2025R$ 300,03"]);
+    expect(valorDe("Em aberto")).toBe("R$ 300,03");
+    expect(screen.getByText("1 linha", { selector: ".contador .sr-only" })).toBeTruthy();     // o contador é do ano
+    // as duas listas à parte são as mesmas nos dois anos
+    expect(linhasDe(screen.getByRole("table", { name: "Nota sem medição ligada" }))).toEqual(soltas);
+    expect(texto(screen.getByText("Em aberto de competências anteriores a 2025").nextElementSibling)).toBe("1 linha · R$ 500,00");
+    expect(screen.getByText("Nota sem medição ligada e em aberto de competência anterior a 2025 não dependem do ano escolhido.")).toBeTruthy();
+  });
+
+  it("nota paga em parte: selo na medição, na linha do em aberto e na nota sem medição, com o que falta", async () => {
+    const emParte: RespostaFechamento = {
+      ...FECHAMENTO,
+      meses: FECHAMENTO.meses.map(m => m.competencia !== "2026-03" ? m : { ...m, obras: [{ ...m.obras[0],
+        medicoes: [medicao(2, 15, "2026-03", MAR26, [{ id: 21, numero: "601", v: 1_000_000, ok: true },
+          { id: 22, numero: "602", v: 800_002, ok: false, parte: true }])] }] }),
+      em_aberto: FECHAMENTO.em_aberto.map(e => ({ ...e, paga_em_parte: true })),
+      notas_sem_medicao: { em_aberto: [{ nota_id: 31, numero: "777", contrato_id: 7, obra: "Obra Alfa", emissao: "2024-08-20",
+        valor_centavos: 5_001, paga_em_parte: true }], em_aberto_centavos: 5_001, pagas: { quantidade: 0, valor_centavos: 0 } },
+    };
+    api.mockResolvedValue(emParte);
+    render(<Fechamento ir={() => {}} />);
+    const aberto = await screen.findByRole("table", { name: /Em aberto de 2026/ });
+    expect(within(aberto).getAllByRole("row").map(l => texto(l))[2]).toBe("28/03/2026Obra Alfa15ª Medição03/2026602paga em parteR$ 4.000,01");
+    const soltas = screen.getByRole("table", { name: "Nota sem medição ligada" });
+    expect(within(soltas).getAllByRole("row").map(l => texto(l))[1]).toBe("20/08/2024Obra Alfa777paga em parteR$ 50,01");
+    const meses = screen.getByRole("table", { name: /por mês de competência de 2026/ });
+    fireEvent.click(within(meses).getByRole("button", { name: /Março de 2026, por obra/ }));
+    fireEvent.click(within(meses).getByRole("button", { name: /Obra Alfa, medições de 03\/2026/ }));
+    const linha = within(meses).getByRole("link", { name: "15ª Medição" }).closest("tr") as HTMLElement;
+    expect(texto(linha)).toContain("Nota 602paga em parte");
+    expect(within(linha).queryByText("em aberto")).toBeNull();
+  });
+
+  it("linha sem nota ligada e sem data de protocolo: diz que não há data, em vez de traço", async () => {
+    api.mockResolvedValue({ ...TRES_PARTES, em_aberto: TRES_PARTES.em_aberto.map(e => e.tipo_aberto === "sem_nota" ? { ...e, protocolo_em: null } : e) });
+    render(<Fechamento ir={() => {}} />);
+    const tabela = await screen.findByRole("table", { name: /Em aberto de 2026/ });
+    expect(within(tabela).getAllByRole("row").map(l => texto(l))[4]).toBe("sem data de protocoloObra Alfa17ª Medição05/2026sem nota ligadaR$ 2.000,00");
   });
 
   it("aviso de cobertura do vínculo: só quando falta nota ligada, com valor e percentual", async () => {
@@ -146,18 +218,44 @@ describe("Fechamento (#748)", () => {
     expect(await screen.findByText(/Protocolado e recebido pelo valor bruto da nota; cada número no mês de competência da medição/)).toBeTruthy();
   });
 
-  it("sem o total a receber liberado, o em aberto mostra as linhas sem valor", async () => {
-    const nulos = { ...TRES_PARTES, total_a_receber_liberado: false, em_aberto_centavos: null, em_aberto_notas_centavos: null,
-      em_aberto_sem_nota_centavos: null, em_aberto: TRES_PARTES.em_aberto.map(e => ({ ...e, valor_centavos: null })),
-      por_ano: { ...TRES_PARTES.por_ano, "2026": { ...TRES_PARTES.por_ano["2026"], em_aberto_centavos: null } },
-      notas_sem_medicao: { ...TRES_PARTES.notas_sem_medicao, em_aberto_centavos: null,
-        em_aberto: TRES_PARTES.notas_sem_medicao.em_aberto.map(e => ({ ...e, valor_centavos: null })) } };
-    api.mockResolvedValue(nulos);
+  it("sem o total a receber liberado: a tela diz, e não mostra o em aberto nem o recebido que deixaria deduzi-lo", async () => {
+    // o que o servidor manda com a trava: recebido e em aberto nulos em todo nível, notas sem marca e listas vazias
+    const semValor = <T extends object>(x: T) => ({ ...x, recebido_centavos: null, em_aberto_centavos: null });
+    const travado: RespostaFechamento = {
+      ...TRES_PARTES, total_a_receber_liberado: false,
+      meses: TRES_PARTES.meses.map(m => ({ ...semValor(m), obras: m.obras.map(o => ({ ...semValor(o),
+        medicoes: o.medicoes.map(md => ({ ...semValor(md), notas: md.notas.map(t => ({ ...t, recebida: null, paga_em_parte: null })) })) })) })),
+      por_ano: Object.fromEntries(Object.entries(TRES_PARTES.por_ano).map(([a, t]) =>
+        [a, { ...semValor(t), em_aberto_notas_centavos: null, sem_nota_centavos: null }])),
+      acumulado: { ate_mes: "05", "2025": semValor(n(900_000, 900_000, 900_000, 0)), "2026": semValor(n(1_700_001, 1_400_001, 1_400_001, 0)) },
+      em_aberto: [], em_aberto_anteriores: { quantidade: 0, valor_centavos: null },
+      notas_sem_medicao: { em_aberto: [], em_aberto_centavos: null, pagas: { quantidade: 0, valor_centavos: null } },
+    };
+    api.mockResolvedValue(travado);
     render(<Fechamento ir={() => {}} />);
-    const tabela = await screen.findByRole("table", { name: /notas protocoladas não pagas/ });
-    expect(texto(tabela.querySelector("tfoot"))).toBe("Total em aberto—");
+    expect(await screen.findByText("O total a receber ainda não está liberado: recebido e em aberto ficam sem valor.")).toBeTruthy();
+    expect(valorDe("Protocolado")).toBe("R$ 14.000,01");
+    expect(valorDe("Recebido")).toBe("—");
     expect(valorDe("Em aberto")).toBe("—");
-    expect(document.body.textContent).not.toContain("R$ 4.000,01");
+    expect(screen.queryByRole("heading", { name: /Em aberto de/ })).toBeNull();
+    expect(screen.queryByRole("table", { name: /Em aberto de/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Recebido" })).toBeNull();     // a comparação não oferece o recebido
+    const meses = screen.getByRole("table", { name: /por mês de competência de 2026/ });
+    expect(texto(meses.querySelector("tfoot"))).toBe("Total de 2026R$ 17.000,01R$ 14.000,01R$ 14.000,01——");
+    fireEvent.click(within(meses).getByRole("button", { name: /Março de 2026, por obra/ }));
+    fireEvent.click(within(meses).getByRole("button", { name: /Obra Alfa, medições de 03\/2026/ }));
+    const linha = within(meses).getByRole("link", { name: "15ª Medição" }).closest("tr") as HTMLElement;
+    expect(texto(linha)).toContain("Nota 601");
+    expect(within(linha).queryByText("recebida")).toBeNull();                   // nem o selo da nota
+    expect(within(linha).queryByText("em aberto")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/R\$ 10\.000,00|R\$ 4\.000,01|R\$ 6\.000,01/);
+  });
+
+  it("com o total liberado a frase da trava não aparece", async () => {
+    api.mockResolvedValue(FECHAMENTO);
+    render(<Fechamento ir={() => {}} />);
+    await screen.findByText("Cota da Lotufo");
+    expect(screen.queryByText(/não está liberado/)).toBeNull();
   });
 
   it("no celular a tabela do mês fica com medido e recebido (as outras colunas são opcionais)", async () => {
@@ -168,7 +266,7 @@ describe("Fechamento (#748)", () => {
     expect(cab.filter(h => !h.classList.contains("fch-col-opcional")).map(h => h.textContent)).toEqual(["Mês", "Medido", "Recebido"]);
   });
 
-  it("variante A da comparação: 2026 × 2025 mês a mês, com o acumulado até o último mês e o ano", async () => {
+  it("comparação em painel próprio: 2026 × 2025 mês a mês, com o acumulado até o último mês e o ano", async () => {
     api.mockResolvedValue(FECHAMENTO);
     render(<Fechamento ir={() => {}} />);
     const tabela = await screen.findByRole("table", { name: /Medido por mês de competência, 2025 e 2026/ });
@@ -180,27 +278,14 @@ describe("Fechamento (#748)", () => {
     expect(texto(within(recebido).getAllByRole("row")[1])).toBe("MarçoR$ 9.000,00R$ 10.000,00");
   });
 
-  it("variante B (?variante=b): o mesmo mês do outro ano embaixo do valor, o mês abre um quadro por obra, sem o painel da comparação", async () => {
-    api.mockResolvedValue(FECHAMENTO);
-    render(<Fechamento ir={() => {}} busca={{ variante: "b" }} />);
-    const tabela = await screen.findByRole("table", { name: /por mês de competência de 2026/ });
-    expect(screen.queryByRole("heading", { name: "2026 × 2025" })).toBeNull();
-    const marco = within(tabela).getByRole("button", { name: /Março de 2026/ }).closest("tr") as HTMLElement;
-    expect(texto(marco)).toContain("R$ 15.000,01mesmo mês de 2025: R$ 9.000,00");
-    expect(texto(tabela.querySelector("tfoot"))).toContain("2025, até maio");
-    fireEvent.click(within(tabela).getByRole("button", { name: /Março de 2026/ }));
-    const quadro = screen.getByRole("table", { name: /Medições de Obra Alfa em 03\/2026/ });
-    expect(within(quadro).getByRole("link", { name: "15ª Medição" })).toBeTruthy();
-  });
-
   it("sem lançamento: uma linha curta no lugar de cada tabela, sem zero disfarçado", async () => {
-    api.mockResolvedValue({ ...FECHAMENTO, meses: [], em_aberto: [], em_aberto_centavos: 0,
-      por_ano: { "2025": { ...n(0, 0, 0, 0), meses: 0 }, "2026": { ...n(0, 0, 0, 0), meses: 0 } },
+    api.mockResolvedValue({ ...FECHAMENTO, meses: [], em_aberto: [],
+      por_ano: { "2025": ano(n(0, 0, 0, 0), 0), "2026": ano(n(0, 0, 0, 0), 0) },
       acumulado: { ate_mes: null, "2025": n(0, 0, 0, 0), "2026": n(0, 0, 0, 0) },
       notas_sem_medicao: { em_aberto: [], em_aberto_centavos: 0, pagas: { quantidade: 0, valor_centavos: 0 } } });
     render(<Fechamento ir={() => {}} />);
     expect(await screen.findByText("Nenhum lançamento em 2026.")).toBeTruthy();
-    expect(screen.getByText("Nada em aberto.")).toBeTruthy();
+    expect(screen.getByText("Nada em aberto em 2026.")).toBeTruthy();
     expect(valorDe("Medido")).toBe("—");
   });
 

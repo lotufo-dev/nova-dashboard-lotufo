@@ -6,7 +6,7 @@ import { brl, contar } from "./formato";
 import { Link } from "./Link";
 import { tituloMedicao } from "./medicao";
 import Rolagem from "./Rolagem";
-import { type Busca, type Ir } from "./rota";
+import { type Ir } from "./rota";
 import Selo from "./Selo";
 import { fmtCompetencia, fmtDataPura, fmtMesExtenso } from "./tempo";
 import "./fechamento.css";
@@ -16,39 +16,40 @@ import "./fechamento.css";
 // somados mes a mes, obra a obra e medicao a medicao: a tela nao soma nem estima nada. O mes de todo numero e' a
 // competencia da medicao (a nota e o recebimento, a da medicao a que a nota esta' ligada).
 //
-// Duas pecas nao existiam na fundacao e ficam com duas variantes, para o dono escolher (`?variante=b` mostra a B das
-// duas): a tabela que abre por obra e por medicao (A: as linhas abrem na propria tabela; B: o mes abre um quadro com
-// uma tabela por obra) e a comparacao entre os anos (A: painel proprio "2026 × 2025"; B: o mesmo mes do outro ano
-// embaixo de cada valor, na tabela do mes).
+// Duas pecas nao existiam na fundacao (decisao do dono de 16/11/2026): o mes abre as obras, e a obra as medicoes, como
+// linhas recuadas da mesma tabela; a comparacao entre os anos fica em painel proprio ("2026 × 2025").
 
-// em_aberto e sem_nota vem nulos com o total a receber ainda nao liberado no cadastro (a trava da lista de Obras)
+// Com o total a receber ainda nao liberado no cadastro (a trava da lista de Obras e do Inicio), o recebido, o em
+// aberto e a marca de cada nota vem nulos e as listas do em aberto vem vazias: a tela diz a trava em uma frase.
 type Numeros = {
-  medido_centavos: number; aprovado_centavos: number; protocolado_centavos: number; recebido_centavos: number;
-  em_aberto_centavos: number | null; sem_nota_centavos?: number | null;
+  medido_centavos: number; aprovado_centavos: number; protocolado_centavos: number; recebido_centavos: number | null;
+  em_aberto_centavos: number | null;
 };
-type NotaLinha = { nota_id: number; numero: string; valor_centavos: number; recebida: boolean };
+/** As duas partes que somam o em aberto do ano: (a) notas e (b) medicoes sem nota ligada. */
+type DoAno = Numeros & { meses: number; em_aberto_notas_centavos: number | null; sem_nota_centavos: number | null };
+type NotaLinha = { nota_id: number; numero: string; valor_centavos: number; recebida: boolean | null; paga_em_parte: boolean | null };
 type MedicaoLinha = Numeros & {
   medicao_id: number; contrato_id: number; obra: string; numero: number; tipo: string; estado: string;
   competencia: string; protocolo_em: string | null; notas: NotaLinha[]; sem_nota?: boolean;
 };
 type ObraLinha = Numeros & { contrato_id: number; obra: string; medicoes: MedicaoLinha[] };
 type Mes = Numeros & { competencia: string; obras: ObraLinha[] };
-/** (a) nota protocolada nao paga ou (b) medicao protocolada sem nota ligada. */
+/** (a) nota protocolada nao paga (a paga em parte, pelo que falta) ou (b) medicao protocolada sem nota ligada. */
 type EmAberto = {
   tipo_aberto: "nota" | "sem_nota"; nota_id: number | null; numero: string | null; contrato_id: number; obra: string;
   medicao_id: number; medicao_numero: number; tipo: string; competencia: string; protocolo_em: string | null;
-  valor_centavos: number | null;
+  valor_centavos: number; paga_em_parte: boolean;
 };
 /** (c) nota de cobranca em aberto no RM sem medicao ligada: sem competencia, fora dos meses e do total. */
-type NotaSolta = { nota_id: number; numero: string; contrato_id: number; obra: string; emissao: string | null; valor_centavos: number | null };
+type NotaSolta = { nota_id: number; numero: string; contrato_id: number; obra: string; emissao: string | null;
+  valor_centavos: number; paga_em_parte: boolean };
 type Contagem = { quantidade: number; valor_centavos: number | null };
 type Cobertura = { aprovado_centavos: number; com_nota_centavos: number; sem_nota_centavos: number; medicoes_sem_nota: number;
   percentual: number | null };
 export type RespostaFechamento = {
-  anos: string[]; meses: Mes[]; por_ano: Record<string, Numeros & { meses: number }>;
+  anos: string[]; meses: Mes[]; por_ano: Record<string, DoAno>;
   acumulado: { ate_mes: string | null } & Record<string, Numeros | string | null>;
-  em_aberto: EmAberto[]; em_aberto_centavos: number | null; em_aberto_notas_centavos: number | null;
-  em_aberto_sem_nota_centavos: number | null; em_aberto_anteriores: Contagem;
+  em_aberto: EmAberto[]; em_aberto_anteriores: Contagem;
   notas_sem_medicao: { em_aberto: NotaSolta[]; em_aberto_centavos: number | null; pagas: Contagem };
   cobertura: Record<string, Cobertura>; total_a_receber_liberado: boolean;
 };
@@ -69,9 +70,6 @@ function valor(c: number | null | undefined): string {
 function nomeMes(comp: string): string {
   const n = fmtMesExtenso(comp);
   return n.charAt(0).toUpperCase() + n.slice(1);
-}
-function outroAno(anos: string[], ano: string): string | null {
-  return anos.find(a => a !== ano) ?? null;
 }
 function doAcumulado(f: RespostaFechamento, ano: string): Numeros | null {
   const x = f.acumulado[ano];
@@ -96,21 +94,15 @@ function NumerosDoAno({ f, ano }: { f: RespostaFechamento; ano: string }) {
 
 /* ------------------------------------------------------------------ tabela do mes */
 
-function Celulas({ x, outro, celular = false }: { x: Numeros; outro?: { ano: string; x: Numeros | null }; celular?: boolean }) {
+function Celulas({ x }: { x: Numeros }) {
   return (
     <>
-      {COLUNAS.map(c => (
-        <td key={c.chave} className={`col-num dinheiro num${celular ? opcional(c) : ""}`}>
-          {valor(x[c.chave])}
-          {outro && c.chave !== "em_aberto_centavos" && (
-            <span className="fch-outro"><span className="sr-only">mesmo mês de </span>{outro.ano}: {outro.x ? valor(outro.x[c.chave]) : "—"}</span>
-          )}
-        </td>
-      ))}
+      {COLUNAS.map(c => <td key={c.chave} className={`col-num dinheiro num${opcional(c)}`}>{valor(x[c.chave])}</td>)}
     </>
   );
 }
 
+/** As notas da medicao, cada uma com a situacao: recebida, paga em parte ou em aberto (sem selo com a trava). */
 function Notas({ m }: { m: MedicaoLinha }) {
   if (m.sem_nota) return <ul className="fch-notas"><li><Selo>sem nota ligada</Selo></li></ul>;
   if (m.notas.length === 0) return null;
@@ -119,7 +111,9 @@ function Notas({ m }: { m: MedicaoLinha }) {
       {m.notas.map(n => (
         <li key={n.nota_id}>
           <span className="num">Nota {n.numero}</span>
-          <Selo situacao={n.recebida ? "feito" : "andamento"}>{n.recebida ? "recebida" : "em aberto"}</Selo>
+          {n.recebida !== null && (
+            <Selo situacao={n.recebida ? "feito" : "andamento"}>{n.recebida ? "recebida" : n.paga_em_parte ? "paga em parte" : "em aberto"}</Selo>
+          )}
         </li>
       ))}
     </ul>
@@ -137,8 +131,8 @@ function BotaoAbre({ aberto, controla, rotulo, children, onClick }:
 
 type Abertos = { tem: (k: string) => boolean; trocar: (k: string) => void };
 
-/** Variante A: o mes abre as obras, e a obra abre as medicoes, na propria tabela, com as colunas alinhadas. */
-function LinhasA({ m, ab, ir }: { m: Mes; ab: Abertos; ir: Ir }) {
+/** O mes abre as obras, e a obra abre as medicoes, na propria tabela, com as colunas alinhadas. */
+function LinhasDoMes({ m, ab, ir }: { m: Mes; ab: Abertos; ir: Ir }) {
   if (!ab.tem(m.competencia)) return null;
   return (
     <>
@@ -152,7 +146,7 @@ function LinhasA({ m, ab, ir }: { m: Mes; ab: Abertos; ir: Ir }) {
                 <BotaoAbre aberto={ab.tem(chave)} controla={id} rotulo={`${o.obra}, medições de ${fmtCompetencia(m.competencia)}`}
                   onClick={() => ab.trocar(chave)}>{o.obra}</BotaoAbre>
               </th>
-              <Celulas x={o} celular />
+              <Celulas x={o} />
             </tr>
             {ab.tem(chave) && o.medicoes.map((md, j) => (
               <tr key={md.medicao_id} className="fch-linha fch-linha--medicao" id={j === 0 ? id : undefined}>
@@ -160,7 +154,7 @@ function LinhasA({ m, ab, ir }: { m: Mes; ab: Abertos; ir: Ir }) {
                   <Link className="link" para={{ tela: "medicao", obra: md.contrato_id, id: md.medicao_id }} ir={ir}>{tituloMedicao(md)}</Link>
                   <Notas m={md} />
                 </th>
-                <Celulas x={md} celular />
+                <Celulas x={md} />
               </tr>
             ))}
           </Fragment>
@@ -170,53 +164,17 @@ function LinhasA({ m, ab, ir }: { m: Mes; ab: Abertos; ir: Ir }) {
   );
 }
 
-/** Variante B: o mes abre um quadro, com uma tabela curta por obra (as medicoes e o subtotal da obra). */
-function QuadroB({ m, ir }: { m: Mes; ir: Ir }) {
-  return (
-    <tr className="fch-quadro" id={`fch-mes-${m.competencia}`}>
-      <td colSpan={COLUNAS.length + 1}>
-        <div className="fch-quadro__corpo">
-          {m.obras.map(o => (
-            <section key={o.contrato_id} className="fch-quadro__obra" aria-label={`${o.obra}, ${fmtCompetencia(m.competencia)}`}>
-              <h3 className="fch-quadro__titulo">{o.obra}</h3>
-              <table className="tabela fch-quadro__tabela">
-                <caption className="sr-only">Medições de {o.obra} em {fmtCompetencia(m.competencia)}, na cota da Lotufo</caption>
-                <thead><tr><th scope="col">Medição</th>{COLUNAS.map(c => <th key={c.chave} scope="col" className="col-num">{c.rotulo}</th>)}</tr></thead>
-                <tbody>
-                  {o.medicoes.map(md => (
-                    <tr key={md.medicao_id}>
-                      <th scope="row">
-                        <Link className="link" para={{ tela: "medicao", obra: md.contrato_id, id: md.medicao_id }} ir={ir}>{tituloMedicao(md)}</Link>
-                        <Notas m={md} />
-                      </th>
-                      <Celulas x={md} />
-                    </tr>
-                  ))}
-                </tbody>
-                {o.medicoes.length > 1 && <tfoot><tr><th scope="row">Total da obra</th><Celulas x={o} /></tr></tfoot>}
-              </table>
-            </section>
-          ))}
-        </div>
-      </td>
-    </tr>
-  );
-}
-
-function TabelaDoAno({ f, ano, variante, ir }: { f: RespostaFechamento; ano: string; variante: "a" | "b"; ir: Ir }) {
+function TabelaDoAno({ f, ano, ir }: { f: RespostaFechamento; ano: string; ir: Ir }) {
   const [abertos, setAbertos] = useState<Set<string>>(new Set());
   const ab: Abertos = {
     tem: k => abertos.has(k),
     trocar: k => setAbertos(s => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; }),
   };
   const meses = f.meses.filter(m => m.competencia.startsWith(`${ano}-`));
-  const outro = variante === "b" ? outroAno(f.anos, ano) : null;
-  const doOutro = (comp: string) => outro ? f.meses.find(m => m.competencia === `${outro}${comp.slice(4)}`) ?? null : null;
   if (meses.length === 0) return <p className="fch-vazio">Nenhum lançamento em {ano}.</p>;
-  const ate = f.acumulado.ate_mes;
   return (
     <Rolagem rotulo={`Por mês de competência, ${ano}`} className="tabela-wrap fch-rolagem">
-      <table className={`tabela fch-tabela fch-tabela--meses${variante === "b" ? " fch-tabela--b" : ""}`}>
+      <table className="tabela fch-tabela fch-tabela--meses">
         <caption className="sr-only">Medido, aprovado, protocolado, recebido e em aberto por mês de competência de {ano}, na cota da Lotufo</caption>
         <thead>
           <tr>
@@ -235,27 +193,21 @@ function TabelaDoAno({ f, ano, variante, ir }: { f: RespostaFechamento; ano: str
                     <span className="fch-mes-curto" aria-hidden="true">{nomeMes(m.competencia).slice(0, 3)}</span>
                   </BotaoAbre>
                 </th>
-                <Celulas x={m} outro={outro ? { ano: outro, x: doOutro(m.competencia) } : undefined} celular />
+                <Celulas x={m} />
               </tr>
-              {variante === "a" ? <LinhasA m={m} ab={ab} ir={ir} /> : ab.tem(m.competencia) && <QuadroB m={m} ir={ir} />}
+              <LinhasDoMes m={m} ab={ab} ir={ir} />
             </Fragment>
           ))}
         </tbody>
         <tfoot>
-          <tr><th scope="row" className="fch-primeira">Total de {ano}</th><Celulas x={f.por_ano[ano]} celular /></tr>
-          {variante === "b" && ate && f.anos.map(a => doAcumulado(f, a) && (
-            <tr key={a} className="fch-acumulado">
-              <th scope="row" className="fch-primeira">{a}, até {fmtMesExtenso(`${a}-${ate}`)}</th>
-              <Celulas x={doAcumulado(f, a) as Numeros} celular />
-            </tr>
-          ))}
+          <tr><th scope="row" className="fch-primeira">Total de {ano}</th><Celulas x={f.por_ano[ano]} /></tr>
         </tfoot>
       </table>
     </Rolagem>
   );
 }
 
-/* ------------------------------------------------------------------ comparacao (variante A) */
+/* ------------------------------------------------------------------ comparacao */
 
 function Comparacao({ f }: { f: RespostaFechamento }) {
   const [chave, setChave] = useState<keyof Numeros>("medido_centavos");
@@ -264,13 +216,15 @@ function Comparacao({ f }: { f: RespostaFechamento }) {
   const mms = [...new Set(f.meses.map(m => m.competencia.slice(5)))].sort();
   const ate = f.acumulado.ate_mes;
   if (mms.length === 0) return null;
-  const rotulo = COMPARAVEIS.find(c => c.chave === chave)?.rotulo ?? "";
+  // com a trava do total a receber, o recebido nao tem valor: o botao dele sai
+  const comparaveis = COMPARAVEIS.filter(c => f.total_a_receber_liberado || c.chave !== "recebido_centavos");
+  const rotulo = comparaveis.find(c => c.chave === chave)?.rotulo ?? "";
   return (
     <section className="cartao fch-painel" aria-labelledby="fch-comparacao">
       <div className="fch-painel__cab">
         <h2 id="fch-comparacao">{b} × {a}</h2>
         <div className="fch-botoes" role="group" aria-label="Número comparado">
-          {COMPARAVEIS.map(c => (
+          {comparaveis.map(c => (
             <button key={c.chave} type="button" className="fch-botao" aria-pressed={chave === c.chave} onClick={() => setChave(c.chave)}>{c.rotulo}</button>
           ))}
         </div>
@@ -313,41 +267,61 @@ function Comparacao({ f }: { f: RespostaFechamento }) {
 
 /* ------------------------------------------------------------------ em aberto */
 
+// As celulas levam a area (`fch-a-*`) e o rotulo (`data-rotulo`): em tela estreita a linha vira um bloco, com a obra e o
+// valor em cima (fechamento.css), e o rotulo da coluna vai escrito antes do dado.
 function LinhaEmAberto({ e, ir }: { e: EmAberto; ir: Ir }) {
   return (
     <tr>
-      <th scope="row" className="fch-primeira num">{e.protocolo_em ? fmtDataPura(e.protocolo_em) : "\u2014"}</th>
-      <td>{e.obra}</td>
-      <td>
+      {e.protocolo_em
+        ? <th scope="row" className="fch-primeira fch-a-data num" data-rotulo="Protocolo">{fmtDataPura(e.protocolo_em)}</th>
+        : <th scope="row" className="fch-primeira fch-a-data fch-sem-data">sem data de protocolo</th>}
+      <td className="fch-a-obra">{e.obra}</td>
+      <td className="fch-a-medicao">
         <Link className="link" para={{ tela: "medicao", obra: e.contrato_id, id: e.medicao_id }} ir={ir}>
           {tituloMedicao({ numero: e.medicao_numero, tipo: e.tipo })}
         </Link>
         <span className="fch-sub num">{fmtCompetencia(e.competencia)}</span>
       </td>
-      <td className="num">{e.numero ?? <Selo>sem nota ligada</Selo>}</td>
-      <td className="col-num dinheiro num">{valor(e.valor_centavos)}</td>
+      <td className="fch-a-nota">
+        {e.numero === null ? <Selo>sem nota ligada</Selo> : <NumeroDaNota numero={e.numero} emParte={e.paga_em_parte} />}
+      </td>
+      <td className="col-num dinheiro num fch-a-valor">{valor(e.valor_centavos)}</td>
     </tr>
   );
 }
 
-/** O em aberto em tres partes: (a) nota protocolada nao paga e (b) medicao protocolada sem nota ligada, que somam o
- *  total, e (c) nota em aberto no RM sem medicao ligada, subtotal a' parte (sem competencia, fora dos meses). */
-function EmAbertoPainel({ f, ir }: { f: RespostaFechamento; ir: Ir }) {
-  const notas = f.em_aberto.filter(e => e.tipo_aberto === "nota");
-  const semNota = f.em_aberto.filter(e => e.tipo_aberto === "sem_nota");
+/** O numero da nota e, na paga em parte, o selo: o valor ao lado e' o que falta, nao o valor da nota. */
+function NumeroDaNota({ numero, emParte }: { numero: string; emParte: boolean }) {
+  return (
+    <span className="fch-nota">
+      <span className="num" data-rotulo="Nota">{numero}</span>
+      {emParte && <Selo situacao="andamento">paga em parte</Selo>}
+    </span>
+  );
+}
+
+/** O em aberto do ano escolhido, em duas partes que somam o total do ano (o mesmo numero do alto e do "Total de <ano>"
+ *  da tabela do mes): (a) nota protocolada nao paga e (b) medicao protocolada sem nota ligada. A' parte, sem depender
+ *  do ano: (c) nota em aberto no RM sem medicao ligada (sem competencia) e o em aberto de antes do primeiro ano. */
+function EmAbertoPainel({ f, ano, ir }: { f: RespostaFechamento; ano: string; ir: Ir }) {
+  const doAno = f.em_aberto.filter(e => e.competencia.startsWith(`${ano}-`));
+  const notas = doAno.filter(e => e.tipo_aberto === "nota");
+  const semNota = doAno.filter(e => e.tipo_aberto === "sem_nota");
+  const t = f.por_ano[ano];
   const soltas = f.notas_sem_medicao.em_aberto;
   const pagas = f.notas_sem_medicao.pagas;
-  const n = f.em_aberto.length;
+  const anteriores = f.em_aberto_anteriores;
+  const n = doAno.length;
   return (
     <section className="cartao fch-painel" aria-labelledby="fch-aberto">
       <div className="fch-painel__cab">
-        <h2 id="fch-aberto">Em aberto</h2>
+        <h2 id="fch-aberto">Em aberto de {ano}</h2>
         <Contador rotulo={contar(n, "linha", "linhas")}>{n}</Contador>
       </div>
-      {n === 0 ? <p className="fch-vazio">Nada em aberto.</p> : (
-        <Rolagem rotulo="Em aberto" className="tabela-wrap fch-rolagem">
+      {n === 0 ? <p className="fch-vazio">Nada em aberto em {ano}.</p> : (
+        <Rolagem rotulo={`Em aberto de ${ano}`} className="tabela-wrap fch-rolagem">
           <table className="tabela fch-tabela fch-tabela--aberto">
-            <caption className="sr-only">Em aberto, na cota da Lotufo: notas protocoladas não pagas e medições protocoladas sem nota ligada, pela data do protocolo</caption>
+            <caption className="sr-only">Em aberto de {ano}, na cota da Lotufo: notas protocoladas não pagas e medições protocoladas sem nota ligada, pela data do protocolo</caption>
             <thead>
               <tr>
                 <th scope="col" className="fch-primeira">Protocolo</th><th scope="col">Obra</th><th scope="col">Medição</th>
@@ -357,60 +331,68 @@ function EmAbertoPainel({ f, ir }: { f: RespostaFechamento; ir: Ir }) {
             {notas.length > 0 && (
               <tbody>
                 <tr className="fch-grupo"><th scope="rowgroup" colSpan={4}>Nota protocolada não paga</th>
-                  <td className="col-num dinheiro num">{valor(f.em_aberto_notas_centavos)}</td></tr>
+                  <td className="col-num dinheiro num">{valor(t.em_aberto_notas_centavos)}</td></tr>
                 {notas.map(e => <LinhaEmAberto key={`n-${e.nota_id}-${e.medicao_id}`} e={e} ir={ir} />)}
               </tbody>
             )}
             {semNota.length > 0 && (
               <tbody>
                 <tr className="fch-grupo"><th scope="rowgroup" colSpan={4}>Medição protocolada sem nota ligada</th>
-                  <td className="col-num dinheiro num">{valor(f.em_aberto_sem_nota_centavos)}</td></tr>
+                  <td className="col-num dinheiro num">{valor(t.sem_nota_centavos)}</td></tr>
                 {semNota.map(e => <LinhaEmAberto key={`m-${e.medicao_id}`} e={e} ir={ir} />)}
               </tbody>
             )}
-            <tfoot><tr><th scope="row" className="fch-primeira" colSpan={4}>Total em aberto</th><td className="col-num dinheiro num">{valor(f.em_aberto_centavos)}</td></tr></tfoot>
+            <tfoot><tr><th scope="row" className="fch-primeira" colSpan={4}>Total em aberto de {ano}</th><td className="col-num dinheiro num">{valor(t.em_aberto_centavos)}</td></tr></tfoot>
           </table>
         </Rolagem>
       )}
-      {soltas.length > 0 && (
+      {(soltas.length > 0 || anteriores.quantidade > 0) && (
         <div className="fch-soltas">
-          <h3 className="fch-soltas__titulo" id="fch-soltas">Nota sem medição ligada</h3>
-          {semNota.length > 0 && (
-            <CaixaAviso nivel="atencao" className="fch-aviso">
-              Medição sem nota ligada e nota sem medição ligada podem ser a mesma cobrança enquanto o vínculo não for feito.
-            </CaixaAviso>
+          <p className="fch-soltas__base">Nota sem medição ligada e em aberto de competência anterior a {f.anos[0]} não dependem do ano escolhido.</p>
+          {soltas.length > 0 && (
+            <>
+              <h3 className="fch-soltas__titulo" id="fch-soltas">Nota sem medição ligada</h3>
+              {semNota.length > 0 && (
+                <CaixaAviso nivel="atencao" className="fch-aviso">
+                  Medição sem nota ligada e nota sem medição ligada podem ser a mesma cobrança enquanto o vínculo não for feito.
+                </CaixaAviso>
+              )}
+              <Rolagem rotulo="Notas sem medição ligada, em aberto" className="tabela-wrap fch-rolagem">
+                <table className="tabela fch-tabela fch-tabela--aberto fch-tabela--soltas" aria-labelledby="fch-soltas">
+                  <caption className="sr-only">Notas de cobrança em aberto no RM sem medição ligada, pela data da emissão, na cota da Lotufo; fora do total em aberto</caption>
+                  <thead>
+                    <tr><th scope="col" className="fch-primeira">Emissão</th><th scope="col">Obra</th><th scope="col">Nota</th>
+                      <th scope="col" className="col-num">Valor</th></tr>
+                  </thead>
+                  <tbody>
+                    {soltas.map(e => (
+                      <tr key={e.nota_id}>
+                        {e.emissao
+                          ? <th scope="row" className="fch-primeira fch-a-data num" data-rotulo="Emissão">{fmtDataPura(e.emissao)}</th>
+                          : <th scope="row" className="fch-primeira fch-a-data fch-sem-data">sem data de emissão</th>}
+                        <td className="fch-a-obra">{e.obra}</td>
+                        <td className="fch-a-nota"><NumeroDaNota numero={e.numero} emParte={e.paga_em_parte} /></td>
+                        <td className="col-num dinheiro num fch-a-valor">{valor(e.valor_centavos)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr><th scope="row" className="fch-primeira" colSpan={3}>Subtotal à parte</th>
+                    <td className="col-num dinheiro num">{valor(f.notas_sem_medicao.em_aberto_centavos)}</td></tr></tfoot>
+                </table>
+              </Rolagem>
+            </>
           )}
-          <Rolagem rotulo="Notas sem medição ligada, em aberto" className="tabela-wrap fch-rolagem">
-            <table className="tabela fch-tabela fch-tabela--aberto" aria-labelledby="fch-soltas">
-              <caption className="sr-only">Notas de cobrança em aberto no RM sem medição ligada, pela data da emissão, na cota da Lotufo; fora do total em aberto</caption>
-              <thead>
-                <tr><th scope="col" className="fch-primeira">Emissão</th><th scope="col">Obra</th><th scope="col">Nota</th>
-                  <th scope="col" className="col-num">Valor</th></tr>
-              </thead>
-              <tbody>
-                {soltas.map(e => (
-                  <tr key={e.nota_id}>
-                    <th scope="row" className="fch-primeira num">{e.emissao ? fmtDataPura(e.emissao) : "\u2014"}</th>
-                    <td>{e.obra}</td><td className="num">{e.numero}</td>
-                    <td className="col-num dinheiro num">{valor(e.valor_centavos)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot><tr><th scope="row" className="fch-primeira" colSpan={3}>Subtotal à parte</th>
-                <td className="col-num dinheiro num">{valor(f.notas_sem_medicao.em_aberto_centavos)}</td></tr></tfoot>
-            </table>
-          </Rolagem>
         </div>
       )}
-      {(pagas.quantidade > 0 || f.em_aberto_anteriores.quantidade > 0) && (
+      {(pagas.quantidade > 0 || anteriores.quantidade > 0) && (
         <dl className="fch-aparte">
           {pagas.quantidade > 0 && (
             <div><dt>Notas pagas sem medição ligada ({f.anos.join(" e ")})</dt>
               <dd><span className="num">{contar(pagas.quantidade, "nota", "notas")}</span> · <span className="num">{valor(pagas.valor_centavos)}</span></dd></div>
           )}
-          {f.em_aberto_anteriores.quantidade > 0 && (
+          {anteriores.quantidade > 0 && (
             <div><dt>Em aberto de competências anteriores a {f.anos[0]}</dt>
-              <dd><span className="num">{contar(f.em_aberto_anteriores.quantidade, "linha", "linhas")}</span> · <span className="num">{valor(f.em_aberto_anteriores.valor_centavos)}</span></dd></div>
+              <dd><span className="num">{contar(anteriores.quantidade, "linha", "linhas")}</span> · <span className="num">{valor(anteriores.valor_centavos)}</span></dd></div>
           )}
         </dl>
       )}
@@ -434,11 +416,10 @@ function AvisoCobertura({ f, ano }: { f: RespostaFechamento; ano: string }) {
 
 /* ------------------------------------------------------------------ pagina */
 
-export default function Fechamento({ ir, busca = {} }: { ir: Ir; busca?: Busca }) {
+export default function Fechamento({ ir }: { ir: Ir }) {
   const [f, setF] = useState<RespostaFechamento | null>(null);
   const [erro, setErro] = useState("");
   const [ano, setAno] = useState<string | null>(null);
-  const variante = busca.variante === "b" ? "b" : "a";
   useEffect(() => {
     let vivo = true;
     api<RespostaFechamento>("/api/fechamento").then(d => { if (vivo) setF(d); })
@@ -460,13 +441,18 @@ export default function Fechamento({ ir, busca = {} }: { ir: Ir; busca?: Busca }
       </div>
       <p className="fch-base">Protocolado e recebido pelo valor bruto da nota; cada número no mês de competência da medição, não no mês do pagamento.</p>
       <NumerosDoAno f={f} ano={atual} />
+      {!f.total_a_receber_liberado && (
+        <CaixaAviso nivel="atencao" className="fch-aviso">
+          O total a receber ainda não está liberado: recebido e em aberto ficam sem valor.
+        </CaixaAviso>
+      )}
       <AvisoCobertura f={f} ano={atual} />
       <section className="cartao fch-painel" aria-labelledby="fch-meses">
         <div className="fch-painel__cab"><h2 id="fch-meses">Por mês de competência</h2></div>
-        <TabelaDoAno key={atual} f={f} ano={atual} variante={variante} ir={ir} />
+        <TabelaDoAno key={atual} f={f} ano={atual} ir={ir} />
       </section>
-      {variante === "a" && <Comparacao f={f} />}
-      <EmAbertoPainel f={f} ir={ir} />
+      <Comparacao f={f} />
+      {f.total_a_receber_liberado && <EmAbertoPainel f={f} ano={atual} ir={ir} />}
     </div>
   );
 }
