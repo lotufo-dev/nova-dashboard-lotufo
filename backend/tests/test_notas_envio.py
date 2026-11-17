@@ -400,6 +400,64 @@ def test_arquivo_do_envio_que_sumiu_do_disco_vira_erro_tratado(api):
     assert r.json()["detail"] == "Um arquivo deste envio não está mais disponível no servidor."
 
 
+def _nada_saiu_nem_foi_gravado(c, ids, pid, tmp_path):
+    assert list((tmp_path / "sim").rglob("*.json")) == []          # nada no simulador do e-mail
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    assert c.execute("SELECT COUNT(*) FROM envio_medicoes").fetchone()[0] == 0
+    assert c.execute("SELECT COUNT(*) FROM medicao_protocolos").fetchone()[0] == 0
+    p = c.execute("SELECT situacao, envio_id, envio_reservado_em FROM protocolos WHERE id=?", (pid,)).fetchone()
+    assert (p["situacao"], p["envio_id"], p["envio_reservado_em"]) == ("rascunho", None, None)
+    assert {r[0] for r in c.execute("SELECT estado FROM medicoes WHERE id IN (?,?)",
+                                    (ids["sinfra_exec"], ids["sinfra_reaj"]))} == {"nota_emitida"}
+
+
+def test_envio_com_anexo_ausente_do_disco_e_recusado_inteiro(api, tmp_path):
+    """O envio nao se desfaz: com um anexo fora do disco, nenhum e-mail sai (nem parcial), nada e' gravado e nenhuma
+    reserva fica presa. A leitura dos anexos vem antes da reserva; a resposta e' a frase tratada, nao 500. Com o
+    arquivo de volta, o mesmo envio sai."""
+    cl, c, ids = api
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"], ids["sinfra_reaj"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    rel = c.execute("SELECT arquivo FROM medicao_documentos WHERE medicao_id=? AND tipo_doc='nfs'",
+                    (ids["sinfra_exec"],)).fetchone()[0]
+    caminho = arquivos.caminho_seguro(rel)
+    guardado = caminho.read_bytes()
+    caminho.unlink()
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d))
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == protocolo.ARQUIVO_AUSENTE
+    _nada_saiu_nem_foi_gravado(c, ids, pid, tmp_path)
+    r = cl.post("/api/protocolos/envio", json={"protocolo_ids": [pid], **_corpo(d)})       # a outra rota de envio
+    assert r.status_code == 409 and r.json()["detail"] == protocolo.ARQUIVO_AUSENTE, r.text
+    _nada_saiu_nem_foi_gravado(c, ids, pid, tmp_path)
+    caminho.write_bytes(guardado)
+    assert cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d)).status_code == 200
+    assert len(list((tmp_path / "sim" / "enviados").glob("*.json"))) == 1
+
+
+def test_anexo_que_some_depois_da_reserva_solta_a_reserva_e_nao_envia(api, tmp_path, monkeypatch):
+    """O arquivo some entre a previa do envio e a segunda leitura dos anexos, ja' com o protocolo reservado: a
+    reserva e' solta antes de qualquer e-mail, nada sai e a resposta e' a mesma frase."""
+    cl, c, ids = api
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"], ids["sinfra_reaj"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    original, leituras = protocolo._anexos_rotulados, []
+
+    def some_na_segunda_leitura(conn, p, hoje):
+        leituras.append(p["id"])
+        if len(leituras) > 1:           # a primeira e' a da previa, antes da reserva
+            raise FileNotFoundError("arquivo")
+        return original(conn, p, hoje)
+
+    monkeypatch.setattr(protocolo, "_anexos_rotulados", some_na_segunda_leitura)
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d))
+    assert r.status_code == 409 and r.json()["detail"] == protocolo.ARQUIVO_AUSENTE, r.text
+    assert len(leituras) == 2
+    _nada_saiu_nem_foi_gravado(c, ids, pid, tmp_path)
+
+
 def test_envio_pelo_simulador_vira_aguardando_pagamento(api, tmp_path):
     cl, c, ids = api
     r = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],

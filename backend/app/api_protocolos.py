@@ -257,6 +257,9 @@ def enviar(dados: EnvioIn, usuario: dict = Depends(exigir("editar_cadastros")),
     except protocolo.ConfirmarPendencias as e:
         conn.rollback()
         raise HTTPException(422, detail=e.detalhe()) from None
+    except FileNotFoundError:
+        conn.rollback()         # anexo ausente do disco: nada saiu e nada foi gravado (ver `protocolo.ARQUIVO_AUSENTE`)
+        raise HTTPException(409, protocolo.ARQUIVO_AUSENTE) from None
     except (ValueError, graph.ErroGraph) as e:
         conn.rollback()
         raise HTTPException(422, str(e)) from None
