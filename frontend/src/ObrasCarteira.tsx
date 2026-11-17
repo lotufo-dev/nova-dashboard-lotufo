@@ -298,7 +298,9 @@ export function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
                   {/* 06/11/2026: a coluna "Desvio (p.p.)" (#296) saiu da tela */}
                   <td data-rotulo="Término" className="num">{data(o.termino)}<div className="qdop-tabela__sub">vigência {data(o.vigencia)}</div></td>
                   <td data-rotulo="Farol">
-                    <SeloFarol farol={o.farol} />
+                    {/* a obra em dia fica so' com a palavra, em tinta: o selo e' da excecao (com o banco real, mais de
+                        dez linhas repetiam o mesmo selo verde) */}
+                    {o.farol === "verde" ? "Em dia" : <SeloFarol farol={o.farol} />}
                     {!o.motivos ? (o.motivo ? <div className="qdop-tabela__motivo">{o.motivo}</div> : null) : visiveis.length === 0 ? null : (
                       <ul className="qdop-tabela__motivos">
                         {visiveis.map(x => <li key={`${x.tipo}-${x.texto}`}>{x.texto}</li>)}
