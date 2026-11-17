@@ -1,6 +1,6 @@
 # Prorrogação de prazo: vigência e execução (Outlook + SharePoint, 2026-09-17)
 
-Fonte: SharePoint (set/2025 a set/2026, 18 cartas lidas na íntegra) e caixa do Leonardo (abr a set/2026),
+Fonte: SharePoint (set/2025 a set/2026, 18 cartas lidas na íntegra) e caixa do dono (abr a set/2026),
 só leitura. Consolidado de três frentes: varredura principal, ramo das obras 159 a 167 e ramo das obras
 168 a 173. O ramo das obras 183 e 184 terminou com erro de créditos de uso e ficou pendente.
 
@@ -38,7 +38,7 @@ depois de vencer.
 **Mediana de antecedência: ~21 dias. Quatro cartas saíram com o prazo já vencido.**
 
 Quem protocola é a operadora; a engenheira cobre o Consórcio Integra BRT; a segunda operadora nunca envia
-ofício de prazo (só espelho), entra em cópia. Leonardo em cópia em 100%.
+ofício de prazo (só espelho), entra em cópia. O dono em cópia em 100%.
 
 Assuntos reais: `CT/166/LT/2026 - 5ª Dilação de Prazo`; `CT/039/2026 - Aditivo de Prazo - I.C. 041/2025/00/00
 – SINFRA`; `CT/192/LT/2026 - 1º Aditivo de Prazo - IC 176/2025 - Estações BRT`; `CT/253/LT/2026 - 1º aditivo
@@ -268,7 +268,7 @@ Pode ser arquivo faltando; precisa de conferência humana.
   CT/248 (Granito) e a Nota Técnica da MTPAR de 19/08/2026; prazos vigentes de 175 Orla, 177 Cultural,
   182 Xtreme, 184 Maternidade, 187 Terminais.
 - **Nenhum ofício de prorrogação da Prefeitura de Cuiabá, SES-MT ou Várzea Grande apareceu no Outlook**: o
-  fluxo nessas é invertido (o órgão inicia) ou corre fora da caixa do Leonardo.
+  fluxo nessas é invertido (o órgão inicia) ou corre fora da caixa do dono.
 - O Graph do tenant entrou em erro 429 recorrente durante as varreduras; as leituras precisaram ser
   espaçadas.
 
@@ -299,9 +299,9 @@ Pode ser arquivo faltando; precisa de conferência humana.
 11. **Cuidado com "chuva"**: o contrato SINFRA veda a alegação. A carta gerada não deve sugerir essa
     justificativa sozinha, só ancorada em ordem de paralisação do órgão.
 
-## 11. Situação confirmada pelo Leonardo e última carta de Alta Floresta (2026-09-18)
+## 11. Situação confirmada pelo dono e última carta de Alta Floresta (2026-09-18)
 
-- **173 Chapada MT-020/251: FINALIZADA** (Leonardo). A ausência de instrumento de prazo após 19/11/2025 é
+- **173 Chapada MT-020/251: FINALIZADA** (o dono). A ausência de instrumento de prazo após 19/11/2025 é
   normal. No cadastro antigo estava "fora de escopo" com "confirmar status" em aberto desde 07/2026.
 - **161 Alta Floresta: 42ª é a MEDIÇÃO FINAL.** A NFS-e 2225 (16/07/2026) descreve "REAJUSTE 42ª MEDIÇÃO
   FINAL DA OBRA DE CONSTRUÇÃO DO HOSPITAL REGIONAL DE ALTA FLORESTA". No boletim só "Administração de obra"

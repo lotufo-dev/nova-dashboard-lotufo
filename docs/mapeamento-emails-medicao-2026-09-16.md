@@ -1,13 +1,13 @@
-# Mapeamento dos e-mails do ciclo de medição (caixa do Leonardo, 2026-09-16)
+# Mapeamento dos e-mails do ciclo de medição (caixa do dono, 2026-09-16)
 
-Fonte: caixa do Leonardo via conector Microsoft 365, só leitura. Objetivo: o sistema
+Fonte: caixa do dono via conector Microsoft 365, só leitura. Objetivo: o sistema
 gerar automaticamente o e-mail do espelho ao faturamento e o e-mail de protocolo ao órgão.
 
 ## 0. Escopo real
 
 - A caixa só tem mensagens desde **2026-05-13** (~4 meses mapeáveis, 837 mensagens na entrada).
-- O Leonardo quase nunca é o remetente: 12 itens enviados no período. Quem opera o ciclo é
-  a operadora, com a segunda operadora como suplente; o Leonardo entra em cópia. Consequência: a conta que
+- O dono quase nunca é o remetente: 12 itens enviados no período. Quem opera o ciclo é
+  a operadora, com a segunda operadora como suplente; o dono entra em cópia. Consequência: a conta que
   protocola é a da operadora; ela precisa de usuário na dashboard e de login Microsoft próprio.
 
 ## 1. Protocolo ao órgão: três famílias
@@ -15,7 +15,7 @@ gerar automaticamente o e-mail do espelho ao faturamento e o e-mail de protocolo
 ### 1.A MTPAR (Complexo Cultural, Orla, Xtreme, Espaço Show, Granito)
 - TO: o e-mail de protocolo da MTPAR + 1 fiscal nominal por obra (muda com o tempo: o Cultural trocou de
   fiscal entre 21/08 e 16/09). Orla apareceu só com o e-mail de protocolo.
-- CC fixo: a equipe interna (cinco endereços, incluindo o do Leonardo).
+- CC fixo: a equipe interna (cinco endereços, incluindo o do dono).
 - Assunto: `CT-{nnn}-LT-2026 - {n}ª Medição - {Obra}` e `CT-{nnn}-LT-2026 - Reajuste {n}ª Medição - {Obra}`
   (variantes com barras e com "Medição Contratual (MM/AAAA) ... IC nnn/ano").
 - Corpo literal: "Bom dia." (ou "Boa tarde.") / "Encaminho arquivo para protocolo." / "Solicito, por favor,
@@ -99,7 +99,7 @@ etapa (reaj. 9ª), Maternidade VG (CT 118/2025, 1ª, 2ª). Entre 1 e 6 protocolo
 e-mails de protocolo e ≥ 50 threads de espelho.
 
 Endereços por papel: ver seções 1, 2 e 5. Cópia interna da engenharia: as duas operadoras, a engenheira,
-o Leonardo e mais quatro pessoas da engenharia.
+o dono e mais quatro pessoas da engenharia.
 
 ## 7. O que automatizar e o que cadastrar
 1. Corpo: 100% automatizável (3 textos fixos; só a saudação varia por horário).

@@ -1,6 +1,6 @@
 # Reajuste contratual na prática (Outlook + SharePoint, 2026-09-17)
 
-Fonte: caixa do Leonardo e SharePoint do Departamento de Engenharia, só leitura.
+Fonte: caixa do dono e SharePoint do Departamento de Engenharia, só leitura.
 A caixa existe desde 2026-05-13; ofícios anteriores foram reconstruídos pelas citações nas reiterações.
 Base normativa citada nos próprios ofícios: IN 001/2024/GS/SINFRA/MT (Cap. V, reajuste), IN 003/2024
 (medição, reajustamento e pagamento), art. 136 da Lei 14.133/2021 (apostilamento). Na MTPAR, a cláusula do
@@ -73,7 +73,7 @@ a data do ofício não identifica o ciclo.
 | Termo de Apostilamento 019/2024/02/09, 06/03/2026 | MT-402, aniversário abril | registra jan, fev e mar/2026: o ciclo de abr/2025 fecha em março, o de abr/2026 começa em abril |
 
 O ciclo vai do mês do aniversário até o mês anterior ao aniversário seguinte, com I1 congelado no índice
-do mês de aniversário. Exemplo do Leonardo corrigido: SICRO 08/2025 → reajuste a partir de 08/2026 (não
+do mês de aniversário. Exemplo do dono corrigido: SICRO 08/2025 → reajuste a partir de 08/2026 (não
 09/2026); SINAPI 03/2025 → 03/2026 confere.
 
 Fórmula das planilhas (Estações BRT): I = TRUNC((I1 − I0) / I0; 4); R = TRUNC(V × I; 2), V = parcela

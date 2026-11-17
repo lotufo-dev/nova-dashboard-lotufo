@@ -3,7 +3,7 @@ saida por nota. Puro: sem banco, sem arquivo. Cada parcela e cada tributo declar
 `round`, porque as planilhas-motor das obras diferem nisso e o espelho real e' a prova
 (docs/espelho-regras-por-obra-2026-09-16.md §3, levantamento de 2026-09-22).
 
-A conta IMITA A PLANILHA, inclusive o ponto flutuante do Excel (decisao do Leonardo em
+A conta IMITA A PLANILHA, inclusive o ponto flutuante do Excel (decisao do dono em
 2026-09-23: o espelho tem de sair igual ao da planilha). Cada celula e' um double; soma, produto
 e divisao sao os do Excel, na ordem das formulas (`resto_de` subtrai as irmas uma a uma,
 `fracao` divide antes de multiplicar). TRUNC/ROUND na celula (rateio, mao de obra) seguem o Excel,
@@ -311,7 +311,7 @@ NOTA_NEGATIVA = "A nota não sai com valor negativo; inclua a execução do mesm
 
 
 def _valores_das_saidas(regra: dict, v: dict[str, float]) -> tuple[dict[str, float], dict[str, float]]:
-    """O valor (double) de cada saida e o reajuste negativo abatido em cada uma. Issue #589 (decisao do Leo de
+    """O valor (double) de cada saida e o reajuste negativo abatido em cada uma. Issue #589 (decisao do dono de
     08/11/2026, item 1): nao existe nota com valor negativo. O reajuste negativo (apostilamento ou previsao negativos)
     abate na nota de medicao do mesmo emissor e municipio deste espelho, que soma com o sinal; a saida de reajuste
     negativa nao vira nota. Sem a medicao no espelho (espelho so' de reajuste negativo), ou com o reajuste que zera
@@ -401,7 +401,7 @@ def valor_por_natureza(regra: dict, entradas: dict[str, int]) -> dict[str, int]:
 
 def entradas_pela_medicao(regra: dict, entradas: dict[str, int], travados: dict[str, tuple[int, str]],
                           opcionais: frozenset[str] | set[str] = frozenset()) -> dict[str, int]:
-    """Issue #284 (decisao do Leo de 03/11/2026): o espelho deixa de ser digitado onde a medicao ja' tem valor.
+    """Issue #284 (decisao do dono de 03/11/2026): o espelho deixa de ser digitado onde a medicao ja' tem valor.
     `travados` e' {tipo: (centavos, fonte)}, com o aprovado, senao o pedido (`fonte` = "boletim" para o aprovado do
     boletim do orgao, "atestado" para o digitado sem boletim, ou "pedido"). Natureza com um campo so': o valor vem preenchido e nao muda (digitado diferente recusa). Com mais de
     um campo: a divisao e' digitada e tem de somar o valor. Devolve as entradas com o preenchido.

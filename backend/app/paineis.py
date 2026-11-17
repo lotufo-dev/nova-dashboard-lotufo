@@ -12,6 +12,10 @@ from app import avisos, contratos, cronograma, medicoes, tempo
 
 ESTADOS_VALIDOS = medicoes.ESTADOS_NO_MEDIDO  # medem (#561: a mesma lista do acumulado do formulario)
 TIPOS = ("execucao", "reajuste", "projeto")
+# #742 (decisao do dono de 16/11/2026, #670; docs/adr/0012): o medido da obra soma execucao e projeto; o reajuste fica
+# em serie propria, fora do medido e do saldo.
+TIPOS_NO_MEDIDO = ("execucao", "projeto")
+_QT = ",".join("?" * len(TIPOS_NO_MEDIDO))
 # Placeholders derivados da constante: se ESTADOS_VALIDOS mudar de tamanho, as
 # queries acompanham sozinhas em vez de quebrar num "IN (?,?,?)" fixo.
 _QS = ",".join("?" * len(ESTADOS_VALIDOS))
@@ -86,8 +90,9 @@ def curva(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
                       "medido_projeto_centavos": m["projeto"],
                       "pedido_execucao_centavos": m.get("pedido_execucao"),
                       "aprovado_execucao_centavos": m.get("aprovado_execucao"),
-                      # `atestado_pendente` qualifica a EXECUCAO (o numero-titulo, que
-                      # tambem alimenta o saldo); as demais series vao em `pendente_por_tipo`.
+                      # `atestado_pendente` qualifica a EXECUCAO (o numero-titulo da evolucao
+                      # mensal); as demais series vao em `pendente_por_tipo`. O saldo soma execucao
+                      # e projeto (#742), cada serie aqui continua separada.
                       "atestado_pendente": pend.get("execucao", False),
                       "pendente_por_tipo": {t: pend.get(t, False) for t in TIPOS}})
     return saida
@@ -98,7 +103,8 @@ def curva_s(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
     `curvaS` (frontend/src/obra.ts) sobre os numeros de `curva` e de `cronograma.curva_comparativa`. O eixo e' a
     uniao das competencias, com os meses vazios do meio; tudo acumulado em centavos. `previsto_anterior_centavos`
     e' None sem repactuacao; `medido_centavos` (execucao) e' None depois do ultimo mes medido. Sem nada previsto nem
-    medido, lista vazia."""
+    medido, lista vazia. #742: continua so' com a execucao, que e' o realizado contra o cronograma e o que vai ao
+    orgao com a carta de prazo; o projeto entra no medido e no saldo da obra (`saldo`), nao aqui (docs/adr/0012)."""
     pontos = {p["competencia"]: p for p in curva(conn, contrato_id)}
     anterior = cronograma.curva_comparativa(conn, contrato_id)["anterior"] if pontos else None
     previsto_anterior = {a["competencia"]: a["previsto_centavos"] for a in anterior or []}
@@ -122,19 +128,19 @@ def curva_s(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
     return saida
 
 
-def mede_execucao(m) -> bool:
-    """A medicao entra no medido de execucao de `saldo` (a regra das consultas daqui, para quem ja' tem a linha:
-    a carteira da Diretoria, #262): execucao, num dos estados que medem."""
-    return m["tipo"] == "execucao" and m["estado"] in ESTADOS_VALIDOS
+def mede_no_medido(m) -> bool:
+    """A medicao entra no medido da obra de `saldo` (a regra das consultas daqui, para quem ja' tem a linha: a carteira
+    da Diretoria, #262): execucao ou projeto (#742), num dos estados que medem."""
+    return m["tipo"] in TIPOS_NO_MEDIDO and m["estado"] in ESTADOS_VALIDOS
 
 
-def medido_execucao_por_contrato(conn: sqlite3.Connection) -> dict[int, int]:
-    """O `atestado_execucao_centavos` de `saldo`, de todos os contratos numa consulta so' (a lista de Obras). Mesma
-    regra, e a soma tambem em Python, pelo motivo dito em `saldo`."""
+def medido_por_contrato(conn: sqlite3.Connection) -> dict[int, int]:
+    """O `medido_centavos` de `saldo`, de todos os contratos numa consulta so' (a lista de Obras). Mesma regra, e a
+    soma tambem em Python, pelo motivo dito em `saldo`."""
     medido: dict[int, int] = {}
     for r in conn.execute(
             "SELECT contrato_id, COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS v "
-            f"FROM medicoes WHERE tipo='execucao' AND estado IN ({_QS})", ESTADOS_VALIDOS):
+            f"FROM medicoes WHERE tipo IN ({_QT}) AND estado IN ({_QS})", (*TIPOS_NO_MEDIDO, *ESTADOS_VALIDOS)):
         medido[r["contrato_id"]] = medido.get(r["contrato_id"], 0) + r["v"]
     return medido
 
@@ -150,27 +156,29 @@ def saldo(conn: sqlite3.Connection, contrato_id: int) -> dict:
     # curva/saldo/consolidado/CSV com 500 ate' alguem apagar a medicao. O int do Python
     # e' ilimitado: o saldo fica absurdamente negativo -- aritmetica honesta sobre dado
     # absurdo -- e o painel continua respondendo.
-    atestado = sum(r["v"] for r in conn.execute(
+    # #742: o medido soma execucao e projeto (`TIPOS_NO_MEDIDO`); o reajuste continua fora.
+    medido = sum(r["v"] for r in conn.execute(
         "SELECT COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS v "
-        f"FROM medicoes WHERE contrato_id=? AND tipo='execucao' AND estado IN ({_QS})",
-        (contrato_id, *ESTADOS_VALIDOS)))
+        f"FROM medicoes WHERE contrato_id=? AND tipo IN ({_QT}) AND estado IN ({_QS})",
+        (contrato_id, *TIPOS_NO_MEDIDO, *ESTADOS_VALIDOS)))
     # #262 (spec 2026-10-20 §3.2): medido e contratado na mesma base, a precos iniciais. O aditivo de reajuste
     # (SES) entra no vigente do contrato, mas fica fora do saldo e aparece a parte.
     return {"vigente_centavos": vig["valor_vigente_centavos"],
             "vigente_execucao_centavos": vig["valor_vigente_execucao_centavos"],
             "reajuste_contratado_centavos": vig["valor_reajuste_centavos"],
-            "atestado_execucao_centavos": atestado,
-            "saldo_centavos": vig["valor_vigente_execucao_centavos"] - atestado,
-            "formula": "saldo = vigente de execução (sem aditivo de reajuste) − medido (execução: atestado; "
+            "medido_centavos": medido,
+            "saldo_centavos": vig["valor_vigente_execucao_centavos"] - medido,
+            "formula": "saldo = vigente de execução (sem aditivo de reajuste) − medido (execução e projeto: atestado; "
                        "pedido enviado ao órgão ou protocolado enquanto não atestado); reajustes em série própria"}
 
 
-def posicao_na_cota(vigente_execucao_centavos: int, medido_execucao_centavos: int, percentual_bp: int | None) -> dict:
-    """Valor vigente, medido e saldo de execucao na cota da Lotufo (#646, #645): a conta UNICA do topo da pagina da
-    obra e da lista de Obras. Entram os cheios de `saldo` (a precos iniciais, sem o aditivo de reajuste); vigente e
-    medido arredondam uma vez cada e o saldo e' a diferenca dos dois, para a conta da tela fechar ao centavo."""
+def posicao_na_cota(vigente_execucao_centavos: int, medido_centavos: int, percentual_bp: int | None) -> dict:
+    """Valor vigente de execucao, medido (execucao e projeto, #742) e saldo na cota da Lotufo (#646, #645): a conta
+    UNICA do topo da pagina da obra e da lista de Obras. Entram os cheios de `saldo` (a precos iniciais, sem o aditivo
+    de reajuste); vigente e medido arredondam uma vez cada e o saldo e' a diferenca dos dois, para a conta da tela
+    fechar ao centavo."""
     vigente = contratos.cota(vigente_execucao_centavos, percentual_bp)
-    medido = contratos.cota(medido_execucao_centavos, percentual_bp)
+    medido = contratos.cota(medido_centavos, percentual_bp)
     return {"vigente_centavos": vigente, "medido_centavos": medido, "saldo_centavos": vigente - medido}
 
 

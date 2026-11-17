@@ -1,4 +1,4 @@
-"""Pagina Inicio do redesenho (decisoes do Leonardo de 08/10/2026). So' leitura; tudo de uma vez.
+"""Pagina Inicio do redesenho (decisoes do dono de 08/10/2026). So' leitura; tudo de uma vez.
 
 Nada e' calculado de novo aqui: cada numero vem do modulo que ja' o calcula para a tela de origem.
 - obras protocoladas: `avisos.resumo_mes` (o mesmo "X de N obras ativas" da fila de Medicoes);

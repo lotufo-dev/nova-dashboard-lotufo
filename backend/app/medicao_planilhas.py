@@ -13,7 +13,7 @@ from app import arquivos, auditoria, contratos, db, espelho, medicoes, reajuste,
 from app.medicoes import ESTADOS_NO_MEDIDO, LOTE_AUDITORIA, _data_br, _json_dict, nome_medicao, rotulo_estado
 
 # o reajuste nao entra pela planilha/carta: nasce pelo campo "Reajuste" do formulario da execucao, em prevista,
-# com data-base e ciclo (decisao do Leo na #276, 08/11/2026)
+# com data-base e ciclo (decisao do dono na #276, 08/11/2026)
 TIPOS = ("execucao", "projeto")
 ESTADOS_REVISAO = ("planilha_gerada", "planilha_enviada")
 FORA_DO_ACUMULADO = ("prevista", "cancelada", "desistida")
@@ -77,7 +77,9 @@ def _saldo(conn, contrato_id: int, tipo: str, acumulado: int, pedido: int | None
     """saldo = vigente − acumulado anterior (e − pedido, no `saldo_apos_pedido`). O acumulado conta as medicoes
     anteriores pela lista do medido de paineis.saldo mais a planilha gerada (#561, ESTADOS_NO_ACUMULADO; spec §2.1
     passo 1, "soma dos aprovados, senao pedidos").
-    So' a execucao tem saldo contra o valor do contrato (como em paineis.saldo); no projeto, os saldos sao nulos."""
+    So' a execucao tem saldo contra o valor do contrato; no projeto, os saldos sao nulos. E' o saldo da SERIE, o que
+    vai ao orgao na planilha/carta: o acumulado e' so' o da propria serie. O saldo da obra (paineis.saldo) soma
+    execucao e projeto (#742, docs/adr/0012) e nao muda este."""
     c = contratos.vigente(conn, contrato_id)
     vigente = c["valor_vigente_centavos"]
     # a base do saldo e' a da execucao, como a do painel (#262, paineis.saldo): o aditivo de reajuste nao entra
@@ -206,7 +208,7 @@ def reajuste_do_numero(conn, contrato_id: int, numero: int, competencia: str):
 
 
 def _conferir_reajuste(conn, contrato_id: int, dados: dict):
-    """Issue #276 (decisao do Leo, 08/11/2026): com o campo "Reajuste" preenchido, a planilha/carta de execucao faz
+    """Issue #276 (decisao do dono, 08/11/2026): com o campo "Reajuste" preenchido, a planilha/carta de execucao faz
     nascer a medicao de reajuste de mesmo nº e competencia, em `prevista`, com o pedido, a data-base e o ciclo. Ja'
     existindo a prevista de reajuste desse nº (`reajuste_do_numero`), ela recebe os valores; sem data-base escolhida,
     vale a que ela ja' tem. Devolve (data-base, ciclo, medicao de reajuste existente ou None); sem o campo, None."""

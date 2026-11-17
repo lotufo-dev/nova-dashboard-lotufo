@@ -143,7 +143,7 @@ def _origem_nova(conn, agora: datetime.datetime) -> list[dict]:
         ultimo[chave] = quando
         if (r["perfil"] == "admin" and quando > agora - DURACAO_ITEM
                 and (anterior is None or quando - anterior > JANELA_ORIGEM)):
-            # nivel `acao` (decisao do Leo de 08/11/2026, issue #424): vai por e-mail na hora (`alertas_seguranca`)
+            # nivel `acao` (decisao do dono de 08/11/2026, issue #424): vai por e-mail na hora (`alertas_seguranca`)
             out.append({"nivel": "acao", "data": tempo.iso_utc(r["criado_em"]),
                         "mensagem": f"Administrador {r['nome']} entrou de uma origem nova ({r['origem'] or 'desconhecida'})"})
     return out[::-1]

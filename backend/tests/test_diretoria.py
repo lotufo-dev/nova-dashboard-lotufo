@@ -165,20 +165,31 @@ def test_carteira_saldo_a_executar_na_cota(cenario):
     assert set(k) == {"saldo_centavos", "por_orgao"}        # #748: ritmo e meses de producao sairam (sem tela)
 
 
-def test_carteira_mede_so_execucao_nos_estados_que_medem(cenario):
-    """#262 (gate Sol S2): saldo e medido da carteira contam o que `paineis.saldo` conta: execucao a partir do
-    envio da planilha/carta (#561). Projeto e planilha gerada (ainda nao enviada) nao reduzem o saldo."""
+def test_carteira_mede_execucao_e_projeto_nos_estados_que_medem(cenario):
+    """#262 (gate Sol S2): saldo e medido da carteira contam o que `paineis.saldo` conta: execucao e projeto (#742) a
+    partir do envio da planilha/carta (#561). Planilha gerada (ainda nao enviada), projeto cancelado ou desistido e
+    reajuste nao reduzem o saldo. O ritmo e os meses de producao da carteira sairam com a tela (#748); o ritmo so' com
+    a execucao (decisao do dono de 16/11/2026) fica no da obra (`prazos`, test_medido_da_obra.py)."""
     c, ids = cenario
     antes = diretoria.painel(c, HOJE)["carteira"]
-    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
-              "VALUES (?, 50, 'projeto', '2026-08', 'recebida', 3000001)", (ids["propria"],))
-    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
-              "VALUES (?, 51, 'execucao', '2026-08', 'planilha_gerada', 4000001)", (ids["propria"],))
+    for numero, tipo, estado in ((51, "execucao", "planilha_gerada"), (53, "projeto", "cancelada"),
+                                 (54, "projeto", "desistida"), (55, "reajuste", "protocolada")):
+        c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+                  "VALUES (?, ?, ?, '2026-08', ?, 4000001)", (ids["propria"], numero, tipo, estado))
     c.commit()
     depois = diretoria.painel(c, HOJE)["carteira"]
     assert depois["saldo_centavos"] == antes["saldo_centavos"]
     assert ({o["orgao"]: o["medido_centavos"] for o in depois["por_orgao"]}
             == {o["orgao"]: o["medido_centavos"] for o in antes["por_orgao"]})
+    # o projeto recebido conta no medido e no saldo (#742): 30.000,01 (centavo impar)
+    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+              "VALUES (?, 50, 'projeto', '2026-08', 'recebida', 3000001)", (ids["propria"],))
+    c.commit()
+    com_projeto = diretoria.painel(c, HOJE)["carteira"]
+    assert com_projeto["saldo_centavos"] == antes["saldo_centavos"] - 3_000_001
+    medido ={o["orgao"]: o["medido_centavos"] for o in com_projeto["por_orgao"]}
+    assert medido["SINFRA"] == {o["orgao"]: o["medido_centavos"] for o in antes["por_orgao"]}["SINFRA"] + 3_000_001
+    antes = com_projeto
     # e a execucao protocolada conta: 1,01 (centavo impar) a menos no saldo da propria
     c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
               "VALUES (?, 52, 'execucao', '2026-08', 'protocolada', 101)", (ids["propria"],))
@@ -522,7 +533,7 @@ def test_a_receber_nota_do_rm_entra_na_lista_e_no_total(cenario):
 
 
 def test_titulo_baixado_sem_valor_fica_fora_do_recebido_e_do_a_receber(cenario):
-    """Issue #583 (decisao do Leo de 08/11/2026, opcao 2): o titulo do RM com baixa total (status 1) e valor baixado
+    """Issue #583 (decisao do dono de 08/11/2026, opcao 2): o titulo do RM com baixa total (status 1) e valor baixado
     zero fica fora do recebido e do a receber (a linha "baixado sem caixa" saiu com a tela A receber, #748). A
     medicao ligada continua sem fechar (regra da #574)."""
     c, ids = cenario
@@ -707,14 +718,18 @@ def _saldos(c):
 
 def test_tabela_de_obras_mede_como_a_carteira(cenario):
     """#262 (revisao, rodada 3): o saldo da tabela de obras desconta o mesmo medido da carteira, logo acima na tela
-    (`paineis.mede_execucao`): projeto recebido nao abate o saldo; execucao com nota emitida abate (#561)."""
+    (`paineis.mede_no_medido`): projeto recebido abate o saldo (#742); execucao com nota emitida abate (#561)."""
     c, ids = cenario
     _medir(c, ids["propria"], 60, "recebida", 50_000_000, tipo="projeto")
     _medir(c, ids["propria"], 61, "nota_emitida", 3_000_001)
     c.commit()
     tabela, carteira, obras = _saldos(c)
-    assert tabela[ids["propria"]] == carteira["SINFRA"] == 93_099_999      # 1.000.000,00 - 39.000,00 - 30.000,01
+    # 1.000.000,00 - 39.000,00 - 500.000,00 (projeto) - 30.000,01
+    assert tabela[ids["propria"]] == carteira["SINFRA"] == 43_099_999
     assert tabela[ids["consorcio"]] == carteira["MTPAR"] == 399_500_000
+    # os percentuais na mesma base: medido (execucao e projeto) sobre o vigente de execucao
+    assert obras[ids["propria"]]["pct_recebido"] == 56_900_001 / 100_000_000
+    assert obras[ids["propria"]]["pct_a_receber"] == 43_099_999 / 100_000_000
     assert obras[ids["propria"]]["faturados"] == 2_900_000 + 50_000_000 + 3_000_001   # a coluna do QDOP fica
 
 

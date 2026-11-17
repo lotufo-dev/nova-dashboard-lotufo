@@ -235,7 +235,7 @@ def apostilamento_do_ciclo(conn, contrato_id: int, mes_base: str, ciclo: int, un
     """O termo que fecha o ciclo, o unico criterio da aba, dos avisos e da recusa de reiterar/reemitir (gate Sol e
     revisor, PR #317): com pleito enviado no ciclo, o termo ligado ao vigente (ou ao pedido que ele reitera); sem
     pleito enviado registrado, o apostilamento do ciclo (`_apostilamento`). O aditivo de valor de reajuste (issue
-    #390) vale como termo nos dois caminhos. Issue #453 (decisao do Leo, 08/11/2026): sem pleito, com apostilamento e
+    #390) vale como termo nos dois caminhos. Issue #453 (decisao do dono, 08/11/2026): sem pleito, com apostilamento e
     aditivo no ciclo, fecha o de data de termo mais antiga (empate: o apostilamento), a regra do `cadastro aplicar`."""
     pl = _pleito(conn, contrato_id, mes_base, ciclo)
     if pl:
@@ -735,7 +735,7 @@ def competencias_por_ciclo(conn, contrato_id: int) -> list[dict]:
                      medicoes_pedido=sorted(v[1] for v in ms if v[2]["valor_protocolado_centavos"] is not None),
                      medicoes_aprovado=sorted(v[1] for v in ms if v[2]["valor_atestado_centavos"] is not None),
                      medicoes_nota=sorted(v[1] for v in ms if faturado.get(v[2]["id"]) is not None),
-                     # issue #274 (decisao do Leo de 08/11/2026): o ja' medido, medicao a medicao (o faturado; sem
+                     # issue #274 (decisao do dono de 08/11/2026): o ja' medido, medicao a medicao (o faturado; sem
                      # ele, o aprovado; sem ele, o pedido), somado: o complemento aprovado sem nota tambem conta
                      medido_centavos=_soma(_medido_da_medicao(v[2], faturado.get(v[2]["id"])) for v in ms))
         x["estado"] = ESTADOS_COMPETENCIA[max(passo, _APOSTILADA if x["apostilada"] else 0)]
@@ -762,7 +762,7 @@ def competencias_da_aba(conn, contrato_id: int) -> list[dict]:
             for g in competencias_por_ciclo(conn, contrato_id)]
 
 
-# Issue #274 (spec 2026-10-20 §2.2; decisao do Leo de 08/11/2026): justificativa do "Reajuste fora da previsao"
+# Issue #274 (spec 2026-10-20 §2.2; decisao do dono de 08/11/2026): justificativa do "Reajuste fora da previsao"
 MIN_JUSTIFICATIVA = 10
 
 
@@ -1103,7 +1103,7 @@ def _avisos_dos_ciclos(conn, contrato_id: int, hoje: datetime.date, nome: str, d
       criterio do estado `reemitir` de `ciclos`); some com o pleito novo enviado (a reemissao do cronograma).
       Operacao.
     - `reajuste_sem_resposta`: o ultimo pleito enviado do ciclo (pleito, reiteracao ou reemissao do cronograma: os
-      dois zeram a contagem, decisao do Leo de 08/11/2026) ha' 120 dias ou mais, em qualquer orgao. Some com a
+      dois zeram a contagem, decisao do dono de 08/11/2026) ha' 120 dias ou mais, em qualquer orgao. Some com a
       reiteracao ou a reemissao enviada, ou com o apostilamento. Operacao e diretoria.
 
     Issue #586: o ciclo indeferido (`indeferimento_do_ciclo`) fecha para os dois, como o termo."""
@@ -1166,7 +1166,7 @@ def _avisos_das_competencias(conn, c: dict, nome: str, destino: dict) -> list[di
     uma linha por competencia (`pendencias`). O pedido fora da previsao deixou de ser aviso (o apostilamento e'
     previsao); a marca `fora_da_previsao` continua na aba Reajuste.
 
-    - `reajuste_sem_apostilamento`: um por data-base e ciclo (decisao do Leo de 08/11/2026), com as competencias
+    - `reajuste_sem_apostilamento`: um por data-base e ciclo (decisao do dono de 08/11/2026), com as competencias
       aprovadas ou faturadas que nenhum termo cobre e a soma do valor ja' medido delas (`medido_centavos` de `competencias_por_ciclo`, medicao a medicao) na cota da Lotufo
       (arredondamento unico, sobre a soma). Operacao; diretoria quando a soma passa de R$ 100 mil. Some com o
       apostilamento carregado.

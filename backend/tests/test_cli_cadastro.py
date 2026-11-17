@@ -704,7 +704,7 @@ def test_carregar_medicoes_grava_as_novas_com_pedido_aprovado_e_evento(tmp_path,
     assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='medicao.carga_historico'").fetchone()[0] == 1
     # o painel da obra soma o aprovado, senao o pedido
     from app import paineis
-    assert paineis.medido_execucao_por_contrato(conn)[cid] == 41234567 + 53000000 + 60125000
+    assert paineis.medido_por_contrato(conn)[cid] == 41234567 + 53000000 + 60125000
 
 
 def test_carregar_medicoes_segunda_carga_nao_muda_nada(tmp_path, monkeypatch, capsys):
@@ -808,7 +808,7 @@ def test_carregar_medicoes_duplicata_cancelada_com_motivo_fica_no_banco_e_sai_do
     conn, cid = _com_exemplo_aplicado(tmp_path, monkeypatch)
     _existente(conn, cid, 4, "2025-07", 100001, 100001)
     dup = _existente(conn, cid, 5, "2025-07", 100001, 100001)
-    antes, saldo_antes = paineis.medido_execucao_por_contrato(conn)[cid], paineis.saldo(conn, cid)["saldo_centavos"]
+    antes, saldo_antes = paineis.medido_por_contrato(conn)[cid], paineis.saldo(conn, cid)["saldo_centavos"]
     arq = _csv(tmp_path, ["5;;execucao;2025-07;;;;;;;;;CI da prefeitura;4;"])
     codigo, saida = _gravar(capsys, arq)
     assert codigo == 0, saida
@@ -816,7 +816,7 @@ def test_carregar_medicoes_duplicata_cancelada_com_motivo_fica_no_banco_e_sai_do
     m = conn.execute("SELECT estado, motivo_represamento FROM medicoes WHERE id=?", (dup,)).fetchone()
     assert m["estado"] == "cancelada"
     assert m["motivo_represamento"] == "Duplicata da medição 4 de execução (carga do histórico: CI da prefeitura)"
-    assert paineis.medido_execucao_por_contrato(conn)[cid] == antes - 100001
+    assert paineis.medido_por_contrato(conn)[cid] == antes - 100001
     assert paineis.saldo(conn, cid)["saldo_centavos"] == saldo_antes + 100001
     textos = [e["texto"] for e in medicoes.edicoes_valor(conn, [dup])[dup]]
     assert any("Cancelada: Duplicata da medição 4 de execução" in t for t in textos), textos

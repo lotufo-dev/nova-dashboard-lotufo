@@ -2075,7 +2075,7 @@ a.alerta:hover .alerta__seta { color: var(--cor-tinta); }
 }
 
 /* N08-02: o selo de criticos em Obras diz a palavra (DESIGN › Selo) onde cabe; abaixo de 1600px fica o numero, com
-   "N criticos" no title e no texto do leitor de tela (decisao pendente do Leonardo: exceção ao "selo sempre com rotulo") */
+   "N criticos" no title e no texto do leitor de tela (decisao pendente do dono: exceção ao "selo sempre com rotulo") */
 @media (max-width: 1599px) { .criticos__palavra { display: none; } }
 /* N08-02: "de N avisos" nao quebra; a regra que libera a quebra das notas do prazo (td.num .campo__nota) vencia o
    .sem-quebra por especificidade */

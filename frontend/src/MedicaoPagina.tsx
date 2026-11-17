@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { Aviso } from "./Alertas";
 import CaixaAviso from "./CaixaAviso";
 import { baseDosValores } from "./formato";
 import { api, mensagemDeErro } from "./api";
@@ -49,6 +50,11 @@ type Painel = "fora" | "protocolado" | "atestado" | "recebimento" | "cancelada" 
 const SECAO_PASSO: Record<string, number> = { espelho: 3, notas: 4, protocolo: 5, "planilha-carta": 1,
   "etapa-1": 3, "etapa-2": 3, "etapa-3": 4, "etapa-4": 5, "etapa-5": 6 };
 
+// #712 (docs/adr/0008): a pendencia sem data da medicao que nenhum passo desta pagina mostra sozinho. Vem da fila de
+// avisos do servidor (a mesma da lateral da obra), que a agenda nao mostra por nao ter data. A nota maior que a
+// medicao tambem aparece no passo Envio da nota (antes do protocolo): la' a caixa daqui nao se repete.
+const SEM_DATA_DA_MEDICAO = ["nota_cancelada_rm", "nota_acima_da_medicao", "medicao_fora_de_ordem"];
+
 export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }:
     { contratoId: number; medicaoId: number; usuario: Usuario; origem: Origem | null }) {
   const podeEditar = usuario.perfil === "engenharia" || usuario.perfil === "admin";
@@ -84,6 +90,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   const [versaoFrc, setVersaoFrc] = useState(0);
   // #508: cada leitura da lista da obra relê tambem a planilha/carta da medicao (a conferencia da revisao)
   const [leituraLista, setLeituraLista] = useState(0);
+  const [pendencias, setPendencias] = useState<Aviso[]>([]);
+  const leituraAvisos = useRef(0);
 
   const m = medicoes?.find(x => x.id === medicaoId) ?? null;
   // a execucao e o reajuste do mesmo numero formam a pagina "Nª Medição + Reajuste"
@@ -108,6 +116,12 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       api<ParDaMedicao>(`/api/medicoes/${medicaoId}/par`).catch(() => null),
     ]);
     if (g !== geracao.current) return;
+    // #712: a fila de avisos chega a' parte: a demora ou a falha dela nao segura nem derruba a pagina. So' a leitura
+    // mais nova vale: a resposta atrasada de uma recarga anterior nao traz de volta o aviso ja' resolvido
+    const minha = ++leituraAvisos.current;
+    void api<{ avisos?: Aviso[] }>("/api/inicio").then(d => {
+      if (minha === leituraAvisos.current) setPendencias((d?.avisos ?? []).filter(a => !a.data && SEM_DATA_DA_MEDICAO.includes(a.tipo)));
+    }).catch(() => {});
     setMedicoes(lista); setLeituraLista(n => n + 1); setAndamento(abertas); setEspelhos(esp.espelhos ?? []); setRegraAtiva(esp.regra?.situacao === "ativa");
     setPar(duas && Array.isArray(duas.metades) ? duas : null);
   }, [contratoId, medicaoId]);
@@ -115,7 +129,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   useEffect(() => {
     geracao.current += 1;
     const g = geracao.current;
-    setCab(null); setMedicoes(null); setPar(null); setErro(""); setFeito(""); setPainel(null); setVendo(null); setSemBoletim(false);
+    setCab(null); setMedicoes(null); setPar(null); setPendencias([]); setErro(""); setFeito(""); setPainel(null); setVendo(null); setSemBoletim(false);
     api<Cabecalho>(`/api/contratos/${contratoId}/cabecalho`).then(c => { if (g === geracao.current) setCab(c); }).catch(() => {});
     carregar().catch(e => { if (g === geracao.current) setErro(mensagemDeErro(e)); });
     return () => { geracao.current += 1; };
@@ -343,7 +357,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // issue #289: a planilha/carta vem antes do espelho (execucao e projeto, na obra com regra de espelho ativa; o
   // reajuste continua pelo espelho). A prevista abre o formulario dela; registrada, o cartao dela (#508: pacote do
   // envio e e-mail ao orgao) e' o passo 1 -- na MT-PAR, sem os passos 1 e 2, fica no alto do passo 3. O espelho segue
-  // a planilha enviada (com ou sem o boletim da #284) ou so' gerada, sem o envio registrado (#460, decisao do Leo de
+  // a planilha enviada (com ou sem o boletim da #284) ou so' gerada, sem o envio registrado (#460, decisao do dono de
   // 07/11/2026: a operacao ainda envia ao orgao por fora; segue sem boletim, com justificativa).
   // quem so' consulta continua vendo o espelho da prevista, so' para ler (sem formulario)
   const novaPlanilha = podeEditar && regraAtiva && comPlanilha && m.estado === "prevista" && !espVigente;
@@ -522,6 +536,12 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     3: diaMes(espVigente?.envio?.enviado_em), 4: diaMes(m.nota_emitida_em),
     5: diaMes(m.protocolos.map(p => p.data).sort().at(-1)), 6: diaMes(m.recebida_em),
   };
+  // #712: a caixa da nota maior que a medicao so' sai do alto quando o passo Envio da nota esta' aberto com a
+  // `ConferenciaNotas` (EtapaEnvio) e os envios CARREGADOS trazem o aviso daquela medicao: a obra sem orgao, a falha da
+  // leitura e a metade do par fora de "a enviar" nao tiram a medicao dos envios sem tirar o aviso da pagina junto
+  const envioAberto = aberta === 5 && sit(5) !== "feito" && (sit(5) !== "futuro" || !!pronta);
+  const envioMostraAcima = (medicaoId: number | null | undefined) => envioAberto
+    && (envios.envios ?? []).some(e => (e.acima_da_medicao ?? []).some(x => x.medicao_id === medicaoId));
   // #514: todo passo aberto tem estrutura propria; so' o futuro (sem corpo) fica no cartao "Libera depois do passo N"
   const proprio = sit(aberta) !== "futuro" || (aberta === 5 && !!pronta);
 
@@ -568,6 +588,25 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
 
         {/* #286: a capa do SMO do boletim vigente diverge do cadastro; some com o cadastro corrigido ou a diferenca aceita */}
         {capaAvisos.map(frase => <CaixaAviso key={`capa-${frase}`} nivel="atencao">{frase}</CaixaAviso>)}
+
+        {/* #712: a nota cancelada no RM, a nota maior que a medicao e o periodo fora de ordem, com o passo que resolve */}
+        {pendencias.filter(a => grupo.some(x => x.id === a.medicao_id)
+          && !(a.tipo === "nota_acima_da_medicao" && envioMostraAcima(a.medicao_id))).map((a, i) => {
+          const x = grupo.find(g => g.id === a.medicao_id)!;
+          const nota = a.tipo !== "medicao_fora_de_ordem";
+          const alvo = nota ? 4 : passos.includes(1) ? 1 : 3;
+          // o periodo fora de ordem ja' vem com o titulo da medicao: sai, e volta so' no par (como nas outras caixas);
+          // "nota 102" vira "NF 102", como o numero da nota no resto da pagina
+          const titulo = `${tituloMedicao(x)}: `;
+          const msg = (a.mensagem.startsWith(titulo) ? a.mensagem.slice(titulo.length) : a.mensagem).replace(/^nota (\S+)/, "NF $1");
+          const comeco = grupo.length > 1 ? `${titulo}${msg}, ` : `${msg.charAt(0).toUpperCase()}${msg.slice(1)}: `;
+          return (
+            <CaixaAviso key={`pendencia-${a.tipo}-${a.medicao_id}-${i}`} nivel={a.nivel === "critico" ? "critico" : "atencao"}>
+              {comeco}<Link className="link" para={aqui} secao={`passo-${alvo}`}
+                ir={(p, o) => { setVendo(alvo); ir(p, o); }}>{nota ? "ver as notas" : "revise a planilha/carta"}</Link>
+            </CaixaAviso>
+          );
+        })}
 
         <div className="med-corpo">
           <div className="med-passo-col">

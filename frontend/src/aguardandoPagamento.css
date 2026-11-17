@@ -1,4 +1,4 @@
-/* Medicoes > Aguardando pagamento (#158). Tirado do prototipo aprovado pelo Leo (14/10/2026): lista em faixas pelo atraso
+/* Medicoes > Aguardando pagamento (#158). Tirado do prototipo aprovado pelo dono (14/10/2026): lista em faixas pelo atraso
    e painel da nota escolhida. Tokens de tokens.css; tudo debaixo de `.ap`/`.ap__*`. */
 
 .ap__total { margin: 0; color: var(--cor-texto-secundario); font-size: var(--texto-corpo); }
