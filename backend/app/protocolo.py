@@ -139,7 +139,7 @@ class Bloqueio(ValueError):
 
 
 class ConfirmarPendencias(ValueError):
-    """Issue #213 (decisao do Leo de 16/10/2026): documento faltando nao bloqueia, mas o envio so' sai com a
+    """Issue #213 (decisao do dono de 16/10/2026): documento faltando nao bloqueia, mas o envio so' sai com a
     confirmacao de quem clicou sobre a lista do que falta. Sem confirmacao, ou com a lista confirmada diferente da
     de agora, o envio e' recusado antes da reserva; `pendencias` e' a lista de agora, para a tela pedir de novo."""
     codigo = "CONFIRMAR_PENDENCIAS"
@@ -400,7 +400,7 @@ def _numeros_nf(docs: list[dict]) -> str:
 
 
 def _valor_da_nota(m: dict) -> int:
-    """Issue #284 (decisao do Leo de 03/11/2026): a nota sai pelo aprovado do boletim, senao pelo pedido (como
+    """Issue #284 (decisao do dono de 03/11/2026): a nota sai pelo aprovado do boletim, senao pelo pedido (como
     notas.py confere a nota); o pedido fica congelado na medicao."""
     v = m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"]
     return v or 0
@@ -1278,7 +1278,7 @@ def previa_envio(conn, protocolo_ids: list[int], remetente: str | None = None,
     k_assunto, k_corpo = ("nota_email_assunto", "nota_email_corpo") if e.chave == "nota" else \
         ("email_assunto", "email_corpo")
     para, copia = _destinatarios(conn, regras, e, c, hoje)
-    if remetente:       # o e-mail de login e a conta do Outlook (podem ser diferentes: Leo)
+    if remetente:       # o e-mail de login e a conta do Outlook (podem ser diferentes: o dono)
         fora = {remetente.lower()} | correio.contas_do_usuario(conn, remetente)
         copia = [x for x in copia if x.lower() not in fora]
     anexos = [a for x in ps for a in _anexos_rotulados(conn, x, hoje)]

@@ -69,10 +69,11 @@ def da_obra(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | No
                  "dias": cab["dias_vigencia"], "nivel": nivel_do_prazo(cab["dias_vigencia"])})
     # #646: o topo numa base so'. Valor vigente, medido e saldo na base de execucao (a precos iniciais, sem o aditivo
     # de reajuste: a mesma de `paineis.saldo`) e na cota da Lotufo. Vigente e medido arredondam uma vez cada e o saldo
-    # e' a diferenca dos dois, para a conta da tela fechar ao centavo. O reajuste contratado vai a parte.
+    # e' a diferenca dos dois, para a conta da tela fechar ao centavo. O reajuste contratado vai a parte. O medido soma
+    # execucao e projeto (#742).
     bp = v["percentual_direito_bp"]
     s = paineis.saldo(conn, contrato_id)
-    posicao = paineis.posicao_na_cota(s["vigente_execucao_centavos"], s["atestado_execucao_centavos"], bp)   # a da lista (#645)
+    posicao = paineis.posicao_na_cota(s["vigente_execucao_centavos"], s["medido_centavos"], bp)   # a da lista (#645)
     # #655: o cartao "Ritmo e prazo" na mesma base do topo: o ritmo vai na cota e o saldo e' o do topo (o mesmo
     # numero do cartao Execucao). As datas e a situacao nao mudam com a cota (saldo e ritmo na mesma proporcao).
     ritmo = prazos.ritmo_e_prazo(conn, contrato_id, hoje)

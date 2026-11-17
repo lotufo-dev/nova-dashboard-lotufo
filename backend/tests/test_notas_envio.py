@@ -21,7 +21,7 @@ D = datetime.date
 HOJE = D(2026, 9, 16)
 
 
-# Cobranca de certidao (geral.yaml, issue #110): conta do Outlook do Leo e os logins dele, ficticios
+# Cobranca de certidao (geral.yaml, issue #110): conta do Outlook do dono e os logins dele, ficticios
 COBRANCA = {"para": ["leo.outlook@exemplo.com.br"], "enviada_por": ["leo.outlook@exemplo.com.br", "leo@exemplo.com.br"]}
 
 
@@ -116,6 +116,18 @@ def test_lista_junta_na_sinfra_e_vg_e_separa_na_mtpar(svc):
     vg, = _por_contrato(lista, ids["vg"])                            # D9: VG junta
     assert vg["grupo"] == "Pref. VG" and len(vg["medicao_ids"]) == 2
     assert lista["contadores"] == {"Todas": 4, "MTPAR": 2, "SINFRA": 1, "Pref. VG": 1}
+
+
+def test_obra_sem_o_passo_envio_da_nota_sai_da_lista_a_enviar(svc):
+    """Issue #743: a obra cuja lista de passos nao tem "envio_nota" nao envia a nota ao orgao; a nota emitida dela
+    espera o pagamento, nao o envio. As outras obras ficam como estao."""
+    c, ids = svc
+    c.execute("UPDATE contratos SET passos_medicao=? WHERE id=?",
+              (json.dumps(["espelhos", "notas", "pagamento"]), ids["sinfra"]))
+    c.commit()
+    lista = notas_envio.a_enviar(c, HOJE)
+    assert _por_contrato(lista, ids["sinfra"]) == []
+    assert lista["contadores"] == {"Todas": 3, "MTPAR": 2, "Pref. VG": 1}
 
 
 def test_aviso_de_15_dias_e_regularidade_que_falta(svc):

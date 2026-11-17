@@ -54,7 +54,7 @@ def test_cancelada_fica_fora(conn, cid):
 def test_saldo_formula_visivel(conn, cid):
     _medir(conn, cid, 1, "execucao", "2026-07", 250_00, atestado=240_00)
     s = paineis.saldo(conn, cid)
-    assert s["vigente_centavos"] == 1_000_00 and s["atestado_execucao_centavos"] == 240_00
+    assert s["vigente_centavos"] == 1_000_00 and s["medido_centavos"] == 240_00
     assert s["saldo_centavos"] == 760_00 and "vigente" in s["formula"]
 
 
@@ -80,9 +80,9 @@ def test_medido_conta_os_estados_do_fluxo_novo_e_bate_com_o_acumulado_do_formula
     _no_estado(conn, cid, 11, "cancelada", 11_00, 11_00)             # fora
     _no_estado(conn, cid, 12, "desistida", 12_00)                    # fora
     esperado = 3_01 + 3_99 + 5_00 + 5_97 + 7_03 + 8_00 + 9_00 + 10_00
-    assert paineis.saldo(conn, cid)["atestado_execucao_centavos"] == esperado
+    assert paineis.saldo(conn, cid)["medido_centavos"] == esperado
     assert paineis.curva(conn, cid)[0]["medido_execucao_centavos"] == esperado
-    assert paineis.medido_execucao_por_contrato(conn)[cid] == esperado
+    assert paineis.medido_por_contrato(conn)[cid] == esperado
     # o acumulado do formulario e' o mesmo medido mais a planilha gerada (decisao da revisao da #561)
     assert medicao_planilhas.acumulado_anterior(conn, cid, "execucao", 13) == esperado + 2_00
 
@@ -247,7 +247,7 @@ def test_saldo_nao_estoura_com_valores_extremos(conn, cid):
     _medir(conn, cid, 1, "execucao", "2026-07", quase_teto)
     _medir(conn, cid, 2, "execucao", "2026-08", quase_teto)
     s = paineis.saldo(conn, cid)
-    assert s["atestado_execucao_centavos"] == 2 * quase_teto
+    assert s["medido_centavos"] == 2 * quase_teto
     assert s["saldo_centavos"] == 1_000_00 - 2 * quase_teto
 
 def test_alertas_antigos_sairam_da_tela(conn, cid):

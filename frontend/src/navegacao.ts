@@ -3,7 +3,7 @@ import type { Rota } from "./rota";
 // Menu e entrada por perfil (NAVEGACAO.md › Perfis e tela de entrada; Menu principal). Funcoes puras: o App
 // so' desenha o que sai daqui.
 //
-// Trilho de icones (09/10/2026, prototipo aprovado pelo Leo): uma lista so', sem rotulos de grupo, na ordem do
+// Trilho de icones (09/10/2026, prototipo aprovado pelo dono): uma lista so', sem rotulos de grupo, na ordem do
 // trabalho. Cada perfil ve o recorte dele. As Notas (A enviar, Aguardando pagamento) sairam do menu: viraram abas
 // de Medicoes. Os Avisos moram dentro de Obras (redesenho #159): o item e a rota /avisos continuam, e o App os leva
 // para "Obras" com os Avisos abertos.
@@ -24,7 +24,7 @@ const ORDEM: readonly ItemMenu[] = ["inicio", "medicoes", "resumo-medicoes", "ob
 // e da Carteira, para todos os perfis.
 // #749: o Resumo das medicoes (so' leitura: a etapa da medicao de cada obra na competencia) para todos os perfis; a
 // diretoria continua sem o item Medicoes, que e' a tela de quem opera.
-// O Inicio voltou (decisao do Leonardo, 08/10/2026): e' a entrada de todos os perfis, no alto do menu.
+// O Inicio voltou (decisao do dono, 08/10/2026): e' a entrada de todos os perfis, no alto do menu.
 const DO_PERFIL: Record<Perfil, readonly ItemMenu[]> = {
   engenharia: ["inicio", "medicoes", "resumo-medicoes", "avisos", "siga", "documentos", "obras", "fechamento", "ancoras-docusign"],
   diretoria: ["inicio", "resumo-medicoes", "avisos", "documentos", "obras", "fechamento"],

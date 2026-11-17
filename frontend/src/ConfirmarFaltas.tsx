@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Glifo } from "./Selo";
 
-// Issue #213 (decisao do Leo de 16/10/2026): documento faltando nao bloqueia o envio; o Enviar abre este aviso com
+// Issue #213 (decisao do dono de 16/10/2026): documento faltando nao bloqueia o envio; o Enviar abre este aviso com
 // tudo o que falta e a pessoa decide. "Cancelar" nao manda nada; "Continuar com o envio" manda a lista confirmada,
 // que o servidor confere de novo (`mudou`: a lista que ele devolveu e' outra, entao a confirmacao e' pedida de novo).
 // Janela modal para o teclado: o foco abre no Cancelar (um Enter a mais nao envia), Escape cancela, o Tab da' a volta

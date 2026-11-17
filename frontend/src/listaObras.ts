@@ -12,8 +12,9 @@ export type ObraLista = {
   execucao_fim_vigente?: string | null; vigencia_fim_vigente?: string | null;
   dias_execucao?: number | null; dias_vigencia?: number | null; vigencia_automatica?: boolean; paralisada_desde?: string | null;
   pedido_prorrogacao?: { enviado_em: string; numero_oficio: string | null; dias: number | null } | null;
-  // valor cheio: o medido de execucao (atestado; protocolado ate' atestar) e o saldo a executar (vigente − medido)
-  medido_execucao_centavos?: number | null; saldo_centavos?: number | null;
+  // valor cheio: o medido, execucao e projeto (#742; atestado, protocolado ate' atestar), e o saldo a executar
+  // (vigente − medido)
+  medido_centavos?: number | null; saldo_centavos?: number | null;
   // o contratante, como em Medicoes ("SINFRA" para toda a familia, com a superintendencia em `orgao_sub`)
   contratante?: string | null; orgao_sub?: string | null;
   // a cota da Lotufo (10000 = 100%)
@@ -128,10 +129,10 @@ export function filtrarObras(lista: ObraLista[], f: FiltroObras): ObraLista[] {
 
 /* --------------------------------------------------- contratantes (a entrada de Obras, redesenho #159) */
 
-/** O valor vigente e o medido de execucao da obra, em valor cheio; o que a API nao deu conta como zero. O vigente e'
- *  o de execucao (#262): o medido e' a precos iniciais, entao o aditivo de reajuste fica fora do % e do saldo. */
+/** O valor vigente e o medido da obra (execucao e projeto, #742), em valor cheio; o que a API nao deu conta como zero.
+ *  O vigente e' o de execucao (#262): o medido e' a precos iniciais, entao o aditivo de reajuste fica fora do % e do saldo. */
 export const vigenteDe = (o: ObraLista) => o.valor_vigente_execucao_centavos ?? o.valor_vigente_centavos ?? 0;
-export const medidoDe = (o: ObraLista) => o.medido_execucao_centavos ?? 0;
+export const medidoDe = (o: ObraLista) => o.medido_centavos ?? 0;
 
 /** A posicao da obra na cota da Lotufo (#645), como o servidor mandou; o que ele nao deu conta como zero. */
 export function posicaoDe(o: ObraLista): PosicaoObra {
@@ -152,7 +153,7 @@ export function totaisDe(obras: ObraLista[]): TotaisObras {
   return t;
 }
 
-/** Quanto da obra ja' foi executado, em %, inteiro: medido de execucao ÷ valor vigente (da posicao na cota quando a
+/** Quanto da obra ja' foi executado, em %, inteiro: medido (execucao e projeto) ÷ valor vigente (da posicao na cota quando a
  *  lista a traz; a razao e' a mesma do cheio). Sem valor vigente, nulo. */
 export function pctExecutado(o: ObraLista): number | null {
   const v = o.posicao ? o.posicao.vigente_centavos : vigenteDe(o);

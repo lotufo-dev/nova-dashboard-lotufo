@@ -4,7 +4,7 @@ import CampoValor from "./CampoValor";
 import { digitosParaBrl } from "./formato";
 import { fmtCompetencia } from "./tempo";
 
-// Issue #276 (spec 2026-10-20 §2.2, decisao do Leo de 08/11/2026): o campo "Reajuste" da medicao de reajuste, ja'
+// Issue #276 (spec 2026-10-20 §2.2, decisao do dono de 08/11/2026): o campo "Reajuste" da medicao de reajuste, ja'
 // preenchido com a sugestao do servidor (o apostilado da competencia, senao o previsto, senao vazio) e a origem dela.
 // Com duas datas-base (D7), o campo "Data-base" escolhe; vem escolhida quando so' uma tem previsao na competencia. O
 // sistema nao calcula nada: a sugestao, o ciclo e o aviso (ja' pedido em outra medicao, ciclo em aberto) vem de

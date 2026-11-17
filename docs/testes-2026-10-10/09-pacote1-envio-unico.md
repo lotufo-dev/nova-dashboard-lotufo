@@ -263,7 +263,7 @@ DEPOIS: ver "Suíte inteira".
   coberto pelo teste vitest e pelo typecheck.
 - **Cobrança de certidões** (`cobranca_certidoes._enviar`) captura `RuntimeError`, então também captura
   `EnvioNaoRegistrado` e escreve "não enviada" no log (inexato; o `log.critical` do correio diz a verdade). O efeito
-  é o mesmo de antes (sem registro, pode repetir na próxima rodada, só para o e-mail do Leo). Não mexi.
+  é o mesmo de antes (sem registro, pode repetir na próxima rodada, só para o e-mail do dono). Não mexi.
 - **Roteiro de verificação da fase 3:** a ordenação de `verificacao/api/lib.py` (que quebrava com o nome novo do
   simulador) já foi ajustada pelo coordenador.
 - A migração 035 entra no próximo deploy (só `ADD COLUMN`; o migrador já pula coluna existente).

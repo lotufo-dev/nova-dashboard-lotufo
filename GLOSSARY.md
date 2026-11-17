@@ -89,7 +89,8 @@ A nota e o pacote foram enviados formalmente ao órgão. A data do protocolo com
 _Avoid_: protocolada para a planilha enviada (isso é "em análise")
 
 **Recebido**:
-O órgão pagou: há baixa no RM, ou registro do administrador com motivo.
+O órgão pagou: há baixa no RM, ou registro do administrador com motivo. Parte do protocolado; na obra sem o passo
+"Envio da nota", parte da nota emitida, sem protocolo, e a espera conta da emissão da nota.
 _Avoid_: pago, quitado
 
 **Paga em parte**:
@@ -110,7 +111,17 @@ _Avoid_: valor atestado
 O valor das notas emitidas para a medição.
 
 **Medido**:
-O aprovado e, enquanto não houver boletim, o pedido.
+O aprovado e, enquanto não houver boletim, o pedido. O medido da obra soma as medições de execução e de projeto
+a partir do envio da planilha/carta; reajuste fica fora, e medição cancelada, desistida ou ainda não enviada não
+conta (`docs/adr/0012`).
+
+**Saldo a executar**:
+O valor vigente de execução (sem o aditivo de reajuste) menos o medido da obra.
+_Avoid_: saldo do contrato
+
+**Ritmo**:
+O medido de execução por mês, numa janela de seis meses. O projeto fica fora: projeto pago não é obra
+andando. A conclusão estimada é o saldo a executar nesse ritmo (`docs/adr/0012`).
 
 **Medição final**:
 A última medição do contrato, marcada pela engenharia; põe o contrato em encerramento.
@@ -156,6 +167,7 @@ O registro no RM de que um título foi pago. A data da baixa é o dia do pagamen
 **Prazo do órgão**:
 Quantos dias o órgão costuma levar do protocolo ao pagamento: o terceiro quartil dos dias entre o protocolo e o
 recebimento, das medições recebidas nos últimos 365 dias, com no mínimo cinco. Com menos, o órgão fica sem previsão.
+A medição recebida sem protocolo (obra sem o passo "Envio da nota") fica fora da conta.
 A SINFRA conta inteira, não cada superintendência.
 
 **Custo lançado no RM**:

@@ -1,7 +1,7 @@
 # Diário de decisões da reestruturação (a partir de 2026-09-16)
 
-Método combinado com o Leonardo em 2026-09-16: uma decisão por vez. Para cada uma, o Claude propõe
-como faria e por quê; o Leonardo decide e justifica; o Claude analisa a justificativa (o que ela ganha,
+Método combinado com o dono em 2026-09-16: uma decisão por vez. Para cada uma, o Claude propõe
+como faria e por quê; o dono decide e justifica; o Claude analisa a justificativa (o que ela ganha,
 o que custa); a decisão fica registrada com o efeito nos itens de `inventario-fica-ou-sai-2026-09-16.md`.
 Ao final, as decisões e justificativas são relacionadas numa explicação única do produto, que vira a spec.
 
@@ -10,9 +10,9 @@ Decisões já tomadas antes deste diário (mesma data):
 - Acesso só pela rede interna.
 - A aba de licitações sai.
 
-**Mudança de método (mesma data):** em vez de o Claude propor decisão por decisão, o Leonardo expõe
+**Mudança de método (mesma data):** em vez de o Claude propor decisão por decisão, o dono expõe
 as ideias dele por tópico; o Claude analisa cada ideia contra o que existe (antiga e nova), registra aqui,
-e ao final formula qual é a objeção real do Leonardo à dashboard nova, para o Leonardo confirmar.
+e ao final formula qual é a objeção real do dono à dashboard nova, para o dono confirmar.
 O roteiro abaixo fica como lista de tópicos a cobrir, não como ordem obrigatória.
 
 ## Roteiro das decisões (ordem prevista)
@@ -36,7 +36,7 @@ Após D10: síntese das decisões e justificativas → spec em `docs/superpowers
 
 ## T1. Tela inicial de quem opera
 
-**Ideias do Leonardo.**
+**Ideias do dono.**
 - Não gosta de "sugestões a decidir". Não quer mais o motor de leitura de planilha do SharePoint; não quer
   "medições no órgão sem NF" nem "pendências" na home.
 - Quer que o sistema seja essencial e entre na rotina para ATESTAR informações (registrar fatos), não para
@@ -58,7 +58,7 @@ Após D10: síntese das decisões e justificativas → spec em `docs/superpowers
   manda (ofício × competência).
 - Sai sem substituto: aviso de medição parada no órgão; sugestão do Claude: coluna discreta na lista, sem
   alarde.
-- Hipótese para a síntese: a objeção é ao princípio "observar em vez de registrar" da spec; o Leonardo quer
+- Hipótese para a síntese: a objeção é ao princípio "observar em vez de registrar" da spec; o dono quer
   "registrar no ponto de passagem obrigatório (espelho) e calcular a partir daí".
 
 **Pendências de esclarecimento (perguntadas em 2026-09-16).**
@@ -71,7 +71,7 @@ Após D10: síntese das decisões e justificativas → spec em `docs/superpowers
 **Efeito no inventário.** A5, A6, A7, A10, A11 saem; D2–D11 caem (fila deixa de ser central); C9 (espelho)
 sobe para primeiro bloco; E1/E2 confirmados; H1 fica pendente da resposta sobre Outlook.
 
-**Respostas do Leonardo (2026-09-16).**
+**Respostas do dono (2026-09-16).**
 1. Detecção: sai a leitura de planilha E a de e-mail; fica SÓ o casamento de NF do RM.
 2. O espelho é gerado hoje no fluxo do Power Automate da dashboard antiga (Office Script + Word no OneDrive).
 3. Ordem REAL do processo: órgão informa a medição por canal não mapeável (e-mail, WhatsApp, foto) →
@@ -100,7 +100,7 @@ sobe para primeiro bloco; E1/E2 confirmados; H1 fica pendente da resposta sobre 
 **Efeito no inventário (atualizado).** H1 SAI; H2 FICA; D1 MUDA (nova máquina de estados); C9 e C4
 (carta de protocolo) viram os dois primeiros blocos; F1 MUDA (exigência por contrato); A12 confirmado.
 
-**Ideia do Leonardo (ainda T1): enviar o e-mail de protocolo pelo sistema, sincronizado com o Outlook,
+**Ideia do dono (ainda T1): enviar o e-mail de protocolo pelo sistema, sincronizado com o Outlook,
 e o envio = protocolada.** Decisão: espelho pela opção (b), reconstruir o gerador em Python na nova.
 
 **Análise do Claude.** Viável e é o desenho mais limpo: envio via Graph com permissão delegada
@@ -113,18 +113,18 @@ e-mail pelo padrão da obra (destinatários, assunto, texto) + carta + NFs + cer
 Alternativas descartadas: rascunho no Outlook (sem leitura, o sistema não sabe que saiu); Outlook COM
 (exige sessão de usuário; produção roda como serviço).
 Opção (b) do espelho exige autorização para ler `~/dev/lotufo-automacao-medicao` (motor, cadastro de
-obras, modelos), hoje proibido; sem isso a reconstrução erra retenção por dedução. PEDIDO ao Leonardo.
+obras, modelos), hoje proibido; sem isso a reconstrução erra retenção por dedução. PEDIDO ao dono.
 
 **Efeito no inventário.** H4 ganha um segundo uso (envio de protocolo, além do e-mail diário); D-protocolo
 vira ato de envio; A13 (já tratei) para protocolo deixa de ser necessário.
 
-**Respostas do Leonardo (2026-09-16).** 1. Autoriza a leitura de `~/dev/lotufo-automacao-medicao`
+**Respostas do dono (2026-09-16).** 1. Autoriza a leitura de `~/dev/lotufo-automacao-medicao`
 (memória `automacao-medicao-autorizada`). 2. O protocolo sai da caixa de QUEM manda o e-mail.
 
 **Análise do Claude.** Token do Graph passa a ser POR USUÁRIO (hoje é um refresh token único em arquivo):
 cada pessoa conecta a própria conta Microsoft uma vez (código de dispositivo) numa tela de perfil; o
 e-mail sai da caixa dela; a auditoria registra quem protocolou. Mudança pequena em `graph.py` + tela
-"conectar minha conta". Quem usa qual conta (estagiária × Leonardo) é decisão operacional, não do sistema.
+"conectar minha conta". Quem usa qual conta (estagiária × dono) é decisão operacional, não do sistema.
 
 **Fechamento do T1 (2026-09-16).** Denominador de "X de N" = obras ativas (confirmado). Home de quem opera:
 avisos (vigência/execução, reajuste anual por índice com prazo de ofício; cada linha com obra, dias, valor);
@@ -135,7 +135,7 @@ mês anterior. Sem sugestões, pendências ou "parada no órgão".
 
 ## T2. A medição, passo a passo dentro do sistema
 
-**Respostas do Leonardo (2026-09-16).**
+**Respostas do dono (2026-09-16).**
 1. Ao gerar o espelho a pessoa digita: competência, valor da medição (obra ou projeto), valor do reajuste
    (se houver) e número da medição. Só isso; hoje é assim na antiga e basta. Retenções saem de regra
    específica por obra, "que tem que ser analisada minuciosamente para replicar".
@@ -146,7 +146,7 @@ mês anterior. Sem sugestões, pendências ou "parada no órgão".
 5. Glosa/reapresentação: não sabe; verificar no Outlook se há caso.
 6. Vale guardar a evidência que o órgão mandou (foto, PDF) anexa à medição.
 
-**Ações do Claude (2026-09-16).** Caixa do Leonardo lida via conector Microsoft 365 (conta do Leonardo; exemplo real de protocolo em 21/08/2026: "CT-289-LT-2026 - 22ª Medição
+**Ações do Claude (2026-09-16).** Caixa do dono lida via conector Microsoft 365 (conta do dono; exemplo real de protocolo em 21/08/2026: "CT-289-LT-2026 - 22ª Medição
 - Complexo Cultural MTPAR" para o protocolo da MTPAR + fiscal, 5 cópias internas, corpo padrão
 "Encaminho arquivo para protocolo..."). Dois levantamentos disparados em paralelo: (a) mapeamento de
 protocolos, espelhos, retornos do órgão, glosas e FRC nos últimos 12 meses; (b) regras de espelho por
@@ -160,7 +160,7 @@ Resultados entram aqui quando chegarem.
   (Coxipó 3ª), projeto (BRT, Estações), cota (Deciolândia 33,33%, valor digitado é o cheio). Bloco zerado
   não emite. O motor NÃO calcula: lê células da planilha-motor; o Python reimplementa as fórmulas por obra
   (tabela no relatório) e prova contra 14 notas de gabarito + MT-402 + extenso.
-- Quem opera o ciclo é a operadora (Leonardo em cópia; 12 enviados em 4 meses). A caixa só existe desde
+- Quem opera o ciclo é a operadora (o dono em cópia; 12 enviados em 4 meses). A caixa só existe desde
   2026-05-13.
 - Protocolo: 3 famílias (MTPAR, SINFRA por superintendência, Prefeitura/supervisora); corpo fixo por
   família; assunto por template; CT-{nnn}-LT-{ano} é contador sequencial GLOBAL; MTPAR separa medição e
@@ -174,7 +174,7 @@ Resultados entram aqui quando chegarem.
 - FRC: a controladoria emite e numera à mão; sistema só dispara/registra.
 - IBS/CBS: zero no motor e nos modelos; entra como trabalho novo no espelho.
 
-**Decisões do Leonardo (2026-09-17).**
+**Decisões do dono (2026-09-17).**
 - **Número do CT: preenchido MANUALMENTE.** O sistema não gera nem controla o contador; é campo da tela de
   protocolo, obrigatório, gravado junto com o envio.
 - **O PDF de protocolo o SISTEMA monta** (carta + medição + certidões consolidados num arquivo só).
@@ -182,7 +182,7 @@ Resultados entram aqui quando chegarem.
 - Pediu verificação: os nomes de arquivo dos anexos variam por obra? (suspeita que consórcio, ex. BRT, é
   diferente). Levantamento disparado no Outlook.
 
-**T2.1 — Padronização dos nomes de arquivo (APROVADA pelo Leonardo em 2026-09-17).**
+**T2.1 — Padronização dos nomes de arquivo (APROVADA pelo dono em 2026-09-17).**
 
 Levantamento em `docs/nomes-arquivo-por-obra-2026-09-17.md`: 17 obras, 17 convenções, com erros reais
 (`114-09-26`, `ESTAÇOES` sem til, `06ª` × `5ª`, espaços duplos, ano errado no reajuste da Cavalaria,
@@ -225,7 +225,7 @@ certidões vigentes num PDF na ordem do check-list do órgão, divide em mediç�
 25 MB, anexa a planilha editável onde exigido. Ao enviar: medição vira protocolada com data, destinatários,
 assunto, id da mensagem e anexos; falha no envio não marca nada.
 
-**Decisões do Leonardo (2026-09-17).**
+**Decisões do dono (2026-09-17).**
 1. O e-mail do espelho SAI DO SISTEMA também (mesma conta, mesmo caminho do protocolo).
 2. Correção antes da nota: pediu recomendação → Claude recomendou e fica: GUARDAR AS DUAS VERSÕES
    (append-only; a mais recente é a vigente, a anterior aparece como substituída, com motivo opcional;
@@ -241,13 +241,13 @@ digitado por quem recebeu, com o PDF anexado; sem obrigação (MTPAR não devolv
 RM; dúvida do casamento vira botão "vincular nota" dentro da medição. Ciclo: informada pelo órgão →
 espelho gerado e enviado → nota emitida → protocolada → recebida.
 
-**T2 FECHADO pelo Leonardo em 2026-09-17.**
+**T2 FECHADO pelo dono em 2026-09-17.**
 
 ---
 
 ## T3. Reajuste
 
-**Respostas do Leonardo (2026-09-17).**
+**Respostas do dono (2026-09-17).**
 1. O ofício de reajuste é solicitado ANTES do aniversário.
 2. Dois ofícios separados, um por índice; cada índice tem o seu ciclo relativo ao próprio mês. Exemplo
    dado: "SICRO 08/2025 → reajuste em 09/2026; SINAPI 03/2025 → reajuste para 03/2026" (discrepância de um
@@ -293,14 +293,14 @@ Pediu levantamento no Outlook de como os pleitos saem (assunto, destinatário, a
   necessidade de dois ciclos independentes.
 
 **Levantamento Outlook + SharePoint (2026-09-17), relatório em `docs/reajuste-pleitos-2026-09-17.md`.**
-Contradiz duas respostas do Leonardo, com documento:
+Contradiz duas respostas do dono, com documento:
 - (1) "Ofício antes do aniversário": só na MTPAR (−2 a −26 dias). Na SINFRA o ofício sai DEPOIS, 40–55
   dias após o dia 1º do mês de aniversário, porque traz o I1 calculado e o índice FGV só sai em meados do
   mês seguinte. Não existe regra de 60 dias em documento algum.
 - (2) "Dois ofícios separados por índice": no 5 Bairros (única obra com duas datas-base e SINAPI/SICRO como
   índice) é UM ofício, CT/234/LT/2026, "mês de aniversário JANEIRO e MARÇO", com duas colunas na memória e
   cada item da planilha apontando para uma data-base.
-- Competência inicial = MÊS DO ANIVERSÁRIO (4 evidências). Exemplo do Leonardo corrigido: SICRO 08/2025 →
+- Competência inicial = MÊS DO ANIVERSÁRIO (4 evidências). Exemplo do dono corrigido: SICRO 08/2025 →
   08/2026.
 - Ciclo cumprido = TERMO DE APOSTILAMENTO homologado (NF de reajuste foi cancelada por falta dele;
   Terminais BRT: ofício em 05/2026, processo nem aberto em 09/2026). Três estados por competência:
@@ -316,7 +316,7 @@ Contradiz duas respostas do Leonardo, com documento:
   Floresta: K não encadeado, sempre contra o Io original. Espaço Show 2º ciclo começou no mês SEGUINTE
   (única exceção). Maternidade: medições renumeradas. Coxipó 2ª: rótulos de coluna trocados na planilha.
 
-**Proposta do Claude para o modelo (2026-09-17), a decidir pelo Leonardo:**
+**Proposta do Claude para o modelo (2026-09-17), a decidir pelo dono:**
 - Unidade = (contrato, data-base): até duas por contrato, cada uma com mês de aniversário e rótulo livre
   (INCC, setorial FGV/DNIT, SINAPI, SICRO). O índice em si NÃO é calculado (E8 continua fora).
 - Marcos por ciclo, registrados por ato humano: (1) pleito enviado (ofício família A, gerado e enviado
@@ -330,7 +330,7 @@ Contradiz duas respostas do Leonardo, com documento:
 - Competência inicial do ciclo: campo registrado (default mês do aniversário), não deduzido.
 - O alerta "reajuste sem par" da nova SAI.
 
-**MODELO APROVADO pelo Leonardo em 2026-09-17 (versão resumida que ele aprovou):**
+**MODELO APROVADO pelo dono em 2026-09-17 (versão resumida que ele aprovou):**
 - Por obra: mês de aniversário (um ou dois relógios) + nome do índice como texto. Sem cálculo de índice.
 - Por ano e por relógio: (1) aviso na home a partir de 30 dias antes do aniversário até o pleito sair;
   (2) ofício de pleito enviado pelo sistema (CT manual) → aviso vira "apostilamento pendente há N dias";
@@ -341,7 +341,7 @@ Contradiz duas respostas do Leonardo, com documento:
 - Pendente de resposta: alguma obra além do 5 Bairros manda dois ofícios? (o cadastro aceita os dois casos)
 
 **T3 FECHADO em 2026-09-17.** Retomada da varredura do SharePoint só para as lacunas ("sem evidência")
-do relatório, a pedido do Leonardo; resultado no §10 do relatório. Três refinamentos ao modelo aprovado,
+do relatório, a pedido do dono; resultado no §10 do relatório. Três refinamentos ao modelo aprovado,
 sem mudar a decisão:
 1. Fonte normativa achada: OT 028/2015/CGE item 3.2.1 (efeitos no 1º dia do mesmo mês do ano seguinte) e
    IN 001/2024 Cap. V (sem prazo em dias; nova solicitação a cada aniversário; pleito = ofício + planilha
@@ -356,9 +356,9 @@ fevereiro/2024, Deciolândia outubro/2021, Maternidade novembro/2024.
 
 ---
 
-## T4. Prazos de vigência e execução (aberto pelo Leonardo em 2026-09-17)
+## T4. Prazos de vigência e execução (aberto pelo dono em 2026-09-17)
 
-**Ideia do Leonardo.** "Nós também protocolamos cartas solicitando" a prorrogação. Pediu varredura de
+**Ideia do dono.** "Nós também protocolamos cartas solicitando" a prorrogação. Pediu varredura de
 como isso é feito (Outlook + SharePoint).
 
 **O que a nova tem.** Vigência e execução separadas no contrato, com fim vigente calculado pelos aditivos
@@ -389,7 +389,7 @@ Achados que mudam o desenho:
 - Pendências da varredura: PDFs digitalizados sem texto (obra 168; cláusula primeira dos apostilamentos
   recentes de Leblon e MT-402) e obras 183/184 (ramo terminou por falta de créditos de uso).
 
-**Informado pelo Leonardo em 2026-09-18.** Chapada (173) FINALIZADA. Alta Floresta (161) "finalizando":
+**Informado pelo dono em 2026-09-18.** Chapada (173) FINALIZADA. Alta Floresta (161) "finalizando":
 confirmado nos PDFs que a 42ª é a MEDIÇÃO FINAL (NF 2225), protocolada em 17/07/2026 (CT/232 e CT/233),
 enviada em 20/07/2026, depois da vigência do 9º TA (26/06/2026). Detalhe no §11 do relatório de prazos.
 
@@ -406,7 +406,7 @@ enviada em 20/07/2026, depois da vigência do 9º TA (26/06/2026). Detalhe no §
   "reajuste 039", corpo dizendo "medição" no reajuste) são exatamente o que a geração pelo sistema elimina.
 - IBS/CBS já sai destacado na NF real (com redução de 60% no caso da SES): o espelho em Python precisa disso.
 
-**Leonardo, 2026-09-18:** "não houve finalização do contrato, mas creio que a obra está finalizada."
+**O dono, 2026-09-18:** "não houve finalização do contrato, mas creio que a obra está finalizada."
 Verificado: nenhuma comunicação de conclusão, pedido de vistoria ou recebimento provisório de Alta Floresta
 no Outlook (desde 05/2026) nem no SharePoint. Estado real: obra física concluída (medição final 42ª,
 período até 26/12/2025), contrato aberto, vigência do 9º TA vencida em 26/06/2026. Custo ainda correndo:
@@ -416,9 +416,9 @@ da Obra, Solicitação de Vistoria e Reiteração de Pedido de Apostilamento". C
 (9º TA cita o art. 57): art. 73, I prevê recebimento provisório pelo fiscal em até 15 dias da comunicação
 escrita da contratada e definitivo por comissão após observação ou vistoria (§3º: até 90 dias).
 
-**Leonardo, 2026-09-18:** Alta Floresta fica para depois.
+**O dono, 2026-09-18:** Alta Floresta fica para depois.
 
-**MODELO DE PRAZOS APROVADO pelo Leonardo em 2026-09-18 (versão resumida que ele aprovou):**
+**MODELO DE PRAZOS APROVADO pelo dono em 2026-09-18 (versão resumida que ele aprovou):**
 - Por contrato: fim da execução e fim da vigência (recalculados por instrumento assinado) + folga do órgão
   (SINFRA 90 d, SES 99, MTPAR a do contrato, PMC prazo único); aviso se um instrumento quebrar a folga.
 - O relógio principal é a EXECUÇÃO; aviso de vigência só onde ela não se prorroga sozinha (fora da SINFRA).
@@ -454,12 +454,12 @@ Para não virar formulário gigante, três níveis:
   configuração de planilha por contrato. Pasta do SharePoint fica como link opcional.
 - Carga inicial pré-preenchida com o que os levantamentos já acharam; a equipe confirma, não digita.
 
-**Decisões do Leonardo (2026-09-21).**
+**Decisões do dono (2026-09-21).**
 1. **Não haverá tela de cadastro de obras na dashboard.** As informações da obra entram SEMPRE pelo Claude
-   (Leonardo + Claude). Consequência: o cadastro vira arquivo versionado no repositório, carregado no banco
+   (o dono + Claude). Consequência: o cadastro vira arquivo versionado no repositório, carregado no banco
    por comando; a tela de criar/editar contrato (Contratos.tsx) e os formulários de entidade e tipo de
    certidão na Administração saem ou ficam só leitura.
-2. **Só o Leonardo edita, e pelo Claude; nada no sistema.**
+2. **Só o dono edita, e pelo Claude; nada no sistema.**
 3. Carga inicial pré-preenchida: autorizada.
 4. Lista das obras para ele marcar quais NÃO entram: apresentada em 2026-09-21 (22 contratos da produção
    + 4 "fora de escopo" do cadastro antigo).
@@ -472,7 +472,7 @@ Mapeamento para o sistema: EM ANDAMENTO → ativo; PARALISADA → suspenso; CONC
 (obra concluída não é contrato encerrado; ver Alta Floresta).
 Divergências com a produção a corrigir na carga: MT-402 e Coxipó 3ª constam suspensos, QDOP diz em
 andamento; Alta Floresta e Orla constam ativos, QDOP diz concluída.
-Inconsistências do próprio QDOP para o Leonardo conferir: Estações BRT e Terminais BRT com vigência ANTES do
+Inconsistências do próprio QDOP para o dono conferir: Estações BRT e Terminais BRT com vigência ANTES do
 término da execução (14/12/2026 × 14/03/2027; 16/02/2027 × 26/02/2027), o que o contrato SINFRA não permite
 (5.2.3: vigência inclui a execução); Maternidade com execução e vigência no mesmo dia (18/12/2027); término
 de execução já passado em obras "em andamento" (Deciolândia 30/01/2026, Xtreme 01/08/2026, Atalaia
@@ -481,13 +481,13 @@ de execução já passado em obras "em andamento" (Deciolândia 30/01/2026, Xtre
 
 **Decisão 5 (2026-09-21): registrar instrumento assinado (aditivo, apostilamento de prazo ou de reajuste) e
 trocar o fiscal também são SÓ PELO CLAUDE.** Ajuste aos modelos de T3 e T4: o passo "registrar o
-instrumento" é feito pelo Leonardo com o Claude no cadastro versionado; na dashboard fica só o ato de
+instrumento" é feito pelo dono com o Claude no cadastro versionado; na dashboard fica só o ato de
 operação (enviar o pleito, a carta de prorrogação, a comunicação de conclusão) e o aviso "pendente há N
 dias", que some quando o instrumento é carregado. A tela de aditivos (rascunho, assinar, cancelar) vira
 leitura.
 
 **Divisão resultante:**
-- **Cadastro (só Leonardo, via Claude, arquivo versionado no repositório):** obras, órgãos, entidades,
+- **Cadastro (só o dono, via Claude, arquivo versionado no repositório):** obras, órgãos, entidades,
   datas, valores, datas-base, lei do contrato, fiscal, destinatários, certidões exigidas, instrumentos
   assinados (aditivos, apostilamentos, paralisações), regra do espelho.
 - **Operação (as operadoras, na dashboard):** gerar e enviar espelho, protocolar, enviar pleito de
@@ -547,8 +547,8 @@ INSS/GPS. Ou seja, o protocolo leva DUAS classes de documento de habilitação:
    vencida"), só tipos exigidos por algum contrato ativo; limiar 7 dias para as de 30 dias de validade e
    15 para as demais. E aviso de "regularidade do mês ainda não anexada" a partir do dia 10.
 7. ZIP por empresa com data de referência ("vigentes em DD/MM") continua, para licitação.
-**Verificado nos e-mails em 2026-09-21 (pergunta do Leonardo: consórcio pede certidão das consorciadas?):**
-- SIM. O alerta diário de certidões (fluxo do Power Automate, sai às 08:00 da conta do próprio Leonardo,
+**Verificado nos e-mails em 2026-09-21 (pergunta do dono: consórcio pede certidão das consorciadas?):**
+- SIM. O alerta diário de certidões (fluxo do Power Automate, sai às 08:00 da conta do próprio dono,
   só para ele) lista certidões de 7 empresas com envio recente: Lotufo, Guaxe, Encomind, Rivoli, Consórcio
   Integra BRT, Consórcio Complexo Leblon, Consórcio Oriundi. As consorciadas têm FGTS renovado todo mês
   (Guaxe e Encomind até 28/09, Rivoli até 24/09). Não aparecem: Montante, Via Parecis, BR-163.
@@ -558,7 +558,7 @@ INSS/GPS. Ou seja, o protocolo leva DUAS classes de documento de habilitação:
 - O ALERTA ATUAL ESTÁ QUEBRADO: 43 linhas por dia, incluindo certidões de junho e julho já substituídas
   (Lotufo FGTS 13/07, 09/08, 02/09 e 28/09 aparecem todas como "sem substituta válida"). Sinal real hoje:
   ~12 itens (Lotufo municipal vencida em 20/09, estadual vence 24/09, Guaxe municipal 22/09...). E vai só
-  para o Leonardo, não para quem renova. Confirma o desenho: última por (empresa, tipo), uma linha por
+  para o dono, não para quem renova. Confirma o desenho: última por (empresa, tipo), uma linha por
   empresa, na tela de quem opera.
 - Cadência medida: FGTS da Lotufo renovado a cada ~25 dias; 7 empresas → 15 a 20 documentos por mês.
 - Quem monta o PDF de regularidade (DP pronto ou operadora junta): NÃO muda o desenho. Para o sistema é um
@@ -581,7 +581,7 @@ INSS/GPS. Ou seja, o protocolo leva DUAS classes de documento de habilitação:
 Digitação total: 4 campos + CT. Pendente: assinar só a carta ou o pacote inteiro (hoje o pacote inteiro
 passa pelo DocuSign: todas as 114 páginas da 42ª de Alta Floresta têm o ID do envelope).
 
-**Objeções do Leonardo ao fluxo (2026-09-21) e verificação:**
+**Objeções do dono ao fluxo (2026-09-21) e verificação:**
 
 *(a) "A nota é emitida no RM ou fora e lançada depois? O faturamento pode devolver a nota por e-mail antes de
 ela estar no RM."* CONFIRMADO pelo banco de produção (notas_fiscais.primeiro_visto_em × hora do e-mail de
@@ -611,18 +611,18 @@ o RM atrasaria o protocolo. O número da nota no RM é o da prefeitura (chave de
 - Para a dashboard o caminho é a API REST de eSignature: cria o envelope com o pacote, signatário (o diretor), consulta o status por polling (rede interna não recebe webhook) e baixa o PDF assinado.
   Produção exige plano com API (plano de desenvolvedor a partir de ~US$ 50/mês, ou Business Pro em diante,
   segundo fontes de terceiros; confirmar no site/conta). Se o plano atual da Lotufo não incluir API, é custo
-  novo e esbarra na regra "sem custo de API" → decisão do Leonardo.
+  novo e esbarra na regra "sem custo de API" → decisão do dono.
 - Desenho proposto: o passo "assinar" tem duas implementações atrás da mesma tela: manual (baixar pacote →
   DocuSign → arrastar assinado; custo zero, funciona no dia 1) e por API (botão "enviar para assinatura",
   status "aguardando o diretor", PDF assinado volta sozinho). Começa manual; liga a API se o plano permitir.
-- **Decisão do Leonardo: o PACOTE INTEIRO é assinado** (não só a carta).
+- **Decisão do dono: o PACOTE INTEIRO é assinado** (não só a carta).
 
-**APROVADO pelo Leonardo em 2026-09-21:** o modelo de certidões ("documentos de protocolo", duas gavetas)
+**APROVADO pelo dono em 2026-09-21:** o modelo de certidões ("documentos de protocolo", duas gavetas)
 e o fluxo completo da pessoa, com o passo 3 refeito (PDF da nota avança, RM confirma).
 **DocuSign: MANUAL.** O sistema monta o pacote inteiro; a pessoa baixa, assina por fora e arrasta o
 assinado de volta; só então envia o e-mail. Sem API, sem conector. (A porta para a API fica fechada; reabrir
 só por decisão dele.)
-Conferência do PDF assinado (corrigida em 2026-09-21 após aviso do Leonardo de que o DocuSign às vezes
+Conferência do PDF assinado (corrigida em 2026-09-21 após aviso do dono de que o DocuSign às vezes
 anexa páginas de autenticação no fim, em número variável): NÃO comparar contagem de páginas. Regra:
 (1) as N primeiras páginas do assinado devem bater, por texto normalizado e ignorando o carimbo do
 envelope, com as N páginas do pacote montado (aponta página trocada, faltando ou fora de ordem; página sem
@@ -652,7 +652,7 @@ um botão que exporta no leiaute oficial do formulário. Acima dela, os mesmos a
 leitura) e os três números do mês. Um gráfico só: faturamento mensal. Sai: quatro números de caixa como
 estão, carteira no cheio, mapa, carteira por contratante, top 10. Custo e margem seguem fora.
 
-**Respostas do Leonardo (2026-09-21).** A diretoria ABRE a dashboard e deve ver o que é realmente
+**Respostas do dono (2026-09-21).** A diretoria ABRE a dashboard e deve ver o que é realmente
 importante para uma diretoria; o QDOP foi só referência, não limitar a ele. operadora atualiza o QDOP
 (frequência desconhecida). No QDOP, "valores faturados" = RECEBIDOS. Quer exatamente o item 4: quanto
 entrou no mês, quanto está a receber, previsão dos próximos meses.
@@ -682,7 +682,7 @@ Vocabulário fixo na tela: medido, faturado (nota emitida), protocolado, recebid
 "faturado").
 LACUNA DECLARADA: margem por obra (o indicador nº 1 de diretoria) fica fora enquanto o custo não vier do
 RM. O RM já entrega nota com centro de custo por obra (16 centros mapeados); custo exigiria mais uma
-Consulta SQL cadastrada no RM. Decisão do Leonardo: reabrir ou manter fora.
+Consulta SQL cadastrada no RM. Decisão do dono: reabrir ou manter fora.
 
 8. Migração: no corte, reler pelo leitor os PDFs vigentes da biblioteca /Certidoes do SharePoint (não
    confiar na lista), carregar, conferir, e só então desligar os 3 fluxos de certidão do Power Automate
@@ -701,14 +701,14 @@ Montar o PDF exige: gerador da carta por obra (modelo Word), anexar o PDF da(s) 
 vigentes do checklist, e juntar tudo em um PDF na ordem do check-list (SINFRA recusa fora de ordem) com
 teto de 25 MB por documento — quando estourar, o sistema divide em medição e reajuste, como o órgão instrui.
 
-**T7 APROVADO e FECHADO pelo Leonardo em 2026-09-21:** os cinco blocos da tela da diretoria. **Custo e
+**T7 APROVADO e FECHADO pelo dono em 2026-09-21:** os cinco blocos da tela da diretoria. **Custo e
 margem CONTINUAM FORA** (decisão reafirmada).
 
 ---
 
-## SÍNTESE: a objeção do Leonardo à dashboard nova (Claude, 2026-09-21, a confirmar por ele)
+## SÍNTESE: a objeção do dono à dashboard nova (Claude, 2026-09-21, a confirmar por ele)
 
-**Em uma frase.** A nova foi feita para OBSERVAR o trabalho e pedir confirmação; o Leonardo quer um
+**Em uma frase.** A nova foi feita para OBSERVAR o trabalho e pedir confirmação; o dono quer um
 sistema ONDE O TRABALHO É FEITO, e que por isso já nasce com o registro certo, simples para quem executa
 e com o controle das regras nas mãos dele.
 
@@ -751,12 +751,12 @@ registro é consequência.*
 
 ## Spec e plano (2026-09-21)
 
-- Síntese da objeção CONFIRMADA pelo Leonardo.
+- Síntese da objeção CONFIRMADA pelo dono.
 - Spec `docs/superpowers/specs/2026-09-21-reestruturacao-design.md` APROVADA; substitui a de 2026-08-28.
 - Plano do bloco 1 `docs/superpowers/plans/2026-09-21-bloco-1-fundacao.md` APROVADO, com as três decisões
   que fogem da spec: máquina de estados da medição vai para o bloco 2 e o remapeamento do legado para o
   bloco 3; "em encerramento" é a coluna `encerramento_iniciado_em`; aditivos de valor e prazo seguem em
   `aditivos`, o resto em `instrumentos`.
 - Execução escolhida: NESTA SESSÃO (inline), após um /clear. Nada implementado ainda.
-- Pendências do Leonardo para o bloco rodar até o fim: `Mail.Send` e `Mail.ReadWrite` no aplicativo do
+- Pendências do dono para o bloco rodar até o fim: `Mail.Send` e `Mail.ReadWrite` no aplicativo do
   Entra; usuários das operadoras na dashboard.

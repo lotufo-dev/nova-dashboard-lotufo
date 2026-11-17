@@ -144,7 +144,7 @@ def previsto_efetivo(conn: sqlite3.Connection, contrato_id: int, antes_da_versao
         # nao e' tocado -- e' justamente o que fica congelado.
         for comp in [c for c in efetivo if c >= mes_criacao]:
             del efetivo[comp]
-        # Issue #396 (decisao do Leo, 05/11/2026): a versao de repactuacao (aditivo, carta, curva do SMO) vale para
+        # Issue #396 (decisao do dono, 05/11/2026): a versao de repactuacao (aditivo, carta, curva do SMO) vale para
         # TODOS os meses que traz, inclusive os passados (o bloco do realizado); sem isso o previsto dos meses
         # passados continuava somando e o saldo era previsto de novo, e a curva passava do contrato.
         repactua = conn.execute("SELECT 1 FROM cronograma_versoes_cadastro WHERE versao_id=? AND origem IN (?,?,?)",

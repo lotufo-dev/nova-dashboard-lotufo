@@ -29,7 +29,7 @@ def _faturado(conn, contrato_id: int, pct, reajuste: bool, mes: str | None = Non
     """Soma das medicoes faturadas (nota emitida, protocolada, NF emitida do legado, recebida), no atestado
     quando houver (gate Sol do bloco 8: `nota_emitida` e' faturado no vocabulario da diretoria). Com `mes`
     ("AAAA-MM"), so' as que receberam a nota naquele mes (`nota_emitida_em`, data da nota: a mesma regra, fatiada;
-    o "Faturado no mes" da Carteira, decisao do Leo de 16/10/2026)."""
+    o "Faturado no mes" da Carteira, decisao do dono de 16/10/2026)."""
     cond = "tipo='reajuste'" if reajuste else "tipo IN ('execucao','projeto')"
     args = (contrato_id,)
     if mes:

@@ -19,6 +19,7 @@ Backend (janela 1):
 cd backend
 $env:DASH_DEV = "1"
 $env:DASH_SEM_JOBS = "1"
+$env:DASH_GRAPH_SIMULADOR = "dados/correio-simulado"
 .venv\Scripts\python -m uvicorn --factory app.main:create_app --reload --port 8080
 ```
 
@@ -38,6 +39,11 @@ No app do Claude, as mesmas duas coisas estão em `.claude/launch.json` (`backen
 - Banco de dev: `backend\dados\dashboard.db`; `DASH_DB_PATH` aponta outro arquivo (quando usar cada um:
   `CLAUDE.md`, item "Banco"). Sem RM configurado, o sistema roda com o RM desligado
   (`DASH_RM_SIMULADOR=<pasta>`); e-mail no dev vai para o simulador (`DASH_GRAPH_SIMULADOR=dados/correio-simulado`).
+- **E-mail real travado no dev** (issue #707): com `DASH_DEV=1` e sem `DASH_GRAPH_SIMULADOR`, todo envio é recusado,
+  com a mensagem de como ligar o simulador: no envio feito por pessoa, antes da reserva; nos jobs de alerta de
+  segurança e de cobrança de certidões, a marca do job é gravada e solta, sem chamar o Graph (nada sai, nada fica
+  preso). Para um teste deliberado com e-mail de verdade, suba
+  também com `DASH_EMAIL_REAL_EM_DEV=1`. Sem `DASH_DEV` (produção) a variável não é lida e nada muda.
 - `DASH_CADASTRO_DIR` aponta a pasta do cadastro (YAML) que `python -m app.cli cadastro validar|aplicar` lê; em
   produção é `C:\DashboardLotufo\cadastro`, clone do repositório privado `lotufo-cadastro`. `--raiz` vence a variável.
 - Sem a variável, o cadastro é o `cadastro-exemplo/` do repositório: 100% fictício, usado pelos testes e pela CI.
@@ -91,7 +97,7 @@ git config core.hooksPath .githooks
 
 E no `~/.zshrc`: `export DASH_SERVIDOR=` seguido do nome do servidor de produção (ver o último item abaixo).
 
-- Backend: `cd backend && DASH_DEV=1 DASH_SEM_JOBS=1 .venv/bin/python -m uvicorn --factory app.main:create_app --reload --port 8080`.
+- Backend: `cd backend && DASH_DEV=1 DASH_SEM_JOBS=1 DASH_GRAPH_SIMULADOR=dados/correio-simulado .venv/bin/python -m uvicorn --factory app.main:create_app --reload --port 8080`.
   Frontend igual ao Windows (`cd frontend && npm run dev`). No app do Claude: `backend-dev-mac`, `frontend-dev-mac`
   e `prototipo-login-mac` em `.claude/launch.json`.
 - Testes: `cd backend && .venv/bin/python -m pytest -q` e os de frontend acima. A suíte oficial é a CI (Ubuntu);

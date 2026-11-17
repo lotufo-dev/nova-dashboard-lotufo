@@ -232,10 +232,11 @@ def _mm_aaaa(comp: str) -> str:
 
 
 def sugestao_dias(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict:
-    """Issue #292 (spec 2026-10-20 §4 item 3): os dias de prorrogacao que a carta de prazo sugere. Ritmo = medido de
-    execucao nas `MESES_RITMO` competencias fechadas (as anteriores ao mes de `hoje`) dividido por elas, arredondado
-    uma vez a centavos (e' esse o ritmo da tela e o da conta); meses que faltam = saldo a executar (o de
-    `paineis.saldo`: vigente de execucao menos o medido, #262) / ritmo; conclusao estimada = `hoje` mais esses meses
+    """Issue #292 (spec 2026-10-20 §4 item 3): os dias de prorrogacao que a carta de prazo sugere. Ritmo = medido
+    de EXECUCAO nas `MESES_RITMO` competencias fechadas (as anteriores ao mes de `hoje`) dividido por elas,
+    arredondado uma vez a centavos (e' esse o ritmo da tela e o da conta); meses que faltam = saldo a executar (o de
+    `paineis.saldo`: vigente de execucao menos o medido de execucao e projeto, #262, #742) / ritmo. O ritmo fica so'
+    com a execucao (decisao do dono de 16/11/2026, docs/adr/0012): projeto pago nao e' obra andando; conclusao estimada = `hoje` mais esses meses
     no calendario (a fracao do ultimo mes arredonda para cima); dias = conclusao estimada menos o fim de execucao
     vigente. Sem fim de execucao, sem saldo, sem ritmo, com conclusao ate' o fim vigente ou acima do teto do pedido,
     `dias` e' None e `motivo` diz por que. E' so' sugestao: a pessoa confirma ou muda o numero ao criar o oficio, e o
@@ -247,7 +248,8 @@ def sugestao_dias(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
     exe_d = _d(exe)
     primeiro = hoje.replace(day=1)
     meses = [_somar_meses(primeiro, -i).strftime("%Y-%m") for i in range(MESES_RITMO, 0, -1)]
-    # mesma regra do medido de `paineis.saldo` (execucao, estados que medem, atestado ou protocolado); soma em Python
+    # o medido de EXECUCAO da janela, nos estados do medido de `paineis.saldo` (atestado ou protocolado): o projeto
+    # entra no saldo, nao no ritmo (#742, docs/adr/0012). Soma em Python
     medido = sum(r["v"] for r in conn.execute(
         "SELECT COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS v FROM medicoes "
         f"WHERE contrato_id=? AND tipo='execucao' AND estado IN ({','.join('?' * len(paineis.ESTADOS_VALIDOS))}) "
