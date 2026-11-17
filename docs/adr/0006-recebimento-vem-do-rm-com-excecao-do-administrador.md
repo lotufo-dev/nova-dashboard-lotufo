@@ -43,3 +43,28 @@ Consequências:
   ligada e, sem ela, pelos títulos da fatura do consórcio vezes a cota; a fatura que a nota da empresa tirou da conta
   aparece sem valor. Com espelho, o passo continua pelas saídas do espelho.
 - O que ainda não segue (a cobertura das notas vigentes, o recebido por mês do Início) está no `docs/backlog.md`.
+
+## O a receber do Início e o em aberto do Fechamento (conciliação de 17/11/2026)
+
+As duas telas respondem a perguntas diferentes e não mostram o mesmo total. A conta que as liga:
+
+**a receber do Início e da lista de Obras = em aberto do Fechamento (2025, 2026 e o anterior a 2025, nas três partes:
+nota não paga, repasse sem baixa e medição sem nota ligada) + cobranças do RM em aberto que nenhuma medição em aberto
+representa.**
+
+As cobranças do RM que só o Início soma (`diretoria._notas_em_aberto`) são de dois tipos:
+- a nota sem medição ligada. O Fechamento a mostra à parte, fora do total (não tem competência), pelo valor bruto; o
+  Início a soma pelo que falta nos títulos do RM, que nascem líquidos, sem as retenções. A mesma nota aparece com
+  valor menor no Início;
+- a nota ligada a medição já recebida (pelo corte de 25/09/2026, por exemplo) com título ainda aberto no RM. O Início
+  a soma pelo que falta nos títulos; no Fechamento a medição recebida leva a nota inteira ao recebido, e ela não
+  aparece em aberto.
+
+Na parte das medições os dois lados usam bases diferentes e só coincidem quando a nota fecha com a medição: o Início
+conta a medição que espera o pagamento pelo valor dela na cota (aprovado, senão o pedido); o Fechamento conta as notas
+ligadas pelo bruto, a paga em parte pelo que falta nos títulos, e só usa o valor da medição quando não há nota ligada.
+Medição protocolada com a nota já baixada no RM, nota paga em parte e nota de valor diferente da medição fazem os dois
+divergirem até a medição virar recebida. Em consórcio com a nota da empresa ligada os dois usam a mesma conta.
+
+Na cópia da produção de 17/11/2026 a parte das medições fechou ao centavo entre as duas telas, e a diferença inteira
+foram as cobranças do RM dos dois tipos acima.
