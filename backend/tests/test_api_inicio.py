@@ -128,7 +128,7 @@ def test_painel_do_inicio_exige_login(client):
 
 def test_obras_ativas_tem_uma_definicao_nas_tres_rotas(client_admin):
     """A-21 (10/10/2026): "obras ativas" = ativo sem encerramento iniciado (`avisos.ativos`) no Inicio e em
-    Medicoes; o farol da Carteira conta mais obras, mas diz a base (ativas, em encerramento, suspensas)."""
+    Medicoes; o QDOP da lista de Obras conta mais obras (tudo que nao e' rescindido)."""
     from app import db
     ids = [novo_contrato({"orgao": "SINFRA", "numero_instrumento": f"IC {i}/2026", "objeto": f"Obra {i}",
                           "valor_original": "1.000,00"}) for i in range(5)]
@@ -145,8 +145,8 @@ def test_obras_ativas_tem_uma_definicao_nas_tres_rotas(client_admin):
     assert inicio == 2
     assert sum(1 for o in obras if not o["encerramento"]) == inicio
     assert sum(1 for o in obras if o["encerramento"]) == 1
-    assert diretoria["obras_base"] == {"ativas": inicio, "encerramento": 1, "suspensas": 1, "encerradas": 0}
-    assert len(diretoria["obras"]) == sum(diretoria["obras_base"].values()) == 4
+    # o QDOP conta tudo que nao e' rescindido (a contagem por base, `obras_base`, nao tinha tela e saiu na #748)
+    assert len(diretoria["obras"]) == 4
 
 
 def test_cadastro_da_obra_traz_o_indice_da_data_base_depois_do_aplicar(client_admin):

@@ -108,6 +108,24 @@ export function Estado({ m }: { m: Medicao }) {
 }
 
 type LinhaAndamento = { id: number; proximo_passo: string; desde: string };
+/** #748: o custo lancado no RM da competencia (`/api/contratos/{id}/custo`, so' na obra com cadastro de custo). */
+type CustoObra = { linhas: { competencia: string; custo_centavos: number }[] };
+
+/** O custo lançado no RM de cada competência vai na linha da primeira medição de execução dela (a de menor número),
+ *  uma vez só: a coluna fica fora de qualquer total. Competência sem custo lançado (zero) não ganha número. */
+function custoPorMedicao(itens: Medicao[], custo: CustoObra | null): Map<number, number> {
+  const out = new Map<number, number>();
+  if (!custo) return out;
+  const porComp = new Map(custo.linhas.filter(l => l.custo_centavos !== 0).map(l => [l.competencia, l.custo_centavos]));
+  const primeira = new Map<string, Medicao>();
+  for (const m of itens) {
+    if (m.tipo !== "execucao" || !porComp.has(m.competencia)) continue;
+    const ja = primeira.get(m.competencia);
+    if (!ja || m.numero < ja.numero) primeira.set(m.competencia, m);
+  }
+  for (const [comp, m] of primeira) out.set(m.id, porComp.get(comp) as number);
+  return out;
+}
 
 // Quantas anteriores aparecem antes do "ver todas": as recentes respondem quase tudo; o resto e' historico.
 const RECENTES = 6;
@@ -125,6 +143,8 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
   // a obra cujas medicoes ja' estao na tela: so' ao trocar de obra a tela volta a "Carregando"; uma releitura
   // pedida por outro cartao (versao) troca a tabela no lugar, sem encolher a pagina sob o cartao que agiu
   const obraLida = useRef<number | null>(null);
+  // #748: a coluna "Custo lançado no RM" so' existe na obra com cadastro de custo (a rota responde 404 nas outras)
+  const [custo, setCusto] = useState<CustoObra | null>(null);
 
   useEffect(() => {
     geracao.current += 1;
@@ -140,6 +160,9 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
     }).catch(e => { if (g === geracao.current) setErro(mensagemDeErro(e)); })
       .finally(() => { if (g === geracao.current) setCarregando(false); });
     api<Frescor>("/api/rm/status").then(f => { if (g === geracao.current) setFrescor(f); }).catch(() => {});
+    api<CustoObra>(`/api/contratos/${contratoId}/custo`)
+      .then(c => { if (g === geracao.current) setCusto(c && Array.isArray(c.linhas) ? c : null); })
+      .catch(() => { if (g === geracao.current) setCusto(null); });
     return () => { geracao.current += 1; };
   }, [contratoId, versao]);
 
@@ -147,6 +170,10 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
   const todas = busca.anteriores === "todas";
   const visiveis = todas ? anteriores : anteriores.slice(0, RECENTES);
   const rmFalhou = !!(frescor?.configurado && frescor.ultimo_erro);
+  const custos = custoPorMedicao(itens, custo);
+  const comCusto = custo !== null;
+  const celulaCusto = (m: Medicao) => comCusto
+    && <td className="col-num dinheiro num">{custos.has(m.id) ? brl(custos.get(m.id) as number) : "—"}</td>;
 
   if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>;
   if (carregando) return <section className="cartao"><div className="vazio"><p>Carregando medições…</p></div></section>;
@@ -163,15 +190,16 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
         ) : (
           <Rolagem rotulo="Medições em andamento da obra">
             {/* grade comum com "Anteriores", logo abaixo (F-47): o dinheiro das duas tabelas cai na mesma coluna */}
-            <table className="tabela tabela--grade">
+            <table className={`tabela tabela--grade${comCusto ? " tabela--com-custo" : ""}`}>
               <colgroup>
                 <col className="c-medicao-obra" /><col className="c-comp" /><col className="c-estado" />
-                <col className="c-valor" /><col className="c-valor" /><col /><col className="c-marcas" />
+                <col className="c-valor" /><col className="c-valor" />{comCusto && <col className="c-valor" />}<col /><col className="c-marcas" />
               </colgroup>
               <thead>
                 <tr>
                   <th scope="col">Medição</th><th scope="col">Competência</th><th scope="col">Estado</th>
                   <th scope="col" className="col-num">Pedido</th><th scope="col" className="col-num">Aprovado</th>
+                  {comCusto && <th scope="col" className="col-num">Custo lançado no RM</th>}
                   <th scope="col">Próximo passo</th><th scope="col">Marcas</th>
                 </tr>
               </thead>
@@ -188,6 +216,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
                       <td><Estado m={m} /></td>
                       <td className="col-num dinheiro num">{brl(m.valor_protocolado_centavos)}</td>
                       <td className="col-num dinheiro num">{brl(m.valor_atestado_centavos)}</td>
+                      {celulaCusto(m)}
                       <td>{passo ? passo.rotulo : "—"}</td>
                       <td>{notasDivergentes(m).length > 0
                         ? <Link className="link-selo" para={destino} secao="notas"><Selo situacao="critico">nota diverge</Selo></Link> : "—"}</td>
@@ -214,15 +243,16 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
         </div>
         {anteriores.length > 0 && (
           <Rolagem rotulo="Medições anteriores da obra" alta>
-            <table className="tabela tabela--grade">
+            <table className={`tabela tabela--grade${comCusto ? " tabela--com-custo" : ""}`}>
               <colgroup>
                 <col className="c-medicao-obra" /><col className="c-comp" /><col className="c-estado" />
-                <col className="c-valor" /><col className="c-valor" /><col /><col className="c-data" />
+                <col className="c-valor" /><col className="c-valor" />{comCusto && <col className="c-valor" />}<col /><col className="c-data" />
               </colgroup>
               <thead>
                 <tr>
                   <th scope="col">Medição</th><th scope="col">Competência</th><th scope="col">Estado</th>
                   <th scope="col" className="col-num">Pedido</th><th scope="col" className="col-num">Aprovado</th>
+                  {comCusto && <th scope="col" className="col-num">Custo lançado no RM</th>}
                   <th scope="col">Notas</th><th scope="col">Recebida em</th>
                 </tr>
               </thead>
@@ -234,6 +264,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
                     <td><Estado m={m} /></td>
                     <td className="col-num dinheiro num">{brl(m.valor_protocolado_centavos)}</td>
                     <td className="col-num dinheiro num">{brl(m.valor_atestado_centavos)}</td>
+                    {celulaCusto(m)}
                     <td>{resumoNotas(m)}</td>
                     <td className="num">{m.recebida_em ? dataBR(m.recebida_em) : "—"}</td>
                   </tr>

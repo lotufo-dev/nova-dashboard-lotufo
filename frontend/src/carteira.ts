@@ -1,13 +1,5 @@
-// Carteira (NAVEGACAO.md › Carteira): a ordem e o recorte, no front, do que o /api/diretoria ja' manda. O farol
-// e os motivos (A5) sao do servidor (`app/diretoria.py`, pelos avisos da diretoria); aqui nao se decide farol.
-
-import type { AbaCarteira } from "./rota";
-
-/** As abas da Carteira, na ordem do mapa (o Resumo e' a padrao). */
-export const ABAS_CARTEIRA: { id: AbaCarteira; rotulo: string }[] = [
-  { id: "resumo", rotulo: "Resumo" }, { id: "qdop", rotulo: "QDOP" }, { id: "producao", rotulo: "Produção" },
-  { id: "custo", rotulo: "Custo" },
-];
+// QDOP da lista de Obras (#748; antes na Carteira): a ordem e o recorte, no front, do que o /api/diretoria ja' manda.
+// O farol e os motivos (A5) sao do servidor (`app/diretoria.py`, pelos avisos da diretoria); aqui nao se decide farol.
 
 export type Farol = "verde" | "atencao" | "acao" | "vermelho";
 export type Motivo = { tipo: string; nivel: string; dias: number | null; valor_centavos: number | null; texto: string };

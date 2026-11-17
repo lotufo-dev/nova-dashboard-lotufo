@@ -88,7 +88,7 @@ def test_obras_so_com_cadastro_de_custo_e_fora_o_consorcio(conn):
     eid = entidades.criar(conn, 1, {"nome": "Consórcio X", "cnpj": "11444777000161", "papel": "consorcio",
                                     "coligada_rm": 12})
     cons = _obra(conn, centro="2.001.014", nome="Do Consórcio", entidade_id=eid)
-    assert custo_obra.obras(conn) == [{"contrato_id": alfa, "obra": "Obra Alfa"}]
+    assert custo_obra.custo_da_obra(conn, alfa)["contrato_id"] == alfa
     for cid in (sem, cons, 9999):
         with pytest.raises(custo_obra.SemCadastro):
             custo_obra.custo_da_obra(conn, cid)

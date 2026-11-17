@@ -88,12 +88,18 @@ _Avoid_: protocolada para a planilha enviada (isso é "em análise")
 O órgão pagou: há baixa no RM, ou registro do administrador com motivo.
 _Avoid_: pago, quitado
 
+**Paga em parte**:
+A nota com alguma baixa com valor no RM e falta acima da tolerância de R$ 1,00. O em aberto dela é o que falta nos
+títulos do RM, limitado ao valor da nota; o resto do valor bruto conta como recebido. Título baixado sem valor não é
+recebimento.
+
 **Pedido**:
 O valor que a planilha/carta pede ao órgão.
 _Avoid_: valor protocolado
 
 **Aprovado**:
-O valor que o órgão fixa no boletim.
+O valor que o órgão fixa no boletim. Sem o valor do boletim gravado, a medição só conta como aprovada depois da nota
+emitida (a nota prova que o órgão aprovou), pelo valor do pedido; antes disso fica só no medido.
 _Avoid_: valor atestado
 
 **Faturado**:

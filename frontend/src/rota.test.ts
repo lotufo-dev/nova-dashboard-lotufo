@@ -4,7 +4,8 @@ import { buscaDosAvisosEmObras, caminhoDe, hrefDe, origemPara, parseRota, substi
 describe("rota", () => {
   it("toda rota tem um caminho canônico e volta igual", () => {
     const rotas: Rota[] = [
-      { tela: "inicio" }, { tela: "medicoes" }, { tela: "carteira" }, { tela: "obras" },
+      { tela: "inicio" }, { tela: "medicoes" }, { tela: "fechamento" }, { tela: "obras" },
+      { tela: "obras", aba: "resumo" }, { tela: "obras", aba: "qdop" },
       { tela: "documentos" }, { tela: "admin" }, { tela: "conta" }, { tela: "avisos" }, { tela: "siga" },
       { tela: "obra", id: 7, aba: "ficha" },
       { tela: "medicao", obra: 7, id: 723 },
@@ -12,7 +13,6 @@ describe("rota", () => {
       { tela: "obra", id: 12, aba: "reajuste" },
       { tela: "obra", id: 12, aba: "prazos" },
       { tela: "obra", id: 12, aba: "contrato" },
-      { tela: "a-receber" }, { tela: "carteira", aba: "qdop" }, { tela: "carteira", aba: "producao" },
       { tela: "admin", aba: "reconciliacao" }, { tela: "admin", aba: "usuarios" }, { tela: "admin", aba: "auditoria" }, { tela: "admin", aba: "pendencias" },
       { tela: "notas-envio", id: 55 },
       { tela: "documentos-empresa", id: 3 }, { tela: "documentos-empresa", id: 3, aba: "regularidade" },
@@ -36,10 +36,21 @@ describe("rota", () => {
     expect(parseRota("/contratos")).toEqual({ tela: "obras" });
     expect(parseRota("/contratos/7")).toEqual({ tela: "obra", id: 7, aba: "ficha" });
     expect(parseRota("/contratos/7/prazos")).toEqual({ tela: "obra", id: 7, aba: "prazos" });
-    expect(parseRota("/diretoria")).toEqual({ tela: "carteira" });
-    expect(parseRota("/painel")).toEqual({ tela: "carteira" });
+    expect(parseRota("/diretoria")).toEqual({ tela: "obras", aba: "resumo" });
+    expect(parseRota("/painel")).toEqual({ tela: "obras", aba: "resumo" });
     expect(parseRota("/certidoes")).toEqual({ tela: "documentos" });
     expect(caminhoDe(parseRota("/contratos/7/prazos"))).toBe("/obras/7/prazos");
+  });
+
+  it("A receber e Carteira saíram (#748): os links antigos abrem o Fechamento ou a vista de Obras que as absorveu", () => {
+    expect(parseRota("/a-receber")).toEqual({ tela: "fechamento" });
+    expect(parseRota("/carteira")).toEqual({ tela: "obras", aba: "resumo" });
+    expect(parseRota("/carteira/resumo")).toEqual({ tela: "obras", aba: "resumo" });
+    expect(parseRota("/carteira/qdop")).toEqual({ tela: "obras", aba: "qdop" });
+    expect(parseRota("/carteira/producao")).toEqual({ tela: "fechamento" });
+    expect(parseRota("/carteira/custo")).toEqual({ tela: "obras" });
+    expect(caminhoDe(parseRota("/carteira/qdop"))).toBe("/obras/qdop");
+    expect(parseRota("/obras/x")).toEqual({ tela: "raiz" });
   });
 
   it("as telas que saíram no bloco 9 caem na entrada do perfil", () => {
@@ -60,10 +71,9 @@ describe("rota", () => {
     expect(caminhoDe({ tela: "obra", id: 7, aba: "medicoes" })).toBe("/obras/7/medicoes");
     expect(parseRota("/obras/7")).toEqual({ tela: "obra", id: 7, aba: "ficha" });
     expect(parseRota("/obras/7/medicoes")).toEqual({ tela: "obra", id: 7, aba: "medicoes" });
-    expect(caminhoDe({ tela: "carteira", aba: "resumo" })).toBe("/carteira");
-    expect(parseRota("/carteira/resumo")).toEqual({ tela: "carteira" });
-    expect(caminhoDe({ tela: "carteira", aba: "custo" })).toBe("/carteira/custo");
-    expect(parseRota("/carteira/custo")).toEqual({ tela: "carteira", aba: "custo" });
+    expect(caminhoDe({ tela: "obras", aba: "posicao" })).toBe("/obras");
+    expect(parseRota("/obras/posicao")).toEqual({ tela: "obras" });
+    expect(caminhoDe({ tela: "obras", aba: "qdop" })).toBe("/obras/qdop");
     expect(parseRota("/admin/saude")).toEqual({ tela: "admin" });
     expect(hrefDe({ tela: "documentos" }, { pendentes: "1", vazio: "" }, "emp-3")).toBe("/documentos?pendentes=1#emp-3");
     expect(hrefDe({ tela: "avisos" }, { familia: "prazo", obra: "7" })).toBe("/avisos?familia=prazo&obra=7");

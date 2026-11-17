@@ -4,7 +4,7 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app import contratos, diretoria, ficha_obra, medicoes, notas, paineis, prazos, tempo
+from app import contratos, custo_obra, diretoria, ficha_obra, medicoes, notas, paineis, prazos, tempo
 from app.api_auth import conexao
 from app.api_medicoes import ID
 from app.permissoes import exigir
@@ -54,6 +54,21 @@ def detalhe(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_c
             conn: sqlite3.Connection = Depends(conexao)):
     _existe(conn, contrato_id)
     return contratos.vigente(conn, contrato_id)
+
+
+@router.get("/{contrato_id}/custo")
+def custo(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
+          conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #491 e #748: o custo lancado no RM por competencia da obra com cadastro de custo (a coluna "Custo lançado
+    no RM" da aba Medicoes da obra). 404 na obra sem cadastro: a pagina nao mostra a coluna."""
+    try:
+        return custo_obra.custo_da_obra(conn, contrato_id)
+    except custo_obra.SemCadastro as e:
+        raise HTTPException(404, str(e)) from None
+    except custo_obra.RegraDesconhecida as e:
+        raise HTTPException(422, str(e)) from None
+    except custo_obra.CentroDisputado as e:
+        raise HTTPException(409, str(e)) from None
 
 
 @router.get("/{contrato_id}/cabecalho")

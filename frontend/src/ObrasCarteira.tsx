@@ -1,66 +1,40 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
-import { ABAS_CARTEIRA, motivosDaLinha, porFarol, type Motivo } from "./carteira";
+import { motivosDaLinha, porFarol, type Motivo } from "./carteira";
 import { fmtDias, fmtPercentual } from "./formato";
 import { IconeAlerta, IconeBaixar } from "./icones";
 import { filtrarObras, type ObraLista } from "./listaObras";
 import { brl } from "./Medicoes";
-import CustoObra from "./CustoObra";
-import { type AbaCarteira, type Ir } from "./rota";
+import { type Ir } from "./rota";
 import { Link } from "./Link";
-import { fmtCompetencia, fmtDataPura, fmtMesCurto as mesCurto, fmtMesExtenso } from "./tempo";
+import { fmtCompetencia, fmtDataPura, fmtMesCurto as mesCurto } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
-import { Abas } from "./Topo";
 import { situacaoDoNivel } from "./situacao";
 
-// Carteira (NAVEGACAO.md › Carteira; bloco 8, spec §10.5; redesenho #163, opcao A), a entrada da diretoria, em
-// abas na URL: Resumo (a padrao, so' o essencial), QDOP e Producao; o "Exportar QDOP" fica visivel nas tres. Tudo na COTA da Lotufo, com o vocabulario fixo: medido, faturado, protocolado,
-// recebido. As regras moram em `app/diretoria.py`; o total a receber so' mostra valor depois de conciliado
-// (geral.yaml: diretoria.total_a_receber_liberado). O a receber (por obra, previsto e recebido) mora
-// em A receber; os reajustes esperando apostilamento, por obra na Producao (#279) e por competencia na aba Reajuste da
-// obra; a lista de avisos, na tela de Avisos; o que termina, em Obras.
+// O Resumo e o QDOP da lista de Obras (#748; vieram da Carteira, bloco 8, spec §10.5, redesenho #163): tudo na COTA da
+// Lotufo, com as regras em `app/diretoria.py` (`/api/diretoria`). A Producao saiu (o faturado por mes mora no
+// Fechamento) e o Custo virou coluna na aba Medicoes da obra.
 
-type Grupo = { quantidade: number; valor_centavos: number | null };
-type PorOrgao = Grupo & { orgao: string; maior_dias: number | null };
-/** #279: por obra, as competências de reajuste já medidas sem apostilamento e o medido delas, na cota. */
-type ReajusteObra = { contrato_id: number; obra: string; competencias: number; valor_centavos: number };
-type Dinheiro = {
-  medido_esperando_nota: Grupo; nota_esperando_protocolo: Grupo; recebido_mes: Grupo;
-  protocolado: Grupo & { faixas: Record<"ate_30" | "de_31_a_60" | "mais_60", Grupo>; por_orgao: PorOrgao[] };
-  reajustes_apostilamento: { quantidade: number; maior_dias: number | null; competencias: number; valor_centavos: number;
-    obras: ReajusteObra[] };
-};
-type MesAno = {
-  mes: string; medido_mes_centavos: number; previsto_mes_centavos: number; mesmo_mes_ano_anterior_centavos: number;
-  acumulado_ano_centavos: number; previsto_ano_centavos: number;
-  faturado_mes_centavos: number; notas_faturadas_mes: number;
-  serie: { competencia: string; medido_centavos: number; previsto_centavos: number }[];
-};
-/** 06/11/2026: o faturado de verdade (notas do RM, na cota) dos 12 meses fechados, com o mesmo mês do ano anterior. */
-type FaturadoRm = {
-  serie: { competencia: string; faturado_centavos: number; ano_anterior_centavos: number }[];
-  ate: string | null; ano_centavos: number; ano_anterior_centavos: number;
-};
-type Proximo = { competencia: string; faturamento_previsto_centavos: number };
 /** Issue #296: a curva S da carteira (obras ativas, cada uma na cota), com o previsto anterior a ultima repactuacao. */
 type PontoCarteira = { competencia: string; previsto_centavos: number; previsto_anterior_centavos: number; medido_centavos: number };
 type Carteira = {
-  saldo_centavos: number; ritmo_mensal_centavos: number; meses_de_producao: number | null;
-  por_orgao: { orgao: string; saldo_centavos: number; fracao: number; vigente_centavos: number; medido_centavos: number; obras: number }[];
+  saldo_centavos: number;
+  por_orgao: { orgao: string; saldo_centavos: number; vigente_centavos: number; medido_centavos: number }[];
 };
 type Obra = {
   contrato_id: number; seq: number; obra: string; contratante: string; empreita: string; direito: number;
-  pi_va: number; faturados: number; saldo: number; pct_recebido: number; status: string; termino: string | null;
+  pi_va: number; faturados: number; saldo: number; status: string; termino: string | null;
   vigencia?: string | null; farol: "verde" | "atencao" | "acao" | "vermelho"; motivo: string; motivos?: Motivo[];
-  desvio_pp?: number | null; desvio_base?: "anterior" | "vigente" | null;
 };
-type Painel = {
-  hoje: string; total_a_receber_liberado: boolean; dinheiro: Dinheiro; mes_ano: MesAno; curva_carteira: PontoCarteira[]; proximos: Proximo[];
-  carteira: Carteira; obras: Obra[]; obras_base: ObrasBase; avisos: Aviso[]; faturado_rm?: FaturadoRm;
+/** #279: por obra, as competências de reajuste já medidas sem apostilamento e o medido delas, na cota. */
+type ReajusteObra = { contrato_id: number; obra: string; competencias: number; valor_centavos: number };
+export type Painel = {
+  hoje: string; medido_ano: { ano: string; valor_centavos: number }; curva_carteira: PontoCarteira[];
+  carteira: Carteira; obras: Obra[]; avisos: Aviso[];
+  reajustes_apostilamento?: { competencias: number; valor_centavos: number; obras: ReajusteObra[] };
 };
-type ObrasBase = { ativas: number; encerramento: number; suspensas: number; encerradas: number };
 
 // O selo diz a palavra do nivel (D12, D10), a mesma do Selo dos avisos: Critico, Acao e Atencao. Acao e Atencao
 // dividem o ambar e se separam pela forma (contorno cheio na Acao), como em Alertas. So' o QDOP EXPORTADO
@@ -99,77 +73,6 @@ function unidade(topo: number): { divisor: number; rotulo: string } {
   if (reais >= 1_000_000) return { divisor: 100_000_000, rotulo: "R$ mi" };
   if (reais >= 10_000) return { divisor: 100_000, rotulo: "R$ mil" };
   return { divisor: 100, rotulo: "R$" };
-}
-
-// F-83: o passo de cada mes vem da largura do conteiner (minimo de 64px; abaixo disso o grafico rola). O texto do
-// eixo nao escala: so' o vao entre os meses e a largura das barras crescem.
-const PASSO_MIN = 64;
-function GraficoAno({ serie, nomes = ["previsto", "medido"], descricao }:
-    { serie: MesAno["serie"]; nomes?: [string, string]; descricao?: string }) {
-  const medida = useRef<HTMLDivElement>(null);
-  const [larg, setLarg] = useState(0);
-  useEffect(() => {
-    const el = medida.current;
-    if (!el) return;
-    const medir = () => setLarg(el.clientWidth);
-    medir();
-    // jsdom (testes) nao tem ResizeObserver: la' a medicao unica basta
-    if (typeof ResizeObserver === "undefined") return;
-    const observador = new ResizeObserver(medir);
-    observador.observe(el);
-    return () => observador.disconnect();
-  }, []);
-  const MARGEM_E = 66, MARGEM_D = 14, VAO = 4, TOPO = 24, ALTURA = 180;
-  const PASSO = Math.max(PASSO_MIN, Math.floor((larg - MARGEM_E - MARGEM_D) / Math.max(1, serie.length)));
-  const LARG = Math.min(32, Math.max(16, Math.round(PASSO / 4)));
-  const BASE = TOPO + ALTURA, H = BASE + 28, W = MARGEM_E + serie.length * PASSO + MARGEM_D;
-  const { topo, passo } = escala(Math.max(...serie.map(m => Math.max(m.medido_centavos, m.previsto_centavos))));
-  const { divisor, rotulo } = unidade(topo);
-  const y = (v: number) => BASE - (v / topo) * ALTURA;
-  const alt = (v: number) => (v <= 0 ? 0 : Math.max(2, (v / topo) * ALTURA));
-  const grade: number[] = [];
-  for (let v = 0; v <= topo + passo / 2; v += passo) grade.push(v);
-  return (
-    <div ref={medida} className="grafico__medida">
-    <svg className="grafico__svg" width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img"
-      aria-label={`${descricao ?? "Medido e previsto nos últimos 12 meses"}, na cota da Lotufo, em ${rotulo}. `
-        + "Os mesmos números estão na tabela recolhida logo abaixo."}>
-      <text className="g-eixo num" x={MARGEM_E - 8} y={TOPO - 9} textAnchor="end">{rotulo}</text>
-      {grade.map(v => (
-        <g key={v}>
-          <line className={v === 0 ? "g-base" : "g-grade"} x1={MARGEM_E} y1={y(v)} x2={W - MARGEM_D} y2={y(v)} />
-          <text className="g-eixo num" x={MARGEM_E - 8} y={y(v) + 4} textAnchor="end">
-            {(v / divisor).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}
-          </text>
-        </g>
-      ))}
-      {serie.map((m, i) => {
-        const cx = MARGEM_E + i * PASSO + PASSO / 2;
-        const hp = alt(m.previsto_centavos), hm = alt(m.medido_centavos);
-        return (
-          <g key={m.competencia}>
-            <title>{`${fmtCompetencia(m.competencia)} — ${nomes[0]} ${brl(m.previsto_centavos)} · ${nomes[1]} ${brl(m.medido_centavos)}`}</title>
-            {hp > 0 ? <rect className="g-previsto" x={cx - VAO / 2 - LARG} y={BASE - hp} width={LARG} height={hp} rx={2.5} />
-              : <rect className="g-talo" x={cx - VAO / 2 - LARG} y={BASE - 4} width={LARG} height={4} rx={2} />}
-            {hm > 0 ? <rect className="g-execucao" x={cx + VAO / 2} y={BASE - hm} width={LARG} height={hm} rx={2.5} />
-              : <rect className="g-talo" x={cx + VAO / 2} y={BASE - 4} width={LARG} height={4} rx={2} />}
-            <text className="g-eixo-x" x={cx} y={BASE + 18} textAnchor="middle">{mesCurto(m.competencia)}</text>
-          </g>
-        );
-      })}
-    </svg>
-    </div>
-  );
-}
-
-// KPI de uma faixa (D13): valor em Display e rotulo embaixo.
-function Kpi({ valorTexto, rotulo, dinheiro = true }: { valorTexto: string; rotulo: string; dinheiro?: boolean }) {
-  return (
-    <li className={`kpi${dinheiro ? " kpi--dinheiro" : ""}`}>
-      <span className="kpi__valor num">{valorTexto}</span>
-      <span className="kpi__rotulo">{rotulo}</span>
-    </li>
-  );
 }
 
 function Secao({ id, titulo, acoes, children }:
@@ -289,9 +192,9 @@ function CurvaS({ serie }: { serie: PontoCarteira[] }) {
   );
 }
 
-/** Resumo (a aba padrao): os três números, a curva S e um cartão por contratante. O resto mora em QDOP e Produção. */
-function Resumo({ p, ir }: { p: Painel; ir: Ir }) {
-  const m = p.mes_ano, k = p.carteira;
+/** Resumo: os números da carteira, a curva S e um cartão por contratante. */
+export function Resumo({ p, ir }: { p: Painel; ir: Ir }) {
+  const k = p.carteira;
   // 06/11/2026 (tela da diretoria): o contratado e o executado saem da mesma soma dos cartoes por contratante
   const contratado = k.por_orgao.reduce((t, o) => t + o.vigente_centavos, 0);
   const executado = k.por_orgao.reduce((t, o) => t + o.medido_centavos, 0);
@@ -312,8 +215,8 @@ function Resumo({ p, ir }: { p: Painel; ir: Ir }) {
           <span className="cart-numero__valor num" title={brl(k.saldo_centavos)}>{mi(k.saldo_centavos)}</span>
         </li>
         <li className="cartao cart-numero">
-          <span className="cart-numero__rotulo">Medido em {m.mes.slice(0, 4)}</span>
-          <span className="cart-numero__valor num" title={brl(m.acumulado_ano_centavos)}>{mi(m.acumulado_ano_centavos)}</span>
+          <span className="cart-numero__rotulo">Medido em {p.medido_ano.ano}</span>
+          <span className="cart-numero__valor num" title={brl(p.medido_ano.valor_centavos)}>{mi(p.medido_ano.valor_centavos)}</span>
         </li>
       </ul>
 
@@ -352,13 +255,47 @@ function Resumo({ p, ir }: { p: Painel; ir: Ir }) {
           })}
         </ul>
       )}
+
+      {/* #279 (spec 2026-10-20 §2.2): o reajuste já medido (pedido ou aprovado) das competências sem apostilamento,
+          por obra; a obra leva à aba Reajuste dela, com cada competência. Veio da Produção da Carteira (#748). */}
+      {p.reajustes_apostilamento && <Reajustes r={p.reajustes_apostilamento} ir={ir} />}
     </>
+  );
+}
+
+function Reajustes({ r, ir }: { r: NonNullable<Painel["reajustes_apostilamento"]>; ir: Ir }) {
+  return (
+    <Secao id="dir-reajustes" titulo="Reajustes esperando apostilamento (cota)">
+      {r.obras.length === 0 ? (
+        <div className="vazio vazio--curto"><p>Nenhum reajuste esperando apostilamento.</p></div>
+      ) : (
+        <Rolagem rotulo="Reajustes esperando apostilamento por obra">
+          <table className="tabela tabela--estreita">
+            <caption className="sr-only">Reajustes esperando apostilamento por obra, na cota da Lotufo</caption>
+            <thead><tr><th scope="col">Obra</th><th scope="col" className="col-num">Competências</th>
+              <th scope="col" className="col-num">Medido</th></tr></thead>
+            <tbody>
+              {r.obras.map(o => (
+                <tr key={o.contrato_id}>
+                  <td><Link className="nome-link truncar truncar--nome" title={o.obra}
+                    para={{ tela: "obra", id: o.contrato_id, aba: "reajuste" }} ir={ir}>{o.obra}</Link></td>
+                  <td className="col-num num">{o.competencias}</td>
+                  <td className="col-num dinheiro num">{brl(o.valor_centavos)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot><tr><th scope="row">Total</th><td className="col-num num">{r.competencias}</td>
+              <td className="col-num dinheiro num">{brl(r.valor_centavos)}</td></tr></tfoot>
+          </table>
+        </Rolagem>
+      )}
+    </Secao>
   );
 }
 
 /** QDOP: o painel do farol (filtro, o que termina, avisos) e a tabela no leiaute do QDOP, pelo farol, com a linha de
  *  total e ate' 2 motivos por obra (o resto nos avisos da obra). */
-function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
+export function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
   const [filtro, setFiltro] = useState<"todas" | "problema" | Obra["farol"]>("todas");
   // o que termina vem da lista de Obras (/api/contratos); undefined = carregando; null = nao carregou
   const [lista, setLista] = useState<ObraLista[] | null | undefined>(undefined);
@@ -411,7 +348,8 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
         </div>
       </Secao>
 
-      <Secao id="dir-qdop" titulo="QDOP">
+      <Secao id="dir-qdop" titulo="QDOP"
+        acoes={<a className="btn" href="/api/diretoria/qdop.xlsx"><IconeBaixar className="icone icone--p" /> Exportar QDOP (.xlsx)</a>}>
         <Rolagem rotulo="QDOP" alta>
           <table className="tabela qdop">
             <caption className="sr-only">QDOP, na cota da Lotufo: as obras pelo farol</caption>
@@ -470,138 +408,18 @@ function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
   );
 }
 
-/** Producao (refeita em 06/11/2026 para a diretoria): o faturado de verdade (notas do RM, na cota) do ultimo mes fechado
- *  e do ano, cada um ao lado do mesmo periodo do ano anterior; o mes a mes dos 12 meses fechados contra o ano anterior
- *  (barras e tabela); e os reajustes esperando apostilamento. O medido por competencia saiu daqui: depende do cadastro
- *  de medicoes, que pode estar atrasado, e a nota chega sozinha do RM. */
-function Producao({ p, ir }: { p: Painel; ir: Ir }) {
-  const f = p.faturado_rm, r = p.dinheiro.reajustes_apostilamento;
-  const ultimo = f && f.serie.length > 0 ? f.serie[f.serie.length - 1] : null;
-  const anoAtual = p.mes_ano.mes.slice(0, 4), anoAnterior = String(Number(anoAtual) - 1);
-  const mesFechado = ultimo ? fmtMesExtenso(ultimo.competencia) : "";
-  const ate = f?.ate ? fmtMesExtenso(f.ate) : null;
-  return (
-    <>
-      {f && ultimo && (
-        <Secao id="dir-mes" titulo="Faturado, na cota">
-          <ul className="kpis cart-kpis--quebra" aria-label="Faturado">
-            <Kpi valorTexto={brl(ultimo.faturado_centavos)} rotulo={`faturado em ${mesFechado} de ${ultimo.competencia.slice(0, 4)}`} />
-            <Kpi valorTexto={brl(ultimo.ano_anterior_centavos)} rotulo={`${mesFechado} de ${Number(ultimo.competencia.slice(0, 4)) - 1}`} />
-            {ate && <Kpi valorTexto={brl(f.ano_centavos)} rotulo={`faturado em ${anoAtual}, até ${ate}`} />}
-            {ate && <Kpi valorTexto={brl(f.ano_anterior_centavos)} rotulo={`${anoAnterior}, até ${ate}`} />}
-          </ul>
-        </Secao>
-      )}
-
-      {f && f.serie.length > 0 && (
-        <Secao id="dir-grafico" titulo="Faturado por mês e o mesmo mês do ano anterior">
-          <div className="cartao__corpo pilha">
-            <Rolagem rotulo="Gráfico do faturado nos últimos 12 meses e no mesmo mês do ano anterior" className="grafico">
-              <GraficoAno nomes={["ano anterior", "faturado"]} descricao="Faturado nos últimos 12 meses fechados e no mesmo mês do ano anterior"
-                serie={f.serie.map(x => ({ competencia: x.competencia, medido_centavos: x.faturado_centavos, previsto_centavos: x.ano_anterior_centavos }))} />
-            </Rolagem>
-            <div className="legenda">
-              <span className="legenda__item"><span className="legenda__chave legenda__chave--previsto" aria-hidden="true" />mesmo mês do ano anterior</span>
-              <span className="legenda__item"><span className="legenda__chave legenda__chave--execucao" aria-hidden="true" />faturado</span>
-            </div>
-            {/* os valores do grafico em texto, para teclado e leitor de tela (o SVG e' role="img") */}
-            <details className="detalhes">
-              <summary>Tabela por mês</summary>
-              <Rolagem rotulo="Faturado por mês e no mesmo mês do ano anterior">
-                <table className="tabela">
-                  <caption className="sr-only">Faturado por mês e no mesmo mês do ano anterior, na cota da Lotufo</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Mês</th>
-                      <th scope="col" className="col-num">Faturado</th>
-                      <th scope="col" className="col-num">Mesmo mês do ano anterior</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {f.serie.map((x, i) => (
-                      <tr key={x.competencia} className={`linha${i % 2 === 1 ? " par" : ""}`}>
-                        <td className="num">{fmtCompetencia(x.competencia)}</td>
-                        <td className="col-num dinheiro num">{brl(x.faturado_centavos)}</td>
-                        <td className="col-num dinheiro num">{brl(x.ano_anterior_centavos)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr><th scope="row">Total</th>
-                      <td className="col-num dinheiro num">{brl(f.serie.reduce((t, x) => t + x.faturado_centavos, 0))}</td>
-                      <td className="col-num dinheiro num">{brl(f.serie.reduce((t, x) => t + x.ano_anterior_centavos, 0))}</td></tr>
-                  </tfoot>
-                </table>
-              </Rolagem>
-            </details>
-          </div>
-        </Secao>
-      )}
-
-      {/* #279 (spec 2026-10-20 §2.2): o reajuste já medido (pedido ou aprovado) das competências sem apostilamento,
-          por obra; a obra leva à aba Reajuste dela, com cada competência */}
-      <Secao id="dir-reajustes" titulo="Reajustes esperando apostilamento (cota)">
-        {r.obras.length === 0 ? (
-          <div className="vazio vazio--curto"><p>Nenhum reajuste esperando apostilamento.</p></div>
-        ) : (
-          <Rolagem rotulo="Reajustes esperando apostilamento por obra">
-            <table className="tabela tabela--estreita">
-              <caption className="sr-only">Reajustes esperando apostilamento por obra, na cota da Lotufo</caption>
-              <thead><tr><th scope="col">Obra</th><th scope="col" className="col-num">Competências</th>
-                <th scope="col" className="col-num">Medido</th></tr></thead>
-              <tbody>
-                {r.obras.map(o => (
-                  <tr key={o.contrato_id}>
-                    <td><Link className="nome-link truncar truncar--nome" title={o.obra}
-                      para={{ tela: "obra", id: o.contrato_id, aba: "reajuste" }} ir={ir}>{o.obra}</Link></td>
-                    <td className="col-num num">{o.competencias}</td>
-                    <td className="col-num dinheiro num">{brl(o.valor_centavos)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot><tr><th scope="row">Total</th><td className="col-num num">{r.competencias}</td>
-                <td className="col-num dinheiro num">{brl(r.valor_centavos)}</td></tr></tfoot>
-            </table>
-          </Rolagem>
-        )}
-      </Secao>
-    </>
-  );
-}
-
-export default function Diretoria({ ir, aba = "resumo" }: { ir: Ir; aba?: AbaCarteira }) {
+/** As duas vistas que vieram da Carteira, com o painel pedido uma vez (`/api/diretoria`). */
+export default function ObrasCarteira({ ir, vista }: { ir: Ir; vista: "resumo" | "qdop" }) {
   const [p, setP] = useState<Painel | null>(null);
   const [erro, setErro] = useState("");
-  // #491: a aba Custo tem a propria busca; o painel so' e' pedido quando outra aba o mostra (uma vez)
-  const precisaPainel = aba !== "custo";
   useEffect(() => {
-    if (!precisaPainel || p !== null) return;
     let vivo = true;
     api<Painel>("/api/diretoria")
       .then(d => { if (vivo) setP(d); })
       .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
     return () => { vivo = false; };
-  }, [precisaPainel, p]);
-
-  // as abas sao links (NAVEGACAO.md › Subnavegacao): a aba fica na URL, e trocar de aba nao busca o painel de novo.
-  // O "Exportar QDOP" fica ao lado delas, visivel nas tres (e tambem enquanto carrega).
-  const abas = (
-    <div className="cart-topo">
-      <Abas rotulo="Seções da Carteira" atual={aba}
-        itens={ABAS_CARTEIRA.map(a => ({ ...a, para: { tela: "carteira" as const, aba: a.id } }))} />
-      <a className="btn" href="/api/diretoria/qdop.xlsx"><IconeBaixar className="icone icone--p" /> Exportar QDOP (.xlsx)</a>
-    </div>
-  );
-  // #491: a aba Custo tem a propria busca; nao espera o painel nem cai com o erro dele
-  if (aba === "custo") return <div className="pilha">{abas}<CustoObra /></div>;
-  if (erro) return <div className="pilha">{abas}<p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro} Recarregue a página para tentar de novo.</p></div>;
-  if (!p) return <div className="pilha">{abas}<section className="cartao"><div className="vazio"><p>Carregando…</p></div></section></div>;
-  return (
-    <div className="pilha">
-      {abas}
-      {aba === "resumo" && <Resumo p={p} ir={ir} />}
-      {aba === "qdop" && <Qdop p={p} ir={ir} />}
-      {aba === "producao" && <Producao p={p} ir={ir} />}
-    </div>
-  );
+  }, []);
+  if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro} Recarregue a página para tentar de novo.</p>;
+  if (!p) return <section className="cartao"><div className="vazio"><p>Carregando…</p></div></section>;
+  return <div className="pilha">{vista === "resumo" ? <Resumo p={p} ir={ir} /> : <Qdop p={p} ir={ir} />}</div>;
 }

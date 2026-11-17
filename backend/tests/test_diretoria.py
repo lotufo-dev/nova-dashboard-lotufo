@@ -1,4 +1,5 @@
-"""Tela da diretoria (bloco 8; spec §10.5): na cota, prazo do orgao, faixas, mes e ano, proximos, carteira."""
+"""Numeros da diretoria (bloco 8; spec §10.5): na cota, prazo do orgao, a receber, notas do RM, Resumo e QDOP da
+lista de Obras (as telas Carteira e A receber sairam na #748)."""
 import datetime
 import json
 import pathlib
@@ -13,6 +14,17 @@ D = datetime.date
 HOJE = D(2026, 9, 24)
 MODELO = pathlib.Path(__file__).parents[2] / "cadastro-exemplo" / "modelos" / "qdop" / "qdop-modelo.xlsx"
 ATRASOS = [5, 5, 5, 6, 6, 7, 8, 9, 10, 12, 20, 40]
+
+
+def _receber(c) -> int:
+    """O a receber na cota, cobranca a cobranca: a soma da lista de Obras (`a_receber_por_obra`, #645). A tela A
+    receber saiu na #748; a conta das cobrancas (medicoes protocoladas e notas do RM em aberto) continua."""
+    return sum((diretoria.a_receber_por_obra(c, na_cota=True) or {}).values())
+
+
+def _notas_rm(c) -> list[tuple[str, int]]:
+    """As cobrancas do RM em aberto que nenhuma medicao em aberto representa (`_notas_em_aberto`): (numero, falta)."""
+    return [(n["nf"], n["valor_protocolado_centavos"]) for n in diretoria._notas_em_aberto(c)]
 
 
 @pytest.fixture
@@ -75,24 +87,6 @@ def cenario(tmp_path, monkeypatch):
     c.close()
 
 
-def test_dinheiro_na_cota_e_por_faixa(cenario):
-    c, ids = cenario
-    d = diretoria.painel(c, HOJE)["dinheiro"]
-    assert d["medido_esperando_nota"]["valor_centavos"] == 1_000_000 + 500_000     # 10 mil proprio + 50% de 10 mil
-    assert d["protocolado"]["faixas"]["mais_60"]["quantidade"] == 1
-
-
-def test_a_receber_por_orgao_com_faixas_e_obras_sem_prazo_normal(cenario):
-    c, ids = cenario                   # A4: protocoladas da SINFRA em 10/09 (14 dias) e 01/07 (85 dias)
-    ids["liberar"]()
-    o = diretoria.painel(c, HOJE)["dinheiro"]["protocolado"]["por_orgao"][0]
-    assert (o["orgao_id"], o["maior_dias"]) == (ids["sinfra"], 85)
-    assert "prazo_normal_dias" not in o          # issue #255: o prazo normal do orgao saiu
-    assert (o["faixas"]["ate_30"]["valor_centavos"], o["faixas"]["mais_60"]["valor_centavos"]) == (700_000, 300_000)
-    assert o["obras"] == [{"contrato_id": ids["propria"], "obra": "Própria", "quantidade": 2, "notas_rm": 0,
-                           "valor_centavos": 1_000_000, "maior_dias": 85}]
-
-
 def test_motivos_da_obra_um_a_um_sem_o_nome_da_obra(cenario, monkeypatch):
     c, ids = cenario                   # A5: motivos[] estruturado, na ordem dos avisos
     monkeypatch.setattr(diretoria._av, "listar", lambda conn, hoje, publico: [
@@ -137,45 +131,43 @@ def test_a_receber_por_obra_igual_ao_da_obra_e_escondido_ate_liberar(cenario):
 
 
 def test_total_a_receber_escondido_ate_liberar(cenario):
+    """O total a receber so' mostra valor com o cadastro liberando (`geral.yaml: diretoria.total_a_receber_liberado`):
+    na lista de Obras e no em aberto do Fechamento (#748), que respeitam a mesma trava."""
+    from app import fechamento
     c, ids = cenario
-    p = diretoria.painel(c, HOJE)
-    assert p["total_a_receber_liberado"] is False
-    assert p["dinheiro"]["protocolado"]["faixas"]["ate_30"]["valor_centavos"] is None
+    assert diretoria.a_receber_por_obra(c, na_cota=True) is None
+    f = fechamento.fechamento(c)
+    assert f["total_a_receber_liberado"] is False and f["em_aberto"] == []
+    assert all(t["em_aberto_centavos"] is None and t["recebido_centavos"] is None for t in f["por_ano"].values())
     ids["liberar"]()
-    p = diretoria.painel(c, HOJE)
-    assert p["dinheiro"]["protocolado"]["faixas"]["ate_30"]["valor_centavos"] == 700_000
+    assert diretoria.a_receber_por_obra(c, na_cota=True)[ids["propria"]] == 1_000_000
+    f = fechamento.fechamento(c)
+    # as protocoladas 14 (7 mil) e 15 (3 mil) nao tem nota ligada: entram pelo valor da medicao
+    assert sum(t["em_aberto_centavos"] for t in f["por_ano"].values()) == 1_000_000
+    assert {e["tipo_aberto"] for e in f["em_aberto"]} == {"sem_nota"}
 
 
-def test_mes_e_ano_contra_previsto_e_ano_anterior(cenario):
+def test_medido_do_ano_no_resumo_na_cota(cenario):
+    """O "Medido em 2026" do Resumo da lista de Obras: competencias de 01 a 09/2026 fora de FORA, na cota. Propria:
+    8 recebidas de 1 mil (01 a 08), espelho de 10 mil, protocoladas de 7 mil e 3 mil; consorcio a 50%: espelho de 10
+    mil, execucao de 4 mi e reajuste de 100 mil."""
     c, _ = cenario
-    m = diretoria.painel(c, HOJE)["mes_ano"]
-    assert (m["medido_mes_centavos"], m["previsto_mes_centavos"]) == (1_500_000, 2_000_000)
-    assert m["mesmo_mes_ano_anterior_centavos"] == 800_000
-    assert len(m["serie"]) == 12 and m["serie"][-1]["competencia"] == "2026-09"
+    assert diretoria.painel(c, HOJE)["medido_ano"] == {
+        "ano": "2026", "valor_centavos": 800_000 + 1_000_000 + 700_000 + 300_000 + 500_000 + 200_000_000 + 5_000_000}
 
 
-def test_proximos_meses_so_com_o_faturamento_previsto(cenario):
-    c, ids = cenario                   # issue #255: o recebimento previsto (mediana do orgao) saiu
-    ids["liberar"]()
-    proximos = diretoria.painel(c, HOJE)["proximos"]
-    assert [x["competencia"] for x in proximos] == ["2026-09", "2026-10", "2026-11", "2026-12", "2027-01", "2027-02"]
-    assert proximos[0] == {"competencia": "2026-09", "faturamento_previsto_centavos": 2_000_000}
-    assert all(set(x) == {"competencia", "faturamento_previsto_centavos"} for x in proximos)
-
-
-def test_carteira_saldo_ritmo_e_termino(cenario):
+def test_carteira_saldo_a_executar_na_cota(cenario):
     c, ids = cenario
     k = diretoria.painel(c, HOJE)["carteira"]
     # proprio: 1.000.000,00 - 39.000,00 medidos; consorcio: 50% de (12.000.000,00 - 4.010.000,00). #262 (gate Sol S2):
     # #561: o espelho gerado (10 mil, propria) e o enviado (10 mil, consorcio) medem, como em `paineis.saldo`
     assert k["saldo_centavos"] == 96_100_000 + 399_500_000
-    assert "terminando" not in k
-    assert k["ritmo_mensal_centavos"] == 33_833_333             # 203.000.000 / 6, meio para cima
+    assert set(k) == {"saldo_centavos", "por_orgao"}        # #748: ritmo e meses de producao sairam (sem tela)
 
 
 def test_carteira_mede_so_execucao_nos_estados_que_medem(cenario):
-    """#262 (gate Sol S2): saldo, medido e ritmo da carteira contam o que `paineis.saldo` conta: execucao a partir do
-    envio da planilha/carta (#561). Projeto e planilha gerada (ainda nao enviada) nao reduzem o saldo nem o ritmo."""
+    """#262 (gate Sol S2): saldo e medido da carteira contam o que `paineis.saldo` conta: execucao a partir do
+    envio da planilha/carta (#561). Projeto e planilha gerada (ainda nao enviada) nao reduzem o saldo."""
     c, ids = cenario
     antes = diretoria.painel(c, HOJE)["carteira"]
     c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
@@ -185,7 +177,6 @@ def test_carteira_mede_so_execucao_nos_estados_que_medem(cenario):
     c.commit()
     depois = diretoria.painel(c, HOJE)["carteira"]
     assert depois["saldo_centavos"] == antes["saldo_centavos"]
-    assert depois["ritmo_mensal_centavos"] == antes["ritmo_mensal_centavos"]
     assert ({o["orgao"]: o["medido_centavos"] for o in depois["por_orgao"]}
             == {o["orgao"]: o["medido_centavos"] for o in antes["por_orgao"]})
     # e a execucao protocolada conta: 1,01 (centavo impar) a menos no saldo da propria
@@ -207,59 +198,15 @@ def test_carteira_saldo_exclui_o_aditivo_de_reajuste(cenario):
     assert por["MTPAR"]["vigente_centavos"] == 600_000_000      # 50% de 12.000.000,00, sem o reajuste
 
 
-def test_faturado_no_mes_e_a_regra_do_qdop_fatiada_pelo_mes_da_nota(cenario):
-    c, ids = cenario
-
-    def nota_em(contrato, numero, data, tipo="execucao"):
-        c.execute("UPDATE medicoes SET nota_emitida_em=? WHERE contrato_id=? AND numero=? AND tipo=?", (data, contrato, numero, tipo))
-    nota_em(ids["propria"], 14, "2026-09-05")        # protocolada, 7.000,00: entra
-    nota_em(ids["propria"], 1, "2026-09-20")         # recebida, 8.000,00: entra
-    nota_em(ids["propria"], 15, "2026-06-15")        # faturada em junho: fora de setembro
-    nota_em(ids["propria"], 13, "2026-09-12")        # espelho gerado, sem nota de fato: nao e' faturado
-    nota_em(ids["consorcio"], 2, "2026-09-10")       # 4.000.000,00 a 50%: 2.000.000,00 na cota
-    nota_em(ids["consorcio"], 2, "2026-09-10", "reajuste")   # reajuste nao entra (e' outra coluna do QDOP)
-    c.commit()
-    m = diretoria.painel(c, HOJE)["mes_ano"]
-    assert m["faturado_mes_centavos"] == 700_000 + 800_000 + 200_000_000
-    assert m["notas_faturadas_mes"] == 3
-    # medicao com nota registrada, sem nota no RM (nenhuma linha em notas_fiscais), entra do mesmo jeito
-    assert c.execute("SELECT COUNT(*) FROM notas_fiscais").fetchone()[0] == 0
-
-
-def test_medicao_faturada_sem_data_da_nota_nao_entra_em_mes_nenhum(cenario):
-    c, ids = cenario
-    c.execute("UPDATE medicoes SET nota_emitida_em='2026-09-05' WHERE contrato_id=? AND numero=14", (ids["propria"],))
-    c.commit()
-    assert diretoria.painel(c, HOJE)["mes_ano"]["faturado_mes_centavos"] == 700_000
-    c.execute("UPDATE medicoes SET nota_emitida_em=NULL WHERE contrato_id=? AND numero=14", (ids["propria"],))   # protocolada, sem data da nota
-    c.commit()
-    assert diretoria.painel(c, HOJE)["mes_ano"]["faturado_mes_centavos"] == 0
-    # mas ela segue no "Faturado" acumulado do QDOP
-    assert any(l["faturados"] >= 700_000 for l in qdop.linhas(c, HOJE) if l["contrato_id"] == ids["propria"])
-
-
-def test_faturado_no_mes_bate_com_a_coluna_faturado_do_qdop(cenario):
-    c, ids = cenario
-    c.execute("UPDATE medicoes SET nota_emitida_em='2026-09-15'")      # todas as medicoes com nota no mesmo mes
-    c.commit()
-    total_qdop = sum(l["faturados"] for l in qdop.linhas(c, HOJE))
-    assert total_qdop > 0
-    assert diretoria.painel(c, HOJE)["mes_ano"]["faturado_mes_centavos"] == total_qdop
-    # em outro mes, nada
-    c.execute("UPDATE medicoes SET nota_emitida_em='2026-08-15'")
-    c.commit()
-    assert diretoria.painel(c, HOJE)["mes_ano"]["faturado_mes_centavos"] == 0
-
-
-def test_carteira_por_orgao_traz_vigente_medido_e_obras_para_o_cartao(cenario):
+def test_carteira_por_orgao_traz_vigente_e_medido_para_o_cartao(cenario):
     c, ids = cenario
     por = {o["orgao"]: o for o in diretoria.painel(c, HOJE)["carteira"]["por_orgao"]}
     # 06/11/2026: o cartao e' do contratante ("SINFRA" junta as superintendencias), nao de cada orgao do cadastro
-    assert (por["SINFRA"]["vigente_centavos"], por["SINFRA"]["medido_centavos"], por["SINFRA"]["obras"]) == (100_000_000, 3_900_000, 1)
+    assert (por["SINFRA"]["vigente_centavos"], por["SINFRA"]["medido_centavos"]) == (100_000_000, 3_900_000)
     assert (por["MTPAR"]["vigente_centavos"], por["MTPAR"]["medido_centavos"]) == (600_000_000, 200_500_000)
 
 
-def test_protocolada_ha_200_dias_nao_gera_aviso_e_fica_em_mais_de_60(cenario):
+def test_protocolada_ha_200_dias_nao_gera_aviso(cenario):
     c, ids = cenario                   # issue #255: o motor de atraso de pagamento por orgao saiu
     c.execute("UPDATE medicao_protocolos SET data='2026-03-08' WHERE medicao_id=(SELECT id FROM medicoes "
               "WHERE contrato_id=? AND numero=15)", (ids["propria"],))          # 200 dias antes de 24/09
@@ -269,9 +216,7 @@ def test_protocolada_ha_200_dias_nao_gera_aviso_e_fica_em_mais_de_60(cenario):
     assert not [a for a in p["avisos"] if a["tipo"] == "pagamento_atrasado"]
     assert not [a for a in avisos.listar(c, HOJE, publico="todos") if a["tipo"] == "pagamento_atrasado"]
     assert not [m for o in p["obras"] for m in o["motivos"] if m["tipo"] == "pagamento_atrasado"]
-    d = p["dinheiro"]["protocolado"]
-    assert (d["faixas"]["mais_60"]["quantidade"], d["faixas"]["mais_60"]["valor_centavos"]) == (1, 300_000)
-    assert d["valor_centavos"] == 1_000_000 and d["por_orgao"][0]["maior_dias"] == 200
+    assert _receber(c) == 1_000_000
 
 
 def test_nota_em_aberto_no_rm_entra_no_a_receber_sem_contar_duas_vezes(cenario):
@@ -288,12 +233,8 @@ def test_nota_em_aberto_no_rm_entra_no_a_receber_sem_contar_duas_vezes(cenario):
     nota(901, "2026-09-12", 700_000, 14)     # medicao 14 protocolada: ja' conta pela medicao
     c.commit()
     ids["liberar"]()
-    d = diretoria.painel(c, HOJE)["dinheiro"]["protocolado"]
-    assert d["valor_centavos"] == 700_000 + 300_000 + 2_500_000
-    assert d["faixas"]["mais_60"]["valor_centavos"] == 300_000 + 2_500_000
-    # A14: das 3 cobrancas da SINFRA, 1 e' nota em aberto no RM
-    o = d["por_orgao"][0]
-    assert (d["notas_rm"], o["quantidade"], o["notas_rm"], o["obras"][0]["notas_rm"]) == (1, 3, 1, 1)
+    assert _receber(c) == 700_000 + 300_000 + 2_500_000
+    assert _notas_rm(c) == [("900", 2_500_000)]       # A14: das 3 cobrancas, 1 e' nota em aberto no RM
 
 
 def test_recebimento_manual_tira_a_nota_do_a_receber_e_o_corte_nao(cenario):
@@ -319,10 +260,8 @@ def test_recebimento_manual_tira_a_nota_do_a_receber_e_o_corte_nao(cenario):
     # o corte se reconhece pelo comeco do motivo, mesmo que o resto do texto da epoca seja outro
     medicoes.mudar_estado(c, uid, cortada, "recebida", "corte de 22/09/2026: faturado conta como pago", None)
     ids["liberar"]()
-    d = diretoria.painel(c, HOJE)["dinheiro"]["protocolado"]
-    assert d["valor_centavos"] == 300_001                  # so' a nota da medicao fechada pelo corte
-    assert d["notas_rm"] == 1
-    assert d["faixas"]["mais_60"]["valor_centavos"] == 300_001
+    assert _receber(c) == 300_001                          # so' a nota da medicao fechada pelo corte
+    assert _notas_rm(c) == [("911", 300_001)]
     assert diretoria.da_obra(c, ids["propria"])["a_receber_centavos"] == 300_001
 
 
@@ -352,34 +291,10 @@ def test_nota_partida_com_medicao_do_corte_fica_inteira_e_baixa_parcial_a_mao_sa
     medicoes.mudar_estado(c, uid, mid(15), "recebida", "corte de 22/09/2026: faturado conta como pago", None,
                           origem="corte")
     ids["liberar"]()
-    d = diretoria.painel(c, HOJE)["dinheiro"]["protocolado"]
-    assert (d["valor_centavos"], d["notas_rm"]) == (1_000_001, 1)
+    assert (_receber(c), _notas_rm(c)) == (1_000_001, [("920", 1_000_001)])
 
 
-def test_reajustes_esperando_apostilamento_por_obra(cenario, monkeypatch):
-    c, ids = cenario                   # A13: um item por ciclo, o mais antigo primeiro
-    def ciclo(situacao, base, dias):
-        return {"situacao": situacao, "data_base_mes": base, "dias": dias, "aniversario": f"{base}-01",
-                "pleito": {"enviado_em": "2026-05-01T10:00:00"}, "apostilamento": None}
-    ciclos = {ids["propria"]: [ciclo("apostilamento_pendente", "2025-01", 40)],
-              ids["consorcio"]: [ciclo("apostilamento_pendente", "2024-01", 120), ciclo("apostilado", "2023-01", None)]}
-    monkeypatch.setattr(diretoria.reajuste, "ciclos", lambda conn, cid, hoje=None: ciclos.get(cid, []))
-    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
-    assert (r["quantidade"], r["maior_dias"]) == (2, 120)
-    assert [(x["obra"], x["data_base_mes"], x["dias"]) for x in r["itens"]] == [("Consórcio", "2024-01", 120),
-                                                                               ("Própria", "2025-01", 40)]
-
-
-def test_ciclo_a_reemitir_continua_esperando_apostilamento(cenario, monkeypatch):
-    # issue #273: o cronograma a reemitir nao tira o ciclo do bloco "reajustes esperando apostilamento"
-    c, ids = cenario
-    ciclos = {ids["propria"]: [{"situacao": "reemitir", "data_base_mes": "2025-01", "dias": 40,
-                                "aniversario": "2025-01-01", "pleito": {"enviado_em": "2026-05-01T10:00:00"},
-                                "apostilamento": None}]}
-    monkeypatch.setattr(diretoria.reajuste, "ciclos", lambda conn, cid, hoje=None: ciclos.get(cid, []))
-    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
-    assert (r["quantidade"], r["maior_dias"]) == (1, 40)
-
+# --- issue #279 (spec 2026-10-20 §2.2): o reajuste ja' medido sem apostilamento, por competencia e na cota ---
 
 # --- issue #279 (spec 2026-10-20 §2.2): o reajuste ja' medido sem apostilamento, por competencia e na cota ---
 
@@ -425,7 +340,7 @@ def test_reajustes_esperando_apostilamento_somam_o_medido_por_competencia_na_cot
     # seriam 50.001 + 50.001)
     _reajuste(c, k, 31, "2026-03", "planilha_enviada", pedido=100_001)
     _reajuste(c, k, 32, "2026-04", "boletim_recebido", pedido=100_001, aprovado=100_001)
-    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    r = diretoria.painel(c, HOJE)["reajustes_apostilamento"]
     assert [(o["contrato_id"], o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [
         (p, "Própria", 3, 100_001 + 50_000 + 199_999 + 300_003), (k, "Consórcio", 2, 100_001)]
     assert (r["competencias"], r["valor_centavos"]) == (5, 650_003 + 100_001)
@@ -442,7 +357,7 @@ def test_obra_com_tudo_apostilado_nao_aparece_nos_reajustes_esperando_apostilame
                               "periodo": {"de": "2026-01", "ate": "2026-12"}})
     _data_base(c, k, "2024-01")
     _reajuste(c, k, 31, "2026-03", "planilha_enviada", pedido=100_001)
-    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    r = diretoria.painel(c, HOJE)["reajustes_apostilamento"]
     assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Consórcio", 1, 50_001)]
     assert (r["competencias"], r["valor_centavos"]) == (1, 50_001)
 
@@ -456,7 +371,7 @@ def test_termo_so_com_periodo_parcial_deixa_o_mes_de_fora_esperando_apostilament
     _reajuste(c, p, 31, "2026-02", "nota_emitida", pedido=100_001, aprovado=100_001)
     _reajuste(c, p, 32, "2026-06", "nota_emitida", pedido=200_003, aprovado=200_003)
     _apostilar(c, p, "ap-1", {"data_base": "2025-01", "ciclo": 2026, "periodo": {"de": "2026-01", "ate": "2026-03"}})
-    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    r = diretoria.painel(c, HOJE)["reajustes_apostilamento"]
     assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Própria", 1, 200_003)]
 
 
@@ -476,7 +391,7 @@ def test_dois_termos_parciais_no_mesmo_ciclo_cobrem_cada_um_os_seus_meses(cenari
     _reajuste(c, p, 33, "2026-06", "nota_emitida", pedido=200_003, aprovado=200_003)
     _apostilar(c, p, "ap-1", {"data_base": "2025-01", "ciclo": 2026, "periodo": {"de": "2026-01", "ate": "2026-03"}})
     _apostilar(c, p, "ap-2", {"data_base": "2025-01", "ciclo": 2026, **segundo}, previsoes)
-    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    r = diretoria.painel(c, HOJE)["reajustes_apostilamento"]
     assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Própria", 1, 200_003)]
 
 
@@ -491,10 +406,10 @@ def test_reajustes_esperando_apostilamento_contam_obra_encerrada_e_nao_a_rescind
     c.execute("UPDATE contratos SET estado='encerrado' WHERE id=?", (p,))
     c.execute("UPDATE contratos SET estado='rescindido' WHERE id=?", (k,))
     c.commit()
-    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    r = diretoria.painel(c, HOJE)["reajustes_apostilamento"]
     assert [o["obra"] for o in r["obras"]] == ["Própria"]
     c.execute("UPDATE contratos SET estado='suspenso' WHERE id=?", (k,)); c.commit()
-    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    r = diretoria.painel(c, HOJE)["reajustes_apostilamento"]
     assert sorted(o["obra"] for o in r["obras"]) == ["Consórcio", "Própria"]
 
 
@@ -515,7 +430,7 @@ def test_termo_que_fecha_o_ciclo_sem_dizer_os_meses_tira_a_obra_do_bloco(cenario
     c.commit()
     assert [(x["ciclo"], x["situacao"]) for x in reajuste.ciclos(c, p, HOJE)] == [(2026, "apostilado")]
     assert [(x["ciclo"], x["situacao"]) for x in reajuste.ciclos(c, k, HOJE)] == [(2026, "apostilado")]
-    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    r = diretoria.painel(c, HOJE)["reajustes_apostilamento"]
     assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Consórcio", 1, 50_001)]
 
 
@@ -533,11 +448,11 @@ def test_medicao_sem_data_base_em_contrato_de_duas_bases_so_sai_com_as_duas_apos
     c.execute("INSERT INTO reajuste_previsoes (contrato_id, data_base_mes, ciclo, competencia, valor_previsto_centavos, "
               "origem, criado_em) VALUES (?, '2025-03', 2026, '2026-04', 100000, 'manual', '2026-08-01 10:00:00')", (p,))
     c.commit()
-    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    r = diretoria.painel(c, HOJE)["reajustes_apostilamento"]
     assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Própria", 1, 100_000)]
     _apostilar(c, p, "ap-b", {"data_base": "2025-03", "ciclo": 2026,
                               "competencias": [{"competencia": "2026-04", "valor": "1.000,00"}]}, [("2026-04", 100_000)])
-    assert diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]["obras"] == []
+    assert diretoria.painel(c, HOJE)["reajustes_apostilamento"]["obras"] == []
 
 
 def test_contrato_sem_data_base_tem_o_reajuste_medido_esperando_apostilamento(cenario):
@@ -547,7 +462,7 @@ def test_contrato_sem_data_base_tem_o_reajuste_medido_esperando_apostilamento(ce
     k = ids["consorcio"]
     _reajuste(c, k, 31, "2026-03", "planilha_enviada", pedido=100_001)
     _reajuste(c, k, 32, "2026-04", "boletim_recebido", pedido=200_000, aprovado=200_001)
-    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    r = diretoria.painel(c, HOJE)["reajustes_apostilamento"]
     assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Consórcio", 2, 150_001)]
 
 
@@ -558,7 +473,7 @@ def test_complemento_ainda_nao_recebido_espera_mesmo_com_a_principal_recebida(ce
     _data_base(c, p, "2025-01")
     _reajuste(c, p, 31, "2026-03", "recebida", pedido=100_000, aprovado=100_000)
     _reajuste(c, p, 32, "2026-03", "planilha_enviada", pedido=50_001)
-    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    r = diretoria.painel(c, HOJE)["reajustes_apostilamento"]
     assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Própria", 1, 50_001)]
 
 
@@ -573,70 +488,22 @@ def test_medicao_sem_base_em_mes_sem_reajuste_em_nenhuma_data_base_espera(cenari
     _reajuste(c, p, 31, "2025-06", "planilha_enviada", pedido=100_001)
     [grupo] = reajuste.competencias_por_ciclo(c, p)
     assert (grupo["data_base_mes"], grupo["ciclo"], grupo["competencias"][0]["data_base_incerta"]) == (None, None, True)
-    r = diretoria.painel(c, HOJE)["dinheiro"]["reajustes_apostilamento"]
+    r = diretoria.painel(c, HOJE)["reajustes_apostilamento"]
     assert [(o["obra"], o["competencias"], o["valor_centavos"]) for o in r["obras"]] == [("Própria", 1, 100_001)]
 
 
-def test_a_receber_total_por_obra_e_lista_na_cota(cenario):
+def test_a_receber_por_obra_na_cota_com_centavo_impar(cenario):
+    """Lista de Obras (#645): o a receber de cada obra na cota, cobranca a cobranca; escondido ate' liberar."""
     c, ids = cenario
     c.execute("UPDATE medicoes SET valor_protocolado_centavos=800001 WHERE contrato_id=? AND numero=14", (ids["propria"],))
     c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
               "VALUES (?, 3, 'execucao', '2026-08', 'protocolada', 1000001)", (ids["consorcio"],))
-    mid = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=3", (ids["consorcio"],)).lastrowid
-    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) VALUES (?, '2026-09-01', 'manual')", (mid,))
     c.commit()
-    r = diretoria.a_receber(c, HOJE)
-    assert r["total_a_receber_liberado"] is False and r["total"] == {"quantidade": 3, "obras": 2, "valor_centavos": None}
-    assert all(o["valor_centavos"] is None for o in r["por_obra"]) and all(i["valor_centavos"] is None for i in r["itens"])
-    assert all(m["previsto_centavos"] is None for m in r["meses"])
+    assert diretoria.a_receber_por_obra(c, na_cota=True) is None
     ids["liberar"]()
-    r = diretoria.a_receber(c, HOJE)
     # centavo impar: 1.000.001 x 50% = 500.001 (arredondamento unico em `contratos.cota`); propria na cota cheia
-    assert r["total"] == {"quantidade": 3, "obras": 2, "valor_centavos": 800_001 + 300_000 + 500_001}
-    assert [(o["obra"], o["quantidade"], o["valor_centavos"]) for o in r["por_obra"]] == [
-        ("Própria", 2, 1_100_001), ("Consórcio", 1, 500_001)]
-    assert [(i["obra"], i["numero"], i["protocolada_em"], i["valor_centavos"]) for i in r["itens"]] == [
-        ("Própria", 15, "2026-07-01", 300_000), ("Consórcio", 3, "2026-09-01", 500_001), ("Própria", 14, "2026-09-10", 800_001)]
-    assert sum(i["valor_centavos"] for i in r["itens"]) == sum(o["valor_centavos"] for o in r["por_obra"])
-    # por contratante: o mesmo total, agrupado pelo orgao do contrato, do maior para o menor
-    assert sum(o["valor_centavos"] for o in r["por_orgao"]) == r["total"]["valor_centavos"]
-    assert sum(o["quantidade"] for o in r["por_orgao"]) == 3
-    assert [o["valor_centavos"] for o in r["por_orgao"]] == sorted((o["valor_centavos"] for o in r["por_orgao"]), reverse=True)
-    assert {i["orgao_id"] for i in r["itens"]} == {o["orgao_id"] for o in r["por_orgao"]}
-    assert {o["orgao"] for o in r["por_orgao"]} == {"SINFRA", "MTPAR"}
-    # o dinheiro antes do protocolo e' o do painel da diretoria (medido sem nota, nota sem protocolo)
-    d = diretoria.painel(c, HOJE)["dinheiro"]
-    assert r["antes_do_protocolo"] == {"medido_esperando_nota": d["medido_esperando_nota"],
-                                       "nota_esperando_protocolo": d["nota_esperando_protocolo"]}
-
-
-def test_a_receber_previsto_pelo_vencimento_e_recebido_pelo_mes_do_recebimento(cenario):
-    c, ids = cenario
-    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, recebida_em) "
-              "VALUES (?, 20, 'execucao', '2026-07', 'recebida', 250001, '2026-09-15')", (ids["consorcio"],))
-    c.commit()
-    ids["liberar"]()
-    r = diretoria.a_receber(c, HOJE)
-    assert [m["competencia"] for m in r["meses"]] == ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09",
-                                                      "2026-10", "2026-11", "2026-12"]
-    por = {m["competencia"]: m for m in r["meses"]}
-    # julho: a 15 (protocolo 01/07 + 10 dias da SINFRA, o terceiro quartil dos doze recebimentos). A 2 do consorcio
-    # nao entra em mes nenhum: o MTPAR tem dois recebimentos, fica sem prazo, e o padrao de 30 dias saiu (issue #711)
-    # abril a junho: duas recebidas da SINFRA por mes (protocolo + 10 dias); nenhum mes leva os 205 milhoes do consorcio
-    assert {m["competencia"]: m["previsto_centavos"] for m in r["meses"]} == {
-        "2026-04": 200_000, "2026-05": 200_000, "2026-06": 200_000, "2026-07": 300_000, "2026-08": 0,
-        "2026-09": 700_000, "2026-10": 0, "2026-11": 0, "2026-12": 0}
-    assert por["2026-09"]["previsto_centavos"] == 700_000                       # a 14: protocolo 10/09 + 10 dias
-    assert (r["mes"]["competencia"], r["mes"]["atual"], r["mes"]["previsto_centavos"]) == ("2026-09", True, 700_000)
-    assert r["mes"]["recebido_centavos"] == 125_001                              # 250.001 x 50%, arredondado uma vez
-    assert por["2026-10"]["futuro"] is True and por["2026-10"]["recebido_centavos"] is None
-
-
-def test_a_receber_recebido_aparece_antes_de_liberar_e_previsto_nao(cenario):
-    c, _ = cenario
-    r = diretoria.a_receber(c, HOJE)
-    assert r["total_a_receber_liberado"] is False
-    assert r["meses"][2]["recebido_centavos"] is not None and r["meses"][2]["previsto_centavos"] is None
+    assert diretoria.a_receber_por_obra(c, na_cota=True) == {ids["propria"]: 800_001 + 300_000, ids["consorcio"]: 500_001}
+    assert diretoria.a_receber_por_obra(c)[ids["consorcio"]] == 1_000_001       # cheio, na pagina da obra
 
 
 def test_a_receber_nota_do_rm_entra_na_lista_e_no_total(cenario):
@@ -650,17 +517,14 @@ def test_a_receber_nota_do_rm_entra_na_lista_e_no_total(cenario):
               "VALUES (?, ?, 2500000, 'detectado', 't')", (mid, nid))
     c.commit()
     ids["liberar"]()
-    r = diretoria.a_receber(c, HOJE)
-    nota = [i for i in r["itens"] if i["tipo"] == "nota"]
-    assert len(nota) == 1 and nota[0]["medicao_id"] is None and nota[0]["nota_numero"] == "900"
-    assert nota[0]["valor_centavos"] == 2_500_000 and r["total"]["valor_centavos"] == 700_000 + 300_000 + 2_500_000
+    assert _notas_rm(c) == [("900", 2_500_000)]
+    assert _receber(c) == 700_000 + 300_000 + 2_500_000
 
 
-def test_titulo_baixado_sem_valor_fica_fora_do_recebido_e_vira_baixado_sem_caixa(cenario):
+def test_titulo_baixado_sem_valor_fica_fora_do_recebido_e_do_a_receber(cenario):
     """Issue #583 (decisao do Leo de 08/11/2026, opcao 2): o titulo do RM com baixa total (status 1) e valor baixado
-    zero fica fora do recebido e do a receber, e o A receber da Diretoria mostra o total dele no ano, pelo valor
-    original, na cota, numa linha propria ("baixado sem caixa"). Titulo com baixa de valor, aberto, cancelado ou
-    baixado em outro ano nao entra; a medicao ligada continua sem fechar (regra da #574)."""
+    zero fica fora do recebido e do a receber (a linha "baixado sem caixa" saiu com a tela A receber, #748). A
+    medicao ligada continua sem fechar (regra da #574)."""
     c, ids = cenario
     c.execute("UPDATE contratos SET centro_custo_rm='9.001.001' WHERE id=?", (ids["propria"],))
     def nota(idmov, emissao, valor, coligada=1, medicao=None, situacao="ativa"):
@@ -692,17 +556,9 @@ def test_titulo_baixado_sem_valor_fica_fora_do_recebido_e_vira_baixado_sem_caixa
     ids["liberar"]()
     faturado, recebido = diretoria.rm_por_mes(c)
     assert {m: v for m, v in recebido.items() if v} == {"2026-08": 300_000}
-    sem_caixa = diretoria.baixado_sem_caixa_por_mes(c)
-    assert sem_caixa == {"2026-08": 700_001, "2025-08": 500_000, "2026-09": 166_667}
-    antes = diretoria.a_receber(c, HOJE)
-    assert antes["recebido_ano_centavos"] == 300_000
-    assert antes["baixado_sem_caixa_ano_centavos"] == 700_001 + 166_667
-    notas_abertas = [i["valor_centavos"] for i in antes["itens"] if i["tipo"] == "nota"]
-    assert notas_abertas == [40_000]
-    # a conta fecha: faturado das notas do ano = recebido + a receber + baixado sem caixa (os titulos somam a nota;
-    # o titulo cancelado da nota 943, 40.000, e' a unica diferenca, e fica fora de tudo)
-    assert faturado["2026-07"] == 1_000_001 + 80_000 + 166_667 == (
-        antes["recebido_ano_centavos"] + sum(notas_abertas) + antes["baixado_sem_caixa_ano_centavos"] + 40_000)
+    assert _notas_rm(c) == [("943", 40_000)]
+    assert faturado["2026-07"] == 1_000_001 + 80_000 + 166_667
+    antes = _receber(c)
     # medicao em aberto ligada a nota com titulo sem caixa: segue no a receber pela medicao, nao fecha (#574) e o
     # titulo nao entra de novo no baixado sem caixa (nao conta duas vezes)
     m15 = c.execute("SELECT id FROM medicoes WHERE contrato_id=? AND numero=15", (ids["propria"],)).fetchone()[0]
@@ -711,10 +567,7 @@ def test_titulo_baixado_sem_valor_fica_fora_do_recebido_e_vira_baixado_sem_caixa
     c.commit()
     sincronizacao_rm._recebimentos(c)
     assert c.execute("SELECT estado FROM medicoes WHERE id=?", (m15,)).fetchone()[0] == "protocolada"
-    depois = diretoria.a_receber(c, HOJE)
-    assert depois["total"]["valor_centavos"] == antes["total"]["valor_centavos"]
-    assert [i["valor_centavos"] for i in depois["itens"] if i["medicao_id"] == m15] == [300_000]
-    assert depois["baixado_sem_caixa_ano_centavos"] == antes["baixado_sem_caixa_ano_centavos"]
+    assert _receber(c) == antes and _notas_rm(c) == [("943", 40_000)]
 
 
 @pytest.mark.parametrize("titulos, falta", [
@@ -740,10 +593,8 @@ def test_a_receber_conta_a_falta_da_nota_titulo_a_titulo(cenario, titulos, falta
               "VALUES (?, ?, 55000, 'detectado', 't')", (mid, nid))
     c.commit()
     ids["liberar"]()
-    r = diretoria.a_receber(c, HOJE)
-    nota = [i["valor_centavos"] for i in r["itens"] if i["tipo"] == "nota"]
-    assert nota == ([] if falta is None else [falta])
-    assert r["total"]["valor_centavos"] == 700_000 + 300_000 + (falta or 0)
+    assert [v for _, v in _notas_rm(c)] == ([] if falta is None else [falta])
+    assert _receber(c) == 700_000 + 300_000 + (falta or 0)
 
 
 def test_so_nota_de_cobranca_ao_orgao_entra_no_a_receber_e_no_faturado(cenario):
@@ -763,40 +614,15 @@ def test_so_nota_de_cobranca_ao_orgao_entra_no_a_receber_e_no_faturado(cenario):
     nota(9702, "2.2.10", 250_000)
     c.commit()
     ids["liberar"]()
-    r = diretoria.a_receber(c, HOJE)
-    assert [i for i in r["itens"] if i["tipo"] == "nota"] == []
-    assert r["total"]["valor_centavos"] == 700_000 + 300_000
+    assert _notas_rm(c) == []
+    assert _receber(c) == 700_000 + 300_000
     assert diretoria.rm_por_mes(c)[0] == {} and diretoria.complemento_rm(c) == {}
     nota(9703, "2.2.01", 1_000_000)
     c.commit()
-    r = diretoria.a_receber(c, HOJE)
-    assert [i["valor_centavos"] for i in r["itens"] if i["tipo"] == "nota"] == [1_000_000]
-    assert r["total"]["valor_centavos"] == 700_000 + 300_000 + 1_000_000
+    assert [v for _, v in _notas_rm(c)] == [1_000_000]
+    assert _receber(c) == 700_000 + 300_000 + 1_000_000
     assert diretoria.rm_por_mes(c)[0] == {"2026-08": 1_000_000}
     assert diretoria.complemento_rm(c) == {ids["propria"]: {"2026-07": 900_000}}
-
-
-def test_a_receber_recebida_sem_data_do_corte_fica_fora_do_previsto(cenario):
-    c, ids = cenario        # medicao do legado protocolada em 05/09, fechada pelo corte (recebida, sem recebida_em)
-    mid = c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
-                    "VALUES (?, 30, 'execucao', '2026-07', 'recebida', 5000000)", (ids["propria"],)).lastrowid
-    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) VALUES (?, '2026-09-05', 'manual')", (mid,))
-    c.commit(); ids["liberar"]()
-    r = diretoria.a_receber(c, HOJE)
-    assert r["mes"]["previsto_centavos"] == 700_000            # so' a 14; os 50.000,00 sem data nao entram
-
-
-def test_a_receber_previsao_futura_nao_conta_medicao_ja_paga(cenario):
-    c, ids = cenario
-    ids["liberar"]()
-    antes = {m["competencia"]: m["previsto_centavos"] for m in diretoria.a_receber(c, HOJE)["meses"]}
-    mid = c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, recebida_em) "
-                    "VALUES (?, 31, 'execucao', '2026-08', 'recebida', 9000000, ?)", (ids["propria"], HOJE.isoformat())).lastrowid
-    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) VALUES (?, ?, 'manual')", (mid, HOJE.isoformat()))
-    c.commit()                       # protocolada e paga em 24/09; SINFRA (10 dias) venceria em 04/10
-    por = {m["competencia"]: m for m in diretoria.a_receber(c, HOJE)["meses"]}
-    assert all(por[k]["previsto_centavos"] == antes[k] for k in por if por[k]["futuro"])
-    assert por["2026-09"]["recebido_centavos"] == 9_000_000
 
 
 # --- issue #296: curva S da carteira (soma das obras ativas, na cota) e desvio em p.p. por obra no QDOP -----
@@ -845,29 +671,6 @@ def test_curva_da_carteira_deixa_de_fora_a_obra_que_nao_esta_ativa(cenario):
                               "medido_centavos": 100_000}
 
 
-def test_desvio_por_obra_no_qdop_pela_linha_anterior_ate_a_ultima_competencia_fechada(cenario):
-    c, ids = cenario
-    obras = {o["contrato_id"]: o for o in diretoria.painel(c, HOJE)["obras"]}
-    assert (obras[ids["consorcio"]]["desvio_pp"], obras[ids["consorcio"]]["desvio_base"]) == (None, None)  # sem cronograma
-    _repactuar_consorcio(c, ids["consorcio"])
-    obras = {o["contrato_id"]: o for o in diretoria.painel(c, HOJE)["obras"]}
-    # consorcio: medido 4 mi contra o anterior 6 mi ate 08/2026, sobre o vigente de 12 mi: -16,67 -> -16,7
-    assert (obras[ids["consorcio"]]["desvio_pp"], obras[ids["consorcio"]]["desvio_base"]) == (-16.7, "anterior")
-    # propria: sem repactuacao, pelo vigente; o previsto de 09/2026 (mes corrente) ainda nao conta;
-    # medido de execucao ate' 08/2026 = 29 mil sobre 1 mi = 2,9 (o espelho de 09/2026 e' do mes corrente)
-    assert (obras[ids["propria"]]["desvio_pp"], obras[ids["propria"]]["desvio_base"]) == (2.9, "vigente")
-    # o medido do mes corrente tambem fica fora: uma execucao protocolada de 09/2026 nao mexe no desvio de hoje
-    c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
-              "VALUES (?, 40, 'execucao', '2026-09', 'protocolada', 5000000)", (ids["propria"],))
-    c.commit()
-    assert {o["contrato_id"]: o for o in diretoria.painel(c, HOJE)["obras"]}[ids["propria"]]["desvio_pp"] == 2.9
-    # medicao nao se apaga (migracao 087): a cancelada fica fora do medido
-    c.execute("UPDATE medicoes SET estado='cancelada' WHERE contrato_id=? AND numero=40", (ids["propria"],))
-    c.commit()
-    # em outubro, 09/2026 fecha: o previsto de 20 mil e o espelho de 10 mil entram (39 - 20 mil = 1,9)
-    assert {o["contrato_id"]: o for o in diretoria.painel(c, D(2026, 10, 1))["obras"]}[ids["propria"]]["desvio_pp"] == 1.9
-
-
 def _reajuste_no_consorcio(c, ids, valor=240_000_001):
     """#262: aditivo de reajuste (SES) de 2.400.000,01 no consorcio: entra no vigente, fica fora da base de execucao."""
     c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza) "
@@ -885,18 +688,9 @@ def test_tabela_de_obras_usa_o_vigente_de_execucao_e_o_qdop_nao_muda(cenario):
     assert (o["pi"], o["va"], o["pi_va"]) == (500_000_000, 100_000_000, 600_000_000)
     assert (o["faturados"], o["reajuste_recebido"], o["saldo"]) == (200_000_000, 5_000_000, 399_500_000)
     assert (o["pct_recebido"], o["pct_a_receber"]) == (200_500_000 / 600_000_000, 399_500_000 / 600_000_000)
+    assert "desvio_pp" not in o                          # #748: o desvio nao tinha tela e saiu
     q = {x["contrato_id"]: x for x in qdop.linhas(c, HOJE)}[ids["consorcio"]]
     assert q["pi_va"] == 720_000_001                         # 50% de 14.400.000,01, meio para cima
-
-
-def test_desvio_divide_pelo_vigente_de_execucao(cenario):
-    """#262 (gate Sol S3): o desvio compara medido e previsto a precos iniciais; o denominador tambem."""
-    c, ids = cenario
-    _repactuar_consorcio(c, ids["consorcio"])
-    _reajuste_no_consorcio(c, ids)
-    obras = {o["contrato_id"]: o for o in diretoria.painel(c, HOJE)["obras"]}
-    # -2 mi sobre 12 mi (nao sobre 14,4 mi): -16,7, como sem o reajuste
-    assert obras[ids["consorcio"]]["desvio_pp"] == -16.7
 
 
 def _medir(c, contrato, numero, estado, valor, tipo="execucao", comp="2026-08"):
@@ -921,9 +715,6 @@ def test_tabela_de_obras_mede_como_a_carteira(cenario):
     tabela, carteira, obras = _saldos(c)
     assert tabela[ids["propria"]] == carteira["SINFRA"] == 93_099_999      # 1.000.000,00 - 39.000,00 - 30.000,01
     assert tabela[ids["consorcio"]] == carteira["MTPAR"] == 399_500_000
-    # os percentuais na mesma base: medido de execucao sobre o vigente de execucao
-    assert obras[ids["propria"]]["pct_recebido"] == 6_900_001 / 100_000_000
-    assert obras[ids["propria"]]["pct_a_receber"] == 93_099_999 / 100_000_000
     assert obras[ids["propria"]]["faturados"] == 2_900_000 + 50_000_000 + 3_000_001   # a coluna do QDOP fica
 
 
@@ -978,8 +769,8 @@ def test_carteira_usa_o_percentual_do_vigente_que_a_tabela_reaproveita(cenario, 
 
 
 def test_aditivo_entre_a_carteira_e_as_obras_nao_muda_a_base(cenario, monkeypatch):
-    """#262 (gate Sol, rodada 3): carteira, tabela e desvio usam o mesmo vigente do painel. Um aditivo de execucao de
-    2.400.000,00 que chega depois da carteira nao entra na tabela nem no denominador do desvio (-2 mi sobre 12 mi)."""
+    """#262 (gate Sol, rodada 3): carteira e tabela usam o mesmo vigente do painel. Um aditivo de execucao de
+    2.400.000,00 que chega depois da carteira nao entra na tabela."""
     c, ids = cenario
     _repactuar_consorcio(c, ids["consorcio"])
     original = diretoria._curva_carteira
@@ -995,7 +786,6 @@ def test_aditivo_entre_a_carteira_e_as_obras_nao_muda_a_base(cenario, monkeypatc
     por = {x["orgao"]: x for x in p["carteira"]["por_orgao"]}["MTPAR"]
     assert o["pi_va"] == por["vigente_centavos"] == 600_000_000
     assert o["saldo"] == por["saldo_centavos"] == 399_500_000
-    assert o["desvio_pp"] == -16.7                       # com o aditivo lido de novo daria -2/14,4 = -13,9
 
 
 def test_painel_le_uma_fotografia_do_banco(cenario, monkeypatch):
@@ -1017,7 +807,7 @@ def test_painel_le_uma_fotografia_do_banco(cenario, monkeypatch):
     monkeypatch.setattr(diretoria, "_curva_carteira", cadastro_no_meio)
     p = diretoria.painel(c, HOJE)
     o = {x["contrato_id"]: x for x in p["obras"]}[ids["consorcio"]]
-    assert o["va"] == o["pi_va"] - o["pi"] == 100_000_000
+    assert o["pi_va"] - o["pi"] == 100_000_000
     assert (o["direito"], o["pi"], o["pi_va"]) == (0.5, 500_000_000, 600_000_000)
     assert not c.in_transaction                        # a transacao de leitura fechou
     monkeypatch.setattr(diretoria, "_curva_carteira", original)
@@ -1043,17 +833,6 @@ def test_saldo_da_tabela_aplica_a_cota_uma_vez(cenario):
     c.commit()
     tabela, carteira, _ = _saldos(c)
     assert tabela[ids["consorcio"]] == carteira["MTPAR"] == 399_500_000
-
-
-def test_ritmo_aplica_a_cota_uma_vez_por_contrato(cenario):
-    """#262 (revisao, rodada 3): o ritmo soma o cheio da janela e aplica a cota uma vez por contrato, como o medido.
-    Doze execucoes de 1 centavo no consorcio a 50%: cota(4.010.000,12) = 2.005.000,06 (nao 2.005.000,12, que viria
-    de doze cotas de 0,5 centavo arredondadas para cima). 203.000.006 / 6 = 33.833.334,33 -> 33.833.334."""
-    c, ids = cenario
-    for i in range(12):
-        _medir(c, ids["consorcio"], 60 + i, "protocolada", 1)
-    c.commit()
-    assert diretoria.painel(c, HOJE)["carteira"]["ritmo_mensal_centavos"] == 33_833_334
 
 
 def test_faturado_e_recebido_reais_saem_do_rm_por_mes_na_cota(cenario):
@@ -1091,17 +870,8 @@ def test_faturado_e_recebido_reais_saem_do_rm_por_mes_na_cota(cenario):
     cota_cons = 500_001                                                  # 1.000.001 x 50%, arredondamento unico
     assert faturado == {"2026-08": 1_000_001 + cota_cons, "2025-08": 400_000}
     assert recebido == {"2026-09": 900_000 + cota_cons, "2025-09": 380_000}
-    # A receber: o recebido real do mes (setembro, o corrente do cenario) e o do ano
-    r = diretoria.a_receber(c, HOJE)
-    assert r["mes"]["recebido_real_centavos"] == 900_000 + cota_cons
-    assert r["recebido_ano_centavos"] == 900_000 + cota_cons
-    assert [m["recebido_real_centavos"] for m in r["meses"] if m["futuro"]] == [None, None, None]
-    # Carteira: 12 meses fechados (ate' agosto), cada um com o mesmo mes do ano anterior, e o ano ate' o ultimo fechado
-    f = diretoria.painel(c, HOJE)["faturado_rm"]
-    assert [s["competencia"] for s in f["serie"]][0] == "2025-09" and f["serie"][-1] == {
-        "competencia": "2026-08", "faturado_centavos": 1_000_001 + cota_cons, "ano_anterior_centavos": 400_000}
-    assert len(f["serie"]) == 12 and f["ate"] == "2026-08"
-    assert (f["ano_centavos"], f["ano_anterior_centavos"]) == (1_000_001 + cota_cons, 400_000)
+    # o recebido do mes do Inicio (#642) e' a mesma conta
+    assert diretoria.recebido_rm_no_mes(c, "2026-09") == {"valor_centavos": 900_000 + cota_cons, "notas": 2}
 
 
 def test_nota_do_rm_sem_medicao_lancada_entra_no_medido_da_diretoria(cenario):
@@ -1130,10 +900,7 @@ def test_nota_do_rm_sem_medicao_lancada_entra_no_medido_da_diretoria(cenario):
     assert compl == {ids["propria"]: {"2026-07": 900_001}, ids["consorcio"]: {"2026-07": 1_000_001}}
     depois = diretoria.painel(c, HOJE)
     cota = 900_001 + 500_001                              # 1.000.001 x 50% = 500.001 (arredondamento unico)
-    serie = lambda p: {s["competencia"]: s["medido_centavos"] for s in p["mes_ano"]["serie"]}
-    assert serie(depois)["2026-07"] - serie(antes)["2026-07"] == cota
-    assert serie(depois)["2026-06"] == serie(antes)["2026-06"] and serie(depois)["2026-08"] == serie(antes)["2026-08"]
-    assert depois["mes_ano"]["acumulado_ano_centavos"] - antes["mes_ano"]["acumulado_ano_centavos"] == cota
+    assert depois["medido_ano"]["valor_centavos"] - antes["medido_ano"]["valor_centavos"] == cota
     # o saldo a executar cai o mesmo tanto (no consorcio, a cota e' aplicada uma vez sobre o saldo cheio: o meio centavo
     # do 1.000.001 cai do outro lado); a curva da carteira ganha o medido de 07/2026
     assert antes["carteira"]["saldo_centavos"] - depois["carteira"]["saldo_centavos"] == 900_001 + 500_000
@@ -1180,8 +947,8 @@ def test_planilha_gerada_nao_esconde_a_nota_do_rm(cenario):
     c.commit()
     assert diretoria.complemento_rm(c) == {ids["propria"]: {"2026-07": 1_200_001}}
     # e o medido do mes nao soma a planilha gerada por cima da nota: so' a recebida de 100.000 e o complemento
-    serie = {s["competencia"]: s["medido_centavos"] for s in diretoria.painel(c, HOJE)["mes_ano"]["serie"]}
-    assert serie["2026-07"] == 100_000 + 1_200_001
+    compl = diretoria._complemento_na_cota(c, diretoria.complemento_rm(c))
+    assert diretoria._medido(diretoria._medicoes(c), "2026-07", compl) == 100_000 + 1_200_001
 
 
 def test_fora_do_medido_e_o_complemento_da_lista_unica():
@@ -1191,7 +958,7 @@ def test_fora_do_medido_e_o_complemento_da_lista_unica():
 
 
 def test_nota_desconsiderada_sai_do_faturado_e_do_a_receber_ao_centavo_e_volta(cenario):
-    """Issue #638: a nota desconsiderada pela correcao de cadastro vale como cancelada. O faturado do mes cai o valor
+    """Issue #638: a nota desconsiderada pela correcao de cadastro vale como cancelada. O faturado do RM no mes cai o valor
     dela na cota e o a receber cai o que faltava do titulo, na cota (centavo impar e consorcio de 50%); a nota que
     ficou continua contando, e `reconsiderar_nf` devolve tudo."""
     from app import contratos, correcao_medicoes, inicio
@@ -1212,13 +979,10 @@ def test_nota_desconsiderada_sai_do_faturado_e_do_a_receber_ao_centavo_e_volta(c
     ids["liberar"]()
 
     def retrato():
-        r = diretoria.a_receber(c, HOJE)
-        return (diretoria.rm_por_mes(c)[0]["2026-07"], r["total"]["valor_centavos"],
-                inicio._a_receber(c, HOJE)["valor_centavos"], diretoria._faturado_rm(c, HOJE)["ano_centavos"],
-                sorted(i["nota_numero"] for i in r["itens"] if i["tipo"] == "nota"),
-                diretoria.a_receber_por_obra(c)[ids["propria"]])
+        return (diretoria.rm_por_mes(c)[0]["2026-07"], _receber(c), inicio._a_receber(c, HOJE)["valor_centavos"],
+                sorted(n for n, _ in _notas_rm(c)), diretoria.a_receber_por_obra(c)[ids["propria"]])
     antes = retrato()
-    assert antes[4] == ["951", "952", "953"]
+    assert antes[3] == ["951", "952", "953"]
     assert (contratos.cota(333_333, 5000), contratos.cota(300_001, 5000)) == (166_667, 150_001)
     base = {"motivo": "cancelada na prefeitura e substituída", "fonte": "comprovante da prefeitura"}
     correcao_medicoes.executar(c, 1, [{"operacao": "desconsiderar_nf", "nf": 951, "coligada": 1, **base},
@@ -1227,9 +991,8 @@ def test_nota_desconsiderada_sai_do_faturado_e_do_a_receber_ao_centavo_e_volta(c
     assert depois[0] == antes[0] - 1_000_001 - 166_667
     assert depois[1] == antes[1] - 930_001 - 150_001
     assert depois[2] == antes[2] - 930_001 - 150_001
-    assert depois[3] == antes[3] - 1_000_001 - 166_667
-    assert depois[4] == ["953"]
-    assert depois[5] == antes[5] - 930_001
+    assert depois[3] == ["953"]
+    assert depois[4] == antes[4] - 930_001
     assert diretoria.complemento_rm(c).get(ids["propria"], {}).get("2026-06", 0) <= 80_000     # so' a nota que ficou
     correcao_medicoes.executar(c, 1, [{"operacao": "reconsiderar_nf", "nf": 951, "coligada": 1, "fonte": "conferência"},
                                       {"operacao": "reconsiderar_nf", "nf": 952, "coligada": 12, "fonte": "conferência"}],

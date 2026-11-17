@@ -222,3 +222,30 @@ describe("Obras: posição financeira na cota da Lotufo, por contratante", () =>
     expect(window.location.search).toBe("?c=MTPAR");
   });
 });
+
+describe("Obras: as vistas Resumo e QDOP vieram da Carteira (#748)", () => {
+  afterEach(() => { cleanup(); api.mockReset(); });
+
+  it("as três vistas são links; Resumo e QDOP pedem o painel e escondem a busca e os totais da posição", async () => {
+    const painel = { hoje: "2026-09-24", medido_ano: { ano: "2026", valor_centavos: 100_00 }, curva_carteira: [],
+      carteira: { saldo_centavos: 0, por_orgao: [] }, obras: [], avisos: [] };
+    api.mockImplementation(async (caminho: string) => {
+      if (caminho === "/api/diretoria") return painel;
+      if (caminho === "/api/contratos") return OBRAS;
+      if (caminho === "/api/entidades") return [];
+      if (caminho === "/api/inicio") return { avisos: [] };
+      throw new Error(`chamada inesperada: ${caminho}`);
+    });
+    render(<Contratos ir={() => {}} busca={{}} aba="resumo" />);
+    const vistas = screen.getByRole("navigation", { name: "Vistas da lista de Obras" });
+    expect(within(vistas).getAllByRole("link").map(a => [a.textContent, a.getAttribute("href")])).toEqual(
+      [["Posição", "/obras"], ["Resumo", "/obras/resumo"], ["QDOP", "/obras/qdop"]]);
+    expect(within(vistas).getByRole("link", { name: "Resumo" }).getAttribute("aria-current")).toBe("page");
+    expect(await screen.findByText("Medido em 2026")).toBeTruthy();
+    expect(screen.queryByLabelText("Totais")).toBeNull();
+    expect(screen.queryByRole("searchbox", { name: "Buscar obra" })).toBeNull();
+    cleanup();
+    render(<Contratos ir={() => {}} busca={{}} aba="qdop" />);
+    expect((await screen.findByRole("link", { name: /Exportar QDOP/ })).getAttribute("href")).toBe("/api/diretoria/qdop.xlsx");
+  });
+});

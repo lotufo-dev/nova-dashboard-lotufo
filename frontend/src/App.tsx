@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
 import Admin from "./Admin";
 import { api, setCsrf } from "./api";
-import AReceberPagina from "./AReceberPagina";
 import { ABAS_ADMIN } from "./administracao";
-import { ABAS_CARTEIRA } from "./carteira";
 import { BarraSuperior, Trilho } from "./Casca";
 import Documentos from "./Documentos";
 import DocumentosEmpresa from "./DocumentosEmpresa";
@@ -16,7 +14,7 @@ import MedicaoPagina from "./MedicaoPagina";
 import MedicoesPagina from "./MedicoesPagina";
 import MinhaConta from "./MinhaConta";
 import MedicaoNova from "./MedicaoNova";
-import Diretoria from "./Diretoria";
+import Fechamento from "./Fechamento";
 import { entradaDe, itemDe, tituloDaSecao, tituloDe } from "./navegacao";
 import SigaPagina from "./SigaPagina";
 import AncorasDocusign from "./AncorasDocusign";
@@ -84,9 +82,8 @@ export default function App() {
   useEffect(() => {
     // A obra e a medicao poem o proprio titulo ("MT-388 · Prazos"), quando o cabecalho delas chega.
     if (rota.tela === "obra" || rota.tela === "medicao" || rota.tela === "documentos-empresa") return;
-    // a aba da Carteira e a da Administracao entram no titulo ("Carteira · QDOP"), como a da obra
-    // ("MT-388 · Prazos")
-    const aba = rota.tela === "carteira" && rota.aba && rota.aba !== "resumo" ? ABAS_CARTEIRA.find(a => a.id === rota.aba)?.rotulo
+    // a vista de Obras e a aba da Administracao entram no titulo ("Obras · QDOP"), como a da obra ("MT-388 · Prazos")
+    const aba = rota.tela === "obras" && rota.aba && rota.aba !== "posicao" ? { resumo: "Resumo", qdop: "QDOP" }[rota.aba]
       : rota.tela === "admin" && rota.aba && rota.aba !== "saude" ? ABAS_ADMIN.find(a => a.id === rota.aba)?.rotulo : undefined;
     document.title = rota.tela === "raiz" ? tituloDe("raiz") : `${tituloDe(rota.tela)}${aba ? ` · ${aba}` : ""} · grupolotufo`;
   }, [rota]);
@@ -126,17 +123,8 @@ export default function App() {
           {rota.tela === "siga" && usuario.perfil !== "diretoria" && <SigaPagina busca={busca} podeEditar={usuario.perfil !== "diretoria"} />}
           {rota.tela === "ancoras-docusign" && usuario.perfil !== "diretoria" && <div className="pagina"><AncorasDocusign /></div>}
           {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}
-          {rota.tela === "a-receber" && (
-            <div className="pagina">
-              <AReceberPagina />
-            </div>
-          )}
-          {rota.tela === "carteira" && (
-            <div className="pagina">
-              <Diretoria ir={ir} aba={rota.aba ?? "resumo"} />
-            </div>
-          )}
-          {rota.tela === "obras" && <Contratos ir={ir} busca={busca} />}
+          {rota.tela === "fechamento" && <div className="pagina"><Fechamento ir={ir} /></div>}
+          {rota.tela === "obras" && <Contratos ir={ir} busca={busca} aba={rota.aba} />}
           {rota.tela === "obra" && (
             // `key` no id: trocar de obra REMONTA a pagina em vez de reaproveitar a
             // instancia. Sem isso, o painel aberto e os rascunhos de formulario da

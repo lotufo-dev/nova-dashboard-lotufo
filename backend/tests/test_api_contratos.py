@@ -395,7 +395,7 @@ def test_listar_traz_o_a_receber_na_cota_so_com_o_total_liberado(client_admin):
     conn = db.get_conn()
     conn.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', ?)", (json.dumps({"total_a_receber_liberado": True}),))
     conn.commit()
-    tela = {o["contrato_id"]: o["valor_centavos"] for o in diretoria.a_receber(conn)["por_obra"]}
+    tela = diretoria.a_receber_por_obra(conn, na_cota=True)
     conn.close()
     lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
     assert lista[cid]["posicao"]["a_receber_centavos"] == 147_000_16 + 49_000_00 == tela[cid]   # 147.000,1617 e 49.000,00

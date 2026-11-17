@@ -23,27 +23,37 @@ def test_painel_e_qdop_para_a_diretoria_e_401_sem_sessao(client):
     c.close()
     _login(client, "dir@l.com")
     r = client.get("/api/diretoria")
-    assert r.status_code == 200 and set(r.json()) == {"hoje", "total_a_receber_liberado", "dinheiro", "mes_ano",
-                                                      "curva_carteira", "proximos", "carteira", "obras", "obras_base", "avisos",
-                                                      "faturado_rm"}
+    # #748: so' o que o Resumo e o QDOP da lista de Obras mostram
+    assert r.status_code == 200 and set(r.json()) == {"hoje", "medido_ano", "curva_carteira", "carteira", "obras", "avisos",
+                                                      "reajustes_apostilamento"}
     x = client.get("/api/diretoria/qdop.xlsx")
     assert x.status_code == 200 and "QDOP" in x.headers["content-disposition"]
     assert openpyxl.load_workbook(io.BytesIO(x.content)).active["S1"].value == "FRM.EXEMPLO.001"
 
 
-def test_a_receber_so_leitura_e_401_sem_sessao(client):
-    assert client.get("/api/a-receber").status_code == 401
+def test_fechamento_so_leitura_e_401_sem_sessao_e_a_receber_saiu(client, monkeypatch):
+    """Issue #748: a pagina Fechamento no lugar de A receber (a rota antiga nao existe mais) e da Carteira."""
+    from app import permissoes
+    assert client.get("/api/fechamento").status_code == 401
     c = db.get_conn()
     auth.criar_usuario(c, "Dir", "dir2@l.com", "senha-forte-123", "diretoria")
     c.close()
     _login(client, "dir2@l.com")
-    r = client.get("/api/a-receber")
-    assert r.status_code == 200 and set(r.json()) == {"hoje", "total_a_receber_liberado", "total", "recebido_ano_centavos", "baixado_sem_caixa_ano_centavos", "antes_do_protocolo", "mes", "meses", "por_obra",
-                                                      "por_orgao", "itens"}
+    r = client.get("/api/fechamento")
+    assert r.status_code == 200 and set(r.json()) == {"anos", "meses", "por_ano", "acumulado", "em_aberto",
+                                                      "em_aberto_anteriores", "notas_sem_medicao", "cobertura",
+                                                      "total_a_receber_liberado"}
+    assert r.json()["anos"] == ["2025", "2026"] and r.json()["meses"] == []
+    assert client.get("/api/a-receber").status_code == 404
+    assert client.get("/api/diretoria/custo").status_code == 404
+    assert client.post("/api/fechamento").status_code == 405
+    monkeypatch.setitem(permissoes.PERFIS, "diretoria", frozenset())
+    assert client.get("/api/fechamento").status_code == 403
 
 
 def test_custo_da_obra_404_sem_cadastro_e_403_sem_ver_paineis(client, monkeypatch):
-    """Issue #491: a aba Custo da Carteira; so' obra com cadastro de custo, so' quem tem `ver_paineis`."""
+    """Issue #491 e #748: o custo da obra (coluna da aba Medicoes); so' obra com cadastro de custo, so' quem tem
+    `ver_paineis`."""
     import json
     from app import contratos, permissoes
     c = db.get_conn()
@@ -57,19 +67,18 @@ def test_custo_da_obra_404_sem_cadastro_e_403_sem_ver_paineis(client, monkeypatc
     c.execute("INSERT INTO custo_grupos (contrato_id, ordem, nome, tarefas, itens_planilha, item_chave_codigo, "
               "item_chave_unidade) VALUES (?,1,'G',?,?,'1.1','m³')", (com, json.dumps(["001"]), json.dumps(["1."])))
     c.commit(); c.close()
-    assert client.get(f"/api/diretoria/custo/{com}").status_code == 401
+    assert client.get(f"/api/contratos/{com}/custo").status_code == 401
     _login(client, "dir3@l.com")
-    assert client.get("/api/diretoria/custo").json() == [{"contrato_id": com, "obra": "IC 1"}]
-    r = client.get(f"/api/diretoria/custo/{com}")
+    r = client.get(f"/api/contratos/{com}/custo")
     assert r.status_code == 200 and set(r.json()) >= {"obra", "grupos", "linhas", "acumulado", "itens_chave", "rm"}
     # issue #492: o bloco do item-chave, em centavos por unidade (sem planilha lida: sem medicao)
     assert r.json()["itens_chave"] == [{
         "grupo": "G", "item": "1.1", "descricao": None, "unidade": "m³", "quantidade_acumulada": None,
         "medicao": None, "custo_centavos": 0, "custo_unitario_centavos": None, "preco_unitario_centavos": None,
         "diferenca_centavos": None, "situacao": "sem_medicao"}]
-    r = client.get(f"/api/diretoria/custo/{sem}")
+    r = client.get(f"/api/contratos/{sem}/custo")
     assert r.status_code == 404 and r.json()["detail"] == "Esta obra não tem cadastro de custo."
-    assert client.get("/api/diretoria/custo/9999").status_code == 404
+    assert client.get("/api/contratos/9999/custo").status_code == 404
     # outra obra com cadastro de custo no mesmo centro: 409 com as obras que disputam, sem valores
     c = db.get_conn()
     outra = contratos.criar(c, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 3", "objeto": "Obra Gama",
@@ -78,11 +87,10 @@ def test_custo_da_obra_404_sem_cadastro_e_403_sem_ver_paineis(client, monkeypatc
     c.execute("INSERT INTO custo_grupos (contrato_id, ordem, nome, tarefas, itens_planilha) VALUES (?,1,'G',?,?)",
               (outra, json.dumps(["002"]), json.dumps(["2."])))
     c.commit(); c.close()
-    r = client.get(f"/api/diretoria/custo/{com}")
+    r = client.get(f"/api/contratos/{com}/custo")
     assert r.status_code == 409 and "2.001.012 na obra IC 3" in r.json()["detail"]
     monkeypatch.setitem(permissoes.PERFIS, "diretoria", frozenset())
-    assert client.get(f"/api/diretoria/custo/{com}").status_code == 403
-    assert client.get("/api/diretoria/custo").status_code == 403
+    assert client.get(f"/api/contratos/{com}/custo").status_code == 403
 
 
 def test_custo_da_obra_com_planilha_sem_item_lida_pelos_titulos_do_cadastro(client):
@@ -104,14 +112,15 @@ def test_custo_da_obra_com_planilha_sem_item_lida_pelos_titulos_do_cadastro(clie
     assert medicao_grupos.ler_e_registrar(c, None, mid, planilha_sem_item(), origem="carga")["situacao"] == "lida"
     c.close()
     _login(client, "dir4@l.com")
-    r = client.get(f"/api/diretoria/custo/{cid}")
+    r = client.get(f"/api/contratos/{cid}/custo")
     assert r.status_code == 200
     grupos = {g["nome"]: g["medido_centavos"] for g in r.json()["linhas"][0]["grupos"]}
     assert grupos == {"Pavimentação": 1296_23 + 800_27, "outros": 500_55 + 1200_01}
 
 
 def test_nota_desconsiderada_some_das_rotas_sem_marca_e_aparece_so_na_auditoria(client):
-    """Issue #638: depois de `desconsiderar_nf`, A receber, Diretoria (faturado do RM), Inicio e a reconciliacao deixam
+    """Issue #638: depois de `desconsiderar_nf`, a lista de Obras (a receber), o Fechamento (notas sem medicao), o
+    Inicio e a reconciliacao deixam
     de contar a nota, ao centavo, e nenhuma dessas respostas fala da correcao; a auditoria do admin traz o evento com
     o motivo e a fonte. `reconsiderar_nf` devolve os numeros e a auditoria fica com os dois eventos."""
     import datetime
@@ -127,8 +136,8 @@ def test_nota_desconsiderada_some_das_rotas_sem_marca_e_aparece_so_na_auditoria(
                        "papel": "lotufo", "coligada_rm": 1, "sigla_oficio": "LT", "nome_curto": "Lotufo"}],
         "contratos": [{**_contrato("Própria", "sinfra-x", "IC 1/2025"), "centro_custo_rm": "9.001.001"}], "avisos": [],
         "geral": {"qdop": {"modelo_caminho": str(MODELO)}, "diretoria": {"total_a_receber_liberado": True}}})
-    # emitida no mes passado: entra na serie do faturado do RM (meses fechados) seja qual for o dia do teste
-    mes_passado = (datetime.date.today().replace(day=1) - datetime.timedelta(days=1)).replace(day=1)
+    # emitida em 2026 e sem medicao: entra nas "notas sem medição" do Fechamento (#748)
+    mes_passado = datetime.date(2026, 10, 15)
     for idmov, valor, falta in ((961, 1_000_001, 930_001), (962, 80_000, 80_000)):
         nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, numero_int, emissao, valor_centavos, situacao, "
                         "codtmv, centro_custo) VALUES (1, ?, ?, ?, ?, ?, 'ativa', '2.2.01', '9.001.001')",
@@ -139,13 +148,12 @@ def test_nota_desconsiderada_some_das_rotas_sem_marca_e_aparece_so_na_auditoria(
     _login(client, "adm@l.com")
 
     def retrato():
-        rotas = {r: client.get(r) for r in ("/api/a-receber", "/api/diretoria", "/api/inicio", "/api/inicio/painel",
+        rotas = {r: client.get(r) for r in ("/api/contratos", "/api/fechamento", "/api/inicio", "/api/inicio/painel",
                                             "/api/rm/reconciliacao")}
         assert all(v.status_code == 200 for v in rotas.values()), {r: v.status_code for r, v in rotas.items()}
         j = {r: v.json() for r, v in rotas.items()}
-        mes = [s["faturado_centavos"] for s in j["/api/diretoria"]["faturado_rm"]["serie"]
-               if s["competencia"] == mes_passado.strftime("%Y-%m")][0]
-        numeros = (j["/api/a-receber"]["total"]["valor_centavos"], mes,
+        a_receber = sum(o["posicao"]["a_receber_centavos"] or 0 for o in j["/api/contratos"])
+        numeros = (a_receber, j["/api/fechamento"]["notas_sem_medicao"]["em_aberto_centavos"],
                    j["/api/inicio/painel"]["a_receber"]["valor_centavos"],
                    sorted(n["numero"] for n in j["/api/rm/reconciliacao"]["nfs_sem_medicao"]),
                    j["/api/rm/reconciliacao"]["totais"]["nfs_sem_medicao"], j["/api/inicio"]["avisos"])

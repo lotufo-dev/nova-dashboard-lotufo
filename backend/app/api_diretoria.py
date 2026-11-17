@@ -1,12 +1,12 @@
-"""Tela da diretoria e exportacao do QDOP (bloco 8; spec 2026-09-21 §10.5). So' leitura; a operacao tambem ve."""
+"""Numeros da diretoria (bloco 8; spec 2026-09-21 §10.5): o Resumo e o QDOP da lista de Obras, a exportacao do QDOP e
+a pagina Fechamento (issue #748). So' leitura; a operacao tambem ve."""
 import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
-from app import custo_obra, diretoria, qdop, tempo
+from app import diretoria, fechamento, qdop, tempo
 from app.api_auth import conexao
-from app.api_medicoes import ID
 from app.permissoes import exigir
 
 router = APIRouter()
@@ -18,29 +18,11 @@ def painel(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Conne
     return diretoria.painel(conn)
 
 
-@router.get("/api/a-receber")
-def a_receber(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
-    return diretoria.a_receber(conn)
-
-
-@router.get("/api/diretoria/custo")
-def custo_obras(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
-    """Issue #491: as obras do seletor da aba Custo (com cadastro de custo, fora de consorcio)."""
-    return custo_obra.obras(conn)
-
-
-@router.get("/api/diretoria/custo/{contrato_id}")
-def custo_da_obra(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
-                  conn: sqlite3.Connection = Depends(conexao)):
-    """Issue #491: custo lancado no RM por grupo, medicao a medicao, com o acumulado da obra."""
-    try:
-        return custo_obra.custo_da_obra(conn, contrato_id)
-    except custo_obra.SemCadastro as e:
-        raise HTTPException(404, str(e)) from None
-    except custo_obra.RegraDesconhecida as e:
-        raise HTTPException(422, str(e)) from None
-    except custo_obra.CentroDisputado as e:
-        raise HTTPException(409, str(e)) from None
+@router.get("/api/fechamento")
+def fechamento_mensal(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #748: medido, aprovado, protocolado e recebido por mes de competencia de 2025 e 2026, na cota, com o em
+    aberto nota a nota (`app/fechamento.py`)."""
+    return fechamento.fechamento(conn)
 
 
 @router.get("/api/diretoria/qdop.xlsx")

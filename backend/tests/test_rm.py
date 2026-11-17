@@ -1417,11 +1417,12 @@ def _a_receber_do_rm(conn) -> list[str]:
 
 
 def _total_a_receber(conn) -> int:
-    """O total da tela A receber (`diretoria.a_receber`), com o total liberado no cadastro."""
+    """O a receber na cota de todas as obras (a soma da lista de Obras, `diretoria.a_receber_por_obra`; a tela A
+    receber saiu na #748), com o total liberado no cadastro."""
     from app import diretoria
     conn.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', ?)",
                  (json.dumps({"total_a_receber_liberado": True}),)); conn.commit()
-    return diretoria.a_receber(conn)["total"]["valor_centavos"]
+    return sum(diretoria.a_receber_por_obra(conn, na_cota=True).values())
 
 
 def _receber_a_mao(conn, mid, em="2026-09-20"):
