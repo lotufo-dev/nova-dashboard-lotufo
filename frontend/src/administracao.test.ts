@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, reconciliacaoDaObra, rotaDoObjeto, rotuloAcao, urlPaginaRec, type Evento,
-  type Reconciliacao,
-} from "./administracao";
+  pendenciasAgrupadas, type Reconciliacao } from "./administracao";
 
 const ev = (id: number, acao: string, criado_em: string, usuario_id: number | null): Evento =>
   ({ id, acao, entidade: null, criado_em, usuario_id });
@@ -161,5 +160,20 @@ describe("administração", () => {
     expect(objetoDaCorrecaoDeNota({ acao: "nota.desconsiderar", depois: "{" })).toBeNull();
     expect(objetoDaCorrecaoDeNota({ acao: "nota.desconsiderar", depois: null })).toBeNull();
     expect(objetoDaCorrecaoDeNota({ acao: "nota.desconsiderar", depois: "{}" })).toBeNull();
+  });
+});
+
+describe("pendências de cadastro agrupadas", () => {
+  const termo = (contrato_id: number, comp: string) => ({ contrato_id, obra: `Obra ${contrato_id}`,
+    falta: `Termo de apostilamento da competência ${comp.slice(5)}/${comp.slice(0, 4)} não está no cadastro`, desde: comp, aba: "reajuste" });
+  const garantia = { contrato_id: 7, obra: "Obra 7", falta: "Último registro da garantia venceu em 14/10/2026", desde: "2026-10-14", aba: "prazos" };
+
+  it("o termo que falta mês a mês na mesma obra vira uma linha, com o intervalo e a contagem; o resto fica como veio", () => {
+    const r = pendenciasAgrupadas([termo(7, "2026-01"), termo(7, "2025-11"), garantia, termo(7, "2025-12"), termo(8, "2026-01")] as never);
+    expect(r.map(p => [p.contrato_id, p.falta, p.desde])).toEqual([
+      [7, "Termo de apostilamento da competência entre 11/2025 e 01/2026 (3 competências) não está no cadastro", "2025-11"],
+      [7, "Último registro da garantia venceu em 14/10/2026", "2026-10-14"],
+      [8, "Termo de apostilamento da competência 01/2026 não está no cadastro", "2026-01"],
+    ]);
   });
 });

@@ -20,6 +20,26 @@ export type PendenciaCadastro = { contrato_id: number; obra: string | null; falt
 export type AvisoSemData = { contrato_id: number | null; obra: string | null; aviso: string };
 export type PendenciasCadastro = { documentos: PendenciaCadastro[]; sem_data: AvisoSemData[] };
 
+/** A mesma pendencia repetida por competencia na mesma obra (o termo de apostilamento que falta, mes a mes) vira uma
+ *  linha so': "... da competência entre 05/2022 e 05/2026 (49 competências) ...", com o `desde` da primeira. So' a
+ *  apresentacao: a lista do servidor nao muda, e a pendencia de uma competencia so' fica como veio. */
+export function pendenciasAgrupadas(lista: PendenciaCadastro[]): PendenciaCadastro[] {
+  const COMPETENCIA = /\b\d{2}\/\d{4}\b/;
+  const grupos = new Map<string, PendenciaCadastro[]>();
+  for (const p of lista) {
+    const porCompetencia = p.desde?.length === 7 && COMPETENCIA.test(p.falta);
+    const chave = porCompetencia ? `${p.contrato_id}|${p.falta.replace(COMPETENCIA, "#")}` : `${p.contrato_id}|${p.falta}|${p.desde}`;
+    grupos.set(chave, [...(grupos.get(chave) ?? []), p]);
+  }
+  return [...grupos.values()].map(g => {
+    if (g.length === 1) return g[0];
+    const ordem = [...g].sort((a, b) => (a.desde ?? "").localeCompare(b.desde ?? ""));
+    const mes = (p: PendenciaCadastro) => p.falta.match(COMPETENCIA)![0];
+    return { ...ordem[0], falta: ordem[0].falta.replace(COMPETENCIA,
+      `entre ${mes(ordem[0])} e ${mes(ordem[ordem.length - 1])} (${g.length} competências)`) };
+  });
+}
+
 /* ------------------------------------------------------------ reconciliacao */
 
 export type NfSolta = { id: number; coligada: number; numero: string; serie: string | null; emissao: string | null;

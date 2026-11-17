@@ -5,7 +5,7 @@ import { rotuloPerfil } from "./navegacao";
 import CaixaAviso from "./CaixaAviso";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import {
-  ABAS_ADMIN, type PendenciasCadastro, campoDoErroDeUsuario, CATEGORIAS_REC, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, pessoaDoEvento,
+  ABAS_ADMIN, type PendenciasCadastro, campoDoErroDeUsuario, CATEGORIAS_REC, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, pendenciasAgrupadas, pessoaDoEvento,
   quantidadeRec,
   reconciliacaoDaObra, rotaDoObjeto, rotuloAcao, rotuloObjeto, rotuloRec, urlPaginaRec,
   type CategoriaRec, type Evento, type Reconciliacao,
@@ -1156,7 +1156,7 @@ function PendenciasCadastro() {
     api<PendenciasCadastro>("/api/admin/pendencias-cadastro").then(setDados).catch(e => setErro(falhaDeCarga(e)));
   }, []);
   // `desde` e' o dia (garantia) ou a competencia (termo de apostilamento)
-  const lista = dados?.documentos, semData = dados?.sem_data ?? [];
+  const lista = dados ? pendenciasAgrupadas(dados.documentos) : undefined, semData = dados?.sem_data ?? [];
   const desde = (d: string | null) => (!d ? "—" : d.length === 7 ? fmtCompetencia(d) : fmtDataPura(d));
   return (
     <section className="cartao" aria-labelledby="titulo-pendencias">
