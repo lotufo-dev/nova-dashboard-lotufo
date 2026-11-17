@@ -22,9 +22,14 @@
 //            `corpo` pode ser funcao dos registros da prova, e `ajustar: (resposta, registros) => resposta` muda a
 //            resposta verdadeira em vez de troca-la
 //   erro     true quando a tela DEVE mostrar o aviso de erro (a falha foi simulada); sem ele, aviso de erro reprova
+//   parou    true quando a tela DEVE cair na tela "A tela parou de responder" (a resposta simulada quebra o desenho)
+//   destino  o caminho em que a tela termina, quando ela so' leva a outra (`/notas/envio/:id` abre a pagina da medicao)
 //
 // Todo item do menu de um perfil precisa de uma tela aqui para esse perfil: a prova reprova o item sem tela.
-import { falha, medicaoComExcluidosNoRm, medicaoComNotaEmitida, medicaoDaMtpar, notasAEnviar, PDF_ILEGIVEL, RM_EXCLUSAO_RECUSADA,
+import { cabecalhoCom, CUSTO_DA_OBRA, detalheDoEnvio, espelhoGerado, falha, medicaoComEspelhoGerado, medicaoComExcluidosNoRm,
+         medicaoComNotaDivergente, medicaoComNotaEmitida, medicaoDaMtpar, NOTAS_COM_DIVERGENCIA, notasAEnviar, notasComEnvioAberto,
+         PDF_ILEGIVEL,
+         prazosEmEncerramento, prazosParalisada, PREVIA_DO_ESPELHO, PROTOCOLO_ID, RESPOSTA_QUE_QUEBRA, RM_EXCLUSAO_RECUSADA,
          SIGA_COM_PROCESSOS } from "./simulados.mjs";
 
 export const PERFIS = ["admin", "engenharia", "diretoria"];
@@ -47,15 +52,36 @@ const comNotaAEnviar = familia => [
   { caminho: MEDICOES_DA_OBRA, ajustar: medicaoComNotaEmitida },
   { caminho: /^\/api\/notas\/a-enviar$/, corpo: notasAEnviar(familia) },
 ];
+// o espelho gerado e ainda nao enviado ao faturamento, com a previa do e-mail (ver simulados.mjs)
+const comEspelhoGerado = [
+  { caminho: MEDICOES_DA_OBRA, ajustar: medicaoComEspelhoGerado },
+  { caminho: /^\/api\/contratos\/\d+\/espelho$/, ajustar: espelhoGerado },
+  { caminho: /^\/api\/espelhos\/\d+\/envio$/, corpo: PREVIA_DO_ESPELHO },
+];
+// o envio da nota ja' comecado (com protocolo): a linha do envio abre o e-mail ao orgao
+const comEnvioAberto = divergente => [
+  { caminho: MEDICOES_DA_OBRA, ajustar: divergente ? medicaoComNotaDivergente : medicaoComNotaEmitida },
+  { caminho: /^\/api\/notas\/a-enviar$/, corpo: notasComEnvioAberto(divergente) },
+  { caminho: /^\/api\/notas\/envio\/\d+$/, corpo: detalheDoEnvio(divergente) },
+  ...(divergente ? [{ caminho: /^\/api\/medicoes\/\d+\/notas$/, corpo: NOTAS_COM_DIVERGENCIA }] : []),
+];
+const abrirEnvio = [...passo("Envio da nota"), { clicar: '#passo-5 button:has-text("Enviar a nota")' }];
+const OBRA_GRADE = ".obra-grade";
 
 export const TELAS = [
   // ---- Inicio
   { rota: "inicio", id: "inicio", caminho: "/inicio", perfis: TODOS, espera: ".ini" },
   { rota: "inicio", id: "inicio-erro", caminho: "/inicio", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/inicio\/painel$/) },
+  { rota: "inicio", id: "inicio-avisos-erro", caminho: "/inicio", perfis: SO_ADMIN, espera: ".ini-avisos [role=alert]", erro: true,
+    simular: falha(/^\/api\/inicio$/) },
+  // a ultima rede: uma resposta que a tela nao sabe desenhar derruba o desenho e aparece "A tela parou de responder"
+  { rota: "inicio", id: "tela-parou", caminho: "/inicio", perfis: TODOS, espera: ".falha", parou: true,
+    simular: [{ caminho: /^\/api\/inicio\/painel$/, corpo: RESPOSTA_QUE_QUEBRA }] },
 
   // ---- Medicoes: o quadro do mes, a janela de iniciar, o quadro vazio e a falha de leitura
-  { rota: "medicoes", id: "medicoes", caminho: "/medicoes", perfis: OPERA, espera: ".quadro__tabela" },
+  // a diretoria nao tem Medicoes no menu, mas o link abre o quadro para leitura
+  { rota: "medicoes", id: "medicoes", caminho: "/medicoes", perfis: TODOS, espera: ".quadro__tabela" },
   { rota: "medicoes", id: "medicoes-iniciar", caminho: "/medicoes", perfis: OPERA, antes: ".quadro__tabela", espera: JANELA,
     passos: [{ clicar: '.quadro__tabela button:has-text("Iniciar")' }] },
   { rota: "medicoes", id: "medicoes-erro", caminho: "/medicoes", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
@@ -121,6 +147,15 @@ export const TELAS = [
   { rota: "obra", id: "obra-reajuste", caminho: "/obras/:obra/reajuste", perfis: TODOS, espera: ".obra-grade" },
   { rota: "obra", id: "obra-documentos", caminho: "/obras/:obra/documentos", perfis: TODOS, espera: ".obra-grade" },
   { rota: "obra", id: "obra-contrato", caminho: "/obras/:obra/contrato", perfis: TODOS, espera: ".obra-grade" },
+  // o que a obra de exemplo nao tem: o custo lancado no RM, a paralisacao e o encerramento
+  { rota: "obra", id: "obra-medicoes-custo", caminho: "/obras/:obra/medicoes", perfis: TODOS, espera: OBRA_GRADE,
+    simular: [{ caminho: /^\/api\/contratos\/\d+\/custo$/, corpo: CUSTO_DA_OBRA }] },
+  { rota: "obra", id: "obra-paralisada", caminho: "/obras/:obra/prazos", perfis: TODOS, espera: OBRA_GRADE,
+    simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoCom("suspenso") },
+      { caminho: /^\/api\/contratos\/\d+\/prazos$/, ajustar: prazosParalisada }] },
+  { rota: "obra", id: "obra-encerramento", caminho: "/obras/:obra/prazos", perfis: TODOS, espera: OBRA_GRADE,
+    simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoCom("em_encerramento") },
+      { caminho: /^\/api\/contratos\/\d+\/prazos$/, ajustar: prazosEmEncerramento }] },
   { rota: "obra", id: "obra-erro", caminho: "/obras/:obra", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/contratos\/\d+\/cabecalho$/) },
 
@@ -150,8 +185,20 @@ export const TELAS = [
     passos: maisAcoes("Editar o atestado") },
   { rota: "medicao", id: "medicao-protocolo-fora", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
     passos: [...passo("Envio da nota"), { clicar: '#conteudo button:has-text("Registrar protocolo feito fora")' }] },
-  { rota: "medicao", id: "medicao-a-enviar", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: "#passo-5 table",
+  { rota: "medicao", id: "medicao-a-enviar", caminho: MEDICAO, perfis: TODOS, antes: "nav.passos", espera: "#passo-5 table",
     simular: comNotaAEnviar("sinfra"), passos: passo("Envio da nota") },
+  // o espelho gerado e nao enviado, e o e-mail ao faturamento aberto (assunto comprido, anexo, aviso)
+  { rota: "medicao", id: "medicao-espelho-gerado", caminho: MEDICAO, perfis: TODOS, antes: "nav.passos", espera: "#passo-3 .espelho__item",
+    simular: comEspelhoGerado, passos: passo("Espelhos") },
+  { rota: "medicao", id: "medicao-espelho-email", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: "#passo-3 .ol-janela",
+    simular: comEspelhoGerado, passos: [...passo("Espelhos"), { clicar: '#passo-3 button:has-text("Enviar ao faturamento")' }] },
+  // o e-mail ao orgao aberto no passo "Envio da nota"; com a nota divergente, a caixa de justificativa acima dele
+  { rota: "medicao", id: "medicao-envio-email", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: "#envio-aberto .nota-secao",
+    simular: comEnvioAberto(false), passos: abrirEnvio },
+  { rota: "medicao", id: "medicao-nota-divergente", caminho: MEDICAO, perfis: TODOS, antes: "nav.passos", espera: "#passo-4 table",
+    simular: comEnvioAberto(true), passos: passo("Notas") },
+  { rota: "medicao", id: "medicao-envio-divergente", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: "#envio-aberto .justificativa",
+    simular: comEnvioAberto(true), passos: abrirEnvio },
   { rota: "medicao", id: "medicao-envio-fora", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
     simular: comNotaAEnviar("sinfra"), passos: [...passo("Envio da nota"), { clicar: '#passo-5 button:has-text("Já enviei por fora")' }] },
   { rota: "medicao", id: "medicao-oficio", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
@@ -171,7 +218,10 @@ export const TELAS = [
   { rota: "medicao", id: "medicao-erro", caminho: MEDICAO, perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/contratos\/\d+\/medicoes$/) },
   { rota: "nova-medicao", id: "nova-medicao", caminho: "/obras/:obra/medicoes/nova", perfis: OPERA, espera: ".med-grade" },
-  // o cadastro de exemplo nao tem protocolo de nota: a tela do envio e' vista no estado "nao foi possivel abrir"
+  // o endereco antigo do envio (/notas/envio/:id) abre a pagina da medicao no passo "Envio da nota"; o cadastro de
+  // exemplo nao tem protocolo de nota, entao o protocolo e' simulado. Depois, o estado "nao foi possivel abrir"
+  { rota: "notas-envio", id: "notas-envio", caminho: `/notas/envio/${PROTOCOLO_ID}`, destino: MEDICAO, perfis: TODOS, espera: "#passo-5 table",
+    simular: comEnvioAberto(false) },
   { rota: "notas-envio", id: "notas-envio-erro", caminho: "/notas/envio/1", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: [{ caminho: /^\/api\/notas\/envio\/\d+$/, status: 404, corpo: { detail: "Protocolo não encontrado" } }] },
 
@@ -212,6 +262,8 @@ export const RESPOSTAS_ESPERADAS = [
     motivo: "antes de entrar, a tela pergunta quem esta' logado e o servidor responde que ninguem" },
   { metodo: "GET", caminho: /^\/api\/contratos\/\d+\/custo$/, status: 404,
     motivo: "a obra sem cadastro de custo responde 404 e a aba Medicoes so' deixa de mostrar a coluna do custo (#748)" },
+  { metodo: "GET", caminho: /^\/api\/correio\/assinatura$/, status: 404,
+    motivo: "quem nao cadastrou assinatura responde 404 e o e-mail aberto mostra o aviso de que ela falta" },
 ];
 
 export function telasDoPerfil(perfil) {

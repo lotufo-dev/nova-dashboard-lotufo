@@ -8,12 +8,15 @@
 // Opcoes: --perfis a,b   --telas id,id   --larguras 1440,390   --escala 2 (pontos por pixel; padrao 1)
 //         --capturas todas|falha|nenhuma (padrao todas)   --conferir (sai com 1 se alguma tela tiver problema ou se
 //         nenhuma tela for aberta)   --estrito (os achados da auditoria visual tambem reprovam)
+//         --obra N   --medicao N   --empresa N   o registro que entra nos caminhos com `:obra`, `:medicao` e `:empresa`,
+//         no lugar do primeiro do banco (para ver outra obra numa copia do banco; --medicao pede --obra)
+//         --rotulo nome   as capturas e o relato saem em `<saida>/capturas/<nome>/`, sem apagar os da rodada de antes
 //
 // Para cada perfil e largura: abre a tela de login, entra com o usuario de teste (digitando, como uma pessoa) e
 // abre cada tela de `telas.mjs` numa aba nova. Uma tela tem PROBLEMA quando: da' erro de script ou de console;
 // alguma resposta volta 4xx ou 5xx (fora as de RESPOSTAS_ESPERADAS); o conteudo principal nao aparece; fica em
 // "Carregando…"; mostra a tela de erro ("A tela parou de responder") ou um aviso de erro; cai no login ou em
-// outra tela; fica em branco; ou a pagina rola de lado. Uma tela de `telas.mjs` pode trazer `passos` (cliques que
+// outra tela; fica em branco; ou a pagina rola de lado. (A tela com `erro` ou `parou` e' a que DEVE mostrar isso.) Uma tela de `telas.mjs` pode trazer `passos` (cliques que
 // abrem uma janela ou um formulario) e `simular` (respostas da API trocadas, para ver a tela vazia ou a de erro).
 // A auditoria visual (`auditoria.mjs`: texto cortado, fora da vista ou sobreposto, letra e canto fora da fundacao)
 // roda em cada tela e largura e sai como aviso; o resumo do fim junta os achados por tipo.
@@ -45,7 +48,7 @@ function recusar(mensagem) {
 // --- opcoes -----------------------------------------------------------------------------------------------------
 
 const args = process.argv.slice(2);
-const COM_VALOR = ["--perfis", "--telas", "--larguras", "--capturas", "--escala"];
+const COM_VALOR = ["--perfis", "--telas", "--larguras", "--capturas", "--escala", "--obra", "--medicao", "--empresa", "--rotulo"];
 const SEM_VALOR = ["--conferir", "--estrito"];
 for (let i = 0; i < args.length; i++) {
   if (COM_VALOR.includes(args[i])) i++;
@@ -68,6 +71,16 @@ const capturas = opcao("--capturas") ?? "todas";
 if (!["todas", "falha", "nenhuma"].includes(capturas)) recusar("--capturas aceita todas, falha ou nenhuma");
 const escala = Number(opcao("--escala") ?? 1);
 if (![1, 2, 3].includes(escala)) recusar("--escala aceita 1, 2 ou 3");
+const inteiro = nome => {
+  const v = opcao(nome);
+  if (v === undefined) return null;
+  if (!/^[1-9]\d*$/.test(v)) recusar(`${nome} pede o número do registro`);
+  return Number(v);
+};
+const pedidos = { obra: inteiro("--obra"), medicao: inteiro("--medicao"), empresa: inteiro("--empresa") };
+if (pedidos.medicao !== null && pedidos.obra === null) recusar("--medicao pede --obra (a medição é de uma obra)");
+const rotulo = opcao("--rotulo") ?? "";
+if (rotulo && !/^[\w-]+$/.test(rotulo)) recusar("--rotulo aceita letras, números, hífen e sublinhado");
 const conferir = args.includes("--conferir");
 const estrito = args.includes("--estrito");
 
@@ -98,7 +111,7 @@ const servidor = JSON.parse(fs.readFileSync(arquivoServidor, "utf8"));
 if (!servidor.frontend) recusar("O servidor de prova subiu com --sem-frontend: não há tela para abrir.");
 const BASE = servidor.base;
 const SENHA = fs.readFileSync(servidor.senha, "utf8").trim();
-const SAIDA = path.join(servidor.saida, "capturas");
+const SAIDA = path.join(servidor.saida, "capturas", rotulo);
 
 let chromium;
 try {
@@ -130,12 +143,13 @@ async function abrirNavegador() {
 
 // --- o que reprova uma tela ---------------------------------------------------------------------------------------
 
-function vigiar(pagina, onde, simuladas = []) {
+function vigiar(pagina, onde, simuladas = [], parou = false) {
   const problemas = [];
   const simulada = (metodo, caminho) => simuladas.some(s => (s.metodo ?? "GET") === metodo && s.caminho.test(caminho));
-  pagina.on("pageerror", e => problemas.push(`erro de script: ${e.message}`));
+  // na tela que cai de proposito (`parou`), o erro de script e o do console sao a propria queda
+  pagina.on("pageerror", e => { if (!parou) problemas.push(`erro de script: ${e.message}`); });
   pagina.on("console", m => {
-    if (m.type() !== "error") return;
+    if (m.type() !== "error" || parou) return;
     // a resposta 4xx/5xx ja' e' julgada abaixo, com a lista de esperadas; esta linha do console e' a mesma coisa
     if (m.text().startsWith("Failed to load resource: the server responded with a status of")) return;
     problemas.push(`erro no console: ${m.text().slice(0, 300)}`);
@@ -194,8 +208,10 @@ async function estadoDaTela(pagina) {
   });
 }
 
-function julgar(estado, caminhoEsperado, problemas, erroEsperado = false) {
-  if (estado.falha) problemas.push(`tela de erro: ${estado.falha}`);
+function julgar(estado, caminhoEsperado, problemas, erroEsperado = false, parou = false) {
+  if (parou) {
+    if (!estado.falha) problemas.push("a queda simulada não mostrou a tela \"A tela parou de responder\"");
+  } else if (estado.falha) problemas.push(`tela de erro: ${estado.falha}`);
   else if (estado.login) problemas.push("caiu na tela de login");
   else {
     const esperado = new URL(caminhoEsperado, BASE).pathname;
@@ -310,12 +326,20 @@ async function registros(contexto) {
     if (medicoes.length) { obra = c.id; medicao = medicoes[0].id; break; }
   }
   obra ??= contratos[0]?.id ?? null;
+  // --obra e --medicao: outra obra da copia do banco, no lugar da primeira
+  if (pedidos.obra !== null) {
+    obra = contratos.some(c => c.id === pedidos.obra) ? pedidos.obra : null;
+    const medicoes = obra === null ? [] : await ler(`/api/contratos/${obra}/medicoes`);
+    medicao = pedidos.medicao === null ? medicoes[0]?.id ?? null : medicoes.find(m => m.id === pedidos.medicao)?.id ?? null;
+  }
   // a empresa da pagina de Documentos: a primeira com certidao exigida (a que nao tem nenhuma abre uma pagina sem
   // o que conferir, e numa copia do banco a primeira de `/api/entidades` costuma ser assim)
   const documentos = await ler("/api/documentos");
   const empresas = documentos.empresas ?? [];
   const empresa = empresas.find(e => (e.certidoes ?? []).some(c => c.exigida)) ?? empresas[0];
-  return { obra, medicao, empresa: empresa?.entidade_id ?? null };
+  const daEmpresa = pedidos.empresa === null ? empresa?.entidade_id ?? null
+    : empresas.find(e => e.entidade_id === pedidos.empresa)?.entidade_id ?? null;
+  return { obra, medicao, empresa: daEmpresa };
 }
 
 async function abrirTela(contexto, perfil, largura, tela, reg) {
@@ -327,10 +351,11 @@ async function abrirTela(contexto, perfil, largura, tela, reg) {
       problemas: conferir ? [frase] : [], avisos: conferir ? [] : [frase] });
     return;
   }
-  const caminho = tela.caminho.replace(/:(\w+)/g, (_, n) => String(reg[n]));
+  const preencher = c => c.replace(/:(\w+)/g, (_, n) => String(reg[n]));
+  const caminho = preencher(tela.caminho);
   const pagina = await contexto.newPage();
   const simuladas = tela.simular ?? [];
-  const problemas = vigiar(pagina, tela.id, simuladas), avisos = [], t0 = Date.now();
+  const problemas = vigiar(pagina, tela.id, simuladas, tela.parou === true), avisos = [], t0 = Date.now();
   let captura = null, achados = [];
   try {
     for (const s of simuladas) {
@@ -351,7 +376,8 @@ async function abrirTela(contexto, perfil, largura, tela, reg) {
       await darPassos(pagina, tela.passos);
       await assentar(pagina, tela.espera, problemas);
     }
-    julgar(await estadoDaTela(pagina), caminho.split("?")[0], problemas, tela.erro === true);
+    // `destino`: a tela que so' leva a outra (o endereco antigo do envio da nota abre a pagina da medicao)
+    julgar(await estadoDaTela(pagina), preencher(tela.destino ?? tela.caminho).split("?")[0], problemas, tela.erro === true, tela.parou === true);
     achados = await conferirVisual(pagina, problemas, avisos);
   } catch (e) {
     problemas.push(`não abriu: ${String(e.message ?? e).split("\n")[0]}`);
