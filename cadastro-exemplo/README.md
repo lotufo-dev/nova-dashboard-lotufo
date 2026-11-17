@@ -23,7 +23,9 @@ QDOP e logo da FRC). Os modelos `.docx` e `.xlsx` são neutros, sem logotipo; o 
   contrato substitui essa marca só nele (`[]` desliga todas); tipo que o órgão não pede é erro no `cadastro aplicar`.
 - Obra Própria: contrato da empresa sozinha (100%), com espelho de medição e reajuste.
 - Obra Consórcio: contrato do Consórcio Exemplo (empresa própria 50% e Engenharia Beta 50%), em dois
-  municípios, com espelho de medição que rateia entre as duas empresas e os dois municípios.
+  municípios, com espelho de medição que rateia entre as duas empresas e os dois municípios. Declara
+  `tipos_cobranca_extras_rm: ['2.2.03']`: nela, e só nela, a nota do RM desse tipo de movimento também é cobrança
+  ao órgão (`docs/adr/0015`).
 
 `medicoes/obra-propria.csv` é o histórico de medições de exemplo da Obra Própria, no formato de
 `cadastro carregar-medicoes <obra>.csv --ensaio` (o nome do arquivo é o slug da obra, como em `contratos/`).

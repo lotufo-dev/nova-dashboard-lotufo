@@ -206,6 +206,35 @@ def test_nota_ja_ligada_conta_como_ja_alocada_mesmo_fora_da_cobranca(conn):
     assert (r["ja_alocada"], r["fora_da_cobranca"], r["puladas_fora_da_cobranca"]) == (1, 0, []), r
 
 
+def test_nf_de_tipo_extra_liga_so_no_contrato_que_o_declara(conn):
+    """docs/adr/0015: a nota 2.2.03 do ledger vira vinculo (e medicao que falta) so' na obra cujo cadastro declara o
+    tipo; na outra obra, nas mesmas condicoes, segue pulada como fora da cobranca."""
+    declara, nao_declara = _contrato(conn), _contrato(conn, "075/2021/00/00-SINFRA")
+    conn.execute("UPDATE contratos SET tipos_cobranca_extras_rm='[\"2.2.03\"]' WHERE id=?", (declara,)); conn.commit()
+    m1, m2 = _medicao_emitida(conn, declara, 1, 500_01), _medicao_emitida(conn, nao_declara, 1, 700_03)
+    nf1 = _nf_rm(conn, 1, 100, 500_01, codtmv="2.2.03")
+    nf2 = _nf_rm(conn, 1, 101, 700_03, "0000000002", codtmv="2.2.03")
+    _nf_rm(conn, 1, 102, 900_05, "0000000003", codtmv="2.2.03")
+    _nf_rm(conn, 1, 103, 300_07, "0000000004", codtmv="2.2.03"); conn.commit()
+    cad = [*CAD, {"Id": 2, "Contrato": "075/2021/00/00"}]
+    def item(obra, rotulo, idmov, numero, valor):
+        return {"ObraId": obra, "TipoDocumento": "Medição", "MedicaoRotulo": rotulo, "IdMovRM": idmov,
+                "ChaveIdempotencia": f"RM:1:{idmov}", "NumNF": numero, "ValorBruto": valor, "Competencia": "02/2026"}
+    itens = [item(1, "1ª", 100, "0000000001", 500.01), item(2, "1ª", 101, "0000000002", 700.03)]
+    r = importar_ledger.importar(conn, 1, itens, cad, aplicar=True)
+    assert (r["alocadas"], r["fora_da_cobranca"]) == (1, 1), r
+    assert r["puladas_fora_da_cobranca"] == [{"medicao_id": m2, "nota_id": nf2, "numero_nf": "0000000002",
+                                              "codtmv": "2.2.03"}]
+    assert [n["nota_id"] for n in medicoes.detalhe(conn, m1)["notas"]] == [nf1]
+    assert medicoes.detalhe(conn, m2)["notas"] == []
+    # a medicao que falta nasce da nota 2.2.03 so' na obra que declara
+    faltam = [item(1, "2ª", 102, "0000000003", 900.05), item(2, "2ª", 103, "0000000004", 300.07)]
+    r = importar_ledger.criar_medicoes_faltantes(conn, 1, faltam, cad, aplicar=True)
+    assert (r["criadas"], r["fora_da_cobranca"], r["grupo_incompleto"]) == (1, 1, 1), r
+    assert [m["numero"] for m in medicoes.listar(conn, declara)] == [1, 2]
+    assert [m["numero"] for m in medicoes.listar(conn, nao_declara)] == [1]
+
+
 def test_competencia_invalida_recusa_o_grupo(conn):
     cid = _contrato(conn)
     _nf_rm(conn, 1, 501, 100_00, "0000000501"); conn.commit()

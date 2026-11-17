@@ -179,6 +179,15 @@ _Avoid_: NFS-e da consorciada (quando a nota é a da própria construtora)
 **Baixa**:
 O registro no RM de que um título foi pago. A data da baixa é o dia do pagamento.
 
+**Tipo de movimento**:
+A classificação que o RM dá a cada nota (`2.2.01`, `2.2.03`), escolhida pelo faturamento ao lançar.
+_Avoid_: codtmv (é o nome da coluna no RM)
+
+**Cobrança ao órgão**:
+A nota do RM que cobra o órgão por uma medição: a de tipo de movimento da lista geral e, na obra cujo cadastro
+declara, a dos tipos extras dela (`docs/adr/0015`). Só ela entra no faturado do RM e no a receber, liga-se sozinha
+à medição e deixa a medição ser recebida pela baixa.
+
 **Prazo do órgão**:
 Quantos dias o órgão costuma levar do protocolo ao pagamento: o terceiro quartil dos dias entre o protocolo e o
 recebimento, das medições recebidas nos últimos 365 dias, com no mínimo cinco. Com menos, o órgão fica sem previsão.

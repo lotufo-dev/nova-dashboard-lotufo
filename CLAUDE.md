@@ -23,9 +23,11 @@ pouco e confere; regra, cadastro e instrumento são do dono, em arquivo versiona
 ## Regras que valem em qualquer arquivo
 
 - **A produção roda em outro computador**, o `<servidor>`, a partir de uma cópia fixa do código em
-  `C:\DashboardLotufo\app`, com os dados em `C:\DashboardLotufo`. Ela é tratada como em uso: muda só por deploy
-  pedido pelo dono (skill `deploy`) ou por gravação que ele autoriza na hora. A máquina onde se desenvolve não é a
-  produção.
+  `C:\DashboardLotufo\app`, com os dados em `C:\DashboardLotufo`. Ela é tratada como em uso: o código dela muda só
+  por deploy pedido pelo dono (skill `deploy`). Gravação de dado nela (carga, correção, `cadastro aplicar`) não
+  espera autorização do dono: a sessão grava pelo rito do `docs/runbook.md` (ensaio lido, backup antes, conferência
+  depois) e relata o que gravou (`docs/adr/0014`). Conta de acesso e gravação no RM continuam só com a
+  autorização dele na hora. A máquina onde se desenvolve não é a produção.
 - **Repositório público**: cada push sai na hora e não se apaga. Dado real (cadastro, pessoa, NF, valor, certidão,
   e-mail, CNPJ) mora no repositório privado `lotufo-cadastro` (lido via `DASH_CADASTRO_DIR`) e na produção; nesta
   árvore, não. Nome de obra e de órgão público não conta como dado real (`docs/adr/0011`). Nos textos, papel no lugar do nome da pessoa ("o dono", "o faturamento") e
@@ -38,6 +40,9 @@ pouco e confere; regra, cadastro e instrumento são do dono, em arquivo versiona
   sem texto. Microsoft 365 e RM, já pagos, não contam.
 - **Dinheiro, envio e banco** têm regra própria em `.claude/rules/`. Mudança neles passa por uma segunda revisão
   independente, de quem não escreveu o código, antes do merge.
+- **Merge sem esperar o dono.** A sessão liga o merge da PR sozinha quando a conferência do corpo da PR está
+  fechada (suíte, revisão do código e, em dinheiro, envio ou banco, a segunda revisão) e a CI está verde
+  (`docs/adr/0014`). O que a CI barra para merge do dono (verificação de vazamento e hooks) continua dele.
 - **Projeto antigo** (`~/dev/lotufo-dashboard`, `~/dev/lotufo-automacao-medicao`): leitura autorizada para
   comparar produto e extrair regra de domínio. O código de lá não se herda.
 - **Português** nos textos da interface, mensagens de erro, commits, issues e PRs. Assunto de commit no padrão

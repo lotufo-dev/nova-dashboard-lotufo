@@ -177,3 +177,58 @@ def test_nota_desconsiderada_some_das_rotas_sem_marca_e_aparece_so_na_auditoria(
     assert retrato()[0] == antes
     ev = [e["acao"] for e in client.get("/api/admin/auditoria").json()["eventos"] if e["entidade"] == "nota_fiscal"]
     assert ev == ["nota.reconsiderar", "nota.desconsiderar"]
+
+
+def test_tipo_extra_do_cadastro_muda_o_a_receber_e_o_faturado_so_da_obra_que_o_declara(client, tmp_path):
+    """docs/adr/0015, de ponta a ponta: o cadastro em arquivo (`tipos_cobranca_extras_rm: ['2.2.03']` na Obra Consorcio
+    do `cadastro-exemplo/`) aplicado, as notas e os titulos trazidos pela sincronizacao com o RM, e os numeros que as
+    telas do redesenho mostram: Inicio (o a receber, na cota), lista de Obras (a receber na cota), cabecalho da obra (a
+    receber em valor cheio) e Fechamento (a nota em aberto sem medicao ligada, pelo bruto na cota, que sai da mesma
+    lista do faturado do RM, `diretoria._notas_do_rm`). As telas A receber e Diretoria sairam na #748. Sem a chave, a
+    nota 2.2.03 do consorcio esta' fora de tudo; com ela, entra so' na obra que a declara, e a 2.2.03 da Obra Propria
+    continua fora. Cota de 50% com centavo impar."""
+    import copy
+    import datetime
+    from app import cadastro_arquivos, sincronizacao_rm
+    from tests.conftest import CADASTRO_EXEMPLO
+    from tests.test_rm import _baixa, _nf, _simulador
+    c = db.get_conn()
+    auth.criar_usuario(c, "Adm", "adm@exemplo.com.br", "senha-forte-123", "admin")
+    com_a_chave = cadastro_arquivos.preparar(CADASTRO_EXEMPLO)
+    sem_a_chave = copy.deepcopy(com_a_chave)
+    for contrato in sem_a_chave["contratos"]:
+        contrato["tipos_cobranca_extras_rm"] = []
+    cadastro_aplicar.aplicar(c, 1, sem_a_chave)
+    propria, consorcio = (c.execute("SELECT id FROM contratos WHERE nome_curto=?", (nome,)).fetchone()[0]
+                          for nome in ("Obra Própria", "Obra Consórcio"))
+    # emitidas no mes passado: entram na serie do faturado do RM (meses fechados) seja qual for o dia do teste
+    mes_passado = (datetime.date.today().replace(day=1) - datetime.timedelta(days=1)).replace(day=1)
+    emissao = f"{mes_passado:%Y-%m}-10T00:00:00-04:00"
+    nfs = [_nf(971, 3333.33, coligada=90, codtmv="2.2.03", emissao=emissao),                      # fatura do consorcio
+           _nf(972, 2500.01, centro_custo="9.001.001", codtmv="2.2.03", emissao=emissao),         # obra que nao declara
+           _nf(973, 400.01, centro_custo="9.001.001", emissao=emissao)]                           # lista geral
+    baixas = [_baixa(9711, 971, 3100.01, 0, 0, coligada=90), _baixa(9721, 972, 2300.01, 0, 0), _baixa(9731, 973, 400.01, 0, 0)]
+    r = sincronizacao_rm.sincronizar(c, _simulador(tmp_path, nfs, baixas))
+    assert (r["estado"], r["nfs"], r["baixas"]) == ("success", 3, 3), r
+    # a sincronizacao traz a nota 2.2.03 e o titulo dela com ou sem a chave: o tipo nao filtra o que vem do RM
+    assert [tuple(x) for x in c.execute("SELECT n.idmov, n.codtmv, b.valor_original_centavos FROM notas_fiscais n "
+                                        "JOIN baixas b ON b.nota_id=n.id ORDER BY n.idmov")] == [
+        (971, "2.2.03", 310_001), (972, "2.2.03", 230_001), (973, "2.2.01", 40_001)]
+    _login(client, "adm@exemplo.com.br")
+
+    def retrato():
+        soltas = client.get("/api/fechamento").json()["notas_sem_medicao"]
+        obras = {o["id"]: o["posicao"]["a_receber_centavos"] for o in client.get("/api/contratos").json()}
+        cheio = {cid: client.get(f"/api/contratos/{cid}/cabecalho").json()["a_receber_centavos"] for cid in (propria, consorcio)}
+        return {"total": client.get("/api/inicio/painel").json()["a_receber"]["valor_centavos"],
+                "sem_medicao": {x["contrato_id"]: x["valor_centavos"] for x in soltas["em_aberto"]},
+                "sem_medicao_total": soltas["em_aberto_centavos"], "obras": obras, "cheio": cheio}
+    assert retrato() == {"total": 40_001, "sem_medicao": {propria: 40_001}, "sem_medicao_total": 40_001,
+                         "obras": {propria: 40_001, consorcio: 0}, "cheio": {propria: 40_001, consorcio: 0}}
+    rel = cadastro_aplicar.aplicar(c, 1, com_a_chave)
+    assert rel["contratos"]["alterados"] == ["Obra Consórcio (tipos de cobrança extras do RM: nenhum → 2.2.03)"]
+    c.close()
+    # 310.001 x 50% = 155.000,5 -> 155.001 (a receber, na cota); 333.333 x 50% = 166.666,5 -> 166.667 (o bruto)
+    assert retrato() == {"total": 40_001 + 155_001, "sem_medicao": {propria: 40_001, consorcio: 166_667},
+                         "sem_medicao_total": 40_001 + 166_667, "obras": {propria: 40_001, consorcio: 155_001},
+                         "cheio": {propria: 40_001, consorcio: 310_001}}
