@@ -1293,7 +1293,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
    para quem envia reconhecer a tela; cores e letra sao as da fundacao desde #719. */
 .ol-janela {
   font-family: var(--fonte-texto); color: var(--cor-tinta);
-  background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: var(--raio-controle); box-shadow: 0 2px 4px color-mix(in srgb, var(--cor-tinta) 8%, transparent);
+  background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: var(--raio-controle); box-shadow: var(--sombra-painel);
   font-size: var(--texto-meta); }
 .ol-topo { display: flex; align-items: center; gap: 16px; padding: 12px 12px 8px; }
 .ol-enviar { display: inline-flex; align-items: center; gap: 6px; background: var(--cor-tinta); color: var(--cor-papel); border: 0;
@@ -1322,7 +1322,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-cco { border: 0; background: none; color: var(--cor-tinta); font: inherit; cursor: pointer; padding: 4px 6px; border-radius: var(--raio-controle); }
 .ol-cco:hover { background: var(--cor-papel-sombreado); }
 .ol-sugestoes { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; width: 300px; margin: 0; padding: 4px 0;
-  list-style: none; background: var(--cor-superficie); border-radius: var(--raio-controle); box-shadow: 0 8px 16px color-mix(in srgb, var(--cor-tinta) 14%, transparent), 0 0 2px color-mix(in srgb, var(--cor-tinta) 12%, transparent); }
+  list-style: none; background: var(--cor-superficie); border-radius: var(--raio-controle); box-shadow: var(--sombra-painel); }
 .ol-sugestao { display: flex; align-items: center; gap: 10px; padding: 6px 10px; cursor: pointer; }
 .ol-sugestao--ativa { background: var(--cor-papel-sombreado); outline: 2px solid var(--cor-tinta); outline-offset: -2px; border-radius: var(--raio-controle); }
 .ol-sugestao__texto { display: grid; }
@@ -1364,7 +1364,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
   border-bottom: 1px solid var(--cor-linha); }
 .ol-barra--flutuante { position: absolute; z-index: 20; transform: translateY(calc(-100% - 6px)); margin: 0; padding: 4px;
   max-width: 100%; box-sizing: border-box;
-  background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); box-shadow: 0 4px 14px color-mix(in srgb, var(--cor-tinta) 14%, transparent); }
+  background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); box-shadow: var(--sombra-painel); }
 .ol-formato { min-width: 30px; height: 30px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--raio-controle);
   background: transparent; color: var(--cor-tinta); font: var(--texto-meta) var(--fonte-texto); cursor: pointer;
   display: inline-grid; place-items: center; }
@@ -1375,7 +1375,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 .ol-formato__realce { background: #FFFF00; padding: 0 2px; line-height: 1.2; }
 .ol-paleta { position: relative; display: inline-block; }
 .ol-paleta__cores { position: absolute; z-index: 21; top: calc(100% + 4px); left: 0; display: flex; gap: 4px; padding: 6px;
-  background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); box-shadow: 0 4px 14px color-mix(in srgb, var(--cor-tinta) 14%, transparent); }
+  background: var(--cor-superficie); border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); box-shadow: var(--sombra-painel); }
 .ol-cor { width: 22px; height: 22px; padding: 0; border: 1px solid var(--cor-borda-controle); border-radius: var(--raio-controle); background: var(--cor-superficie);
   cursor: pointer; font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
 .ol-cor:focus-visible { outline: 2px solid var(--cor-foco); outline-offset: 1px; }
@@ -1384,7 +1384,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
   padding: 8px 10px; max-width: 60ch; }
 .ol-modal-fundo { position: fixed; inset: 0; z-index: 100; background: var(--cor-veu); display: grid; place-items: center; }
 .ol-modal { width: min(1100px, 94vw); height: min(640px, 88vh); display: grid; grid-template-rows: auto 1fr auto;
-  background: var(--cor-superficie); border-radius: var(--raio-controle); box-shadow: 0 25px 60px color-mix(in srgb, var(--cor-tinta) 30%, transparent); font-family: var(--fonte-texto);
+  background: var(--cor-superficie); border-radius: var(--raio-controle); box-shadow: var(--sombra-painel); font-family: var(--fonte-texto);
   color: var(--cor-tinta); font-size: var(--texto-meta); overflow: hidden; }
 .ol-modal__cabeca { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px;
   background: var(--cor-papel-sombreado); font-size: var(--texto-titulo-sub); }
