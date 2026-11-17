@@ -25,18 +25,24 @@ type Numeros = {
   medido_centavos: number; aprovado_centavos: number; protocolado_centavos: number; recebido_centavos: number | null;
   em_aberto_centavos: number | null;
 };
-/** As duas partes que somam o em aberto do ano: (a) notas e (b) medicoes sem nota ligada. */
-type DoAno = Numeros & { meses: number; em_aberto_notas_centavos: number | null; sem_nota_centavos: number | null };
-type NotaLinha = { nota_id: number; numero: string; valor_centavos: number; recebida: boolean | null; paga_em_parte: boolean | null };
+/** As tres partes que somam o em aberto do ano: (a) notas que o orgao nao pagou, (a') repasse sem baixa (o orgao ja'
+ *  pagou o consorcio e a nota da empresa segue sem baixa) e (b) medicoes sem nota ligada. */
+type DoAno = Numeros & { meses: number; em_aberto_notas_centavos: number | null; em_aberto_repasse_centavos: number | null;
+  sem_nota_centavos: number | null };
+type NotaLinha = { nota_id: number; numero: string; valor_centavos: number; recebida: boolean | null; paga_em_parte: boolean | null;
+  aguarda_repasse?: boolean | null };
+/** Em consorcio com a nota da propria empresa ligada, a fatura do consorcio ligada a' mesma medicao: sem valor, nao soma. */
+type NotaFora = { nota_id: number; numero: string };
 type MedicaoLinha = Numeros & {
   medicao_id: number; contrato_id: number; obra: string; numero: number; tipo: string; estado: string;
-  competencia: string; protocolo_em: string | null; notas: NotaLinha[]; sem_nota?: boolean;
+  competencia: string; protocolo_em: string | null; notas: NotaLinha[]; notas_fora_da_conta?: NotaFora[]; sem_nota?: boolean;
 };
 type ObraLinha = Numeros & { contrato_id: number; obra: string; medicoes: MedicaoLinha[] };
 type Mes = Numeros & { competencia: string; obras: ObraLinha[] };
-/** (a) nota protocolada nao paga (a paga em parte, pelo que falta) ou (b) medicao protocolada sem nota ligada. */
+/** (a) nota protocolada nao paga (a paga em parte, pelo que falta), (a') nota da empresa ao consorcio sem baixa em
+ *  medicao que o orgao ja' pagou, ou (b) medicao protocolada sem nota ligada. */
 type EmAberto = {
-  tipo_aberto: "nota" | "sem_nota"; nota_id: number | null; numero: string | null; contrato_id: number; obra: string;
+  tipo_aberto: "nota" | "repasse" | "sem_nota"; nota_id: number | null; numero: string | null; contrato_id: number; obra: string;
   medicao_id: number; medicao_numero: number; tipo: string; competencia: string; protocolo_em: string | null;
   valor_centavos: number; paga_em_parte: boolean;
 };
@@ -46,12 +52,20 @@ type NotaSolta = { nota_id: number; numero: string; contrato_id: number; obra: s
 type Contagem = { quantidade: number; valor_centavos: number | null };
 type Cobertura = { aprovado_centavos: number; com_nota_centavos: number; sem_nota_centavos: number; medicoes_sem_nota: number;
   percentual: number | null };
+/** Medicao de consorcio cujas notas da empresa ligadas nao somam a cota dela (diferenca = notas - cota). */
+type NotaDifere = { contrato_id: number; obra: string; medicao_id: number; medicao_numero: number; tipo: string;
+  competencia: string; notas_centavos: number; cota_centavos: number; diferenca_centavos: number };
+/** A execucao ou o reajuste que ainda conta pela fatura do consorcio enquanto a outra metade do par (`par_*`) ja'
+ *  conta pela nota da empresa: a mesma cobranca pode estar somada duas vezes. */
+type ParMisto = { contrato_id: number; obra: string; medicao_id: number; medicao_numero: number; tipo: string;
+  competencia: string; par_medicao_id: number; par_tipo: string };
 export type RespostaFechamento = {
   anos: string[]; meses: Mes[]; por_ano: Record<string, DoAno>;
   acumulado: { ate_mes: string | null } & Record<string, Numeros | string | null>;
   em_aberto: EmAberto[]; em_aberto_anteriores: Contagem;
   notas_sem_medicao: { em_aberto: NotaSolta[]; em_aberto_centavos: number | null; pagas: Contagem };
-  cobertura: Record<string, Cobertura>; total_a_receber_liberado: boolean;
+  cobertura: Record<string, Cobertura>; notas_diferem?: NotaDifere[]; pares_mistos?: ParMisto[];
+  total_a_receber_liberado: boolean;
 };
 
 // `curta`: a coluna que fica no celular (a 390 px a tabela mostra o medido e o recebido de cada mes)
@@ -102,18 +116,28 @@ function Celulas({ x }: { x: Numeros }) {
   );
 }
 
-/** As notas da medicao, cada uma com a situacao: recebida, paga em parte ou em aberto (sem selo com a trava). */
+/** As notas da medicao, cada uma com a situacao: recebida, paga em parte, repasse sem baixa (o orgao ja' pagou o
+ *  consorcio e a nota da empresa segue aberta) ou em aberto (sem selo com a trava). Em
+ *  consorcio, com a nota da propria empresa ligada, a fatura do consorcio da mesma medicao vem depois, dita em texto:
+ *  nao entra no protocolado, no recebido nem no em aberto (o servidor nao manda valor para ela). */
 function Notas({ m }: { m: MedicaoLinha }) {
   if (m.sem_nota) return <ul className="fch-notas"><li><Selo>sem nota ligada</Selo></li></ul>;
-  if (m.notas.length === 0) return null;
+  const fora = m.notas_fora_da_conta ?? [];
+  if (m.notas.length === 0 && fora.length === 0) return null;
   return (
     <ul className="fch-notas">
       {m.notas.map(n => (
         <li key={n.nota_id}>
           <span className="num">Nota {n.numero}</span>
           {n.recebida !== null && (
-            <Selo situacao={n.recebida ? "feito" : "andamento"}>{n.recebida ? "recebida" : n.paga_em_parte ? "paga em parte" : "em aberto"}</Selo>
+            <Selo situacao={n.recebida ? "feito" : "andamento"}>{n.recebida ? "recebida" : n.paga_em_parte ? "paga em parte" : n.aguarda_repasse ? "repasse sem baixa" : "em aberto"}</Selo>
           )}
+        </li>
+      ))}
+      {fora.map(n => (
+        <li key={`fora-${n.nota_id}`}>
+          <span className="num">Nota {n.numero}</span>
+          <span>fatura do consórcio, não entra na conta</span>
         </li>
       ))}
     </ul>
@@ -300,12 +324,14 @@ function NumeroDaNota({ numero, emParte }: { numero: string; emParte: boolean })
   );
 }
 
-/** O em aberto do ano escolhido, em duas partes que somam o total do ano (o mesmo numero do alto e do "Total de <ano>"
- *  da tabela do mes): (a) nota protocolada nao paga e (b) medicao protocolada sem nota ligada. A' parte, sem depender
+/** O em aberto do ano escolhido, em tres partes que somam o total do ano (o mesmo numero do alto e do "Total de <ano>"
+ *  da tabela do mes): (a) nota protocolada nao paga, (a') nota da empresa sem baixa em medicao de consorcio que o orgao
+ *  ja' pagou (quem deve e' o consorcio) e (b) medicao protocolada sem nota ligada. A' parte, sem depender
  *  do ano: (c) nota em aberto no RM sem medicao ligada (sem competencia) e o em aberto de antes do primeiro ano. */
 function EmAbertoPainel({ f, ano, ir }: { f: RespostaFechamento; ano: string; ir: Ir }) {
   const doAno = f.em_aberto.filter(e => e.competencia.startsWith(`${ano}-`));
   const notas = doAno.filter(e => e.tipo_aberto === "nota");
+  const repasses = doAno.filter(e => e.tipo_aberto === "repasse");
   const semNota = doAno.filter(e => e.tipo_aberto === "sem_nota");
   const t = f.por_ano[ano];
   const soltas = f.notas_sem_medicao.em_aberto;
@@ -321,7 +347,7 @@ function EmAbertoPainel({ f, ano, ir }: { f: RespostaFechamento; ano: string; ir
       {n === 0 ? <p className="fch-vazio">Nada em aberto em {ano}.</p> : (
         <Rolagem rotulo={`Em aberto de ${ano}`} className="tabela-wrap fch-rolagem">
           <table className="tabela fch-tabela fch-tabela--aberto">
-            <caption className="sr-only">Em aberto de {ano}, na cota da Lotufo: notas protocoladas não pagas e medições protocoladas sem nota ligada, pela data do protocolo</caption>
+            <caption className="sr-only">Em aberto de {ano}, na cota da Lotufo, pela data do protocolo: notas protocoladas não pagas, notas da empresa de medições que o órgão já pagou ao consórcio e seguem sem baixa do repasse no RM, e medições protocoladas sem nota ligada</caption>
             <thead>
               <tr>
                 <th scope="col" className="fch-primeira">Protocolo</th><th scope="col">Obra</th><th scope="col">Medição</th>
@@ -333,6 +359,13 @@ function EmAbertoPainel({ f, ano, ir }: { f: RespostaFechamento; ano: string; ir
                 <tr className="fch-grupo"><th scope="rowgroup" colSpan={4}>Nota protocolada não paga</th>
                   <td className="col-num dinheiro num">{valor(t.em_aberto_notas_centavos)}</td></tr>
                 {notas.map(e => <LinhaEmAberto key={`n-${e.nota_id}-${e.medicao_id}`} e={e} ir={ir} />)}
+              </tbody>
+            )}
+            {repasses.length > 0 && (
+              <tbody>
+                <tr className="fch-grupo"><th scope="rowgroup" colSpan={4}>Órgão pagou o consórcio, repasse sem baixa no RM</th>
+                  <td className="col-num dinheiro num">{valor(t.em_aberto_repasse_centavos)}</td></tr>
+                {repasses.map(e => <LinhaEmAberto key={`r-${e.nota_id}-${e.medicao_id}`} e={e} ir={ir} />)}
               </tbody>
             )}
             {semNota.length > 0 && (
@@ -414,6 +447,47 @@ function AvisoCobertura({ f, ano }: { f: RespostaFechamento; ano: string }) {
   );
 }
 
+/** Aviso de divergencia (so' quando existe): em consorcio, as notas da empresa ligadas a' medicao nao somam a cota
+ *  dela. A cobertura do vinculo nao pega (ha' nota ligada); cada medicao vai com o link e a diferenca. */
+function AvisoNotasDiferem({ f, ano, ir }: { f: RespostaFechamento; ano: string; ir: Ir }) {
+  const xs = (f.notas_diferem ?? []).filter(e => e.competencia.startsWith(`${ano}-`));
+  if (xs.length === 0) return null;
+  return (
+    <CaixaAviso nivel="atencao" role="status" className="fch-aviso">
+      Em {ano}, a nota da empresa ao consórcio difere da cota da medição:{" "}
+      {xs.map((e, i) => (
+        <Fragment key={e.medicao_id}>
+          {i > 0 && "; "}
+          <Link className="link" para={{ tela: "medicao", obra: e.contrato_id, id: e.medicao_id }} ir={ir}>
+            {e.obra}, {tituloMedicao({ numero: e.medicao_numero, tipo: e.tipo })}
+          </Link>
+          {" "}(<span className="num">{brl(Math.abs(e.diferenca_centavos))}</span> a {e.diferenca_centavos > 0 ? "mais" : "menos"})
+        </Fragment>
+      ))}.
+    </CaixaAviso>
+  );
+}
+
+/** Aviso de divergencia (so' quando existe): a execucao e o reajuste de mesmo numero contando por notas diferentes.
+ *  A fatura do consorcio cobre as duas; a medicao listada ainda conta por ela, e a outra ja' pela nota da empresa. */
+function AvisoParesMistos({ f, ano, ir }: { f: RespostaFechamento; ano: string; ir: Ir }) {
+  const xs = (f.pares_mistos ?? []).filter(e => e.competencia.startsWith(`${ano}-`));
+  if (xs.length === 0) return null;
+  return (
+    <CaixaAviso nivel="atencao" role="status" className="fch-aviso">
+      Em {ano}, falta ligar a nota da empresa ao consórcio, e a cobrança pode estar somada duas vezes:{" "}
+      {xs.map((e, i) => (
+        <Fragment key={e.medicao_id}>
+          {i > 0 && "; "}
+          <Link className="link" para={{ tela: "medicao", obra: e.contrato_id, id: e.medicao_id }} ir={ir}>
+            {e.obra}, {tituloMedicao({ numero: e.medicao_numero, tipo: e.tipo })}
+          </Link>
+        </Fragment>
+      ))}.
+    </CaixaAviso>
+  );
+}
+
 /* ------------------------------------------------------------------ pagina */
 
 export default function Fechamento({ ir }: { ir: Ir }) {
@@ -447,6 +521,8 @@ export default function Fechamento({ ir }: { ir: Ir }) {
         </CaixaAviso>
       )}
       <AvisoCobertura f={f} ano={atual} />
+      <AvisoNotasDiferem f={f} ano={atual} ir={ir} />
+      <AvisoParesMistos f={f} ano={atual} ir={ir} />
       <section className="cartao fch-painel" aria-labelledby="fch-meses">
         <div className="fch-painel__cab"><h2 id="fch-meses">Por mês de competência</h2></div>
         <TabelaDoAno key={atual} f={f} ano={atual} ir={ir} />

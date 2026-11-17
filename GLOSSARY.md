@@ -161,6 +161,21 @@ com elas.
 A ligação entre uma nota e a medição que ela fatura.
 _Avoid_: casamento, alocação (são nomes internos)
 
+**Fatura do consórcio**:
+A nota que o consórcio cobra do órgão por uma medição, lançada na coligada do consórcio no RM. Entra nas contas pelo
+valor cheio vezes a cota.
+_Avoid_: FRC (é a página que soma as notas das consorciadas)
+
+**Nota da empresa ao consórcio**:
+A nota que a construtora emite ao consórcio pela sua cota de uma medição. O valor de face dela já é a cota. Ligada à
+medição, é dela que saem o protocolado e o recebido da cota no Fechamento: pelo valor de face, sem multiplicar pelo
+percentual, e pela baixa dos títulos dela; a fatura do consórcio ligada à mesma medição não entra na conta. Sem ela,
+vale a fatura do consórcio vezes a cota. Nunca as duas na mesma medição. O recebido dela é só o que foi baixado nos
+títulos dela no RM, mesmo com a medição recebida: a medição vira recebida quando o órgão paga o consórcio, e a cota
+só entrou quando o consórcio repassou (`docs/adr/0006`). O que falta dela numa medição recebida é repasse sem baixa:
+quem deve é o consórcio, não o órgão.
+_Avoid_: NFS-e da consorciada (quando a nota é a da própria construtora)
+
 **Baixa**:
 O registro no RM de que um título foi pago. A data da baixa é o dia do pagamento.
 
