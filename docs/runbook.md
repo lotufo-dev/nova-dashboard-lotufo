@@ -994,8 +994,12 @@ ainda em aberto não cria outro pedido, mas dispara de novo.
    ("comecei"): o servidor responde `rodada_id`, `tipo` e `processos` (o mesmo formato de `GET /api/siga/processos`).
    A rodada é completa (todos os processos vivos) com pedido "todos" em aberto ou quando a última rodada completa
    terminada começou há 59 minutos ou mais (`tipo: automatica` quando é completa por tempo, no máximo uma por hora;
-   `pedido` nos demais casos); senão, só os processos pedidos. Fora do horário, o robô manda `{"so_pedidos": true}` (issue
-   #347): o servidor não abre rodada completa por tempo e só atende os pedidos em aberto, que valem a qualquer hora.
+   `pedido` nos demais casos); senão, só os processos pedidos e os novos. Processo novo é o que ainda não tem
+   leitura e nenhuma rodada chamou: entra sozinho na pergunta seguinte do robô, uma vez, sem depender de
+   `DASH_SIGA_TAREFA`; se o robô não conseguir ler, ele segue na rodada da hora. O tempo até a leitura é o intervalo
+   da tarefa agendada do robô. Fora do horário, o robô manda `{"so_pedidos": true}` (issue
+   #347): o servidor não abre rodada completa por tempo e só atende os pedidos em aberto e os processos novos, que
+   valem a qualquer hora.
    `rodada_id: null` quer dizer nada a ler. As leituras continuam
    por `POST /api/siga/leituras`. No fim, `POST /api/siga/rodadas/<id>/fim` com
    `{"nao_lidos": [{"codigo" ou "numero", "motivo"}]}` ("terminei"); se cair, `POST /api/siga/rodadas/<id>/falha` com
