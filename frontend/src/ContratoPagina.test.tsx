@@ -235,7 +235,7 @@ describe("Página da obra: o desenho novo", () => {
     responderCompleto();
     const base = api.getMockImplementation()!;
     api.mockImplementation(async (url: string, o?: { method?: string }) =>
-      url.endsWith("/cabecalho") ? { ...CABECALHO_COMPLETO, vigencia_inicio: null } : base(url, o));
+      url.endsWith("/cabecalho") ? { ...CABECALHO_COMPLETO, vigencia_inicio: null, nivel_execucao: "critico", nivel_vigencia: "critico" } : base(url, o));
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
     const cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
     expect(within(cartao).getAllByText("vencida")).toHaveLength(2);
@@ -263,6 +263,21 @@ describe("Página da obra: o desenho novo", () => {
     expect(within(cartao).getByText("paralisada")).toBeTruthy();
     expect(within(cartao).queryByText("obra paralisada: o vencimento não conta")).toBeNull();
     expect(within(cartao).queryByText("vencida")).toBeNull();
+  });
+
+  it("o selo das linhas do tempo é o nível que o servidor manda: a tela não decide pelos dias nem pelo status", async () => {
+    fixarDia("2027-01-05T15:00:00Z");     // execucao vencida (31/12/2026), vigencia a 26 dias
+    // obra ativa vencida, mas o servidor diz que nao ha' prazo a cobrar: nenhum selo
+    responderCom({ status: "ativo", nivel_execucao: "normal", nivel_vigencia: "normal" });
+    const { unmount } = render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    let cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
+    expect(within(cartao).queryByText(/vencida|vence em/)).toBeNull();
+    unmount();
+    responderCom({ status: "ativo", nivel_execucao: "critico", nivel_vigencia: "atencao" });
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
+    expect(within(cartao).getByText("vencida").closest(".selo--critico")).not.toBeNull();
+    expect(within(cartao).getByText("vence em 26 dias").closest(".selo--breve")).not.toBeNull();
   });
 
   it("contrato encerrado ou rescindido não leva selo de vencida nem frase no lugar dos dias", async () => {

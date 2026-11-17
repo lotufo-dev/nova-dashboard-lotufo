@@ -204,6 +204,11 @@ def _pecas(conn, protocolo_id: int) -> list[dict]:
         "SELECT * FROM protocolo_pecas WHERE protocolo_id=? AND removida_em IS NULL ORDER BY id", (protocolo_id,))]
 
 
+# O anexo gravado no banco que nao esta' mais na pasta de dados: a previa e o envio recusam com esta frase (409), em
+# vez de 500. No envio, a leitura dos anexos vem antes da reserva e, de novo, antes do e-mail: nada sai nem e' gravado.
+ARQUIVO_AUSENTE = "Um arquivo deste envio não está mais disponível no servidor."
+
+
 def _bytes(rel: str) -> bytes:
     return arquivos.caminho_seguro(rel).read_bytes()
 

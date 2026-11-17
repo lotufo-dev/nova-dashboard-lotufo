@@ -167,6 +167,16 @@ describe("Passo Pagamento (#514)", () => {
     expect(props.aoReceber).toHaveBeenCalledWith(MEDICAO);
   });
 
+  it("par de medição e reajuste: um botão de recebimento para cada, dizendo de qual; nunca dois iguais", () => {
+    const reajuste = com({ id: 6, tipo: "reajuste" });
+    const props = montar({ grupo: [MEDICAO, reajuste], junta: true });
+    expect(screen.queryByRole("button", { name: "Registrar recebimento" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Registrar recebimento do reajuste" }));
+    expect(props.aoReceber).toHaveBeenCalledWith(reajuste);
+    fireEvent.click(screen.getByRole("button", { name: "Registrar recebimento da medição" }));
+    expect(props.aoReceber).toHaveBeenLastCalledWith(MEDICAO);
+  });
+
   it("a engenharia não vê o botão de recebimento (sem botão no passo)", () => {
     montar({ usuario: { ...admin, perfil: "engenharia" } });
     expect(screen.queryByRole("button")).toBeNull();

@@ -630,7 +630,7 @@ describe("Envio da nota: a página montada pelo dono (#722)", () => {
   it("bloqueio por FRC recusada, com uma certidão que só falta: a faixa não fala em certidão e a FRC sai no crítico", async () => {
     // a certidao nunca cadastrada aparece `pendente` no checklist e `falta` no envio: nao trava. Quem trava e' a FRC
     // assinada recusada, que o servidor marca com `bloqueia` (estado `falta`)
-    api.mockResolvedValue({ itens: [certidao(1, "Construtora Alfa Ltda", "Federal", "ok"), certidao(4, "Construtora Beta S.A.", "Trabalhista", "pendente", null)] });
+    api.mockResolvedValue({ itens: [certidao(1, "Construtora Alfa Ltda", "Federal", "ok"), { ...certidao(4, "Construtora Beta S.A.", "Trabalhista", "pendente", null), nunca_cadastrada: true }] });
     montar([envio({ situacao: "bloqueado", aviso: "FRC assinada não é a da FRC vigente · Beta: Trabalhista sem certidão",
       itens: [{ chave: "notas", rotulo: "Nota fiscal (1)", estado: "ok" },
         { chave: "frc:631", rotulo: "FRC assinada", detalhe: "FRC assinada não é a da FRC vigente", estado: "falta", acao: "anexar_frc", bloqueia: true },
@@ -651,7 +651,13 @@ describe("Envio da nota: a página montada pelo dono (#722)", () => {
     expect(within(notas).getByText("Notas das consorciadas").closest("li")!.querySelector(".glifo--feito")).not.toBeNull();
     // a certidao que so' falta pede atencao, e a frase com o link fica sob a lista, onde ja' ficava
     expect(within(cert).getByText("1 de 2").closest(".contador")!.className).toBe("contador contador--breve");
-    expect(cert.querySelector(".certidoes__nota")!.textContent).toBe("Certidão vencida: emita a nova em Documentos.");
+    // nunca cadastrada nao e' vencida: sinal de atencao, "não cadastrada" e a frase dela, sem "Certidão vencida"
+    const trabalhista = within(cert).getByText("Trabalhista").closest("li")!;
+    expect(trabalhista.querySelector(".glifo--breve")).not.toBeNull();
+    expect(trabalhista.querySelector(".glifo--critico")).toBeNull();
+    expect(within(trabalhista).getByText("não cadastrada").className).toBe("");
+    expect(cert.querySelector(".certidoes__nota")!.textContent).toBe("Certidão não cadastrada: anexe em Documentos.");
+    expect(within(cert).queryByText(/Certidão vencida|sem validade hoje/)).toBeNull();
     // o motivo inteiro do servidor na trava abaixo da linha, com o botao desligado
     const [linha, trava] = screen.getAllByRole("row").slice(1);
     expect(within(trava).getByText("Envio bloqueado: FRC assinada não é a da FRC vigente · Beta: Trabalhista sem certidão")).toBeTruthy();
