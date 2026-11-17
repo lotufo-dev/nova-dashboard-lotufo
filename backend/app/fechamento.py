@@ -27,8 +27,10 @@ parcela; os totais sao somas dessas parcelas, entao fecham ao centavo com as lin
   Nunca as duas na mesma medicao: contaria a cobranca duas vezes. A nota ligada a mais de uma medicao entra em cada
   uma pelo valor do vinculo (`valor_alocado_centavos`); ligada a uma so', pelo valor atual da nota.
 - Recebido: `_recebimento`, a UNICA definicao (bruto por competencia: das notas do protocolado, as pagas, pelo mesmo
-  valor bruto; da nota paga em parte, o valor bruto menos o que falta nos titulos do RM). Vale igual para a nota da
-  empresa ao consorcio: pela baixa dos titulos dela, e a falta tambem sem aplicar a cota.
+  valor bruto; da nota paga em parte, o valor bruto menos o que falta nos titulos do RM). A medicao recebida leva as
+  notas dela inteiras ao recebido, MENOS a nota da empresa ao consorcio (decisao do dono de 17/11/2026, "pela baixa
+  do titulo"): essa so' entra no recebido pelo que foi baixado nos titulos DELA no RM, e a falta nao leva a cota. A
+  medicao de consorcio vira recebida quando o orgao paga o consorcio; a cota so' entrou quando o consorcio repassou.
 - Em aberto (a receber), em tres partes que a tela diz uma a uma:
   a) nota protocolada e nao paga, nota a nota, com a data do protocolo. A nota paga em parte (alguma baixa com valor
      no RM e falta acima da tolerancia) entra pelo que falta nos titulos, marcada "paga em parte";
@@ -44,6 +46,9 @@ parcela; os totais sao somas dessas parcelas, entao fecham ao centavo com as lin
   do servidor, nem o recebido, que o deixaria deduzir (`_esconder_a_receber`).
 - Cobertura do vinculo, por ano: quanto do aprovado das medicoes com nota emitida (ou alem) tem nota ligada que
   conta (`_notas_da_conta`; em consorcio, a nota da empresa ou a fatura do consorcio).
+- Nota da empresa diferente da cota (`notas_diferem`): a cobertura so' diz se ha' nota ligada, nao se o valor fecha.
+  Em consorcio, as notas da empresa ligadas a' medicao deveriam somar a cota dela; quando a diferenca passa de
+  `diretoria.TOLERANCIA_CENTAVOS`, a medicao sai nessa lista, com os dois valores. So' avisa: nenhum numero muda.
 
 So' aparece o que tem lancamento: mes sem medicao nao vira linha, e nada e' estimado. O em aberto de competencias
 anteriores a 2025 fica contado a' parte.
@@ -87,18 +92,20 @@ def _aprovado(m: dict) -> int | None:
 
 def _notas_da_conta(m: dict, ligadas: list[dict]) -> tuple[list[dict], list[dict]]:
     """A UNICA definicao de quais notas ligadas a' medicao entram no protocolado, no recebido, no em aberto e na
-    cobertura, e com que percentual: (as que contam, cada uma com `pct`; as que ficam fora da conta).
+    cobertura, e com que percentual: (as que contam, cada uma com `pct` e `pela_baixa`; as que ficam fora da conta).
     Em medicao de contrato de consorcio com a nota da PROPRIA empresa ao consorcio ligada (decisao do dono de
     17/11/2026, issue #756), contam so' as da empresa, pelo valor de face (`pct` nulo = integral: a nota ja' e' a
     cota), e a fatura do consorcio ligada a' mesma medicao fica fora. Sem ela, e em obra propria, contam as notas da
     coligada da entidade do contrato, pelo percentual do contrato. Nunca as duas na mesma medicao. Nota de qualquer
-    outra coligada (a NFS-e de outra consorciada) nao conta nem aparece."""
+    outra coligada (a NFS-e de outra consorciada) nao conta nem aparece.
+    `pela_baixa` marca a nota da empresa ao consorcio: o recebido dela vem so' da baixa dos titulos dela
+    (`_recebimento`), nao do estado da medicao."""
     do_contrato = [x for x in ligadas if x["coligada"] == m["coligada"]]
     empresa = m["coligada_empresa"]
     da_empresa = [x for x in ligadas if x["coligada"] == empresa] if m["consorcio"] and empresa != m["coligada"] else []
     if da_empresa:
-        return [{**x, "pct": None} for x in da_empresa], do_contrato
-    return [{**x, "pct": m["pct"]} for x in do_contrato], []
+        return [{**x, "pct": None, "pela_baixa": True} for x in da_empresa], do_contrato
+    return [{**x, "pct": m["pct"], "pela_baixa": False} for x in do_contrato], []
 
 
 def _recebimento(m: dict, nota: dict, valor_cota: int) -> tuple[int, int]:
@@ -106,13 +113,18 @@ def _recebimento(m: dict, nota: dict, valor_cota: int) -> tuple[int, int]:
     o valor bruto da nota (o mesmo do protocolado), no mes da competencia da medicao. "Bruto por competencia":
     - a nota da medicao recebida (baixa no RM ou registro do administrador, docs/adr/0006) e a nota com os titulos
       baixados no RM, faltando ate' `diretoria.TOLERANCIA_CENTAVOS`, entram inteiras no recebido;
+    - a nota da empresa ao consorcio (`pela_baixa`, de `_notas_da_conta`) e' a excecao a' primeira parte (decisao do
+      dono de 17/11/2026): o estado da medicao nao a leva ao recebido. A medicao de consorcio vira recebida quando o
+      orgao paga a fatura do consorcio (`sincronizacao_rm._recebimentos` so' olha a coligada do contrato), e a cota
+      da empresa so' entrou quando o consorcio repassou, que e' a baixa dos titulos da nota dela. Vale para ela so' o
+      que os titulos dizem, como nas linhas abaixo; sem titulo no RM, fica inteira em aberto;
     - a nota paga em parte (alguma baixa com valor e falta acima da tolerancia, `_no_rm`) fica em aberto pelo que
       falta nos titulos do RM, na cota (pelo percentual da nota, `_notas_da_conta`: a falta da nota da empresa ao
       consorcio ja' e' a cota), limitado ao valor da nota; o recebido e' o valor bruto menos essa falta;
     - a nota sem nenhuma baixa com valor fica inteira em aberto, pelo bruto. Titulo baixado sem valor (glosa,
       compensacao) nao e' recebimento.
     Trocar para outra base (o liquido baixado, pelo mes do pagamento) e' trocar esta funcao e o mes em `_fechamento`."""
-    if m["estado"] == "recebida" or nota["no_rm"] == "paga":
+    if nota["no_rm"] == "paga" or (m["estado"] == "recebida" and not nota["pela_baixa"]):
         return valor_cota, 0
     aberto = _falta_na_cota(nota["falta"], nota["pct"], valor_cota) if nota["no_rm"] == "parte" else valor_cota
     return valor_cota - aberto, aberto
@@ -172,7 +184,8 @@ def _notas_por_medicao(conn, ids: set[int]) -> dict[int, list[dict]]:
 
 
 def _no_rm(conn, nota_id: int) -> tuple[str, int]:
-    """A nota nos titulos (nao cancelados) do RM: ("paga", 0), ("parte", o que falta, em valor cheio) ou ("aberta", 0).
+    """A nota nos titulos (nao cancelados) do RM: ("paga", 0), ("parte", o que falta) ou ("aberta", 0). A falta vem
+    na base da propria nota: valor cheio na fatura do consorcio, ja' a cota na nota da empresa ao consorcio.
     Sem nenhuma baixa COM VALOR, aberta (sem titulo, titulo sem baixa ou baixado sem valor: glosa e compensacao nao
     sao recebimento). Com alguma, conta o que falta titulo a titulo (`sincronizacao_rm._falta_por_titulo`; o titulo
     sem baixa com valor entra inteiro, e juros num titulo nao cobrem outro): ate' `diretoria.TOLERANCIA_CENTAVOS`,
@@ -190,7 +203,25 @@ def _numero_nota(numero) -> str:
     return str(int(s)) if s.isdigit() else s
 
 
-def _linha_medicao(m: dict, notas: list[dict]) -> dict:
+def _difere_da_cota(conn, m: dict, ligadas: list[dict]) -> dict | None:
+    """Em consorcio, as notas da propria empresa que contam na medicao (`_notas_da_conta`) deveriam somar a cota dela.
+    Devolve a soma das notas, a cota e a diferenca (notas - cota) quando ela passa de `diretoria.TOLERANCIA_CENTAVOS`
+    (a cota arredonda meio para cima; a nota pode ter arredondado para o outro lado); senao, nada. Vale da nota
+    emitida em diante, a mesma base da cobertura do vinculo. A cota e' a do valor que a nota cobre
+    (`medicoes.valor_do_par`, issue #589: a execucao que absorveu reajuste negativo e' faturada pelo liquido do par)."""
+    if m["estado"] not in ESTADOS_COM_NOTA or not any(x["pela_baixa"] for x in ligadas):
+        return None
+    valor = medicoes.valor_do_par(conn, m["id"], _aprovado(m))
+    if valor is None:
+        return None
+    cota = contratos.cota(valor, m["pct"]) or 0
+    soma = sum(contratos.cota(x["valor"], x["pct"]) or 0 for x in ligadas)
+    if abs(soma - cota) <= diretoria.TOLERANCIA_CENTAVOS:
+        return None
+    return {"notas_centavos": soma, "cota_centavos": cota, "diferenca_centavos": soma - cota}
+
+
+def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
     cota = lambda v: contratos.cota(v, m["pct"]) or 0
     valor = m["aprovado"] if m["aprovado"] is not None else m["pedido"]
     aprovado = _aprovado(m)
@@ -222,7 +253,9 @@ def _linha_medicao(m: dict, notas: list[dict]) -> dict:
             "notas_fora_da_conta": saida_fora, "sem_nota": sem_nota,
             # cobertura do vinculo: o aprovado das medicoes que ja' deveriam ter nota, e se alguma que conta esta' ligada
             "_base_cobertura": n["aprovado_centavos"] if m["estado"] in ESTADOS_COM_NOTA else 0,
-            "_coberta": bool(ligadas)}
+            "_coberta": bool(ligadas),
+            # em consorcio, as notas da empresa ligadas que nao somam a cota da medicao (`notas_diferem`)
+            "_difere": _difere_da_cota(conn, m, ligadas)}
 
 
 def _notas_sem_medicao(conn) -> dict:
@@ -274,14 +307,15 @@ def fechamento(conn) -> dict:
 def _fechamento(conn) -> dict:
     ms = _medicoes(conn)
     notas = _notas_por_medicao(conn, {m["id"] for m in ms})
-    linhas = [_linha_medicao(m, notas.get(m["id"], [])) for m in ms]
+    linhas = [_linha_medicao(conn, m, notas.get(m["id"], [])) for m in ms]
     cobertura = _cobertura(linhas)
 
     meses: dict[str, dict] = {}
     anteriores = {"quantidade": 0, "valor_centavos": 0}
-    em_aberto = []
+    em_aberto, diferem = [], []
     for x in linhas:
         x.pop("_base_cobertura"); x.pop("_coberta")
+        difere = x.pop("_difere")
         ano = x["competencia"][:4]
         abertas = [{"tipo_aberto": "nota", "nota_id": nt["nota_id"], "numero": nt["numero"],
                     "valor_centavos": nt["em_aberto_centavos"], "paga_em_parte": nt["paga_em_parte"]}
@@ -304,6 +338,9 @@ def _fechamento(conn) -> dict:
         em_aberto += [{**e, "contrato_id": x["contrato_id"], "obra": x["obra"], "medicao_id": x["medicao_id"],
                        "medicao_numero": x["numero"], "tipo": x["tipo"], "competencia": x["competencia"],
                        "protocolo_em": x["protocolo_em"]} for e in abertas]
+        if difere:
+            diferem.append({"contrato_id": x["contrato_id"], "obra": x["obra"], "medicao_id": x["medicao_id"],
+                            "medicao_numero": x["numero"], "tipo": x["tipo"], "competencia": x["competencia"], **difere})
 
     lista = []
     for comp in sorted(meses):
@@ -327,7 +364,7 @@ def _fechamento(conn) -> dict:
     # painel do ano escolhido). (c) e o em aberto de antes de 2025 ficam a' parte, de qualquer ano.
     saida = {"anos": list(ANOS), "meses": lista, "por_ano": por_ano, "acumulado": {"ate_mes": ate, **acumulado},
              "em_aberto": em_aberto, "em_aberto_anteriores": anteriores, "notas_sem_medicao": _notas_sem_medicao(conn),
-             "cobertura": cobertura, "total_a_receber_liberado": diretoria._liberado(conn)}
+             "cobertura": cobertura, "notas_diferem": diferem, "total_a_receber_liberado": diretoria._liberado(conn)}
     if not saida["total_a_receber_liberado"]:
         _esconder_a_receber(saida)
     return saida
@@ -337,7 +374,8 @@ def _esconder_a_receber(f: dict) -> None:
     """Sem o total a receber liberado no cadastro (a trava de `diretoria._liberado`, a da lista de Obras e do Inicio),
     o em aberto nao sai do servidor, nem o que deixa deduzi-lo: o recebido (protocolado - recebido e' o em aberto das
     notas), a marca de recebida de cada nota, a de medicao sem nota ligada e as listas do em aberto. Como no Inicio,
-    o bloco inteiro vem vazio, e a tela diz a trava em uma frase. Medido, aprovado e protocolado ficam."""
+    o bloco inteiro vem vazio, e a tela diz a trava em uma frase. Medido, aprovado e protocolado ficam, e o aviso
+    `notas_diferem` tambem (compara a nota com a medicao; nada do recebido)."""
     def nulo(x):
         for k in ESCONDIDOS:
             x[k] = None

@@ -42,7 +42,7 @@ def test_fechamento_so_leitura_e_401_sem_sessao_e_a_receber_saiu(client, monkeyp
     r = client.get("/api/fechamento")
     assert r.status_code == 200 and set(r.json()) == {"anos", "meses", "por_ano", "acumulado", "em_aberto",
                                                       "em_aberto_anteriores", "notas_sem_medicao", "cobertura",
-                                                      "total_a_receber_liberado"}
+                                                      "notas_diferem", "total_a_receber_liberado"}
     assert r.json()["anos"] == ["2025", "2026"] and r.json()["meses"] == []
     assert client.get("/api/a-receber").status_code == 404
     assert client.get("/api/diretoria/custo").status_code == 404

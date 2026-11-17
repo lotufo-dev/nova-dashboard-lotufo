@@ -48,12 +48,15 @@ type NotaSolta = { nota_id: number; numero: string; contrato_id: number; obra: s
 type Contagem = { quantidade: number; valor_centavos: number | null };
 type Cobertura = { aprovado_centavos: number; com_nota_centavos: number; sem_nota_centavos: number; medicoes_sem_nota: number;
   percentual: number | null };
+/** Medicao de consorcio cujas notas da empresa ligadas nao somam a cota dela (diferenca = notas - cota). */
+type NotaDifere = { contrato_id: number; obra: string; medicao_id: number; medicao_numero: number; tipo: string;
+  competencia: string; notas_centavos: number; cota_centavos: number; diferenca_centavos: number };
 export type RespostaFechamento = {
   anos: string[]; meses: Mes[]; por_ano: Record<string, DoAno>;
   acumulado: { ate_mes: string | null } & Record<string, Numeros | string | null>;
   em_aberto: EmAberto[]; em_aberto_anteriores: Contagem;
   notas_sem_medicao: { em_aberto: NotaSolta[]; em_aberto_centavos: number | null; pagas: Contagem };
-  cobertura: Record<string, Cobertura>; total_a_receber_liberado: boolean;
+  cobertura: Record<string, Cobertura>; notas_diferem?: NotaDifere[]; total_a_receber_liberado: boolean;
 };
 
 // `curta`: a coluna que fica no celular (a 390 px a tabela mostra o medido e o recebido de cada mes)
@@ -425,6 +428,27 @@ function AvisoCobertura({ f, ano }: { f: RespostaFechamento; ano: string }) {
   );
 }
 
+/** Aviso de divergencia (so' quando existe): em consorcio, as notas da empresa ligadas a' medicao nao somam a cota
+ *  dela. A cobertura do vinculo nao pega (ha' nota ligada); cada medicao vai com o link e a diferenca. */
+function AvisoNotasDiferem({ f, ano, ir }: { f: RespostaFechamento; ano: string; ir: Ir }) {
+  const xs = (f.notas_diferem ?? []).filter(e => e.competencia.startsWith(`${ano}-`));
+  if (xs.length === 0) return null;
+  return (
+    <CaixaAviso nivel="atencao" role="status" className="fch-aviso">
+      Em {ano}, a nota da empresa ao consórcio difere da cota da medição:{" "}
+      {xs.map((e, i) => (
+        <Fragment key={e.medicao_id}>
+          {i > 0 && "; "}
+          <Link className="link" para={{ tela: "medicao", obra: e.contrato_id, id: e.medicao_id }} ir={ir}>
+            {e.obra}, {tituloMedicao({ numero: e.medicao_numero, tipo: e.tipo })}
+          </Link>
+          {" "}(<span className="num">{brl(Math.abs(e.diferenca_centavos))}</span> a {e.diferenca_centavos > 0 ? "mais" : "menos"})
+        </Fragment>
+      ))}.
+    </CaixaAviso>
+  );
+}
+
 /* ------------------------------------------------------------------ pagina */
 
 export default function Fechamento({ ir }: { ir: Ir }) {
@@ -458,6 +482,7 @@ export default function Fechamento({ ir }: { ir: Ir }) {
         </CaixaAviso>
       )}
       <AvisoCobertura f={f} ano={atual} />
+      <AvisoNotasDiferem f={f} ano={atual} ir={ir} />
       <section className="cartao fch-painel" aria-labelledby="fch-meses">
         <div className="fch-painel__cab"><h2 id="fch-meses">Por mês de competência</h2></div>
         <TabelaDoAno key={atual} f={f} ano={atual} ir={ir} />

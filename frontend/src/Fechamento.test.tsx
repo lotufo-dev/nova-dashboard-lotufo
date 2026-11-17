@@ -43,6 +43,7 @@ const FECHAMENTO: RespostaFechamento = {
     "2025": { aprovado_centavos: 900_000, com_nota_centavos: 900_000, sem_nota_centavos: 0, medicoes_sem_nota: 0, percentual: 100 },
     "2026": { aprovado_centavos: 1_400_001, com_nota_centavos: 1_400_001, sem_nota_centavos: 0, medicoes_sem_nota: 0, percentual: 100 },
   },
+  notas_diferem: [],
   total_a_receber_liberado: true,
 };
 // as tres partes do em aberto: (a) nota nao paga, (b) medicao protocolada sem nota ligada e (c) nota solta, a' parte
@@ -228,6 +229,23 @@ describe("Fechamento (#748)", () => {
     expect(texto(aviso)).toContain("Em 2026, só R$ 14.000,01 (87,5%) dos R$ 16.000,01 aprovados com nota emitida têm nota ligada; 1 medição aparece sem protocolado nem recebido.");
     fireEvent.click(screen.getByRole("button", { name: "2025" }));
     expect(screen.queryByRole("status")).toBeNull();                    // 2025 com cobertura total: some
+  });
+
+  it("aviso da nota da empresa ao consórcio diferente da cota: só no ano em que existe, com o link e a diferença (#756)", async () => {
+    const difere = (id: number, numero: number, tipo: string, comp: string, notas: number, cota: number) => ({
+      contrato_id: 9, obra: "Obra Consórcio", medicao_id: id, medicao_numero: numero, tipo, competencia: comp,
+      notas_centavos: notas, cota_centavos: cota, diferenca_centavos: notas - cota });
+    api.mockResolvedValue({ ...FECHAMENTO, notas_diferem: [
+      difere(41, 5, "execucao", "2026-03", 700_001, 1_000_001), difere(42, 5, "reajuste", "2026-04", 300_102, 300_001)] });
+    const ir = vi.fn();
+    render(<Fechamento ir={ir} />);
+    const aviso = await screen.findByRole("status");
+    expect(texto(aviso)).toContain("Em 2026, a nota da empresa ao consórcio difere da cota da medição: "
+      + "Obra Consórcio, 5ª Medição (R$ 3.000,00 a menos); Obra Consórcio, Reajuste da 5ª Medição (R$ 1,01 a mais).");
+    fireEvent.click(within(aviso).getByRole("link", { name: "Obra Consórcio, Reajuste da 5ª Medição" }));
+    expect(ir.mock.calls[0][0]).toEqual({ tela: "medicao", obra: 9, id: 42 });
+    fireEvent.click(screen.getByRole("button", { name: "2025" }));
+    expect(screen.queryByRole("status")).toBeNull();                    // 2025 sem divergência: some
   });
 
   it("diz a base dos números: valor bruto da nota e mês de competência", async () => {
