@@ -80,12 +80,12 @@ export function avisosDaObra(avisos: Aviso[], contratoId: number): Aviso[] {
   return porAtraso(avisos.filter(a => a.contrato_id === contratoId)).map(semObra);
 }
 
-// O nivel vira palavra no selo: estado nunca e' so' cor. D2 (DESIGN.md › Colors): vermelho so' no
-// Critico, como o farol da Diretoria; Acao e Atencao dividem o ambar e se separam pela FORMA — Acao
-// com contorno cheio e o icone de proximo passo, Atencao com o ponto.
+// O nivel vira palavra E forma no selo, por um criterio so' (#779): a forma diz se o aviso ja' pede acao. Critico e
+// Acao (os que o servidor trata como imediatos) levam o octogono; Atencao (o que se acompanha) leva o triangulo de
+// "vence em breve". A palavra separa o Critico da Acao. Vale tambem para o farol da obra (ObrasCarteira.tsx).
 export const SELO: Record<Nivel, { rotulo: string; classe: string }> = {
   critico: { rotulo: "Crítico", classe: "critico" },
-  acao: { rotulo: "Ação", classe: "breve" },
+  acao: { rotulo: "Ação", classe: "critico" },
   atencao: { rotulo: "Atenção", classe: "breve" },
 };
 

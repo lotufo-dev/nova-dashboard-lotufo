@@ -933,29 +933,12 @@ a.topbar__avisos:hover { color: var(--cor-menu-realce); }
 .negativo, .tabela tbody td.negativo, .tabela tfoot td.negativo { color: var(--situacao-critico-texto); }
 .negativo .icone { vertical-align: -3px; margin-right: 4px; }
 
-/* --------------------------------------------------------- estado (badge) */
+/* --------------------------------------------------------- estado da medicao
 
-/* Estado nunca e' so cor: ponto + rotulo, sempre. */
-.estado { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; color: var(--cor-tinta); }
-.estado__ponto { width: 6px; height: 6px; border-radius: var(--raio-selo); flex: none; background: var(--cor-texto-terciario); }
-.estado--prevista    .estado__ponto { background: var(--previsao-sem); }
-.estado--planilha_gerada .estado__ponto { background: var(--previsao-sem); }
-.estado--planilha_enviada .estado__ponto { background: var(--cor-texto-secundario); }
-.estado--boletim_recebido .estado__ponto { background: var(--cor-texto-secundario); }
-.estado--espelho_gerado  .estado__ponto { background: var(--previsao-sem); }
-.estado--espelho_enviado .estado__ponto { background: var(--cor-texto-secundario); }
-.estado--protocolada .estado__ponto { background: var(--cor-texto-secundario); }
-/* passo normal do fluxo: ponto neutro. O acento e' de interacao, nao de situacao. */
-.estado--nf_emitida  .estado__ponto { background: var(--cor-texto-secundario); }
-.estado--nota_emitida .estado__ponto { background: var(--cor-texto-secundario); }
-.estado--recebida    .estado__ponto { background: var(--situacao-feito-ponto); }
-/* situacao de uma COMPETENCIA na curva (T8): mesma gramatica ponto + rotulo */
-.estado--aberto     .estado__ponto { background: var(--previsao-sem); }
-.estado--provisorio .estado__ponto { background: var(--situacao-breve-ponto); }
-.estado--atestado   .estado__ponto { background: var(--situacao-feito-ponto); }
-.estado--aberto { color: var(--cor-texto-secundario); }
-.estado--excecao { color: var(--cor-texto-secundario); text-decoration: line-through; text-decoration-color: var(--cor-texto-terciario); }
-.estado--excecao .estado__ponto { background: var(--cor-texto-terciario); text-decoration: none; }
+   O estado e' um Selo (Medicoes.tsx > SeloDoEstado): glifo e palavra nas situacoes da fundacao. O ponto de cor
+   sozinho (.estado) saiu. Cancelada e desistida ficam neutras e riscadas. */
+.estado-medicao { display: inline-flex; flex-wrap: wrap; gap: var(--espaco-mini); max-width: 100%; }
+.selo--riscado .selo__texto { text-decoration: line-through; }
 
 .cadeado { color: var(--cor-texto-secundario); display: inline-flex; margin-left: 6px; vertical-align: -2px; }
 
@@ -1753,7 +1736,7 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
    (nome da obra, texto do aviso, proximo passo). As larguras cabem o conteudo mais longo de cada coluna
    (a 23a medicao de reajuste, o selo "Nota diverge", um valor na casa dos milhoes) sem quebrar no meio. */
 .tabela--grade { table-layout: fixed; }
-.tabela--grade .selo, .tabela--grade .estado { white-space: nowrap; }
+.tabela--grade .selo { white-space: nowrap; }
 .tabela--grade col.c-medicao { width: 184px; }
 .tabela--grade col.c-medicao-obra { width: 200px; }
 /* 112px: o cabecalho COMPETENCIA em caixa alta nao cabe em menos (N3-07) */
@@ -1879,7 +1862,6 @@ a.alerta:hover { background: var(--cor-papel-sombreado); color: var(--cor-tinta)
 code { -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 
 /* Documentos (F-102, F-88, F-77): "em dia" sem fundo, data do ZIP na cabeca do cartao, nota da matriz sem quebra */
-.estado--ok .estado__ponto { background: var(--situacao-feito-ponto); }
 /* cabeca do cartao que ganha a data do ZIP: quebra linha em vez de espremer o titulo e a dica */
 .cartao__cabeca--quebra { flex-wrap: wrap; }
 /* rotulo e campo lado a lado (a data do ZIP na cabeca) */
@@ -2027,7 +2009,6 @@ a.contagem:hover .dado__valor { color: var(--cor-menu-realce); text-decoration: 
 .fila__cabeca .filtros-avisos__linha { min-height: 32px; align-items: center; max-width: none; }
 
 /* F-87: o estado na coluna Marcas da fila nao encosta no selo "nota diverge" (a margem final some se o selo quebra de linha) */
-.tabela--grade td .estado { margin-right: 8px; }
 
 /* F-93: o icone de seta do "onde se resolve" na lateral, no lugar do glifo */
 .alertas--lateral .campo__nota .icone { vertical-align: -3px; margin-right: 4px; }

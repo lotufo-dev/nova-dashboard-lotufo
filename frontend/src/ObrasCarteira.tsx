@@ -36,13 +36,13 @@ export type Painel = {
   reajustes_apostilamento?: { competencias: number; valor_centavos: number; obras: ReajusteObra[] };
 };
 
-// O selo diz a palavra do nivel (D12, D10), a mesma do selo dos avisos: Critico, Acao e Atencao. Acao e Atencao
-// dividem a situacao "vence em breve" (o triangulo) e se separam pela palavra. So' o QDOP EXPORTADO (arquivo) segue
-// com o vocabulario oficial (verde, amarelo, vermelho).
+// O selo diz a palavra do nivel (D12, D10), a mesma do selo dos avisos, com a forma pelo mesmo criterio (Alertas.tsx
+// > SELO): Critico e Acao pedem acao agora e levam o octogono; Atencao leva o triangulo de "vence em breve". So' o
+// QDOP EXPORTADO (arquivo) segue com o vocabulario oficial (verde, amarelo, vermelho).
 type FarolObra = Obra["farol"];
 const FAROL: Record<FarolObra, { rotulo: string; classe: string }> = {
   verde: { rotulo: "Em dia", classe: "feito" },
-  acao: { rotulo: "Ação", classe: "breve" },
+  acao: { rotulo: "Ação", classe: "critico" },
   atencao: { rotulo: "Atenção", classe: "breve" },
   vermelho: { rotulo: "Crítico", classe: "critico" },
 };

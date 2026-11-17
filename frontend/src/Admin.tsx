@@ -14,7 +14,7 @@ import { api, mensagemDeErro } from "./api";
 import Falha from "./Falha";
 import { nomeDaObra, type ObraLista } from "./listaObras";
 import { tituloMedicao } from "./medicao";
-import { brl, ROTULO_ESTADO } from "./Medicoes";
+import { brl, SeloDoEstado } from "./Medicoes";
 import { trocarBusca, type AbaAdmin, type Busca } from "./rota";
 import { Link } from "./Link";
 import { fmtCompetencia, fmtDataHora, fmtDataPura, fmtDuracao, fmtHora } from "./tempo";
@@ -109,14 +109,6 @@ function SeloRodada({ estado }: { estado: string }) {
   );
 }
 
-// F-87: o estado da medicao em ponto + palavra (a mesma gramatica do `Estado` da medicao, sem o final e o cadeado)
-function EstadoMedicao({ estado }: { estado: string }) {
-  return (
-    <span className={`estado estado--${estado}`}>
-      <span className="estado__ponto" aria-hidden="true" />{ROTULO_ESTADO[estado] ?? estado}
-    </span>
-  );
-}
 
 /* ------------------------------------------------------------------- saude */
 
@@ -681,7 +673,7 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
                     <td>{nomeObra(m.contrato_id, m.numero_instrumento)}</td>
                     <td><Link para={{ tela: "medicao", obra: m.contrato_id, id: m.medicao_id }} secao="notas">{tituloMedicao(m)}</Link></td>
                     <td className="num">{fmtCompetencia(m.competencia)}</td>
-                    <td><EstadoMedicao estado={m.estado} /></td>
+                    <td><SeloDoEstado estado={m.estado} /></td>
                     <td className="col-num dinheiro num">{m.valor_centavos === null ? "—" : brl(m.valor_centavos)}</td>
                   </tr>
                 ))}
@@ -732,7 +724,7 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
                       <td className="num">{x.numero}{x.serie ? `/${x.serie}` : ""}</td>
                       <td className="num">{fmtDataHora(x.desfeita_em)}</td>
                       <td>{x.motivo_desfazer}</td>
-                      <td><EstadoMedicao estado={x.estado} /></td>
+                      <td><SeloDoEstado estado={x.estado} /></td>
                     </tr>
                   );
                 })}
@@ -876,11 +868,11 @@ function Usuarios({ eu }: { eu?: number }) {
                           <option value="admin">Administrador</option>
                         </select>
                       )}</td>
-                      {/* o comum (ativo) em ponto e palavra; a excecao no selo, para destacar da coluna (D15): inativo, neutro;
+                      {/* o comum (ativo) so' a palavra, em tinta; a excecao no selo, para destacar da coluna (D15): inativo, neutro;
                           bloqueado por tentativas (#768, na mesma coluna), "vence em breve" com a hora em que o bloqueio cai */}
                       <td><span className="adm-situacao">
                         {!u.ativo ? <Selo>inativo</Selo>
-                          : !u.bloqueado_ate && <span className="estado"><span className="estado__ponto" aria-hidden="true" />Ativo</span>}
+                          : !u.bloqueado_ate && "Ativo"}
                         {u.bloqueado_ate && (
                           <>
                             <Selo situacao="breve">Bloqueado</Selo>

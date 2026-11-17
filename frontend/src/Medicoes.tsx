@@ -94,32 +94,24 @@ export const ROTULO_ESTADO: Record<string, string> = {
   recebida: "Recebida", cancelada: "Cancelada", desistida: "Desistida",
 };
 
-export function Estado({ m }: { m: Medicao }) {
-  const excecao = EXCECOES.includes(m.estado);
+/** O estado de uma medicao nas situacoes da fundacao: recebida e' "feito", cancelada e desistida ficam neutras e
+ *  riscadas, e o resto esta' em andamento. Glifo e palavra, nunca so' cor. Um desenho so' para a lista da obra, o
+ *  resumo ao lado da medicao e a reconciliacao da Administracao. */
+export function SeloDoEstado({ estado, sufixo }: { estado: string; sufixo?: React.ReactNode }) {
+  const excecao = EXCECOES.includes(estado);
   return (
-    <span className={`estado estado--${m.estado}${excecao ? " estado--excecao" : ""}`}>
-      <span className="estado__ponto" aria-hidden="true" />
-      {ROTULO_ESTADO[m.estado] ?? m.estado}
-      {m.final === 1 && <Selo situacao="breve">final</Selo>}
-      {m.congelada === 1 && (
-        <span className="cadeado">
-          <IconeCadeado className="icone icone--p" titulo="Congelada" />
-        </span>
-      )}
-    </span>
+    <Selo situacao={excecao ? undefined : estado === "recebida" ? "feito" : "andamento"} className={excecao ? "selo--riscado" : undefined}
+      sufixo={sufixo}>
+      {ROTULO_ESTADO[estado] ?? estado}
+    </Selo>
   );
 }
 
-/** O estado na lista de medicoes da obra, nas situacoes da fundacao: recebida e' "feito", cancelada e desistida ficam
- *  neutras e riscadas, e o resto esta' em andamento. Glifo e palavra, nunca so' cor. */
-function EstadoDaLinha({ m }: { m: Medicao }) {
-  const excecao = EXCECOES.includes(m.estado);
+/** O estado com o que o acompanha: o cadeado da congelada e o selo da medicao final. */
+export function Estado({ m }: { m: Medicao }) {
   return (
-    <span className="obra-medicoes__estado">
-      <Selo situacao={excecao ? undefined : m.estado === "recebida" ? "feito" : "andamento"} className={excecao ? "selo--riscado" : undefined}
-        sufixo={m.congelada === 1 ? <IconeCadeado className="icone icone--p" titulo="Congelada" /> : undefined}>
-        {ROTULO_ESTADO[m.estado] ?? m.estado}
-      </Selo>
+    <span className="estado-medicao">
+      <SeloDoEstado estado={m.estado} sufixo={m.congelada === 1 ? <IconeCadeado className="icone icone--p" titulo="Congelada" /> : undefined} />
       {m.final === 1 && <Selo situacao="breve">final</Selo>}
     </span>
   );
@@ -243,7 +235,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
                         <div className="obra-medicoes__sub num">{competenciaBR(m.competencia)}</div>
                       </td>
                       <td data-rotulo="Estado">
-                        <EstadoDaLinha m={m} />
+                        <Estado m={m} />
                         {notasDivergentes(m).length > 0
                           && <Link className="link-selo" para={destino} secao="notas"><Selo situacao="critico">nota diverge</Selo></Link>}
                       </td>
@@ -285,7 +277,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
                       <Link className="link forte" para={{ tela: "medicao", obra: contratoId, id: m.id }}>{tituloMedicao(m)}</Link>
                       <div className="obra-medicoes__sub num">{competenciaBR(m.competencia)}</div>
                     </td>
-                    <td data-rotulo="Estado"><EstadoDaLinha m={m} /></td>
+                    <td data-rotulo="Estado"><Estado m={m} /></td>
                     <td data-rotulo="Pedido" className="col-num dinheiro num">{brl(m.valor_protocolado_centavos)}</td>
                     <td data-rotulo="Aprovado" className="col-num dinheiro num">{brl(m.valor_atestado_centavos)}</td>
                     {celulaCusto(m)}
