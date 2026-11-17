@@ -36,9 +36,11 @@ copia_extras: []
 # - a fatura do próprio consórcio (a coligada da entidade do contrato) entra no a receber e no faturado do RM,
 #   liga-se sozinha à medição e deixa a medição ser recebida pela baixa;
 # - a nota da própria empresa (outra coligada) continua fora do a receber e do faturado, com ou sem a chave: para
-#   ela a chave vale no vínculo automático (pela saída do espelho), na nota repetida e na página Fechamento.
+#   ela a chave vale no vínculo automático (pela saída do espelho), na nota repetida e, quando adotada, na página
+#   Fechamento.
 # Sem a chave ou com [], nenhum. Código entre aspas, no formato 2.2.NN; tipo que já está na lista geral é recusado
-# pelo `cadastro validar`. O `cadastro aplicar` recusa declarar o tipo enquanto houver nota reclassificada em dobro
-# na obra (a nova e a antiga ativas): a antiga é desconsiderada antes.
+# pelo `cadastro validar`. O `cadastro aplicar` recusa declarar o tipo enquanto houver nota em dobro na obra (o
+# movimento refeito no RM e o antigo, os dois ativos): o antigo que o RM deixou de devolver sai sozinho na
+# sincronização; se o RM devolve os dois, o antigo é desconsiderado antes.
 tipos_cobranca_extras_rm: ['2.2.03']
 instrumentos: []

@@ -439,6 +439,8 @@ def _rm(args) -> int:
     """`rm vinculos-fora-da-cobranca` (issue #584): lista os vínculos automáticos de nota com medição cuja nota não é
     de cobrança ao órgão (tipo de movimento fora da lista). Só lê, com o banco aberto somente para leitura."""
     from app import sincronizacao_rm
+    if args.acao == "liberar-exclusao":
+        return _liberar_exclusao(args)
     try:
         banco = db.db_path().resolve()
     except RuntimeError:
@@ -462,6 +464,36 @@ def _rm(args) -> int:
         print(f"    NF {v['numero']} (idmov {v['idmov']}, coligada {v['coligada']}, tipo {v['codtmv']}) "
               f"-> medição {v['medicao_id']} ({v['numero_instrumento']} nº {v['medicao_numero']} {v['medicao_tipo']}, "
               f"{v['medicao_estado']}): {format_brl(v['valor_centavos'])}, regra {v['regra'] or '-'}")
+    return 0
+
+
+def _liberar_exclusao(args) -> int:
+    """`rm liberar-exclusao --usuario <e-mail> [--ensaio]` (issue #755): marca como excluído no RM, sem o teto, o que
+    a rodada recusou por ser exclusão em massa. Só depois de conferir no RM que a exclusão é verdadeira."""
+    from app import sincronizacao_rm
+    if not args.usuario:
+        print("`rm liberar-exclusao` exige --usuario <e-mail>")
+        return 1
+    conn = db.get_conn()
+    try:
+        db.migrate(conn)
+        u = conn.execute("SELECT id FROM usuarios WHERE email=? AND ativo=1", (args.usuario,)).fetchone()
+        if u is None:
+            print(f"Usuário não encontrado ou inativo: {args.usuario}")
+            return 1
+        try:
+            rel = sincronizacao_rm.liberar_exclusao(conn, u["id"], ensaio=args.ensaio)
+        except ValueError as e:
+            print(str(e))
+            return 1
+    finally:
+        conn.close()
+    print("ENSAIO (nada foi gravado)" if rel["ensaio"] else "APLICADO")
+    print(f"  pela rodada {rel['rodada']}: {rel['notas']} notas e {rel['titulos']} títulos marcados como excluídos no RM "
+          f"({rel['notas_afetadas']} notas afetadas; teto da rodada: {rel['teto']})")
+    print(f"  vínculos com medição desfeitos: {rel['com_vinculo']}")
+    for linha in rel["linhas"]:
+        print(f"    {linha}")
     return 0
 
 
@@ -649,8 +681,10 @@ def main(argv: list[str] | None = None) -> int:
     con.add_argument("--data", help="data do corte (AAAA-MM-DD), só em `corte`")
     con.add_argument("--usuario", required=True, help="e-mail de quem aplica")
     con.add_argument("--ensaio", action="store_true", help="mostra o relatório e desfaz")
-    rmp = sub.add_parser("rm", help="relatos do casamento das notas do RM (só leitura)")
-    rmp.add_argument("acao", choices=["vinculos-fora-da-cobranca"])
+    rmp = sub.add_parser("rm", help="relatos do casamento das notas do RM e liberação da exclusão em massa")
+    rmp.add_argument("acao", choices=["vinculos-fora-da-cobranca", "liberar-exclusao"])
+    rmp.add_argument("--usuario", help="e-mail de quem libera (só em `liberar-exclusao`)")
+    rmp.add_argument("--ensaio", action="store_true", help="mostra o que seria marcado e desfaz (`liberar-exclusao`)")
     ins = sub.add_parser("instalacao", help="chave do dono e arquivo assinado da instalação (no Mac do dono)")
     ins.add_argument("acao", choices=["gerar-chave", "assinar", "verificar"])
     ins.add_argument("--saida", help="pasta das chaves (gerar-chave) ou arquivo assinado (assinar)")

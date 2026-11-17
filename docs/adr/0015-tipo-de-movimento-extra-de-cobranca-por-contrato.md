@@ -30,22 +30,32 @@ de cadastro (cada nota nova pediria um ato de alguém, e a regra é do dono, em 
 A reclassificação não troca o tipo da nota que o sistema já tem. O RM passa a devolver outro movimento, com o
 mesmo número, a mesma emissão e o mesmo valor, no tipo novo, e o movimento antigo vem cancelado ou só deixa de
 vir. Cancelado, o vínculo dele é desfeito e, com a chave, a nota nova liga à medição e recebe pela baixa. Quando
-só deixa de vir, a nota antiga continua ativa no banco e ligada à medição, e a nova fica solta: declarado o tipo,
-as duas contam, e o faturado e o a receber da obra saem em dobro sem que tela nenhuma acuse.
+só deixa de vir, a sincronização o marca como excluído no RM depois de duas rodadas completas sem ele
+(`docs/adr/0006`, #755): a nota antiga deixa de contar, o vínculo dela é desfeito e a nova liga. Nesse intervalo,
+ou quando o RM continua devolvendo os dois movimentos, as duas notas estão ativas no banco: declarado o tipo, as
+duas contam, e o faturado e o a receber da obra saem em dobro sem que tela nenhuma acuse.
 
 Por isso declarar um tipo extra é travado enquanto houver esse par. O `cadastro aplicar`, no ensaio e para valer,
 procura, na obra que está ganhando o tipo, as notas ativas gêmeas (mesma coligada, mesmo número, mesma emissão e
-mesmo valor, em movimentos diferentes; uma de tipo da lista geral e a outra do tipo declarado; as duas contando)
-e recusa o cadastro inteiro, dizendo quais são. O passo de quem declara:
+mesmo valor, em movimentos diferentes; uma do tipo declarado e a outra de tipo da lista geral ou também de tipo
+extra, que é a nota que nasceu no tipo novo e teve o movimento refeito; as duas contando) e recusa o cadastro
+inteiro, dizendo quais são. O passo de quem declara:
 
 1. rodar `cadastro aplicar --ensaio`;
-2. para cada par listado, tirar da conta a nota de tipo da lista geral, pela correção de cadastro: `desligar_nf`
-   se ela estiver ligada a uma medição e `desconsiderar_nf` pelo idmov;
-3. aplicar de novo. Na sincronização seguinte a nota nova liga à medição.
+2. se o RM deixou de devolver a nota mais antiga do par, esperar a sincronização marcá-la (duas rodadas completas);
+3. se o RM devolve as duas, tirar da conta a mais antiga, pela correção de cadastro: `desligar_nf` se ela estiver
+   ligada a uma medição e `desconsiderar_nf` pelo idmov;
+4. aplicar de novo. Na sincronização seguinte a nota nova liga à medição.
 
-A trava é do ato de declarar. O par que aparece depois, numa obra que já declara o tipo, não é conferido: a nota
-e o título que deixam de vir do RM e continuam ativos no banco são assunto da #755 (título excluído no RM
-continua contando na nota).
+A trava é do ato de declarar. Na obra que já declara o tipo, o par que aparece depois não trava o cadastro, que
+pode estar trazendo mudança sem relação com ele: vira aviso em toda aplicação e em todo ensaio, até sumir.
+
+A nota antiga com baixa gravada não fica mais sem saída. A correção de cadastro continua recusando desconsiderar
+nota com recebimento; quem a tira da conta é a marca de excluída no RM, que leva a baixa junto (fica gravada, fora
+do recebido; o dinheiro conta pelo título da substituta). Sobra um caso, em que a trava é mais dura do que o
+princípio de só travar o que sai errado para fora: o RM devolve os dois movimentos ativos e o mais antigo tem
+baixa. Aí o erro está no RM, e a declaração fica recusada até o movimento ser cancelado lá. Travado, o número erra
+para menos, como antes da chave; destravado, dobraria.
 
 ## Consequências
 

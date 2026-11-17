@@ -24,7 +24,9 @@ def status(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
     # thread nao existe e o ambiente e' a verdade.
     configurado = rm.de_ambiente() is not None
     return {"configurado": configurado, **{k: v for k, v in sincronizacao_rm.ESTADO.items() if k != "configurado"},
-            "rodadas": ultimas, "custo_aviso": sincronizacao_rm.aviso_do_custo(conn)}
+            "rodadas": ultimas, "custo_aviso": sincronizacao_rm.aviso_do_custo(conn),
+            # issue #755: a ultima rodada recusou uma exclusao em massa (None sem recusa)
+            "exclusao_aviso": sincronizacao_rm.aviso_da_exclusao(conn)}
 
 
 @router.post("/sincronizar")

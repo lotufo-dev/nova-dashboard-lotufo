@@ -55,6 +55,12 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 - 2026-11-16 #749: a data da etapa "Protocolado" no Resumo das medições é a do primeiro protocolo da nota (como no Início e no Fechamento); o quadro do mês da tela Medições mostra a do último (`medicoes.em_andamento`, `MAX`). Na medição reapresentada as duas telas mostram datas diferentes.
 - 2026-11-16 #749: a frase "de quando é o dado" do Resumo das medições usa o último registro de auditoria de medição feito por uma pessoa (`audit_log`, entidade `medicao`); a correção aplicada pelo cadastro (`cadastro aplicar`) também conta como lançamento. Não há hoje um carimbo só dos atos do ciclo.
 - 2026-11-17 #749: no Resumo das medições a etapa sai do estado da medição e os passos só dizem quais etapas a obra tem. Quando o estado põe a medição numa etapa que a lista `passos_medicao` da obra não tem (planilha/carta enviada sem `analise`; protocolo registrado sem `envio_nota`), a linha dessa medição mostra a etapa mesmo assim (`resumo_medicoes.etapas_da_medicao`). As listas em uso hoje não caem nisso. A alternativa é o cadastro recusar as listas em que um estado fica sem etapa (`cadastro_arquivos._passos_medicao`).
+- 2026-11-17 Depois da #753 (boletim da MT-PAR): o leitor foi rodado pelo pypdf sobre 13 PDFs reais das cinco obras do órgão (7 boletins e 6 reajustes, de 2025 e 2026) e nenhum valor saiu errado. Em 5 dos 7 boletins a extração devolve os valores do Visto num bloco separado dos rótulos: o valor não é proposto e a pessoa usa a leitura do controle financeiro num clique (`leitura_boletim_mtpar.py` › `_VISTO_AO_LADO`). Decidir se a leitura do quadro sozinha, com a mesma quantia impressa na página do Visto, passa a propor o valor. No reajuste sem a carta do fiscal a data não é lida (a pessoa digita e o registro sai `manual`), e o quadro de duas obras não deixa conferir o contrato (ano trocado numa, número ausente do texto noutra): o valor não é proposto.
+- 2026-11-16 Depois da #753: a pendência "boletim não anexado" só aparece na página da medição (`medicoes.py` › `boletim_pendente`); não entra na lista do administrador, onde o `docs/adr/0008` põe toda pendência sem data. Decidir depois de ver quantas são.
+- 2026-11-16 Depois da #753: na medição nova de obra da MT-PAR com regra de espelho ativa, o passo "Análise do órgão" abre com o formulário da planilha/carta, e o boletim só entra depois que a medição existe (`MedicaoPagina.tsx`, medição nova). Falta o caminho que cria a medição já pelo boletim.
+- 2026-11-16 Depois da #753: obra da MT-PAR sem regra de espelho ativa fica parada no passo 2 depois do boletim: a medição prevista continua `prevista` (`medicoes.py` › `_gravar_boletim` só leva a `boletim_recebido` com a regra ativa) e a barra não passa para "Espelhos". Decidir o estado dela, ou o passo pelo boletim anexado.
+- 2026-11-16 Depois da #753: o PDF único com o boletim da medição e o reajuste juntos é recusado na medição de reajuste ("é o boletim da medição"), porque o leitor para no Visto (`leitura_boletim_mtpar.py` › `ler`). Na medição de execução ele entra. Ler os dois documentos do mesmo PDF, cada um na sua medição.
+- 2026-11-16 Depois da #753: o cadastro recusa `analise` sem `planilha` em `passos_medicao` (`cadastro_arquivos.py` › `_passos_medicao`), então a obra da MT-PAR com a chave perde o passo do boletim. Nenhuma obra do órgão tem a chave hoje.
 
 ## Cadastro (dono)
 
@@ -63,17 +69,22 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 
 ## Decisões do dono em aberto
 
-- 2026-10-28 #296 (curva S da carteira), gate Sol S1: a curva da carteira no Resumo acumula só dentro da janela de 12 meses (parte de zero no primeiro mês), como já fazia; o dono decide se ela passa a acumular desde o início dos contratos.
-- 2026-09-22 **IBS/CBS**: motor e tela prontos (linhas informativas, não deduzem do líquido), mas NENHUMA regra os declara. As notas reais de 2026 trazem CBS 0,9% e IBS 0,1% com redução de 60% (efetivas 0,36% e 0,04%), base = bruto − ISS − PIS − COFINS. Falta decidir se entram no espelho; depois acrescentar os controles `ibs`/`cbs` nos modelos Word e descomentar nos YAMLs.
+- Nenhuma em 17/11/2026: as que havia foram decididas e estão em "Decisões vigentes".
 
 ## Externo (dono)
 
-- 2026-09-25 Diretório Microsoft nas sugestões de destinatário: o código já pede `People.Read` e `User.ReadBasic.All`; falta acrescentá-las (delegadas) no aplicativo do Entra ID e cada pessoa "Conectar de novo".
-- 2026-09-04 RM: a API só responde HTTP, então a credencial da conta de serviço viaja em claro na rede interna; trocar a senha do RM que passou pelo chat e criar uma conta de serviço só-leitura.
-- 2026-09-02 Segundo administrador da dashboard.
+- Nenhum em 17/11/2026.
 - 2026-11-17 Job `ponta-a-ponta` (#701): falta torná-lo obrigatório. Depois de três execuções verdes seguidas no `master`, o dono acrescenta o check `ponta-a-ponta` (nome exato) aos checks obrigatórios do ruleset `master protegida` (Settings › Rules › Rulesets). Até lá o job roda em PR, no `master` e na fila de merge, mas vermelho não barra o merge. Feito isso, fechar a #701.
 
 ## Decisões vigentes (registro)
 
 - 2026-09-02 Decisão (gate Sol): "execução após a data-base" usa a COMPETÊNCIA, não a data do ofício; aniversário no meio do mês não separa a competência. Revisar se um órgão cobrar pró-rata.
 - 2026-09-24 O fluxo "Certidão Alerta" do Power Automate continua ligado (decisão de 2026-09-24); os avisos da tela inicial não dependem dele.
+- 2026-11-17 **IBS/CBS** não entram no espelho em 2026: nas notas deste ano são linhas informativas, que não mudam o líquido, e o espelho segue o modelo que o órgão já aprova. O motor e a tela ficam prontos e nenhuma regra os declara. Rever quando a retenção passar a valer; aí entram os controles `ibs`/`cbs` nos modelos Word e nos YAMLs.
+- 2026-11-17 Curva S da carteira (#296): encerrada sem mudança. A página Carteira sai no redesenho (`docs/adr/0004`, issue #717) e o desvio do QDOP, que fica na lista de Obras, já conta o histórico inteiro.
+- 2026-11-17 Pendências de competências anteriores a 2025 ficam fora das telas da diretoria: o Fechamento cobre 2025 e 2026.
+- 2026-11-17 Canal do boletim nas superintendências sem e-mail (#299): encerrada. O motor aceita o PDF venha de onde vier e o `prazo_boletim_dias` não muda; issue nova se o aviso de pedido sem boletim errar.
+- 2026-11-17 O número grande do alto da página da medição continua sendo o valor pedido, com o aprovado à parte, como na tela aprovada pelo dono em 16/11/2026.
+- 2026-11-17 Diretório Microsoft nas sugestões de destinatário não será ligado: o catálogo de contatos do próprio sistema atende. As permissões `People.Read` e `User.ReadBasic.All` não serão acrescentadas no aplicativo do Entra ID.
+- 2026-11-17 Segundo administrador: não será criado agora. O desbloqueio do único administrador é pelo `cli desbloquear` no servidor; entra um segundo quando outra pessoa passar a administrar o sistema.
+- 2026-11-17 Senha do RM: o dono decidiu não trocar a senha da conta que a dashboard usa nem criar conta de serviço só-leitura. Risco aceito por ele: a API do RM só responde HTTP, então a credencial viaja em claro na rede interna.

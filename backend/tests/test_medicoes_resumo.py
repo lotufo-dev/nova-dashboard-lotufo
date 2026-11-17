@@ -94,7 +94,8 @@ def test_estados_novos_do_motor_entram_na_lista_antes_do_espelho(conn, cenario):
     linhas = medicoes.linhas_em_andamento(conn, HOJE)
     assert [x["situacao"] for x in linhas][:3] == ["planilha-gerada", "planilha-enviada", "boletim-recebido"]
     env = next(x for x in linhas if x["situacao"] == "planilha-enviada")
-    assert env["dias"] == 2 and env["proximo_passo"] == "Espelhos"   # a obra B (MTPAR) nao tem planilha e carta: comeca em Espelhos
+    # a obra B (MTPAR) nao tem planilha e carta: comeca no passo do boletim, "Análise do órgão" (#753)
+    assert env["dias"] == 2 and env["proximo_passo"] == "Análise do órgão"
     assert [x["estado"] for x in medicoes.em_andamento(conn, estado="boletim_recebido")] == ["boletim_recebido"]
     # "desde" usa os marcos novos (nao o criado_em); a planilha gerada conta da 1a versao
     assert {m["estado"]: m["desde"] for m in medicoes.em_andamento(conn)}["planilha_enviada"] == "2026-10-07"
@@ -378,7 +379,8 @@ def test_quadro_execucao_e_reajuste_mostram_o_menos_adiantado(conn, cenario):
     # B: a execucao espera o pagamento (passo 6) e o reajuste ainda espera a nota (passo 4): a linha esta' no passo 4
     b = quadro["Obra B"]
     assert [m["id"] for m in b["medicoes"]] == [ids["b15"], ids["b15r"]]
-    assert _passos(b) == {3: ("feito", None, None), 4: ("atual", None, ids["b15r"]),
+    # #753: a B e' da MT-PAR e tem o passo do boletim (2) antes do espelho; sem boletim, feito sem data
+    assert _passos(b) == {2: ("feito", None, None), 3: ("feito", None, None), 4: ("atual", None, ids["b15r"]),
                           5: ("futuro", None, None), 6: ("futuro", None, None)}
     assert b["pedido_centavos"] == 304000 and b["aprovado_centavos"] is None
     # A: as tres no envio da nota; o passo feito leva a data da ultima a fechar e o da vez abre a execucao
@@ -458,10 +460,11 @@ def test_quadro_e_proximo_passo_so_com_os_passos_da_lista_do_cadastro(conn, cena
     assert _passos(c) == {3: ("feito", None, None), 4: ("feito", "2026-10-02", None), 6: ("atual", None, ids["c3"])}
     [linha] = [x for x in medicoes.em_andamento(conn) if x["id"] == ids["c3"]]
     assert linha["proximo_passo"] == "Pagamento" and linha["passo"] == {"numero": 6, "nome": "Pagamento"}
-    # a lista nao da' a' obra o passo que a familia do orgao nao tem (a B e' da MT-PAR: sem planilha e analise)
+    # a lista nao da' a' obra o passo que a familia do orgao nao tem (a B e' da MT-PAR: sem planilha e carta; a
+    # analise e' o passo do boletim dela, #753)
     _passos_do_cadastro(conn, ids["b"], ["planilha", "analise", "espelhos", "notas", "envio_nota", "pagamento"])
     b = next(x for x in medicoes.resumo(conn, HOJE, mes="2026-09")["quadro"] if x["obra"] == "Obra B")
-    assert [p["numero"] for p in b["passos"]] == [3, 4, 5, 6]
+    assert [p["numero"] for p in b["passos"]] == [2, 3, 4, 5, 6]
 
 
 def test_obra_com_a_lista_vazia_sai_do_quadro_e_nao_oferece_iniciar(conn, cenario):

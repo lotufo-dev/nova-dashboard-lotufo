@@ -502,6 +502,27 @@ A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_US
          WHERE M.CODCOLIGADA = L.CODCOLIGADA AND M.IDMOV = L.IDMOV
            AND M.CODTMV LIKE '2.2.%' AND M.DATAEMISSAO >= DATEADD(MONTH, -24, GETDATE()))
    ```
+   As duas consultas têm de continuar devolvendo **tudo** o que está na janela: a nota e o título que deixam de vir
+   em duas rodadas completas seguidas são marcados como excluídos no RM e saem das somas (`docs/adr/0006`, #755);
+   voltando a vir, voltam a contar. Estreitar o filtro de uma delas (tipo de movimento, coligada, `PAGREC`) marcaria
+   como excluído o que só deixou de ser consultado. Encurtar a janela de 24 meses não marca nada: a janela é medida
+   pela nota mais antiga que veio.
+
+   **Exclusão em massa recusada.** Se uma rodada afetaria mais notas do que o teto (o maior entre 30 e 5% das notas
+   que vieram), ela não marca nada, a Saúde mostra o cartão do RM em atenção com o aviso, e as rodadas seguintes
+   recusam de novo. Quase sempre é a consulta: conferir no RM se a `DASH10` e a `DASH11` continuam como acima, se a
+   conta de serviço ainda enxerga todas as coligadas e se a resposta traz todas elas. Consertada a consulta, a
+   rodada seguinte volta ao normal sozinha, sem nada marcado. Só quando a exclusão é verdadeira (o faturamento
+   refez mesmo dezenas de notas, conferido no RM), o administrador libera, no servidor, com ensaio antes:
+   ```
+   python -m app.cli rm liberar-exclusao --usuario <e-mail do administrador> --ensaio
+   python -m app.cli rm liberar-exclusao --usuario <e-mail do administrador>
+   ```
+   O ensaio lista cada nota que seria marcada e quantas têm vínculo com medição (a marca desfaz o vínculo). Para
+   valer, marca sem o teto o que a última rodada completa não trouxe e que já não vinha na anterior, grava quem
+   liberou na auditoria e limpa o aviso. É gravação em produção: pede a autorização do dono, como as outras. Se a
+   nota voltar a vir depois, ela volta a contar e recupera o vínculo.
+
    Confirmar na primeira execução: (a) `FLAN.IDMOV` existe na 12.1.2510 — se não, trocar o vínculo por `TMOVLAN` (`IDMOV` ↔ `IDLAN`) na `DASH11`; (b) `PAGREC = 1` é o lado **a receber** do razão (spec §15.3) — conferir com uma NF conhecida; (c) o `LEFT JOIN FCFO` (tomador) é opcional: se a coluna do cliente for outra, remover o join e o campo `TOMADOR`.
 
    `DASH25` — custo a pagar por coligada, centro de custo, projeto, tarefa, natureza e mês (issue #488, cadastrada em 06/11/2026):
@@ -1017,8 +1038,12 @@ ainda em aberto não cria outro pedido, mas dispara de novo.
    ("comecei"): o servidor responde `rodada_id`, `tipo` e `processos` (o mesmo formato de `GET /api/siga/processos`).
    A rodada é completa (todos os processos vivos) com pedido "todos" em aberto ou quando a última rodada completa
    terminada começou há 59 minutos ou mais (`tipo: automatica` quando é completa por tempo, no máximo uma por hora;
-   `pedido` nos demais casos); senão, só os processos pedidos. Fora do horário, o robô manda `{"so_pedidos": true}` (issue
-   #347): o servidor não abre rodada completa por tempo e só atende os pedidos em aberto, que valem a qualquer hora.
+   `pedido` nos demais casos); senão, só os processos pedidos e os novos. Processo novo é o que ainda não tem
+   leitura e nenhuma rodada chamou: entra sozinho na pergunta seguinte do robô, uma vez, sem depender de
+   `DASH_SIGA_TAREFA`; se o robô não conseguir ler, ele segue na rodada da hora. O tempo até a leitura é o intervalo
+   da tarefa agendada do robô. Fora do horário, o robô manda `{"so_pedidos": true}` (issue
+   #347): o servidor não abre rodada completa por tempo e só atende os pedidos em aberto e os processos novos, que
+   valem a qualquer hora.
    `rodada_id: null` quer dizer nada a ler. As leituras continuam
    por `POST /api/siga/leituras`. No fim, `POST /api/siga/rodadas/<id>/fim` com
    `{"nao_lidos": [{"codigo" ou "numero", "motivo"}]}` ("terminei"); se cair, `POST /api/siga/rodadas/<id>/falha` com
