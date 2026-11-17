@@ -400,6 +400,25 @@ def test_arquivo_do_envio_que_sumiu_do_disco_vira_erro_tratado(api):
     assert r.json()["detail"] == "Um arquivo deste envio não está mais disponível no servidor."
 
 
+def test_certidao_nunca_cadastrada_nao_trava_o_envio_e_a_vencida_trava(api):
+    """A situacao na tela segue o efeito (docs/adr/0002): a certidao exigida e nunca cadastrada e' documento faltando,
+    o envio sai com a confirmacao da lista do que falta; so' a vencida trava. O checklist diz qual e' qual
+    (`nunca_cadastrada`), e a tela mostra a primeira em atencao e a segunda em critico."""
+    cl, c, ids = api
+    c.execute("DELETE FROM certidoes WHERE tipo_id=(SELECT id FROM certidao_tipos WHERE chave='federal')")
+    c.commit()
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"], ids["sinfra_reaj"]]}).json()["protocolo_id"]
+    itens = cl.get(f"/api/contratos/{ids['sinfra']}/checklist-protocolo?natureza=execucao").json()["itens"]
+    federal = next(i for i in itens if i["chave"] == "federal")
+    assert (federal["situacao"], federal["nunca_cadastrada"]) == ("pendente", True)
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    assert d["bloqueio"] is None and any("federal" in p.lower() for p in d["pendencias"])
+    assert cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d)).status_code == 422       # pede a confirmacao
+    assert cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, confirmadas=d["pendencias"])).status_code == 200
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 1
+
+
 def _nada_saiu_nem_foi_gravado(c, ids, pid, tmp_path):
     assert list((tmp_path / "sim").rglob("*.json")) == []          # nada no simulador do e-mail
     assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
