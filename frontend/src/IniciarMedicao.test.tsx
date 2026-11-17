@@ -22,5 +22,5 @@ test("falha ao ler a regra da obra: a mensagem do servidor não emenda na frase 
   api.mockRejectedValue(new ApiErro(404, "Contrato não encontrado"));
   render(<IniciarMedicao obra={OBRA} mes="2026-10" />);
   expect((await screen.findByRole("alert")).textContent)
-    .toBe("Crítico: Não foi possível ler a regra da obra: Contrato não encontrado. Escolha a obra de novo para tentar outra vez.");
+    .toBe("Não foi possível ler a regra da obra: Contrato não encontrado. Escolha a obra de novo para tentar outra vez.");
 });

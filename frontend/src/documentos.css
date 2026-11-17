@@ -129,7 +129,7 @@ a.doc-chip:focus-visible { outline: var(--largura-foco) solid var(--cor-foco); o
 
 .doc-cnpj { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-pp); font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 .doc-cnpj .num { font-family: var(--fonte-numero); color: var(--cor-tinta); user-select: all; }
-.doc-cnpj button { height: var(--altura-controle-menor); padding: 0 var(--espaco-pp); font-size: var(--texto-mini); }
+.doc-cnpj button { height: var(--alvo-menor); padding: 0 var(--espaco-p); font-size: var(--texto-meta); }
 .doc-copia { font-size: var(--texto-mini); color: var(--situacao-feito-texto); }
 
 /* o sinal de cada certidao na linha da consorciada: o glifo da situacao e o nome curto */
@@ -165,9 +165,14 @@ a.doc-chip:focus-visible { outline: var(--largura-foco) solid var(--cor-foco); o
   text-decoration: underline; text-underline-offset: var(--afastamento-sublinhado);
 }
 .doc-zona__link:hover:not(:disabled) { background: none; }
-.doc-fila { margin: 0; }
-.doc-fila .documentos__item { border: var(--borda-linha); border-radius: var(--raio-canto); background: var(--cor-superficie); padding: var(--espaco-p) var(--espaco-m); }
-.doc-digitar__msg { flex-basis: 100%; }
+/* fila de leitura do "Anexar PDF": cada PDF numa caixa com a borda de campo; o nome em destaque, a mensagem da
+   leitura na linha inteira e os botoes na altura dos campos ao lado */
+.doc-fila { margin: var(--espaco-m) 0 0; gap: var(--espaco-p); }
+.doc-fila .documentos__item { gap: var(--espaco-pp); border: var(--borda-campo); border-radius: var(--raio-canto); background: var(--cor-superficie); padding: var(--espaco-m); font-size: var(--texto-corpo); }
+.doc-fila .documentos__arquivo { font-weight: var(--peso-forte); }
+.doc-fila .campo__nota, .doc-fila .notas__ok, .doc-fila .notas__diverge { font-size: var(--texto-meta); }
+.doc-fila .doc-digitar__msg { flex-basis: 100%; max-width: none; color: var(--situacao-breve-texto); font-weight: var(--peso-medio); }
+.doc-fila .form-inline > .btn--pequeno { height: var(--alvo-minimo); padding: 0 var(--espaco-m); font-size: var(--texto-corpo); }
 
 /* ---------------------------------------------------------------- pagina da empresa */
 .doc-cabeca { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--espaco-m) var(--espaco-g); width: 100%; }

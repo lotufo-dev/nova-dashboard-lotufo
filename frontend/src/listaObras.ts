@@ -153,12 +153,17 @@ export function totaisDe(obras: ObraLista[]): TotaisObras {
   return t;
 }
 
-/** Quanto da obra ja' foi executado, em %, inteiro: medido (execucao e projeto) ÷ valor vigente (da posicao na cota quando a
+/** Percentual inteiro por PISO: 99,6% e' 99%, nunca 100%. So' mostra 100% quem concluiu (#779). Sem base, nulo. */
+export function pctPiso(parte: number, base: number): number | null {
+  return base > 0 ? Math.floor((parte * 100) / base) : null;
+}
+
+/** Quanto da obra ja' foi executado, em %, inteiro (por piso): medido (execucao e projeto) ÷ valor vigente (da posicao na cota quando a
  *  lista a traz; a razao e' a mesma do cheio). Sem valor vigente, nulo. */
 export function pctExecutado(o: ObraLista): number | null {
   const v = o.posicao ? o.posicao.vigente_centavos : vigenteDe(o);
   const m = o.posicao ? o.posicao.medido_centavos : medidoDe(o);
-  return v > 0 ? Math.round((m * 100) / v) : null;
+  return pctPiso(m, v);
 }
 
 export type ResumoContratante = {
@@ -183,7 +188,7 @@ export function resumoContratante(obras: ObraLista[], avisos: ReadonlyMap<number
       if (r.nivelMax === null || GRAVIDADE[n] < GRAVIDADE[r.nivelMax]) r.nivelMax = n;
     }
   }
-  r.pct = r.vigente > 0 ? Math.round((r.medido * 100) / r.vigente) : 0;
+  r.pct = pctPiso(r.medido, r.vigente) ?? 0;
   return r;
 }
 

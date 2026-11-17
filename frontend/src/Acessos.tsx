@@ -9,10 +9,10 @@ import { fmtDataHora } from "./tempo";
 // origem e navegador vem nulos nos eventos gravados antes do registro de acesso.
 export type Acesso = { data: string; sucesso: boolean; origem: string | null; navegador: string | null };
 
-/** Entrou (ponto e palavra, o comum) ou recusada (selo de atencao, a excecao). */
+/** Entrou (so' a palavra, o comum) ou recusada (selo de atencao, a excecao). */
 function ResultadoAcesso({ sucesso }: { sucesso: boolean }) {
   return sucesso
-    ? <span className="estado"><span className="estado__ponto" aria-hidden="true" />Entrou</span>
+    ? <>Entrou</>
     : <Selo situacao="breve">recusada</Selo>;
 }
 

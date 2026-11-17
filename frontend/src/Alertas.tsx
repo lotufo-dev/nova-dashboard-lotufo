@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { IconeAlerta, IconeSeta, IconeSino } from "./icones";
+import { IconeSeta, IconeSino } from "./icones";
 import Selo from "./Selo";
 import { semRSOrfao } from "./avisos";
 import { brl } from "./Medicoes";
 import { type AbaObra, type Busca, type Ir, type Rota } from "./rota";
 import { Link } from "./Link";
 import { situacaoDoNivel } from "./situacao";
+import Falha from "./Falha";
 
 // Cartao de avisos (spec §11). Bloco 6: o servidor manda o aviso PRONTO (`app/avisos.py`): nivel,
 // mensagem de uma linha, obra, dias, valor e destino do clique. Esta tela so' desenha — nao ha mais
@@ -79,12 +80,12 @@ export function avisosDaObra(avisos: Aviso[], contratoId: number): Aviso[] {
   return porAtraso(avisos.filter(a => a.contrato_id === contratoId)).map(semObra);
 }
 
-// O nivel vira palavra no selo: estado nunca e' so' cor. D2 (DESIGN.md › Colors): vermelho so' no
-// Critico, como o farol da Diretoria; Acao e Atencao dividem o ambar e se separam pela FORMA — Acao
-// com contorno cheio e o icone de proximo passo, Atencao com o ponto.
+// O nivel vira palavra E forma no selo, por um criterio so' (#779): a forma diz se o aviso ja' pede acao. Critico e
+// Acao (os que o servidor trata como imediatos) levam o octogono; Atencao (o que se acompanha) leva o triangulo de
+// "vence em breve". A palavra separa o Critico da Acao. Vale tambem para o farol da obra (ObrasCarteira.tsx).
 export const SELO: Record<Nivel, { rotulo: string; classe: string }> = {
   critico: { rotulo: "Crítico", classe: "critico" },
-  acao: { rotulo: "Ação", classe: "breve" },
+  acao: { rotulo: "Ação", classe: "critico" },
   atencao: { rotulo: "Atenção", classe: "breve" },
 };
 
@@ -115,10 +116,7 @@ export default function Alertas({ itens, ir, titulo = "Avisos", limite = LIMITE,
 
       {itens === undefined ? null : itens === null ? (
         <div className="cartao__corpo">
-          <p className="erro" role="alert">
-            <IconeAlerta className="icone icone--p" />
-            Não foi possível verificar os avisos. Recarregue a página para tentar de novo.
-          </p>
+          <Falha>Não foi possível verificar os avisos. Recarregue a página para tentar de novo.</Falha>
         </div>
       ) : itens.length === 0 ? (
         <div className="vazio vazio--curto">

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { api, mensagemDeErro } from "./api";
 import CaixaAviso from "./CaixaAviso";
 import Contador from "./Contador";
-import { IconeAlerta, IconeLinkExterno, IconeSeta, IconeSiga } from "./icones";
+import { IconeLinkExterno, IconeSeta, IconeSiga } from "./icones";
 import LegendaCor, { type ItemLegenda } from "./LegendaCor";
 import { Link } from "./Link";
 import type { ObraLista } from "./listaObras";
@@ -16,6 +16,7 @@ import {
 import Selo, { Glifo } from "./Selo";
 import { fmtData, fmtDataHora, fmtHora } from "./tempo";
 import "./siga.css";
+import Falha from "./Falha";
 
 // Tela SIGA (#329; redesenho #512; fundacao do redesenho na #767): responde "onde esta' cada processo e qual esta'
 // parado ha' mais tempo". Duas paginas. A principal e' uma tabela com a
@@ -110,7 +111,7 @@ function Atualizar({ rotulo, processoId, robo, aoPedir }: {
       <button type="button" className="btn btn--pequeno" disabled={ocupado || situacao !== null} onClick={() => void pedir()}>
         {situacao === "lendo" ? "Lendo..." : ocupado || situacao === "na_fila" ? "Na fila" : rotulo}
       </button>
-      {erro && <p className="erro sg__erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha className="sg__erro">{erro}</Falha>}
     </>
   );
 }
@@ -335,8 +336,8 @@ function AcompanharProcesso({ aoGravar }: { aoGravar: (id: number) => Promise<vo
           value={link} onChange={e => setLink(e.target.value)} />
       </div>
       <button type="submit" className="btn btn--primario" disabled={ocupado}>Acompanhar</button>
-      <button type="button" className="btn btn--pequeno" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
-      {erro && <p className="erro sg__erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      <button type="button" className="btn" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
+      {erro && <Falha className="sg__erro">{erro}</Falha>}
     </form>
   );
 }
@@ -376,8 +377,8 @@ function CorrigirCategoria({ p, aoGravar }: { p: ProcessoSiga; aoGravar: () => P
     <form className="form-inline sg__novo" onSubmit={enviar} aria-label="Corrigir categoria">
       <CamposCategoria id="siga-corrigir" valor={valor} mudar={setValor} obras={obras} aoFalhar={setErro} />
       <button type="submit" className="btn btn--primario" disabled={ocupado}>Salvar</button>
-      <button type="button" className="btn btn--pequeno" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
-      {erro && <p className="erro sg__erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      <button type="button" className="btn" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
+      {erro && <Falha className="sg__erro">{erro}</Falha>}
     </form>
   );
 }
@@ -410,7 +411,7 @@ export default function SigaPagina({ busca, agora, podeEditar = true }: { busca:
     return (
       <div className="pagina">
         {erro
-          ? <div className="form-inline"><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler os processos do SIGA: {erro}</p>
+          ? <div className="form-inline"><Falha>Não foi possível ler os processos do SIGA: {erro}</Falha>
               <button type="button" className="btn btn--pequeno" onClick={() => void carregar()}>Tentar de novo</button></div>
           : <p className="campo__nota">Carregando os processos…</p>}
       </div>

@@ -132,7 +132,6 @@ describe("celular", () => {
     expect(tokensCss).toMatch(/\.topbar__linha > \.topbar__meta\s*\{[^}]*min-width:\s*12ch;[^}]*white-space:\s*nowrap;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis/);
     expect(tokensCss).toMatch(/\.topbar__trilha, \.topbar__linha\s*\{[^}]*min-width:\s*0/);
     expect(tokensCss).toMatch(/\.topbar__titulo\s*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis/);
-    expect(tokensCss).toMatch(/\.topbar__resumo\s*\{[^}]*min-width:\s*0/);
     expect(tokensCss).toMatch(/\.topbar\s*\{[^}]*width:\s*100%/);
     // listas (Medições, Documentos, Obras): o topo é a barra de seção, cujo título cede com reticências
     expect(tokensCss).toMatch(/\.topo__titulo\s*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/);

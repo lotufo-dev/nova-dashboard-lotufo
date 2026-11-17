@@ -18,7 +18,7 @@
 .conta .cartao__cabeca { padding: var(--espaco-g) var(--espaco-g) 0; }
 .conta .cartao__corpo { padding: var(--titulo-margem-base) var(--espaco-g) var(--espaco-g); }
 .conta .campo__rotulo { font-size: var(--texto-corpo); }
-.conta .senha input, .conta .botao-largo, .conta .par-botoes > .btn { height: var(--alvo-minimo); font-size: var(--texto-corpo); }
+.conta .senha input { height: var(--alvo-minimo); font-size: var(--texto-corpo); }
 .conta .olho { top: var(--espaco-mini); right: var(--espaco-mini); width: var(--alvo-menor); height: var(--alvo-menor); }
 .conta .aviso { margin: 0 0 var(--espaco-p); }
 .conta .par-botoes + .conta-trava { margin: var(--espaco-p) 0 0; }

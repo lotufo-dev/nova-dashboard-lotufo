@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { api, ApiErro, mensagemDeErro } from "./api";
-import { IconeAlerta } from "./icones";
+import Falha from "./Falha";
 
 // Reserva de envio presa (10/10/2026): o servidor nao a toma sozinho, porque nao sabe se o e-mail saiu. Quem
 // decide e' a pessoa, depois de conferir a caixa de Enviados; a liberacao fica na auditoria com o motivo e a
@@ -74,7 +74,7 @@ export default function LiberarEnvio({ tabela, id, reserva, aoLiberar, textoLibe
           Liberar envio
         </button>
       </div>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
     </div>
   );
 }

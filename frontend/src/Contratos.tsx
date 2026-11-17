@@ -2,9 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
 import AvisosPagina from "./AvisosPagina";
-import { IconeAlerta } from "./icones";
 import {
-  ehDoContratante, escopoDaUrl, filtrarObras, gruposPorContratante, nomeDaObra, pctExecutado, posicaoDe, totaisDe,
+  ehDoContratante, escopoDaUrl, filtrarObras, gruposPorContratante, nomeDaObra, pctExecutado, pctPiso, posicaoDe, totaisDe,
   type ObraLista, type TotaisObras,
 } from "./listaObras";
 import { brl } from "./Medicoes";
@@ -14,6 +13,7 @@ import { Link } from "./Link";
 import Rolagem from "./Rolagem";
 import { Abas } from "./Topo";
 import "./obras.css";
+import Falha from "./Falha";
 
 // Obras (lista), redesenhada na #774. A tela responde: quanto a empresa tem contratado, medido, a executar e a receber,
 // por contratante e por obra, e que obra pede atencao. Tudo NA COTA DA LOTUFO (o cabecalho diz uma vez; os numeros vem
@@ -44,7 +44,8 @@ function Executado({ pct }: { pct: number | null }) {
   );
 }
 
-const pctDe = (t: TotaisObras) => (t.contratado > 0 ? Math.round((t.medido * 100) / t.contratado) : null);
+// o executado dos totais e do contratante, por piso como o de cada obra: 99,6% nao aparece como 100%
+const pctDe = (t: TotaisObras) => pctPiso(t.medido, t.contratado);
 
 export default function Contratos({ ir, busca = {}, aba = "posicao" }: { ir: Ir; busca?: Busca; aba?: AbaObras }) {
   const [lista, setLista] = useState<Obra[] | null>(null);
@@ -117,20 +118,16 @@ export default function Contratos({ ir, busca = {}, aba = "posicao" }: { ir: Ir;
 
         {vista === "qdop" && (
           painel === undefined ? <section className="cartao"><div className="vazio"><p>Carregando…</p></div></section>
-            : painel === null ? <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroPainel} Recarregue a página para tentar de novo.</p>
+            : painel === null ? <Falha>{erroPainel} Recarregue a página para tentar de novo.</Falha>
               : <Qdop p={painel} ir={ir} />
         )}
 
         {vista === "posicao" && <>
         {!lista && !erro && <div className="vazio"><p>Carregando as obras…</p></div>}
-        {erro && <p className="erro" role="alert">
-          <IconeAlerta className="icone icone--p" />{erro} Recarregue a página para tentar de novo.
-        </p>}
+        {erro && <Falha>{erro} Recarregue a página para tentar de novo.</Falha>}
         {lista && (empresas === null || avisos === null) && avisosAbertos && (
-          <p className="campo__nota" role="alert">
-            Não foi possível carregar {[empresas === null && "os nomes das empresas", avisos === null && "os avisos"].filter(Boolean).join(" nem ")};
-            recarregue a página para tentar de novo.
-          </p>
+          <Falha>Não foi possível carregar {[empresas === null && "os nomes das empresas", avisos === null && "os avisos"].filter(Boolean).join(" nem ")};
+            recarregue a página para tentar de novo.</Falha>
         )}
 
         {lista && avisosAbertos && (
@@ -216,8 +213,7 @@ export default function Contratos({ ir, busca = {}, aba = "posicao" }: { ir: Ir;
         )}
 
         {lista && painel === null && (
-          <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />
-            Não foi possível carregar o farol, a curva e os reajustes. Recarregue a página para tentar de novo.</p>
+          <Falha>Não foi possível carregar o farol, a curva e os reajustes. Recarregue a página para tentar de novo.</Falha>
         )}
         {lista && painel && listaInteira && <CurvaDaCarteira serie={painel.curva_carteira ?? []} />}
         {/* #279: o reajuste ja' medido das competencias sem apostilamento, por obra; so' quando existe */}
