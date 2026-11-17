@@ -198,8 +198,9 @@ def _notas_em_aberto(conn, preteridas=frozenset()) -> list[dict]:
     extras = cobranca_orgao.extras_por_contrato(conn)
     tipos = cobranca_orgao.tipos_buscados(extras)
     out = []
+    # issue #755: a nota excluida no RM nao e' ativa; o filtro fica escrito para a conta nao depender so' da situacao
     for n in conn.execute("SELECT * FROM notas_fiscais WHERE idmov IS NOT NULL AND situacao='ativa' AND emissao IS NOT NULL "
-                          f"AND codtmv IN ({','.join('?' * len(tipos))})", tipos):
+                          f"AND excluida_rm_em IS NULL AND codtmv IN ({','.join('?' * len(tipos))})", tipos):
         ligadas = conn.execute("""SELECT m.id, m.contrato_id, m.estado FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id
                                   WHERE a.nota_id=? AND a.desfeita_em IS NULL""", (n["id"],)).fetchall()
         if any(r["estado"] in em_aberto for r in ligadas):
