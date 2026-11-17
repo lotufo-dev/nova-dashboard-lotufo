@@ -322,11 +322,13 @@ def arquivo_da_rota(rota: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "__", rota.strip("/")) + ".json"
 
 
-def pasta_do_retrato(saida: Path, rotulo: str) -> Path:
-    """Rotulo simples vira `<saida>/retrato/<rotulo>`; com barra, e' um caminho de pasta."""
+def pasta_do_retrato(saida: Path, rotulo: str, raiz: Path = comum.RAIZ, base: Path | None = None) -> Path:
+    """Rotulo simples vira `<saida>/retrato/<rotulo>`; com barra, e' um caminho de pasta. O caminho passa pela
+    mesma recusa da saida (`comum.saida_de_prova`): o retrato de uma copia do banco tem dado real, e dentro do
+    repositorio so' pode morar em `.prova/`."""
     if re.fullmatch(r"[A-Za-z0-9._-]+", rotulo):
         return saida / "retrato" / rotulo
-    return comum.absoluto(rotulo)
+    return comum.saida_permitida(comum.absoluto(rotulo, base), f"O retrato '{rotulo}'", raiz)
 
 
 def tirar(args) -> int:

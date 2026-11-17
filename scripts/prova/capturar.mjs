@@ -6,7 +6,8 @@
 //   node scripts/prova/capturar.mjs --conferir --capturas falha --larguras 1440     (o que a CI roda)
 //
 // Opcoes: --perfis a,b   --telas id,id   --larguras 1440,390   --escala 2 (pontos por pixel; padrao 1)
-//         --capturas todas|falha|nenhuma (padrao todas)   --conferir (sai com 1 se alguma tela tiver problema)
+//         --capturas todas|falha|nenhuma (padrao todas)   --conferir (sai com 1 se alguma tela tiver problema ou se
+//         nenhuma tela for aberta)
 //
 // Para cada perfil e largura: abre a tela de login, entra com o usuario de teste (digitando, como uma pessoa) e
 // abre cada tela de `telas.mjs` numa aba nova. Uma tela tem PROBLEMA quando: da' erro de script ou de console;
@@ -50,6 +51,7 @@ const opcao = nome => { const i = args.indexOf(nome); return i >= 0 ? args[i + 1
 const lista = (nome, todos, rotulo) => {
   const pedidos = opcao(nome)?.split(",").map(s => s.trim()).filter(Boolean);
   if (!pedidos) return todos;
+  if (!pedidos.length) recusar(`${nome} veio vazio: sem ${rotulo} não há o que abrir. Vale: ${todos.join(", ")}`);
   const fora = pedidos.filter(p => !todos.map(String).includes(p));
   if (fora.length) recusar(`${nome} não conhece ${rotulo} "${fora.join('", "')}". Vale: ${todos.join(", ")}`);
   return todos.filter(t => pedidos.includes(String(t)));
@@ -328,4 +330,9 @@ fs.writeFileSync(path.join(SAIDA, "relato.json"), JSON.stringify({
 console.log(`\n${relato.length} tela(s) abertas em ${Math.round((Date.now() - inicio) / 1000)} s; `
   + `${comProblema.length} com problema. Relato: ${path.join(SAIDA, "relato.json")}`);
 for (const i of comProblema) console.log(`  FALHA ${i.perfil} ${i.largura} ${i.tela}: ${i.problemas[0]}`);
-process.exit(conferir && comProblema.length ? 1 : 0);
+// conferencia que nao abriu tela nenhuma (fora o login) nao conferiu nada: reprova, em vez de passar vazia
+const semTela = !relato.some(i => i.tela !== LOGIN.id);
+if (conferir && semTela) {
+  console.log("  FALHA nenhuma tela foi aberta: --perfis ou --telas ficou vazio, ou nenhum perfil pedido tem as telas pedidas");
+}
+process.exit(conferir && (comProblema.length || semTela) ? 1 : 0);

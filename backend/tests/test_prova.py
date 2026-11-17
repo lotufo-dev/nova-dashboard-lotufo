@@ -1,5 +1,10 @@
 """Roteiros de prova (scripts/prova, issue #702): as recusas do ambiente, o ambiente do servidor de prova, o
 comparador do retrato e as listas de rotas do retrato conferidas contra as rotas de verdade do backend."""
+import os
+import shutil
+import socket
+import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 
@@ -70,6 +75,178 @@ def test_banco_fora_do_repositorio_passa_novo_ou_copia(repo):
 def test_o_repositorio_de_verdade_recusa_o_proprio_banco_padrao():
     with pytest.raises(comum.Recusa, match="banco padrão"):
         comum.banco_de_prova({"DASH_DB_PATH": str(RAIZ / "backend" / "dados" / "dashboard.db")})
+
+
+# --- recusas: banco de uma instalacao e banco com contratos sem `--copia` ----------------------------------------
+
+def _instalacao(pasta):
+    """Uma pasta montada como a da producao: `dados/dashboard.db` e `segredos/instalacao.json`."""
+    (pasta / "dados").mkdir(parents=True)
+    (pasta / "segredos").mkdir()
+    (pasta / "segredos" / "instalacao.json").write_text("{}", encoding="utf-8")
+    return pasta / "dados" / "dashboard.db"
+
+
+def _banco(caminho, contratos=0, usuarios=()):
+    """Um banco SQLite so' com o que a guarda le: a tabela de contratos e a de usuarios."""
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(caminho)
+    conn.execute("CREATE TABLE contratos (id INTEGER PRIMARY KEY)")
+    conn.execute("CREATE TABLE usuarios (id INTEGER PRIMARY KEY, email TEXT)")
+    conn.executemany("INSERT INTO contratos DEFAULT VALUES", [()] * contratos)
+    conn.executemany("INSERT INTO usuarios (email) VALUES (?)", [(u,) for u in usuarios])
+    conn.commit()
+    conn.close()
+    return caminho
+
+
+USUARIOS_DE_TESTE = [comum.email_de_teste(p) for p in comum.PERFIS]
+
+
+def test_banco_de_uma_instalacao_e_recusado_exista_ou_nao_o_arquivo(repo):
+    raiz, fora = repo
+    banco = _instalacao(fora / "Dashboard")
+    for alvo in (banco, banco.with_name("outro.db")):       # o banco ainda nem existe, ou e' outro arquivo da pasta
+        with pytest.raises(comum.Recusa, match="banco de uma instalação") as e:
+            comum.banco_de_prova({"DASH_DB_PATH": str(alvo)}, raiz)
+        assert "Copie o arquivo do banco" in str(e.value)
+    _banco(banco, contratos=2)
+    with pytest.raises(comum.Recusa, match="banco de uma instalação"):
+        comum.banco_de_prova({"DASH_DB_PATH": "Dashboard/dados/dashboard.db"}, raiz, base=fora)    # relativo
+
+
+def test_pasta_com_cara_de_producao_mas_sem_o_arquivo_da_instalacao_passa(repo):
+    raiz, fora = repo
+    banco = fora / "Dashboard" / "dados" / "dashboard.db"
+    (fora / "Dashboard" / "segredos").mkdir(parents=True)     # a pasta existe, o arquivo da instalacao nao
+    assert comum.banco_de_prova({"DASH_DB_PATH": str(banco)}, raiz) == banco.resolve()
+
+
+def test_terminal_com_a_variavel_da_instalacao_recusa(repo):
+    raiz, fora = repo
+    arquivo = fora / "outro-lugar" / "instalacao.json"
+    ambiente = {"DASH_DB_PATH": str(fora / "prova.db"), "DASH_INSTALACAO_ARQUIVO": str(arquivo)}
+    assert comum.banco_de_prova(ambiente, raiz) == (fora / "prova.db").resolve()     # aponta para o que nao existe
+    arquivo.parent.mkdir()
+    arquivo.write_text("{}", encoding="utf-8")
+    with pytest.raises(comum.Recusa, match="DASH_INSTALACAO_ARQUIVO"):
+        comum.banco_de_prova(ambiente, raiz)
+
+
+def test_o_marcador_da_instalacao_e_o_mesmo_arquivo_que_o_backend_le(monkeypatch, tmp_path):
+    """`comum.py` roda sem as dependencias do backend e por isso repete a regra de `instalacao.caminho_arquivo`.
+    Se a regra de la' mudar, este teste reprova e a guarda da prova muda junto."""
+    from app import instalacao
+    banco = tmp_path / "Dashboard" / "dados" / "dashboard.db"
+    monkeypatch.setenv("DASH_DB_PATH", str(banco))
+    monkeypatch.delenv("DASH_INSTALACAO_ARQUIVO", raising=False)
+    assert instalacao.caminho_arquivo() == comum.marcador_de_instalacao(banco)
+    assert comum.marcador_de_instalacao(banco) == tmp_path / "Dashboard" / "segredos" / "instalacao.json"
+
+
+def test_banco_com_contratos_so_com_copia_explicita(repo):
+    _, fora = repo
+    banco = _banco(fora / "copia.db", contratos=3)
+    with pytest.raises(comum.Recusa, match="--copia") as e:
+        comum.conferir_copia(banco, False)
+    assert "administrador" in str(e.value)
+    assert comum.conferir_copia(banco, True) == "copia"
+    # com um usuario de teste so' ainda falta criar conta: continua pedindo
+    faltando = _banco(fora / "meia.db", contratos=1, usuarios=USUARIOS_DE_TESTE[:1])
+    with pytest.raises(comum.Recusa, match="--copia"):
+        comum.conferir_copia(faltando, False)
+
+
+def test_banco_novo_vazio_ou_ja_preparado_nao_pede_copia(repo):
+    _, fora = repo
+    assert comum.conferir_copia(fora / "novo.db", False) == "novo"
+    (fora / "zero.db").write_bytes(b"")
+    assert comum.conferir_copia(fora / "zero.db", False) == "vazio"
+    assert comum.conferir_copia(_banco(fora / "sem-contrato.db"), False) == "vazio"
+    # a prova ja' rodou nele (os tres usuarios de teste existem): subir de novo nao cria conta nenhuma
+    preparado = _banco(fora / "preparado.db", contratos=2, usuarios=[*USUARIOS_DE_TESTE, "alguem@exemplo.com.br"])
+    assert comum.conferir_copia(preparado, False) == "preparado"
+    assert comum.estado_do_banco(preparado) == {"contratos": 2, "usuarios_de_teste": sorted(USUARIOS_DE_TESTE)}
+
+
+def test_copia_pedida_sobre_arquivo_que_nao_existe_ou_nao_e_banco_recusa(repo):
+    _, fora = repo
+    with pytest.raises(comum.Recusa, match="não há arquivo"):
+        comum.conferir_copia(fora / "caminho-errado.db", True)
+    (fora / "lixo.db").write_text("isto não é um banco " * 200, encoding="utf-8")
+    for copia in (False, True):
+        with pytest.raises(comum.Recusa, match="não abre como banco SQLite"):
+            comum.conferir_copia(fora / "lixo.db", copia)
+
+
+def _nada_nasceu_ao_lado(banco):
+    return sorted(p.name for p in banco.parent.iterdir() if p.name.startswith("prova-") or p.name == "correio-simulado")
+
+
+def test_servidor_recusa_banco_de_instalacao_e_banco_com_contratos_antes_de_gravar(tmp_path):
+    cadastro = str(comum.CADASTRO_EXEMPLO)
+    producao = _banco(_instalacao(tmp_path / "Dashboard"), contratos=2)
+    copia = _banco(tmp_path / "temp" / "copia.db", contratos=2)
+    antes = {b: b.read_bytes() for b in (producao, copia)}
+    for banco, com_copia, frase in ((producao, False, "banco de uma instalação"),
+                                    (producao, True, "banco de uma instalação"),     # --copia nao abre a producao
+                                    (copia, False, "--copia")):
+        with pytest.raises(comum.Recusa, match=frase):
+            servidor.subir({"DASH_DB_PATH": str(banco), "DASH_CADASTRO_DIR": cadastro}, com_frontend=False,
+                           copia=com_copia)
+        assert banco.read_bytes() == antes[banco]
+        assert _nada_nasceu_ao_lado(banco) == []        # nem a senha de teste
+
+
+@pytest.mark.parametrize("onde, argumentos, frase", [
+    ("instalacao", [], "banco de uma instalação"),
+    ("instalacao", ["--copia"], "banco de uma instalação"),
+    ("copia", [], "--copia"),
+])
+def test_semear_chamado_direto_nao_e_atalho_para_criar_conta(tmp_path, onde, argumentos, frase):
+    """`semear.py` e' quem cria os usuarios de teste: as recusas valem nele tambem, antes de abrir o banco."""
+    banco = _instalacao(tmp_path / "Dashboard") if onde == "instalacao" else tmp_path / "temp" / "copia.db"
+    _banco(banco, contratos=2)
+    antes = banco.read_bytes()
+    senha = tmp_path / "senha.txt"
+    servidor.garantir_senha(senha)
+    env = comum.ambiente_do_servidor(os.environ, banco, comum.CADASTRO_EXEMPLO, None)
+    env["PYTHONPATH"] = str(comum.BACKEND)
+    feito = subprocess.run([sys.executable, str(RAIZ / "scripts" / "prova" / "semear.py"), str(senha), *argumentos],
+                           cwd=comum.BACKEND, env=env, capture_output=True, text=True, encoding="utf-8")
+    assert feito.returncode != 0
+    assert "RECUSADO" in feito.stderr and frase in feito.stderr
+    assert banco.read_bytes() == antes
+    conn = sqlite3.connect(banco)
+    assert conn.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] == 0
+    conn.close()
+
+
+def test_porta_pedida_ja_ocupada_recusa_sem_preparar_o_banco(tmp_path):
+    banco = tmp_path / "prova.db"
+    ambiente = {"DASH_DB_PATH": str(banco), "DASH_CADASTRO_DIR": str(comum.CADASTRO_EXEMPLO)}
+    with socket.socket() as outro:                       # outra dashboard ja' escutando na porta pedida
+        outro.bind(("127.0.0.1", 0))
+        outro.listen()
+        porta = outro.getsockname()[1]
+        assert servidor.porta_ocupada(porta) is True
+        with pytest.raises(comum.Recusa, match=f"porta {porta} já está em uso"):
+            servidor.subir(ambiente, porta=porta, com_frontend=False)
+    assert not banco.exists() and _nada_nasceu_ao_lado(banco) == []
+    assert servidor.porta_ocupada(porta) is False        # liberada, a mesma porta serve
+
+
+def test_capturar_recusa_lista_vazia_de_perfis_ou_de_telas():
+    """`--perfis ""` ou `--telas ""` com `--conferir` passava sem abrir tela nenhuma."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("sem Node nesta máquina")
+    sem_prova = {k: v for k, v in os.environ.items() if not k.upper().startswith("DASH_")}   # recusa antes do banco
+    for opcao in ("--perfis", "--telas"):
+        feito = subprocess.run([node, str(RAIZ / "scripts" / "prova" / "capturar.mjs"), "--conferir", opcao, ""],
+                               capture_output=True, text=True, encoding="utf-8", env=sem_prova)
+        assert feito.returncode == 2, feito.stderr
+        assert f"{opcao} veio vazio" in feito.stderr
 
 
 def test_cadastro_faltando_ou_inexistente_recusa(repo):
@@ -326,3 +503,24 @@ def test_nome_do_arquivo_de_cada_rota_e_unico_e_sem_barra():
 def test_rotulo_simples_fica_na_saida_e_caminho_e_usado_como_esta(tmp_path):
     assert retrato.pasta_do_retrato(tmp_path, "antes") == tmp_path / "retrato" / "antes"
     assert retrato.pasta_do_retrato(tmp_path, str(tmp_path / "outra" / "pasta")) == (tmp_path / "outra" / "pasta").resolve()
+
+
+def test_retrato_com_caminho_dentro_do_repositorio_so_na_pasta_ignorada(repo):
+    """Rotulo com barra e' caminho: passa pela mesma recusa de `comum.saida_de_prova`."""
+    raiz, fora = repo
+    saida = fora / "prova-saida"
+    for rotulo, base in (("docs/retrato-antes", raiz),                 # relativo, rodado na raiz do repositorio
+                         (str(raiz / "docs" / "retrato-antes"), None),
+                         ("../retrato-antes", raiz / "backend"),
+                         (str(raiz) + "/", None)):
+        with pytest.raises(comum.Recusa, match="dentro do repositório"):
+            retrato.pasta_do_retrato(saida, rotulo, raiz, base)
+    ignorada = raiz / comum.SAIDA_NO_REPOSITORIO / "retrato-antes"
+    assert retrato.pasta_do_retrato(saida, f"{comum.SAIDA_NO_REPOSITORIO}/retrato-antes", raiz, raiz) == ignorada.resolve()
+    assert retrato.pasta_do_retrato(saida, str(fora / "x" / "antes"), raiz) == (fora / "x" / "antes").resolve()
+    assert retrato.pasta_do_retrato(saida, "../fora/antes", raiz, raiz) == (fora / "antes").resolve()
+
+
+def test_retrato_no_repositorio_de_verdade_recusa_pasta_versionada(tmp_path):
+    with pytest.raises(comum.Recusa, match="dentro do repositório"):
+        retrato.pasta_do_retrato(tmp_path, str(RAIZ / "docs" / "retrato-antes"))

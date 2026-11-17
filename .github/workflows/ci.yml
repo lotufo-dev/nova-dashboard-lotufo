@@ -169,11 +169,19 @@ jobs:
   # do ruleset `master protegida` (roda tambem na fila de merge, como os outros). Nada aqui muda essa configuracao.
   # O navegador (so' o Chromium sem janela) fica em cache pela versao do Playwright. Quando reprova, as capturas das
   # telas reprovadas, o relato e o log do servidor sobem como artefato: so' dado de exemplo, nenhum segredo.
+  # O passo do teste tem prazo proprio, menor que o do job: servidor que trava reprova o PASSO e o artefato sobe;
+  # se fosse o job a estourar, o GitHub cancelaria tudo e nao sobraria captura nem log.
+  # O job roda `npm ci`, build e navegador com o codigo da PR: so' le o repositorio e o checkout nao deixa o token
+  # gravado no `.git/config`.
   ponta-a-ponta:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -200,6 +208,7 @@ jobs:
         run: npx playwright install --only-shell chromium
         working-directory: frontend
       - name: Ponta a ponta
+        timeout-minutes: 6
         run: python scripts/prova/ponta_a_ponta.py --pasta "$RUNNER_TEMP/ponta-a-ponta"
       - name: Capturas das telas reprovadas
         if: ${{ failure() }}

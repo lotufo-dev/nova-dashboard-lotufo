@@ -2,8 +2,13 @@
 
   DASH_DB_PATH=<pasta temporaria>/prova.db DASH_CADASTRO_DIR=cadastro-exemplo python3 scripts/prova/servidor.py
 
+Sobre uma copia do banco (um arquivo que ja' tem contratos), a primeira subida pede `--copia`: a prova roda as
+migracoes e cria tres usuarios de teste nela, um deles administrador, e isso nao se faz sem alguem dizer que o
+arquivo e' copia. O banco de uma instalacao (a producao) e' recusado sempre, com ou sem `--copia`.
+
 O que faz, nesta ordem:
-  1. confere as variaveis (`comum.py`): recusa o banco padrao, banco dentro do repositorio e variavel faltando;
+  1. confere as variaveis (`comum.py`): recusa o banco padrao, banco dentro do repositorio, banco de uma
+     instalacao, banco com contratos sem `--copia`, variavel faltando e `--porta` ja' ocupada;
   2. monta o frontend numa pasta ao lado do banco (`frontend/dist` nao e' tocado), a menos de `--dist` ou
      `--sem-frontend`;
   3. gera a senha dos usuarios de teste num arquivo ao lado do banco (`prova-senha.txt`, fora do repositorio; a
@@ -43,6 +48,23 @@ def porta_livre() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def porta_ocupada(porta: int) -> bool:
+    with socket.socket() as s:
+        try:
+            s.bind(("127.0.0.1", porta))
+        except OSError:
+            return True
+    return False
+
+
+def exigir_porta_livre(porta: int) -> None:
+    """Com a porta ja' ocupada por outra dashboard, o `/api/health` DELA responderia "ok" antes de o backend da
+    prova desistir da porta, e a prova seria anunciada no ar em cima do servidor errado."""
+    if porta_ocupada(porta):
+        raise comum.Recusa(f"A porta {porta} já está em uso por outro processo. Escolha outra com --porta ou rode "
+                           "sem --porta, que a prova pega uma livre.")
 
 
 def montar_frontend(destino: Path) -> None:
@@ -119,13 +141,22 @@ def _esperar_saude(base: str, processo: subprocess.Popen, log: Path) -> None:
     raise comum.Recusa(f"O servidor de prova não respondeu em {ESPERA_SUBIDA} s. Fim do log:\n" + _fim_do_log(log))
 
 
+ROTULOS = {"novo": "novo", "vazio": "sem contratos: o cadastro será aplicado", "copia": "cópia",
+           "preparado": "a prova já rodou nele"}
+
+
 def subir(ambiente=os.environ, porta: int | None = None, dist: Path | None = None,
-          com_frontend: bool = True) -> Servidor:
-    """Confere o ambiente, prepara o banco e devolve o servidor ja' respondendo. Levanta `comum.Recusa`."""
+          com_frontend: bool = True, copia: bool = False) -> Servidor:
+    """Confere o ambiente, prepara o banco e devolve o servidor ja' respondendo. Levanta `comum.Recusa`.
+    Todas as recusas vem antes de a prova gravar qualquer coisa: nem pasta, nem senha, nem migracao, nem conta.
+    (O banco com contratos e' aberto so' para leitura, para contar contratos e usuarios de teste.)"""
     banco = comum.banco_de_prova(ambiente)
     cadastro = comum.cadastro_de_prova(ambiente)
     saida = comum.saida_de_prova(ambiente, banco)
     arquivos = comum.arquivos_da_prova(banco)
+    o_que_e = comum.conferir_copia(banco, copia)
+    if porta:
+        exigir_porta_livre(porta)
     banco.parent.mkdir(parents=True, exist_ok=True)
 
     if not com_frontend:
@@ -139,13 +170,17 @@ def subir(ambiente=os.environ, porta: int | None = None, dist: Path | None = Non
     python = comum.python_do_backend()
     env = comum.ambiente_do_servidor(ambiente, banco, cadastro, dist)
     env["PYTHONPATH"] = os.pathsep.join([str(comum.BACKEND), *filter(None, [ambiente.get("PYTHONPATH")])])
-    print(f"banco da prova: {banco} ({'cópia' if banco.exists() else 'novo'})", flush=True)
+    print(f"banco da prova: {banco} ({ROTULOS[o_que_e]})", flush=True)
     gerou = garantir_senha(arquivos["senha"])
     semear = [python, str(Path(__file__).resolve().parent / "semear.py"), str(arquivos["senha"])]
-    if subprocess.run(semear + (["--redefinir"] if gerou else []), cwd=comum.BACKEND, env=env).returncode != 0:
+    semear += (["--redefinir"] if gerou else []) + (["--copia"] if copia else [])
+    if subprocess.run(semear, cwd=comum.BACKEND, env=env).returncode != 0:
         raise comum.Recusa("O banco da prova não ficou pronto (mensagem acima).")
 
-    porta = porta or porta_livre()
+    if porta:
+        exigir_porta_livre(porta)   # de novo: montar o frontend e preparar o banco levam tempo
+    else:
+        porta = porta_livre()
     base = f"http://127.0.0.1:{porta}"
     log = open(arquivos["log"], "w", encoding="utf-8")
     processo = subprocess.Popen(
@@ -169,10 +204,13 @@ def main(argv: list | None = None) -> int:
     p.add_argument("--porta", type=int, help="porta em 127.0.0.1 (padrão: uma livre)")
     p.add_argument("--dist", help="frontend já montado (padrão: monta agora, ao lado do banco)")
     p.add_argument("--sem-frontend", action="store_true", help="só a API (basta para o retrato)")
+    p.add_argument("--copia", action="store_true",
+                   help="o banco de DASH_DB_PATH é uma cópia com contratos: a prova roda as migrações e cria os "
+                        "usuários de teste nela (sem isto, banco que já tem contrato é recusado)")
     args = p.parse_args(argv)
     try:
         servidor = subir(porta=args.porta, dist=comum.absoluto(args.dist) if args.dist else None,
-                         com_frontend=not args.sem_frontend)
+                         com_frontend=not args.sem_frontend, copia=args.copia)
     except comum.Recusa as e:
         print(f"RECUSADO: {e}", file=sys.stderr)
         return 2
