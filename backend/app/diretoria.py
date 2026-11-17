@@ -184,20 +184,19 @@ def _notas_em_aberto(conn, preteridas=frozenset()) -> list[dict]:
     exemplo). A obra vem da medicao ligada ou do centro de custo (atual ou anterior); consorcio sem centro, pela
     coligada. So' notas da coligada da entidade do contrato: a NFS-e da Lotufo em obra de consorcio e' repassada
     pelo consorcio e nao e' cobranca ao orgao. O valor e' o que falta dos titulos (liquido), titulo a titulo, na cota.
-    Nota ligada a medicao recebida por REGISTRO feito para ela fica fora (`conciliacao.recebidas_por_registro`: a'
-    mao pelo administrador, issue #203, e pela correcao de cadastro, decisao de 17/11/2026, docs/adr/0006): o registro
-    vale, e o titulo ainda aberto no RM aparece na Saude, nao de novo no a receber. A fechada pelo corte continua
-    aqui (a decisao do corte: o que o RM mostra em aberto segue a receber pelas notas), e a recebida pela baixa do RM
-    tambem, se o RM voltar a mostrar titulo aberto. Issue #713: a nota que chega DEPOIS do recebimento a mao e'
-    ligada a' medicao pelo casador do RM (`sincronizacao_rm._candidatas`) e sai daqui por esta mesma regra; a da
-    recebida pela correcao de cadastro, quando a propria correcao a liga (`ligar_nf`). Solta, a nota soma, pelo centro
-    de custo, um dinheiro que ja' entrou. So' nota de cobranca ao orgao (#563):
+    Nota ligada a medicao recebida a mao fica fora (issue #203): o registro manual vale, e o titulo ainda aberto
+    no RM aparece na Saude, nao de novo no a receber. So' o registro do administrador na tela tira a nota daqui
+    (decisao de 17/11/2026, docs/adr/0006): a ligada a medicao fechada pelo corte ou recebida pela correcao de
+    cadastro continua (o que o RM mostra em aberto segue a receber pelas notas) e aparece tambem na Saude
+    (`sincronizacao_rm._recebidas_sem_baixa`). Issue #713: a nota que chega DEPOIS do recebimento a mao e'
+    ligada a' medicao pelo casador do RM (`sincronizacao_rm._candidatas`) e sai daqui por esta mesma regra; antes
+    ficava solta e somava, pelo centro de custo, um dinheiro que ja' entrou. So' nota de cobranca ao orgao (#563):
     a de tipo da lista geral e, na obra a que a nota foi atribuida, a dos tipos extras dela
     (`cobranca_orgao.e_cobranca`, docs/adr/0015).
     `preteridas` (issue #756, so' na cota: `a_receber_na_cota`): as faturas do consorcio que a nota da propria empresa
     tirou da conta da medicao a que estao ligadas; ficam fora, para a mesma cobranca nao entrar duas vezes."""
     em_aberto = set(ESPERANDO_NOTA + ESPERANDO_PROTOCOLO + PROTOCOLADAS)
-    por_registro = conciliacao.recebidas_por_registro(conn)
+    a_mao = conciliacao.recebidas_a_mao(conn)
     contr, por_centro, por_coligada = _mapa_contratos(conn)
     extras = cobranca_orgao.extras_por_contrato(conn)
     tipos = cobranca_orgao.tipos_buscados(extras)
@@ -211,8 +210,10 @@ def _notas_em_aberto(conn, preteridas=frozenset()) -> list[dict]:
             continue                                        # a medicao em aberto ja' conta
         if n["id"] in preteridas:
             continue                                        # a medicao conta pela nota da empresa ao consorcio (#756)
-        if ligadas and all(r["id"] in por_registro for r in ligadas):
-            continue                                        # recebida por registro: o registro vale (#203, docs/adr/0006)
+        if ligadas and all(r["id"] in a_mao for r in ligadas):
+            continue                                        # recebida a mao: o registro manual vale (#203)
+        # (`sincronizacao_rm.alocar` so' liga a nota a uma medicao; se um dia houver nota partida com medicao
+        # fechada de outro jeito, ela fica inteira no a receber, como antes do #203)
         # (`sincronizacao_rm.alocar` so' liga a nota a uma medicao; se um dia houver nota partida com medicao
         # fechada de outro jeito, ela fica inteira no a receber, como antes do #203)
         if ligadas:

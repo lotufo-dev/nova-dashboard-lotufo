@@ -214,7 +214,7 @@ _CAMPOS_CONTRATO = ("nome_curto", "orgao", "orgao_id", "entidade_id", "objeto", 
                     "estado", "documentos", "objeto_completo", "cno_arquivo", "folga_vigencia_dias",
                     "centros_custo_anteriores_rm", "objeto_carta", "garantia_apolice", "garantia_vigencia_fim",
                     "garantia_arquivo", "indice_reajuste", "pecas_no_oficio", "passos_medicao",
-                    "tipos_cobranca_extras_rm")
+                    "tipos_cobranca_extras_rm", "centro_custo_empresa_rm")
 _CAMPOS_FISCAL = ("cargo", "tratamento", "portaria")
 
 
@@ -327,7 +327,9 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             "passos_medicao": None if c.get("passos_medicao") is None else _json(c["passos_medicao"]),
             # docs/adr/0015: tipos de movimento do RM que so' nesta obra tambem sao cobranca ao orgao; sem nenhum, NULL
             "tipos_cobranca_extras_rm": _json(c["tipos_cobranca_extras_rm"])
-            if c.get("tipos_cobranca_extras_rm") else None}
+            if c.get("tipos_cobranca_extras_rm") else None,
+            # docs/adr/0005: o centro de custo da propria empresa para o contrato de consorcio; sem a chave, NULL
+            "centro_custo_empresa_rm": c.get("centro_custo_empresa_rm")}
     mudou = False
     # A troca dos tipos de cobranca muda o a receber, o faturado e o vinculo das notas da obra: o relatorio (e o
     # ensaio) diz o antes e o depois ao lado do nome, em vez de so' "alterado".

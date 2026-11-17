@@ -504,8 +504,9 @@ def test_nota_com_todos_os_titulos_quitados_fecha_sem_evento(conn, cid, tmp_path
 
 
 def test_reconciliacao_lista_recebida_a_mao_com_titulo_aberto_no_rm(conn, cid, tmp_path):
-    """Issue #203: o recebimento a mao vale, e a Saude avisa enquanto o RM nao tiver a baixa do titulo. A medicao
-    fechada pelo corte nao entra (o titulo aberto dela segue no a receber); com o titulo quitado, o aviso sai."""
+    """Issue #203: o recebimento a mao vale, e a Saude avisa enquanto o RM nao tiver a baixa do titulo. Desde
+    17/11/2026 (docs/adr/0006) a medicao fechada pelo corte tambem aparece, sem a marca `a_mao`: o titulo aberto dela
+    segue no a receber, e a lista mostra a contradicao. Com o titulo quitado, a linha sai."""
     from app import conciliacao
     a_mao = _medicao(conn, cid, 12, 1000_01)
     cortada = _medicao(conn, cid, 13, 500_00)
@@ -521,9 +522,11 @@ def test_reconciliacao_lista_recebida_a_mao_com_titulo_aberto_no_rm(conn, cid, t
                  "VALUES (?, ?, 1, 'detectado', 't')", (irma, nid)); conn.commit()
     medicoes.mudar_estado(conn, 1, irma, "recebida", "a baixa nao entrou no RM; conferida no extrato", "2026-09-20")
     r = sincronizacao_rm.reconciliacao(conn)["recebidas_sem_baixa"]
-    assert [(x["medicao_id"], x["numero"], x["numero_nf"], x["falta_centavos"], x["recebida_em"]) for x in r] == [
-        (a_mao, 12, "0000000100", 924_01, "2026-09-20")]
-    pagas = [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-25T00:00:00-04:00"), _baixa(2, 101, 462.0, 0.0, 0)]
+    assert [(x["medicao_id"], x["numero"], x["numero_nf"], x["falta_centavos"], x["recebida_em"], x["a_mao"]) for x in r] == [
+        (a_mao, 12, "0000000100", 924_01, "2026-09-20", True), (cortada, 13, "0000000101", 462_00, None, False)]
+    assert _a_receber_do_rm(conn) == ["0000000101"]                # so' a do corte segue no a receber
+    pagas = [_baixa(1, 100, 924.01, 924.01, 1, "2026-09-25T00:00:00-04:00"),
+             _baixa(2, 101, 462.0, 462.0, 1, "2026-09-25T00:00:00-04:00")]
     sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, pagas))
     assert sincronizacao_rm.reconciliacao(conn)["recebidas_sem_baixa"] == []
 
@@ -2194,39 +2197,30 @@ def test_recebida_a_mao_em_duas_notas_com_uma_ligada_nao_recebe_a_segunda_e_avis
     assert medicoes.detalhe(conn, mid)["estado"] == "recebida"
 
 
-@pytest.mark.parametrize("como, no_a_receber", [("correcao", False), ("manual", False), ("corte", True)])
-def test_nota_ligada_a_medicao_recebida_por_registro_sai_do_a_receber(conn, cid, tmp_path, como, no_a_receber):
-    """Decisao de 17/11/2026 (docs/adr/0006): a nota ligada a' medicao recebida por registro feito para ela (o
-    administrador, a' mao, ou a correcao de cadastro) nao soma no a receber, mesmo com o titulo aberto no RM, e aparece
-    na Saude. A fechada pelo corte continua: a decisao do corte e' "o que o RM mostra em aberto segue a receber"."""
+@pytest.mark.parametrize("como, no_a_receber", [("manual", False), ("correcao", True), ("corte", True)])
+def test_so_o_recebimento_a_mao_tira_a_nota_do_a_receber(conn, cid, tmp_path, como, no_a_receber):
+    """Decisao de 17/11/2026 (docs/adr/0006): so' o recebimento registrado pelo administrador na tela tira do a
+    receber a nota ligada com titulo aberto no RM. Na medicao fechada pelo corte e na recebida pela correcao de
+    cadastro vale o RM: o que ele mostra em aberto segue a receber pela nota. Nos tres casos a nota aparece na
+    Saude, com a marca de que o recebimento foi a' mao ou nao."""
     from app import conciliacao
     c2 = _obra_com_centro(conn)
     mid = _medicao(conn, c2, 3, 500_01)
     cli = _simulador(tmp_path, [_nf(7, 500.01, centro_custo="2.001.012", numero="77")], [_baixa(1, 7, 462.01, 0.0, 0)])
     assert sincronizacao_rm.sincronizar(conn, cli)["alocacoes"] == 1
     assert _a_receber_do_rm(conn) == []                            # protocolada: a medicao conta, a nota nao
+    assert sincronizacao_rm.reconciliacao(conn)["recebidas_sem_baixa"] == []
     if como == "corte":
         medicoes.mudar_estado(conn, 1, mid, "recebida", conciliacao.MOTIVO_CORTE.format(data="22/09/2026"), None,
                               origem="corte")
     else:
         medicoes.mudar_estado(conn, 1, mid, "recebida", "paga, conforme o extrato do banco", "2026-09-20",
-                              origem="manual" if como == "manual" else conciliacao.ORIGEM_CORRECAO)
-    assert (mid in conciliacao.recebidas_por_registro(conn)) is not no_a_receber
+                              origem="manual" if como == "manual" else "correção de cadastro")
     assert _a_receber_do_rm(conn) == (["77"] if no_a_receber else [])
     assert _total_a_receber(conn) == (462_01 if no_a_receber else 0)
-    sem_baixa = [(x["medicao_id"], x["falta_centavos"]) for x in sincronizacao_rm.reconciliacao(conn)["recebidas_sem_baixa"]]
-    assert sem_baixa == ([] if no_a_receber else [(mid, 462_01)])
-
-
-def test_recebidas_por_registro_vale_a_ultima_passagem_a_recebida(conn, cid, tmp_path):
-    """A medicao recebida a' mao, reaberta e depois recebida pela baixa do RM deixa de ser "por registro"."""
-    from app import conciliacao
-    mid = _medicao(conn, cid, 3, 500_01)
-    _receber_a_mao(conn, mid)
-    assert conciliacao.recebidas_por_registro(conn) == {mid}
-    conn.execute("UPDATE medicoes SET estado='protocolada', recebida_em=NULL WHERE id=?", (mid,)); conn.commit()
-    medicoes.mudar_estado(conn, None, mid, "recebida", None, "2026-10-01")
-    assert conciliacao.recebidas_por_registro(conn) == set()
+    sem_baixa = [(x["medicao_id"], x["falta_centavos"], x["a_mao"])
+                 for x in sincronizacao_rm.reconciliacao(conn)["recebidas_sem_baixa"]]
+    assert sem_baixa == [(mid, 462_01, como == "manual")]
 
 
 def test_recebida_a_mao_do_legado_nao_atrai_nota(conn, cid, tmp_path):
@@ -2333,6 +2327,136 @@ def test_nota_da_lotufo_em_obra_de_consorcio_nao_liga_pela_saida_sem_obra(conn, 
     assert sorted(n["idmov"] for n in sincronizacao_rm.reconciliacao(conn)["nfs_sem_medicao"]) == [939, 940, 942]
     assert medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado"
     assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='nf.alocar'").fetchone()[0] == 0
+
+
+# --- docs/adr/0005: o contrato de consorcio declara o centro de custo da propria empresa (`centro_custo_empresa_rm`) ---
+
+CENTRO_DA_EMPRESA = "5.001.001"      # o que a Obra Consorcio do `cadastro-exemplo/` declara
+
+
+def _nota_da_empresa_no_centro_declarado(idmov, emissao="2026-08-10", valor=2000000.02, **extra):
+    return _nf(idmov, valor, coligada=1, centro_custo=CENTRO_DA_EMPRESA, emissao=f"{emissao}T00:00:00-04:00", **extra)
+
+
+def test_cadastro_de_exemplo_declara_o_centro_da_empresa_na_obra_consorcio(conn, espelho_consorcio):
+    assert [tuple(r) for r in conn.execute("SELECT nome_curto, centro_custo_empresa_rm FROM contratos ORDER BY nome_curto")] == [
+        ("Obra Consórcio", CENTRO_DA_EMPRESA), ("Obra Própria", None)]
+
+
+def test_nota_da_empresa_no_centro_declarado_liga_pela_saida_do_espelho_com_as_travas(conn, tmp_path, espelho_consorcio):
+    """Com o centro da empresa declarado no contrato de consorcio, a nota dela aponta a obra e liga pela saida do
+    espelho, dentro da obra e com as travas: a anterior ao envio do espelho nao liga; duas posteriores do mesmo valor
+    ficam ambiguas; cancelada uma no RM, a outra liga. E ela nao segura o recebimento nem entra no a receber do RM."""
+    from app import diretoria
+    mid = espelho_consorcio
+    antiga = _nota_da_empresa_no_centro_declarado(939, emissao="2026-06-20")
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [antiga], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0) and not _tem_nf(conn, mid), r
+    duas = [antiga, _nota_da_empresa_no_centro_declarado(940), _nota_da_empresa_no_centro_declarado(942, emissao="2026-08-12")]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, duas, []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 2) and not _tem_nf(conn, mid), r
+    duas[2]["STATUS"] = "C"
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, duas, []))
+    assert r["alocacoes"] == 1, r
+    m = medicoes.detalhe(conn, mid)
+    assert [(n["idmov"], n["regra"], n["da_cota"]) for n in m["notas"]] == [(940, "saida_espelho", True)]
+    assert diretoria._notas_em_aberto(conn) == [] and diretoria.rm_por_mes(conn)[0] == {}
+    assert auditoria.verificar_cadeia(conn)
+
+
+def test_nota_da_empresa_em_outro_centro_nao_concorre_com_a_do_centro_declarado(conn, tmp_path, espelho_consorcio):
+    """A nota do mesmo valor num centro que nao aponta obra nao liga nem deixa ambigua a do centro declarado."""
+    mid = espelho_consorcio
+    nfs = [_nota_da_empresa_sem_obra(941), _nota_da_empresa_no_centro_declarado(940)]
+    for ordem in (nfs, nfs[::-1]):
+        sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, ordem, []))
+    assert [n["idmov"] for n in medicoes.detalhe(conn, mid)["notas"]] == [940]
+    assert [n["idmov"] for n in sincronizacao_rm.reconciliacao(conn)["nfs_sem_medicao"]] == [941]
+
+
+@pytest.mark.parametrize("declara", [True, False])
+def test_nota_da_empresa_de_tipo_extra_liga_pela_saida_so_no_consorcio_que_o_declara(conn, tmp_path, espelho_consorcio,
+                                                                                     declara):
+    """docs/adr/0015 com o centro da empresa declarado: a nota da empresa em 2.2.03 liga pela saida do espelho da
+    medicao do consorcio cujo cadastro declara o tipo; sem a chave do tipo, fica solta."""
+    mid = espelho_consorcio
+    if not declara:
+        conn.execute("UPDATE contratos SET tipos_cobranca_extras_rm=NULL"); conn.commit()
+    faltavam = medicoes.detalhe(conn, mid)["notas_faltam"]
+    nota = _nota_da_empresa_no_centro_declarado(940, codtmv="2.2.03")
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [nota], [_baixa(1, 940, 1840000.02, 0.0, 0)]))
+    assert (r["alocacoes"], r["sugestoes"]) == ((1, 0) if declara else (0, 0)), r
+    m = medicoes.detalhe(conn, mid)
+    assert [(n["idmov"], n["regra"], n["da_cota"]) for n in m["notas"]] == ([(940, "saida_espelho", True)] if declara else [])
+    assert faltavam >= 1 and m["notas_faltam"] == (faltavam - 1 if declara else faltavam)
+
+
+def _consorcio_sem_espelho(conn):
+    """Cadastro de exemplo aplicado; devolve o id da Obra Consorcio (cota de 50%, centro da empresa declarado)."""
+    from app import auth, cadastro_aplicar, cadastro_arquivos
+    auth.criar_usuario(conn, "U", "u@l.com", "senha-forte-123", "engenharia")
+    cadastro_aplicar.aplicar(conn, 1, cadastro_arquivos.preparar(RAIZ), ensaio=False)
+    return conn.execute("SELECT id FROM contratos WHERE nome_curto='Obra Consórcio'").fetchone()[0]
+
+
+@pytest.mark.parametrize("valor_da_nota, liga", [(1000.01, True), (1000.00, False), (2000.01, False)])
+def test_sem_espelho_a_nota_da_empresa_no_centro_declarado_liga_pela_cota_da_medicao(conn, tmp_path, valor_da_nota, liga):
+    """Medicao de consorcio SEM espelho, de R$ 2.000,01 (centavo impar): a nota da empresa e' a cota, R$ 1.000,01
+    (50%, meio para cima). Liga so' pelo valor exato da cota: um centavo ao lado nao liga, e o valor cheio tambem nao
+    (esse e' o da fatura do consorcio). O estado nao muda e a nota nao decide o recebimento."""
+    cid = _consorcio_sem_espelho(conn)
+    mid = _medicao(conn, cid, 3, 2000_01)
+    nota = _nota_da_empresa_no_centro_declarado(7, valor=valor_da_nota)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [nota], [_baixa(1, 7, 930.0, 930.0, 1, "2026-09-01T00:00:00-04:00")]))
+    assert r["alocacoes"] == (1 if liga else 0) and r["recebimentos"] == 0, r
+    m = medicoes.detalhe(conn, mid)
+    assert m["estado"] == "protocolada"
+    assert [(n["idmov"], n["regra"]) for n in m["notas"]] == ([(7, "centro_custo_valor")] if liga else [])
+
+
+def test_sem_espelho_a_nota_da_empresa_segue_as_travas_e_a_fatura_do_consorcio_liga_pelo_cheio(conn, tmp_path):
+    """As travas valem para a nota da empresa pela cota: a anterior ao boletim nao liga, e duas do valor da cota ficam
+    ambiguas. A fatura do consorcio (coligada dele, valor cheio) liga pela regra de sempre, e a medicao so' deixa de
+    ser candidata da empresa quando ganha a nota DELA."""
+    cid = _consorcio_sem_espelho(conn)
+    mid = _medicao(conn, cid, 3, 2000_01)                                    # boletim em 28/07/2026
+    antiga = _nota_da_empresa_no_centro_declarado(6, emissao="2026-07-20", valor=1000.01)
+    fatura = _nf(9, 2000.01, coligada=90)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [antiga, fatura], []))
+    assert r["alocacoes"] == 1 and [(n["idmov"], n["regra"]) for n in medicoes.detalhe(conn, mid)["notas"]] == [(9, "valor_exato")]
+    duas = [antiga, fatura, _nota_da_empresa_no_centro_declarado(7, valor=1000.01),
+            _nota_da_empresa_no_centro_declarado(8, emissao="2026-08-12", valor=1000.01)]
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, duas, []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 2), r
+    duas[3]["STATUS"] = "C"
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, duas, []))
+    assert r["alocacoes"] == 1, r
+    assert sorted((n["idmov"], n["regra"]) for n in medicoes.detalhe(conn, mid)["notas"]) == [
+        (7, "centro_custo_valor"), (9, "valor_exato")]
+    # com a nota da empresa ligada, outra do mesmo valor nao entra
+    duas.append(_nota_da_empresa_no_centro_declarado(10, emissao="2026-08-20", valor=1000.01))
+    assert sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, duas, []))["alocacoes"] == 0
+
+
+def test_sem_a_declaracao_do_centro_a_nota_da_empresa_nao_liga_pela_cota(conn, tmp_path):
+    cid = _consorcio_sem_espelho(conn)
+    conn.execute("UPDATE contratos SET centro_custo_empresa_rm=NULL"); conn.commit()
+    mid = _medicao(conn, cid, 3, 2000_01)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_empresa_no_centro_declarado(7, valor=1000.01)], []))
+    assert (r["alocacoes"], r["sugestoes"]) == (0, 0) and not _tem_nf(conn, mid), r
+
+
+def test_centro_da_empresa_declarado_em_dois_contratos_nao_aponta_obra(conn, tmp_path):
+    """O `cadastro validar` recusa a repeticao; se ela chegar ao banco por outro caminho, o centro nao estreita e a
+    nota nao liga (como o centro de custo repetido de sempre)."""
+    cid = _consorcio_sem_espelho(conn)
+    outro = contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 77", "objeto": "Outra",
+                                      "valor_original_centavos": 100_000_00,
+                                      "entidade_id": conn.execute("SELECT entidade_id FROM contratos WHERE id=?", (cid,)).fetchone()[0]})
+    conn.execute("UPDATE contratos SET centro_custo_empresa_rm=? WHERE id=?", (CENTRO_DA_EMPRESA, outro)); conn.commit()
+    mid = _medicao(conn, cid, 3, 2000_01)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_empresa_no_centro_declarado(7, valor=1000.01)], []))
+    assert r["alocacoes"] == 0 and not _tem_nf(conn, mid), r
 
 
 def _nota_da_empresa_sem_obra(idmov, emissao="2026-08-10", codtmv="2.2.01"):

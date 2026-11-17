@@ -50,6 +50,14 @@ def test_aplicar_grava_e_ensaio_nao(tmp_path, monkeypatch, capsys):
     assert "ENSAIO" in capsys.readouterr().out
 
 
+def test_validar_recusa_o_centro_da_empresa_fora_de_consorcio(tmp_path, capsys):
+    """docs/adr/0005: `cadastro validar` recusa `centro_custo_empresa_rm` em contrato que nao e' de consorcio."""
+    raiz = _cadastro(tmp_path / "a", {**CONTRATO, "centro_custo_empresa_rm": "9.005.001"})
+    assert cli.main(["cadastro", "validar", "--raiz", str(raiz)]) == 1
+    assert "centro_custo_empresa_rm: só vale em contrato de consórcio" in capsys.readouterr().out
+    assert cli.main(["cadastro", "validar", "--raiz", str(_cadastro(tmp_path / "b", dict(CONTRATO)))]) == 0
+
+
 def test_validar_recusa_tipo_de_cobranca_malformado_e_o_da_lista_geral(tmp_path, capsys):
     """docs/adr/0015: `cadastro validar` recusa `tipos_cobranca_extras_rm` malformado e o tipo que ja' e' geral."""
     raiz = _cadastro(tmp_path / "a", {**CONTRATO, "tipos_cobranca_extras_rm": ["2.2.3"]})

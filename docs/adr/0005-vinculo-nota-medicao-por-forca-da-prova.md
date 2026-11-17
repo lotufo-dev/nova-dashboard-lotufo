@@ -37,6 +37,29 @@ contrariava o item 4. Decidimos que, na coligada que cadastra centros de custo, 
 não liga por regra nenhuma de valor, nem concorre com a nota da obra: fica em "NFs sem medição" e a pessoa a liga
 pelo PDF.
 
+## O contrato de consórcio declara o centro de custo da própria empresa
+
+O contrato de consórcio é de outra coligada, e a empresa lança a nota que emite pela cota dela num centro de custo
+do livro dela, que não é o de contrato nenhum. Sem mais nada, a decisão acima deixaria essa nota solta todo mês, e o
+recebido e o repasse do consórcio (`docs/adr/0006`) dependem desse vínculo. Decidimos que o cadastro do contrato de
+consórcio declara esse centro (`centro_custo_empresa_rm`, coluna criada pela migração 090): com a declaração, a nota
+da empresa naquele centro aponta aquela obra, e as regras de valor valem dentro dela, com as duas travas.
+
+- Com espelho, vale a saída do espelho (item 2), como em toda medição nascida dele.
+- Sem espelho, o valor comparado é a cota da medição (um arredondamento, o de `contratos.cota`), porque a nota da
+  empresa já é a cota: valem o valor exato da cota e o par do dia que soma a cota. A nota um centavo ao lado da cota
+  não liga. A fatura do próprio consórcio continua casando pelo valor cheio, na coligada dele.
+- Sem a declaração, a nota da empresa não liga sozinha.
+- Cada centro aponta uma obra só: o `cadastro validar` recusa o mesmo centro em dois contratos, o centro que já é o
+  centro de custo de uma obra própria e a chave em contrato que não é de consórcio. Se a repetição chegar ao banco por
+  outro caminho, o centro não aponta obra nenhuma.
+
+Na cópia da produção de 17/11/2026, com o centro declarado nas três obras de consórcio que têm nota da empresa ligada,
+desfeitos os 27 vínculos e as medições de volta a protocoladas: o casador refez os 3 das medições nascidas do espelho,
+todos pela saída; 20 são de medição do legado, que o casador não olha; e 4 são de medição sem espelho e sem data de
+boletim nem de envio da planilha/carta (a trava de data). Em 26 das 27 notas o valor é a cota ao centavo; uma difere
+dois centavos.
+
 ## Consequências
 
 - Duas notas ativas com o mesmo valor para a mesma saída, ou para a mesma medição sem espelho, ficam soltas e a
@@ -45,9 +68,8 @@ pelo PDF.
 - Os vínculos por valor feitos na conciliação do histórico continuam e são conferidos contra o documento no
   fechamento.
 - Vínculo já gravado não é desfeito por mudança de regra: as travas valem para o que o casador fizer dali em diante.
-- A nota da própria empresa em obra de consórcio deixa de ligar sozinha: o contrato é do consórcio e o centro de
-  custo dela não aponta obra. Ela entra pelo PDF anexado na medição ou pela correção de cadastro. Se o cadastro do
-  contrato de consórcio passar a declarar o centro de custo que a empresa usa para ele, a saída do espelho volta a
-  valer dentro da obra; está no `docs/backlog.md`.
+- A nota da própria empresa em obra de consórcio só liga sozinha na obra cujo cadastro declara o centro de custo
+  dela. Depois do deploy que traz essa regra, o centro tem de ser declarado em cada contrato de consórcio; até lá a
+  nota entra pelo PDF anexado na medição ou pela correção de cadastro.
 - A medição sem espelho e sem data de boletim nem de envio da planilha/carta (lançada à mão direto no protocolo) não
   atrai nota por valor.

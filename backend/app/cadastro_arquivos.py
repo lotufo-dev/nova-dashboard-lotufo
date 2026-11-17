@@ -879,8 +879,46 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
             c["pecas_no_oficio"] = list(pno)
     c["passos_medicao"] = _passos_medicao(bruto.get("passos_medicao"), falha)
     c["tipos_cobranca_extras_rm"] = _tipos_cobranca_extras(bruto.get("tipos_cobranca_extras_rm"), falha)
+    # docs/adr/0005: o centro de custo que a propria empresa usa, no RM dela, para este contrato de consorcio. Que a
+    # entidade e' consorcio e que o centro nao se repete entre contratos, `preparar` confere (`_centros_da_empresa`).
+    c["centro_custo_empresa_rm"] = None
+    cce = bruto.get("centro_custo_empresa_rm")
+    if cce is not None:
+        if not isinstance(cce, str) or not cce.strip():
+            falha("centro_custo_empresa_rm", "use o código do centro de custo do RM entre aspas (ex.: '9.005.001')")
+        else:
+            c["centro_custo_empresa_rm"] = cce.strip()
     c["custo"] = _custo(bruto.get("custo"), falha)
     return c
+
+
+def _centros_da_empresa(contratos: list[dict], ents: list[dict], erros: list[str]) -> None:
+    """docs/adr/0005: `centro_custo_empresa_rm` so' vale em contrato de consorcio (na obra propria o centro da empresa
+    e' o `centro_custo_rm`), e o centro declarado tem de apontar UMA obra: nao pode se repetir em outro contrato, nem
+    ser o `centro_custo_rm` (atual ou anterior) de um contrato da propria empresa. Repetido, a nota daquele centro
+    nao teria como dizer de qual obra e'."""
+    papel = {e["chave"]: e["papel"] for e in ents}
+    da_empresa: dict[str, list[str]] = {}
+    for c in contratos:
+        if papel.get(c["entidade"]) == "lotufo":
+            for cc in [c.get("centro_custo_rm"), *(c.get("centros_custo_anteriores_rm") or [])]:
+                if cc and str(cc).strip():
+                    da_empresa.setdefault(str(cc).strip(), []).append(c["nome_curto"])
+    declarados: dict[str, list[str]] = {}
+    for c in contratos:
+        cc = c.get("centro_custo_empresa_rm")
+        if not cc:
+            continue
+        onde = f"contratos/{slug(c['nome_curto'])}.yaml: centro_custo_empresa_rm"
+        if papel.get(c["entidade"]) != "consorcio":
+            erros.append(f"{onde}: só vale em contrato de consórcio (na obra própria, use centro_custo_rm)")
+        if cc in da_empresa:
+            erros.append(f"{onde}: {cc} já é o centro de custo de {', '.join(da_empresa[cc])}")
+        declarados.setdefault(cc, []).append(c["nome_curto"])
+    for cc, nomes in declarados.items():
+        if len(nomes) > 1:
+            erros.append(f"contratos: centro_custo_empresa_rm {cc} repetido em {', '.join(sorted(nomes))}: "
+                         "cada centro aponta uma obra só")
 
 
 def _tipos_cobranca_extras(bruto, falha) -> list[str]:
@@ -1174,6 +1212,7 @@ def preparar(raiz: Path) -> dict:
         valores = [c[campo] for c in contratos if c[campo]]
         if len(set(valores)) != len(valores):
             erros.append(f"contratos: {campo} repetido")
+    _centros_da_empresa(contratos, ents, erros)
 
     geral = _geral(raiz, erros)
     cartas = _cartas(raiz, chaves_ent, erros)

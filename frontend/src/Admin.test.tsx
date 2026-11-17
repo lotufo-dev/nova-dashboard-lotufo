@@ -170,16 +170,23 @@ test("Reconciliação: recebida à mão sem baixa no RM mostra a medição, a NF
     if (url === "/api/rm/reconciliacao") return {
       nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [],
       recebidas_sem_baixa: [{ medicao_id: 70, contrato_id: 12, numero_instrumento: "IC 1/2025", numero: 14, tipo: "execucao",
-        competencia: "2026-08", recebida_em: "2026-09-20", nota_id: 3, numero_nf: "100", serie: "1", falta_centavos: 924_01 }],
+        competencia: "2026-08", recebida_em: "2026-09-20", nota_id: 3, numero_nf: "100", serie: "1", falta_centavos: 924_01, a_mao: true },
+        { medicao_id: 71, contrato_id: 12, numero_instrumento: "IC 1/2025", numero: 9, tipo: "execucao",
+          competencia: "2026-03", recebida_em: null, nota_id: 4, numero_nf: "77", serie: "1", falta_centavos: 462_00, a_mao: false }],
       totais: { nfs_sem_medicao: 0, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
     throw new Error(`chamada inesperada: ${url}`);
   });
   render(<Admin aba="reconciliacao" busca={{ categoria: "recebidas" }} />);
-  expect(await screen.findByRole("heading", { name: "Notas de medições recebidas por registro sem baixa no RM" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "Notas de medições recebidas sem baixa no RM" })).toBeTruthy();
   expect(screen.getByRole("link", { name: "14ª Medição" })).toBeTruthy();
   expect(screen.getByText("100/1")).toBeTruthy();
   expect(screen.getByText("20/09/2026")).toBeTruthy();
   expect(screen.getByText(/924,01/)).toBeTruthy();
+  // docs/adr/0006: a recebida à mão saiu do a receber; a fechada pelo corte ou pela correção de cadastro continua nele
+  const linha = (nome: string) => screen.getByRole("link", { name: nome }).closest("tr")!;
+  expect(within(linha("14ª Medição")).getByText("não: recebimento à mão")).toBeTruthy();
+  expect(within(linha("9ª Medição")).getByText("sim")).toBeTruthy();
+  expect(within(linha("9ª Medição")).getByText("sem data")).toBeTruthy();
 });
 
 // Issue #31: a Saúde mostra o último backup, quantos estão guardados e o último erro; atrasado acima de 2 h em destaque

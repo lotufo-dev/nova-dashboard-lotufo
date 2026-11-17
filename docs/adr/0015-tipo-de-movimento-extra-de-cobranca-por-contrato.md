@@ -67,9 +67,10 @@ para menos, como antes da chave; destravado, dobraria.
   provas do vínculo (`docs/adr/0005`) valem igual.
 - A chave não muda a regra da coligada. O a receber, o faturado e o recebido do RM e o recebimento pela baixa
   continuam só com a nota da coligada da entidade do contrato. No contrato em nome do consórcio, a nota da
-  própria empresa, de tipo extra ou não, fica fora dessas contas com ou sem a chave. Para ela a chave vale na
-  página Fechamento; no vínculo automático não vale mais desde 17/11/2026, porque a nota cujo centro de custo não
-  aponta obra deixou de ligar sozinha (`docs/adr/0005`). Em obra
+  própria empresa, de tipo extra ou não, fica fora dessas contas com ou sem a chave. Para ela a chave vale no
+  vínculo automático (pela saída do espelho, na obra de consórcio cujo cadastro declara o centro de custo da empresa,
+  `centro_custo_empresa_rm`: desde 17/11/2026 a nota cujo centro não aponta obra não liga sozinha, `docs/adr/0005`),
+  na nota repetida e na página Fechamento. Em obra
   da própria empresa e na fatura do próprio consórcio, a chave vale em tudo. Desde 17/11/2026 (#756, `docs/adr/0006`)
   o a receber do Início e da lista de Obras segue a conta do Fechamento na medição de consórcio com a nota da empresa
   ligada: ali a nota da empresa, de tipo extra declarado ou da lista geral, entra pelo que falta baixar nos títulos

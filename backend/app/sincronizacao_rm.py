@@ -27,7 +27,9 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
       quem resolve e' o PDF da nota anexado na medicao).
    SEM alvo: se a coligada cadastra centros (Lotufo) e o desta NF nao aponta obra, silencio -- nenhuma regra de
    valor vale, nem a da saida do espelho, que ate' 17/11/2026 era procurada na carteira inteira (docs/adr/0005:
-   nunca valor fora da obra; e' o caso da NF da Lotufo ao orgao em obra de consorcio, que entra pelo PDF). Coligada
+   nunca valor fora da obra). A NF da Lotufo em obra de consorcio aponta a obra quando o contrato declara o centro
+   de custo da empresa (`centro_custo_empresa_rm`): ai' valem (b) e, sem espelho, (c) e (d) pela COTA da medicao;
+   sem a declaracao, ela entra pelo PDF. Coligada
    sem centro cadastrado (consorcio de uma obra so', ja' isolada 1:1): exato unico -> 0.8
    `valor_exato`; proximos ate' 5% -> log, sem alocacao. Sem candidato -> so' reconciliacao.
    Duas travas em TODAS as regras de valor (issue #708; na medicao sem espelho desde 17/11/2026):
@@ -612,14 +614,17 @@ def _candidatas(conn, coligada: int, cache: dict | None = None) -> list[dict]:
     recebidas = f" OR (m.estado='recebida' AND m.id IN ({','.join('?' * len(a_mao))}))" if a_mao else ""
     linhas = conn.execute(f"""
         SELECT m.*, c.numero_instrumento, c.orgao, e.coligada_rm AS coligada_contrato,
+               c.percentual_direito_bp AS pct, c.centro_custo_empresa_rm AS centro_da_empresa,
                COALESCE(m.valor_atestado_centavos, m.valor_protocolado_centavos) AS valor
         FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
         JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
         WHERE (m.estado IN ({marcas}){recebidas})
           AND (m.valor_protocolado_origem='espelho' OR m.competencia >= ?)
-          AND (e.coligada_rm=? OR EXISTS (SELECT 1 FROM espelho_medicoes em WHERE em.medicao_id=m.id))
+          AND (e.coligada_rm=? OR EXISTS (SELECT 1 FROM espelho_medicoes em WHERE em.medicao_id=m.id)
+               OR TRIM(COALESCE(c.centro_custo_empresa_rm, '')) <> '')
         ORDER BY c.numero_instrumento, m.tipo, m.numero""",
         (*ESTADOS_CANDIDATOS, *a_mao, COMPETENCIA_CORTE_RM, coligada)).fetchall()
+    empresa = notas._coligada_lotufo(conn)
     out = []
     for r in linhas:
         d = dict(r)
@@ -644,6 +649,19 @@ def _candidatas(conn, coligada: int, cache: dict | None = None) -> list[dict]:
                                WHERE a.medicao_id=? AND a.desfeita_em IS NULL AND n.coligada=?""",
                             (r["id"], coligada)).fetchone():
                 continue
+        elif ((d["centro_da_empresa"] or "").strip() and empresa is not None and coligada == empresa
+              and notas.esperadas_do_espelho(conn, r["id"]) is None):
+            # lado da propria empresa em contrato de CONSORCIO que declara o centro de custo dela (docs/adr/0005,
+            # `centro_custo_empresa_rm`), na medicao SEM espelho: a nota da empresa e' a cota, entao o valor a casar
+            # e' a cota da medicao (um arredondamento, `contratos.cota`; a nota um centavo ao lado nao liga). Entra
+            # enquanto nao tiver nota da empresa. Com espelho, vale o ramo de cima (as saidas dele); espelho sem
+            # saida da empresa nao espera nota dela.
+            d["esperadas"] = []
+            d["valor"] = contratos.cota(d["valor"], d["pct"])
+            if conn.execute("""SELECT 1 FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
+                               WHERE a.medicao_id=? AND a.desfeita_em IS NULL AND n.coligada=?""",
+                            (r["id"], coligada)).fetchone():
+                continue
         else:
             continue
         out.append(d)
@@ -653,23 +671,35 @@ def _candidatas(conn, coligada: int, cache: dict | None = None) -> list[dict]:
 
 
 def _contrato_por_centro_custo(conn, coligada: int, centro_custo) -> int | None:
-    """Contrato apontado pelo centro de custo da NF, so' quando ha' EXATAMENTE UM dentro
-    da coligada.
+    """Contrato apontado pelo centro de custo da NF, so' quando ha' EXATAMENTE UM.
 
     E' a chave que desambigua a Lotufo (uma entidade, muitos contratos): o CODCCUSTO da
-    NF diz de qual obra ela e'. Centro nao cadastrado, ou repetido entre contratos, nao
+    NF diz de qual obra ela e'. Dois caminhos:
+    - o contrato da entidade daquela coligada com aquele `centro_custo_rm` (a obra propria; a fatura do consorcio
+      que cadastra centro);
+    - para a nota da PROPRIA empresa, o contrato de CONSORCIO que declara aquele centro em
+      `centro_custo_empresa_rm` (docs/adr/0005, decisao de 17/11/2026): o contrato e' do consorcio, de outra
+      coligada, e a empresa lanca a nota da cota dela num centro proprio. Sem a declaracao, esse centro nao aponta
+      obra e a nota nao liga sozinha.
+    Centro nao cadastrado, ou repetido entre contratos, nao
     estreita -- devolve None e o casamento cai no comportamento por coligada (que ja'
     basta para consorcio, onde a coligada isola a obra). O codigo do RM e' comparado
     aparado nas duas pontas; espaco a mais no cadastro nao deveria furar a chave."""
+    from app import notas   # import local: notas importa este modulo
     cc = (centro_custo or "").strip()
     if not cc:
         return None
-    achados = [r["id"] for r in conn.execute("""
+    achados = {r["id"] for r in conn.execute("""
         SELECT c.id FROM contratos c
         JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
         WHERE e.coligada_rm=? AND c.centro_custo_rm IS NOT NULL AND TRIM(c.centro_custo_rm)=?""",
-        (coligada, cc))]
-    return achados[0] if len(achados) == 1 else None
+        (coligada, cc))}
+    if coligada == notas._coligada_lotufo(conn):
+        achados |= {r["id"] for r in conn.execute("""
+            SELECT c.id FROM contratos c JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
+            WHERE e.papel='consorcio' AND c.centro_custo_empresa_rm IS NOT NULL
+              AND TRIM(c.centro_custo_empresa_rm)=?""", (cc,))}
+    return next(iter(achados)) if len(achados) == 1 else None
 
 
 def _dia_do_envio_do_espelho(conn, medicao_id: int) -> str | None:
@@ -1579,17 +1609,17 @@ def reconciliacao(conn, nfs_apos: int | None = None, desfeitas_apos: int | None 
 
 
 def _recebidas_sem_baixa(conn) -> list[dict]:
-    """Issue #203 e decisao de 17/11/2026 (docs/adr/0006): medicao recebida por registro feito para ela
-    (`conciliacao.recebidas_por_registro`: o administrador, a' mao, ou a correcao de cadastro) com nota ligada cujo
-    titulo o RM ainda mostra em aberto. O registro vale (a nota sai do a receber); esta lista e' o aviso de que o RM
-    nao tem a baixa, para o titulo aberto nao sumir sem ninguem ver. Uma linha por nota (nota partida entre duas
-    medicoes aparece uma vez, na primeira), so' as da coligada
-    da entidade do contrato (as que decidem o recebimento) e com mais que a tolerancia em aberto, a mesma regra do
-    a receber; o valor e' o que falta do titulo, cheio."""
+    """Issue #203 e decisao de 17/11/2026 (docs/adr/0006): medicao RECEBIDA, por qualquer caminho, com nota ligada
+    cujo titulo o RM ainda mostra em aberto. `a_mao` diz se o recebimento foi registrado pelo administrador na tela
+    (`conciliacao.recebidas_a_mao`): so' nesse caso a nota saiu do a receber, e esta lista e' o unico lugar em que o
+    titulo aberto aparece. Na fechada pelo corte, na recebida pela correcao de cadastro e na recebida pela baixa do RM
+    a nota continua no a receber (o que o RM mostra em aberto segue a receber pelas notas), e a lista mostra a
+    contradicao entre o estado da medicao e o RM para alguem decidir. Uma linha por nota (nota partida entre duas
+    medicoes aparece uma vez, na primeira), so' as da coligada da entidade do contrato (as que decidem o recebimento)
+    e com mais que a tolerancia em aberto, a mesma regra do a receber; o valor e' o que falta do titulo, cheio. A nota
+    ligada tambem a uma medicao que ainda nao foi recebida nao entra: essa medicao a representa."""
     from app import conciliacao, diretoria   # import local: os dois importam este modulo
-    por_registro = conciliacao.recebidas_por_registro(conn)
-    if not por_registro:
-        return []
+    a_mao = conciliacao.recebidas_a_mao(conn)
     out, vistas = [], set()
     for r in conn.execute("""
             SELECT m.id AS medicao_id, m.contrato_id, c.numero_instrumento, m.numero, m.tipo, m.competencia,
@@ -1598,13 +1628,15 @@ def _recebidas_sem_baixa(conn) -> list[dict]:
             JOIN nf_alocacoes a ON a.medicao_id=m.id AND a.desfeita_em IS NULL
             JOIN notas_fiscais n ON n.id=a.nota_id AND n.situacao='ativa' AND n.coligada=e.coligada_rm
             WHERE m.estado='recebida'
+              AND NOT EXISTS (SELECT 1 FROM nf_alocacoes b JOIN medicoes mb ON mb.id=b.medicao_id
+                              WHERE b.nota_id=n.id AND b.desfeita_em IS NULL AND mb.estado<>'recebida')
             ORDER BY c.numero_instrumento, m.numero, m.id, n.id"""):
-        if r["medicao_id"] not in por_registro or r["nota_id"] in vistas:
+        if r["nota_id"] in vistas:
             continue
         vistas.add(r["nota_id"])
         falta = _falta_por_titulo(conn, r["nota_id"], aberto_inteiro=True, baixa_total_quita=True)   # #253, #563
         if falta > diretoria.TOLERANCIA_CENTAVOS:
-            out.append({**dict(r), "falta_centavos": falta})
+            out.append({**dict(r), "falta_centavos": falta, "a_mao": r["medicao_id"] in a_mao})
     return out
 
 

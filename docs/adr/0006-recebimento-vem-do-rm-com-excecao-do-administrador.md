@@ -77,10 +77,10 @@ As cobranças do RM que só o Início soma (`diretoria._notas_em_aberto`) são d
 - a nota sem medição ligada. O Fechamento a mostra à parte, fora do total (não tem competência), pelo valor bruto; o
   Início a soma pelo que falta nos títulos do RM, que nascem líquidos, sem as retenções. A mesma nota aparece com
   valor menor no Início;
-- a nota ligada a medição fechada pelo corte de 25/09/2026, ou recebida pela baixa do RM, com título ainda aberto
-  no RM. O Início a soma pelo que falta nos títulos; no Fechamento a medição recebida leva a nota inteira ao recebido,
-  e ela não aparece em aberto. A nota ligada a medição recebida por registro (à mão ou pela correção de cadastro) não
-  entra em nenhuma das duas telas: ver "Medição recebida por registro", abaixo.
+- a nota ligada a medição já recebida (pelo corte de 25/09/2026 ou pela correção de cadastro, por exemplo) com título
+  ainda aberto no RM. O Início a soma pelo que falta nos títulos; no Fechamento a medição recebida leva a nota inteira
+  ao recebido, e ela não aparece em aberto. Só a nota ligada a medição recebida à mão pelo administrador fica fora das
+  duas telas: ver "Medição recebida por registro", abaixo.
 
 Na parte das medições os dois lados usam bases diferentes e só coincidem quando a nota fecha com a medição: o Início
 conta a medição que espera o pagamento pelo valor dela na cota (aprovado, senão o pedido); o Fechamento conta as notas
@@ -93,23 +93,27 @@ foram as cobranças do RM dos dois tipos acima.
 
 ## Medição recebida por registro (decisões de 17/11/2026)
 
-O dono delegou estas decisões à sessão em 17/11/2026, medidas numa cópia da produção. Nela não havia nenhuma medição
-recebida à mão pelo administrador; os casos contados são os da correção de cadastro e do corte.
+O dono delegou estas decisões em 17/11/2026, medidas numa cópia da produção. Nela não havia nenhuma medição recebida
+à mão pelo administrador; os casos contados são os da correção de cadastro e do corte.
 
 - **O registro à mão exige a data.** Sem ela a medição ficava recebida com a data nula, fora do recebido de qualquer
   mês e do prazo do órgão. A rota recusa o registro sem data e com data depois de hoje. As medições recebidas sem data
   que existem vieram do corte e da correção de cadastro, que não sabem o dia.
-- **A nota ligada a medição recebida por registro não entra no a receber.** Registro é o ato feito para aquela
-  medição, com motivo: o do administrador, à mão (já valia, #203), e o da correção de cadastro (`estado: recebida`),
-  que passa a valer igual. O estado diz que o dinheiro entrou, o Fechamento já levava a nota inteira ao recebido, e o
-  título ainda aberto no RM aparece na Saúde ("Notas de medições recebidas por registro sem baixa no RM"), para a
-  contradição não sumir: quem a resolve reabre a medição ou confirma o registro. Ficam como estavam a medição fechada
-  pelo corte (a decisão do corte diz que o que o RM mostra em aberto segue a receber pelas notas) e a recebida pela
-  baixa do RM. Na cópia, uma nota saiu do a receber por esta regra.
+- **Só o recebimento registrado pelo administrador tira a nota do a receber.** Já era assim (#203) e fica assim. A
+  medição recebida pela correção de cadastro (`estado: recebida`) não conta como registro à mão: a correção fecha
+  medição do histórico em lote, com base nos documentos da carga, e não é afirmação de pagamento. Para ela, como para
+  a fechada pelo corte, a evidência que existe é o RM: o que ele mostra em aberto segue a receber pelas notas. A
+  medida mostrou o caso: a única nota ligada a medição recebida pela correção de cadastro com título aberto tem o
+  título inteiro em aberto no RM, e tirá-la do a receber esconderia um valor que o RM diz que não entrou.
+- **A reconciliação mostra toda nota de medição recebida com título aberto no RM**, qualquer que seja o caminho do
+  recebimento ("Notas de medições recebidas sem baixa no RM"), e diz se a nota está no a receber. Na recebida à mão é
+  o único lugar em que o título aberto aparece; nas outras é a contradição entre o estado da medição e o RM, para
+  alguém decidir (reabrir a medição ou esperar a baixa). Na cópia eram três notas: duas de medição fechada pelo corte
+  e uma de medição recebida pela correção de cadastro.
 - **A nota que chega depois, na medição recebida pela correção de cadastro, é ligada pela própria correção**
-  (`ligar_nf`). O casador só procura nota para a recebida à mão: a correção de cadastro fecha medição do histórico em
-  lote, e abrir todas ao casador seria casar 24 meses de notas por coincidência de valor. Na cópia, a única medição
-  recente recebida pela correção sem nota é de valor zero.
+  (`ligar_nf`). O casador só procura nota para a recebida à mão: abrir ao casador as medições fechadas em lote seria
+  casar 24 meses de notas por coincidência de valor. Na cópia, a única medição recente recebida pela correção sem
+  nota é de valor zero.
 - **Janela de datas da recebida à mão no casador.** A nota só liga a ela se foi emitida entre o pedido da medição
   (`docs/adr/0005`) e cinco dias depois da data do recebimento. Sem a janela, a nota de outra medição de mesmo valor
   na obra, emitida meses depois, ligava a ela. O tamanho saiu da medida: de 624 pares de nota e medição recebida com
