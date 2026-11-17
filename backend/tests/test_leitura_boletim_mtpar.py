@@ -14,7 +14,7 @@ def test_valor_colado_ao_rotulo_e_igual_ao_do_controle_financeiro_e_proposto():
     assert (r["ok"], r["motivo"], r["documento"]) == (True, None, "medicao")
     assert r["campos"] == {"numero": 7, "data": "2026-08-01", "valor_centavos": VALOR}
     assert r["leituras"] == {"rotulo_centavos": VALOR, "controle_centavos": VALOR}
-    assert r["contratos"] == ["45/2025"]
+    assert (r["contratos"], r["contratos_do_quadro"], r["numero_do_rotulo"]) == (["45/2025"], ["45/2025"], 7)
 
 
 def test_valor_em_bloco_separado_dos_rotulos_vai_para_a_conferencia_com_a_leitura_do_quadro():
@@ -90,6 +90,30 @@ def test_sem_o_quadro_de_controle_financeiro_o_valor_nao_e_proposto():
     assert r["leituras"] == {"rotulo_centavos": VALOR, "controle_centavos": None}
 
 
+def test_digito_colado_depois_dos_centavos_nao_e_valor():
+    """Revisao da PR #760: "123.456,795" nao e' R$ 123.456,79. O valor com digito grudado no fim nao e' lido, nem no
+    Visto nem na linha do quadro."""
+    paginas = bm.boletim(numero=7, valor=VALOR)
+    visto = next(i for i, p in enumerate(paginas) if "Visto" in p)
+    grudado = list(paginas)
+    grudado[visto] = paginas[visto].replace(f"{bm.brl(VALOR)} R$ Valor Total Acumulado", f"{bm.brl(VALOR)}5 R$ Valor Total Acumulado")
+    assert grudado[visto] != paginas[visto]
+    r = leitor.ler(grudado)
+    assert (r["ok"], r["motivo"]) == (False, "valor-fora-do-rotulo")
+    assert r["leituras"] == {"rotulo_centavos": None, "controle_centavos": VALOR}
+    quadro = next(i for i, p in enumerate(paginas) if "CONTROLE FINANCEIRO" in p)
+    grudado = list(paginas)
+    grudado[quadro] = paginas[quadro].replace(f"31 120 R$ {bm.brl(VALOR)} R$", f"31 120 R$ {bm.brl(VALOR)}5 R$")
+    assert grudado[quadro] != paginas[quadro]
+    r = leitor.ler(grudado)
+    assert (r["ok"], r["motivo"]) == (False, "controle-nao-lido")
+    assert r["leituras"] == {"rotulo_centavos": VALOR, "controle_centavos": None}
+    # o "TOTAL REAJUSTE" tambem
+    do_reajuste = bm.reajuste(numero=7, valor=REAJUSTE)
+    do_reajuste[1] = do_reajuste[1].replace(f"TOTAL REAJUSTE R$ {bm.brl(REAJUSTE)}", f"TOTAL REAJUSTE R$ {bm.brl(REAJUSTE)}1")
+    assert leitor.ler(do_reajuste)["leituras"] == {"rotulo_centavos": None, "controle_centavos": REAJUSTE}
+
+
 def test_valor_zero_e_centavos_inteiros():
     r = leitor.ler(bm.boletim(valor=0, reajuste=0))
     assert r["ok"] and r["campos"]["valor_centavos"] == 0
@@ -113,7 +137,9 @@ def test_numero_vem_da_capa_e_nao_do_rodape():
 def test_sem_a_capa_o_numero_vem_do_campo_dos_dados_gerais():
     paginas = bm.boletim(numero=7, valor=VALOR)[1:]                     # sem a pagina da capa
     r = leitor.ler(paginas)
-    assert r["ok"] and r["campos"]["numero"] == 7 and r["contratos"] == ["45/2025"]
+    assert r["ok"] and r["campos"]["numero"] == 7
+    # sem a capa, o contrato so' sai no quadro: nao e' a fonte principal
+    assert (r["contratos"], r["contratos_do_quadro"]) == ([], ["45/2025"])
 
 
 def test_sem_capa_nem_campo_o_numero_nao_e_lido_e_nada_e_proposto():
@@ -122,6 +148,42 @@ def test_sem_capa_nem_campo_o_numero_nao_e_lido_e_nada_e_proposto():
     assert "numero" not in r["campos"] and "valor_centavos" not in r["campos"]
     # o numero impresso no rotulo do Visto nao serve de numero da medicao: nada do quadro e' lido por ele
     assert r["leituras"] == {"rotulo_centavos": VALOR, "controle_centavos": None}
+    assert r["numero_do_rotulo"] == 7                                   # so' a reserva da recusa de "outra medicao"
+
+
+def test_capa_nao_reconhecida_e_sem_o_campo_o_rotulo_do_visto_recusa_a_outra_medicao():
+    """Revisao da PR #760: com a capa nao reconhecida e sem o campo dos dados gerais, o boletim da 6a medicao entrava
+    na 7a. O numero do rotulo do Visto e' a reserva da recusa; ele nao vira o numero lido e nada e' proposto."""
+    paginas = bm.sem_capa_reconhecida(bm.boletim(numero=6, valor=7_000_003), sem_campo=True)
+    lido = leitor.ler(paginas)
+    assert (lido["ok"], lido["motivo"], lido["numero_do_rotulo"]) == (False, "numero-nao-lido", 6)
+    assert "numero" not in lido["campos"] and "valor_centavos" not in lido["campos"]
+    assert lido["leituras"] == {"rotulo_centavos": 7_000_003, "controle_centavos": None}
+    assert leitor.recusa(lido, "execucao", 7, "045/2025/MTPAR") == \
+        "Este boletim é da 6ª medição, e esta é a 7ª: escolha o PDF da 7ª medição"
+    assert leitor.recusa(lido, "execucao", 6, "045/2025/MTPAR") is None
+    # o mesmo pelo PDF gerado
+    do_pdf = leitor.ler_pdf(bm.pdf(paginas))
+    assert (do_pdf["motivo"], do_pdf["numero_do_rotulo"]) == ("numero-nao-lido", 6)
+
+
+def test_a_capa_e_o_campo_mandam_antes_do_rotulo_do_visto():
+    """A reserva so' vale sem as outras fontes: com a capa lida, e' o numero dela que recusa."""
+    lido = leitor.ler([bm.capa(7), bm.visto(6, VALOR), bm.controle([bm.linha(6, VALOR, 0), bm.linha(7, VALOR, 0)])])
+    assert (lido["campos"]["numero"], lido["numero_do_rotulo"]) == (7, 6)
+    assert leitor.recusa(lido, "execucao", 7, "045/2025/MTPAR") is None       # numero-divergente: nada e' proposto
+    assert leitor.recusa(lido, "execucao", 6, "045/2025/MTPAR") == \
+        "Este boletim é da 7ª medição, e esta é a 6ª: escolha o PDF da 6ª medição"
+
+
+def test_sem_fonte_nenhuma_do_numero_o_boletim_nao_e_recusado_e_nada_e_proposto():
+    """Sem capa, sem o campo e com dois rotulos de medicoes diferentes no Visto: nenhuma fonte diz o numero."""
+    visto = bm.visto(7, VALOR) + " Valor Total da 6ª Medição ........ 70.000,03 R$"
+    lido = leitor.ler([visto, bm.controle([bm.linha(6, 7_000_003, 0), bm.linha(7, VALOR, 0)])])
+    assert (lido["ok"], lido["motivo"], lido["numero_do_rotulo"]) == (False, "numero-nao-lido", None)
+    assert "numero" not in lido["campos"] and "valor_centavos" not in lido["campos"]
+    assert leitor.recusa(lido, "execucao", 7, "045/2025/MTPAR") is None
+    assert leitor.recusa(lido, "execucao", 9, "045/2025/MTPAR") is None
 
 
 def test_capa_com_dois_numeros_nao_decide():
@@ -152,6 +214,53 @@ def test_recusa_o_boletim_de_outra_obra_por_extenso():
     assert leitor.recusa(lido, "execucao", 7, "012/2023/MTPAR") is None
     assert leitor.recusa(lido, "execucao", 7, "contrato sem número") is None    # sem o que comparar, nao recusa
     assert leitor.recusa(lido, "execucao", 7, None) is None
+
+
+def test_quadro_com_o_ano_do_contrato_trocado_nao_recusa_o_boletim_certo():
+    """Revisao da PR #760: o quadro de controle financeiro ja' veio com o ano do contrato trocado. Sozinho ele nao e'
+    fonte confiavel: so' a capa (ou a carta do reajuste) recusa o boletim de outra obra."""
+    paginas = bm.boletim(numero=7, valor=VALOR, contrato_no_quadro="045/2024")
+    # com a capa lida e certa, o quadro nem entra na conferencia
+    lido = leitor.ler(paginas)
+    assert (lido["ok"], lido["contratos"], lido["contratos_do_quadro"]) == (True, ["45/2025"], ["45/2024"])
+    assert leitor.recusa(lido, "execucao", 7, "045/2025/MTPAR") is None
+    assert leitor.contrato_nao_conferido(lido, "045/2025/MTPAR") is None
+    # com a capa nao reconhecida, so' o quadro foi lido e discorda: nao recusa, e o contrato fica por conferir
+    lido = leitor.ler(bm.sem_capa_reconhecida(paginas))
+    assert (lido["campos"]["numero"], lido["contratos"], lido["contratos_do_quadro"]) == (7, [], ["45/2024"])
+    assert leitor.recusa(lido, "execucao", 7, "045/2025/MTPAR") is None
+    assert leitor.contrato_nao_conferido(lido, "045/2025/MTPAR") == \
+        "O contrato não pôde ser conferido: só o controle financeiro traz o número (45/2024), e o desta obra é o 45/2025"
+    do_pdf = leitor.ler_pdf(bm.pdf(bm.sem_capa_reconhecida(paginas)))
+    assert leitor.recusa(do_pdf, "execucao", 7, "045/2025/MTPAR") is None
+    assert leitor.contrato_nao_conferido(do_pdf, "045/2025/MTPAR") is not None
+
+
+def test_conferencia_do_contrato_pela_fonte_principal():
+    certo, outro = "045/2025/MTPAR", "012/2023/MTPAR"
+    # so' o quadro foi lido e traz o contrato da obra: confere
+    so_quadro = leitor.ler(bm.sem_capa_reconhecida(bm.boletim(numero=7, valor=VALOR)))
+    assert (so_quadro["contratos"], so_quadro["contratos_do_quadro"]) == ([], ["45/2025"])
+    assert leitor.recusa(so_quadro, "execucao", 7, certo) is None
+    assert leitor.contrato_nao_conferido(so_quadro, certo) is None
+    # a capa traz outro contrato e o quadro tambem: outra obra (recusa, e nao "por conferir")
+    de_outra = leitor.ler(bm.boletim(numero=7, valor=VALOR, contrato="012/2023"))
+    assert leitor.recusa(de_outra, "execucao", 7, certo) is not None
+    assert leitor.contrato_nao_conferido(de_outra, certo) is None
+    # a capa traz outro contrato e so' o quadro traz o da obra: as fontes discordam; nao recusa, fica por conferir
+    discordam = leitor.ler(bm.boletim(numero=7, valor=VALOR, contrato="012/2023", contrato_no_quadro="045/2025"))
+    assert leitor.recusa(discordam, "execucao", 7, certo) is None
+    assert leitor.contrato_nao_conferido(discordam, certo) == (
+        "O contrato não pôde ser conferido: a capa traz o 12/2023 e o controle financeiro traz o 45/2025, que é o "
+        "desta obra")
+    # o reajuste confere pela carta
+    carta_de_outra = leitor.ler(bm.reajuste(numero=7, contrato="012/2023"))
+    assert leitor.recusa(carta_de_outra, "reajuste", 7, certo) == \
+        "Este boletim é de outra obra: traz o contrato 12/2023, e o desta obra é o 45/2025"
+    assert leitor.recusa(carta_de_outra, "reajuste", 7, outro) is None
+    # sem numero no cadastro, ou sem documento reconhecido, nao ha' o que conferir
+    assert leitor.contrato_nao_conferido(discordam, "contrato sem número") is None
+    assert leitor.contrato_nao_conferido(leitor.ler(["Ofício qualquer"]), certo) is None
 
 
 def test_numero_do_instrumento_ignora_zeros_data_e_cnpj():

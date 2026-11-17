@@ -89,18 +89,31 @@ def resumo(numero=7, pagina="Página 6 de 20") -> str:
 
 
 def boletim(numero=7, valor=12_345_679, reajuste: int | None = 1_234_567, colado=True, visto_na=5,
-            contrato=CONTRATO, valor_no_quadro: int | None = None, **extra) -> list[str]:
+            contrato=CONTRATO, valor_no_quadro: int | None = None, contrato_no_quadro: str | None = None,
+            **extra) -> list[str]:
     """As paginas do boletim da medicao, com o Visto na pagina `visto_na` (5: capa, dois de dados gerais, a de
-    medicoes, o Visto; 2: logo depois da capa) e o quadro em seguida, com as medicoes anteriores e a desta."""
+    medicoes, o Visto; 2: logo depois da capa) e o quadro em seguida, com as medicoes anteriores e a desta.
+    `contrato_no_quadro`: o numero do contrato que o quadro imprime, quando nao e' o da capa (o ano trocado)."""
     quadro = controle([linha(numero - 2, 5_000_001, 0 if reajuste is not None else None, 60_000_000),
                        linha(numero - 1, 7_000_003, 700_001 if reajuste is not None else None, 77_654_321),
-                       linha(numero, valor if valor_no_quadro is None else valor_no_quadro, reajuste)], contrato)
+                       linha(numero, valor if valor_no_quadro is None else valor_no_quadro, reajuste)],
+                      contrato_no_quadro or contrato)
     o_visto = visto(numero, valor, colado, contrato, **extra)
     if visto_na == 2:
         return [capa(numero, contrato=contrato), o_visto, dados_gerais(numero), dados_gerais(numero), quadro,
                 resumo(numero)]
     return [capa(numero, contrato=contrato), dados_gerais(numero), dados_gerais(numero),
             "Descrição Observações: Medições: Prazos: Item Valor %" + ENVELOPE, o_visto, quadro, resumo(numero)]
+
+
+def sem_capa_reconhecida(paginas: list[str], sem_campo=False) -> list[str]:
+    """As mesmas paginas com a capa como outra extracao a devolveria (sem o hifen entre "Medição" e o mes): o leitor
+    nao a reconhece. `sem_campo`: os dados gerais tambem sem o campo "N.º da Medição" (so' o rotulo do Visto traz o
+    numero)."""
+    capa_nova = paginas[0].replace("ª Medição - ", "ª Medição ")
+    assert capa_nova != paginas[0]
+    resto = [("Dados gerais sem o campo" + ENVELOPE if sem_campo and "N.º da Medição" in p else p) for p in paginas[1:]]
+    return [capa_nova, *resto]
 
 
 def carta_reajuste(numero=7, valor=1_234_567, contrato=CONTRATO) -> str:

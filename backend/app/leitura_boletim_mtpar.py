@@ -26,14 +26,19 @@ O que o leitor faz, e por que:
   que nao fecha (colunas fora de ordem na extracao) nao e' lida.
 - **O numero da medicao vem da capa** ("Nª Medição - Mês/AAAA") ou, sem ela, do campo "N.º da Medição" dos dados
   gerais; nunca do rodape nem do nome do arquivo (o rodape ja' veio com o numero da medicao anterior). O rotulo do
-  Visto traz o numero de novo: se discorda, nada e' proposto.
+  Visto traz o numero de novo: se discorda, nada e' proposto. Sem a capa e sem o campo, o numero do rotulo do Visto
+  (`numero_do_rotulo`) so' serve de reserva para recusar o boletim de outra medicao: nao vira o numero lido, nao
+  acha a linha do quadro e nada e' proposto.
 - **Os campos "acumulado das medicoes anteriores" e "saldo" do Visto nao entram** em conferencia nenhuma: vem
   errados em parte das obras.
 - **Reajuste.** No PDF proprio, a leitura do rotulo e' o "TOTAL REAJUSTE" e a do quadro e' o reajuste do periodo na
   linha da medicao; o numero vem da carta ("Reajustamento da Nª Medição").
 
-`contratos` devolve os numeros de instrumento ("60/2024") impressos na capa (ou na carta) e no quadro, para quem
-chama recusar o boletim de outra obra (`recusa`).
+`contratos` devolve os numeros de instrumento ("45/2025") impressos na capa (ou na carta do reajuste), a fonte
+principal; `contratos_do_quadro`, os do quadro de controle financeiro. O quadro sozinho nao e' fonte confiavel (ja'
+veio com o ano do contrato trocado): so' a capa ou a carta recusam o boletim de outra obra (`recusa`); quando o que
+ha' e' o quadro e ele discorda do cadastro, o boletim nao e' recusado, mas o contrato fica por conferir
+(`contrato_nao_conferido`) e quem chama nao propoe o valor.
 """
 import re
 from datetime import date
@@ -46,7 +51,8 @@ from .leitura_smo import _centavos, _plano
 PAGINAS = 12
 
 _I = re.IGNORECASE
-_VALOR = r"\d{1,3}(?:\.\d{3})*,\d{2}"
+# o digito colado depois dos centavos ("123.456,795") nao e' um valor: nada e' lido pela metade
+_VALOR = r"\d{1,3}(?:\.\d{3})*,\d{2}(?!\d)"
 _DATA = r"\d{2}/\d{2}/\d{4}"
 # "26ª", "3º", "26a", "26°" e "26": sem acento (`_plano`) o ª vira "a" e o º vira "o"
 _ORDINAL = r"(?<![\d/.,])(\d{1,3}) ?[ao°]?"
@@ -90,12 +96,12 @@ def _data(plano: str) -> str | None:
 
 
 def _contratos(planos: list[str]) -> list[str]:
-    """Os numeros de instrumento impressos ("060/2024 MTPAR", "N° 060/2024/MTPAR"), sem os zeros da frente."""
+    """Os numeros de instrumento impressos ("045/2025 MTPAR", "N° 045/2025/MTPAR"), sem os zeros da frente."""
     return sorted({f"{int(n)}/{a}" for p in planos for n, a in _CONTRATO.findall(p)})
 
 
 def numero_do_instrumento(texto: str | None) -> str | None:
-    """"060/2024/MTPAR" -> "60/2024" (o numero do contrato como `contratos` o devolve); sem o padrao, None."""
+    """"045/2025/MTPAR" -> "45/2025" (o numero do contrato como `contratos` o devolve); sem o padrao, None."""
     m = _CONTRATO.search(texto or "")
     return f"{int(m.group(1))}/{m.group(2)}" if m else None
 
@@ -142,19 +148,24 @@ def _do_controle(linhas: dict[int, list[list[int]]], numero: int | None, coluna:
 
 
 def _resultado(motivo: str | None, documento: str | None = None, campos: dict | None = None,
-               leituras: dict | None = None, contratos: list[str] | None = None) -> dict:
+               leituras: dict | None = None, contratos: list[str] | None = None,
+               contratos_do_quadro: list[str] | None = None, numero_do_rotulo: int | None = None) -> dict:
     return {"ok": motivo is None, "motivo": motivo, "documento": documento, "campos": campos or {},
             "leituras": leituras or {"rotulo_centavos": None, "controle_centavos": None},
-            "contratos": contratos or []}
+            "contratos": contratos or [], "contratos_do_quadro": contratos_do_quadro or [],
+            "numero_do_rotulo": numero_do_rotulo}
 
 
 def ler(paginas: list[str]) -> dict:
-    """{ok, motivo, documento, campos, leituras, contratos} do boletim cujas primeiras paginas tem os textos `paginas`.
+    """{ok, motivo, documento, campos, leituras, contratos, contratos_do_quadro, numero_do_rotulo} do boletim cujas
+    primeiras paginas tem os textos `paginas`.
 
     `documento`: "medicao" (o boletim, com o Visto), "reajuste" (o PDF proprio do reajuste) ou None. `campos` traz so'
     o que foi lido: `numero` (da medicao), `data` (AAAA-MM-DD) e, so' com `ok`, `valor_centavos`. `leituras` traz as
     duas leituras do valor, cada uma em centavos ou None: `rotulo_centavos` (o valor ao lado do rotulo do Visto ou do
-    "TOTAL REAJUSTE") e `controle_centavos` (a linha da medicao no quadro de controle financeiro).
+    "TOTAL REAJUSTE") e `controle_centavos` (a linha da medicao no quadro de controle financeiro). `contratos` sao os
+    numeros de instrumento da capa (ou da carta do reajuste) e `contratos_do_quadro`, os do quadro. `numero_do_rotulo`
+    e' o numero da medicao no rotulo do Visto (None no reajuste e no Visto com dois numeros): a reserva de `recusa`.
 
     `ok=False` com `motivo`: `sem-texto`, `modelo-nao-reconhecido` (nao e' boletim deste modelo), `numero-nao-lido`,
     `numero-divergente` (a capa e o rotulo do Visto dizem medicoes diferentes), `valor-fora-do-rotulo` (o valor nao
@@ -176,7 +187,8 @@ def ler(paginas: list[str]) -> dict:
 
 
 def _fechar(documento: str, numero: int | None, divergente: bool, data: str | None, rotulo: int | None,
-            controle: int | None, contratos: list[str]) -> dict:
+            controle: int | None, contratos: list[str], contratos_do_quadro: list[str],
+            numero_do_rotulo: int | None = None) -> dict:
     campos: dict = {}
     if numero is not None:
         campos["numero"] = numero
@@ -188,7 +200,7 @@ def _fechar(documento: str, numero: int | None, divergente: bool, data: str | No
               else "leituras-divergentes" if rotulo != controle else None)
     if motivo is None:
         campos["valor_centavos"] = rotulo
-    return _resultado(motivo, documento, campos, leituras, contratos)
+    return _resultado(motivo, documento, campos, leituras, contratos, contratos_do_quadro, numero_do_rotulo)
 
 
 def _ler_medicao(planos: list[str], visto: str, linhas: dict) -> dict:
@@ -206,7 +218,7 @@ def _ler_medicao(planos: list[str], visto: str, linhas: dict) -> dict:
     controle = _do_controle(linhas, numero, 0)
     quadro = [p for p in planos if re.search(r"CONTROLE FINANCEIRO", p, _I)]
     return _fechar("medicao", numero, divergente, _data(visto), rotulo, controle,
-                   _contratos(([capa] if capa else []) + quadro))
+                   _contratos([capa] if capa else []), _contratos(quadro), do_rotulo)
 
 
 def _ler_reajuste(planos: list[str], planilha: str, linhas: dict) -> dict:
@@ -217,17 +229,32 @@ def _ler_reajuste(planos: list[str], planilha: str, linhas: dict) -> dict:
     controle = _do_controle(linhas, numero, 2)
     quadro = [p for p in planos if re.search(r"CONTROLE FINANCEIRO", p, _I)]
     data = next((d for d in (_data(p) for p in cartas) if d), None)
-    return _fechar("reajuste", numero, False, data, rotulo, controle, _contratos(cartas + quadro))
+    return _fechar("reajuste", numero, False, data, rotulo, controle, _contratos(cartas), _contratos(quadro))
 
 
 _ROTULO_TIPO = {"execucao": "execução", "projeto": "projeto", "reajuste": "reajuste"}
 
 
+def _contrato(lido: dict, instrumento: str | None) -> tuple[str | None, str | None]:
+    """(situacao, numero do contrato da obra) da conferencia do contrato impresso contra o do cadastro. Situacao:
+    None (confere, ou nao ha' o que comparar: o PDF ou o cadastro sem numero), "outra-obra" (a capa ou a carta traz
+    outro contrato, e o quadro tambem nao traz o da obra) ou "nao-conferido" (so' o quadro foi lido e traz outro
+    numero, ou a capa/carta e o quadro discordam e so' o quadro traz o da obra)."""
+    da_obra = numero_do_instrumento(instrumento)
+    principal, quadro = lido["contratos"], lido["contratos_do_quadro"]
+    if not da_obra or da_obra in principal or not (principal or quadro):
+        return None, da_obra
+    if principal:
+        return ("nao-conferido" if da_obra in quadro else "outra-obra"), da_obra
+    return (None if da_obra in quadro else "nao-conferido"), da_obra
+
+
 def recusa(lido: dict, tipo: str, numero: int, instrumento: str | None) -> str | None:
     """Por que este boletim nao e' o desta medicao (None: pode ser). `tipo` e `numero` sao os da medicao (o numero no
     orgao, quando difere); `instrumento`, o numero do contrato no cadastro. So' recusa o que o PDF diz com todas as
-    letras: o documento do outro tipo, a medicao de outro numero e o contrato de outra obra. O que nao foi lido nao
-    recusa (a pessoa confere e digita)."""
+    letras: o documento do outro tipo, a medicao de outro numero (o da capa ou do campo dos dados gerais; sem eles, o
+    do rotulo do Visto) e o contrato de outra obra na capa ou na carta do reajuste. O quadro de controle financeiro
+    sozinho nao recusa (`contrato_nao_conferido`). O que nao foi lido nao recusa (a pessoa confere e digita)."""
     documento = lido.get("documento")
     if documento is None:
         return None
@@ -237,13 +264,30 @@ def recusa(lido: dict, tipo: str, numero: int, instrumento: str | None) -> str |
     if documento == "medicao" and tipo == "reajuste":
         return "Este PDF é o boletim da medição, e esta é a medição de reajuste: escolha o PDF do reajuste"
     lida = lido["campos"].get("numero")
+    if lida is None:
+        lida = lido.get("numero_do_rotulo")
     if lida is not None and lida != numero:
         return f"Este boletim é da {lida}ª medição, e esta é a {numero}ª: escolha o PDF da {numero}ª medição"
-    da_obra = numero_do_instrumento(instrumento)
-    if da_obra and lido["contratos"] and da_obra not in lido["contratos"]:
+    situacao, da_obra = _contrato(lido, instrumento)
+    if situacao == "outra-obra":
         return (f"Este boletim é de outra obra: traz o contrato {', '.join(lido['contratos'])}, e o desta obra é o "
                 f"{da_obra}")
     return None
+
+
+def contrato_nao_conferido(lido: dict, instrumento: str | None) -> str | None:
+    """A frase de quando o contrato impresso nao pode ser conferido com o do cadastro (None: conferiu, foi recusado
+    por `recusa` ou nao ha' o que comparar). O boletim nao e' recusado, mas quem chama nao propoe o valor: a pessoa
+    confere no PDF se o boletim e' da obra."""
+    situacao, da_obra = _contrato(lido, instrumento)
+    if lido.get("documento") is None or situacao != "nao-conferido":
+        return None
+    onde = "a carta do reajuste" if lido["documento"] == "reajuste" else "a capa"
+    if lido["contratos"]:
+        return (f"O contrato não pôde ser conferido: {onde} traz o {', '.join(lido['contratos'])} e o controle "
+                f"financeiro traz o {da_obra}, que é o desta obra")
+    return (f"O contrato não pôde ser conferido: só o controle financeiro traz o número "
+            f"({', '.join(lido['contratos_do_quadro'])}), e o desta obra é o {da_obra}")
 
 
 def ler_pdf(pdf: bytes) -> dict:

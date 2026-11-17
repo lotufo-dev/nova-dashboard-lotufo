@@ -27,8 +27,17 @@ O reajuste vem em PDF próprio, e o aprovado dele é o "TOTAL REAJUSTE".
   medição no quadro "CONTROLE FINANCEIRO". Se não batem, ou se o valor não sai ao lado do rótulo, a pessoa confere
   no PDF e digita, com as duas leituras na tela. Os campos "acumulado das medições anteriores" e "saldo" do Visto
   ficam fora da conferência: vêm errados em parte das obras.
+- Uma leitura só nunca vira valor aceito. Quando só a do quadro existe (ou as duas existem e são iguais, mas o
+  valor não foi proposto), a pessoa pode usá-la num clique: ela entra como valor digitado. O valor registrado
+  diferente de uma leitura avisa na tela antes do registro, não trava, e a diferença fica na auditoria com as
+  leituras.
 - O número da medição vem da capa ou do campo "N.º da Medição", nunca do rodapé nem do nome do arquivo. O boletim
-  de outra medição, de outra obra ou do outro tipo (o da medição no reajuste e o contrário) é recusado.
+  de outra medição, de outra obra ou do outro tipo (o da medição no reajuste e o contrário) é recusado. Sem a capa
+  e sem o campo, o número do rótulo do Visto só serve para recusar o boletim de outra medição: nada é proposto.
+- A obra se confere pelo número do contrato da capa (no reajuste, da carta). O quadro de controle financeiro já
+  veio com o ano do contrato trocado: sozinho ele não recusa. Quando só ele foi lido e discorda do cadastro, ou
+  quando a capa e ele discordam e só ele traz o contrato da obra, o boletim entra, o valor não é proposto e a
+  tela diz que o contrato não pôde ser conferido.
 - O passo não trava. Em parte das obras o boletim das medições recentes não estava guardado: a medição sem boletim
   segue até o pagamento, com a pendência "boletim não anexado" na página dela.
 - `prazo_boletim_dias` continua sem valer para a MT-PAR: o boletim não é esperado do órgão por e-mail.

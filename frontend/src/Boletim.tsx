@@ -19,8 +19,11 @@ import "./planilhaCarta.css";
 // Issue #753: na MT-PAR o servidor le o boletim do modelo do orgao. O valor so' vem proposto quando as duas leituras
 // dele (a do rotulo e a do controle financeiro) batem; senao elas aparecem para a pessoa conferir e digitar
 // (`leituras`). O boletim de outra medicao ou de outra obra volta recusado (`recusa`) e o PDF nao fica no formulario.
+// Revisao da PR #760: a leitura que o servidor marca com `pode_usar` (a do controle financeiro, quando a linha fecha
+// e a do rotulo nao existe ou e' a mesma) entra num clique, "Usar este valor"; continua valor digitado (o servidor
+// grava `manual`). E o valor do campo diferente de uma leitura avisa antes do registro, com os dois valores, sem travar.
 
-type LeituraDoValor = { fonte: string; valor_centavos: number | null };
+type LeituraDoValor = { fonte: string; valor_centavos: number | null; pode_usar?: boolean };
 type Leitura = { lido: boolean; fonte: string | null; avisos: string[];
   campos: { numero_orgao?: string; data?: string; valor_centavos?: number };
   modelo?: string | null; leituras?: LeituraDoValor[]; recusa?: string | null };
@@ -106,6 +109,19 @@ function confirmacaoBoletim(m: Medicao, resposta: unknown): string {
   return "Boletim registrado.";
 }
 
+/** As leituras do boletim que nao sao o valor do campo, por extenso e juntas quando sao a mesma quantia:
+ *  "R$ 1,00 no Visto e no controle financeiro" ou "R$ 1,00 no Visto e R$ 2,00 no controle financeiro". */
+function leiturasDiferentes(leituras: LeituraDoValor[], aprovado: number | null): string {
+  if (aprovado === null) return "";
+  const porValor = new Map<number, string[]>();
+  for (const l of leituras) {
+    if (l.valor_centavos === null || l.valor_centavos === aprovado) continue;
+    const onde = l.fonte === "Visto" ? "no Visto" : `no ${l.fonte.toLowerCase()}`;
+    porValor.set(l.valor_centavos, [...(porValor.get(l.valor_centavos) ?? []), onde]);
+  }
+  return [...porValor].map(([v, onde]) => `${brl(v)} ${onde.join(" e ")}`).join(" e ");
+}
+
 /** "12.345,67" -> 1234567 (centavos inteiros, sem ponto flutuante); vazio -> null. */
 function centavos(valor: string): number | null {
   const d = valor.replace(/\D/g, "");
@@ -130,6 +146,8 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
   // o que a capa trouxe (gate Sol, rodada 1): o campo e' "lido" enquanto o valor atual for o lido, mesmo depois de
   // mexer e voltar. Quem decide a origem (`aceito`) e' o servidor, contra a leitura que ele guardou.
   const [lido, setLido] = useState<{ numero?: string; data?: string; valor?: number }>({});
+  // a leitura que entrou por "Usar este valor": sai com o PDF dela, como os campos lidos (o servidor a grava `manual`)
+  const [usado, setUsado] = useState<number | null>(null);
   const [tentou, setTentou] = useState(false);
   const leitura = useRef(0);
   const hoje = hojeLocal();
@@ -140,8 +158,8 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
     // o que veio da leitura do PDF anterior sai; o que a pessoa digitou fica (code-review)
     if (lidos.has("numero")) setNumero("");
     if (lidos.has("data")) setData("");
-    if (lidos.has("valor")) setValor("");
-    setArquivo(f); setErroLeitura(""); setRecusa(""); setAvisos([]); setLeituras([]); setLido({});
+    if (lidos.has("valor") || (usado !== null && aprovado === usado)) setValor("");
+    setArquivo(f); setErroLeitura(""); setRecusa(""); setAvisos([]); setLeituras([]); setLido({}); setUsado(null);
     setLendo(true);
     const fd = new FormData();
     fd.append("arquivo", f);
@@ -161,8 +179,9 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
       if (Object.keys(novo).length > 0 && !meio && !mtpar) setMeio("smo");
       setLido(novo);
       setAvisos(r.avisos ?? []);
-      // as duas leituras so' aparecem quando o valor nao veio proposto: e' com elas que a pessoa confere
-      setLeituras(novo.valor === undefined ? r.leituras ?? [] : []);
+      // as duas leituras ficam guardadas para o aviso do valor diferente; so' aparecem quando o valor nao veio
+      // proposto (`lido.valor`): e' com elas que a pessoa confere
+      setLeituras(r.leituras ?? []);
     } catch (e) {
       if (n === leitura.current) setErroLeitura(mensagemDeErro(e));
     } finally {
@@ -182,6 +201,7 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
     : !data ? "Informe a data do boletim."
     : data > hoje ? "A data do boletim não pode ser futura."
     : aprovado === null ? "Informe o valor aprovado." : undefined;
+  const difereDoLido = leiturasDiferentes(leituras, aprovado);
 
   async function salvar(ev: React.FormEvent) {
     ev.preventDefault();
@@ -223,9 +243,16 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
       {erroLeitura && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler o PDF: {erroLeitura}</p>}
       {recusa && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{recusa}</p>}
       {avisos.map(a => <CaixaAviso nivel="atencao" key={a}>{a}</CaixaAviso>)}
-      {leituras.length > 0 && (
+      {leituras.length > 0 && lido.valor === undefined && (
         <dl className="planilha__saldo" aria-label="Leituras do valor">
-          {leituras.map(l => <div key={l.fonte}><dt>{l.fonte}</dt><dd className="num">{brl(l.valor_centavos)}</dd></div>)}
+          {leituras.map(l => (
+            <div key={l.fonte}><dt>{l.fonte}</dt>
+              <dd className="num">{brl(l.valor_centavos)}
+                {l.pode_usar && l.valor_centavos !== null && l.valor_centavos !== aprovado && (
+                  <> <button type="button" className="btn btn--pequeno" onClick={() => { setValor(brlCampo(l.valor_centavos)); setUsado(l.valor_centavos); }}>Usar este valor</button></>
+                )}
+              </dd></div>
+          ))}
         </dl>
       )}
       <div className="form-inline">
@@ -258,6 +285,8 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
           <dd className={`num${pedido !== null && aprovado !== null && aprovado < pedido ? " planilha__negativo" : ""}`}>
             {pedido !== null && aprovado !== null ? brl(aprovado - pedido) : "—"}</dd></div>
       </dl>
+      {/* #753: nao trava; o servidor guarda as leituras e a diferenca na auditoria */}
+      {difereDoLido && <CaixaAviso nivel="atencao">Valor aprovado: o formulário diz {brl(aprovado)}, o boletim diz {difereDoLido}.</CaixaAviso>}
       <ErroCampo id="bol-erro" erro={tentou ? falta : undefined} />
       <div className="painel__rodape form-inline">
         <button type="submit" className="btn btn--primario" disabled={salvando || lendo}>

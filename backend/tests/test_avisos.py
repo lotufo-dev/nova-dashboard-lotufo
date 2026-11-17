@@ -349,6 +349,31 @@ def test_boletim_com_aprovado_diferente_do_espelho_avisa_sem_dizer_glosa(ambient
     assert [m["espelho_desatualizado"] for m in medicoes.listar(conn, cid)] == ["aprovado_mudou"]
 
 
+def test_obra_da_mtpar_boletim_com_outro_valor_depois_do_espelho_enviado_avisa(ambiente):
+    """Issue #753 (revisao da PR #760): na MT-PAR o boletim pode chegar depois do espelho. O aprovado diferente do
+    valor do espelho enviado da' o mesmo aviso dos outros orgaos, e o boletim tira a pendencia "boletim não anexado"."""
+    conn, u, cid = ambiente
+    conn.execute("UPDATE orgaos SET familia='mtpar' WHERE id=(SELECT orgao_id FROM contratos WHERE id=?)", (cid,))
+    conn.commit()
+    assert medicoes.modelo_do_boletim(conn, cid) == "mtpar"
+    mid = _espelho_enviado(conn, u, cid, 100_01)
+
+    def pendente():
+        m = dict(conn.execute("SELECT * FROM medicoes WHERE id=?", (mid,)).fetchone())
+        return medicoes.boletim_pendente(conn, m, medicoes.passos_das_medicoes(conn)(m))
+    assert pendente() is True and _desatualizados(conn) == []           # seguiu sem o boletim: so' a pendencia
+    _boletim(conn, u, mid, 99_99)                                       # dois centavos abaixo do espelho
+    [a] = _desatualizados(conn)
+    assert (a["medicao_id"], a["contrato_id"], a["nivel"], a["valor_centavos"]) == (mid, cid, "acao", 99_99)
+    assert a["mensagem"] == "23ª Medição: o aprovado mudou depois do espelho, gere o espelho de novo"
+    assert medicoes.detalhe(conn, mid)["espelho_desatualizado"] == "aprovado_mudou"
+    assert [m["espelho_desatualizado"] for m in medicoes.listar(conn, cid)] == ["aprovado_mudou"]
+    assert pendente() is False
+    # o boletim com o valor do espelho nao avisa
+    _boletim(conn, u, mid, 100_01, sha="b")
+    assert _desatualizados(conn) == [] and medicoes.detalhe(conn, mid)["espelho_desatualizado"] is None
+
+
 def test_boletim_com_o_mesmo_valor_do_espelho_nao_avisa(ambiente):
     conn, u, cid = ambiente
     mid = _espelho_enviado(conn, u, cid, 100_01)

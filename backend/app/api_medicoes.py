@@ -606,11 +606,12 @@ def registrar_boletim(medicao_id: ID,
         raise _erro_do_cliente(conn, e)
     pdf = _pdf_validado(arquivo, TETO_PLANILHA)   # o pacote do SMO (capa, resumo, calculo, cronograma) passa de 10 MB
     m = conn.execute("SELECT contrato_id FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
-    capa = leituras = None
+    capa = leituras = nao_conferido = None
     if medicoes.modelo_do_boletim(conn, m["contrato_id"]) == "mtpar":
         # issue #753: o servidor le o boletim de novo no registro: o de outra medicao, de outra obra ou do outro tipo
-        # e' recusado aqui tambem, antes de o PDF ser guardado; as duas leituras do valor vao para a auditoria
-        lido, recusa = _boletim_mtpar(conn, medicao_id, pdf)
+        # e' recusado aqui tambem, antes de o PDF ser guardado; as duas leituras do valor vao para a auditoria, com o
+        # contrato que nao pode ser conferido
+        lido, recusa, nao_conferido = _boletim_mtpar(conn, medicao_id, pdf)
         if recusa:
             raise HTTPException(422, recusa)
         if lido["documento"]:
@@ -624,25 +625,29 @@ def registrar_boletim(medicao_id: ID,
     caminho, sha = arquivos.gravar_bytes("boletins", pdf, "pdf")
     try:
         return medicoes.registrar_boletim(conn, usuario["id"], medicao_id, dados,
-                                          {"arquivo": caminho, "sha256": sha, "capa": capa, "leituras": leituras})
+                                          {"arquivo": caminho, "sha256": sha, "capa": capa, "leituras": leituras,
+                                           "contrato_nao_conferido": nao_conferido})
     except ValueError as e:
         raise _erro_do_cliente(conn, e)
 
 
-def _boletim_mtpar(conn: sqlite3.Connection, medicao_id: int, pdf: bytes) -> tuple[dict, str | None]:
-    """Issue #753: o boletim da MT-PAR lido do PDF e a recusa dele para esta medicao (None: pode ser o dela)."""
+def _boletim_mtpar(conn: sqlite3.Connection, medicao_id: int, pdf: bytes) -> tuple[dict, str | None, str | None]:
+    """Issue #753: o boletim da MT-PAR lido do PDF, a recusa dele para esta medicao (None: pode ser o dela) e, sem
+    recusa, a frase do contrato que nao pode ser conferido com o do cadastro (None: conferiu ou nao ha' o que
+    comparar)."""
     from app import leitura_boletim_mtpar
     m = conn.execute("SELECT m.numero, m.numero_orgao, m.tipo, c.numero_instrumento FROM medicoes m "
                      "JOIN contratos c ON c.id=m.contrato_id WHERE m.id=?", (medicao_id,)).fetchone()
     lido = leitura_boletim_mtpar.ler_pdf(pdf)
-    return lido, leitura_boletim_mtpar.recusa(lido, m["tipo"], m["numero_orgao"] or m["numero"],
-                                              m["numero_instrumento"])
+    recusa = leitura_boletim_mtpar.recusa(lido, m["tipo"], m["numero_orgao"] or m["numero"], m["numero_instrumento"])
+    nao_conferido = None if recusa else leitura_boletim_mtpar.contrato_nao_conferido(lido, m["numero_instrumento"])
+    return lido, recusa, nao_conferido
 
 
 # as duas leituras do valor, pelo nome que a pessoa ve no documento
 _LEITURA_DO_ROTULO = {"medicao": "Visto", "reajuste": "Total do reajuste"}
 _SEM_VALOR_MTPAR = {
-    "numero-nao-lido": "O nº da medição não foi lido na capa do boletim",
+    "numero-nao-lido": "O nº da medição não foi lido no documento",
     "numero-divergente": "A capa e o Visto do boletim trazem medições diferentes",
     "valor-fora-do-rotulo": "O valor não saiu ao lado do rótulo no boletim",
     "controle-nao-lido": "A linha da medição não foi lida no controle financeiro",
@@ -652,9 +657,12 @@ _SEM_VALOR_MTPAR = {
 
 def _ler_boletim_mtpar(conn: sqlite3.Connection, medicao_id: int, pdf: bytes, usuario_id: int) -> dict:
     """Issue #753: a leitura do boletim da MT-PAR para a tela. O valor so' e' proposto quando as duas leituras (a do
-    rotulo e a do controle financeiro) sao a mesma quantia; senao a pessoa confere e digita, com as duas mostradas
-    (`leituras`). O boletim de outra medicao, de outra obra ou do outro tipo volta em `recusa` e nada e' proposto."""
-    lido, recusa = _boletim_mtpar(conn, medicao_id, pdf)
+    rotulo e a do controle financeiro) sao a mesma quantia e o contrato pode ser conferido; senao a pessoa confere e
+    digita, com as duas mostradas (`leituras`). A do controle financeiro vem com `pode_usar` quando a tela pode
+    oferece-la num clique ("Usar este valor"): o valor nao foi proposto, a linha do quadro foi lida (fecha) e a
+    leitura do rotulo nao existe ou e' a mesma quantia. O valor que entra por ela e' digitado pela pessoa (origem
+    `manual`). O boletim de outra medicao, de outra obra ou do outro tipo volta em `recusa` e nada e' proposto."""
+    lido, recusa, nao_conferido = _boletim_mtpar(conn, medicao_id, pdf)
     base = {"modelo": "mtpar", "lido": False, "fonte": None, "campos": {}, "avisos": [], "leituras": [], "recusa": None}
     if recusa:
         return {**base, "recusa": recusa}
@@ -671,11 +679,25 @@ def _ler_boletim_mtpar(conn: sqlite3.Connection, medicao_id: int, pdf: bytes, us
         campos["numero_orgao"] = str(c["numero"])
     if "data" in c:
         campos["data"] = c["data"]
-    if lido["ok"]:
+    proposto = lido["ok"] and not nao_conferido
+    if proposto:
         campos["valor_centavos"] = c["valor_centavos"]
-    leituras = [{"fonte": _LEITURA_DO_ROTULO[lido["documento"]], "valor_centavos": lido["leituras"]["rotulo_centavos"]},
-                {"fonte": "Controle financeiro", "valor_centavos": lido["leituras"]["controle_centavos"]}]
-    avisos = [] if lido["ok"] else [f"{_SEM_VALOR_MTPAR[lido['motivo']]}: confira no PDF e digite o valor aprovado"]
+    rotulo, controle = lido["leituras"]["rotulo_centavos"], lido["leituras"]["controle_centavos"]
+    leituras = [{"fonte": _LEITURA_DO_ROTULO[lido["documento"]], "valor_centavos": rotulo, "pode_usar": False},
+                {"fonte": "Controle financeiro", "valor_centavos": controle,
+                 "pode_usar": not proposto and controle is not None and rotulo in (None, controle)}]
+    avisos = []
+    if lido["motivo"] == "numero-nao-lido" and lido["numero_do_rotulo"] is not None:
+        # o numero so' saiu no rotulo do Visto: serviu para a recusa de "outra medicao", mas nao e' o numero lido
+        avisos.append("O nº da medição só foi lido no rótulo do Visto, não na capa nem nos dados gerais do boletim: "
+                      "confira no PDF e digite o nº e o valor aprovado")
+    elif lido["motivo"] == "numero-nao-lido":
+        avisos.append(f"{_SEM_VALOR_MTPAR['numero-nao-lido']}: confira no PDF se o boletim é desta medição e digite "
+                      "o nº e o valor aprovado")
+    elif not lido["ok"]:
+        avisos.append(f"{_SEM_VALOR_MTPAR[lido['motivo']]}: confira no PDF e digite o valor aprovado")
+    if nao_conferido:
+        avisos.append(f"{nao_conferido}. Confira no PDF se o boletim é desta obra e digite o valor aprovado")
     if len(campos) == 3:
         _guardar_leitura(conn, medicao_id, pdf, campos, "texto", usuario_id)
     return {**base, "lido": bool(campos), "fonte": "texto" if campos else None, "campos": campos, "avisos": avisos,

@@ -241,6 +241,128 @@ describe("boletim da MT-PAR (issue #753)", () => {
     expect(quadro.textContent).toContain("123.456,78");
   });
 
+  it("leitura só do controle financeiro: \"Usar este valor\" preenche o campo, sem virar valor lido", async () => {
+    const agir = soltar({ modelo: "mtpar", lido: true, fonte: "texto", recusa: null,
+      avisos: ["O valor não saiu ao lado do rótulo no boletim: confira no PDF e digite o valor aprovado"],
+      campos: { numero_orgao: "7", data: "2026-08-01" },
+      leituras: [{ fonte: "Visto", valor_centavos: null, pode_usar: false },
+        { fonte: "Controle financeiro", valor_centavos: 12345679, pode_usar: true }] });
+    const quadro = await screen.findByLabelText("Leituras do valor");
+    expect(campo(/Valor aprovado/).value).toBe("");
+    // um botão só, ao lado da leitura do controle financeiro
+    expect(screen.getAllByRole("button", { name: "Usar este valor" })).toHaveLength(1);
+    expect(quadro.textContent).toBe("Visto—Controle financeiroR$\u00a0123.456,79 Usar este valor");
+    fireEvent.click(screen.getByRole("button", { name: "Usar este valor" }));
+    expect(campo(/Valor aprovado/).value).toBe("123.456,79");
+    // o valor entrou como digitado: só o nº e a data levam o selo de lido, e nenhum aviso de valor diferente
+    expect(screen.getAllByText("Lido do boletim")).toHaveLength(2);
+    expect(screen.queryByText(/o formulário diz/)).toBeNull();
+    // usado, o botão sai; a leitura continua na tela
+    expect(screen.queryByRole("button", { name: "Usar este valor" })).toBeNull();
+    expect(screen.getByLabelText("Leituras do valor").textContent).toContain("123.456,79");
+    expect(agir).not.toHaveBeenCalled();                    // o clique não registra
+    fireEvent.click(screen.getByRole("button", { name: "Aceitar e registrar o boletim" }));
+    await waitFor(() => expect(enviado()!.get("valor")).toBe("123.456,79"));
+  });
+
+  it("o valor que entrou por \"Usar este valor\" sai quando outro PDF é escolhido; o digitado fica", async () => {
+    const leitura = { modelo: "mtpar", lido: true, fonte: "texto", recusa: null, avisos: [],
+      campos: { numero_orgao: "7", data: "2026-08-01" },
+      leituras: [{ fonte: "Visto", valor_centavos: null, pode_usar: false },
+        { fonte: "Controle financeiro", valor_centavos: 12345679, pode_usar: true }] };
+    soltar(leitura);
+    fireEvent.click(await screen.findByRole("button", { name: "Usar este valor" }));
+    expect(campo(/Valor aprovado/).value).toBe("123.456,79");
+    apiForm.mockImplementation(async () => ({ modelo: "mtpar", lido: false, fonte: null, avisos: [], campos: {}, leituras: [],
+      recusa: "Este boletim é da 6ª medição, e esta é a 7ª: escolha o PDF da 7ª medição" }));
+    fireEvent.drop(screen.getByTestId("soltar-boletim"), { dataTransfer: { files: [PDF] } });
+    await screen.findByRole("alert");
+    expect(campo(/Valor aprovado/).value).toBe("");
+    // o valor que a pessoa digitou depois de usar a leitura é dela: fica
+    apiForm.mockImplementation(async () => leitura);
+    fireEvent.drop(screen.getByTestId("soltar-boletim"), { dataTransfer: { files: [PDF] } });
+    fireEvent.click(await screen.findByRole("button", { name: "Usar este valor" }));
+    fireEvent.change(campo(/Valor aprovado/), { target: { value: "123.456,80" } });
+    fireEvent.drop(screen.getByTestId("soltar-boletim"), { dataTransfer: { files: [PDF] } });
+    await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(4));
+    expect(campo(/Valor aprovado/).value).toBe("123.456,80");
+  });
+
+  it("sem `pode_usar` não há botão: leituras que divergem e linha do quadro não lida", async () => {
+    soltar({ modelo: "mtpar", lido: true, fonte: "texto", recusa: null,
+      avisos: ["As duas leituras do valor não batem: confira no PDF e digite o valor aprovado"],
+      campos: { numero_orgao: "7", data: "2026-08-01" },
+      leituras: [{ fonte: "Visto", valor_centavos: 12345679, pode_usar: false },
+        { fonte: "Controle financeiro", valor_centavos: 12345678, pode_usar: false }] });
+    await screen.findByLabelText("Leituras do valor");
+    expect(screen.queryByRole("button", { name: "Usar este valor" })).toBeNull();
+    cleanup();
+    soltar({ modelo: "mtpar", lido: true, fonte: "texto", recusa: null,
+      avisos: ["A linha da medição não foi lida no controle financeiro: confira no PDF e digite o valor aprovado"],
+      campos: { numero_orgao: "7", data: "2026-08-01" },
+      leituras: [{ fonte: "Visto", valor_centavos: 12345679, pode_usar: false },
+        { fonte: "Controle financeiro", valor_centavos: null, pode_usar: false }] });
+    await screen.findByLabelText("Leituras do valor");
+    expect(screen.queryByRole("button", { name: "Usar este valor" })).toBeNull();
+  });
+
+  it("valor digitado diferente da leitura: avisa com os dois valores e deixa registrar", async () => {
+    const agir = soltar({ modelo: "mtpar", lido: true, fonte: "texto", recusa: null,
+      avisos: ["O valor não saiu ao lado do rótulo no boletim: confira no PDF e digite o valor aprovado"],
+      campos: { numero_orgao: "7", data: "2026-08-01" },
+      leituras: [{ fonte: "Visto", valor_centavos: null, pode_usar: false },
+        { fonte: "Controle financeiro", valor_centavos: 12345679, pode_usar: true }] });
+    await screen.findByLabelText("Leituras do valor");
+    expect(screen.queryByText(/o formulário diz/)).toBeNull();          // campo vazio: nada a comparar
+    fireEvent.change(campo(/Valor aprovado/), { target: { value: "123.456,80" } });      // um centavo acima
+    expect(screen.getByText(/o formulário diz/).textContent)
+      .toBe("Atenção: Valor aprovado: o formulário diz R$\u00a0123.456,80, o boletim diz R$\u00a0123.456,79 no controle financeiro.");
+    fireEvent.click(screen.getByRole("button", { name: "Aceitar e registrar o boletim" }));
+    await waitFor(() => expect(enviado()!.get("valor")).toBe("123.456,80"));
+    expect(agir).toHaveBeenCalledTimes(1);
+    // digitado o valor lido, o aviso some
+    fireEvent.change(campo(/Valor aprovado/), { target: { value: "123.456,79" } });
+    expect(screen.queryByText(/o formulário diz/)).toBeNull();
+  });
+
+  it("valor proposto e trocado pela pessoa: o aviso diz o que as duas leituras trazem", async () => {
+    soltar({ modelo: "mtpar", lido: true, fonte: "texto", avisos: [], recusa: null,
+      campos: { numero_orgao: "7", data: "2026-08-01", valor_centavos: 12345679 },
+      leituras: [{ fonte: "Visto", valor_centavos: 12345679, pode_usar: false },
+        { fonte: "Controle financeiro", valor_centavos: 12345679, pode_usar: false }] });
+    await waitFor(() => expect(campo(/Valor aprovado/).value).toBe("123.456,79"));
+    expect(screen.queryByText(/o formulário diz/)).toBeNull();
+    fireEvent.change(campo(/Valor aprovado/), { target: { value: "100.000,01" } });
+    expect(screen.getByText(/o formulário diz/).textContent)
+      .toBe("Atenção: Valor aprovado: o formulário diz R$\u00a0100.000,01, o boletim diz R$\u00a0123.456,79 no Visto e no controle financeiro.");
+    expect(screen.queryByLabelText("Leituras do valor")).toBeNull();    // o quadro das leituras continua fora
+    expect(screen.queryByRole("button", { name: "Usar este valor" })).toBeNull();
+  });
+
+  it("leituras que divergem: o aviso diz a que não é a do campo", async () => {
+    soltar({ modelo: "mtpar", lido: true, fonte: "texto", recusa: null,
+      avisos: ["As duas leituras do valor não batem: confira no PDF e digite o valor aprovado"],
+      campos: { numero_orgao: "7", data: "2026-08-01" },
+      leituras: [{ fonte: "Total do reajuste", valor_centavos: 1234567, pode_usar: false },
+        { fonte: "Controle financeiro", valor_centavos: 1234566, pode_usar: false }] });
+    await screen.findByLabelText("Leituras do valor");
+    fireEvent.change(campo(/Valor aprovado/), { target: { value: "12.345,67" } });
+    expect(screen.getByText(/o formulário diz/).textContent)
+      .toBe("Atenção: Valor aprovado: o formulário diz R$\u00a012.345,67, o boletim diz R$\u00a012.345,66 no controle financeiro.");
+    fireEvent.change(campo(/Valor aprovado/), { target: { value: "1,00" } });
+    expect(screen.getByText(/o formulário diz/).textContent)
+      .toBe("Atenção: Valor aprovado: o formulário diz R$\u00a01,00, o boletim diz R$\u00a012.345,67 no total do reajuste e R$\u00a012.345,66 no controle financeiro.");
+  });
+
+  it("boletim de outra obra pelo contrato da capa: a recusa por extenso, sem leituras nem botão", async () => {
+    soltar({ modelo: "mtpar", lido: false, fonte: null, avisos: [], campos: {}, leituras: [],
+      recusa: "Este boletim é de outra obra: traz o contrato 12/2023, e o desta obra é o 45/2025" });
+    expect((await screen.findByRole("alert")).textContent).toBe("Este boletim é de outra obra: traz o contrato 12/2023, e o desta obra é o 45/2025");
+    expect(screen.queryByText("boletim.pdf")).toBeNull();
+    expect(screen.queryByLabelText("Leituras do valor")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Usar este valor" })).toBeNull();
+  });
+
   it("boletim de outra medição: a recusa do servidor por extenso, e o PDF sai do formulário", async () => {
     const agir = soltar({ modelo: "mtpar", lido: false, fonte: null, avisos: [], campos: {}, leituras: [],
       recusa: "Este boletim é da 6ª medição, e esta é a 7ª: escolha o PDF da 7ª medição" });

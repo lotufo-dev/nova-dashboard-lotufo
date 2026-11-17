@@ -541,7 +541,14 @@ def _gravar_boletim(conn, usuario_id: int, m, dia, valor: int, origem: str, meio
     if par_de is not None:
         boletim["par_de_medicao_id"] = par_de       # issue #625: veio do registro na outra medicao do par
     if anexo.get("leituras"):
-        boletim["leituras"] = anexo["leituras"]     # issue #753: as duas leituras do valor que o servidor fez do PDF
+        # issue #753: as duas leituras do valor que o servidor fez do PDF e, quando o valor registrado nao e' o de uma
+        # delas, a diferenca (registrado menos lido, em centavos): o registro nao trava, a auditoria guarda
+        boletim["leituras"] = anexo["leituras"]
+        difere = {k: valor - lido for k, lido in anexo["leituras"].items() if lido is not None and lido != valor}
+        if difere:
+            boletim["diferenca_das_leituras"] = difere
+    if anexo.get("contrato_nao_conferido"):
+        boletim["contrato_nao_conferido"] = anexo["contrato_nao_conferido"]     # #753: a obra ficou por conferir
     auditoria.registrar(conn, usuario_id, "medicao.valor_atestado", "medicao", m["id"], antes, {
         "estado": novo, "valor_atestado_centavos": valor, "valor_atestado_origem": origem,
         "atestado_em": dia.isoformat(), "boletim": boletim})
@@ -1268,7 +1275,8 @@ def titulo(m: dict) -> str:
 
 # Os estados de "em andamento" e o passo de cada um na barra da pagina da medicao (#653: o proximo passo diz o NOME do
 # passo, o mesmo vocabulario em toda tela). O valor daqui e' o do fluxo completo; `em_andamento` devolve o da medicao,
-# que na obra sem planilha/carta comeca em "Espelhos" (`passo_do_estado`).
+# que na obra sem planilha/carta comeca em "Espelhos" e, na MT-PAR (#753), em "Análise do órgão", o passo do boletim
+# (`passo_do_estado`).
 PROXIMO_PASSO = {"planilha_gerada": "Planilha e carta", "planilha_enviada": "Análise do órgão",
                  "boletim_recebido": "Espelhos", "espelho_gerado": "Espelhos", "espelho_enviado": "Notas",
                  "nota_emitida": "Envio da nota", "protocolada": "Pagamento", "nf_emitida": "Pagamento"}
