@@ -940,11 +940,62 @@ def test_notas_gemeas_de_tipo_extra_so_lista_o_par_que_contaria_junto(cenario):
     par(9851, 12)                       # do consorcio
     assert diretoria.notas_gemeas_de_tipo_extra(c, k, {"2.2.03"}) == [{
         "obra": "Consórcio", "coligada": 12, "numero": "500", "emissao": "2026-08-10", "valor_centavos": 333_333,
-        "idmov_geral": 9851, "tipo_geral": "2.2.01", "idmov_extra": 9852, "tipo_extra": "2.2.03"}]
+        "idmov_antiga": 9851, "tipo_antiga": "2.2.01", "idmov_nova": 9852, "tipo_nova": "2.2.03"}]
     assert diretoria.notas_gemeas_de_tipo_extra(c, k, {"2.2.04"}) == []      # outro tipo: nenhum par
     _tipos_extras(c, p, "2.2.03")       # declarado tambem na propria: o par do centro dela passa a contar junto
-    assert [(g["idmov_geral"], g["idmov_extra"]) for g in diretoria.notas_gemeas_de_tipo_extra(c, p, {"2.2.03"})] == [
+    assert [(g["idmov_antiga"], g["idmov_nova"]) for g in diretoria.notas_gemeas_de_tipo_extra(c, p, {"2.2.03"})] == [
         (9841, 9842)]
+
+
+def test_duas_notas_do_mesmo_tipo_extra_tambem_sao_gemeas_e_o_par_aparece_uma_vez(cenario):
+    """Segunda revisao da PR #764: a nota que nasceu no tipo extra e teve o movimento refeito. As duas contam na obra
+    que declara o tipo, entao sao par, listado uma vez, com o movimento mais antigo (menor idmov) como a antiga."""
+    c, ids = cenario
+    p = ids["propria"]
+    c.execute("UPDATE contratos SET centro_custo_rm='9.001.001' WHERE id=?", (p,))
+    _tipos_extras(c, p, "2.2.03")
+    for idmov in (9862, 9861):
+        nid = _nota_do_rm(c, idmov, "2.2.03", 333_333, [(333_333, 0, 0, None)], centro="9.001.001")
+        c.execute("UPDATE notas_fiscais SET numero='500', numero_int=500 WHERE id=?", (nid,))
+    c.commit()
+    assert [(g["idmov_antiga"], g["tipo_antiga"], g["idmov_nova"], g["tipo_nova"])
+            for g in diretoria.notas_gemeas_de_tipo_extra(c, p, {"2.2.03"})] == [(9861, "2.2.03", 9862, "2.2.03")]
+    assert diretoria.rm_por_mes(c)[0] == {"2026-08": 2 * 333_333}       # e' o dobro que o par denuncia
+
+
+def test_nota_e_titulo_excluidos_no_rm_saem_do_a_receber_do_faturado_e_do_recebido(cenario):
+    """Issue #755: o que a sincronizacao marca como excluido no RM sai de toda soma da diretoria, na cota. Consorcio a
+    50% com centavo impar (cada parcela arredonda uma vez): uma nota com um titulo refeito (o antigo marcado) e uma
+    nota inteira marcada, com baixa. Tirada a marca, tudo volta."""
+    c, ids = cenario
+    k = ids["consorcio"]
+    c.execute("UPDATE entidades SET coligada_rm=12 WHERE chave='cons'")
+    # titulo refeito: o antigo (aberto) e o vigente (pago em parte); cheio 333.333 -> na cota 166.667
+    refeita = _nota_do_rm(c, 9871, "2.2.01", 333_333, [(300_001, 0, 0, None), (300_001, 100_001, 4, "2026-09-02")],
+                          coligada=12)
+    # movimento refeito: a nota antiga, com baixa total, e a que ficou
+    sumida = _nota_do_rm(c, 9872, "2.2.01", 200_001, [(180_001, 180_001, 1, "2026-09-03")], coligada=12)
+    _nota_do_rm(c, 9873, "2.2.01", 200_001, [(180_001, 180_001, 1, "2026-09-04")], coligada=12)
+    ids["liberar"]()
+
+    def retrato():
+        return _notas_a_receber(c), diretoria.rm_por_mes(c), diretoria.recebido_rm_no_mes(c, "2026-09")
+    # antes da marca: o titulo aberto antigo soma na falta e a nota antiga dobra faturado e recebido
+    em_dobro = retrato()
+    assert em_dobro == ([(k, 250_001)],
+                        ({"2026-08": 166_667 + 100_001 + 100_001}, {"2026-09": 50_001 + 90_001 + 90_001}),
+                        {"valor_centavos": 50_001 + 90_001 + 90_001, "notas": 3})
+    antigo = c.execute("SELECT MIN(id) FROM baixas WHERE nota_id=?", (refeita,)).fetchone()[0]
+    c.execute("UPDATE baixas SET excluida_rm_em='2026-09-10 12:00:00' WHERE id=? OR nota_id=?", (antigo, sumida))
+    c.execute("UPDATE notas_fiscais SET excluida_rm_em='2026-09-10 12:00:00', situacao='cancelada' WHERE id=?", (sumida,))
+    c.commit()
+    # a receber: 300.001 - 100.001 = 200.000 cheio -> 100.000 na cota
+    assert retrato() == ([(k, 100_000)], ({"2026-08": 166_667 + 100_001}, {"2026-09": 50_001 + 90_001}),
+                         {"valor_centavos": 50_001 + 90_001, "notas": 2})
+    c.execute("UPDATE baixas SET excluida_rm_em=NULL")
+    c.execute("UPDATE notas_fiscais SET excluida_rm_em=NULL, situacao='ativa'")
+    c.commit()
+    assert retrato() == em_dobro
 
 
 def test_a_receber_recebida_sem_data_do_corte_fica_fora_do_previsto(cenario):

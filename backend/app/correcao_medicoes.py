@@ -629,8 +629,15 @@ def _nota_da_operacao(conn, op: dict):
     return achadas[0]
 
 
+def _excluida_no_rm(n) -> bool:
+    """Issue #755: a nota que o RM deixou de devolver (banco de antes da 089, no ensaio sem migrar: nenhuma)."""
+    return "excluida_rm_em" in n.keys() and n["excluida_rm_em"] is not None
+
+
 def _situacao_da_nota(n) -> str:
-    return "desconsiderada" if n["desconsiderada_em"] is not None else n["situacao"]
+    if n["desconsiderada_em"] is not None:
+        return "desconsiderada"
+    return "excluída no RM" if _excluida_no_rm(n) else n["situacao"]
 
 
 def _registro_da_nota(n) -> dict:
@@ -645,6 +652,8 @@ def _desconsiderar_nf(conn, uid, nota, op, fonte):
         raise ValueError("diga o motivo (motivo: ...)")
     if nota["desconsiderada_em"] is not None:
         raise _JaFeito("já desconsiderada")
+    if _excluida_no_rm(nota):
+        raise ValueError(f"NF {nota['numero']} foi excluída no RM e já não conta: não há o que desconsiderar")
     if nota["situacao"] != "ativa":
         raise ValueError(f"NF {nota['numero']} já está {nota['situacao']} no RM: não há o que desconsiderar")
     ligada = conn.execute("SELECT m.id, m.numero, m.tipo FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id "
@@ -654,7 +663,10 @@ def _desconsiderar_nf(conn, uid, nota, op, fonte):
                          f"(id {ligada['id']}): desligue-a antes (desligar_nf)")
     # dinheiro recebido nao some em silencio: qualquer baixa (com valor, ou baixa total sem valor) recusa
     marcas = ",".join("?" * len(sincronizacao_rm.STATUS_RECEBIDO))
-    if conn.execute(f"SELECT 1 FROM baixas WHERE nota_id=? AND status_lan<>2 AND (status_lan IN ({marcas}) "
+    # (o titulo excluido no RM, issue #755, ja' nao e' recebimento)
+    excluidos = " AND excluida_rm_em IS NULL" if any(
+        r[1] == "excluida_rm_em" for r in conn.execute("PRAGMA table_info(baixas)")) else ""
+    if conn.execute(f"SELECT 1 FROM baixas WHERE nota_id=? AND status_lan<>2{excluidos} AND (status_lan IN ({marcas}) "
                     "OR COALESCE(valor_baixado_centavos, 0)>0)",
                     (nota["id"], *sincronizacao_rm.STATUS_RECEBIDO)).fetchone():
         raise ValueError(f"NF {nota['numero']} tem baixa no RM: nota com recebimento não se desconsidera")
@@ -674,7 +686,9 @@ def _reconsiderar_nf(conn, uid, nota, op, fonte):
     if nota["desconsiderada_em"] is None:
         raise _JaFeito("não está desconsiderada")
     # o que o RM diz da nota ficou em `status_rm`: se ele a cancelou nesse meio-tempo, ela segue cancelada
-    nova = "cancelada" if str(nota["status_rm"] or "").upper() == "C" else "ativa"
+    # issue #755: a que o RM deixou de devolver tambem segue fora da conta, ate' voltar a vir
+    excluida = _excluida_no_rm(nota)
+    nova = "cancelada" if excluida or str(nota["status_rm"] or "").upper() == "C" else "ativa"
     cur = conn.execute("UPDATE notas_fiscais SET situacao=?, desconsiderada_em=NULL "
                        "WHERE id=? AND desconsiderada_em IS NOT NULL", (nova, nota["id"]))
     db.exigir_uma_linha(cur, f"A NF {nota['numero']} mudou concorrentemente; tente novamente")
@@ -683,6 +697,8 @@ def _reconsiderar_nf(conn, uid, nota, op, fonte):
                         {"situacao": "desconsiderada", "desconsiderada_em": nota["desconsiderada_em"]},
                         {"situacao": nova, **_registro_da_nota(nota), "fonte": fonte, "origem": ORIGEM,
                          **({"motivo": motivo} if motivo else {})})
+    if excluida:
+        return ["AVISO: a nota foi excluída no RM: ela continua fora da conta"]
     return ["AVISO: o RM cancelou a nota: ela continua cancelada"] if nova == "cancelada" else ["volta a contar"]
 
 

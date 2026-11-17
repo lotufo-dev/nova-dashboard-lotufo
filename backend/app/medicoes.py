@@ -155,6 +155,8 @@ def _detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     # sincronizacao_rm importa este modulo.
     from app import sincronizacao_rm
     d["notas"] = sincronizacao_rm.notas_da_medicao(conn, medicao_id)
+    # issue #755: as notas desta medicao que o RM deixou de devolver; ditas como excluidas, fora de todo total
+    d["notas_excluidas_rm"] = sincronizacao_rm.notas_excluidas_da_medicao(conn, medicao_id)
     # Issue #514 (passo Pagamento): quantas notas da Lotufo esperadas ainda nao casaram (as saidas do espelho; sem
     # espelho, 1 enquanto nao houver nota). A cota so' se soma com todas casadas. Import local: notas importa este modulo.
     from app import notas as _notas

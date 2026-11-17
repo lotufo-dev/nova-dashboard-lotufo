@@ -198,12 +198,14 @@ def _notas_do_rm(conn) -> list[tuple]:
 
 
 def notas_gemeas_de_tipo_extra(conn, contrato_id: int, tipos) -> list[dict]:
-    """docs/adr/0015: as notas que contariam DUAS VEZES nesta obra com os tipos extras `tipos` declarados. No RM, a
-    nota reclassificada chega como movimento novo (outro idmov; mesmo numero, emissao e valor; o tipo novo) e a antiga
-    pode so' deixar de vir, sem cancelamento: continua ativa no banco e, com o tipo declarado, as duas contam no
-    faturado e no a receber. Devolve cada par: a nota ativa de tipo extra que conta nesta obra e a gemea dela, ativa
-    e de tipo da lista geral, que tambem conta (em qualquer obra): mesma coligada, mesmo numero, mesma emissao e mesmo
-    valor. So' le; quem recusa a declaracao enquanto houver par e' o `cadastro aplicar`.
+    """docs/adr/0015: as notas que contam DUAS VEZES nesta obra com os tipos extras `tipos` declarados. No RM, a nota
+    reclassificada (ou com o movimento refeito) chega como movimento novo: outro idmov; mesmo numero, emissao e valor.
+    A antiga que so' deixa de vir e' marcada como excluida pela sincronizacao (issue #755) e sai sozinha; o par que
+    sobra aqui e' o de duas notas que o banco ainda tem como ativas (as duas vindo do RM, ou a antiga ainda a' espera
+    das duas rodadas completas da marca). Devolve cada par: a nota ativa de tipo extra que conta nesta obra e a gemea
+    dela, QUALQUER outra nota ativa que tambem conta (em qualquer obra), de tipo da lista geral ou de tipo extra: mesma
+    coligada, mesmo numero, mesma emissao e mesmo valor. `idmov_antiga` e' o movimento mais antigo do par (o menor
+    idmov) e `idmov_nova`, o outro. So' le; quem recusa ou avisa e' o `cadastro aplicar`.
 
     Parte de `_notas_do_rm`, a conta do faturado: le os tipos extras ja' gravados no banco, entao e' chamada depois de
     o cadastro gravar o contrato, na mesma transacao. Nota que nao conta (de outra coligada que nao a da entidade do
@@ -212,15 +214,23 @@ def notas_gemeas_de_tipo_extra(conn, contrato_id: int, tipos) -> list[dict]:
         numero = n["numero_int"] if n["numero_int"] is not None else (n["numero"] or "").strip()
         return (n["coligada"], numero, n["emissao"], n["valor_centavos"])
     ativas = [(n, c) for n, c, _ in _notas_do_rm(conn) if n["situacao"] == "ativa"]
-    gerais: dict[tuple, list] = {}
+    grupos: dict[tuple, list] = {}
     for n, _ in ativas:
-        if n["codtmv"] in cobranca_orgao.CODTMV_COBRANCA:
-            gerais.setdefault(chave(n), []).append(n)
-    return [{"obra": c["obra"], "coligada": n["coligada"], "numero": n["numero"], "emissao": n["emissao"],
-             "valor_centavos": n["valor_centavos"], "idmov_geral": g["idmov"], "tipo_geral": g["codtmv"],
-             "idmov_extra": n["idmov"], "tipo_extra": n["codtmv"]}
-            for n, c in ativas if c["id"] == contrato_id and n["codtmv"] in tipos
-            for g in gerais.get(chave(n), [])]
+        grupos.setdefault(chave(n), []).append(n)
+    pares, vistos = [], set()
+    for n, c in ativas:
+        if c["id"] != contrato_id or n["codtmv"] not in tipos:
+            continue
+        for g in grupos[chave(n)]:
+            par = frozenset((n["id"], g["id"]))
+            if g["id"] == n["id"] or par in vistos:
+                continue                # duas do tipo extra na mesma obra: o par aparece uma vez
+            vistos.add(par)
+            antiga, nova = sorted((n, g), key=lambda x: x["idmov"])
+            pares.append({"obra": c["obra"], "coligada": n["coligada"], "numero": n["numero"], "emissao": n["emissao"],
+                          "valor_centavos": n["valor_centavos"], "idmov_antiga": antiga["idmov"],
+                          "tipo_antiga": antiga["codtmv"], "idmov_nova": nova["idmov"], "tipo_nova": nova["codtmv"]})
+    return pares
 
 
 def rm_por_mes(conn) -> tuple[dict[str, int], dict[str, int]]:
@@ -229,7 +239,8 @@ def rm_por_mes(conn) -> tuple[dict[str, int], dict[str, int]]:
 
     Faturado: o bruto das notas ativas do RM, pelo mes da emissao. Recebido: o que foi baixado nos titulos da nota
     (`sincronizacao_rm.STATUS_RECEBIDO`), pelo mes da baixa; e' o liquido que entrou (o titulo nasce sem as retencoes).
-    A obra de cada nota e' a de `_notas_do_rm`."""
+    A obra de cada nota e' a de `_notas_do_rm`. Issue #755: a nota e o titulo excluidos no RM (o que o RM deixou de
+    devolver) ficam fora das duas contas: a nota marcada nao e' ativa, e o titulo marcado nao e' lido."""
     pct_da_nota: dict[int, int] = {}
     faturado: dict[str, int] = {}
     recebido: dict[str, int] = {}
@@ -238,8 +249,9 @@ def rm_por_mes(conn) -> tuple[dict[str, int], dict[str, int]]:
         if n["situacao"] == "ativa" and n["emissao"]:
             mes = n["emissao"][:7]
             faturado[mes] = faturado.get(mes, 0) + (contratos.cota(n["valor_centavos"], c["pct"]) or 0)
+    # issue #755: o titulo excluido no RM (`excluida_rm_em`) nao e' dinheiro recebido
     for b in conn.execute("SELECT nota_id, valor_baixado_centavos, status_lan, data_baixa FROM baixas "
-                          "WHERE data_baixa IS NOT NULL AND nota_id IS NOT NULL"):
+                          "WHERE data_baixa IS NOT NULL AND nota_id IS NOT NULL AND excluida_rm_em IS NULL"):
         if b["status_lan"] not in sincronizacao_rm.STATUS_RECEBIDO or b["nota_id"] not in pct_da_nota:
             continue
         mes = b["data_baixa"][:7]
@@ -254,7 +266,7 @@ def recebido_rm_no_mes(conn, mes: str) -> dict:
     pct_da_nota = {n["id"]: c["pct"] for n, c, _ in _notas_do_rm(conn)}
     valor, notas = 0, set()
     for b in conn.execute("SELECT nota_id, valor_baixado_centavos, status_lan FROM baixas "
-                          "WHERE nota_id IS NOT NULL AND substr(data_baixa, 1, 7)=?", (mes,)):
+                          "WHERE nota_id IS NOT NULL AND excluida_rm_em IS NULL AND substr(data_baixa, 1, 7)=?", (mes,)):
         if b["status_lan"] not in sincronizacao_rm.STATUS_RECEBIDO or b["nota_id"] not in pct_da_nota:
             continue
         valor += contratos.cota(b["valor_baixado_centavos"] or 0, pct_da_nota[b["nota_id"]]) or 0
@@ -278,7 +290,8 @@ def baixado_sem_caixa_por_mes(conn) -> dict[str, int]:
                    if n["situacao"] == "ativa" and n["id"] not in com_medicao_aberta}
     out: dict[str, int] = {}
     for b in conn.execute("SELECT nota_id, valor_original_centavos, data_baixa FROM baixas WHERE data_baixa IS NOT NULL "
-                          "AND nota_id IS NOT NULL AND status_lan=? AND COALESCE(valor_baixado_centavos, 0)<=0",
+                          "AND nota_id IS NOT NULL AND excluida_rm_em IS NULL "
+                          "AND status_lan=? AND COALESCE(valor_baixado_centavos, 0)<=0",
                           (sincronizacao_rm.STATUS_BAIXA_TOTAL,)):
         if b["nota_id"] not in pct_da_nota:
             continue

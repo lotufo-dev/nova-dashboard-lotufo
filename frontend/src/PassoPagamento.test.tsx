@@ -98,6 +98,26 @@ describe("Passo Pagamento (#514)", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
+  it("#755: título e nota excluídos no RM aparecem ditos como excluídos, e os números continuam os do servidor", () => {
+    // a nota 2351 teve o titulo refeito (o antigo, de mesmo valor, parou de vir); a 2340 foi refeita inteira e saiu
+    montar({ grupo: [com({
+      notas: [nota(1, "2351", 418330386, 384863955, 0, { titulos_excluidos_rm: [
+        { valor_original_centavos: 384863955, valor_baixado_centavos: 0, excluida_rm_em: "2026-11-17 18:00:00" }] })],
+      notas_excluidas_rm: [{ nota_id: 7, coligada: 1, numero: "2340", serie: null, emissao: "2026-11-10",
+        valor_centavos: 67032113, excluida_rm_em: "2026-11-17 18:00:00" }],
+      pagamento_cota: cota(384863955, 0, 384863955) })] });
+    expect(screen.getByLabelText("A receber: R$ 3.848.639,55")).toBeTruthy();
+    expect(screen.getByText("R$ 0,00 recebido de R$ 3.848.639,55")).toBeTruthy();
+    const linhas = within(screen.getByRole("table")).getAllByRole("row").map(r => r.textContent);
+    expect(linhas[1]).toMatch(/^NF 2351R\$\s4\.183\.303,86em aberto título de R\$\s3\.848\.639,55 excluído no RM$/);
+    expect(linhas[2]).toMatch(/^NF 2340R\$\s670\.321,13excluída no RM$/);
+  });
+
+  it("sem nada excluído no RM, a tabela não fala disso", () => {
+    montar();
+    expect(screen.queryByText(/excluíd[ao] no RM/)).toBeNull();
+  });
+
   it("espelho sem saída da Lotufo (cota zero, completa): A receber R$ 0,00, sem barra, sem “Recebido” nem “Aguardando o órgão”", () => {
     montar({ grupo: [com({ notas: [nota(3, "21", 990529648, 911287276, 911287276, { coligada: 90, da_lotufo: false, da_cota: false })],
       pagamento_cota: cota(0, 0, 0) })] });

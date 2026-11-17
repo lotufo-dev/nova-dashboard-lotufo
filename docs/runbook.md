@@ -502,6 +502,12 @@ A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_US
          WHERE M.CODCOLIGADA = L.CODCOLIGADA AND M.IDMOV = L.IDMOV
            AND M.CODTMV LIKE '2.2.%' AND M.DATAEMISSAO >= DATEADD(MONTH, -24, GETDATE()))
    ```
+   As duas consultas têm de continuar devolvendo **tudo** o que está na janela: a nota e o título que deixam de vir
+   em duas rodadas completas seguidas são marcados como excluídos no RM e saem das somas (`docs/adr/0006`, #755);
+   voltando a vir, voltam a contar. Estreitar o filtro de uma delas (tipo de movimento, coligada, `PAGREC`) marcaria
+   como excluído o que só deixou de ser consultado. Encurtar a janela de 24 meses não marca nada: a janela é medida
+   pela nota mais antiga que veio.
+
    Confirmar na primeira execução: (a) `FLAN.IDMOV` existe na 12.1.2510 — se não, trocar o vínculo por `TMOVLAN` (`IDMOV` ↔ `IDLAN`) na `DASH11`; (b) `PAGREC = 1` é o lado **a receber** do razão (spec §15.3) — conferir com uma NF conhecida; (c) o `LEFT JOIN FCFO` (tomador) é opcional: se a coluna do cliente for outra, remover o join e o campo `TOMADOR`.
 
    `DASH25` — custo a pagar por coligada, centro de custo, projeto, tarefa, natureza e mês (issue #488, cadastrada em 06/11/2026):

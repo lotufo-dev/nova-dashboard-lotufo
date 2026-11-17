@@ -43,7 +43,11 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
    `recebida`, com a maior data de baixa. Issue #35: titulo pago ate' R$ 1,00 a menos tambem fecha, com a diferenca auditada em
    `medicao.recebida_com_diferenca`. Parcial fica visivel no detalhe da medicao (recebido por NF), sem mudar de estado.
 
-Toda decisao (alocar, desfazer, mudar estado) e' auditada com usuario NULL = sistema.
+6. Excluidos no RM (issue #755, docs/adr/0006): a nota e o titulo que o RM deixou de devolver sao MARCADOS
+   (`excluida_rm_em`; nada se apaga) e saem de toda soma; voltando a vir, a marca e' limpa (`_marcar_excluidos`,
+   entre o passo 2 e o 3).
+
+Toda decisao (alocar, desfazer, mudar estado, marcar excluido) e' auditada com usuario NULL = sistema.
 As linhas de NF/baixa nao entram na cadeia (espelho de outro sistema, ver migracao 012).
 """
 import datetime
@@ -116,7 +120,13 @@ def _upsert_nf(conn, linha: dict) -> int:
     coligada, idmov = int(linha["CODCOLIGADA"]), int(linha["IDMOV"])
     situacao = "cancelada" if str(linha.get("STATUS", "")).upper() == "C" else "ativa"
     numero = str(linha.get("NUMEROMOV") or "")
-    if conn.execute("SELECT 1 FROM notas_fiscais WHERE coligada=? AND idmov=?", (coligada, idmov)).fetchone() is None:
+    ja = conn.execute("SELECT id, excluida_rm_em FROM notas_fiscais WHERE coligada=? AND idmov=?",
+                      (coligada, idmov)).fetchone()
+    if ja is not None and ja["excluida_rm_em"] is not None:
+        # issue #755: a nota marcada como excluida voltou a vir: a marca sai abaixo e ela volta a contar
+        auditoria.registrar(conn, None, "rm.nota_voltou", "nota_fiscal", ja["id"],
+                            {"excluida_rm_em": ja["excluida_rm_em"]}, {"coligada": coligada, "idmov": idmov})
+    if ja is None:
         nid = _confirmar_nota_do_pdf(conn, coligada, idmov, _numero_int(numero), rm.data(linha.get("DATAEMISSAO")),
                                      rm.centavos(linha.get("VALORBRUTO")), linha, situacao)
         if nid is not None:
@@ -134,7 +144,7 @@ def _upsert_nf(conn, linha: dict) -> int:
             confirmacao=CASE WHEN notas_fiscais.valor_pdf_centavos IS NULL THEN notas_fiscais.confirmacao
                              WHEN notas_fiscais.valor_pdf_centavos=excluded.valor_centavos THEN 'confirmada'
                              ELSE 'divergente' END,
-            ultimo_visto_em=datetime('now')""",
+            excluida_rm_em=NULL, ultimo_visto_em=datetime('now')""",
         (coligada, idmov, numero, _numero_int(numero), linha.get("SERIE"),
          rm.data(linha.get("DATAEMISSAO")), rm.centavos(linha.get("VALORBRUTO")),
          linha.get("CODTMV"), linha.get("STATUS"), linha.get("CAMPOLIVRE1"),
@@ -152,6 +162,12 @@ def _upsert_baixa(conn, linha: dict) -> None:
                          (coligada, int(idmov))).fetchone()
         nota_id = r["id"] if r else None
     bruta = linha.get("DATABAIXA")
+    ja = conn.execute("SELECT id, excluida_rm_em FROM baixas WHERE coligada=? AND idlan=? AND excluida_rm_em IS NOT NULL",
+                      (coligada, idlan)).fetchone()
+    if ja is not None:
+        # issue #755: o titulo marcado como excluido voltou a vir: a marca sai abaixo e ele volta a contar
+        auditoria.registrar(conn, None, "rm.titulo_voltou", "baixa", ja["id"],
+                            {"excluida_rm_em": ja["excluida_rm_em"]}, {"coligada": coligada, "idlan": idlan})
     conn.execute("""
         INSERT INTO baixas (coligada, idlan, nota_id, idmov, numero_documento, valor_original_centavos,
                             valor_baixado_centavos, status_lan, data_baixa, data_baixa_bruta)
@@ -161,7 +177,7 @@ def _upsert_baixa(conn, linha: dict) -> None:
             valor_original_centavos=excluded.valor_original_centavos,
             valor_baixado_centavos=excluded.valor_baixado_centavos, status_lan=excluded.status_lan,
             data_baixa=excluded.data_baixa, data_baixa_bruta=excluded.data_baixa_bruta,
-            ultimo_visto_em=datetime('now')""",
+            excluida_rm_em=NULL, ultimo_visto_em=datetime('now')""",
         (coligada, idlan, nota_id, idmov, linha.get("NUMERODOCUMENTO"),
          rm.centavos(linha.get("VALORORIGINAL")), rm.centavos(linha.get("VALORBAIXADO")),
          int(linha.get("STATUSLAN") or 0), rm.data(bruta), str(bruta) if bruta is not None else None))
@@ -183,6 +199,8 @@ def alocar(conn, usuario_id, nota_id: int, medicao_id: int, origem: str, confian
             raise ValueError("Nota fiscal não encontrada")
         if nf["situacao"] != "ativa":
             # issue #638: a desconsiderada vale como cancelada, mas nao foi o RM que a cancelou
+            if nf["excluida_rm_em"] is not None:
+                raise ValueError(f"Nota fiscal {nf['numero']} foi excluída no RM")
             raise ValueError(f"Nota fiscal {nf['numero']} está {nf['situacao']}"
                              + ("" if nf["desconsiderada_em"] is not None else " no RM"))
         m = medicoes.detalhe(conn, medicao_id)
@@ -208,13 +226,19 @@ def alocar(conn, usuario_id, nota_id: int, medicao_id: int, origem: str, confian
         return cur.lastrowid
 
 
-def _desfazer_alocacoes_de_nf_cancelada(conn, nota_id: int, numero: str) -> int:
+MOTIVO_CANCELADA_RM = "NF cancelada no RM"      # o mesmo texto de `notas.MOTIVO_CANCELADA_RM` (o aviso le por ele)
+MOTIVO_EXCLUIDA_RM = "NF excluída no RM"        # issue #755: a nota deixou de vir do RM
+
+
+def _desfazer_alocacoes_de_nf_cancelada(conn, nota_id: int, numero: str, motivo: str = MOTIVO_CANCELADA_RM) -> int:
+    """Desfaz (marca, audita) o vinculo vigente da nota que o RM cancelou ou, com `MOTIVO_EXCLUIDA_RM`, deixou de
+    devolver (issue #755). A medicao nao volta de estado sozinha."""
     n = 0
-    for a in conn.execute("SELECT * FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL", (nota_id,)):
+    for a in conn.execute("SELECT * FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL", (nota_id,)).fetchall():
         conn.execute("UPDATE nf_alocacoes SET desfeita_em=datetime('now'), motivo_desfazer=? WHERE id=?",
-                     ("NF cancelada no RM", a["id"]))
+                     (motivo, a["id"]))
         auditoria.registrar(conn, None, "nf.desalocar", "medicao", a["medicao_id"],
-                            {"nota_id": nota_id}, {"motivo": "NF cancelada no RM", "nf": numero})
+                            {"nota_id": nota_id}, {"motivo": motivo, "nf": numero})
         n += 1
     return n
 
@@ -298,10 +322,25 @@ def notas_da_medicao(conn, medicao_id: int) -> list[dict]:
         d["conferencia"] = json.loads(d["conferencia"] or "[]")
         d["recebido_centavos"], d["devido_centavos"], d["recebido_em"] = _recebido_da_nota(conn, r["nota_id"])
         d["falta_centavos"] = _falta_por_titulo(conn, r["nota_id"], aberto_inteiro=True) or 0
+        # issue #755: os titulos desta nota que o RM deixou de devolver; aparecem, e nao entram em devido/recebido/falta
+        d["titulos_excluidos_rm"] = [dict(b) for b in conn.execute(
+            "SELECT valor_original_centavos, valor_baixado_centavos, excluida_rm_em FROM baixas "
+            "WHERE nota_id=? AND excluida_rm_em IS NOT NULL ORDER BY id", (r["nota_id"],))]
         d["da_lotufo"] = lotufo is not None and r["coligada"] == lotufo
         d["da_cota"] = r["nota_id"] in da_cota if esperadas is not None else d["da_lotufo"]
         out.append(d)
     return out
+
+
+def notas_excluidas_da_medicao(conn, medicao_id: int) -> list[dict]:
+    """Issue #755: as notas que estavam ligadas a esta medicao e o RM deixou de devolver (o vinculo foi desfeito com
+    `MOTIVO_EXCLUIDA_RM` e a nota segue marcada). Para o detalhe da medicao dize-las como excluidas no RM; nao entram
+    em `notas_da_medicao` nem em total nenhum. A nota que volta a vir sai daqui."""
+    return [dict(r) for r in conn.execute("""
+        SELECT DISTINCT n.id AS nota_id, n.coligada, n.numero, n.serie, n.emissao, n.valor_centavos, n.excluida_rm_em
+        FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
+        WHERE a.medicao_id=? AND a.desfeita_em IS NOT NULL AND a.motivo_desfazer=? AND n.excluida_rm_em IS NOT NULL
+        ORDER BY n.emissao, n.id""", (medicao_id, MOTIVO_EXCLUIDA_RM))]
 
 
 ESTADOS_ENCERRADOS = ("cancelada", "desistida")
@@ -381,10 +420,11 @@ def _recebido_da_nota(conn, nota_id: int) -> tuple[int, int, str | None]:
     o certo e' comparar com os titulos. Cada linha de `baixas` e' UM titulo (chave unica
     coligada+idlan), entao `devido` SOMA o `valor_original` de todos os titulos da nota
     (uma NF partida em dois lancamentos so' esta' recebida quando os dois entram); titulo
-    cancelado (status 2) nao conta como devido nem como recebido."""
+    cancelado (status 2) nao conta como devido nem como recebido, nem o titulo excluido no RM (issue #755:
+    `excluida_rm_em`, o que o RM deixou de devolver)."""
     recebido, devido, ultima = 0, 0, None
     for b in conn.execute("SELECT valor_original_centavos, valor_baixado_centavos, data_baixa, status_lan "
-                          "FROM baixas WHERE nota_id=?", (nota_id,)):
+                          "FROM baixas WHERE nota_id=? AND excluida_rm_em IS NULL", (nota_id,)):
         if b["status_lan"] == 2:               # cancelado: fora
             continue
         devido += b["valor_original_centavos"] or 0
@@ -734,10 +774,11 @@ def _falta_por_titulo(conn, nota_id: int, aberto_inteiro: bool = False, baixa_to
     Issue #563: com `baixa_total_quita`, titulo com baixa total (status 1) e valor baixado zero conta como quitado
     (falta zero): o a receber da diretoria e o aviso da Saude nao o tratam como divida. Sem ele (recebimento
     automatico, pagina da medicao), o titulo continua sem baixa: status 1 com valor zero pode ser glosa, compensacao
-    ou encontro de contas, e nao fecha medicao sozinho."""
+    ou encontro de contas, e nao fecha medicao sozinho.
+    Issue #755: o titulo excluido no RM (`excluida_rm_em`) fica fora, como o cancelado."""
     falta = 0
     for b in conn.execute("SELECT status_lan, valor_original_centavos, valor_baixado_centavos FROM baixas "
-                          "WHERE nota_id=? AND status_lan<>2", (nota_id,)):
+                          "WHERE nota_id=? AND status_lan<>2 AND excluida_rm_em IS NULL", (nota_id,)):
         baixado = (b["valor_baixado_centavos"] or 0) if b["status_lan"] in STATUS_RECEBIDO else 0
         if baixa_total_quita and b["status_lan"] == STATUS_BAIXA_TOTAL and baixado <= 0:
             continue                    # #563: baixa total no RM e' titulo quitado, mesmo com valor baixado zero
@@ -979,6 +1020,84 @@ def _sincronizar_custo(conn, cliente, rodada_id: int) -> dict:
         return {**_SEM_CUSTO, "custo_erro": ERRO_CUSTO_INESPERADO}
 
 
+# ------------------------------------------------------------------ excluidos no RM (issue #755)
+
+def _rodada_completa_anterior(conn, rodada_id: int) -> str | None:
+    """O inicio (UTC) da ultima rodada COMPLETA antes desta: terminou bem e trouxe nota e titulo. None sem nenhuma."""
+    r = conn.execute("""SELECT iniciado_em FROM rm_sincronizacoes WHERE id<? AND estado='success' AND nfs>0 AND baixas>0
+                        ORDER BY id DESC LIMIT 1""", (rodada_id,)).fetchone()
+    return r["iniciado_em"] if r else None
+
+
+def _marcar_excluidos(conn, rodada_id: int, nfs: list[dict], baixas: list[dict]) -> dict:
+    """Issue #755 (docs/adr/0006): marca como excluidos no RM a nota e o titulo que o RM deixou de devolver. O
+    faturamento exclui o titulo e o refaz, ou refaz o movimento inteiro; o antigo some das consultas sem ser cancelado,
+    e a sincronizacao, que so' insere e atualiza, o deixaria contando para sempre. Chamada dentro da transacao da
+    rodada, depois dos upserts (que limpam a marca de quem voltou a vir). Nada se apaga.
+
+    So' marca com prova de ausencia:
+    - rodada completa: as duas consultas responderam e trouxeram linhas (a que falha nem chega aqui; vazia nao prova
+      nada);
+    - ausente em DUAS rodadas completas seguidas: fora desta e nao vista desde antes do inicio da completa anterior
+      (`ultimo_visto_em`). As consultas do RM leem sem bloqueio e uma linha pode faltar numa leitura; e sem rodada
+      completa anterior nao ha' historico para decidir. Custa uma hora e evita fechar medicao por um titulo que so'
+      piscou;
+    - NOTA: so' a de dentro da janela que a consulta cobre, medida pela propria resposta (emissao posterior a' da nota
+      mais antiga que veio). A consulta traz 24 meses: nota mais antiga, ou sem data, saiu pela janela, nao foi
+      excluida;
+    - TITULO: so' aquele cuja nota veio nesta rodada (o titulo foi excluido e a nota ficou) ou esta' marcada como
+      excluida (o movimento saiu inteiro e os titulos com ele). Titulo de nota que saiu pela janela fica como esta'.
+
+    A nota marcada fica com `situacao` 'cancelada' (como a desconsiderada, #638: sai de toda conta que le nota ativa),
+    com o vinculo a' medicao desfeito e auditado (`MOTIVO_EXCLUIDA_RM`; a medicao nao volta de estado sozinha, como na
+    nota cancelada). Devolve {notas_excluidas, titulos_excluidos} desta rodada."""
+    out = {"notas_excluidas": 0, "titulos_excluidos": 0}
+    if not nfs or not baixas:
+        return out
+    anterior = _rodada_completa_anterior(conn, rodada_id)
+    if anterior is None:
+        return out
+    notas_vistas = {(int(x["CODCOLIGADA"]), int(x["IDMOV"])) for x in nfs}
+    titulos_vistos = {(int(x["CODCOLIGADA"]), int(x["IDLAN"])) for x in baixas}
+    emissoes = [e for e in (rm.data(x.get("DATAEMISSAO")) for x in nfs) if e]
+    if emissoes:
+        janela = min(emissoes)
+        for n in conn.execute("""SELECT id, coligada, idmov, numero, serie, emissao, valor_centavos, situacao
+                                 FROM notas_fiscais WHERE idmov IS NOT NULL AND excluida_rm_em IS NULL
+                                   AND ultimo_visto_em < ? AND emissao IS NOT NULL AND emissao > ?
+                                 ORDER BY id""", (anterior, janela)).fetchall():
+            if (n["coligada"], n["idmov"]) in notas_vistas:
+                continue
+            conn.execute("UPDATE notas_fiscais SET excluida_rm_em=datetime('now'), situacao='cancelada' WHERE id=?",
+                         (n["id"],))
+            auditoria.registrar(conn, None, "rm.nota_excluida", "nota_fiscal", n["id"], {"situacao": n["situacao"]},
+                                {"coligada": n["coligada"], "idmov": n["idmov"], "numero": n["numero"],
+                                 "emissao": n["emissao"], "valor_centavos": n["valor_centavos"], "rodada": rodada_id})
+            _desfazer_alocacoes_de_nf_cancelada(conn, n["id"], n["numero"], MOTIVO_EXCLUIDA_RM)
+            out["notas_excluidas"] += 1
+    for b in conn.execute("""SELECT b.id, b.coligada, b.idlan, b.nota_id, b.valor_original_centavos,
+                                    b.valor_baixado_centavos, b.status_lan, n.coligada AS coligada_nota,
+                                    n.idmov AS idmov_nota, n.excluida_rm_em AS nota_excluida
+                             FROM baixas b JOIN notas_fiscais n ON n.id=b.nota_id
+                             WHERE b.excluida_rm_em IS NULL AND b.ultimo_visto_em < ? ORDER BY b.id""",
+                          (anterior,)).fetchall():
+        if (b["coligada"], b["idlan"]) in titulos_vistos:
+            continue
+        if b["nota_excluida"] is None and (b["coligada_nota"], b["idmov_nota"]) not in notas_vistas:
+            continue                    # a nota saiu pela janela (ou nao veio): nao e' exclusao do titulo
+        conn.execute("UPDATE baixas SET excluida_rm_em=datetime('now') WHERE id=?", (b["id"],))
+        auditoria.registrar(conn, None, "rm.titulo_excluido", "baixa", b["id"], None,
+                            {"coligada": b["coligada"], "idlan": b["idlan"], "nota_id": b["nota_id"],
+                             "valor_original_centavos": b["valor_original_centavos"],
+                             "valor_baixado_centavos": b["valor_baixado_centavos"], "status_lan": b["status_lan"],
+                             "com_a_nota": b["nota_excluida"] is not None, "rodada": rodada_id})
+        out["titulos_excluidos"] += 1
+    if out["notas_excluidas"] or out["titulos_excluidos"]:
+        log.info("rodada %s: %d nota(s) e %d titulo(s) marcados como excluidos no RM", rodada_id,
+                 out["notas_excluidas"], out["titulos_excluidos"])
+    return out
+
+
 # ------------------------------------------------------------------ rodada
 
 class RodadaEmAndamento(Exception):
@@ -1007,7 +1126,8 @@ def sincronizar(conn: sqlite3.Connection, cliente, disparo: str = "manual") -> d
         # Rede primeiro, sem lock de escrita.
         nfs = cliente.consultar(rm.CONSULTA_NF)
         baixas = cliente.consultar(rm.CONSULTA_BAIXA)
-        resumo = {"nfs": 0, "baixas": 0, "alocacoes": 0, "sugestoes": 0, "recebimentos": 0}
+        resumo = {"nfs": 0, "baixas": 0, "alocacoes": 0, "sugestoes": 0, "recebimentos": 0,
+                  "notas_excluidas": 0, "titulos_excluidos": 0}
         with db.mutacao(conn):
             _garantir_posse(conn, rodada_id)
             ids = []
@@ -1018,6 +1138,8 @@ def sincronizar(conn: sqlite3.Connection, cliente, disparo: str = "manual") -> d
             for linha in baixas:
                 _upsert_baixa(conn, linha)
                 resumo["baixas"] += 1
+            # Issue #755: o que o RM deixou de devolver sai da conta ANTES do casador e dos recebimentos desta rodada
+            resumo.update(_marcar_excluidos(conn, rodada_id, nfs, baixas))
             # Uma vez por rodada: quais coligadas cadastram centro (gatilho do modo estrito) e as
             # candidatas por coligada (cache, limpo a cada alocacao).
             coligadas_com_centro = _coligadas_com_centro(conn)

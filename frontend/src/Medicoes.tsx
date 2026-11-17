@@ -33,7 +33,12 @@ type Nota = {
   conferencia?: { campo: string; espelho: number | string | null; nota: number | string | null; grau: string }[];
   justificativa?: string | null; leitura?: string | null;
   situacao?: string;          // ativa | cancelada (RM)
+  // #755: os titulos desta nota que o RM deixou de devolver (excluidos no RM); ja' estao fora de devido/recebido/falta
+  titulos_excluidos_rm?: { valor_original_centavos: number; valor_baixado_centavos: number; excluida_rm_em: string }[];
 };
+// #755: nota que estava ligada a' medicao e o RM deixou de devolver; aparece dita como excluida, fora de todo total
+export type NotaExcluidaRm = { nota_id: number; coligada: number; numero: string; serie: string | null;
+  emissao: string | null; valor_centavos: number; excluida_rm_em: string };
 type Frescor = { configurado: boolean; ultima_sincronizacao: string | null; ultimo_erro: string | null };
 // Documento de faturamento do consorcio (NF/NFS-e/FATURA do SharePoint, migracao 017) e, do bloco 2, os
 // documentos LOCAIS (espelho gerado, evidencia do orgao), que baixam pela API.
@@ -51,6 +56,7 @@ export type Medicao = {
   nota_emitida_em?: string | null;
   espelho_em?: string | null; espelho_origem?: string | null;
   congelada: number; protocolos: Protocolo[]; notas?: Nota[];
+  notas_excluidas_rm?: NotaExcluidaRm[];
   notas_faltam?: number;      // #514: notas da Lotufo esperadas (saidas do espelho) ainda sem nota casada
   // #514: o resumo do passo Pagamento, pronto do servidor (a cota da Lotufo nesta medicao + a irma valida do par);
   // null sem espelho vigente. Os valores vem null enquanto `completo` for falso.

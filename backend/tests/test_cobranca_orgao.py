@@ -82,6 +82,19 @@ def test_coluna_ilegivel_vale_nenhum_tipo_extra_com_aviso_no_log_e_nao_derruba_a
     assert diretoria._notas_em_aberto(conn) == [] and diretoria.rm_por_mes(conn) == ({}, {})
 
 
+def test_celula_ilegivel_avisa_no_log_uma_vez_so_e_de_novo_se_mudar(caplog):
+    """Cada tela e cada rodada do RM leem a coluna: a mesma celula ruim nao repete a linha no log a cada leitura."""
+    with caplog.at_level("WARNING", logger="app.cobranca_orgao"):
+        for _ in range(3):
+            assert cobranca_orgao.tipos_gravados("isto nao e json", 7) == frozenset()
+        assert caplog.text.count("contrato 7: tipos_cobranca_extras_rm ilegivel") == 1
+        cobranca_orgao.tipos_gravados("isto nao e json", 8)         # outro contrato: avisa
+        cobranca_orgao.tipos_gravados("null", 7)                    # a celula mudou: avisa
+        assert caplog.text.count("tipos_cobranca_extras_rm ilegivel") == 3
+    assert cobranca_orgao.legivel(None) and cobranca_orgao.legivel('["2.2.03"]') and cobranca_orgao.legivel("[]")
+    assert not any(cobranca_orgao.legivel(c) for c in ILEGIVEIS)
+
+
 def test_tipos_gravados_le_a_lista_valida_e_o_nulo_sem_aviso(caplog):
     with caplog.at_level("WARNING", logger="app.cobranca_orgao"):
         assert cobranca_orgao.tipos_gravados(None) == frozenset()
