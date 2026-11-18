@@ -359,7 +359,7 @@ export const fechamentoComValores = reg => {
 // pagina (sem orgao no cadastro); cada coluna das linhas soma o total do ano, como no servidor, com o resto no
 // primeiro. `vazio` e' a pagina sem lancamento nenhum, nas tres abas. Valores inventados.
 const FCH_CONTRATANTES = [["SINFRA", "sinfra", 560], ["MTPAR", "mtpar", 250], ["Pref. Várzea Grande", "pref-vg", 120],
-  ["Consórcio Intermunicipal de Desenvolvimento do Vale do Rio Cuiabá", null, 70]];
+  ["Secretaria Municipal de Infraestrutura e Obras de Exemplo do Norte", null, 70]];
 const fchPorContratante = total => {
   const linhas = FCH_CONTRATANTES.map(([contratante, chave, porMil]) => ({ contratante, contratante_chave: chave,
     ...Object.fromEntries(FCH_SOMAVEIS.map(k => [k, Math.floor(total[k] * porMil / 1000)])), participacao_medido_por_mil: porMil }));
