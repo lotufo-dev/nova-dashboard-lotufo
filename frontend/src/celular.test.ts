@@ -133,10 +133,15 @@ describe("celular", () => {
     expect(tokensCss).toMatch(/\.topbar__trilha, \.topbar__linha\s*\{[^}]*min-width:\s*0/);
     expect(tokensCss).toMatch(/\.topbar__titulo\s*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis/);
     expect(tokensCss).toMatch(/\.topbar\s*\{[^}]*width:\s*100%/);
-    // listas (Medições, Documentos, Obras): o topo é a barra de seção, cujo título cede com reticências
-    expect(tokensCss).toMatch(/\.topo__titulo\s*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/);
+    // a barra do topo leva o caminho da página (#814): o que não cabe desce para a linha de baixo, e a barra cresce
+    // em vez de alargar a página; só o trecho sozinho mais largo que a barra cede com reticências
+    expect(tokensCss).toMatch(/\.topo\s*\{[^}]*min-height:\s*var\(--altura-topo\)/);
+    expect(tokensCss).toMatch(/\.caminho\s*\{[^}]*min-width:\s*0/);
+    expect(tokensCss).toMatch(/\.caminho ol\s*\{[^}]*flex-wrap:\s*wrap/);
+    expect(tokensCss).toMatch(/\.caminho__trecho\s*\{[^}]*min-width:\s*0;\s*max-width:\s*100%/);
+    expect(tokensCss).toMatch(/\.caminho__trecho > a,[^{]*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/);
     expect(blocoMedia(tokensCss, 767)).toMatch(/\.abas\s*\{[^}]*overflow-x:\s*auto/);
-    expect(blocoMedia(tokensCss, 767)).toMatch(/\.topo\s*\{[^}]*padding:\s*0 var\(--espaco-pp\) 0 var\(--espaco-m\)/);
+    expect(blocoMedia(tokensCss, 767)).toMatch(/\.topo\s*\{[^}]*padding:\s*var\(--espaco-pp\) var\(--espaco-pp\) var\(--espaco-pp\) var\(--espaco-m\)/);
     // no celular o respiro lateral encolhe para 16 px
     expect(blocoMedia(tokensCss, 900)).toMatch(/\.topbar, \.pagina\s*\{[^}]*padding-left:\s*16px/);
   });

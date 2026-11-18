@@ -211,11 +211,15 @@ describe("App: o menu lateral largo", () => {
     const nav = await screen.findByRole("navigation", { name: "Navegação principal" });
     expect(nav.getAttribute("data-estado")).toBe("largo");
     const links = within(nav).getAllByRole("link");
+    // #814: as páginas na ordem das áreas (Painel, Medições, Obras, Financeiro, Prazos e avisos, Órgãos, Documentos, Sistema)
     expect(links.map(l => l.textContent)).toEqual(
-      ["Início", "Medições", "Resumo das medições", "Obras", "Avisos", "SIGA", "Documentos", "Fechamento", "Âncoras DocuSign", "Administração"]);
+      ["Início", "Medições", "Resumo das medições", "Obras", "Fechamento", "A receber", "Avisos", "SIGA", "Certidões", "Regularidade mensal",
+        "Garantias", "Âncoras DocuSign", "Administração", "Minha conta"]);
     for (const l of links) expect(l.querySelector("svg")).not.toBeNull();
     expect(within(nav).getByRole("link", { name: "SIGA" }).getAttribute("aria-current")).toBe("page");
     expect(links.filter(l => l.getAttribute("aria-current") === "page")).toHaveLength(1);
+    // a área da página aberta fica com o nome aceso
+    expect([...nav.querySelectorAll(".menu__area--acesa .menu__area-nome")].map(n => n.textContent)).toEqual(["Órgãos"]);
   });
 
   it("recolhe pelo botão (só ícones, nome continua acessível) e lembra a escolha", async () => {
@@ -385,5 +389,173 @@ describe("App: aviso flutuante de resposta do órgão (issue #654)", () => {
     await act(async () => {});
     expect(screen.queryByText("SINFRA respondeu:")).toBeNull();
     expect(api.mock.calls.some(c => String(c[0]).startsWith("/api/correio/respostas"))).toBe(false);
+  });
+});
+
+// #814 (decisão do dono de 18/11/2026, #805): o caminho no alto de toda página, as rotas das páginas novas e os
+// endereços de antes.
+describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", () => {
+  const SEM = { quantidade: 0, criticas: 0, breves: 0, alem_do_prazo: 0 };
+  const entrar = (perfil: string) => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa Exemplo", email: "p@lotufo.com", perfil, csrf: "x" };
+    if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
+    if (caminho === "/api/inicio") return { avisos: [] };
+    if (caminho === "/api/contratos") return [{ ...OBRA, contratante_chave: "sinfra" }];
+    if (caminho === "/api/documentos") return (await import("./documentosTeste")).PAINEL;
+    if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
+      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, ...SIGA_SEM_PROCESSO };
+    if (caminho.startsWith("/api/medicoes/fila")) {
+      return { hoje: "2026-11-07", mes: "2026-11", obras: [], limites: { dias_atencao: 5, dias_critico: 10, diferenca_critica_por_mil: 5 },
+        numeros: { com: { lotufo: SEM, faturamento: SEM, orgao: SEM }, concluidas: 0, sem_medicao: 0, pedido_centavos: null, aprovado_centavos: null,
+          aprovado_com_pedido_centavos: null, pedido_do_aprovado_centavos: null, abaixo_do_pedido_centavos: null },
+        grupos: [], concluidas: [], sem_medicao: [], quadro: [],
+        anteriores: { linhas: [], esperam_pagamento: 0, antes_do_ano_inicial: 0, ano_inicial: "2025" } };
+    }
+    if (caminho === "/api/health" || caminho.startsWith("/api/correio/respostas")) return [];
+    // o que a página pedir além disso falha: ela mostra a falha de leitura dela, e a casca continua de pé
+    throw new Error("sem dado neste teste");
+  });
+  beforeEach(() => { try { localStorage.clear(); } catch { /* sem armazenamento: o menu abre largo */ } });
+  afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
+
+  // a barra do topo (as páginas de detalhe têm o próprio <header>, que não é ela)
+  const topo = () => document.querySelector<HTMLElement>("header.topo")!;
+  const caminho = () => within(topo()).getByRole("navigation", { name: "Você está em" });
+  const trechos = () => [...caminho().querySelectorAll("li")].map(li => li.textContent);
+  const aceso = () => within(screen.getByRole("navigation", { name: "Navegação principal" })).getAllByRole("link")
+    .filter(l => l.getAttribute("aria-current") === "page").map(l => l.textContent);
+  const endereco = () => window.location.pathname + window.location.search;
+
+  it("/a-receber abre a página A receber, com o caminho, o título e o estado vazio; o item fica aceso", async () => {
+    entrar("diretoria");
+    window.history.replaceState(null, "", "/a-receber");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "A receber" })).toBeTruthy();
+    expect(trechos()).toEqual(["Financeiro", "A receber"]);
+    expect(within(caminho()).getByRole("link", { name: "Financeiro" }).getAttribute("href")).toBe("/fechamento");
+    expect(screen.getByText("Nenhuma nota em aberto.")).toBeTruthy();
+    expect(endereco()).toBe("/a-receber");                    // da #748 até aqui o endereço levava ao Fechamento
+    expect(aceso()).toEqual(["A receber"]);
+    expect(document.title).toBe("A receber · grupolotufo");
+  });
+
+  it("/a-receber?contratante= mostra só o contratante do endereço", async () => {
+    entrar("admin");
+    window.history.replaceState(null, "", "/a-receber?contratante=SINFRA");
+    render(<App />);
+    expect(await screen.findByText("Nenhuma nota em aberto de SINFRA.")).toBeTruthy();
+    expect(endereco()).toBe("/a-receber?contratante=SINFRA");
+    await act(async () => { fireEvent.click(screen.getByRole("link", { name: "Ver todos os contratantes" })); });
+    expect(endereco()).toBe("/a-receber");
+    expect(screen.getByText("Nenhuma nota em aberto.")).toBeTruthy();
+  });
+
+  it("Documentos tem três endereços, cada um com a página acesa, o caminho e o título dele", async () => {
+    entrar("diretoria");
+    window.history.replaceState(null, "", "/documentos/garantias");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Garantias" })).toBeTruthy();
+    expect(trechos()).toEqual(["Documentos", "Garantias"]);
+    expect(aceso()).toEqual(["Garantias"]);
+    expect(document.title).toBe("Garantias · Documentos · grupolotufo");
+    await screen.findAllByRole("region", { name: /^Garantias de / });
+    // do menu para a Regularidade mensal: outro endereço, outra página acesa
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("navigation", { name: "Navegação principal" })).getByRole("link", { name: "Regularidade mensal" }));
+    });
+    expect(endereco()).toBe("/documentos/regularidade");
+    expect(await screen.findByRole("list", { name: "Regularidade mensal por empresa" })).toBeTruthy();
+    expect(trechos()).toEqual(["Documentos", "Regularidade mensal"]);
+    expect(aceso()).toEqual(["Regularidade mensal"]);
+    // e pelo trecho da área, de volta à primeira página dela
+    await act(async () => { fireEvent.click(within(caminho()).getByRole("link", { name: "Documentos" })); });
+    expect(endereco()).toBe("/documentos");
+    expect(await screen.findByRole("heading", { level: 1, name: "Certidões" })).toBeTruthy();
+    expect(aceso()).toEqual(["Certidões"]);
+  });
+
+  it.each([
+    ["/documentos?aba=regularidade", "/documentos/regularidade", "Regularidade mensal"],
+    ["/documentos?aba=garantias", "/documentos/garantias", "Garantias"],
+    ["/documentos?aba=certidoes", "/documentos", "Certidões"],
+    ["/documentos/certidoes", "/documentos", "Certidões"],
+    ["/certidoes", "/documentos", "Certidões"],
+  ])("o endereço de antes %s abre %s", async (antigo, novo, titulo) => {
+    entrar("engenharia");
+    window.history.replaceState(null, "", antigo);
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: titulo })).toBeTruthy();
+    expect(endereco()).toBe(novo);
+    expect(aceso()).toEqual([titulo]);
+  });
+
+  it("a página do contratante diz o nome ao caminho do topo quando a lista chega; a obra não ganha trilha na página", async () => {
+    entrar("diretoria");
+    window.history.replaceState(null, "", "/obras/contratante/sinfra");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
+    await waitFor(() => expect(trechos()).toEqual(["Obras", "SINFRA"]));
+    expect(within(caminho()).getByRole("link", { name: "Obras" }).getAttribute("href")).toBe("/obras");
+    expect(within(topo()).queryByRole("heading")).toBeNull();                            // o h1 é o da página
+    expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);  // uma trilha só, a do topo
+    expect(aceso()).toEqual(["Obras"]);
+  });
+
+  it("a aba do SIGA do contratante segue a tela SIGA: a diretoria cai na página do contratante", async () => {
+    entrar("diretoria");
+    window.history.replaceState(null, "", "/obras/contratante/sinfra/siga");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
+    await waitFor(() => expect(endereco()).toBe("/obras/contratante/sinfra"));
+    expect(api).not.toHaveBeenCalledWith("/api/siga");
+  });
+
+  it("a vista entra no caminho como último trecho, e no título da aba do navegador", async () => {
+    entrar("engenharia");
+    window.history.replaceState(null, "", "/medicoes/quadro");
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Quadro do mês" })).toBeTruthy();
+    expect(trechos()).toEqual(["Medições", "Quadro do mês"]);
+    expect(within(topo()).getByRole("heading", { level: 1 }).textContent).toBe("Medições");
+    expect(document.title).toBe("Medições · Quadro do mês · grupolotufo");
+    await act(async () => { fireEvent.click(within(caminho()).getByRole("link", { name: "Medições" })); });
+    expect(endereco()).toBe("/medicoes");
+    expect(trechos()).toEqual(["Medições"]);
+  });
+
+  it.each([
+    ["/inicio", ["Painel", "Início"]],
+    ["/resumo-medicoes", ["Medições", "Resumo das medições"]],
+    ["/obras", ["Obras"]],
+    ["/fechamento", ["Financeiro", "Fechamento"]],
+    ["/avisos", ["Prazos e avisos", "Avisos"]],
+    ["/siga", ["Órgãos", "SIGA"]],
+    ["/ancoras-docusign", ["Sistema", "Âncoras DocuSign"]],
+    ["/admin", ["Sistema", "Administração"]],
+    ["/admin/usuarios", ["Sistema", "Administração", "Usuários"]],
+    ["/conta", ["Sistema", "Minha conta"]],
+  ])("toda página tem o caminho no alto: %s", async (url, esperado) => {
+    entrar("admin");
+    window.history.replaceState(null, "", url);
+    render(<App />);
+    await screen.findByRole("navigation", { name: "Navegação principal" });
+    await waitFor(() => expect(trechos()).toEqual(esperado));
+    expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);
+    // o trecho da página é o título da barra; ele só não é o h1 onde a página tem o dela (o Início e Obras)
+    const titulo = topo().querySelector(".caminho__trecho--titulo")!;
+    expect(titulo.textContent).toBe(esperado[esperado.length - 1] === "Usuários" ? "Administração" : esperado[esperado.length - 1]);
+    expect(titulo.querySelector("h1") !== null).toBe(url !== "/inicio" && url !== "/obras");
+  });
+
+  it("a Minha conta entra pelo menu (área Sistema) e pelo avatar, e fica acesa", async () => {
+    entrar("diretoria");
+    window.history.replaceState(null, "", "/conta");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Minha conta" })).toBeTruthy();
+    expect(aceso()).toEqual(["Minha conta"]);
+    const nav = screen.getByRole("navigation", { name: "Navegação principal" });
+    expect([...nav.querySelectorAll(".menu__area--acesa .menu__area-nome")].map(n => n.textContent)).toEqual(["Sistema"]);
+    // a diretoria não ganhou nada da área Sistema além da própria conta
+    expect(within(within(nav).getByRole("list", { name: "Sistema" })).getAllByRole("link").map(l => l.textContent)).toEqual(["Minha conta"]);
   });
 });

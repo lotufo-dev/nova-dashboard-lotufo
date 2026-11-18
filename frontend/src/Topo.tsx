@@ -3,8 +3,9 @@ import { tituloDe } from "./navegacao";
 import { parseRota, type Busca, type Origem, type Rota } from "./rota";
 import { Link } from "./Link";
 
-// Pecas da casca (NAVEGACAO.md › Subnavegacao, breadcrumb e voltar): o breadcrumb diz onde se esta' na
-// hierarquia, o "← origem" diz de onde se veio, e as abas sao links (abrem em nova aba do navegador).
+// Pecas de navegacao dentro da pagina: o "← origem" diz de onde se veio, e as abas sao links (abrem em nova aba do
+// navegador). O caminho ("Obras › SINFRA › MT-388"), que diz onde se esta' na hierarquia, e' da casca: uma peca so',
+// na barra do topo (Caminho.tsx, #814); as paginas nao desenham mais trilha propria.
 
 type Destino = { para: Rota; busca?: Busca; secao?: string };
 
@@ -16,33 +17,15 @@ export function destinoDeHref(href: string): Destino {
     secao: u.hash.replace(/^#/, "") || undefined };
 }
 
-/** `fixa`: o link vai sempre ao `para` dela (com a `busca` dela), nunca a origem de onde se chegou. */
-export type Migalha = { rotulo: string; para?: Rota; busca?: Busca; fixa?: boolean };
-
-/** "Obras › MT-388": os ancestrais sao links; o ultimo e' onde se esta'. Quando a origem e' o proprio
- *  ancestral (chegou-se pela lista de Obras filtrada), o link dele volta com os filtros. */
-export function Migalhas({ itens, origem }: { itens: Migalha[]; origem?: Origem | null }) {
-  return (
-    <nav className="migalhas" aria-label="Você está em">
-      <ol>
-        {itens.map((m, i) => {
-          const volta = origem && m.para && !m.fixa && origem.tela === m.para.tela ? destinoDeHref(origem.href) : null;
-          return (
-            <li key={`${m.rotulo}-${i}`} aria-current={i === itens.length - 1 ? "page" : undefined}>
-              {m.para && i < itens.length - 1
-                ? <Link para={volta?.para ?? m.para} busca={volta?.busca ?? m.busca} title={m.rotulo}>{m.rotulo}</Link>
-                : <span title={m.rotulo}>{m.rotulo}</span>}
-            </li>
-          );
-        })}
-      </ol>
-    </nav>
-  );
+/** Ha' de onde voltar? So' quando se chegou de uma tela que nao esta' no caminho (`alemDe`: as que estao; o trecho
+ *  delas ja' volta sozinho, com os filtros). A pagina usa para nao desenhar vazia a linha do "← origem". */
+export function temOrigem(origem: Origem | null, alemDe: Rota["tela"][]): origem is Origem {
+  return origem !== null && !alemDe.includes(origem.tela);
 }
 
-/** "← Medicoes": so' quando se chegou de outra tela que nao a do breadcrumb (esta ja' volta sozinha). */
+/** "← Medicoes": so' quando se chegou de outra tela que nao as do caminho (estas ja' voltam sozinhas). */
 export function VoltarOrigem({ origem, alemDe }: { origem: Origem | null; alemDe: Rota["tela"][] }) {
-  if (!origem || alemDe.includes(origem.tela)) return null;
+  if (!temOrigem(origem, alemDe)) return null;
   const d = destinoDeHref(origem.href);
   return (
     <Link className="btn--voltar" para={d.para} busca={d.busca}>

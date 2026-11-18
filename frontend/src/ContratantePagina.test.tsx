@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import Caminho from "./Caminho";
 import ContratantePagina from "./ContratantePagina";
 import type { ObraLista } from "./listaObras";
 import { useRota } from "./rota";
@@ -40,9 +41,12 @@ const PAINEL = {
   avisos: [aviso(1, "critico"), aviso(1, "atencao"), aviso(5, "critico")],
 };
 
+// o caminho é da barra do topo (#814): aqui ele entra ao lado da página, como a casca o desenha
 function Pagina({ perfil = "diretoria" }: { perfil?: string }) {
   const { rota, busca, ir } = useRota();
-  return rota.tela === "contratante" ? <ContratantePagina chave={rota.chave} perfil={perfil} busca={busca} ir={ir} /> : <p>outra tela</p>;
+  return rota.tela === "contratante"
+    ? <><Caminho rota={rota} perfil={perfil} ehH1={false} /><ContratantePagina chave={rota.chave} aba={rota.aba} perfil={perfil} busca={busca} ir={ir} /></>
+    : <p>outra tela</p>;
 }
 function abrir(url: string, perfil?: string) {
   window.history.replaceState(null, "", url);
@@ -69,6 +73,16 @@ describe("Página do contratante (#805)", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("SINFRA cota da Lotufo");
     expect(document.querySelector(".topbar__meta")!.textContent).toBe("3 obras em andamento");
     await waitFor(() => expect(document.title).toBe("SINFRA · Obras · grupolotufo"));
+    // a página não desenha trilha própria (#814): a única é a da barra do topo
+    expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);
+    expect(document.querySelector(".topbar .caminho, .topbar__trilha")).toBeNull();
+  });
+
+  it("as abas do contratante já têm endereço (#814); enquanto não chegam (#818), o endereço delas abre a página", async () => {
+    abrir("/obras/contratante/sinfra/medicoes?situacao=todas");
+    await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe("/obras/contratante/sinfra?situacao=todas"));
+    expect(screen.getByRole("table")).toBeTruthy();
   });
 
   it("o cabeçalho traz os números do bloco: contratado e participação, medido, medido no mês, a receber, prazo e andamento", async () => {

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { apiForm } from "./api";
+import Caminho from "./Caminho";
 import DocumentosEmpresa from "./DocumentosEmpresa";
 
 vi.mock("./api", async (original) => ({
@@ -19,12 +20,16 @@ const diretoria = { ...usuario, perfil: "diretoria" };
 
 const linhaDa = (nome: RegExp) => screen.getAllByRole("row").find(r => nome.test(r.querySelector("td")?.textContent ?? ""))!;
 
-test("cabeçalho com caminho, nome, CNPJ e situação, sem a linha de papel e obras", async () => {
-  render(<DocumentosEmpresa usuario={usuario} id={1} />);
+test("cabeçalho com nome, CNPJ e situação, sem a linha de papel e obras; o caminho do topo recebe o nome da empresa", async () => {
+  // o caminho é da barra do topo (#814): aqui ele entra ao lado da página, como a casca o desenha
+  render(<><Caminho rota={{ tela: "documentos-empresa", id: 1 }} ehH1={false} /><DocumentosEmpresa usuario={usuario} id={1} /></>);
   await screen.findByRole("heading", { level: 1, name: "Lotufo" });
   const caminho = screen.getByRole("navigation", { name: "Você está em" });
-  expect(within(caminho).getByRole("link", { name: "Documentos" }).getAttribute("href")).toBe("/documentos");
+  expect([...caminho.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Documentos", "Certidões", "Lotufo"]);
+  expect(within(caminho).getByRole("link", { name: "Certidões" }).getAttribute("href")).toBe("/documentos");
   expect(within(caminho).getByText("Lotufo").getAttribute("title")).toBe("Lotufo");
+  expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);      // a página não desenha trilha própria
+  expect(document.querySelector(".topbar__trilha")).toBeNull();                            // nem a linha do "← origem", sem origem
   screen.getByText("31.200.101/0001-30");
   screen.getByText("1 vencida · 1 vence em 4 dias · regularidade atrasada · garantia vence em 12 dias");
   expect(screen.queryByText(/também consorciada em|exigida em/)).toBeNull();

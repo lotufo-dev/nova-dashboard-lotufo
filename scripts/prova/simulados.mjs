@@ -737,3 +737,13 @@ export const filaSimulada = (resposta, reg) => {
     anteriores: { linhas: anteriores, esperam_pagamento: 17, antes_do_ano_inicial: 4, ano_inicial: "2025" },
   };
 };
+
+// ------------------------------------------------------------------ caminho no alto (#814)
+// O cabecalho da obra com nomes compridos, como os da producao: o contratante escrito por extenso e a obra com o
+// trecho e o lote no nome. O caminho do topo ("Obras › contratante › obra › Medições › 15ª Medição") tem de quebrar
+// em linhas a 390 px em vez de cortar ou de alargar a pagina. Nomes inventados.
+export const cabecalhoDeNomeLongo = cabecalho => ({
+  ...cabecalho,
+  contratante: "Secretaria de Estado de Infraestrutura e Logística",
+  obra: "Rodovia Exemplo, trecho do entroncamento ao distrito, lote 2",
+});

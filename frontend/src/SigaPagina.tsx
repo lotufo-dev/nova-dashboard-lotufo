@@ -8,6 +8,7 @@ import LegendaCor, { type ItemLegenda } from "./LegendaCor";
 import { Link } from "./Link";
 import type { ObraLista } from "./listaObras";
 import { FINAIS, tituloMedicao } from "./medicao";
+import { useNomesDoCaminho } from "./nomesDoCaminho";
 import { ir, trocarBusca, type Busca } from "./rota";
 import {
   CATEGORIAS, categoriaDaBusca, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, naoLidoDe, nomeDoProcesso, ordenar,
@@ -215,8 +216,8 @@ const PASSO_HISTORICO = 30;
 const PRIMEIRAS = 15;
 
 // Pagina do historico de um processo (#512): todas as movimentacoes gravadas, com filtro por tipo e busca.
-function Historico({ p, dados, aoPedir, podeEditar, categoria }: {
-  p: ProcessoSiga; dados: PainelSiga; aoPedir: () => Promise<void>; podeEditar: boolean; categoria: Categoria | null;
+function Historico({ p, dados, aoPedir, podeEditar }: {
+  p: ProcessoSiga; dados: PainelSiga; aoPedir: () => Promise<void>; podeEditar: boolean;
 }) {
   const [tipo, setTipo] = useState<TipoMovimentacao | null>(null);
   const [texto, setTexto] = useState("");
@@ -227,16 +228,11 @@ function Historico({ p, dados, aoPedir, podeEditar, categoria }: {
   const periodo = periodoDe(p.movimentacoes, fmtData);
   const total = p.movimentacoes.length;
   const escolher = (t: TipoMovimentacao | null) => { setTipo(t); setMostrando(PRIMEIRAS); };
+  // o caminho ("Órgãos › SIGA › processo") e' da barra do topo (#814): o trecho SIGA volta para a categoria de onde se
+  // veio, que continua na busca do endereco; a pagina so' diz o nome do processo
+  useNomesDoCaminho({ processo: nome });
   return (
     <div className="pagina siga sg-hist">
-      <nav className="sg__trilha" aria-label="Você está em">
-        {/* volta para a categoria de onde se veio */}
-        <Link className="sg__link" para={{ tela: "siga" }} busca={buscaDa(categoria)}>SIGA</Link>
-        <IconeSeta className="icone icone--p" />
-        <span>{nome}</span>
-        <IconeSeta className="icone icone--p" />
-        <span aria-current="page">Histórico</span>
-      </nav>
       <header className="sg__cabeca sg__cabeca--regua">
         <h1>Histórico · {nome}</h1>
         <p className="sg__sub">
@@ -506,7 +502,7 @@ export default function SigaPagina({ busca, agora, podeEditar = true }: { busca:
   // ?processo=<id> abre o historico (o "Abrir" do aviso tambem); id que nao existe cai na tabela
   const categoria = categoriaDaBusca(busca);
   const aberto = /^\d+$/.test(busca.processo ?? "") ? processos.find(p => p.id === Number(busca.processo)) : undefined;
-  if (aberto) return <Historico key={aberto.id} p={aberto} dados={dados} aoPedir={carregar} podeEditar={podeEditar} categoria={categoria} />;
+  if (aberto) return <Historico key={aberto.id} p={aberto} dados={dados} aoPedir={carregar} podeEditar={podeEditar} />;
 
   const robo = dados.robo;
   // #657: os paineis so' tem os vivos; os encerrados ficam recolhidos no fim da pagina

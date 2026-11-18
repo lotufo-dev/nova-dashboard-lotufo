@@ -176,6 +176,5 @@
 
 /* a trilha quebra linha em vez de cortar o nome do orgao e o da obra na borda da pagina */
 .topbar--obra .topbar__trilha { flex-wrap: wrap; row-gap: var(--espaco-pp); }
-.topbar--obra .migalhas ol { flex-wrap: wrap; }
 .instrumento__numero { overflow-wrap: anywhere; }
 .obra .docs-falta { padding-left: var(--espaco-g); padding-right: var(--espaco-g); }

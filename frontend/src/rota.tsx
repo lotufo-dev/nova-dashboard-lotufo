@@ -34,6 +34,13 @@ export type AbaMedicoes = "fila" | "quadro" | "anteriores";
 
 // Abas da pagina da empresa em Documentos (#161). As Certidoes sao a padrao e nao entram na URL.
 export type AbaDocumentos = "certidoes" | "regularidade" | "garantia";
+// As tres paginas da area Documentos (#805, menu em areas), cada uma com o proprio endereco: "/documentos" (as
+// Certidoes, no endereco que a tela sempre teve), "/documentos/regularidade" e "/documentos/garantias". O endereco de
+// antes com a aba na busca ("/documentos?aba=regularidade") abre a pagina certa: o App troca a URL pela canonica.
+export type PaginaDocumentos = "certidoes" | "regularidade" | "garantias";
+// Abas da pagina do contratante (#805): "Obras" e' a padrao e nao entra na URL ("/obras/contratante/sinfra");
+// "/obras/contratante/sinfra/medicoes", ".../a-receber", ".../siga" e ".../avisos".
+export type AbaContratante = "obras" | "medicoes" | "a-receber" | "siga" | "avisos";
 
 export type Rota =
   | { tela: "raiz" }
@@ -42,11 +49,13 @@ export type Rota =
   | { tela: "resumo-medicoes" }
   | { tela: "avisos" }
   | { tela: "siga" }
-  | { tela: "documentos" }
+  | { tela: "documentos"; pagina?: PaginaDocumentos }
   | { tela: "documentos-empresa"; id: number; aba?: AbaDocumentos }
   | { tela: "obras"; aba?: AbaObras }
   // a pagina de um contratante (#805): "/obras/contratante/sinfra". A chave vem do servidor (`contratante_chave`)
-  | { tela: "contratante"; chave: string }
+  | { tela: "contratante"; chave: string; aba?: AbaContratante }
+  // A receber (#805): o em aberto nota a nota, na area Financeiro. O contratante vai na busca (?contratante=SINFRA)
+  | { tela: "a-receber" }
   | { tela: "fechamento" }
   | { tela: "notas-envio"; id: number }
   | { tela: "obra"; id: number; aba: AbaObra }
@@ -65,6 +74,8 @@ type EstadoHistorico = { origem?: Origem };
 
 const ABAS: readonly AbaObra[] = ["medicoes", "prazos", "reajuste", "documentos", "contrato"];
 const ABAS_DOCUMENTOS: readonly AbaDocumentos[] = ["certidoes", "regularidade", "garantia"];
+const PAGINAS_DOCUMENTOS: readonly PaginaDocumentos[] = ["certidoes", "regularidade", "garantias"];
+const ABAS_CONTRATANTE: readonly AbaContratante[] = ["obras", "medicoes", "a-receber", "siga", "avisos"];
 const ABAS_OBRAS: readonly AbaObras[] = ["contratantes", "todas", "andamento", "qdop"];
 // As vistas de antes da #805: a Posicao era a tabela de todas as obras; o Resumo, os totais por contratante.
 const ABAS_OBRAS_ANTIGAS: Record<string, AbaObras> = { posicao: "todas", resumo: "contratantes" };
@@ -84,7 +95,6 @@ type Simples = (typeof SIMPLES)[number];
 const SIMPLES_ANTIGAS: Record<string, Simples> = {
   certidoes: "documentos",   // bloco 4: Certidoes virou Documentos de protocolo
   contratos: "obras",        // mapa de 2026-09-28: a URL diz o que o menu diz
-  "a-receber": "fechamento", // #748: o A receber saiu; o em aberto, nota a nota, mora no Fechamento
 };
 // #748: a Carteira saiu. O Resumo e o QDOP foram para a lista de Obras; a Producao (faturado por mes) virou o
 // Fechamento; o Custo virou coluna na aba Medicoes de cada obra. "/painel" e "/diretoria" eram a Carteira antes.
@@ -103,6 +113,14 @@ function ehAba(s: string): s is AbaObra {
 
 function ehAbaDocumentos(s: string): s is AbaDocumentos {
   return (ABAS_DOCUMENTOS as readonly string[]).includes(s);
+}
+
+function ehPaginaDocumentos(s: string | undefined): s is PaginaDocumentos {
+  return s !== undefined && (PAGINAS_DOCUMENTOS as readonly string[]).includes(s);
+}
+
+function ehAbaContratante(s: string | undefined): s is AbaContratante {
+  return s !== undefined && (ABAS_CONTRATANTE as readonly string[]).includes(s);
 }
 
 function ehAbaObras(s: string): s is AbaObras {
@@ -127,6 +145,8 @@ export function parseRota(pathname: string): Rota {
   if (partes.length === 0) return { tela: "raiz" };
   const [a, b, c] = partes;
   if (partes.length === 1 && ehSimples(a)) return { tela: a };
+  // A receber (#805) voltou a ser pagina, na area Financeiro: da #748 ate' aqui o endereco abria o Fechamento.
+  if (partes.length === 1 && a === "a-receber") return { tela: "a-receber" };
   if (partes.length === 1 && Object.prototype.hasOwnProperty.call(SIMPLES_ANTIGAS, a)) return { tela: SIMPLES_ANTIGAS[a] };
   if (partes.length === 1 && (a === "carteira" || a === "painel" || a === "diretoria")) return CARTEIRA_ANTIGA.resumo;
   if (a === "carteira" && partes.length === 2 && Object.prototype.hasOwnProperty.call(CARTEIRA_ANTIGA, b)) return CARTEIRA_ANTIGA[b];
@@ -136,8 +156,15 @@ export function parseRota(pathname: string): Rota {
     const vista = Object.prototype.hasOwnProperty.call(ABAS_OBRAS_ANTIGAS, b) ? ABAS_OBRAS_ANTIGAS[b] : b;
     if (ehAbaObras(vista)) return vista === "contratantes" ? { tela: "obras" } : { tela: "obras", aba: vista };
   }
-  // A pagina do contratante (#805): "/obras/contratante/<chave>".
-  if (a === "obras" && b === "contratante") return partes.length === 3 && ehChave(c) ? { tela: "contratante", chave: c } : { tela: "raiz" };
+  // A pagina do contratante (#805): "/obras/contratante/<chave>" e as abas dela ("/obras/contratante/<chave>/medicoes").
+  // A aba padrao (".../obras") vira a forma canonica, sem a aba.
+  if (a === "obras" && b === "contratante") {
+    if (!ehChave(c) || partes.length > 4) return { tela: "raiz" };
+    if (partes.length === 3) return { tela: "contratante", chave: c };
+    const aba = partes[3];
+    if (!ehAbaContratante(aba)) return { tela: "raiz" };
+    return aba === "obras" ? { tela: "contratante", chave: c } : { tela: "contratante", chave: c, aba };
+  }
   if ((a === "obras" || a === "contratos") && b !== undefined) {
     // So' inteiro positivo em decimal: "/obras/abc" e "/obras/1e3" nao sao obras, sao caminhos
     // desconhecidos. Number("") seria 0 e passaria sem isto. Ate' 15 digitos: cabe no inteiro seguro do
@@ -166,6 +193,11 @@ export function parseRota(pathname: string): Rota {
     return b === "fila" ? { tela: "medicoes" } : { tela: "medicoes", aba: b as AbaMedicoes };
   }
   if (a === "medicoes" && partes.length === 2 && ABAS_MEDICOES_ANTIGAS.includes(b)) return { tela: "medicoes" };
+  // As tres paginas de Documentos (#805): "/documentos" (Certidoes), "/documentos/regularidade", "/documentos/garantias".
+  // "/documentos/certidoes" tambem abre as Certidoes, e o App troca a URL pela canonica.
+  if (a === "documentos" && partes.length === 2 && ehPaginaDocumentos(b)) {
+    return b === "certidoes" ? { tela: "documentos" } : { tela: "documentos", pagina: b };
+  }
   // A empresa em Documentos (#161): "/documentos/3" e as outras abas; a padrao vira a forma canonica.
   if (a === "documentos" && b !== undefined && ehId(b) && partes.length <= 3) {
     if (partes.length === 2) return { tela: "documentos-empresa", id: Number(b) };
@@ -187,7 +219,9 @@ export function caminhoDe(r: Rota): string {
     case "documentos-empresa": return r.aba && r.aba !== "certidoes" ? `/documentos/${r.id}/${r.aba}` : `/documentos/${r.id}`;
     case "obras": return r.aba && r.aba !== "contratantes" ? `/obras/${r.aba}` : "/obras";
     case "medicoes": return r.aba && r.aba !== "fila" ? `/medicoes/${r.aba}` : "/medicoes";
-    case "contratante": return `/obras/contratante/${encodeURIComponent(r.chave)}`;
+    case "contratante": return `/obras/contratante/${encodeURIComponent(r.chave)}${r.aba && r.aba !== "obras" ? `/${r.aba}` : ""}`;
+    // as Certidoes ficam no endereco que a tela Documentos sempre teve: os links que ja' existem continuam canonicos
+    case "documentos": return r.pagina && r.pagina !== "certidoes" ? `/documentos/${r.pagina}` : "/documentos";
     case "admin": return r.aba && r.aba !== "saude" ? `/admin/${r.aba}` : "/admin";
     case "notas-envio": return `/notas/envio/${r.id}`;
     default: return `/${r.tela}`;

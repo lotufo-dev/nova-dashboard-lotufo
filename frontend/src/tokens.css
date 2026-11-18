@@ -242,6 +242,11 @@
   --menu-duracao: 200ms;
   --menu-curva: cubic-bezier(.65, 0, .35, 1);
   --menu-sombra-sobreposto: 8px 0 0 var(--cor-veu);
+  /* menu em areas (#814): 14 paginas no lugar de 10, entao o item fica um pouco mais baixo que os 40 px do botao; o
+     nome da area vai em 12 px, e um fio separa as areas quando o menu esta' recolhido */
+  --altura-item-menu: 36px;
+  --texto-area-menu: var(--texto-mini);
+  --borda-area-menu: var(--borda-fina) solid var(--cor-menu-realce);
 
   /* avisos (CaixaAviso.tsx): trava em bloco cheio, justificativa em moldura grossa de tinta */
   --borda-trava: var(--borda-grossa) solid var(--situacao-critico-ponto);
@@ -608,8 +613,10 @@ td, th { font-variant-numeric: tabular-nums; }
   background: var(--cor-superficie); border: 1px solid var(--cor-linha); border-radius: var(--raio-selo);
   font-size: var(--texto-mini); color: var(--cor-texto-secundario);
 }
-/* MENU LATERAL: o simbolo e o nome da marca em dois pesos, um item por tela e o botao de recolher no pe'. O item
-   ativo (aria-current="page") leva fundo realcado, texto claro e forte e o icone no laranja da marca. */
+/* MENU LATERAL: o simbolo e o nome da marca em dois pesos, as paginas agrupadas por area (#814: o nome da area em
+   cima das paginas dela) e o botao de recolher no pe'. O item ativo (aria-current="page") leva fundo realcado, texto
+   claro e forte e o icone no laranja da marca; a area dele fica com o nome aceso. Quando as areas nao cabem na altura
+   da janela, o menu rola e o botao de recolher continua a' vista, preso ao pe'. */
 .menu {
   position: fixed; top: 0; bottom: 0; left: 0; z-index: 40;
   width: var(--largura-menu-recolhido);
@@ -625,16 +632,25 @@ td, th { font-variant-numeric: tabular-nums; }
 /* marca: o L (a haste herda a cor do texto do menu, o bloco e' o laranja; Simbolo.tsx) e o nome escrito */
 .menu__marca {
   display: flex; align-items: center; gap: var(--espaco-p); flex: none;
-  min-height: var(--alvo-minimo); padding: 0 var(--espaco-pp); margin-bottom: var(--espaco-g);
+  min-height: var(--alvo-minimo); padding: 0 var(--espaco-pp); margin-bottom: var(--espaco-m);
   color: var(--cor-menu-texto);
 }
+/* as areas, uma embaixo da outra; o nome da area em letra pequena de titulo, apagado ate' a area ser a da pagina */
+.menu__areas { display: flex; flex-direction: column; gap: var(--espaco-p); margin-bottom: var(--espaco-p); }
+.menu__area-nome {
+  margin: 0 0 var(--espaco-mini); padding: 0 var(--espaco-p);
+  font-size: var(--texto-area-menu); line-height: var(--entrelinha); font-weight: var(--peso-forte);
+  text-transform: var(--caixa-titulo); letter-spacing: var(--espacamento-titulo); white-space: nowrap;
+  color: var(--cor-menu-texto-secundario);
+}
+.menu__area--acesa .menu__area-nome { color: var(--cor-menu-texto); }
 .menu__simbolo { width: var(--simbolo-marca-largura); height: var(--simbolo-marca-altura); flex: none; }
 .menu__nome { font-family: var(--fonte-marca); font-weight: var(--peso-marca); font-size: var(--texto-marca); line-height: var(--entrelinha-justa); }
 .menu__nome-apoio { font-family: var(--fonte-marca-apoio); font-weight: var(--peso-normal); }
-.menu__lista { display: flex; flex-direction: column; gap: var(--espaco-mini); margin: 0; padding: 0; list-style: none; }
+.menu__lista { display: flex; flex-direction: column; gap: var(--espaco-traco); margin: 0; padding: 0; list-style: none; }
 .menu__item, .menu__recolher {
   display: flex; align-items: center; gap: var(--espaco-p); flex: none;
-  width: 100%; height: auto; padding: var(--espaco-pp) var(--espaco-p);
+  width: 100%; height: auto; min-height: var(--altura-item-menu); padding: var(--espaco-mini) var(--espaco-p);
   border: 0; border-radius: var(--raio-controle); background: none;
   color: var(--cor-menu-texto-secundario); text-decoration: none;
   font-size: var(--texto-menu); font-weight: var(--peso-medio); line-height: var(--entrelinha); text-align: left;
@@ -644,8 +660,12 @@ td, th { font-variant-numeric: tabular-nums; }
 .menu__item[aria-current="page"] { background: var(--cor-menu-realce); color: var(--cor-menu-texto); font-weight: var(--peso-forte); }
 .menu__item[aria-current="page"] .menu__icone { color: var(--cor-marca); }
 .menu__icone { width: var(--tamanho-icone-menu); height: var(--tamanho-icone-menu); stroke-width: 1.75; }
-.menu__recolher { margin-top: auto; }
-/* recolhido: o item e' o quadrado do icone, e a marca fica so' com o simbolo, centrado */
+.menu__recolher { margin-top: auto; position: sticky; bottom: 0; background: var(--cor-menu); }
+/* recolhido: o item e' o quadrado do icone, e a marca fica so' com o simbolo, centrado. O nome da area sai da vista
+   (continua sendo o nome da lista para o leitor de tela) e um fio separa uma area da outra. */
+.menu[data-estado="recolhido"] .menu__areas { width: calc(var(--largura-menu-recolhido) - 2 * var(--espaco-p)); gap: var(--espaco-pp); }
+.menu[data-estado="recolhido"] .menu__area-nome { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); }
+.menu[data-estado="recolhido"] .menu__area + .menu__area { border-top: var(--borda-area-menu); padding-top: var(--espaco-pp); }
 .menu[data-estado="recolhido"] .menu__lista,
 .menu[data-estado="recolhido"] .menu__recolher { width: calc(var(--largura-menu-recolhido) - 2 * var(--espaco-p)); }
 .menu[data-estado="recolhido"] .menu__item,
@@ -662,20 +682,41 @@ td, th { font-variant-numeric: tabular-nums; }
   .menu, .menu__seta { transition: none; }
 }
 
-/* TOPO (56px): o titulo da secao e a conta, sobre o papel, com um fio embaixo. O titulo tem a letra do texto (nao
-   a condensada dos titulos de bloco), seja ele o h1 da pagina ou um paragrafo. */
+/* TOPO (56px, ou mais quando o caminho quebra em linhas): o caminho da pagina, o lugar da busca e a conta, sobre o
+   papel, com um fio embaixo. */
 .topo {
-  height: var(--altura-topo); flex: none;
+  min-height: var(--altura-topo); flex: none;
   display: flex; align-items: center; gap: var(--espaco-p);
-  padding: 0 var(--pagina-margem-lado);
+  padding: var(--espaco-pp) var(--pagina-margem-lado);
   background: var(--cor-papel); color: var(--cor-tinta);
   border-bottom: var(--borda-linha);
 }
-.topo__titulo {
-  margin: 0 auto 0 0; min-width: 0;
+/* CAMINHO (Caminho.tsx, #814): "Obras › SINFRA › MT-388 › Medições › 15ª Medição". Os trechos de antes sao links
+   sublinhados, na cor do texto de apoio; o trecho da pagina (ou do objeto) e' o titulo da barra, com a letra do texto
+   (nao a condensada dos titulos de bloco), seja ele o h1 da pagina ou so' texto. O que nao cabe numa linha desce para
+   a de baixo; so' um nome sozinho mais largo que a barra e' cortado, com o nome inteiro no `title`. */
+.caminho { flex: 1 1 auto; min-width: 0; }
+.caminho ol { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--espaco-pp); margin: 0; padding: 0; list-style: none; }
+.caminho__trecho {
+  display: inline-flex; align-items: baseline; gap: var(--espaco-pp); min-width: 0; max-width: 100%;
+  font-size: var(--texto-meta); line-height: var(--entrelinha); color: var(--cor-texto-secundario);
+}
+.caminho__trecho + .caminho__trecho::before {
+  content: "›"; flex: none;
+  font-size: var(--texto-meta); font-weight: var(--peso-normal); color: var(--cor-texto-terciario);
+}
+.caminho__trecho > a, .caminho__trecho > span, .caminho__titulo > a, .caminho__titulo > span {
+  min-width: 0; max-width: 36ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.caminho a:hover { color: var(--cor-tinta); }
+.caminho__trecho[aria-current="page"] { color: var(--cor-tinta); font-weight: var(--peso-medio); }
+.caminho__trecho--titulo, .caminho__trecho--titulo[aria-current="page"] {
+  font-size: var(--texto-topo); font-weight: var(--peso-forte); color: var(--cor-tinta);
+}
+.caminho__titulo {
+  display: inline-flex; min-width: 0; margin: 0;
   font-family: var(--fonte-texto); font-stretch: var(--largura-texto);
-  font-size: var(--texto-topo); line-height: var(--entrelinha); font-weight: var(--peso-forte);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: inherit; line-height: inherit; font-weight: inherit; letter-spacing: normal;
 }
 .conta { position: relative; flex: none; }
 .conta__botao {
@@ -723,7 +764,7 @@ td, th { font-variant-numeric: tabular-nums; }
      a alargaria; preso `a faixa, rola com ela */
   .abas { position: relative; overflow-x: auto; scrollbar-width: none; }
   .abas > .aba { flex: none; white-space: nowrap; }
-  .topo { padding: 0 var(--espaco-pp) 0 var(--espaco-m); }
+  .topo { padding: var(--espaco-pp) var(--espaco-pp) var(--espaco-pp) var(--espaco-m); }
   /* no celular fica o avatar; o nome esta' no rotulo acessivel do botao */
   .conta__nome { display: none; }
   /* aviso de resposta do orgao (#654): mais perto da borda, e acima da faixa da instalacao, que aqui quebra em linhas */
@@ -770,20 +811,6 @@ td, th { font-variant-numeric: tabular-nums; }
 }
 /* o numero de avisos da obra, depois da linha do resumo: link inteiro, nunca cortado */
 .topbar__linha > .selo, .topbar__trilha > .btn--voltar { flex: none; }
-
-.migalhas { min-width: 0; font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
-/* uma linha so' (F-50): os ancestrais ficam inteiros e o ultimo item, onde se esta', corta com reticencias */
-.migalhas ol { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
-/* o ancestral cede so' depois do item atual e tem teto (nome de obra longo no meio da trilha) */
-.migalhas li { flex: 0 0 auto; max-width: 28ch; min-width: 0; }
-.migalhas li > a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.migalhas li[aria-current="page"] { flex: 0 1 auto; min-width: 0; max-width: 40ch; }
-.migalhas li[aria-current="page"] > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.migalhas li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.migalhas li + li::before { content: "›"; color: var(--cor-texto-terciario); }
-.migalhas a { color: var(--cor-texto-secundario); text-decoration: none; }
-.migalhas a:hover { color: var(--cor-tinta); }
-.migalhas li[aria-current="page"] { color: var(--cor-tinta); }
 
 .pagina {
   width: 100%; max-width: var(--pagina-largura-max);

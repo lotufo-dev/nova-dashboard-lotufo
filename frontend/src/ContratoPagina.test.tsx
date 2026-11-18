@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import Caminho from "./Caminho";
 import ContratoPagina from "./ContratoPagina";
 import type { Usuario } from "./Login";
 
@@ -138,8 +139,9 @@ describe("Página da obra: o desenho novo", () => {
     expect([voltar().textContent!.trim(), voltar().getAttribute("href")]).toEqual(["Obras", "/obras/todas?q=hosp"]);
     cleanup();
     // da página do contratante com as encerradas à vista: volta a ela como estava, e o caminho também
-    render(<ContratoPagina contratoId={1} usuario={usuario} aba="ficha"
-      origem={{ tela: "contratante", href: "/obras/contratante/ses-mt?situacao=todas" }} busca={{}} />);
+    const origem = { tela: "contratante" as const, href: "/obras/contratante/ses-mt?situacao=todas" };
+    render(<><Caminho rota={{ tela: "obra", id: 1, aba: "ficha" }} origem={origem} ehH1={false} />
+      <ContratoPagina contratoId={1} usuario={usuario} aba="ficha" origem={origem} busca={{}} /></>);
     await screen.findByRole("heading", { level: 1, name: "Hospital" });
     expect([voltar().textContent!.trim(), voltar().getAttribute("href")]).toEqual(["SES-MT", "/obras/contratante/ses-mt?situacao=todas"]);
     expect(document.querySelectorAll(".topbar__trilha > a.btn--voltar")).toHaveLength(1);      // sem um segundo "voltar" para o mesmo lugar
@@ -147,20 +149,28 @@ describe("Página da obra: o desenho novo", () => {
     expect(within(caminho).getByRole("link", { name: "SES-MT" }).getAttribute("href")).toBe("/obras/contratante/ses-mt?situacao=todas");
   });
 
-  it("#805: o caminho é Obras › contratante › obra; o cabeçalho de quem tem 100% não fala de cota", async () => {
+  // o caminho é da barra do topo (#814): aqui ele entra ao lado da página, como a casca o desenha, com os nomes que
+  // a página diz quando o cabeçalho da obra chega
+  it("#805: o caminho é Obras › contratante › obra, com a aba; o cabeçalho de quem tem 100% não fala de cota", async () => {
     doContratante();
-    render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    render(<><Caminho rota={{ tela: "obra", id: 1, aba: "medicoes" }} ehH1={false} />
+      <ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} /></>);
     await screen.findByRole("heading", { level: 1, name: "Hospital" });
     expect(document.querySelector(".topbar__meta")!.textContent).toBe("SES · Contrato CT 1/2026");
     const caminho = screen.getByRole("navigation", { name: "Você está em" });
-    expect([...caminho.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Obras", "SES-MT", "Hospital"]);
+    expect([...caminho.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Obras", "SES-MT", "Hospital", "Medições"]);
     expect(within(caminho).getByRole("link", { name: "Obras" }).getAttribute("href")).toBe("/obras");
     expect(within(caminho).getByRole("link", { name: "SES-MT" }).getAttribute("href")).toBe("/obras/contratante/ses-mt");
+    expect(within(caminho).getByRole("link", { name: "Hospital" }).getAttribute("href")).toBe("/obras/1");
+    // a página não desenha trilha própria: a única é a da barra do topo
+    expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);
+    expect(document.querySelector(".topbar .caminho")).toBeNull();
   });
 
   it("obra sem órgão no cadastro: o caminho diz o órgão sem link e o voltar leva a Obras", async () => {
     responderCompleto();       // o cabeçalho sem `contratante_chave`
-    render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    render(<><Caminho rota={{ tela: "obra", id: 1, aba: "ficha" }} ehH1={false} />
+      <ContratoPagina contratoId={1} usuario={usuario} aba="ficha" origem={null} busca={{}} /></>);
     await screen.findByRole("heading", { level: 1, name: "Hospital" });
     expect([voltar().textContent!.trim(), voltar().getAttribute("href")]).toEqual(["Obras", "/obras"]);
     const caminho = screen.getByRole("navigation", { name: "Você está em" });
