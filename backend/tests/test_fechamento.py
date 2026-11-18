@@ -1314,7 +1314,8 @@ def test_sem_o_total_liberado_a_nota_emitida_sem_protocolo_nao_aparece_em_a_rece
     nota(c, 500_001, [a], coligada=EMPRESA, emissao="2026-09-01")
     c.execute("UPDATE cadastro_geral SET valor=? WHERE chave='diretoria'", (json.dumps({"total_a_receber_liberado": False}),))
     c.commit()
-    assert inicio._a_receber(c, HOJE_TESTE) == {"liberado": False, "valor_centavos": None, "mais_60_centavos": None}
+    assert inicio._a_receber(c, HOJE_TESTE) == {"liberado": False, "valor_centavos": None, "mais_60_centavos": None,
+                                                "a_parte": None}
     assert diretoria.a_receber_por_obra(c, na_cota=True) is None and diretoria.da_obra(c, p)["a_receber_centavos"] is None
     f = fechamento.fechamento(c)
     assert f["em_aberto"] == [] and _medicao(f, a)["em_aberto_centavos"] is None

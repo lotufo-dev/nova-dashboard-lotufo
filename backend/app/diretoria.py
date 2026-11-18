@@ -140,6 +140,59 @@ def _mapa_contratos(conn) -> tuple[dict, dict, dict]:
     return contr, por_centro, por_coligada
 
 
+# Decisao do dono de 17/11/2026 (docs/adr/0006, "A receber antigo, a' parte"): pendencia de competencia anterior a este
+# ano fica fora do total das telas da diretoria e aparece a' parte. A UNICA definicao do ano: o Fechamento conta o "em
+# aberto anterior" pelo mesmo valor (`fechamento.ANOS` comeca nele), e o Inicio e a lista de Obras separam por ele.
+ANO_INICIAL = "2025"
+DIAS_SEM_ATUALIZACAO = 2    # nota que o RM nao informa ha' mais que isto, contado da ultima nota que ele informou
+
+
+def sem_atualizacao_do_rm(conn) -> dict[int, str]:
+    """As notas do RM que a sincronizacao deixou de receber: nota -> o dia (AAAA-MM-DD, hora local) em que o RM a
+    informou pela ultima vez. A consulta de notas e a de titulos so' trazem a nota emitida nos ultimos 24 meses; a que
+    sai da janela para de vir e o titulo dela fica como estava, "em aberto" para sempre: a dashboard nao sabe se foi
+    pago. (Dentro da janela, a nota que para de vir e' marcada como excluida no RM e ja' nao conta: issue #755.)
+    "Deixou de receber" e' nao ter vindo nas rodadas dos ultimos `DIAS_SEM_ATUALIZACAO` dias, contados da nota vista
+    por ultimo: com a sincronizacao inteira parada, nenhuma nota fica mais velha que as outras e nada muda de lugar."""
+    ultima = conn.execute("SELECT MAX(ultimo_visto_em) FROM notas_fiscais WHERE idmov IS NOT NULL").fetchone()[0]
+    if not ultima:
+        return {}
+    limite = (datetime.datetime.fromisoformat(ultima) - datetime.timedelta(days=DIAS_SEM_ATUALIZACAO)).isoformat(" ")
+    return {r["id"]: tempo.para_local(datetime.datetime.fromisoformat(r["ultimo_visto_em"])).date().isoformat()
+            for r in conn.execute("SELECT id, ultimo_visto_em FROM notas_fiscais WHERE idmov IS NOT NULL "
+                                  "AND situacao='ativa' AND excluida_rm_em IS NULL AND ultimo_visto_em < ?", (limite,))}
+
+
+def marcar_a_parte(conn, linhas: list[dict]) -> list[dict]:
+    """docs/adr/0006 ("A receber antigo, a' parte"): marca em cada linha do a receber o que a tira do total.
+    - `sem_atualizacao_desde`: o RM deixou de informar a nota (`sem_atualizacao_do_rm`). Na linha de nota, a propria
+      nota; na medicao que espera o pagamento, quando TODAS as notas ligadas a ela, da coligada do contrato, estao
+      assim (a baixa que a fecharia nao chega mais). Vale o dia mais antigo.
+    - `anterior`: competencia anterior a `ANO_INICIAL`. A da medicao; na nota do RM, a da medicao a que esta' ligada
+      e, sem medicao, o ano da emissao (a nota nao fatura competencia posterior a' emissao dela).
+    - `a_parte`: uma das duas. A linha a' parte nao entra no total nem em "ha' mais de 60 dias"."""
+    sem = sem_atualizacao_do_rm(conn)
+    das_medicoes: dict[int, list[int]] = {}
+    if sem:
+        for r in conn.execute("""SELECT a.medicao_id, n.id FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
+                                 JOIN medicoes m ON m.id=a.medicao_id JOIN contratos c ON c.id=m.contrato_id
+                                 JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
+                                 WHERE a.desfeita_em IS NULL AND n.situacao='ativa' AND n.coligada=e.coligada_rm"""):
+            das_medicoes.setdefault(r["medicao_id"], []).append(r["id"])
+    for x in linhas:
+        if x["tipo"] == "nota":
+            desde = sem.get(x["nota_id"])
+            referencia = x["competencia_da_medicao"] or x["protocolo_em"]       # a emissao, na nota sem medicao
+        else:
+            notas = das_medicoes.get(x["id"], [])
+            desde = min(sem[n] for n in notas) if notas and all(n in sem for n in notas) else None
+            referencia = x["competencia"]
+        x["sem_atualizacao_desde"] = desde
+        x["anterior"] = bool(referencia) and referencia[:4] < ANO_INICIAL
+        x["a_parte"] = x["anterior"] or desde is not None
+    return linhas
+
+
 def a_receber_na_cota(conn, ms: list[dict] | None = None) -> list[dict]:
     """A UNICA lista do a receber do Inicio e da lista de Obras, na COTA (`_a_receber_cota` da' o valor de cada linha):
     1. a medicao que espera o pagamento (`espera_pagamento`), pelo valor dela na cota, com a data de `cobrada_em`;
@@ -161,7 +214,7 @@ def a_receber_na_cota(conn, ms: list[dict] | None = None) -> list[dict]:
             out.append({**m, "protocolo_em": cobrada_em(m), "cota_em_aberto_centavos": aberto})
         elif m["estado"] == "recebida" and aberto:
             out.append({**m, "repasse": True, "cota_em_aberto_centavos": aberto})
-    return out + _notas_em_aberto(conn, preteridas)
+    return marcar_a_parte(conn, out + _notas_em_aberto(conn, preteridas))
 
 
 def _a_receber_cota(x: dict) -> int:
@@ -243,7 +296,9 @@ def _notas_em_aberto(conn, preteridas=frozenset()) -> list[dict]:
                     "protocolo_em": n["emissao"], "orgao_id": c["orgao_id"], "orgao_nome": c["orgao_nome"],
                     "orgao_familia": c["orgao_familia"], "orgao_chave": c["orgao_chave"],
                     "obra": c["obra"], "contrato_id": c["id"], "contrato_estado": c["estado"],
-                    "competencia": None, "recebida_em": None})
+                    "competencia": None, "recebida_em": None, "nota_id": n["id"],
+                    # para `marcar_a_parte`: a competencia da medicao (fechada) a que a nota esta' ligada
+                    "competencia_da_medicao": min((r["competencia"] for r in ligadas), default=None)})
     return out
 
 
@@ -644,14 +699,36 @@ def a_receber_por_obra(conn, na_cota: bool = False) -> dict[int, int] | None:
     """O a receber de TODAS as obras de uma vez, em valor CHEIO, pela mesma conta de `da_obra` (#509).
     Sem o total liberado, nulo: a lista mostra "—" em vez de um numero nao conciliado. Obra sem nada a receber fica de fora.
     `na_cota` (lista de Obras, #645): cada cobranca na cota da Lotufo, pela lista do Inicio (`a_receber_na_cota`); em
-    consorcio com a nota da propria empresa ligada, pelo em aberto dela (#756)."""
+    consorcio com a nota da propria empresa ligada, pelo em aberto dela (#756). Na cota, so' o que entra no total: o
+    que fica a' parte (anterior a `ANO_INICIAL` ou sem atualizacao do RM) sai em `a_receber_na_cota_por_obra`."""
+    if na_cota:
+        par = a_receber_na_cota_por_obra(conn)
+        return None if par is None else par[0]
     if not _liberado(conn):
         return None
-    linhas, valor = (a_receber_na_cota(conn), _a_receber_cota) if na_cota else (_a_receber_cheio(conn), _cheio)
     por_obra: dict[int, int] = {}
-    for x in linhas:
-        por_obra[x["contrato_id"]] = por_obra.get(x["contrato_id"], 0) + valor(x)
+    for x in _a_receber_cheio(conn):
+        por_obra[x["contrato_id"]] = por_obra.get(x["contrato_id"], 0) + _cheio(x)
     return por_obra
+
+
+def a_receber_na_cota_por_obra(conn) -> tuple[dict[int, int], dict[int, dict[str, int]]] | None:
+    """Para a lista de Obras, na cota, pela lista unica do Inicio (`a_receber_na_cota`): (o a receber de cada obra, so'
+    com o que entra no total; o que fica a' parte em cada obra: competencia anterior a `ANO_INICIAL` ou nota sem
+    atualizacao do RM, docs/adr/0006). As duas somas, obra a obra, fecham com os numeros do Inicio. Sem o total
+    liberado, nulo."""
+    if not _liberado(conn):
+        return None
+    total: dict[int, int] = {}
+    a_parte: dict[int, dict[str, int]] = {}
+    for x in a_receber_na_cota(conn):
+        if not x["a_parte"]:
+            total[x["contrato_id"]] = total.get(x["contrato_id"], 0) + _a_receber_cota(x)
+            continue
+        # as mesmas duas partes do Inicio (`inicio._a_receber`): a linha que e' as duas conta em "sem atualizacao"
+        da_obra_ = a_parte.setdefault(x["contrato_id"], {"anterior_centavos": 0, "sem_atualizacao_centavos": 0})
+        da_obra_["sem_atualizacao_centavos" if x["sem_atualizacao_desde"] else "anterior_centavos"] += _a_receber_cota(x)
+    return total, a_parte
 
 
 @contextlib.contextmanager

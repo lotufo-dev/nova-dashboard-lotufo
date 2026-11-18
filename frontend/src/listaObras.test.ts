@@ -111,7 +111,12 @@ describe("lista de Obras na cota da Lotufo, por contratante (#645)", () => {
   ];
 
   it("os totais somam as linhas na cota, sem arredondar de novo; a receber nulo fica sem valor", () => {
-    expect(totaisDe(lista)).toEqual({ contratado: 6000_01, medido: 2000_33, saldo: 3999_68, aReceber: 150_01, temReceber: true });
+    expect(totaisDe(lista)).toEqual({ contratado: 6000_01, medido: 2000_33, saldo: 3999_68, aReceber: 150_01, temReceber: true,
+      aReceberAnterior: 0, aReceberSemAtualizacao: 0, anoInicial: null });
+    // docs/adr/0006: o a receber que fica fora do total soma 'a parte, obra a obra, sem entrar em `aReceber`
+    const comAntigo = lista.map((o, i) => ({ ...o, posicao: { ...posicaoDe(o), a_receber_ano_inicial: "2025",
+      a_receber_anterior_centavos: i === 0 ? 70_003 : 0, a_receber_sem_atualizacao_centavos: i === 1 ? 40_001 : 0 } }));
+    expect(totaisDe(comAntigo)).toMatchObject({ aReceber: 150_01, aReceberAnterior: 70_003, aReceberSemAtualizacao: 40_001, anoInicial: "2025" });
     const semLiberar = lista.map(x => ({ ...x, posicao: { ...x.posicao!, a_receber_centavos: null } }));
     expect(totaisDe(semLiberar)).toMatchObject({ aReceber: 0, temReceber: false });
   });
@@ -126,7 +131,7 @@ describe("lista de Obras na cota da Lotufo, por contratante (#645)", () => {
     const grupos = gruposPorContratante(lista);
     expect(grupos.map(g => g.contratante)).toEqual(["MTPAR", "SINFRA"]);
     expect(grupos[1].obras.map(x => x.nome_curto)).toEqual(["Avenida", "Ponte"]);
-    expect(grupos[1].subtotal).toEqual({ contratado: 4000_01, medido: 1000_33, saldo: 2999_68, aReceber: 100_01, temReceber: true });
+    expect(grupos[1].subtotal).toMatchObject({ contratado: 4000_01, medido: 1000_33, saldo: 2999_68, aReceber: 100_01, temReceber: true });
     // a soma dos subtotais é o total do topo
     const t = totaisDe(lista);
     for (const k of ["contratado", "medido", "saldo", "aReceber"] as const) expect(grupos.reduce((a, g) => a + g.subtotal[k], 0)).toBe(t[k]);

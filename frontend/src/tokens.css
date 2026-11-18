@@ -436,6 +436,15 @@ td.col-num, .dinheiro, .entrada--num, .saldo__valor, .alerta__valor {
 .contador--breve { background: var(--situacao-breve-fundo); color: var(--situacao-breve-texto); }
 .contador--critico { background: var(--situacao-critico-fundo); color: var(--situacao-critico-texto); }
 
+/* EM ABERTO A' PARTE (EmAbertoAParte.tsx, docs/adr/0006): o a receber que fica fora do total (competencia anterior ao
+   ano inicial, nota sem atualizacao do RM). Uma linha por parte, rotulo a' esquerda e valor a' direita, na letra de
+   apoio: menor que os numeros da tela, para nao disputar com o total. */
+.em-aberto-a-parte { margin: var(--espaco-p) 0 0; border-top: var(--borda-linha); padding-top: var(--espaco-p);
+  font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
+.em-aberto-a-parte__linha { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--espaco-m); }
+.em-aberto-a-parte dt { min-width: 0; }
+.em-aberto-a-parte dd { margin: 0; white-space: nowrap; font-variant-numeric: tabular-nums lining-nums; color: var(--cor-tinta); }
+
 /* colunas de valor e data: algarismos de mesma largura em toda tabela */
 td, th { font-variant-numeric: tabular-nums; }
 

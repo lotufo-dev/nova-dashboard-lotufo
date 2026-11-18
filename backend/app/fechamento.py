@@ -78,7 +78,8 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from app import cobranca_orgao, contratos, db, diretoria, dinheiro, medicoes, notas as notas_fiscais, sincronizacao_rm
 
-ANOS = ("2025", "2026")
+# o primeiro ano e' `diretoria.ANO_INICIAL`: a UNICA definicao de "anterior", a mesma do a receber do Inicio (adr 0006)
+ANOS = (diretoria.ANO_INICIAL, "2026")
 ESTADOS_APROVADO = ("boletim_recebido", "espelho_gerado", "espelho_enviado", "nota_emitida", "protocolada",
                     "nf_emitida", "recebida")
 # a nota emitida e' a prova de que o orgao aprovou: sem o valor do boletim gravado, o pedido conta como aprovado daqui em diante
