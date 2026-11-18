@@ -74,9 +74,11 @@ O caminho, nesta ordem:
 1. **Aprovado pela carga** (`medicoes/<obra>.csv` no repositório privado, pelo rito): a tela recusa valor diferente
    do pedido enquanto não há boletim, e o boletim exige o PDF e o número do órgão. Meio `outro`, data da emissão das
    notas, e a `fonte` dizendo "sem documento do órgão", as notas somadas e a decisão. O pedido não muda.
-2. **Espelho pela tela**, com o aprovado e a justificativa de seguir sem boletim. Não enviar ao faturamento: o
-   espelho já foi feito por fora.
-3. **Notas pela tela**, todas, inclusive as das consorciadas.
+2. **Espelho pela tela**, com o aprovado e a justificativa de seguir sem boletim.
+3. **"Já enviei por fora"** no passo Espelhos (issue #798), com a data em que a equipe mandou o espelho ao
+   faturamento. Nunca "Enviar ao faturamento": é e-mail de verdade. Sem esse registro o passo Notas não abre.
+4. **Notas pela tela**, todas, inclusive as das consorciadas. Em obra de consórcio com fatura pela dashboard, a
+   última nota anexada **gera a FRC sozinha**, com o número seguinte: dizer isso no relato, com o número.
 
 O que a dashboard acusar na conferência das notas (tributo, líquido, município) **não se justifica nem se corrige**:
 é o que a conferência existe para mostrar. Vai para o relato, com o valor do espelho e o da nota.
@@ -88,6 +90,9 @@ Quando o documento do órgão chegar com outro valor, ele entra como boletim pel
 - **Ensaiar antes numa cópia** do snapshot horário da produção, com o código que está no ar: o mesmo fluxo, os
   totais antes e depois e os avisos que nascem. Só vai à produção o que o ensaio mostrou. Script de ensaio que
   chama a leitura de PDF precisa do bloco `if __name__ == "__main__":` (a leitura abre um processo filho).
+  A cópia do banco não traz os arquivos da produção (modelos, logos): o que depende deles pode falhar calado no
+  ensaio e acontecer na produção. Em 18/11/2026 a FRC não foi gerada no ensaio e foi gerada na produção. O que o
+  ensaio não exercitou de verdade vai para o relato como "não ensaiado", não como "não acontece".
 - **A sessão da dashboard no Chrome tem de estar aberta** (usuário da ronda, ou o do dono no piloto). Tela de
   entrada: parar e pedir o login; a sessão não digita senha. O que já foi gravado por arquivo fica dito no relato.
 

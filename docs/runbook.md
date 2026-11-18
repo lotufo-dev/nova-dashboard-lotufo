@@ -773,7 +773,7 @@ novo (mesmos valores, com o motivo) e registrar o envio da versão nova com a da
 versão substituída deixa de contar para o vínculo da nota (o e-mail do sistema, que é fato, continua
 contando de qualquer versão). Enquanto a data errada estiver na versão vigente, ela vale: uma data
 anterior à verdadeira pode ligar à medição uma nota livre de mesmo valor da obra, emitida entre as duas
-datas; esse vínculo se desfaz à mão, no passo Notas. Custo da regra: quem registra a versão nova com a
+datas; esse vínculo se desfaz à mão, no passo Notas, mas só depois de anexar a nota certa (a tela recusa desfazer o vínculo que deixaria a medição sem nota, e recusa gerar o espelho de novo com a medição já em nota emitida): até a nota certa existir, a nota da outra medição fica presa nesta. Custo da regra: quem registra a versão nova com a
 data do envio dela deixa sem vínculo automático a nota emitida entre o envio da versão anterior e o da
 nova; essa nota entra pelo PDF.
 
