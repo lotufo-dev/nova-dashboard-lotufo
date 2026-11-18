@@ -633,17 +633,9 @@ def _novo_devolver(op: dict) -> str | None:
 
 
 def _estado_de_destino(conn, m, novo: str) -> str:
-    """O estado em que a TELA guarda a medicao naquele ponto do fluxo (`GLOSSARY.md`, Em analise e Boletim):
-    - em analise: a execucao e o projeto ficam com a planilha/carta enviada; o reajuste continua `prevista`, com o
-      pedido congelado pelo marcador do envio (`planilha_enviada_em`, como `medicao_planilhas.congelar_reajuste_do_envio`);
-    - boletim recebido: `boletim_recebido`; o reajuste so' na obra com regra de espelho ativa, senao segue `prevista`
-      com o aprovado gravado (a mesma decisao de `medicoes._gravar_boletim`)."""
-    if m["tipo"] != "reajuste":
-        return "planilha_enviada" if novo == "em_analise" else "boletim_recebido"
-    if novo == "boletim_recebido" and conn.execute("SELECT 1 FROM espelho_regras WHERE contrato_id=? AND situacao='ativa'",
-                                                   (m["contrato_id"],)).fetchone():
-        return "boletim_recebido"
-    return "prevista"
+    """O estado em que a TELA guarda a medicao naquele ponto do fluxo: `medicoes.estado_no_fluxo` (o reajuste em
+    analise continua `prevista`, com o pedido congelado pelo marcador do envio)."""
+    return medicoes.estado_no_fluxo(conn, m["contrato_id"], m["tipo"], novo)
 
 
 def _ja_no_destino(m, estado_novo: str) -> bool:

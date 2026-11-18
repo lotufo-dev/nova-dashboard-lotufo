@@ -78,6 +78,21 @@ ROTULO_ESTADO = {"prevista": "prevista", "planilha_gerada": "com planilha/carta 
                  "recebida": "recebida", "cancelada": "cancelada", "desistida": "desistida"}
 
 
+def estado_no_fluxo(conn, contrato_id: int, tipo: str, etapa: str) -> str:
+    """O estado em que a TELA guarda a medicao numa etapa anterior a' nota (`GLOSSARY.md`, Em analise e Boletim), para
+    quem a poe la' sem passar pela tela (a correcao de cadastro e a carga do historico, docs/adr/0006):
+    - `em_analise`: a execucao e o projeto ficam com a planilha/carta enviada; o reajuste continua `prevista`, com o
+      pedido congelado pelo marcador do envio (`planilha_enviada_em`, como `medicao_planilhas.congelar_reajuste_do_envio`);
+    - `boletim_recebido`: `boletim_recebido`; o reajuste so' na obra com regra de espelho ativa, senao segue
+      `prevista` com o aprovado gravado (a mesma decisao de `_gravar_boletim`)."""
+    if tipo != "reajuste":
+        return "planilha_enviada" if etapa == "em_analise" else "boletim_recebido"
+    if etapa == "boletim_recebido" and conn.execute("SELECT 1 FROM espelho_regras WHERE contrato_id=? AND situacao='ativa'",
+                                                    (contrato_id,)).fetchone():
+        return "boletim_recebido"
+    return "prevista"
+
+
 def nome_medicao(numero, tipo: str) -> str:
     """"Medição 32 de execução" para mensagem de erro."""
     return f"Medição {numero} de {ROTULO_TIPO.get(tipo, tipo)}"

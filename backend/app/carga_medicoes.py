@@ -43,6 +43,9 @@ COLUNAS = {
     "meio": "meio",
     "no do processo no orgao": "processo_orgao",
     "data do protocolo da nota": "data_protocolo_nota",
+    # docs/adr/0006 ("A carga cria no estado que a linha prova"): colunas opcionais
+    "data do envio": "data_envio",                      # o envio da planilha/carta ao orgao (em analise)
+    "data do recebimento": "data_recebimento",          # o pagamento que o documento da fonte prova
     "nf": "nf",
     "fonte": "fonte",
     "cancelar": "cancelar",
@@ -197,7 +200,14 @@ def _interpretar(bruto: dict, janela: tuple[str, str] | None) -> dict:
     meio = bruto.get("meio", "")
     if meio and _normalizar(meio) not in MEIOS:
         raise ValueError(f"meio desconhecido: {meio!r} (use e-mail, SMO, ofício, carimbo, CI ou outro)")
+    data_envio = _data(bruto.get("data_envio", ""), "data do envio")
+    data_recebimento = _data(bruto.get("data_recebimento", ""), "data do recebimento")
+    hoje = datetime.date.today().isoformat()
+    for rotulo, dia in (("data do envio", data_envio), ("data do recebimento", data_recebimento)):
+        if dia is not None and dia > hoje:
+            raise ValueError(f"{rotulo} não pode ser futura ({dia})")
     return {"numero": int(numero), "tipo": tipo, "competencia": competencia,
+            "data_envio": data_envio, "data_recebimento": data_recebimento,
             "numero_orgao": int(numero_orgao) if numero_orgao else None,
             "periodo": _periodo(bruto.get("periodo", "")),
             "valor_pedido": _valor(bruto.get("valor_pedido", ""), "valor pedido"),
@@ -301,8 +311,17 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
             # Medicao historica nasce protocolada e congelada: sem o pedido ela ficaria congelada sem valor, e o
             # primeiro preenchimento depois nao passaria pelo documento (gate Sol da #259)
             linhas.append({**item, "categoria": "erro", "detalhe": "medição nova sem valor pedido"})
+        elif m is None and d["data_recebimento"] and not d["fonte"]:
+            linhas.append({**item, "categoria": "erro",
+                           "detalhe": "recebimento sem fonte: diga na coluna fonte o documento que prova o pagamento"})
         elif m is None:
-            linhas.append({**item, "categoria": "nova", "detalhe": "", "dados": d})
+            # docs/adr/0006: a medicao nova nasce no estado que as colunas da linha provam (`etapa_da_linha`)
+            etapa = etapa_da_linha(d)
+            nova = {**item, "categoria": "nova", "detalhe": "", "dados": d, "etapa": etapa}
+            if etapa != "protocolada":
+                nova["entra_como"] = ROTULO_ETAPA[etapa] + (
+                    " (sem a data do envio)" if etapa == "em_analise" and not d["data_envio"] else "")
+            linhas.append(nova)
         elif m["estado"] in ESTADOS_TERMINAIS:
             linhas.append({**item, "categoria": "conflito", "detalhe": f"no banco a medição está {m['estado']}"})
         elif m["competencia"] != d["competencia"] and not d["corrige_competencia"]:
@@ -331,6 +350,25 @@ def ensaiar(conn, caminho: Path, obra: str | None = None) -> dict:
                  "nao_encontrada": sum(1 for li in linhas if li.get("aviso_nf") == "nao_encontrada")}
     return {"obra": obra, "contrato": contrato["nome_curto"], "contrato_id": contrato["id"], "linhas": linhas,
             "totais": totais, "avisos_nf": avisos_nf}
+
+
+ROTULO_ETAPA = {"em_analise": "em análise no órgão", "boletim_recebido": "aprovada, à espera da nota",
+                "protocolada": "protocolada", "recebida": "recebida"}
+
+
+def etapa_da_linha(d: dict) -> str:
+    """docs/adr/0006 ("A carga cria no estado que a linha prova"): a etapa que as colunas de uma linha NOVA sustentam.
+    - com a data do recebimento: recebida (o documento da fonte prova o pagamento);
+    - com a nota ou com a data do protocolo da nota: protocolada (como a carga sempre criou);
+    - com o aprovado e sem nota: boletim recebido (o orgao aprovou e a nota nao saiu);
+    - so' com o pedido: em analise no orgao.
+    Antes toda medicao nova nascia protocolada, e o pedido sem aprovacao nem nota contava no a receber. A medicao que
+    ja' existe nao muda de estado pela carga: a linha dela continua "igual"."""
+    if d["data_recebimento"]:
+        return "recebida"
+    if d["nfs"] or d["data_protocolo_nota"]:
+        return "protocolada"
+    return "boletim_recebido" if d["valor_aprovado"] is not None else "em_analise"
 
 
 JANELA_RM_MESES = 24    # o casador do RM (DASH12/13) so' traz as notas dos ultimos 24 meses
@@ -566,9 +604,20 @@ def gravar(conn, usuario_id: int, caminho: Path, obra: str | None = None) -> dic
             if ok:
                 vinculadas.append(mid)
         sincronizacao_rm._recebimentos(conn, vinculadas)
+        from app import medicoes   # import local: medicoes importa sincronizacao_rm, que importa notas
         for mid, li in criadas.items():
-            if conn.execute("SELECT estado FROM medicoes WHERE id=?", (mid,)).fetchone()[0] == "recebida":
+            estado = conn.execute("SELECT estado FROM medicoes WHERE id=?", (mid,)).fetchone()[0]
+            if estado == "recebida":
                 li["acao"] += "; recebida (baixa no RM)"
+            elif li.get("etapa") == "recebida":
+                # docs/adr/0006: o recebimento que a linha prova (a data e a fonte). Nao e' o registro a' mao do
+                # administrador: pela origem, vale como o da correcao de cadastro (titulo aberto no RM segue a receber)
+                d = li["dados"]
+                medicoes.mudar_estado(conn, usuario_id, mid, "recebida", f"Recebimento da carga do histórico: {d['fonte']}",
+                                      data=d["data_recebimento"], origem="carga do histórico")
+                li["acao"] += f"; recebida em {d['data_recebimento']} (pela fonte da linha)"
+            elif li.get("etapa") in ("em_analise", "boletim_recebido"):
+                li["acao"] += f" {ROTULO_ETAPA[li['etapa']]}"
         if criadas or corrigidas:     # rodar de novo sem nada novo nao deixa rastro
             auditoria.registrar(conn, usuario_id, "medicao.carga_historico", "contrato", cid, None,
                                 {"arquivo": caminho.name, "criadas": len(criadas), "corrigidas": len(corrigidas),
@@ -581,20 +630,39 @@ def gravar(conn, usuario_id: int, caminho: Path, obra: str | None = None) -> dic
 
 
 def _criar(conn, usuario_id: int, contrato_id: int, li: dict) -> int:
+    from app import medicoes   # import local: medicoes importa sincronizacao_rm, que importa notas
     d = li["dados"]
     ini, fim = d["periodo"] or (None, None)
+    # docs/adr/0006: o estado que a linha prova. A recebida nasce protocolada e so' vira recebida depois do vinculo
+    # da nota (`gravar`): se o RM ja' tem a baixa, vale a data dele. Antes da nota o estado e' o que a tela guarda
+    # (`medicoes.estado_no_fluxo`: o reajuste em analise fica previsto, com o pedido congelado pelo envio) e a
+    # medicao nao nasce congelada (`congelada` e' do protocolo da nota)
+    etapa = li.get("etapa") or etapa_da_linha(d)
+    protocolada = etapa in ("protocolada", "recebida")
+    estado = "protocolada" if protocolada else medicoes.estado_no_fluxo(conn, contrato_id, d["tipo"], etapa)
+    origem_envio = "externo" if d["data_envio"] else None
     cur = conn.execute(
         "INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, congelada, valor_protocolado_centavos, "
-        "valor_protocolado_origem, numero_orgao, periodo_inicio, periodo_fim) "
-        "VALUES (?,?,?,?,'protocolada',1,?,?,?,?,?)",
-        (contrato_id, d["numero"], d["tipo"], d["competencia"], d["valor_pedido"], "manual", d["numero_orgao"],
-         ini, fim))
+        "valor_protocolado_origem, numero_orgao, periodo_inicio, periodo_fim, planilha_enviada_em, planilha_envio_origem) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (contrato_id, d["numero"], d["tipo"], d["competencia"], estado, 1 if protocolada else 0, d["valor_pedido"],
+         "manual", d["numero_orgao"], ini, fim, d["data_envio"], origem_envio))
     mid = cur.lastrowid
     auditoria.registrar(conn, usuario_id, "medicao.criar", "medicao", mid, None,
                         {"numero": d["numero"], "tipo": d["tipo"], "competencia": d["competencia"],
-                         "estado": "protocolada", "valor_protocolado_centavos": d["valor_pedido"],
+                         "estado": estado, "valor_protocolado_centavos": d["valor_pedido"],
                          "numero_orgao": d["numero_orgao"], "periodo_inicio": ini, "periodo_fim": fim,
-                         "origem": "carga do histórico", "linha": li["linha"], "fonte": d["fonte"]})
+                         "origem": "carga do histórico", "linha": li["linha"], "fonte": d["fonte"],
+                         **({"planilha_enviada_em": d["data_envio"], "planilha_envio_origem": origem_envio}
+                            if d["data_envio"] else {}),
+                         **({"numero_processo": d["processo_orgao"]} if d["processo_orgao"] and not protocolada else {})})
+    if not protocolada and d["data_envio"] and d["processo_orgao"]:
+        # antes da nota, o processo do orgao e' o da planilha/carta (etapa 'planilha'), na data do envio, como a tela
+        conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem, etapa) "
+                     "VALUES (?,?,?,'manual','planilha')", (mid, d["data_envio"], d["processo_orgao"]))
+        auditoria.registrar(conn, usuario_id, "medicao.numero_siga", "medicao", mid, None,
+                            {"numero_processo": d["processo_orgao"], "data": d["data_envio"],
+                             "origem": "carga do histórico"})
     if d["data_protocolo_nota"]:
         conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem) "
                      "VALUES (?,?,?,'manual')", (mid, d["data_protocolo_nota"], d["processo_orgao"]))
