@@ -205,6 +205,8 @@ a.rdm-obra:hover { text-decoration: underline; text-underline-offset: var(--afas
   .rdm-abas { column-gap: var(--espaco-m); }
   .rdm-abas .aba { padding: 0; font-size: var(--texto-meta); }
   .rdm-vistas { margin-left: 0; }
+  /* sem o cabecalho da tabela, a faixa de tinta do primeiro grupo encosta no alto do painel */
+  .rdm .rdm-painel { padding-top: 0; }
   /* o quadro em uma coluna: um cartao embaixo do outro */
   .rdm-cartoes { grid-template-columns: minmax(0, 1fr); }
   .rdm-itens { grid-template-columns: minmax(0, 1fr); }
@@ -222,7 +224,8 @@ a.rdm-obra:hover { text-decoration: underline; text-underline-offset: var(--afas
   /* o cabecalho de grupo forte: o nome a' esquerda e o medido do grupo a' direita, na faixa de tinta */
   .rdm .rdm-tabela.tabela tr.rdm-grupo { justify-content: space-between; column-gap: var(--espaco-p); padding: var(--espaco-pp); border-bottom: 0; background: var(--cor-tinta); }
   .rdm .rdm-tabela.tabela tr.rdm-grupo > :is(th, td) { font-size: var(--texto-meta); }
-  .rdm .rdm-tabela.tabela tr.rdm-grupo > th { flex: 1 1 auto; }
+  /* o nome encolhe e a quantidade desce para a linha de baixo, para o medido do grupo ficar na mesma linha */
+  .rdm .rdm-tabela.tabela tr.rdm-grupo > th { flex: 1 1 0; }
   .rdm .rdm-tabela.tabela tr.rdm-grupo > td { flex: none; white-space: nowrap; }
   .rdm .rdm-tabela.tabela tr > .rdm-primeira { order: 1; flex: 1 1 calc(100% - var(--rdm-largura-valor)); width: auto; font-size: var(--texto-meta); }
   .rdm .rdm-tabela.tabela tr > .rdm-valor { order: 2; flex: 0 0 var(--rdm-largura-valor); text-align: right; white-space: nowrap; font-size: var(--texto-meta); }
