@@ -190,6 +190,14 @@ export const CUSTO_DA_OBRA = {
     { competencia: "2025-06", custo_centavos: 0 }],
 };
 
+// O a receber que fica a' parte (docs/adr/0006): o cadastro de exemplo nao tem pendencia anterior a 2025 nem nota fora da
+// janela do RM. No Inicio, a linha sob o ciclo; na lista de Obras, sob os totais (a primeira obra leva os dois valores).
+export const inicioComAParte = painel => ({ ...painel, a_receber: { ...painel.a_receber, liberado: true,
+  a_parte: { ano_inicial: "2025", valor_centavos: 110004, anterior_centavos: 70003, sem_atualizacao_centavos: 40001,
+    sem_atualizacao_desde: "2026-10-02" } } });
+export const obrasComAParte = obras => obras.map((o, i) => ({ ...o, posicao: { ...o.posicao, a_receber_ano_inicial: "2025",
+  a_receber_anterior_centavos: i === 0 ? 70003 : 0, a_receber_sem_atualizacao_centavos: i === 0 ? 40001 : 0 } }));
+
 // A obra paralisada e a obra em encerramento: o cabecalho muda o selo do estado e a aba Prazos mostra a paralisacao
 // (sem o selo dos dias da execucao) ou o cartao do encerramento.
 export const cabecalhoCom = status => cabecalho => ({ ...cabecalho, status });

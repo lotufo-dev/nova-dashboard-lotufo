@@ -373,7 +373,7 @@ def test_titulo_baixado_no_rm_com_valor_menor_nao_tem_falta_e_fecha_a_medicao(co
 
 
 def test_tolerancia_nao_alcanca_diferenca_grande(conn, cid, tmp_path):
-    """O titulo baixado EM PARTE (status 4) com R$ 2.016,48 a menos continua aberto para conferencia, sem evento de
+    """O titulo baixado EM PARTE (status 4) com uma diferenca grande continua aberto para conferencia, sem evento de
     diferenca."""
     mid = _medicao(conn, cid, 12, 50_000_00)
     cli = _simulador(tmp_path, [_nf(100, 50_000.0)],
