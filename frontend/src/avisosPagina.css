@@ -78,6 +78,8 @@
 .avs-vencidos thead th:first-child { width: 100%; }
 .avs-vencidos tbody th[scope="row"] { font-weight: var(--peso-normal); white-space: normal; text-align: left; }
 .avs-vencido { cursor: pointer; }
+/* a primeira celula e' um th: escurece com as outras ao passar o mouse */
+.avs-vencidos tbody tr.avs-vencido:hover > th { background: var(--cor-papel-sombreado); }
 .avs-abre {
   display: inline-flex; align-items: baseline; gap: var(--espaco-pp); height: auto; min-height: 0; padding: 0;
   border: 0; background: none; box-shadow: none;
@@ -124,7 +126,9 @@
     display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--espaco-mini) var(--espaco-p);
     padding: var(--espaco-p) var(--avs-margem); border-bottom: var(--borda-linha);
   }
-  .avs-vencidos tbody tr.avs-vencido > :is(th, td) { padding: 0; border: 0; background: none; }
+  .avs-vencidos tbody tr.avs-vencido:hover { background: var(--cor-papel-sombreado); }
+  .avs-vencidos tbody tr.avs-vencido > td { padding: 0; border: 0; }
+  .avs-vencidos tbody tr.avs-vencido > th[scope="row"]:first-child { padding: 0; border: 0; }
   .avs-vencidos tbody tr.avs-vencido > th { grid-row: 1; grid-column: 1 / -1; }
   .avs-vencidos tbody tr.avs-vencido > .avs-vencido__n {
     grid-row: 2; grid-column: 1; align-self: center; text-align: left;
