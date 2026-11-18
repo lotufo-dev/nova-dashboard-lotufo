@@ -1674,3 +1674,68 @@ def test_nota_excluida_no_rm_nao_entra_no_protocolado_nem_no_em_aberto(cenario):
     # a pagina da medicao diz a nota como excluida no RM, fora da lista das que contam
     assert [n["numero"] for n in sincronizacao_rm.notas_da_medicao(c, a)] == [f"{int(nova):09d}"]
     assert [n["numero"] for n in sincronizacao_rm.notas_excluidas_da_medicao(c, a)] == [f"{int(antiga):09d}"]
+
+
+# ---------------------------------------------------------------- familias de valor (issue #805)
+
+def test_diferenca_aprovado_x_pedido_so_das_medicoes_com_boletim_e_pedido(cenario):
+    # #805: os dois lados da diferenca saem prontos, na cota, e so' das medicoes que tem o valor do boletim gravado E
+    # o pedido. A medicao em analise nao e' diferenca (e' etapa nao alcancada), e a de nota emitida sem o valor do
+    # boletim nao tem dois valores para comparar. Centavo impar: a cota de 50% arredonda cada lado uma vez.
+    from app import avisos_medicao
+    c, ids = cenario
+    medir(c, ids["propria"], 1, "2026-03", "boletim_recebido", 1_000_001, 990_001)          # aprovado abaixo do pedido
+    medir(c, ids["propria"], 2, "2026-03", "planilha_enviada", 500_000)                     # em analise: fora
+    medir(c, ids["propria"], 3, "2026-03", "nota_emitida", 300_003)                         # sem o valor do boletim: fora
+    medir(c, ids["propria"], 4, "2026-03", "boletim_recebido", None, 70_001)                # boletim sem pedido: fora
+    medir(c, ids["consorcio"], 1, "2026-03", "recebida", 200_001, 200_001)                  # igual: cota 100.001 nos dois
+    medir(c, ids["consorcio"], 2, "2026-03", "espelho_gerado", 333_333, 333_331)            # cotas 166.667 e 166.666
+    f = fechamento.fechamento(c, datetime.date(2026, 11, 18))
+    _confere_soma(f)
+    mes = _mes(f, "2026-03")
+    par = lambda x: (x["aprovado_com_pedido_centavos"], x["pedido_do_aprovado_centavos"])   # noqa: E731
+    propria, consorcio = (next(o for o in mes["obras"] if o["contrato_id"] == ids[k]) for k in ("propria", "consorcio"))
+    assert [par(md) for md in propria["medicoes"]] == [(990_001, 1_000_001), (0, 0), (0, 0), (0, 0)]
+    assert [par(md) for md in consorcio["medicoes"]] == [(100_001, 100_001), (166_666, 166_667)]
+    assert par(propria) == (990_001, 1_000_001) and par(consorcio) == (266_667, 266_668)
+    assert par(mes) == par(f["por_ano"]["2026"]) == par(f["acumulado"]["2026"]) == (1_256_668, 1_266_669)
+    assert par(f["por_ano"]["2025"]) == (0, 0)
+    # nao e' "medido - aprovado": o medido leva a medicao em analise, que nao e' diferenca
+    assert mes["medido_centavos"] - mes["aprovado_centavos"] == 500_000
+    assert mes["aprovado_centavos"] == 990_001 + 300_003 + 70_001 + 100_001 + 166_666
+    # o limite da diferenca critica e' o do aviso "aprovado abaixo do pedido" (#741): um numero so'
+    assert f["diferenca_critica_por_mil"] == avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL == 5
+
+
+def test_diferenca_aprovado_x_pedido_nao_some_com_a_trava_do_a_receber(cenario):
+    # #805: a trava do total a receber esconde o recebido e o em aberto; aprovado e pedido nao deixam deduzi-los
+    c, ids = cenario
+    c.execute("UPDATE cadastro_geral SET valor=? WHERE chave='diretoria'", (json.dumps({"total_a_receber_liberado": False}),))
+    medir(c, ids["propria"], 1, "2026-03", "protocolada", 1_000_001, 990_001, protocolo="2026-04-10")
+    f = fechamento.fechamento(c, datetime.date(2026, 11, 18))
+    mes = _mes(f, "2026-03")
+    assert not f["total_a_receber_liberado"] and mes["em_aberto_centavos"] is None
+    assert (mes["aprovado_com_pedido_centavos"], mes["pedido_do_aprovado_centavos"]) == (990_001, 1_000_001)
+
+
+def test_medido_do_ano_anterior_so_em_competencia_encerrada(cenario):
+    # #805: a referencia da variacao do medido e' o medido do mesmo mes do ano anterior, quando ele esta' na pagina e
+    # tem valor, e so' nos meses anteriores ao de hoje (o mes em curso ainda recebe medicao)
+    c, ids = cenario
+    medir(c, ids["propria"], 1, "2025-03", "recebida", 900_001, 900_001)
+    medir(c, ids["propria"], 2, "2026-03", "boletim_recebido", 1_000_001, 1_000_001)
+    medir(c, ids["propria"], 3, "2026-05", "boletim_recebido", 100_001, 100_001)            # 05/2025 sem lancamento
+    medir(c, ids["propria"], 4, "2025-11", "recebida", 500_001, 500_001)
+    medir(c, ids["consorcio"], 1, "2026-11", "planilha_enviada", 800_001)
+    f = fechamento.fechamento(c, datetime.date(2026, 11, 18))
+    referencia = lambda f: {m["competencia"]: m["medido_ano_anterior_centavos"] for m in f["meses"]}   # noqa: E731
+    assert referencia(f) == {"2025-03": None,            # 2024 nao esta' na pagina
+                             "2025-11": None,
+                             "2026-03": 900_001,
+                             "2026-05": None,            # o ano anterior nao teve medido no mes
+                             "2026-11": None}            # o mes de hoje ainda esta' aberto
+    # virou o mes: novembro encerrou e passa a comparar (o medido de 11/2025, na cota: a obra propria conta inteira)
+    assert referencia(fechamento.fechamento(c, datetime.date(2026, 12, 1)))["2026-11"] == 500_001
+    # a referencia nao entra nas somas nem desce para a obra e a medicao
+    assert "medido_ano_anterior_centavos" not in fechamento.SOMAS
+    assert all("medido_ano_anterior_centavos" not in o for m in f["meses"] for o in m["obras"])

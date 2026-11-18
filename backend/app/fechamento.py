@@ -75,10 +75,25 @@ recebido, nem na falta.
 
 So' aparece o que tem lancamento: mes sem medicao nao vira linha, e nada e' estimado. O em aberto de competencias
 anteriores a 2025 fica contado a' parte.
+
+Familias de valor (issue #805, decisao do dono de 18/11/2026): a tela mostra a variacao do medido e a diferenca entre
+o aprovado e o pedido, e as duas referencias saem daqui, prontas:
+- Diferenca aprovado x pedido: `aprovado_com_pedido_centavos` e `pedido_do_aprovado_centavos`, na cota, somados so'
+  das medicoes que tem o valor do boletim gravado E o pedido (`_linha_medicao`). A medicao ainda em analise nao entra:
+  nela nao ha' diferenca, ha' etapa nao alcancada, e somar o pedido dela faria o mes parecer aprovado a menor. A
+  medicao com nota emitida e sem o valor do boletim (o pedido conta como aprovado, `_aprovado`) tambem nao: nao ha'
+  dois valores para comparar. Por isso a diferenca NAO e' medido - aprovado. Os dois numeros somam como os outros
+  (medicao, obra, mes, ano). O limite que separa a diferenca pequena da critica vai em `diferenca_critica_por_mil` e e' o
+  do aviso "aprovado abaixo do pedido" (`avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL`, issue #741): um numero so'.
+- Variacao do medido: `medido_ano_anterior_centavos`, em cada mes, e' o medido do mesmo mes do ano anterior. So' nos
+  meses de competencia ja' encerrada (anteriores ao mes de hoje: o mes em curso ainda recebe medicao) e so' quando o
+  ano anterior esta' na pagina e teve medido nesse mes; senao, nulo.
 """
+import datetime
 from decimal import ROUND_HALF_UP, Decimal
 
-from app import cobranca_orgao, contratos, db, diretoria, dinheiro, medicoes, notas as notas_fiscais, sincronizacao_rm
+from app import (avisos_medicao, cobranca_orgao, contratos, db, diretoria, dinheiro, medicoes, notas as notas_fiscais,
+                 sincronizacao_rm, tempo)
 
 # o primeiro ano e' `diretoria.ANO_INICIAL`: a UNICA definicao de "anterior", a mesma do a receber do Inicio (adr 0006)
 ANOS = (diretoria.ANO_INICIAL, "2026")
@@ -91,7 +106,9 @@ ESTADOS_EM_COBRANCA = ("protocolada", "nf_emitida")       # protocolada e ainda 
 NUMEROS = ("medido_centavos", "aprovado_centavos", "protocolado_centavos", "recebido_centavos", "em_aberto_centavos")
 # as tres partes que somam o em aberto: (a) `em_aberto_notas`, (a') `em_aberto_repasse` e (b) `sem_nota`
 PARTES_DO_ABERTO = ("em_aberto_notas_centavos", "em_aberto_repasse_centavos", "sem_nota_centavos")
-SOMAS = NUMEROS + PARTES_DO_ABERTO
+# issue #805: os dois lados da diferenca aprovado x pedido, so' das medicoes que tem os dois valores (ver o cabecalho)
+COMPARAVEIS = ("aprovado_com_pedido_centavos", "pedido_do_aprovado_centavos")
+SOMAS = NUMEROS + PARTES_DO_ABERTO + COMPARAVEIS
 ESCONDIDOS = ("recebido_centavos", "em_aberto_centavos") + PARTES_DO_ABERTO                               # pela trava
 PAR = ("execucao", "reajuste")                           # os tipos que a fatura unica do consorcio cobre juntos
 
@@ -387,6 +404,11 @@ def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
     n = _zero()
     n["medido_centavos"] = cota(valor) if valor is not None else 0
     n["aprovado_centavos"] = cota(aprovado) if aprovado is not None else 0
+    # issue #805: a diferenca aprovado x pedido so' existe com o valor do boletim gravado e o pedido; a medicao em
+    # analise e a de nota emitida sem o valor do boletim ficam fora dos dois lados
+    if m["estado"] in ESTADOS_APROVADO and m["aprovado"] is not None and m["pedido"] is not None:
+        n["aprovado_com_pedido_centavos"] = cota(m["aprovado"])
+        n["pedido_do_aprovado_centavos"] = cota(m["pedido"])
     ligadas, fora = _notas_da_conta(m, notas)
     saida, saida_fora = [], []
     if _cobrada(m):
@@ -464,12 +486,27 @@ def _cobertura(linhas: list[dict]) -> dict:
     return out
 
 
-def fechamento(conn) -> dict:
+def fechamento(conn, hoje: datetime.date | None = None) -> dict:
     with db.leitura(conn):
-        return _fechamento(conn)
+        return _fechamento(conn, hoje or tempo.hoje_local())
 
 
-def _fechamento(conn) -> dict:
+def _medido_do_ano_anterior(lista: list[dict], hoje: datetime.date) -> None:
+    """Issue #805: em cada mes, o medido do mesmo mes do ano anterior (`medido_ano_anterior_centavos`), a referencia
+    da variacao da coluna Medido. E' o proprio `medido_centavos` daquele mes, a mesma origem da tabela que compara os
+    dois anos. Nulo no mes de hoje e nos seguintes (competencia ainda aberta), e quando o ano anterior nao esta' na
+    pagina ou nao teve medido no mes."""
+    por_competencia = {m["competencia"]: m for m in lista}
+    corrente = hoje.strftime("%Y-%m")
+    for m in lista:
+        comp = m["competencia"]
+        anterior = por_competencia.get(f"{int(comp[:4]) - 1:04d}{comp[4:]}")
+        encerrada = comp < corrente
+        m["medido_ano_anterior_centavos"] = (anterior["medido_centavos"]
+                                             if encerrada and anterior and anterior["medido_centavos"] > 0 else None)
+
+
+def _fechamento(conn, hoje: datetime.date) -> dict:
     ms = _medicoes(conn)
     notas = _notas_por_medicao(conn, {m["id"] for m in ms})
     linhas = [_linha_medicao(conn, m, notas.get(m["id"], [])) for m in ms]
@@ -514,6 +551,7 @@ def _fechamento(conn) -> dict:
         m = meses[comp]
         m["obras"] = sorted(m["obras"].values(), key=lambda o: (o["obra"], o["contrato_id"]))
         lista.append(m)
+    _medido_do_ano_anterior(lista, hoje)
     por_ano = {a: {**_zero(), "meses": 0} for a in ANOS}
     for m in lista:
         _somar(por_ano[m["competencia"][:4]], m)
@@ -532,6 +570,7 @@ def _fechamento(conn) -> dict:
     saida = {"anos": list(ANOS), "meses": lista, "por_ano": por_ano, "acumulado": {"ate_mes": ate, **acumulado},
              "em_aberto": em_aberto, "em_aberto_anteriores": anteriores, "notas_sem_medicao": _notas_sem_medicao(conn),
              "cobertura": cobertura, "notas_diferem": diferem, "pares_mistos": mistos,
+             "diferenca_critica_por_mil": avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL,
              "total_a_receber_liberado": diretoria._liberado(conn)}
     if not saida["total_a_receber_liberado"]:
         _esconder_a_receber(saida)
