@@ -41,14 +41,14 @@ export default function ObrasContratantes({ obras, painel, ir }: { obras: ObraLi
                     {parte && <span className="obras-contratante__apoio num">{parte} da carteira</span>}</span></dd>
                 </div>
                 <div><dt>Executado</dt><dd><Executado pct={pctPiso(r.totais.medido, r.totais.contratado)} /></dd></div>
-                <div><dt>Medido{mes ? ` em ${mes}` : " no mês"}</dt><dd><MedidoNoMes mm={r.medidoMes} /></dd></div>
+                <div className="obras-contratante__dupla"><dt>Medido{mes ? ` em ${mes}` : " no mês"}</dt><dd><MedidoNoMes mm={r.medidoMes} /></dd></div>
                 <div>
                   <dt><MarcaEtapa etapa="em_aberto">A receber</MarcaEtapa></dt>
                   <dd><AReceber centavos={r.totais.temReceber ? r.totais.aReceber : null} /></dd>
                 </div>
                 <div><dt>Prazo de pagamento</dt><dd className="num">{prazo === undefined ? "—" : fmtDias(prazo)}</dd></div>
               </dl>
-              <EtiquetasDeAtencao r={r} />
+              <EtiquetasDeAtencao r={r} semAndamento />
             </li>
           );
         })}

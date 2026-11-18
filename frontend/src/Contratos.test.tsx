@@ -466,8 +466,9 @@ describe("Obras em níveis (#805): Por contratante, Todas as obras, Andamento e 
       "Prazo de pagamento47 dias",
     ]);
     expect(sinfra.querySelector(".obras-em-aberto")).toBeTruthy();
-    expect([...sinfra.querySelectorAll(".obras-etiquetas li")].map(li => limpo(li.textContent))).toEqual(["1 devagar", "2 avisos críticos"]);
-    expect(sinfra.querySelector(".obras-etiqueta--devagar")!.querySelector(".glifo")).toBeNull();      // valor não é situação
+    // decisão do dono de 18/11/2026: o bloco do contratante não leva a etiqueta do andamento ("1 devagar")
+    expect([...sinfra.querySelectorAll(".obras-etiquetas li")].map(li => limpo(li.textContent))).toEqual(["2 avisos críticos"]);
+    expect(sinfra.querySelector(".obras-etiqueta--devagar")).toBeNull();
     expect(sinfra.querySelector(".selo--critico .glifo--critico")).toBeTruthy();
     // a MTPAR não tem prazo de pagamento no sistema, nem medição em agosto; a obra dela está paralisada
     expect(linhas(mtpar)).toEqual(["ContratadoR$ 2.000,0044,7% da carteira", "Executado25%", "Medido em ago—", "A receberR$ 100,00", "Prazo de pagamento—"]);

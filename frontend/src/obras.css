@@ -116,13 +116,22 @@
 .obras-contratante__link:focus-visible { outline: none; }
 .obras-contratante:has(.obras-contratante__link:focus-visible) { outline: var(--largura-foco) solid var(--cor-foco); outline-offset: var(--espaco-traco); }
 .obras-contratante__n { flex: none; color: var(--cor-papel-escuro); font-size: var(--texto-meta); }
-.obras-contratante__numeros { display: grid; gap: var(--espaco-pp); margin: 0; padding: var(--espaco-m); }
+.obras-contratante__numeros { display: grid; gap: var(--espaco-p); margin: 0; padding: var(--espaco-m); }
 .obras-contratante__numeros > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--espaco-p); min-width: 0; }
 .obras-contratante__numeros dt { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .obras-contratante__numeros dd { margin: 0; min-width: 0; text-align: right; font-size: var(--texto-meta); font-weight: var(--peso-numero); }
 .obras-contratante__numeros .obras-exec { min-width: calc(var(--alvo-minimo) * 4); }
 .obras-contratante__apoio { color: var(--cor-texto-secundario); font-size: var(--texto-mini); font-weight: var(--peso-normal); }
-.obras-contratante > .obras-etiquetas { margin-top: auto; padding: 0 var(--espaco-m) var(--espaco-m); }
+/* a linha do medido do mes tem valor e variacao; sem medicao no mes fica so' o traco. Ela reserva as duas linhas para
+   as linhas seguintes cairem na mesma altura em todo bloco (decisao do dono de 18/11/2026: remanejar o espacamento) */
+.obras-contratante__dupla { min-height: calc(var(--texto-meta) * var(--entrelinha) + var(--texto-mini) * var(--entrelinha) + var(--espaco-traco) + var(--espaco-mini)); }
+/* as etiquetas sao o rodape do bloco: uma regua em cima, sempre no pe'. O rodape reserva duas linhas de etiqueta, para
+   a regua cair na mesma altura em todo bloco mesmo quando as etiquetas de um deles quebram a linha */
+.obras-contratante > .obras-etiquetas {
+  margin-top: auto; padding: var(--espaco-p) var(--espaco-m); border-top: var(--borda-linha);
+  min-height: calc(var(--alvo-minimo) * 2); align-content: center;
+}
+.obras-contratante > .obras-etiquetas--emdia { display: flex; align-items: center; }
 
 /* os reajustes esperando apostilamento, recolhidos: a quantidade e o total na faixa do titulo */
 .obras-reajustes > summary { flex-wrap: wrap; padding-bottom: var(--espaco-m); }

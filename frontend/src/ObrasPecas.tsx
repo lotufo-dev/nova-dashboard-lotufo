@@ -101,11 +101,14 @@ export function NumerosDeObras({ r, rotulo, participacao, prazo }: {
 
 /** O que pede atencao num conjunto de obras, em etiquetas: o andamento (devagar, em atencao) no tom da familia de
  *  valor, sem glifo (valor nao e' situacao); paralisada, neutra; execucao vencida e aviso critico, com o selo do
- *  critico. Sem nenhuma, "Em dia", em tinta. */
-export function EtiquetasDeAtencao({ r }: { r: ResumoObras }) {
+ *  critico. Sem nenhuma, "Em dia", em tinta.
+ *  `semAndamento` (decisao do dono de 18/11/2026): os blocos de "Por contratante" nao levam as etiquetas do andamento
+ *  (com a carteira real toda obra esta' abaixo do necessario, e a etiqueta se repetia em todo bloco); o andamento
+ *  continua no numero do alto da pagina, na pagina do contratante e na coluna das tabelas. */
+export function EtiquetasDeAtencao({ r, semAndamento = false }: { r: ResumoObras; semAndamento?: boolean }) {
   const itens: React.ReactNode[] = [];
-  if (r.devagar > 0) itens.push(<span className="obras-etiqueta obras-etiqueta--devagar">{r.devagar} devagar</span>);
-  if (r.atencao > 0) itens.push(<span className="obras-etiqueta obras-etiqueta--atencao">{r.atencao} em atenção</span>);
+  if (!semAndamento && r.devagar > 0) itens.push(<span className="obras-etiqueta obras-etiqueta--devagar">{r.devagar} devagar</span>);
+  if (!semAndamento && r.atencao > 0) itens.push(<span className="obras-etiqueta obras-etiqueta--atencao">{r.atencao} em atenção</span>);
   if (r.paralisadas > 0) itens.push(<Selo>{contar(r.paralisadas, "paralisada", "paralisadas")}</Selo>);
   if (r.execucaoVencida > 0) itens.push(<Selo situacao="critico">{r.execucaoVencida} com execução vencida</Selo>);
   if (r.avisosCriticos > 0) itens.push(<Selo situacao="critico">{contar(r.avisosCriticos, "aviso crítico", "avisos críticos")}</Selo>);
