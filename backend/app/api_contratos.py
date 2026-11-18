@@ -44,7 +44,8 @@ def listar(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
     # #805 (Obras por contratante), tudo na cota:
     # - `contratante_chave`: a chave estavel do contratante, para o endereco da pagina dele;
     # - `andamento`: o ritmo e o necessario por mes, pela conta do painel "Prazo" da pagina da obra
-    #   (`prazos.ritmo_na_cota`), sobre o saldo de `posicao`. Os limites da leitura (70% e 100%) sao da tela;
+    #   (`prazos.ritmo_na_cota`), sobre o saldo de `posicao`, e a `leitura` pronta (#822: adiantada, atencao, devagar,
+    #   ou o motivo de a obra ficar fora da regua), a mesma que `/ficha` devolve em `ritmo.leitura`;
     # - `medido_mes`: o medido da ultima competencia fechada e o da anterior a ela (a referencia da variacao), o
     #   mesmo numero que o Fechamento mostra para a obra naquele mes (`fechamento.medido_do_mes_fechado`).
     do_mes = fechamento.medido_do_mes_fechado(conn, hoje)
@@ -63,7 +64,8 @@ def listar(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
                                   "a_receber_ano_inicial": diretoria.ANO_INICIAL,
                                   **{k: None if a_parte is None else a_parte.get(c["id"], {}).get(k.removeprefix("a_receber_"), 0)
                                      for k in ("a_receber_anterior_centavos", "a_receber_sem_atualizacao_centavos")}},
-                      "andamento": {"ritmo_centavos": ritmo["ritmo_centavos"], "necessario_centavos": ritmo["necessario_centavos"]},
+                      "andamento": {"ritmo_centavos": ritmo["ritmo_centavos"], "necessario_centavos": ritmo["necessario_centavos"],
+                                    "leitura": ritmo["leitura"]},
                       "medido_mes": {"competencia": do_mes["competencia"],
                                      "valor_centavos": do_mes["por_obra"].get(c["id"], 0),
                                      "referencia_competencia": do_mes["referencia_competencia"],
