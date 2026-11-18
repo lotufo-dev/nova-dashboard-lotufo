@@ -26,7 +26,8 @@ const LISTA = { familia: "ses", etapas: [{ chave: "unico", rotulo: "Protocolo", 
 const FICHA = { topo: { vigente_centavos: 100000, medido_centavos: 45000, saldo_centavos: 55000, reajuste_centavos: 0 },
   contrato: { original_centavos: 100000, original_igual: true, tas: 0, data_base: null },
   ultima_medicao: null, em_andamento: null,
-  ritmo: { ritmo_centavos: 11000, conclusao: "2027-03-15", situacao: "atrasa", dias_alem: 74 },
+  ritmo: { ritmo_centavos: 11000, necessario_centavos: 13750, competencias_restantes: 4, conclusao: "2027-03-15",
+    situacao: "atrasa", dias_alem: 74 },
   vencimentos: [{ chave: "execucao", rotulo: "Fim da execução", data: null, dias: null, nivel: "normal" }] };
 
 const leituras = (caminho: string) => api.mock.calls.filter(c => c[0] === caminho && !c[1]);

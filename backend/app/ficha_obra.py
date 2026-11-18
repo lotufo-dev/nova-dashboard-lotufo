@@ -69,6 +69,11 @@ def da_obra(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | No
     ritmo = prazos.ritmo_e_prazo(conn, contrato_id, hoje)
     if ritmo["ritmo_centavos"] is not None:
         ritmo["ritmo_centavos"] = contratos.cota(ritmo["ritmo_centavos"], bp)
+    # #803: o necessario por mes na cota e' a mesma conta de `prazos` sobre o saldo do topo, para a tela fechar ao
+    # centavo: saldo a executar / competencias que restam = necessario. A cota aplicada ao necessario cheio poderia
+    # ficar a um centavo do saldo da tela dividido (o saldo do topo e' a diferenca de dois valores ja' arredondados).
+    if ritmo["necessario_centavos"] is not None:
+        ritmo["necessario_centavos"] = prazos.necessario_por_mes(posicao["saldo_centavos"], ritmo["competencias_restantes"])
     return {"topo": {**posicao,
                      "reajuste_centavos": contratos.cota(s["reajuste_contratado_centavos"], bp)},
             "ritmo": ritmo,

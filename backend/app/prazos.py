@@ -312,18 +312,44 @@ def sugestao_dias(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
     return {**out, "novo_fim": conclusao.isoformat(), "dias": dias}
 
 
+def competencias_restantes(hoje: datetime.date, execucao_fim: datetime.date) -> int:
+    """Issue #803: as competencias que restam ate' o fim da execucao, do mes de `hoje` ao mes do fim, as duas contadas
+    (a de hoje ainda nao fechou: a medicao dela esta' por vir)."""
+    return (execucao_fim.year - hoje.year) * 12 + execucao_fim.month - hoje.month + 1
+
+
+def necessario_por_mes(saldo_centavos: int, competencias: int) -> int:
+    """Issue #803: quanto medir por mes para zerar `saldo_centavos` em `competencias` meses, arredondado uma vez a
+    centavos, como o ritmo. Uma conta so' para o valor cheio (a comparacao com o ritmo) e para o da cota (a tela)."""
+    return dinheiro._aplicar(Decimal(saldo_centavos) / competencias, "round2")
+
+
 def ritmo_e_prazo(conn, contrato_id: int, hoje: datetime.date | None = None) -> dict:
     """Issue #655: o ritmo do painel "Prazo" da pagina da obra. E' a conta de `sugestao_dias`, so' mostrada: ritmo
     mensal e conclusao estimada nesse ritmo (o saldo a executar e o fim da execucao sairam daqui com os cartoes que
-    os mostravam: a tela os tem no topo e na linha do tempo). `situacao` e' "no_prazo"
-    (a conclusao cai ate' o fim da execucao) ou "atrasa", com `dias_alem` (os dias que faltariam); None quando a
-    conta nao fecha (sem fim de execucao, sem saldo ou sem medicao na janela). Acima do teto do pedido (`TETO_DIAS`)
+    os mostravam: a tela os tem no topo e na linha do tempo).
+
+    Issue #803: o NECESSARIO por mes para terminar no prazo, `necessario_centavos` = saldo a executar (o mesmo do
+    ritmo, `paineis.saldo`) / `competencias_restantes` (do mes de hoje ao mes do fim da execucao vigente, as duas
+    contadas). Os dois ficam None onde nao ha' prazo a cumprir: sem fim de execucao (ou sem prazo de execucao
+    conhecido, #662), sem saldo, execucao vencida, obra parada, encerrada ou com medicao final.
+
+    `situacao`: "no_prazo" quando o ritmo e' igual ou maior que o necessario; "atrasa", com `dias_alem` (os dias da
+    conclusao estimada alem do fim da execucao), quando o ritmo fica abaixo do necessario ou a execucao ja' venceu;
+    None quando a conta nao fecha (sem fim de execucao, sem saldo ou sem medicao na janela). Ritmo abaixo do
+    necessario poe sempre a conclusao depois do fim da execucao (ela conta os meses a partir do dia de hoje); o
+    contrario nao vale: no ritmo do necessario a conclusao estimada pode passar do fim por menos de um mes, porque o
+    necessario conta inteira a competencia de hoje, que ainda vai ser medida. Acima do teto do pedido (`TETO_DIAS`)
     a conta tambem nao fecha: ritmo tao baixo (obra que mal comecou ou quase parada) nao representa a obra, e uma
     conclusao decadas a frente nao e' informacao; `conclusao`, `situacao` e `dias_alem` ficam None. Valores cheios,
     como os da sugestao."""
+    hoje = hoje or tempo.hoje_local()
     s = sugestao_dias(conn, contrato_id, hoje)
     conclusao, exe = _d(s["novo_fim"]), _d(s["execucao_fim"])
     dias = (conclusao - exe).days if conclusao and exe else None
+    # #803: execucao vencida (no dia do fim ainda nao venceu) ou sem saldo: nao ha' competencia que reste nem o que
+    # dividir. Sem prazo de execucao conhecido (#662) a execucao registrada ja' venceu: cai aqui tambem
+    restam = competencias_restantes(hoje, exe) if exe and exe >= hoje and s["saldo_centavos"] > 0 else None
     if dias is not None and dias > TETO_DIAS:
         conclusao = dias = None
     # #662: sem prazo de execucao conhecido nao ha' com o que comparar a conclusao (a conta nao fecha); a data fica
@@ -333,11 +359,16 @@ def ritmo_e_prazo(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
     # medicao final, encerrou ou esta' parada, "N dias alem do prazo" pelo ritmo nao e' informacao
     v = contratos.vigente(conn, contrato_id)
     if v["estado"] != "ativo" or v.get("encerramento_iniciado_em") or _paralisacao(conn, contrato_id):
-        conclusao = dias = None
-    return {"ritmo_centavos": s["ritmo_centavos"],
+        conclusao = dias = restam = None
+    necessario = necessario_por_mes(s["saldo_centavos"], restam) if restam else None
+    ritmo = s["ritmo_centavos"]
+    no_ritmo = necessario is not None and ritmo is not None and ritmo >= necessario
+    atrasa = not no_ritmo and dias is not None and dias > 0
+    return {"ritmo_centavos": ritmo,
+            "necessario_centavos": necessario, "competencias_restantes": restam,
             "conclusao": conclusao.isoformat() if conclusao and dias is not None else None,
-            "situacao": None if dias is None else "atrasa" if dias > 0 else "no_prazo",
-            "dias_alem": dias if dias is not None and dias > 0 else None}
+            "situacao": "no_prazo" if no_ritmo else "atrasa" if atrasa else None,
+            "dias_alem": dias if atrasa else None}
 
 
 def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
