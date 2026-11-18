@@ -1002,8 +1002,8 @@ def _encerrar_residuo_nf(conn, uid, nota, op, fonte):
     baixa com valor (o titulo inteiro em aberto e' divida, nao residuo)."""
     from app import sincronizacao_rm   # import local: sincronizacao_rm importa medicoes
     motivo = _conferir_nota_do_residuo(conn, nota, op)
-    if nota["residuo_encerrado_centavos"]:
-        raise _JaFeito(f"resíduo de {dinheiro.format_brl(nota['residuo_encerrado_centavos'])} já encerrado")
+    if nota["residuo_encerrado_em"]:
+        raise _JaFeito(f"resíduo de {dinheiro.format_brl(nota['residuo_encerrado_centavos'] or 0)} já encerrado")
     falta = sincronizacao_rm._falta_por_titulo(conn, nota["id"])
     if falta is None:
         raise ValueError(f"NF {nota['numero']} tem título sem baixa no RM: isso é título em aberto, não resíduo de "
@@ -1011,17 +1011,26 @@ def _encerrar_residuo_nf(conn, uid, nota, op, fonte):
     _, devido, _ = sincronizacao_rm._recebido_da_nota(conn, nota["id"])
     if devido <= 0:
         raise ValueError(f"NF {nota['numero']} não tem título no RM: não há resíduo a encerrar")
-    if falta <= 0:
-        raise ValueError(f"NF {nota['numero']} não tem resíduo: os títulos dela não têm falta")
+    # o titulo que o RM deu como baixado com valor menor nao tem falta, mas a diferenca fica a' vista na reconciliacao
+    # (`sincronizacao_rm._baixados_com_diferenca`) ate' alguem a conferir: este ato tambem a encerra, com falta zero
+    diferenca = sincronizacao_rm.diferenca_da_baixa_total(conn, nota["id"])
+    if falta <= 0 and diferenca <= 0:
+        raise ValueError(f"NF {nota['numero']} não tem resíduo: os títulos dela não têm falta nem diferença na baixa")
     cur = conn.execute("UPDATE notas_fiscais SET residuo_encerrado_centavos=?, residuo_encerrado_em=datetime('now') "
-                       "WHERE id=? AND residuo_encerrado_centavos IS NULL", (falta, nota["id"]))
+                       "WHERE id=? AND residuo_encerrado_em IS NULL", (falta, nota["id"]))
     db.exigir_uma_linha(cur, f"A NF {nota['numero']} mudou concorrentemente; tente novamente")
     auditoria.registrar(conn, uid, "nota.residuo_encerrado", "nota_fiscal", nota["id"],
                         {"residuo_encerrado_centavos": None},
                         {**_registro_da_nota(nota), "residuo_encerrado_centavos": falta, "titulos_centavos": devido,
+                         "diferenca_da_baixa_total_centavos": diferenca,
                          "motivo": motivo, "fonte": fonte, "origem": ORIGEM})
-    detalhes = [f"resíduo de {dinheiro.format_brl(falta)} encerrado: deixa de contar no a receber (valor cheio; "
-                f"títulos de {dinheiro.format_brl(devido)})"]
+    detalhes = []
+    if falta > 0:
+        detalhes.append(f"resíduo de {dinheiro.format_brl(falta)} encerrado: deixa de contar no a receber (valor cheio; "
+                        f"títulos de {dinheiro.format_brl(devido)})")
+    if diferenca > 0:
+        detalhes.append(f"diferença de {dinheiro.format_brl(diferenca)} na baixa total conferida: sai da lista da "
+                        "reconciliação")
     if falta * 100 > devido * AVISO_RESIDUO_PCT:
         detalhes.append(f"AVISO: o resíduo passa de {AVISO_RESIDUO_PCT}% do valor dos títulos; confira se não é "
                         "nota paga em parte")
@@ -1031,17 +1040,18 @@ def _encerrar_residuo_nf(conn, uid, nota, op, fonte):
 def _reabrir_residuo_nf(conn, uid, nota, op, fonte):
     """O inverso de `encerrar_residuo_nf`: o residuo volta a contar como falta da nota."""
     motivo = _conferir_nota_do_residuo(conn, nota, op)
-    if not nota["residuo_encerrado_centavos"]:
+    if not nota["residuo_encerrado_em"]:
         raise _JaFeito("não tem resíduo encerrado")
     cur = conn.execute("UPDATE notas_fiscais SET residuo_encerrado_centavos=NULL, residuo_encerrado_em=NULL "
-                       "WHERE id=? AND residuo_encerrado_centavos IS NOT NULL", (nota["id"],))
+                       "WHERE id=? AND residuo_encerrado_em IS NOT NULL", (nota["id"],))
     db.exigir_uma_linha(cur, f"A NF {nota['numero']} mudou concorrentemente; tente novamente")
     auditoria.registrar(conn, uid, "nota.residuo_reaberto", "nota_fiscal", nota["id"],
                         {"residuo_encerrado_centavos": nota["residuo_encerrado_centavos"],
                          "residuo_encerrado_em": nota["residuo_encerrado_em"]},
                         {**_registro_da_nota(nota), "residuo_encerrado_centavos": None, "motivo": motivo, "fonte": fonte,
                          "origem": ORIGEM})
-    return [f"resíduo de {dinheiro.format_brl(nota['residuo_encerrado_centavos'])} volta a contar como falta da nota"]
+    return [f"resíduo de {dinheiro.format_brl(nota['residuo_encerrado_centavos'] or 0)} volta a contar como falta da nota "
+            "(e a diferença da baixa total, se houver, volta à reconciliação)"]
 
 
 EXECUTORES_DE_NOTA = {"desconsiderar_nf": _desconsiderar_nf, "reconsiderar_nf": _reconsiderar_nf,

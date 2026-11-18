@@ -27,7 +27,7 @@
 //
 // Todo item do menu de um perfil precisa de uma tela aqui para esse perfil: a prova reprova o item sem tela.
 import { cabecalhoCom, CUSTO_DA_OBRA, detalheDoEnvio, espelhoGerado, falha, inicioComAParte, medicaoComEspelhoGerado,
-         medicaoComExcluidosNoRm, obrasComAParte,
+         medicaoComExcluidosNoRm, obrasComAParte, reconciliacaoComBaixados,
          medicaoComNotaDivergente, medicaoComNotaEmitida, medicaoDaMtpar, NOTAS_COM_DIVERGENCIA, notasAEnviar, notasComEnvioAberto,
          PDF_ILEGIVEL,
          prazosEmEncerramento, prazosParalisada, PREVIA_DO_ESPELHO, PROTOCOLO_ID, RESPOSTA_QUE_QUEBRA, RM_EXCLUSAO_RECUSADA,
@@ -234,6 +234,9 @@ export const TELAS = [
   // ---- Administracao: as cinco abas, os formularios de Usuarios, a auditoria vazia e a falha
   { rota: "admin", id: "admin", caminho: "/admin", perfis: SO_ADMIN, espera: "#conteudo h2" },
   { rota: "admin", id: "admin-reconciliacao", caminho: "/admin/reconciliacao", perfis: SO_ADMIN, espera: "#conteudo h2" },
+  { rota: "admin", id: "admin-reconciliacao-baixados", caminho: "/admin/reconciliacao?categoria=baixados", perfis: SO_ADMIN,
+    espera: "#conteudo table",
+    simular: [{ caminho: /^\/api\/rm\/reconciliacao$/, ajustar: reconciliacaoComBaixados }] },
   { rota: "admin", id: "admin-usuarios", caminho: "/admin/usuarios", perfis: SO_ADMIN, espera: "#conteudo h2" },
   { rota: "admin", id: "admin-usuarios-redefinir", caminho: "/admin/usuarios", perfis: SO_ADMIN, antes: "#conteudo table",
     espera: "#conteudo table form", passos: [{ clicar: '#conteudo table button:has-text("Redefinir senha")' }] },

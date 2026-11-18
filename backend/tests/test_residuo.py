@@ -124,6 +124,58 @@ def test_encerrar_residuo_recusa_o_que_nao_e_residuo_de_nota_paga(cenario):
     assert "tem baixa no RM" in rel["itens"][0]["erro"]
 
 
+# ------------------------------------------------------------------ a diferenca fica a' vista na reconciliacao
+
+def test_reconciliacao_lista_o_titulo_baixado_por_valor_menor_acima_de_um_real(cenario):
+    """Recebeu menos do que cobrou: nao e' divida e nao segura a medicao, mas aparece para o administrador. Entra o
+    titulo baixado (status 1) com mais de R$ 1,00 a menos; fica de fora o que esta' na tolerancia, o baixado em parte
+    (esse tem falta e ja' aparece no a receber), o titulo excluido no RM e a nota que nao e' cobranca ao orgao."""
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 1, estado="recebida")
+    ligada = _cobranca(c, 601, 90_000_011)
+    _ligar(c, mid, ligada)
+    _titulo(c, ligada, 83_000_009, 82_800_008, 1)                   # R$ 2.000,01 a menos: entra, com a medicao
+    solta = _cobranca(c, 607, 60_001)
+    _titulo(c, solta, 50_102, 50_001, 1, idlan=71)                  # R$ 1,01 a menos, sem medicao: entra
+    _titulo(c, solta, 5_100, 5_000, 1, idlan=72)                    # R$ 1,00 a menos: na tolerancia, fora
+    em_parte = _cobranca(c, 602, 50_000_003)
+    _titulo(c, em_parte, 46_000_003, 45_990_002, 4)                 # baixado em parte: fora (tem falta)
+    excluido = _cobranca(c, 608, 100_001)
+    _titulo(c, excluido, 93_001, 80_000, 1)
+    c.execute("UPDATE baixas SET excluida_rm_em='2026-11-01 10:00:00' WHERE nota_id=?", (excluido,))
+    fornecedor = _nota(c, 609, valor=100_001)                       # sem tipo de cobranca ao orgao: fora
+    _titulo(c, fornecedor, 93_001, 80_000, 1)
+    c.execute("UPDATE baixas SET data_baixa='2025-09-10' WHERE nota_id=?", (solta,))
+    c.commit()
+    linhas = sincronizacao_rm.reconciliacao(c)["baixados_com_diferenca"]
+    assert [(x["numero_nf"], x["contrato_id"], x["medicao_id"], x["numero"], x["tipo"], x["valor_original_centavos"],
+             x["valor_baixado_centavos"], x["diferenca_centavos"], x["data_baixa"]) for x in linhas] == [
+        ("607", cid, None, None, None, 50_102, 50_001, 101, "2025-09-10"),
+        ("601", cid, mid, 1, "execucao", 83_000_009, 82_800_008, 200_001, "2025-08-01")]
+    assert linhas[0]["numero_instrumento"]
+    # nenhuma das duas e' divida: nao estao no a receber
+    assert [x["numero"] for x in diretoria._notas_em_aberto(c)] == ["602"]
+
+
+def test_diferenca_conferida_pelo_ato_sai_da_reconciliacao_e_volta_se_o_ato_e_desfeito(cenario):
+    c, cid, uid = cenario
+    nid = _cobranca(c, 601, 90_000_011)
+    _titulo(c, nid, 83_000_009, 82_800_008, 1)
+    grupo = lambda: [x["numero_nf"] for x in sincronizacao_rm.reconciliacao(c)["baixados_com_diferenca"]]
+    assert grupo() == ["601"]
+    rel = _rodar(c, uid, [{**ENCERRAR, "nf": 601, "motivo": "desconto lançado na baixa, conferido"}])
+    assert rel["feitos"] == 1, rel
+    assert "diferença de R$ 2.000,01 na baixa total conferida" in rel["itens"][0]["detalhes"][0]
+    assert grupo() == []
+    n = dict(c.execute("SELECT * FROM notas_fiscais WHERE id=?", (nid,)).fetchone())
+    assert n["residuo_encerrado_centavos"] == 0 and n["residuo_encerrado_em"]       # nao havia falta a abater
+    reg = json.loads(c.execute("SELECT depois FROM audit_log WHERE acao='nota.residuo_encerrado'").fetchone()[0])
+    assert reg["diferenca_da_baixa_total_centavos"] == 200_001 and reg["residuo_encerrado_centavos"] == 0
+    assert _rodar(c, uid, [{**ENCERRAR, "nf": 601}])["ja_feitos"] == 1
+    rel = _rodar(c, uid, [{"operacao": "reabrir_residuo_nf", "nf": 601, "motivo": "conferência errada", "fonte": "y"}])
+    assert rel["feitos"] == 1 and grupo() == ["601"]
+
+
 # ------------------------------------------------------------------ migracao 092
 
 @pytest.mark.migracao_real

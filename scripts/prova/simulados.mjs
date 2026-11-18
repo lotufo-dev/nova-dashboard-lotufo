@@ -198,6 +198,16 @@ export const inicioComAParte = painel => ({ ...painel, a_receber: { ...painel.a_
 export const obrasComAParte = obras => obras.map((o, i) => ({ ...o, posicao: { ...o.posicao, a_receber_ano_inicial: "2025",
   a_receber_anterior_centavos: i === 0 ? 70003 : 0, a_receber_sem_atualizacao_centavos: i === 0 ? 40001 : 0 } }));
 
+// A reconciliacao com o grupo "Títulos baixados no RM por valor menor" (docs/adr/0006): o banco da prova nao tem titulo
+// baixado com diferenca. Uma linha com medicao e outra de nota sem medicao, na primeira obra da prova.
+export const reconciliacaoComBaixados = (rec, reg) => ({ ...rec, baixados_com_diferenca: [
+  { titulo_id: 9301, nota_id: 9311, contrato_id: reg.obra, numero_instrumento: "001/2025/00/00-EXEMPLO", medicao_id: reg.medicao, numero: 1,
+    tipo: "execucao", competencia: "2025-04", numero_nf: "101", serie: "1", valor_original_centavos: 38000001,
+    valor_baixado_centavos: 37800000, diferenca_centavos: 200001, data_baixa: "2025-07-10" },
+  { titulo_id: 9302, nota_id: 9312, contrato_id: reg.obra, numero_instrumento: "001/2025/00/00-EXEMPLO", medicao_id: null, numero: null,
+    tipo: null, competencia: null, numero_nf: "115", serie: null, valor_original_centavos: 50001, valor_baixado_centavos: 40000,
+    diferenca_centavos: 10001, data_baixa: null }] });
+
 // A obra paralisada e a obra em encerramento: o cabecalho muda o selo do estado e a aba Prazos mostra a paralisacao
 // (sem o selo dos dias da execucao) ou o cartao do encerramento.
 export const cabecalhoCom = status => cabecalho => ({ ...cabecalho, status });

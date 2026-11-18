@@ -232,6 +232,13 @@ medição pela baixa.
   a menos ficava aberta para conferência; agora vira recebida, e a diferença fica na auditoria do recebimento
   (`medicao.recebida_com_diferenca`, com `baixa_total_no_rm`). A tolerância de R$ 1,00 continua valendo para o
   título baixado em parte.
+- **A diferença fica à vista, sem travar nada.** Receber menos do que se cobrou é informação de dinheiro: o título
+  que o RM deu como baixado com mais de R$ 1,00 a menos (o mesmo limite, `diretoria.TOLERANCIA_CENTAVOS`) aparece em
+  Administração › Reconciliação, no grupo "Títulos baixados no RM por valor menor", com a obra, a medição, a nota, o
+  valor do título, o valor baixado, a diferença e a data da baixa, e na contagem da Saúde. É pendência sem data, do
+  administrador (`docs/adr/0008`). Só nota de cobrança ao órgão que cai numa obra; o título e a nota excluídos no
+  RM não entram. Quem conferiu tira a nota da lista com `encerrar_residuo_nf` (motivo e fonte), que nesse caso só
+  registra a conferência: não havia falta a abater.
 - A baixa total **sem valor** (glosa, compensação) continua como estava: não é recebimento, e só o a receber da
   diretoria e a reconciliação a tratam como quitada (#563).
 - **Resíduo de baixa parcial antiga.** O RM não diz se a sobra de um título baixado em parte é dívida ou resto

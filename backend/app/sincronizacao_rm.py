@@ -1729,6 +1729,42 @@ def _recebidas_sem_baixa(conn) -> list[dict]:
     return out
 
 
+def _baixados_com_diferenca(conn) -> list[dict]:
+    """docs/adr/0006 ("Titulo baixado no RM nao tem falta"): os titulos que o RM deu como BAIXADOS (status 1) com o
+    valor baixado menor que o original por mais que `diretoria.TOLERANCIA_CENTAVOS` (o R$ 1,00 da issue #35). A
+    diferenca nao e' divida e nao segura a medicao, mas "recebeu menos do que cobrou" tem de ficar a' vista: e'
+    pendencia sem data, do administrador (docs/adr/0008). Uma linha por titulo, em valor cheio, da baixa mais recente
+    a' mais antiga, so' de nota de cobranca ao orgao ativa que cai numa obra (`diretoria._notas_do_rm`), com a
+    medicao a que a nota esta' ligada (a primeira, na nota partilhada). Saem a nota cujo residuo a correcao de
+    cadastro encerrou (`encerrar_residuo_nf`: alguem ja' olhou e decidiu) e o titulo ou a nota excluidos no RM."""
+    from app import diretoria   # import local: diretoria importa este modulo
+    da_obra = {n["id"]: c for n, c, _ in diretoria._notas_do_rm(conn) if n["situacao"] == "ativa"}
+    out = []
+    for b in conn.execute("""
+            SELECT b.id AS titulo_id, b.nota_id, b.valor_original_centavos, b.valor_baixado_centavos, b.data_baixa,
+                   n.numero AS numero_nf, n.serie
+            FROM baixas b JOIN notas_fiscais n ON n.id=b.nota_id
+            WHERE b.status_lan=? AND b.valor_baixado_centavos>0 AND b.excluida_rm_em IS NULL
+              AND n.excluida_rm_em IS NULL AND n.residuo_encerrado_em IS NULL
+              AND b.valor_original_centavos - b.valor_baixado_centavos > ?
+            ORDER BY b.data_baixa DESC, b.id""", (STATUS_BAIXA_TOTAL, diretoria.TOLERANCIA_CENTAVOS)):
+        c = da_obra.get(b["nota_id"])
+        if c is None:
+            continue
+        m = conn.execute("""SELECT m.id, m.numero, m.tipo, m.competencia FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id
+                            WHERE a.nota_id=? AND a.desfeita_em IS NULL ORDER BY a.id LIMIT 1""", (b["nota_id"],)).fetchone()
+        instrumento = conn.execute("SELECT numero_instrumento FROM contratos WHERE id=?", (c["id"],)).fetchone()[0]
+        out.append({"titulo_id": b["titulo_id"], "nota_id": b["nota_id"], "contrato_id": c["id"],
+                    "numero_instrumento": instrumento, "medicao_id": m["id"] if m else None,
+                    "numero": m["numero"] if m else None, "tipo": m["tipo"] if m else None,
+                    "competencia": m["competencia"] if m else None, "numero_nf": b["numero_nf"], "serie": b["serie"],
+                    "valor_original_centavos": b["valor_original_centavos"],
+                    "valor_baixado_centavos": b["valor_baixado_centavos"],
+                    "diferenca_centavos": b["valor_original_centavos"] - b["valor_baixado_centavos"],
+                    "data_baixa": (b["data_baixa"] or "")[:10] or None})
+    return out
+
+
 def _reconciliacao(conn, nfs_apos: int | None, desfeitas_apos: int | None) -> dict:
     de_nfs = """
         FROM notas_fiscais n
@@ -1777,6 +1813,7 @@ def _reconciliacao(conn, nfs_apos: int | None, desfeitas_apos: int | None) -> di
     return {"nfs_sem_medicao": nfs_sem_medicao, "medicoes_sem_nf": medicoes_sem_nf,
             "divergencias": divergencias, "alocacoes_desfeitas": desfeitas,
             "recebidas_sem_baixa": _recebidas_sem_baixa(conn),
+            "baixados_com_diferenca": _baixados_com_diferenca(conn),
             "totais": {"nfs_sem_medicao": total_nfs, "alocacoes_desfeitas": total_desfeitas},
             "ha_mais": {"nfs_sem_medicao": mais_nfs, "alocacoes_desfeitas": mais_desfeitas}}
 

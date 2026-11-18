@@ -1179,8 +1179,8 @@ def test_rotas_rm(client_admin, tmp_path, monkeypatch):
     assert r.status_code == 200 and r.json()["estado"] == "success", r.text
     assert client_admin.get("/api/rm/status").json()["rodadas"][0]["estado"] == "success"
     assert set(client_admin.get("/api/rm/reconciliacao").json()) == {
-        "nfs_sem_medicao", "medicoes_sem_nf", "divergencias", "alocacoes_desfeitas", "recebidas_sem_baixa", "totais",
-        "ha_mais"}
+        "nfs_sem_medicao", "medicoes_sem_nf", "divergencias", "alocacoes_desfeitas", "recebidas_sem_baixa",
+        "baixados_com_diferenca", "totais", "ha_mais"}
     # #22: a pagina seguinte pela URL, depois do id da ultima linha; id invalido ou desfeita que nao existe e' 422
     # em portugues
     r = client_admin.get("/api/rm/reconciliacao?nfs_apos=10")
