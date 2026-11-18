@@ -44,6 +44,8 @@
 /* tabela de envios (passo 5) */
 .envios__nfs { display: flex; flex-direction: column; gap: var(--espaco-traco); }
 .envios__nfs span { white-space: nowrap; }
+/* a nota sem numero aparece pelo nome do arquivo, que e' comprido: quebra dentro da celula */
+.envios__nfs .envios__nf--arquivo { white-space: normal; overflow-wrap: anywhere; }
 .envios__acao { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--espaco-mini) var(--espaco-p); }
 .envios__motivo { font-size: var(--texto-mini); color: var(--cor-texto-secundario); max-width: 26ch; text-align: right; }
 .envios__motivo--atencao { color: var(--situacao-breve-texto); }

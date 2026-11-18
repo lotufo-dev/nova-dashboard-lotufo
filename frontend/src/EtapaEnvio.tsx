@@ -112,7 +112,7 @@ function CelulaNotas({ e }: { e: Envio }) {
   return (
     <div className="envios__nfs">
       {e.notas.map(n => (
-        <span key={`${n.numero ?? n.arquivo}-${n.natureza}`}>{rotuloDaNota(n)}{mistura && <> <small>· {n.natureza === "reajuste" ? "reajuste" : "medição"}</small></>}</span>
+        <span key={`${n.numero ?? n.arquivo}-${n.natureza}`} className={n.numero ? undefined : "envios__nf--arquivo"}>{rotuloDaNota(n)}{mistura && <> <small>· {n.natureza === "reajuste" ? "reajuste" : "medição"}</small></>}</span>
       ))}
     </div>
   );
