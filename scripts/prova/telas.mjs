@@ -151,11 +151,15 @@ export const TELAS = [
   { rota: "obra", id: "obra-medicoes-custo", caminho: "/obras/:obra/medicoes", perfis: TODOS, espera: OBRA_GRADE,
     simular: [{ caminho: /^\/api\/contratos\/\d+\/custo$/, corpo: CUSTO_DA_OBRA }] },
   { rota: "obra", id: "obra-paralisada", caminho: "/obras/:obra/prazos", perfis: TODOS, espera: OBRA_GRADE,
-    simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoCom("suspenso") },
+    simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/,
+        ajustar: cabecalhoCom("suspenso", { status_desde: "2026-08-03", paralisada_desde: "2026-08-03" }) },
       { caminho: /^\/api\/contratos\/\d+\/prazos$/, ajustar: prazosParalisada }] },
   { rota: "obra", id: "obra-encerramento", caminho: "/obras/:obra/prazos", perfis: TODOS, espera: OBRA_GRADE,
-    simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoCom("em_encerramento") },
+    simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoCom("em_encerramento", { status_desde: "2026-10-01" }) },
       { caminho: /^\/api\/contratos\/\d+\/prazos$/, ajustar: prazosEmEncerramento }] },
+  // a obra encerrada sem a data do encerramento no sistema: o painel "Prazo" diz so' "encerrada"
+  { rota: "obra", id: "obra-encerrada", caminho: "/obras/:obra", perfis: TODOS, espera: OBRA_GRADE,
+    simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoCom("encerrado", { status_desde: null }) }] },
   { rota: "obra", id: "obra-erro", caminho: "/obras/:obra", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/contratos\/\d+\/cabecalho$/) },
 
