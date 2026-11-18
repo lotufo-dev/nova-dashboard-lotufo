@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import type { Usuario } from "./Login";
-import { ir, medicaoDaBusca, type Busca, type Origem, type Rota } from "./rota";
+import { ir, medicaoDaBusca, temOrigem, type Busca, type Origem, type Rota } from "./rota";
 import { Link } from "./Link";
 import { FaixaPasso, PassoCartao, Passos, passosDa } from "./Passos";
 import { NovaPlanilhaCarta } from "./PlanilhaCarta";
 import { baseDosValores } from "./formato";
 import { useNomesDoCaminho } from "./nomesDoCaminho";
-import { temOrigem, VoltarOrigem } from "./Topo";
+import { VoltarOrigem } from "./Topo";
 import "./etapas.css";
 
 // Medicao que ainda nao existe (#153): a antiga tela "Nova medição" virou o primeiro passo da pagina da medicao. Desde a

@@ -9,11 +9,11 @@ import {
   certidaoPendente, certidoesOrdenadas, NOME_CURTO, resumoEmpresa, situacaoCertidao,
   situacaoGarantia, type EmpresaDoc,
 } from "./matriz";
-import { type AbaDocumentos, type Origem } from "./rota";
+import { temOrigem, type AbaDocumentos, type Origem } from "./rota";
 import Selo from "./Selo";
 import { fmtCompetencia as mesBR, fmtDataPura } from "./tempo";
 import { useNomesDoCaminho } from "./nomesDoCaminho";
-import { temOrigem, VoltarOrigem } from "./Topo";
+import { VoltarOrigem } from "./Topo";
 import { AnexarCertidoes, CnpjCopiar, EmDia, Pilula, Ponto, SituacaoSelo, type AnexarRef } from "./documentosComum";
 import { cnpjBR, competenciaDoNome, ROTULO_TIPO, useCopiarCnpj, usePainel } from "./documentosDados";
 import Falha from "./Falha";

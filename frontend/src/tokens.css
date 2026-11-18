@@ -693,20 +693,21 @@ td, th { font-variant-numeric: tabular-nums; }
 }
 /* CAMINHO (Caminho.tsx, #814): "Obras › SINFRA › MT-388 › Medições › 15ª Medição". Os trechos de antes sao links
    sublinhados, na cor do texto de apoio; o trecho da pagina (ou do objeto) e' o titulo da barra, com a letra do texto
-   (nao a condensada dos titulos de bloco), seja ele o h1 da pagina ou so' texto. O que nao cabe numa linha desce para
-   a de baixo; so' um nome sozinho mais largo que a barra e' cortado, com o nome inteiro no `title`. */
+   (nao a condensada dos titulos de bloco), seja ele o h1 da pagina ou so' texto.
+   O caminho corre como texto: o que nao cabe numa linha desce para a de baixo e a barra cresce; nada e' cortado. Cada
+   nome anda inteiro (so' o nome mais largo que a barra quebra por dentro), e o sinal "›" fica preso ao trecho de
+   antes: a linha quebra depois dele. */
 .caminho { flex: 1 1 auto; min-width: 0; }
-.caminho ol { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--espaco-pp); margin: 0; padding: 0; list-style: none; }
-.caminho__trecho {
-  display: inline-flex; align-items: baseline; gap: var(--espaco-pp); min-width: 0; max-width: 100%;
-  font-size: var(--texto-meta); line-height: var(--entrelinha); color: var(--cor-texto-secundario);
-}
-.caminho__trecho + .caminho__trecho::before {
-  content: "›"; flex: none;
+.caminho ol { display: block; margin: 0; padding: 0; list-style: none; font-size: var(--texto-meta); line-height: var(--entrelinha); }
+/* `nowrap` no trecho: entre o nome e o "›" dele a linha nao quebra; dentro do nome e depois do sinal, quebra */
+.caminho__trecho { display: inline; white-space: nowrap; font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
+/* "›" e um espaco largo depois dele, que e' onde a linha pode quebrar */
+.caminho__trecho:not(:last-child)::after {
+  content: "›\2002"; padding-inline-start: var(--espaco-pp); white-space: normal;
   font-size: var(--texto-meta); font-weight: var(--peso-normal); color: var(--cor-texto-terciario);
 }
 .caminho__trecho > a, .caminho__trecho > span, .caminho__titulo > a, .caminho__titulo > span {
-  min-width: 0; max-width: 36ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: inline-block; max-width: 100%; white-space: normal; overflow-wrap: anywhere; vertical-align: baseline;
 }
 .caminho a:hover { color: var(--cor-tinta); }
 .caminho__trecho[aria-current="page"] { color: var(--cor-tinta); font-weight: var(--peso-medio); }
@@ -714,7 +715,7 @@ td, th { font-variant-numeric: tabular-nums; }
   font-size: var(--texto-topo); font-weight: var(--peso-forte); color: var(--cor-tinta);
 }
 .caminho__titulo {
-  display: inline-flex; min-width: 0; margin: 0;
+  display: inline; margin: 0;
   font-family: var(--fonte-texto); font-stretch: var(--largura-texto);
   font-size: inherit; line-height: inherit; font-weight: inherit; letter-spacing: normal;
 }
@@ -765,6 +766,13 @@ td, th { font-variant-numeric: tabular-nums; }
   .abas { position: relative; overflow-x: auto; scrollbar-width: none; }
   .abas > .aba { flex: none; white-space: nowrap; }
   .topo { padding: var(--espaco-pp) var(--espaco-pp) var(--espaco-pp) var(--espaco-m); }
+  /* o caminho no celular: os trechos de antes numa linha de letra pequena, e o titulo na linha de baixo (com a vista,
+     quando ha'); assim o titulo nao divide a linha com quatro nomes */
+  .caminho ol { font-size: var(--texto-mini); }
+  .caminho__trecho:has(~ .caminho__trecho--titulo),
+  .caminho__trecho:has(~ .caminho__trecho--titulo)::after { font-size: var(--texto-mini); }
+  .caminho__trecho:not(:last-child)::after { padding-inline-start: var(--espaco-mini); }
+  .caminho__trecho + .caminho__trecho--titulo::before { content: "\A"; white-space: pre; }
   /* no celular fica o avatar; o nome esta' no rotulo acessivel do botao */
   .conta__nome { display: none; }
   /* aviso de resposta do orgao (#654): mais perto da borda, e acima da faixa da instalacao, que aqui quebra em linhas */

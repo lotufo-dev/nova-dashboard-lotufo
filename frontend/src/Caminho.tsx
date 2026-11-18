@@ -41,8 +41,8 @@ export default function Caminho({ rota, perfil, busca, origem, ehH1 }: {
           const ultimo = i === trechos.length - 1;
           const volta = veioDe && t.para && !t.area && mesmaPagina(veioDe.para, t.para) ? veioDe : null;
           const texto = !ultimo && t.para
-            ? <Link para={volta?.para ?? t.para} busca={volta ? volta.busca : t.busca} title={t.rotulo}>{t.rotulo}</Link>
-            : <span title={t.rotulo}>{t.rotulo}</span>;
+            ? <Link para={volta?.para ?? t.para} busca={volta ? volta.busca : t.busca}>{t.rotulo}</Link>
+            : <span>{t.rotulo}</span>;
           return (
             <li key={`${t.rotulo}-${i}`} className={t.titulo ? "caminho__trecho caminho__trecho--titulo" : "caminho__trecho"}
               aria-current={ultimo ? "page" : undefined}>

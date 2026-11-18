@@ -49,8 +49,8 @@ describe("Caminho", () => {
     expect(trechos()).toEqual(["Obras", "SINFRA", "MT-388", "Medições", "15ª Medição"]);
     expect([link("Obras"), link("SINFRA"), link("MT-388"), link("Medições")])
       .toEqual(["/obras", "/obras/contratante/sinfra", "/obras/7", "/obras/7/medicoes"]);
-    // o nome longo cede com reticências na tela; o nome inteiro fica na dica
-    expect(within(caminho()).getByText("15ª Medição").getAttribute("title")).toBe("15ª Medição");
+    // nada é cortado (o que não cabe desce para a linha de baixo): o trecho não precisa de dica com o nome inteiro
+    expect(within(caminho()).getByText("15ª Medição").getAttribute("title")).toBeNull();
   });
 
   it("a página que sai da tela apaga os nomes: o de uma obra não aparece no caminho de outra", () => {

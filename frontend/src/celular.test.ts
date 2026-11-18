@@ -133,15 +133,17 @@ describe("celular", () => {
     expect(tokensCss).toMatch(/\.topbar__trilha, \.topbar__linha\s*\{[^}]*min-width:\s*0/);
     expect(tokensCss).toMatch(/\.topbar__titulo\s*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis/);
     expect(tokensCss).toMatch(/\.topbar\s*\{[^}]*width:\s*100%/);
-    // a barra do topo leva o caminho da página (#814): o que não cabe desce para a linha de baixo, e a barra cresce
-    // em vez de alargar a página; só o trecho sozinho mais largo que a barra cede com reticências
+    // a barra do topo leva o caminho da página (#814): ele corre como texto, o que não cabe desce para a linha de
+    // baixo e a barra cresce em vez de alargar a página; o nome mais largo que a barra quebra por dentro
     expect(tokensCss).toMatch(/\.topo\s*\{[^}]*min-height:\s*var\(--altura-topo\)/);
     expect(tokensCss).toMatch(/\.caminho\s*\{[^}]*min-width:\s*0/);
-    expect(tokensCss).toMatch(/\.caminho ol\s*\{[^}]*flex-wrap:\s*wrap/);
-    expect(tokensCss).toMatch(/\.caminho__trecho\s*\{[^}]*min-width:\s*0;\s*max-width:\s*100%/);
-    expect(tokensCss).toMatch(/\.caminho__trecho > a,[^{]*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/);
+    expect(tokensCss).toMatch(/\.caminho ol\s*\{[^}]*display:\s*block/);
+    expect(tokensCss).toMatch(/\.caminho__trecho > a,[^{]*\{[^}]*display:\s*inline-block;\s*max-width:\s*100%;\s*white-space:\s*normal;\s*overflow-wrap:\s*anywhere/);
+    expect(tokensCss).not.toMatch(/\.caminho[^{]*\{[^}]*text-overflow/);
     expect(blocoMedia(tokensCss, 767)).toMatch(/\.abas\s*\{[^}]*overflow-x:\s*auto/);
     expect(blocoMedia(tokensCss, 767)).toMatch(/\.topo\s*\{[^}]*padding:\s*var\(--espaco-pp\) var\(--espaco-pp\) var\(--espaco-pp\) var\(--espaco-m\)/);
+    // no celular os trechos de antes vão numa linha pequena e o título desce para a de baixo
+    expect(blocoMedia(tokensCss, 767)).toMatch(/\.caminho__trecho \+ \.caminho__trecho--titulo::before\s*\{[^}]*content:\s*"\\A"/);
     // no celular o respiro lateral encolhe para 16 px
     expect(blocoMedia(tokensCss, 900)).toMatch(/\.topbar, \.pagina\s*\{[^}]*padding-left:\s*16px/);
   });

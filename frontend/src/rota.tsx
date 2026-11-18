@@ -250,6 +250,12 @@ export function origemPara(de: Rota, deHref: string, para: Rota, anterior: Orige
   return { tela: de.tela, href: deHref };
 }
 
+/** Ha' de onde voltar? So' quando se chegou de uma tela que nao esta' no caminho da pagina (`alemDe`: as que estao; o
+ *  trecho delas ja' volta sozinho, com os filtros). A pagina usa para nao desenhar vazia a linha do "← origem". */
+export function temOrigem(origem: Origem | null, alemDe: Rota["tela"][]): origem is Origem {
+  return origem !== null && !alemDe.includes(origem.tela);
+}
+
 /* ------------------------------------------------------------ estado da URL */
 
 type Local = { caminho: string; busca: string; secao: string; origem: Origem | null; chave: string };

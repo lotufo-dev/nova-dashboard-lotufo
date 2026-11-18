@@ -27,7 +27,6 @@ test("cabeçalho com nome, CNPJ e situação, sem a linha de papel e obras; o ca
   const caminho = screen.getByRole("navigation", { name: "Você está em" });
   expect([...caminho.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Documentos", "Certidões", "Lotufo"]);
   expect(within(caminho).getByRole("link", { name: "Certidões" }).getAttribute("href")).toBe("/documentos");
-  expect(within(caminho).getByText("Lotufo").getAttribute("title")).toBe("Lotufo");
   expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);      // a página não desenha trilha própria
   expect(document.querySelector(".topbar__trilha")).toBeNull();                            // nem a linha do "← origem", sem origem
   screen.getByText("31.200.101/0001-30");

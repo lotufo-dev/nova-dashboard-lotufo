@@ -1,6 +1,6 @@
 import { IconeVoltar } from "./icones";
 import { tituloDe } from "./navegacao";
-import { parseRota, type Busca, type Origem, type Rota } from "./rota";
+import { parseRota, temOrigem, type Busca, type Origem, type Rota } from "./rota";
 import { Link } from "./Link";
 
 // Pecas de navegacao dentro da pagina: o "← origem" diz de onde se veio, e as abas sao links (abrem em nova aba do
@@ -15,12 +15,6 @@ export function destinoDeHref(href: string): Destino {
   const busca = Object.fromEntries(u.searchParams);
   return { para: parseRota(u.pathname), busca: Object.keys(busca).length ? busca : undefined,
     secao: u.hash.replace(/^#/, "") || undefined };
-}
-
-/** Ha' de onde voltar? So' quando se chegou de uma tela que nao esta' no caminho (`alemDe`: as que estao; o trecho
- *  delas ja' volta sozinho, com os filtros). A pagina usa para nao desenhar vazia a linha do "← origem". */
-export function temOrigem(origem: Origem | null, alemDe: Rota["tela"][]): origem is Origem {
-  return origem !== null && !alemDe.includes(origem.tela);
 }
 
 /** "← Medicoes": so' quando se chegou de outra tela que nao as do caminho (estas ja' voltam sozinhas). */

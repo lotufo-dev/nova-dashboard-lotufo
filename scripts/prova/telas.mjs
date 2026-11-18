@@ -230,8 +230,8 @@ export const TELAS = [
   { rota: "documentos", id: "documentos", caminho: "/documentos", perfis: TODOS, espera: ".doc-painel-aba" },
   // #814: cada assunto tem o proprio endereco (e o proprio item no menu); antes eram abas de "/documentos"
   { rota: "documentos", id: "documentos-regularidade", caminho: "/documentos/regularidade", perfis: TODOS,
-    espera: '.doc-painel-aba [aria-label="Regularidade mensal por empresa"]' },
-  { rota: "documentos", id: "documentos-garantias", caminho: "/documentos/garantias", perfis: TODOS, espera: ".doc-painel-aba .doc-grupo" },
+    espera: '#aba-regularidade[aria-selected="true"]' },
+  { rota: "documentos", id: "documentos-garantias", caminho: "/documentos/garantias", perfis: TODOS, espera: '#aba-garantias[aria-selected="true"]' },
   { rota: "documentos", id: "documentos-anexar", caminho: "/documentos", perfis: OPERA, antes: ".doc-painel-aba", espera: ".doc-fila form",
     simular: [{ metodo: "POST", caminho: /^\/api\/documentos\/anexar\/ler$/, corpo: PDF_ILEGIVEL }],
     passos: [{ arquivo: ['input[aria-label="Escolher PDFs para anexar"]', "certidao-de-prova.pdf"] }] },
@@ -394,7 +394,7 @@ export const TELAS = [
     espera: '#conteudo .vazio a[href="/a-receber"]' },
   // os enderecos de antes de Documentos: a aba na busca e "/documentos/certidoes" abrem a pagina do assunto
   { rota: "documentos", id: "documentos-endereco-de-antes", caminho: "/documentos?aba=garantias", destino: "/documentos/garantias",
-    perfis: SO_ADMIN, espera: ".doc-painel-aba .doc-grupo" },
+    perfis: SO_ADMIN, espera: '#aba-garantias[aria-selected="true"]' },
   { rota: "documentos", id: "documentos-certidoes-por-extenso", caminho: "/documentos/certidoes", destino: "/documentos", perfis: SO_ADMIN,
     espera: ".doc-painel-aba" },
   // a aba do contratante ja' tem endereco; enquanto a #818 nao chega, ele abre a pagina do contratante

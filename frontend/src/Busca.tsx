@@ -5,8 +5,9 @@ import type { Ir } from "./rota";
 // e por ora ela nao devolve nada. A issue #819 preenche aqui dentro, sem mexer na casca.
 //
 // O que a casca entrega: o `perfil` de quem esta' logado (so' aparece no resultado o que o perfil pode abrir: quem nao
-// acessa o SIGA nao recebe processo) e o `ir` do roteador. O estilo da peca vai em css proprio; a barra do topo
-// (`.topo`, tokens.css) quebra em linhas quando falta largura, e a busca nao pode cobrir o caminho.
+// acessa o SIGA nao recebe processo) e o `ir` do roteador. O estilo da peca vai em css proprio. Na barra do topo
+// (`.topo`, tokens.css) o caminho fica com a largura que sobra e quebra o proprio texto em linhas; a busca entra com
+// largura fixa (`flex: none`) e nao pode cobrir o caminho: a 390 px sobram cerca de 230 px para ele.
 
 export default function Busca(_props: { perfil: string; ir: Ir }) {
   return null;

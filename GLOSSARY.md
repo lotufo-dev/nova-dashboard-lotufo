@@ -354,6 +354,28 @@ A linha preta acima de um título: a de grupo, grossa, e a de seção, fina.
 O que fica igual em toda tela: o menu lateral e o topo.
 _Avoid_: trilho, layout
 
+**Área**:
+O grupo de páginas do menu, com o nome escrito em cima delas: Painel, Medições, Obras, Financeiro, Prazos e avisos,
+Órgãos, Documentos e Sistema. A área não é página: o nome dela leva à primeira página que o perfil tem nela.
+_Avoid_: seção, módulo, grupo; área como nome de setor do órgão
+
+**Página (do menu)**:
+O item do menu, com endereço próprio: Início, Medições, Resumo das medições, Obras, Fechamento, A receber, Avisos,
+SIGA, Certidões, Regularidade mensal, Garantias, Âncoras DocuSign, Administração e Minha conta.
+_Avoid_: aba (a aba é uma vista dentro da página)
+
+**Caminho**:
+A linha no alto de toda página que diz onde se está, da área até o objeto, cada trecho um link: "Obras › SINFRA ›
+MT-388 › Medições › 15ª Medição". É uma peça só, na barra do topo.
+_Avoid_: trilha, migalhas, breadcrumb; caminho como o endereço da página (esse é o endereço, ou URL)
+
+**Trecho**:
+Cada nome do caminho. O trecho da página ou do objeto é o título da barra do topo; depois dele só vem a vista.
+
+**Vista**:
+O recorte de uma página que tem endereço próprio e se escolhe por aba: o Quadro do mês em Medições, Todas as obras
+em Obras, Prazos na página da obra. A vista padrão não entra no endereço nem no caminho.
+
 **Janela**:
 O painel que abre por cima da página para um formulário ou uma ação fora do fluxo dela.
 _Avoid_: modal, popup
