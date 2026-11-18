@@ -1,6 +1,6 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { textoDoTempo, type Parada } from "./parada";
+import { fraseDoTempo, textoDoTempo, type Parada } from "./parada";
 import TempoParado from "./TempoParado";
 
 // O tempo parado como o servidor manda: os dias úteis, a situação e, no Pagamento, o prazo do órgão. Datas inventadas.
@@ -34,6 +34,18 @@ describe("TempoParado (#805)", () => {
     const alem = render(<TempoParado parada={parada({ dias_uteis: 41, prazo_orgao_dias: 45, esperada: "2026-11-09", alem_do_prazo: true })} />);
     expect(alem.container.querySelector(".tempo-parado__prazo")?.textContent).toBe("prazo do órgão venceu em 09/11");
     expect(alem.container.querySelector(".selo--critico")).not.toBeNull();
+  });
+
+  it("em frase, para o cartão do Resumo das medições: o mesmo selo e o mesmo prazo, e nada sem a data do evento", () => {
+    expect(fraseDoTempo({ dias_uteis: 0, hoje: true })).toBe("desde hoje");
+    expect(fraseDoTempo({ dias_uteis: 0, hoje: false })).toBe("há menos de 1 dia útil");
+    expect(fraseDoTempo({ dias_uteis: 1, hoje: false })).toBe("há 1 dia útil");
+    expect(fraseDoTempo({ dias_uteis: 12, hoje: false })).toBe("há 12 dias úteis");
+    const { container } = render(<TempoParado frase parada={parada({ dias_uteis: 41, prazo_orgao_dias: 45, esperada: "2026-11-09", alem_do_prazo: true })} />);
+    expect(container.querySelector(".selo--critico .selo__texto")?.textContent).toBe("há 41 dias úteis");
+    expect(container.querySelector(".tempo-parado__prazo")?.textContent).toBe("prazo do órgão venceu em 09/11");
+    cleanup();
+    expect(render(<TempoParado frase parada={parada({ desde: null, dias_uteis: null, situacao: null })} />).container.textContent).toBe("");
   });
 
   it("fora do Pagamento não há prazo escrito; sem a data do evento, só o traço", () => {

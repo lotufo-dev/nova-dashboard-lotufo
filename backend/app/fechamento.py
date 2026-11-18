@@ -417,6 +417,18 @@ def medido_na_cota(m: dict) -> int:
     return (contratos.cota(valor, m["pct"]) or 0) if valor is not None else 0
 
 
+def medido_das_competencias(conn, competencias, contratos_ids=None) -> dict[str, int]:
+    """Issue #805 (Resumo das medicoes em quadro): o medido de cada competencia pedida, na cota. E' o `medido_centavos`
+    que esta pagina mostra no mes: as mesmas medicoes (`_medicoes`) e a mesma conta por medicao (`medido_na_cota`),
+    sem montar o fechamento inteiro. `contratos_ids` recorta as obras (o filtro por contratante do Resumo das
+    medicoes); sem ele, todas. Competencia sem medicao vem com zero."""
+    soma = dict.fromkeys(competencias, 0)
+    for m in _medicoes(conn):
+        if m["competencia"] in soma and (contratos_ids is None or m["contrato_id"] in contratos_ids):
+            soma[m["competencia"]] += medido_na_cota(m)
+    return soma
+
+
 def medido_do_mes_fechado(conn, hoje: datetime.date) -> dict:
     """Issue #805 (Obras por contratante): o medido de cada obra na ultima competencia FECHADA (o mes anterior ao de
     `hoje`; o mes em curso ainda recebe medicao, como em `_medido_do_ano_anterior`) e na competencia anterior a ela, a

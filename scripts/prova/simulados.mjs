@@ -297,6 +297,104 @@ export const fechamentoComValores = reg => {
 export const obrasComAParte = obras => obras.map((o, i) => ({ ...o, posicao: { ...o.posicao, a_receber_ano_inicial: "2025",
   a_receber_anterior_centavos: i === 0 ? 70003 : 0, a_receber_sem_atualizacao_centavos: i === 0 ? 40001 : 0 } }));
 
+// #805, Resumo das medicoes em quadro por etapa: o mes que o cadastro de exemplo nao tem (ele tem uma obra com
+// medicao). As obras e os contratantes sao os da carteira simulada acima; os valores sao inventados. Medicao em cada
+// etapa; cartao com o tempo parado em cada situacao (chegou hoje, em andamento, vence em breve, critico), que e' o
+// `parada` da fila de trabalho: no protocolado, sem prazo do orgao (a MTPAR), dentro do prazo e alem dele; aprovado
+// abaixo do pedido (pequeno e critico) e acima dele; recebida com os dias da nota ao recebimento; planilha/carta
+// ainda nao enviada; obras sem medicao (uma que nunca mediu) e meses anteriores em aberto de tres competencias.
+// O protocolado tem a referencia da mesma altura e o recebido vem sem lastro (sem variacao). `contratante` recorta
+// como o servidor (a MTPAR fica com quatro etapas vazias); `vazio` e' o mes sem medicao nenhuma.
+// A resposta verdadeira da' o dia, a competencia e de quando e' o dado; o resto e' trocado.
+const ETAPAS_DO_RESUMO = ["em_analise", "boletim", "nota", "protocolado", "recebido"];
+const porNome = (a, b) => a.localeCompare(b, "pt-BR");
+export const resumoEmQuadro = ({ contratante = null, vazio = false } = {}) => resposta => {
+  const hoje = Date.parse(`${resposta.hoje}T00:00:00Z`), mes = resposta.mes;
+  let id = 9600;
+  // a linha de uma medicao: a etapa da vez e, de cada etapa alcancada, a data (ha' quantos dias). O `parada` e' o da
+  // fila de trabalho: os limites do SIGA fora do protocolado; nele, `prazo: [dias do orgao, a data esperada em dias a
+  // partir de hoje]` (negativa = ja' passou, critico); sem prazo, em andamento
+  const linha = (contrato_id, obra, quem, titulo, etapa, valor, dias, uteis, { prazo = null, ...extra } = {}) => {
+    id += 1;
+    const pos = ETAPAS_DO_RESUMO.indexOf(etapa), recebida = etapa === "recebido", alem = prazo !== null && prazo[1] < 0;
+    const etapas = ETAPAS_DO_RESUMO.map((e, i) => ({ etapa: e,
+      situacao: i > pos ? "futuro" : i < pos || recebida ? "feito" : "atual",
+      data: i > pos || dias === null ? null : dataEm(hoje, -(dias + (pos - i) * 6)) }));
+    const situacao = dias === null ? null : alem ? "critico" : dias === 0 ? "feito"
+      : etapa === "protocolado" || uteis < 5 ? "andamento" : uteis < 10 ? "breve" : "critico";
+    const parada = recebida ? null : { desde: dias === null ? null : dataEm(hoje, -dias), dias_uteis: dias === null ? null : uteis,
+      hoje: dias === 0, situacao, prazo_orgao_dias: prazo ? prazo[0] : null, esperada: prazo ? dataEm(hoje, prazo[1]) : null, alem_do_prazo: alem };
+    return { contrato_id, obra, contratante: quem, medicao_id: id, medicao_ids: [id], titulo, numero: parseInt(titulo, 10) || 1, tipo: "execucao",
+      competencia: mes, etapa, etapas, valor_centavos: valor * REAIS, parada, recebida_em: recebida ? dataEm(hoje, -dias) : null,
+      dias_da_nota_ao_recebimento: null,
+      pedido_do_aprovado_centavos: null, abaixo_do_pedido_centavos: null, acima_do_pedido_centavos: null, ...extra };
+  };
+  const comPedido = (pedido, abaixo = 0, acima = 0) => ({ pedido_do_aprovado_centavos: pedido * REAIS,
+    abaixo_do_pedido_centavos: abaixo * REAIS, acima_do_pedido_centavos: acima * REAIS });
+  const doMes = vazio ? [] : [
+    linha(9001, "Avenida Alfa", "SINFRA", "29ª Medição", "em_analise", 553_000, 12, 9),
+    linha(9010, "Hospital Capa", "SES-MT", "5ª Medição", "em_analise", 169_000, 16, 11),
+    linha(9005, "Bairros Épsilon", "SINFRA", "12ª Medição", "boletim", 412_000, 0, 0, comPedido(414_000, 2_000)),
+    linha(9002, "Corredor Beta", "SINFRA", "16ª Medição", "nota", 3_270_000, 1, 1, comPedido(3_270_000)),
+    linha(9009, "Orla Iota", "Pref. Cuiabá", "30ª Medição", "nota", 828_000, 8, 6, comPedido(820_000, 0, 8_000)),
+    { ...linha(9007, "Trevo Eta", "MTPAR", "25ª Medição + Reajuste", "protocolado", 1_904_000, 6, 4, comPedido(1_904_000)), medicao_ids: [9690, 9691] },
+    linha(9008, "Anel Teta", "MTPAR", "8ª Medição", "protocolado", 592_000, 11, 8),
+    // protocoladas com o prazo do orgao: dentro dele (a data esperada vai escrita) e alem dele (critico). O prazo curto
+    // da segunda e' para o estado caber no mes da prova
+    linha(9004, "Quartel Delta", "SINFRA", "35ª Medição", "protocolado", 209_000, 12, 8, { prazo: [47, 35] }),
+    linha(9015, "Viaduto Ômicron", "SES-MT", "3ª Medição", "protocolado", 240_000, 16, 11, { prazo: [14, -2] }),
+    linha(9003, "Estações Gama", "SINFRA", "8ª Medição", "recebido", 14_629_000, 5, null, { ...comPedido(14_629_000), dias_da_nota_ao_recebimento: 4 }),
+    linha(9001, "Avenida Alfa", "SINFRA", "Reajuste da 28ª Medição", "recebido", 1_607_000, 9, null,
+      { tipo: "reajuste", ...comPedido(1_977_000, 370_000), dias_da_nota_ao_recebimento: 31 }),
+    // a planilha/carta gerada e ainda nao enviada: existe, sem valor e sem etapa
+    { ...linha(9004, "Quartel Delta", "SINFRA", "1ª de Projeto", "antes", 0, 4, 3), tipo: "projeto", valor_centavos: null,
+      etapas: ETAPAS_DO_RESUMO.map(e => ({ etapa: e, situacao: "futuro", data: null })) },
+  ];
+  const semMedicao = vazio ? [] : [
+    { contrato_id: 9011, obra: "Complexo Lambda", contratante: "SINFRA", ultima: { medicao_id: 9701, titulo: "7ª Medição", competencia: mesAntes(mes, 3), etapa: "recebido" } },
+    { contrato_id: 9012, obra: "Ponte Mi", contratante: "SINFRA", ultima: { medicao_id: 9702, titulo: "3ª Medição", competencia: mesAntes(mes, 1), etapa: "protocolado" } },
+    { contrato_id: 9013, obra: "Praça Ni", contratante: "Pref. Cuiabá", ultima: { medicao_id: 9703, titulo: "14ª Medição", competencia: mesAntes(mes, 11), etapa: "recebido" } },
+    { contrato_id: 9014, obra: "Rodovia Csi lote 2", contratante: "MTPAR", ultima: null },
+  ];
+  const deAntes = (meses, ...linhas) => linhas.map(l => ({ ...l, competencia: mesAntes(mes, meses) }));
+  const anteriores = vazio ? [] : [
+    ...deAntes(7, linha(9009, "Orla Iota", "Pref. Cuiabá", "23ª Medição", "protocolado", 905_000, 190, 128)),
+    ...deAntes(2, linha(9002, "Corredor Beta", "SINFRA", "14ª Medição", "protocolado", 2_790_000, 48, 33, comPedido(2_800_000, 10_000)),
+      linha(9007, "Trevo Eta", "MTPAR", "23ª Medição", "protocolado", 4_000_000, 51, 35)),
+    ...deAntes(1, linha(9001, "Avenida Alfa", "SINFRA", "28ª Medição", "protocolado", 1_760_000, 20, 14),
+      linha(9003, "Estações Gama", "SINFRA", "7ª Medição", "nota", 9_600_000, 15, 10),
+      linha(9008, "Anel Teta", "MTPAR", "7ª Medição", "em_analise", 610_000, 40, 28)),
+  ];
+  const quantas = ls => ls.reduce((n, l) => n + l.medicao_ids.length, 0);
+  const soma = ls => ls.reduce((n, l) => n + (l.valor_centavos ?? 0), 0);
+  const porEtapa = ls => ["antes", ...ETAPAS_DO_RESUMO].map(e => {
+    const daEtapa = ls.filter(l => l.etapa === e);
+    return { etapa: e, medicoes: quantas(daEtapa), valor_centavos: soma(daEtapa) };
+  });
+  const contratantes = [...new Set([...doMes, ...anteriores].map(l => l.contratante))].sort(porNome).map(n => ({ contratante: n,
+    medicoes: quantas(doMes.filter(l => l.contratante === n)), anteriores: quantas(anteriores.filter(l => l.contratante === n)) }));
+  const recorte = ls => (contratante ? ls.filter(l => l.contratante === contratante) : ls);
+  const linhasDoMes = recorte(doMes), linhasDeAntes = recorte(anteriores);
+  const grupos = [...new Set(linhasDoMes.map(l => l.contratante))].sort(porNome).map(n => {
+    const ls = linhasDoMes.filter(l => l.contratante === n).sort((a, b) => porNome(a.obra, b.obra));
+    return { contratante: n, medicoes: quantas(ls), valor_centavos: soma(ls), linhas: ls };
+  });
+  const medido = soma(linhasDoMes);
+  // o mesmo dia de hoje, um mes antes (o dia 29 em diante fica no 28, para caber em qualquer mes)
+  const d = new Date(hoje), ate = dataEm(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, Math.min(28, d.getUTCDate())));
+  return { ...resposta, contratante, contratantes, etapas: porEtapa(linhasDoMes),
+    // o medido subiu contra o mes anterior e ficou estavel contra o mesmo mes do ano anterior
+    medido: { valor_centavos: medido, mes_anterior: medido ? { competencia: mesAntes(mes, 1), valor_centavos: Math.round(medido / 1.068) } : null,
+      ano_anterior: medido ? { competencia: mesAntes(mes, 12), valor_centavos: Math.round(medido / 0.99) } : null },
+    // o protocolado caiu contra a mesma altura do mes anterior; o recebido nao tem lastro (sem variacao)
+    mesma_altura: medido ? { competencia: mesAntes(mes, 1), ate, protocolado_centavos: 3_780_000 * REAIS, recebido_centavos: null } : null,
+    diferenca_critica_por_mil: 5, grupos, sem_medicao: recorte(semMedicao), anteriores_etapas: porEtapa(linhasDeAntes),
+    anteriores: [...new Set(linhasDeAntes.map(l => l.competencia))].sort().map(c => {
+      const ls = linhasDeAntes.filter(l => l.competencia === c);
+      return { competencia: c, medicoes: quantas(ls), valor_centavos: soma(ls), linhas: ls };
+    }) };
+};
+
 // #805, Obras por contratante: a carteira que o cadastro de exemplo nao tem (ele tem um orgao so', duas obras em
 // andamento e nenhuma medicao no mes fechado). Quatro contratantes (as siglas sao as que o codigo conhece; as obras e
 // os valores sao inventados): obra devagar, em atencao e adiantada; obra paralisada, com a execucao vencida, em

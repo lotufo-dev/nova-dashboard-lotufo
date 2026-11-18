@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
@@ -61,8 +61,13 @@ describe("App: os Avisos têm página própria (#805)", () => {
     window.history.replaceState(null, "", "/obras?c=SINFRA");
     render(<App />);
     expect(await screen.findByRole("heading", { level: 1, name: /^Obras/ })).toBeTruthy();
-    expect(window.location.pathname + window.location.search).toBe("/obras?c=SINFRA");
+    // O filtro de antes da #805 (?c=) abre a tabela de todas as obras, com o filtro, quando a lista chega
+    // (Contratos.tsx). O teste espera esse endereco final: conferir o endereco logo que o titulo aparece dependia de a
+    // lista ja' ter chegado ou nao, e o teste passava ou falhava conforme a maquina.
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe("/obras/todas?c=SINFRA"));
+    expect(screen.getByRole("heading", { level: 1, name: /^Obras/ })).toBeTruthy();
     expect(trilho().getByRole("link", { name: "Obras" }).getAttribute("aria-current")).toBe("page");
+    expect(trilho().getByRole("link", { name: "Avisos" }).getAttribute("aria-current")).toBeNull();
   });
 });
 

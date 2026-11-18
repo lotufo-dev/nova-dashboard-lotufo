@@ -1,5 +1,9 @@
-"""Pagina Resumo das medicoes (issue #749): em que etapa do ciclo esta' a medicao de cada obra numa competencia, as
-obras sem medicao nela e as medicoes de competencias anteriores ainda em aberto. So' leitura.
+"""Pagina Resumo das medicoes (issues #749 e #805): em que etapa do ciclo esta' a medicao de cada obra numa
+competencia, as obras sem medicao nela e as medicoes de competencias anteriores ainda em aberto. So' leitura.
+
+A pergunta da tela (decisao do dono de 18/11/2026, #805) e' de quem le: "onde esta' o dinheiro do mes?". A resposta e'
+um quadro com uma coluna por etapa e um cartao por medicao; os numeros de cada coluna, as referencias das variacoes e
+os dois lados da diferenca saem daqui, prontos (a tela nao soma).
 
 As etapas sao as do glossario, na ordem do ciclo: em analise, boletim, nota, protocolado, recebido.
 
@@ -44,10 +48,52 @@ mes, `medicoes._quadro_do_mes`).
 
 Obra sem o passo "Envio da nota" (#743): nao tem a etapa protocolado; a nota emitida fica na etapa da nota, desde a
 emissao, ate' a baixa do RM (ou o registro do administrador) leva'-la a recebido, sem protocolo.
+
+O QUE A #805 ACRESCENTOU (todo numero na cota, em centavos inteiros):
+
+- MEDIDO DO MES (`medido`): o medido da competencia, o MESMO numero do Fechamento (`fechamento.medido_das_competencias`:
+  as medicoes e a conta de `fechamento.medido_na_cota`). E' a soma dos valores das cinco etapas: as duas contas tem a
+  mesma regra (a medicao enviada ao orgao; o aprovado e, sem boletim, o pedido), e um teste confere que fecham. As
+  referencias da variacao sao esse mesmo medido na competencia anterior (`mes_anterior`) e na mesma competencia do
+  ano anterior (`ano_anterior`). So' na competencia ja' encerrada (anterior ao mes de hoje: o mes em curso ainda
+  recebe medicao, a regra de `fechamento._medido_do_ano_anterior`), e so' quando a referencia e' de `ANO_INICIAL` em
+  diante e teve medido; senao, nula.
+- A MESMA ALTURA DO MES ANTERIOR (`mesma_altura`): a referencia da variacao do protocolado e do recebido. O valor de
+  uma etapa e' um retrato de hoje (o medido das medicoes que estao nela), entao a referencia e' o mesmo retrato da
+  competencia anterior na data em que faltavam para ela os mesmos dias: o mesmo dia de hoje, um mes antes (`ate`; dia
+  31 num mes de 30 vira o ultimo dia). Hoje em 18/11 e a competencia de outubro: o que as medicoes de setembro tinham
+  no protocolado e no recebido em 18/10. Onde cada medicao estava naquele dia sai das datas dos eventos, nunca da
+  competencia: estava recebida com a data do recebimento ate' `ate`; estava no protocolado com a data do primeiro
+  protocolo ate' `ate` e sem recebimento ate' la'. O valor e' o medido de hoje dessas medicoes.
+  So' aparece o que tem lastro: se uma medicao da competencia anterior chegou a' etapa sem a data do evento (recebida
+  sem a data do recebimento; protocolada, ou recebida depois de `ate`, sem a data do protocolo na obra que tem a
+  etapa), a referencia daquela etapa vem nula e a tela nao mostra a variacao. Competencia anterior a `ANO_INICIAL` nao
+  serve de referencia: `mesma_altura` vem nulo.
+- PARADA HA' (`parada`): ha' quanto tempo a medicao esta' parada e a leitura disso. E' o MESMO `parada` da fila de
+  trabalho da tela Medicoes (`fila_medicoes.paradas`, a unica leitura do tempo parado): os dias uteis desde o evento
+  que abriu a situacao atual da medicao, com os limites do SIGA; no passo Pagamento, critico so' depois da data
+  esperada do recebimento pelo prazo do orgao (docs/adr/0007). A mesma medicao tem o mesmo tom nas duas telas. O
+  evento e' o da situacao, que pode ser mais novo que o da etapa: na etapa do boletim, o espelho gerado ou o e-mail
+  ao faturamento; no protocolado, o ultimo protocolo. A data de cada etapa continua em `etapas`. Na linha que junta
+  execucao e reajuste e a fila nao junta, vale o `parada` da mais parada das duas. Nulo na recebida, que nao esta'
+  parada: ela leva `recebida_em` e, com a emissao da nota registrada, os dias corridos da nota ao recebimento
+  (`dias_da_nota_ao_recebimento`).
+- DIFERENCA ENTRE O APROVADO E O PEDIDO (`pedido_do_aprovado_centavos`, `abaixo_do_pedido_centavos`,
+  `acima_do_pedido_centavos`): a conta do Fechamento, medicao a medicao (`fechamento.aprovado_contra_o_pedido`, a
+  unica: a tolerancia de R$ 0,05 no valor cheio; aqui na cota, como no Fechamento; a tela Medicoes usa a mesma
+  funcao no valor cheio); nulos sem os dois valores. A linha que junta execucao e reajuste soma as duas. O limite que separa a diferenca
+  pequena da critica vai em `diferenca_critica_por_mil` (`avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL`, #741).
+- FILTRO POR CONTRATANTE (`contratante`): recorta tudo (linhas, etapas, medido, referencias, obras sem medicao e meses
+  anteriores) para as obras daquele contratante. `contratantes` lista, sem recorte, quem tem medicao na competencia
+  ou em meses anteriores, com a quantidade de cada.
+- MESES ANTERIORES: so' de `diretoria.ANO_INICIAL` em diante (decisao do dono: pendencia anterior a 2025 fica fora
+  das telas da diretoria), por competencia, com a quantidade e o medido de cada uma e a contagem por etapa
+  (`anteriores_etapas`).
 """
+import calendar
 import datetime
 
-from app import contratos, db, diretoria, medicoes, tempo
+from app import avisos_medicao, contratos, db, diretoria, fechamento, fila_medicoes, medicoes, tempo
 
 ETAPAS = ("em_analise", "boletim", "nota", "protocolado", "recebido")
 ROTULO = {"antes": "Planilha/carta a enviar", "em_analise": "Em análise", "boletim": "Boletim", "nota": "Nota",
@@ -123,15 +169,42 @@ def _medicao(conn, m: dict, passos_de) -> dict | None:
         etapas.append({"etapa": e, "situacao": situacao, "data": dia.isoformat() if dia else None})
     return {"id": m["id"], "contrato_id": m["contrato_id"], "numero": m["numero"], "tipo": m["tipo"],
             "competencia": m["competencia"], "titulo": medicoes.titulo(m), "etapa": da_vez, "etapas": etapas,
-            "valor_centavos": _cota(m)}
+            "valor_centavos": _cota(m),
+            # #805: os dois lados da diferenca aprovado x pedido, a conta do Fechamento; nulo sem os dois valores
+            "diferenca": fechamento.aprovado_contra_o_pedido(m["estado"], m["valor_protocolado_centavos"],
+                                                             m["valor_atestado_centavos"], m["pct"])}
 
 
-def _linhas(partes: list[dict], obras: dict[int, dict]) -> list[dict]:
+def _dia(iso: str | None) -> datetime.date | None:
+    return datetime.date.fromisoformat(iso) if iso else None
+
+
+def _parada_da_linha(juntas: list[dict], paradas: dict[int, dict]) -> dict | None:
+    """#805: o `parada` da linha, o da fila de trabalho (`fila_medicoes.paradas`). A fila junta execucao e reajuste
+    pela situacao e esta pagina pela etapa: quando as duas medicoes da linha tem leituras diferentes, vale a da mais
+    parada (alem do prazo do orgao primeiro; depois, mais dias uteis). Nulo quando nenhuma esta' aberta (a recebida)."""
+    das_partes = [paradas[p["id"]] for p in juntas if p["id"] in paradas]
+    if not das_partes:
+        return None
+    return max(das_partes, key=lambda x: (x["alem_do_prazo"], x["dias_uteis"] if x["dias_uteis"] is not None else -1))
+
+
+def _recebimento(etapa: str, datas: dict) -> dict:
+    """#805: na linha recebida, a data do recebimento e os dias corridos da emissao da nota ate' ele; nulos nas outras
+    e sem a data do evento (nada conta da competencia)."""
+    nota, recebido = _dia(datas.get("nota")), _dia(datas.get("recebido"))
+    recebida = etapa == "recebido"
+    return {"recebida_em": recebido.isoformat() if recebida and recebido else None,
+            "dias_da_nota_ao_recebimento": (recebido - nota).days if recebida and nota and recebido and recebido >= nota else None}
+
+
+def _linhas(partes: list[dict], obras: dict[int, dict], paradas: dict[int, dict]) -> list[dict]:
     """Uma linha por medicao. A execucao e o reajuste de mesmo numero, na mesma competencia e na mesma etapa, viram
     uma linha so' ("24ª Medição + Reajuste", como em `medicoes.linhas_em_andamento`): o valor e' a soma das duas cotas
     e cada etapa leva a data da ultima das duas a chegar nela. So' se juntam quando as duas dizem o mesmo de cada
     etapa que tem em comum (uma com o registro do boletim e a outra sem ficam em duas linhas): a linha conjunta nao
-    afirma de uma o que so' a outra tem."""
+    afirma de uma o que so' a outra tem. A diferenca entre o aprovado e o pedido da linha conjunta soma a das duas
+    (cada uma com a propria tolerancia). `paradas` e' o de `fila_medicoes.paradas` (`_parada_da_linha`)."""
     grupos: dict[tuple, list[dict]] = {}
     for p in partes:
         grupos.setdefault((p["contrato_id"], p["competencia"], p["numero"], p["etapa"]), []).append(p)
@@ -150,6 +223,9 @@ def _linhas(partes: list[dict], obras: dict[int, dict]) -> list[dict]:
                 dias = [x["data"] for p in juntas for x in p["etapas"] if x["etapa"] == e["etapa"] and x["data"]]
                 etapas.append({**e, "data": max(dias) if dias else None})
             valores = [p["valor_centavos"] for p in juntas if p["valor_centavos"] is not None]
+            diferencas = [p["diferenca"] for p in juntas if p["diferenca"] is not None]
+            da_diferenca = {k: sum(d[k] for d in diferencas) if diferencas else None
+                            for k in ("pedido_do_aprovado_centavos", "abaixo_do_pedido_centavos", "acima_do_pedido_centavos")}
             o = obras.get(principal["contrato_id"], {})
             linhas.append({
                 "contrato_id": principal["contrato_id"], "obra": o.get("obra"), "contratante": o.get("contratante"),
@@ -157,7 +233,9 @@ def _linhas(partes: list[dict], obras: dict[int, dict]) -> list[dict]:
                 "titulo": f"{principal['titulo']} + Reajuste" if len(juntas) == 2 else principal["titulo"],
                 "numero": principal["numero"], "tipo": principal["tipo"], "competencia": principal["competencia"],
                 "etapa": principal["etapa"], "etapas": etapas,
-                "valor_centavos": sum(valores) if valores else None})
+                "valor_centavos": sum(valores) if valores else None,
+                "parada": _parada_da_linha(juntas, paradas),
+                **_recebimento(principal["etapa"], {e["etapa"]: e["data"] for e in etapas}), **da_diferenca})
     linhas.sort(key=lambda x: (medicoes._chave_nome(x["obra"]), x["contrato_id"], _ORDEM_TIPO.index(x["tipo"]),
                                x["numero"], x["medicao_id"]))
     return linhas
@@ -172,20 +250,90 @@ def _atualizacao(conn) -> dict:
     return {"ultimo_lancamento": lancamento, "rm_lido_em": rm}
 
 
-def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> dict:
+def _por_etapa(partes: list[dict]) -> list[dict]:
+    """Quantas medicoes estao em cada etapa e o medido delas, na cota (`antes`: planilha/carta ainda nao enviada)."""
+    return [{"etapa": e, "medicoes": sum(1 for p in partes if p["etapa"] == e),
+             "valor_centavos": sum(p["valor_centavos"] or 0 for p in partes if p["etapa"] == e)}
+            for e in ("antes", *ETAPAS)]
+
+
+def _subtotal(linhas: list[dict]) -> dict:
+    """A quantidade de medicoes e o medido de um grupo de linhas (o contratante; nos meses anteriores, a competencia)."""
+    return {"medicoes": sum(len(x["medicao_ids"]) for x in linhas),
+            "valor_centavos": sum(x["valor_centavos"] or 0 for x in linhas)}
+
+
+def _mes_mais(mes: str, soma: int) -> str:
+    return diretoria._mes(datetime.date(int(mes[:4]), int(mes[5:7]), 1), soma)
+
+
+def _um_mes_antes(d: datetime.date) -> datetime.date:
+    """O mesmo dia do mes anterior; dia que o mes anterior nao tem (31, ou 29 e 30 em fevereiro) vira o ultimo dele."""
+    ano, mes = (d.year, d.month - 1) if d.month > 1 else (d.year - 1, 12)
+    return datetime.date(ano, mes, min(d.day, calendar.monthrange(ano, mes)[1]))
+
+
+def _medido(conn, hoje: datetime.date, mes: str, contratos_ids) -> dict:
+    """O medido da competencia e as duas referencias da variacao dele (ver o texto do modulo): o numero do Fechamento."""
+    anterior, ano_anterior = _mes_mais(mes, -1), _mes_mais(mes, -12)
+    soma = fechamento.medido_das_competencias(conn, (mes, anterior, ano_anterior), contratos_ids)
+    encerrada = mes < hoje.strftime("%Y-%m")
+
+    def referencia(competencia: str) -> dict | None:
+        serve = encerrada and competencia[:4] >= diretoria.ANO_INICIAL and soma[competencia] > 0
+        return {"competencia": competencia, "valor_centavos": soma[competencia]} if serve else None
+    return {"valor_centavos": soma[mes], "mes_anterior": referencia(anterior), "ano_anterior": referencia(ano_anterior)}
+
+
+def _mesma_altura(partes: list[dict], competencia: str, ate: datetime.date) -> dict | None:
+    """O protocolado e o recebido que as medicoes da competencia anterior (`partes`, as de `_medicao`) tinham em `ate`,
+    pelas datas dos eventos (ver o texto do modulo). A etapa sem lastro (alguma medicao chegou nela sem a data do
+    evento) vem nula."""
+    if competencia[:4] < diretoria.ANO_INICIAL:
+        return None
+    limite = ate.isoformat()
+    protocolado = recebido = 0
+    protocolado_tem_lastro = recebido_tem_lastro = True
+    for p in partes:
+        etapa = {e["etapa"]: e for e in p["etapas"]}
+        valor = p["valor_centavos"] or 0
+        recebida = p["etapa"] == "recebido"
+        quando = etapa["recebido"]["data"] if recebida else None
+        if recebida and quando is None:
+            recebido_tem_lastro = False
+        ja_recebida = recebida and quando is not None and quando <= limite
+        if ja_recebida:
+            recebido += valor
+        do_protocolo = etapa.get("protocolado")
+        # nunca passou pelo protocolado (a obra nao tem a etapa, ou a medicao ainda nao chegou la'), ou ja' tinha
+        # saido dele em `ate`
+        if do_protocolo is None or do_protocolo["situacao"] == "futuro" or ja_recebida:
+            continue
+        if do_protocolo["data"] is None or (recebida and quando is None):
+            protocolado_tem_lastro = False       # nao da' para dizer se estava no protocolado naquele dia
+        elif do_protocolo["data"] <= limite:
+            protocolado += valor
+    return {"competencia": competencia, "ate": limite,
+            "protocolado_centavos": protocolado if protocolado_tem_lastro else None,
+            "recebido_centavos": recebido if recebido_tem_lastro else None}
+
+
+def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None, contratante: str | None = None) -> dict:
     """A competencia `mes` (AAAA-MM; sem ela, a competencia em trabalho: o mes anterior ao de hoje): as linhas por
-    contratante, a contagem por etapa, as obras ativas sem medicao nela (com a ultima medicao de cada uma) e as
-    medicoes abertas de competencias anteriores, da mais antiga para a mais nova. Tudo de um retrato so' do banco
+    contratante, a contagem por etapa, o medido do mes com as referencias, as obras ativas sem medicao nela (com a
+    ultima medicao de cada uma) e as medicoes abertas de competencias anteriores, da mais antiga para a mais nova.
+    `contratante` (a sigla, como em `contratantes`) recorta tudo para as obras dele. Tudo de um retrato so' do banco
     (`db.leitura`, como o Fechamento): uma gravacao no meio nao deixa as linhas de um instante e as obras sem medicao
     de outro."""
     with db.leitura(conn):
-        return _resumo(conn, hoje, mes)
+        return _resumo(conn, hoje, mes, contratante)
 
 
-def _resumo(conn, hoje: datetime.date | None, mes: str | None) -> dict:
+def _resumo(conn, hoje: datetime.date | None, mes: str | None, contratante: str | None) -> dict:
     hoje = hoje or tempo.hoje_local()
     em_trabalho = diretoria._mes(hoje, -1)
     mes = mes or em_trabalho
+    anterior = _mes_mais(mes, -1)
     obras = medicoes._obras_com_contratante(conn)
     passos_de = medicoes.passos_das_medicoes(conn)
     marcas = ",".join("?" * len(_FORA))
@@ -193,19 +341,42 @@ def _resumo(conn, hoje: datetime.date | None, mes: str | None) -> dict:
     sql = ("SELECT m.*, c.percentual_direito_bp AS pct, (SELECT MIN(p.data) FROM medicao_protocolos p "
            "WHERE p.medicao_id=m.id AND p.etapa='nota' AND p.desfeita_em IS NULL) AS protocolado_em FROM medicoes m "
            f"JOIN contratos c ON c.id=m.contrato_id WHERE m.estado NOT IN ({marcas}) ")
-    do_mes, anteriores = [], []
-    for r in conn.execute(sql + "AND (m.competencia=? OR (m.competencia<? AND m.estado<>'recebida'))", (*_FORA, mes, mes)):
+    # a competencia, as abertas de antes dela (so' de `ANO_INICIAL` em diante) e a competencia anterior inteira (as
+    # recebidas tambem: e' a referencia da "mesma altura")
+    do_mes, anteriores, da_anterior = [], [], []
+    for r in conn.execute(sql + "AND (m.competencia IN (?,?) OR (m.competencia<? AND m.estado<>'recebida'))",
+                          (*_FORA, mes, anterior, mes)):
         p = _medicao(conn, dict(r), passos_de)
-        if p is not None:
-            (do_mes if p["competencia"] == mes else anteriores).append(p)
+        if p is None:
+            continue
+        if p["competencia"] == mes:
+            do_mes.append(p)
+            continue
+        if p["competencia"] == anterior:
+            da_anterior.append(p)
+        if p["etapa"] != "recebido" and p["competencia"][:4] >= diretoria.ANO_INICIAL:
+            anteriores.append(p)
 
-    linhas = _linhas(do_mes, obras)
+    # quem tem medicao na competencia ou aberta em meses anteriores, antes do recorte: as opcoes do filtro
+    nome_de = lambda p: obras.get(p["contrato_id"], {}).get("contratante") or "sem contratante"
+    quantos: dict[str, dict] = {}
+    for chave, partes in (("medicoes", do_mes), ("anteriores", anteriores)):
+        for p in partes:
+            quantos.setdefault(nome_de(p), {"medicoes": 0, "anteriores": 0})[chave] += 1
+    contratantes = [{"contratante": k, **quantos[k]} for k in sorted(quantos, key=medicoes._chave_nome)]
+
+    # #805: o recorte por contratante vale para tudo o que a pagina mostra
+    do_recorte = None if contratante is None else {i for i, o in obras.items() if o["contratante"] == contratante}
+    if do_recorte is not None:
+        do_mes, anteriores, da_anterior = ([p for p in ps if p["contrato_id"] in do_recorte]
+                                           for ps in (do_mes, anteriores, da_anterior))
+
+    # #805: o tempo parado de cada medicao aberta, o mesmo da fila de trabalho da tela Medicoes
+    paradas = fila_medicoes.paradas(conn, hoje, obras)
+    linhas = _linhas(do_mes, obras, paradas)
     grupos: dict[str, list[dict]] = {}
     for x in linhas:
         grupos.setdefault(x["contratante"] or "sem contratante", []).append(x)
-    etapas = [{"etapa": e, "medicoes": sum(1 for p in do_mes if p["etapa"] == e),
-               "valor_centavos": sum(p["valor_centavos"] or 0 for p in do_mes if p["etapa"] == e)}
-              for e in ("antes", *ETAPAS)]
 
     # a ultima medicao de execucao ou de projeto de cada obra, ate' a competencia da pagina (o reajuste acompanha a execucao)
     ultima: dict[int, dict] = {}
@@ -222,16 +393,22 @@ def _resumo(conn, hoje: datetime.date | None, mes: str | None) -> dict:
     sem_medicao = [{"contrato_id": o["id"], "obra": o["obra"], "contratante": o["contratante"], "ultima": ultima.get(o["id"])}
                    for o in sorted(obras.values(), key=lambda o: (medicoes._chave_nome(o["obra"]), o["id"]))
                    if o["id"] not in com_medicao and o["id"] not in sem_fluxo and o["estado"] == "ativo"
-                   and not o["encerramento_iniciado_em"]]
+                   and not o["encerramento_iniciado_em"] and (do_recorte is None or o["id"] in do_recorte)]
 
     por_competencia: dict[str, list[dict]] = {}
-    for x in _linhas(anteriores, obras):
+    for x in _linhas(anteriores, obras, paradas):
         por_competencia.setdefault(x["competencia"], []).append(x)
     return {"hoje": hoje.isoformat(), "mes": mes, "em_trabalho": em_trabalho, "atualizacao": _atualizacao(conn),
-            "etapas": etapas,
-            "grupos": [{"contratante": k, "linhas": v} for k, v in sorted(grupos.items(), key=lambda kv: medicoes._chave_nome(kv[0]))],
+            "contratante": contratante, "contratantes": contratantes,
+            "etapas": _por_etapa(do_mes), "medido": _medido(conn, hoje, mes, do_recorte),
+            "mesma_altura": _mesma_altura(da_anterior, anterior, _um_mes_antes(hoje)),
+            "diferenca_critica_por_mil": avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL,
+            "grupos": [{"contratante": k, **_subtotal(v), "linhas": v}
+                       for k, v in sorted(grupos.items(), key=lambda kv: medicoes._chave_nome(kv[0]))],
             "sem_medicao": sem_medicao,
-            "anteriores": [{"competencia": k, "linhas": por_competencia[k]} for k in sorted(por_competencia)]}
+            "anteriores_etapas": _por_etapa(anteriores),
+            "anteriores": [{"competencia": k, **_subtotal(por_competencia[k]), "linhas": por_competencia[k]}
+                           for k in sorted(por_competencia)]}
 
 
 def _data_br(iso: str | None) -> str:

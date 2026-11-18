@@ -79,6 +79,32 @@ def _parada(desde: datetime.date | None, hoje: datetime.date, passo: int, espera
             "esperada": esperada.isoformat() if no_pagamento and esperada else None, "alem_do_prazo": alem}
 
 
+def _parada_da_linha(x: dict, ms: list[dict], hoje: datetime.date, prazos: dict) -> dict:
+    """O `parada` de uma linha de `medicoes.linhas_em_andamento` (`x`), com as medicoes dela (`ms`, as de
+    `diretoria._medicoes`) e os prazos de `diretoria.prazos_do_orgao`: o marco e o passo sao os da linha; a data
+    esperada do recebimento (docs/adr/0007) e' a mais proxima entre as medicoes dela."""
+    esperadas = [e for e in (diretoria.esperada(i, prazos) for i in ms) if e]
+    marco = datetime.date.fromisoformat(x["marco"]) if x["marco"] else None
+    return _parada(marco, hoje, x["passo"]["numero"], min(esperadas) if esperadas else None,
+                   prazos.get(diretoria._contratante(ms[0])))
+
+
+def paradas(conn, hoje: datetime.date, obras: dict[int, dict] | None = None) -> dict[int, dict]:
+    """Medicao aberta -> o `parada` da linha dela na fila de trabalho, de qualquer competencia. E' a UNICA leitura do
+    tempo parado de uma medicao: a da tela Medicoes (`fila`) e a do cartao do Resumo das medicoes
+    (`resumo_medicoes.py`), para a mesma medicao nao sair critica numa tela e em andamento na outra. A medicao e o
+    reajuste que a fila junta numa linha levam o mesmo `parada`. `obras` e' o de `medicoes._obras_com_contratante`,
+    para quem ja' o leu."""
+    todas = diretoria._medicoes(conn)
+    de = {m["id"]: m for m in todas}
+    prazos = diretoria.prazos_do_orgao(todas, hoje)
+    out: dict[int, dict] = {}
+    for x in medicoes.linhas_em_andamento(conn, hoje, obras=obras):
+        parada = _parada_da_linha(x, [de[i] for i in x["medicao_ids"]], hoje, prazos)
+        out.update(dict.fromkeys(x["medicao_ids"], parada))
+    return out
+
+
 def _comparar(ms: list[dict]) -> dict:
     """Pedido, aprovado e a diferenca entre eles de um conjunto de medicoes (a linha, a obra, o contratante, o mes),
     no valor cheio. Pedido e aprovado somam as medicoes que tem cada valor (nulo sem nenhuma), como o quadro do mes
@@ -121,17 +147,13 @@ def fila(conn, hoje: datetime.date | None = None, mes: str | None = None) -> dic
         # a medicao da vez na linha de medicao + reajuste: a menos adiantada, como o passo de `linhas_em_andamento`
         m = min(ms, key=lambda m: medicoes.passo_do_estado(m["estado"], passos_de(m)))
         tem, n = passos_de(m), x["passo"]["numero"]
-        # a data esperada do recebimento (docs/adr/0007): a mais proxima entre as medicoes da linha
-        esperadas = [e for e in (diretoria.esperada(i, prazos) for i in ms) if e]
-        marco = datetime.date.fromisoformat(x["marco"]) if x["marco"] else None
         return {"contrato_id": x["contrato_id"], "obra": x["obra"], "contratante": x["contratante"],
                 "orgao_sub": x["orgao_sub"], "medicao_id": x["medicao_id"], "medicao_ids": x["medicao_ids"],
                 "titulo": x["titulo"], "competencia": x["competencia"], "com_quem": com_quem(n, m["estado"]),
                 "passo": {**x["passo"], "posicao": tem.index(n) + 1 if n in tem else None, "total": len(tem)},
                 "passos": [{"numero": p, "nome": medicoes.PASSOS[p - 1],
                             "situacao": "feito" if p < n else "atual" if p == n else "futuro"} for p in tem],
-                "parada": _parada(marco, hoje, n, min(esperadas) if esperadas else None,
-                                  prazos.get(diretoria._contratante(m))),
+                "parada": _parada_da_linha(x, ms, hoje, prazos),
                 **_comparar(ms), "acao": acao(n, m["estado"])}
 
     abertas = [linha(x) for x in medicoes.linhas_em_andamento(conn, hoje) if x["competencia"]]

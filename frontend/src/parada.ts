@@ -20,3 +20,9 @@ export function textoDoTempo(p: Pick<Parada, "dias_uteis" | "hoje">): string {
   if (p.dias_uteis < 1) return "menos de 1 dia útil";
   return p.dias_uteis === 1 ? "1 dia útil" : `${p.dias_uteis.toLocaleString("pt-BR")} dias úteis`;
 }
+
+/** O mesmo tempo dito em frase, para onde nao ha' a coluna "Parada há" por cima (o cartao do Resumo das medicoes):
+ *  "desde hoje", "há menos de 1 dia útil", "há 12 dias úteis". */
+export function fraseDoTempo(p: Pick<Parada, "dias_uteis" | "hoje">): string {
+  return p.hoje ? "desde hoje" : `há ${textoDoTempo(p)}`;
+}
