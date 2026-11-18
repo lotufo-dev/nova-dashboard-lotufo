@@ -301,6 +301,13 @@ def _espelhos(conn) -> None:
                      (contrato, n, usuario))
 
 
+def _contrato_fiscais(conn) -> None:
+    contrato = _contrato(conn)
+    for n in range(1, _LINHAS + 1):
+        conn.execute("INSERT INTO contrato_fiscais (contrato_id, nome, email, desde) VALUES (?,?,?,'2026-01-01')",
+                     (contrato, f"Fiscal {n}", f"fiscal{n}@exemplo.gov.br"))
+
+
 # Como por linhas em cada tabela que alguma migracao reconstroi, so' com as colunas obrigatorias: a mesma receita serve
 # em qualquer ponto da historia do esquema. Cada caso semeia TODAS as daqui que ja' existem no banco, nao so' a que a
 # migracao mexe: a tabela reconstruida fica com linhas filhas apontando para ela (medicao_documentos -> medicoes,
@@ -309,6 +316,7 @@ _SEMEAR = {
     "medicoes": _medicoes,
     "medicao_documentos": _medicao_documentos,
     "notas_fiscais": _notas_fiscais,
+    "contrato_fiscais": _contrato_fiscais,
     "protocolo_pecas": _protocolo_pecas,
     "pleitos": _pleitos,
     "pleito_anexos": _pleito_anexos,

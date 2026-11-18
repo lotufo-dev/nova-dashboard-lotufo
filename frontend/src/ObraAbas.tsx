@@ -172,8 +172,9 @@ export function ContratoObra({ contratoId }: { contratoId: number }) {
             <dd>{!cad.dados ? (cad.erro ? "—" : "carregando…") : fiscais.length === 0 ? "—" : (
               <ul className="lista-simples">
                 {fiscais.map(f => (
-                  <li key={`${f.email}-${f.desde}`}>{f.nome || f.email || "—"}
-                    {f.cargo ? `, ${f.cargo}` : ""}{f.portaria ? `, ${f.portaria}` : ""}</li>
+                  <li key={`${f.email ?? f.nome}-${f.desde}`}>{f.nome || f.email || "—"}
+                    {f.cargo ? `, ${f.cargo}` : ""}{f.portaria ? `, ${f.portaria}` : ""}
+                    {f.email ? (f.nome ? `, ${f.email}` : "") : ", sem e-mail cadastrado"}</li>
                 ))}
               </ul>
             )}</dd>

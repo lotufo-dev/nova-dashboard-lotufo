@@ -1226,7 +1226,7 @@ def _destinatarios(conn, regras: dict, e: Etapa, c: dict, hoje: datetime.date) -
     if chave == "protocolo_assinados_para":     # nota da SINFRA (SUEF I/II, SUPU): so' o protocolo, sem fiscal
         return para, [x for x in copia if x not in para]
     f = carta.fiscal_vigente(conn, c["id"], hoje.isoformat())
-    if f and f["email"] not in para:
+    if f and f["email"] and f["email"] not in para:      # fiscal sem e-mail cadastrado e' so' A/C da carta
         para.append(f["email"])
     para += [x for x in json.loads(c.get("destinatarios_extras") or "[]") if x not in para]
     return para, [x for x in copia if x not in para]
