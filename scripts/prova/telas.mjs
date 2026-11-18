@@ -13,7 +13,7 @@
 //            obra com medicao, a primeira medicao dela e a primeira empresa com certidao exigida (ver `capturar.mjs`)
 //   perfis   quem abre a tela na prova (o menu de cada perfil esta' em frontend/src/navegacao.ts)
 //   espera   seletor do conteudo principal: sem ele visivel, a tela nao carregou
-//   menu     so' quando o link do menu e' outro endereco que leva a esta tela (Avisos: `/avisos` abre Obras)
+//   menu     so' quando o link do menu e' outro endereco que leva a esta tela (hoje nenhuma: todo item abre o proprio)
 //   passos   o que fazer depois de a tela abrir, para chegar ao ESTADO a conferir (janela, formulario, aba):
 //            { clicar: seletor }, { preencher: [seletor, texto] } ou { arquivo: [seletor do campo, nome do PDF] }.
 //            Com passos, `espera` e' o seletor do estado ja' aberto
@@ -26,7 +26,7 @@
 //   destino  o caminho em que a tela termina, quando ela so' leva a outra (`/notas/envio/:id` abre a pagina da medicao)
 //
 // Todo item do menu de um perfil precisa de uma tela aqui para esse perfil: a prova reprova o item sem tela.
-import { cabecalhoCom, cabecalhoEmDia, CUSTO_DA_OBRA, detalheDoEnvio, espelhoEnviadoPorFora, espelhoGerado, falha,
+import { avisosEmVolume, semAvisos, cabecalhoCom, cabecalhoEmDia, CUSTO_DA_OBRA, detalheDoEnvio, espelhoEnviadoPorFora, espelhoGerado, falha,
          fechamentoComValores, fichaComNecessario, inicioComAParte, inicioComVariacoes, semAvisoDePrazo,
          medicaoComEspelhoEnviadoPorFora, medicaoComEspelhoGerado, medicaoComExcluidosNoRm, obrasComAParte, reconciliacaoComBaixados,
          medicaoComNotaDivergente, medicaoComNotaEmitida, medicaoDaMtpar, NOTAS_COM_DIVERGENCIA, notasAEnviar, notasComEnvioAberto,
@@ -80,6 +80,8 @@ const comNecessario = noRitmo => [
   { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaComNecessario(noRitmo) },
   { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
 ];
+// issue #805: a fila de avisos com o volume da producao (dezenas de vencidos em varias obras; ver simulados.mjs)
+const comAvisosEmVolume = [{ caminho: /^\/api\/inicio$/, ajustar: avisosEmVolume }];
 
 export const TELAS = [
   // ---- Inicio
@@ -118,7 +120,25 @@ export const TELAS = [
     simular: [{ caminho: /^\/api\/contratos$/, corpo: [] }] },
   { rota: "obras", id: "obras-erro", caminho: "/obras", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/contratos$/) },
-  { rota: "avisos", id: "avisos", caminho: "/obras?avisos=1", menu: "/avisos", perfis: TODOS, espera: ".avs" },
+
+  // ---- Avisos (#805): a pagina propria com o cadastro de exemplo; com o volume da producao (dezenas de vencidos em
+  // varias obras), fechada e com uma obra aberta; filtrada por uma obra e por um assunto; vazia; a falha; e o
+  // endereco de antes, de quando os Avisos abriam dentro de Obras
+  { rota: "avisos", id: "avisos", caminho: "/avisos", perfis: TODOS, espera: ".avs-numeros" },
+  { rota: "avisos", id: "avisos-volume", caminho: "/avisos", perfis: TODOS, espera: ".avs-vencidos",
+    simular: comAvisosEmVolume },
+  { rota: "avisos", id: "avisos-volume-aberta", caminho: "/avisos", perfis: TODOS, antes: ".avs-vencidos", espera: ".avs-vencido__itens",
+    simular: comAvisosEmVolume, passos: [{ clicar: ".avs-vencido:nth-child(1) .avs-abre" }] },
+  { rota: "avisos", id: "avisos-obra", caminho: "/avisos?obra=:obra", perfis: TODOS, espera: ".avs-recorte + .avs-numeros",
+    simular: comAvisosEmVolume },
+  { rota: "avisos", id: "avisos-assunto", caminho: "/avisos?familia=reajuste", perfis: ["diretoria"], espera: ".avs-vencidos",
+    simular: comAvisosEmVolume },
+  { rota: "avisos", id: "avisos-vazia", caminho: "/avisos", perfis: SO_ADMIN, espera: ".avs-barra + .avs-vazio",
+    simular: [{ caminho: /^\/api\/inicio$/, ajustar: semAvisos }] },
+  { rota: "avisos", id: "avisos-erro", caminho: "/avisos", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
+    simular: falha(/^\/api\/inicio$/) },
+  { rota: "avisos", id: "avisos-endereco-de-antes", caminho: "/obras?c=todas&avisos=1", destino: "/avisos", perfis: SO_ADMIN,
+    espera: ".avs-numeros" },
 
   // ---- SIGA: sem processo (o cadastro de exemplo), com processos, o historico de um e os dois formularios
   { rota: "siga", id: "siga", caminho: "/siga", perfis: OPERA, espera: ".sg__quadro" },

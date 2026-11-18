@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buscaDosAvisosEmObras, caminhoDe, hrefDe, origemPara, parseRota, substituir, type Rota } from "./rota";
+import { buscaDosAvisos, caminhoDe, hrefDe, origemPara, parseRota, substituir, type Rota } from "./rota";
 
 describe("rota", () => {
   it("toda rota tem um caminho canônico e volta igual", () => {
@@ -117,13 +117,19 @@ describe("rota", () => {
     expect(origemPara(obra, "/obras/7", { tela: "documentos" }, vinda)).toBeUndefined();
   });
 
-  it("/avisos abre Obras com os Avisos abertos, de todas as obras, mantendo os filtros do link (#159)", () => {
+  it("/avisos é a página Avisos; o endereço de antes (/obras?avisos=1) leva para ela com os filtros equivalentes (#805)", () => {
     expect(parseRota("/avisos")).toEqual({ tela: "avisos" });
-    expect(buscaDosAvisosEmObras({})).toEqual({ c: "todas", avisos: "1" });
-    expect(buscaDosAvisosEmObras({ obra: "7", familia: "prazos" })).toEqual({ c: "todas", avisos: "1", obra: "7", familia: "prazos" });
-    window.history.replaceState(null, "", "/avisos?obra=7#x");
-    substituir({ tela: "obras" }, { busca: buscaDosAvisosEmObras({ obra: "7" }) });
-    expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe("/obras?c=todas&avisos=1&obra=7#x");
+    expect(caminhoDe({ tela: "avisos" })).toBe("/avisos");
+    // `c=todas` era o padrão; `avisos`, `nivel`, `agrupar` e os filtros da lista de Obras ficam para trás
+    expect(buscaDosAvisos({ c: "todas", avisos: "1" })).toEqual({});
+    expect(buscaDosAvisos({ c: "todas", avisos: "1", obra: "7", familia: "prazos", nivel: "critico", agrupar: "obra", q: "granito" }))
+      .toEqual({ familia: "prazos", obra: "7" });
+    // o contratante do link continua valendo, também no `?orgao=` mais antigo
+    expect(buscaDosAvisos({ c: "SINFRA", avisos: "1" })).toEqual({ c: "SINFRA" });
+    expect(buscaDosAvisos({ orgao: "SINFRA - SUEF II", avisos: "1" })).toEqual({ c: "SINFRA - SUEF II" });
+    window.history.replaceState(null, "", "/obras?c=todas&avisos=1&obra=7#x");
+    substituir({ tela: "avisos" }, { busca: buscaDosAvisos({ c: "todas", avisos: "1", obra: "7" }) });
+    expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe("/avisos?obra=7#x");
     window.history.replaceState(null, "", "/contratos?q=x");
     substituir({ tela: "obras" });
     expect(window.location.pathname + window.location.search).toBe("/obras?q=x");

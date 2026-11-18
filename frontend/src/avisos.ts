@@ -119,6 +119,55 @@ export function porSecao(avisos: Aviso[], hoje?: string): { id: Secao; rotulo: s
   return SECOES.map(s => ({ ...s, itens: avisos.filter(a => secaoDoAviso(a, hoje) === s.id).sort(ordem) }));
 }
 
+/** Os dias com sinal, por extenso, como o selo os escreve: "há 3 dias" no que passou, "hoje", "em 5 dias". */
+export function diasPorExtenso(d: number): string {
+  const n = Math.abs(d), txt = `${n.toLocaleString("pt-BR")} ${n === 1 ? "dia" : "dias"}`;
+  return d < 0 ? `há ${txt}` : d === 0 ? "hoje" : `em ${txt}`;
+}
+
+/** O nome da familia, como a aba e a coluna do assunto o escrevem. */
+export const rotuloDaFamilia = (f: Familia) => FAMILIAS.find(x => x.id === f)?.rotulo ?? f;
+
+// ---- Vencidos por obra (#805): o vencido deixa de ser lista corrida; a decisao da #656 (todos, sem limite de idade) fica ----
+
+/** Uma obra (ou uma empresa, no aviso sem obra) com os vencidos dela: `itens` do mais antigo ao mais novo,
+ *  `familias` na ordem do mapa (o resumo dos assuntos) e `maisAntigo` em dias, positivo. */
+export type GrupoVencido = {
+  chave: string; nome: string; contratoId: number | null; entidadeId: number | null;
+  familias: Familia[]; itens: Aviso[]; maisAntigo: number;
+};
+
+/** Os vencidos agrupados pela obra (`contrato_id`); o aviso sem obra, pela empresa (`entidade_id`); o resto, num
+ *  grupo so'. Do grupo com o vencido mais antigo ao mais novo; no empate, o de mais avisos e depois o nome. O que nao
+ *  venceu (ou nao tem data) fica de fora. */
+export function vencidosPorObra(avisos: Aviso[], hoje?: string): GrupoVencido[] {
+  const vencidos = porSecao(avisos, hoje)[0].itens;
+  const grupos = new Map<string, GrupoVencido>();
+  for (const a of vencidos) {
+    const chave = a.contrato_id !== null ? `obra-${a.contrato_id}` : a.entidade_id != null ? `empresa-${a.entidade_id}` : "sem-obra";
+    const g = grupos.get(chave) ?? { chave, contratoId: a.contrato_id, entidadeId: a.contrato_id === null ? a.entidade_id ?? null : null,
+      nome: a.contrato_id !== null ? a.obra ?? `Obra ${a.contrato_id}` : a.entidade_id != null ? a.entidade ?? `Empresa ${a.entidade_id}` : "Sem obra",
+      familias: [], itens: [], maisAntigo: 0 };
+    g.itens.push(a);
+    g.maisAntigo = Math.max(g.maisAntigo, -(diasAteOAviso(a, hoje) ?? 0));
+    grupos.set(chave, g);
+  }
+  for (const g of grupos.values()) {
+    const tem = new Set(g.itens.map(familiaDoAviso));
+    g.familias = FAMILIAS.map(f => f.id).filter(f => tem.has(f));
+  }
+  return [...grupos.values()].sort((x, y) => y.maisAntigo - x.maisAntigo || y.itens.length - x.itens.length
+    || x.nome.localeCompare(y.nome, "pt-BR"));
+}
+
+/** Em quantas obras e empresas os vencidos estao: "em 14 obras", "em 3 obras e 1 empresa"; sem nenhuma das duas, "". */
+export function ondeEstao(grupos: GrupoVencido[]): string {
+  const obras = grupos.filter(g => g.contratoId !== null).length, empresas = grupos.filter(g => g.entidadeId !== null).length;
+  const partes = [obras > 0 && `${obras.toLocaleString("pt-BR")} ${obras === 1 ? "obra" : "obras"}`,
+    empresas > 0 && `${empresas.toLocaleString("pt-BR")} ${empresas === 1 ? "empresa" : "empresas"}`].filter(Boolean);
+  return partes.length ? `em ${partes.join(" e ")}` : "";
+}
+
 /** O filtro por categoria da rota (?familia=reajustes|prazos|certidoes, do "Ver todos" do Inicio); os ids das
  *  familias (?familia=prazo) continuam valendo. */
 export function familiaDaBusca(v: string | undefined): Familia | null {

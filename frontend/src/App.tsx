@@ -20,8 +20,9 @@ import { entradaDe, itemDe, tituloDaSecao, tituloDe } from "./navegacao";
 import SigaPagina from "./SigaPagina";
 import AncorasDocusign from "./AncorasDocusign";
 import AvisoRespostas from "./AvisoRespostas";
+import AvisosPagina from "./AvisosPagina";
 import { useLeituraDasRespostas } from "./respostasOrgao";
-import { buscaDosAvisosEmObras, caminhoDe, ehDetalhe, useRolarAteSecao, useRota } from "./rota";
+import { buscaDosAvisos, caminhoDe, ehDetalhe, useRolarAteSecao, useRota } from "./rota";
 
 // Menu e entrada por perfil moram em navegacao.ts (NAVEGACAO.md › Perfis e tela de entrada); o trilho e a barra
 // superior, em Casca.tsx. O App so' escolhe a tela. Todo perfil entra pelo Inicio (decisao do dono, 08/10/2026).
@@ -70,9 +71,9 @@ export default function App() {
     if (rota.tela === "raiz" || (rota.tela === "admin" && usuario.perfil !== "admin")
       || ((rota.tela === "siga" || rota.tela === "ancoras-docusign") && usuario.perfil === "diretoria")) {
       substituir(entradaDe(usuario.perfil));
-    } else if (rota.tela === "avisos") {
-      // os Avisos moram dentro de Obras (09/10/2026): o item do menu e o link de antes levam para la'
-      substituir({ tela: "obras" }, { busca: buscaDosAvisosEmObras(busca) });
+    } else if (rota.tela === "obras" && busca.avisos === "1") {
+      // os Avisos tem pagina propria (#805): o link de antes, de quando abriam dentro de Obras, leva para la'
+      substituir({ tela: "avisos" }, { busca: buscaDosAvisos(busca) });
     } else if (caminhoDe(rota) !== window.location.pathname) {
       substituir(rota);
     }
@@ -114,7 +115,7 @@ export default function App() {
         ev.preventDefault();
         document.getElementById("conteudo")?.focus();
       }}>Pular para o conteúdo</a>
-      <Trilho perfil={usuario.perfil} marcado={itemDe(rota, busca)} ir={ir} />
+      <Trilho perfil={usuario.perfil} marcado={itemDe(rota)} ir={ir} />
 
       <div className="coluna">
         <BarraSuperior titulo={tituloDaSecao(rota)} ehH1={!tituloProprio} usuario={usuario} ir={ir} />
@@ -126,6 +127,7 @@ export default function App() {
           {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}
           {rota.tela === "fechamento" && <div className="pagina"><Fechamento ir={ir} /></div>}
           {rota.tela === "resumo-medicoes" && <div className="pagina"><ResumoDasMedicoes ir={ir} busca={busca} /></div>}
+          {rota.tela === "avisos" && <div className="pagina"><AvisosPagina busca={busca} /></div>}
           {rota.tela === "obras" && <Contratos ir={ir} busca={busca} aba={rota.aba} />}
           {rota.tela === "obra" && (
             // `key` no id: trocar de obra REMONTA a pagina em vez de reaproveitar a

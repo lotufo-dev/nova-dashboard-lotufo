@@ -21,7 +21,7 @@ describe("navegação por perfil", () => {
     expect(itemDe({ tela: "fechamento" })).toBe("fechamento");
     expect(itemDe({ tela: "obras", aba: "qdop" })).toBe("obras");
     expect(itemDe({ tela: "obras" })).toBe("obras");
-    expect(itemDe({ tela: "obras" }, { c: "todas", avisos: "1" })).toBe("avisos");   // Avisos abertos dentro de Obras
+    expect(itemDe({ tela: "avisos" })).toBe("avisos");   // os Avisos têm página própria (#805)
     expect(itemDe({ tela: "inicio" })).toBe("inicio");
     // a medição, a nova medição e o envio da nota ficam sob Medições
     expect(itemDe({ tela: "medicao", obra: 7, id: 723 })).toBe("medicoes");

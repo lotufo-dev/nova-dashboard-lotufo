@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Aviso } from "./Alertas";
-import { FAMILIAS, familiaDaBusca, familiaDoAviso, filtrarAvisos, porFamilia, porObra, porSecao, quandoDoAviso, secaoDoAviso, daAgenda, diasAteOAviso } from "./avisos";
+import { FAMILIAS, familiaDaBusca, familiaDoAviso, filtrarAvisos, porFamilia, porObra, porSecao, quandoDoAviso, secaoDoAviso, daAgenda, diasAteOAviso,
+  diasPorExtenso, ondeEstao, rotuloDaFamilia, vencidosPorObra } from "./avisos";
 
 const av = (tipo: string, nivel: Aviso["nivel"], contrato_id: number | null, aba: string | null, data: string | null = null): Aviso => ({
   tipo, nivel, publico: ["operacao"], contrato_id, obra: contrato_id ? `Obra ${contrato_id}` : null, dias: null,
@@ -99,5 +100,55 @@ describe("avisos pelo tempo (#511)", () => {
     expect(familiaDaBusca("certidoes")).toBe("documentos");
     expect(familiaDaBusca("prazo")).toBe("prazo");
     expect(familiaDaBusca("x")).toBeNull();
+  });
+
+  it("os dias por extenso, como o selo os escreve", () => {
+    const sem = (t: string) => t.replace(/ /g, " ");
+    expect([-1200, -1, 0, 1, 45].map(d => sem(diasPorExtenso(d)))).toEqual(["há 1.200 dias", "há 1 dia", "hoje", "em 1 dia", "em 45 dias"]);
+    expect(rotuloDaFamilia("documentos")).toBe("Documentos");
+  });
+});
+
+describe("vencidos por obra (#805)", () => {
+  const venc = (contrato_id: number | null, dias: number, aba: string, extra: Partial<Aviso> = {}): Aviso => ({
+    ...av("x", "atencao", contrato_id, aba), dias, sentido: "prazo", ...extra });
+  const lista = [
+    venc(7, -3, "prazos"), venc(7, -400, "reajuste"), venc(7, -50, "prazos"),
+    venc(8, -90, "reajuste"),
+    { ...venc(null, -10, "documentos"), entidade_id: 2, entidade: "Construtora Alfa" },
+    { ...venc(null, -10, "documentos"), entidade_id: 2, entidade: "Construtora Alfa" },
+    venc(null, -5, "x"),
+    venc(9, 5, "prazos"), venc(9, null as unknown as number, "prazos"),       // a vencer e sem data: fora
+  ];
+
+  it("agrupa pela obra, o aviso sem obra pela empresa e o resto num grupo só; da maior idade para a menor", () => {
+    const g = vencidosPorObra(lista);
+    expect(g.map(x => [x.chave, x.nome, x.itens.length, x.maisAntigo])).toEqual([
+      ["obra-7", "Obra 7", 3, 400], ["obra-8", "Obra 8", 1, 90], ["empresa-2", "Construtora Alfa", 2, 10], ["sem-obra", "Sem obra", 1, 5]]);
+    // dentro do grupo, do mais antigo ao mais novo; os assuntos, na ordem do mapa, sem repetir
+    expect(g[0].itens.map(a => a.dias)).toEqual([-400, -50, -3]);
+    expect(g[0].familias).toEqual(["prazo", "reajuste"]);
+    expect(g[2].familias).toEqual(["documentos"]);
+    expect([g[0].contratoId, g[0].entidadeId, g[2].contratoId, g[2].entidadeId]).toEqual([7, null, null, 2]);
+    // todo vencido entra, sem limite de idade (#656)
+    expect(g.flatMap(x => x.itens)).toHaveLength(7);
+  });
+
+  it("no empate de idade, o grupo com mais avisos primeiro e depois o nome", () => {
+    const g = vencidosPorObra([venc(3, -20, "prazos"), venc(2, -20, "prazos"), venc(1, -20, "prazos"), venc(1, -2, "prazos")]);
+    expect(g.map(x => x.nome)).toEqual(["Obra 1", "Obra 2", "Obra 3"]);
+  });
+
+  it("a garantia traz a obra e a empresa: fica no grupo da obra", () => {
+    const g = vencidosPorObra([{ ...venc(7, -30, "documentos"), entidade_id: 2, entidade: "Construtora Alfa" }]);
+    expect(g.map(x => [x.chave, x.entidadeId])).toEqual([["obra-7", null]]);
+  });
+
+  it("diz em quantas obras e empresas os vencidos estão", () => {
+    expect(ondeEstao(vencidosPorObra(lista))).toBe("em 2 obras e 1 empresa");
+    expect(ondeEstao(vencidosPorObra([venc(7, -3, "prazos")]))).toBe("em 1 obra");
+    expect(ondeEstao(vencidosPorObra([{ ...venc(null, -3, "documentos"), entidade_id: 2 }, { ...venc(null, -3, "documentos"), entidade_id: 3 }]))).toBe("em 2 empresas");
+    expect(ondeEstao(vencidosPorObra([venc(null, -3, "x")]))).toBe("");
+    expect(ondeEstao([])).toBe("");
   });
 });

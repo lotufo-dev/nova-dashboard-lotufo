@@ -1,66 +1,140 @@
-/* Avisos (redesenho 4a, AvisosPagina.tsx): a agenda do que vence, dentro de Obras. A moldura do painel (.cartao), o
-   botao (.btn), o campo, o selo, o contador, a legenda e a caixa de aviso sao pecas de base de tokens.css. Cor,
-   familia, tamanho, espaco e borda so' por variavel. */
+/* Avisos (#805, AvisosPagina.tsx): pagina propria, com as contagens pelo prazo, as abas por assunto e dois blocos, a
+   Agenda e os Vencidos por obra. A moldura do painel (.cartao), a tabela (.tabela), a escolha (.escolha), o selo, o
+   contador, a legenda e a caixa de falha sao pecas de base de tokens.css. Cor, familia, tamanho, espaco e borda so'
+   por variavel. */
 
-/* O painel e' o container: a linha do aviso muda de forma pela largura que sobra, e nao pela largura da janela. */
-.avs { container: avs-painel / inline-size; min-width: 0; padding: var(--espaco-g); font-size: var(--texto-meta); }
-
-/* cabecalho: titulo, contagem, legenda e o botao de fechar */
-.avs__cab { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-pp) var(--espaco-p); }
-.avs__cab h2 { margin: 0; font-size: var(--texto-titulo-bloco); }
-.avs__acoes { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--espaco-pp) var(--espaco-m); }
-
-/* filtros: o tipo, em opcoes lado a lado (a escolhida em tinta cheia), e a obra */
-.avs__filtros { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--espaco-p) var(--espaco-g); margin-top: var(--espaco-m); }
-.avs__tipo { display: grid; gap: var(--espaco-mini); min-width: 0; }
-.avs__opcoes { margin: 0; max-width: none; }
-.avs__opcoes .escolha { white-space: nowrap; }
-.avs__obra { flex: 0 1 calc(var(--largura-menu) + var(--espaco-xxg)); min-width: 0; }
-.avs__obra select { width: 100%; min-width: 0; }
-
-.avs__vazio { margin: var(--espaco-g) 0 0; max-width: none; color: var(--cor-texto-secundario); }
-.avs__erro { margin-top: var(--espaco-g); }
-
-/* secoes pelo tempo: titulo e contagem sobre a regua de secao, uma linha por aviso */
-.avs__secoes { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-g); margin-top: var(--espaco-g); }
-.avs-secao { min-width: 0; }
-.avs-secao__topo {
-  display: flex; align-items: center; gap: var(--espaco-pp);
-  border-top: var(--regua-secao); padding-top: var(--regua-secao-respiro); margin-bottom: var(--espaco-mini);
+/* A pagina e' o container: os blocos ficam lado a lado ou um embaixo do outro pela largura que sobra para o conteudo
+   (menu aberto ou recolhido), e nao pela largura da janela. `--avs-margem` e' a margem de dentro do painel, a mesma
+   do cabecalho dele e da primeira coluna da tabela. */
+.avs {
+  --avs-margem: calc(var(--espaco-m) + var(--espaco-mini));
+  container: avs-pagina / inline-size; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-g);
+  min-width: 0; font-size: var(--texto-meta);
 }
-.avs-secao__topo h3 { margin: 0; font-size: var(--texto-titulo-sub); }
-.avs-secao__lista { list-style: none; margin: 0; padding: 0; }
 
-/* a linha: a data do fato, a obra (ou a empresa), o que e' e os dias. A linha inteira e' o link. */
+/* o recorte em vigor (uma obra ou um contratante) e o link que volta a todos os avisos */
+.avs-recorte { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-mini) var(--espaco-m); }
+.avs-recorte h2 { margin: 0; font-size: var(--texto-titulo-bloco); overflow-wrap: anywhere; }
+
+.avs-vazio { margin: 0; max-width: none; color: var(--cor-texto-secundario); }
+
+/* as contagens pelo prazo: rotulo e numero sob a regua de grupo, sem moldura (como os numeros de Obras e do
+   Fechamento). A situacao vai no simbolo ao lado do rotulo; o numero fica em tinta. */
+.avs-numeros {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--espaco-m) var(--espaco-g);
+  margin: 0; border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro);
+}
+.avs-numero { min-width: 0; }
+.avs-numero dt { display: flex; align-items: center; gap: var(--espaco-mini); color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.avs-numero dd { margin: 0; }
+.avs-numero__valor {
+  font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
+  font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-valor); line-height: var(--entrelinha-numero);
+}
+.avs-numero__apoio { color: var(--cor-texto-secundario); }
+
+/* as abas por assunto, com a quantidade, e a legenda das duas situacoes */
+.avs-barra { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--espaco-p) var(--espaco-g); }
+.avs-abas .escolha { white-space: nowrap; }
+
+/* os dois blocos, lado a lado; cada um e' container: a linha do aviso e a tabela mudam pela largura do bloco */
+.avs-blocos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--espaco-entre-colunas); align-items: start; }
+.avs-bloco { container: avs-bloco / inline-size; min-width: 0; padding-bottom: var(--espaco-pp); }
+
+/* Agenda: cada prazo (esta semana, este mes, proximos 90 dias) com o titulo e a contagem sobre a regua de secao */
+.avs-quando + .avs-quando { margin-top: var(--espaco-m); }
+.avs-quando__topo {
+  display: flex; align-items: center; gap: var(--espaco-pp); margin: 0 var(--avs-margem);
+  border-top: var(--regua-secao); padding-top: var(--regua-secao-respiro);
+}
+.avs-quando__topo h3 { margin: 0; font-size: var(--texto-titulo-sub); }
+
+/* a linha do aviso: os dias, a obra (ou a empresa) com o que e', e o assunto. A linha inteira e' o link. */
+.avs-lista { list-style: none; margin: 0; padding: 0; }
 .avs-linha {
-  position: relative; display: grid; align-items: baseline; gap: var(--espaco-mini) var(--espaco-m);
-  grid-template-columns: calc(var(--espaco-xxg) + var(--espaco-g)) minmax(0, 3fr) minmax(0, 6fr) minmax(calc(var(--espaco-xxg) * 2), auto);
-  padding: var(--espaco-p) var(--espaco-pp); margin: 0 calc(var(--espaco-pp) * -1); border-bottom: var(--borda-linha);
+  position: relative; display: grid; align-items: start; gap: var(--espaco-mini) var(--espaco-p);
+  grid-template-columns: calc(var(--alvo-minimo) * 3) minmax(0, 1fr) calc(var(--alvo-minimo) * 2.5);
+  padding: var(--espaco-p) var(--avs-margem); border-bottom: var(--borda-linha);
 }
 .avs-linha:last-child { border-bottom: 0; }
 .avs-linha:has(.avs-linha__link:hover) { background: var(--cor-papel-sombreado); }
-.avs-linha__data { font-family: var(--fonte-numero); font-stretch: var(--largura-numero); white-space: nowrap; }
+.avs-linha > .selo { justify-self: start; }
+.avs-linha__corpo { display: grid; gap: var(--espaco-traco); min-width: 0; }
 .avs-linha__obra { font-weight: var(--peso-forte); overflow-wrap: anywhere; }
 .avs-linha__fato { min-width: 0; text-wrap: pretty; overflow-wrap: anywhere; }
+.avs-linha__obra + .avs-linha__fato { color: var(--cor-texto-secundario); }
 .avs-linha__link { color: inherit; text-decoration: none; }
 .avs-linha__link::after { content: ""; position: absolute; inset: 0; }
 .avs-linha__link:focus-visible { outline: none; }
 .avs-linha__link:focus-visible::after { outline: var(--largura-foco) solid var(--cor-foco); outline-offset: calc(var(--afastamento-foco) * -1); }
-.avs-linha__dias { justify-self: end; }
+.avs-linha__assunto { color: var(--cor-texto-secundario); text-align: right; white-space: nowrap; }
 /* o selo de dias e' uma frase de tempo ("há 64 dias"), nao um rotulo de estado: fica como esta' escrita */
-.avs-linha__dias .selo__texto::first-letter { text-transform: none; }
+.avs-dias .selo__texto::first-letter { text-transform: none; }
 
-/* painel estreito (o celular): a data e os dias na primeira linha, a obra e o fato embaixo */
-@container avs-painel (max-width: 640px) {
-  .avs-linha { grid-template-columns: minmax(0, 1fr) auto; }
-  .avs-linha__data { grid-row: 1; grid-column: 1; }
-  .avs-linha__dias { grid-row: 1; grid-column: 2; }
-  .avs-linha__obra { grid-row: 2; grid-column: 1 / -1; }
-  .avs-linha__fato { grid-row: 3; grid-column: 1 / -1; }
-  .avs__acoes { margin-left: 0; justify-content: flex-start; width: 100%; }
-  .avs__acoes .legenda-cor { justify-content: flex-start; margin-right: auto; }
-  .avs__obra { flex-basis: 100%; }
+/* Vencidos por obra: o nome abre os avisos da obra (teclado e leitor de tela), com a seta que gira, como no
+   Fechamento; a linha inteira tambem abre */
+.avs-vencidos { table-layout: auto; }
+/* o nome fica com a largura que sobra: a quantidade e o mais antigo encostam na direita */
+.avs-vencidos thead th:first-child { width: 100%; }
+.avs-vencidos tbody th[scope="row"] { font-weight: var(--peso-normal); white-space: normal; text-align: left; }
+.avs-vencido { cursor: pointer; }
+.avs-abre {
+  display: inline-flex; align-items: baseline; gap: var(--espaco-pp); height: auto; min-height: 0; padding: 0;
+  border: 0; background: none; box-shadow: none;
+  color: var(--cor-tinta); font-size: var(--texto-meta); font-weight: var(--peso-forte); line-height: var(--entrelinha); text-align: left;
 }
+.avs-abre:hover:not(:disabled) { background: none; text-decoration: underline; }
+.avs-abre__seta {
+  flex: none; width: 0; height: 0;
+  border-top: var(--espaco-mini) solid transparent; border-bottom: var(--espaco-mini) solid transparent;
+  border-left: calc(var(--espaco-mini) * 1.5) solid var(--cor-tinta);
+  transition: transform .12s ease;
+}
+.avs-abre[aria-expanded="true"] .avs-abre__seta { transform: rotate(90deg); }
+/* o resumo dos assuntos, alinhado com o nome (depois da seta) */
+.avs-vencido__assuntos { display: block; padding-left: calc(var(--espaco-mini) * 1.5 + var(--espaco-pp)); color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
+.avs-vencido__antigo { white-space: nowrap; }
+/* os avisos da obra aberta, na propria tabela, sobre o papel sombreado e recuados ate' o nome */
+.avs-vencidos tbody tr.avs-vencido__itens > td { padding: 0; background: var(--cor-papel-sombreado); }
+.avs-vencido__itens .avs-linha { padding-left: calc(var(--avs-margem) + var(--espaco-mini) * 1.5 + var(--espaco-pp)); }
+.avs-vencido__itens .avs-linha:has(.avs-linha__link:hover) { background: var(--cor-papel-escuro); }
+
+/* ---------------------------------------------------------------- pagina media e estreita (a 1024 com o menu aberto) */
+@container avs-pagina (max-width: 960px) {
+  .avs-blocos { grid-template-columns: minmax(0, 1fr); gap: var(--espaco-g); }
+}
+@container avs-pagina (max-width: 620px) {
+  .avs-numeros { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .avs-barra .legenda-cor { justify-content: flex-start; }
+}
+
+/* ---------------------------------------------------------------- bloco estreito (o celular) */
+@container avs-bloco (max-width: 460px) {
+  /* a linha do aviso: os dias e o assunto em cima, a obra e o que e' embaixo */
+  .avs-linha { grid-template-columns: minmax(0, 1fr) auto; }
+  .avs-linha > .selo { grid-row: 1; grid-column: 1; }
+  .avs-linha__assunto { grid-row: 1; grid-column: 2; }
+  .avs-linha__corpo { grid-row: 2; grid-column: 1 / -1; }
+  .avs-linha:not(:has(> .selo)) .avs-linha__assunto { grid-column: 1 / -1; text-align: left; }
+
+  /* a tabela vira um bloco por obra: o nome e os assuntos em cima; embaixo, a quantidade e o mais antigo */
+  .avs-vencidos, .avs-vencidos :is(tbody, tr, th, td) { display: block; }
+  .avs-vencidos thead { display: none; }
+  .avs-vencidos tbody tr.avs-vencido {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--espaco-mini) var(--espaco-p);
+    padding: var(--espaco-p) var(--avs-margem); border-bottom: var(--borda-linha);
+  }
+  .avs-vencidos tbody tr.avs-vencido > :is(th, td) { padding: 0; border: 0; background: none; }
+  .avs-vencidos tbody tr.avs-vencido > th { grid-row: 1; grid-column: 1 / -1; }
+  .avs-vencidos tbody tr.avs-vencido > .avs-vencido__n {
+    grid-row: 2; grid-column: 1; align-self: center; text-align: left;
+    padding-left: calc(var(--espaco-mini) * 1.5 + var(--espaco-pp));
+  }
+  .avs-vencido__antigo { grid-row: 2; grid-column: 2; justify-self: end; }
+  .avs-vencido__n::after { content: " " attr(data-unidade); font-weight: var(--peso-normal); color: var(--cor-texto-secundario); }
+  .avs-vencidos tbody tr.avs-vencido__itens { border-bottom: var(--borda-linha); }
+}
+
 @media (max-width: 767px) {
-  .avs { padding: var(--espaco-m); box-shadow: none; }
+  .avs-bloco { box-shadow: none; }
 }
