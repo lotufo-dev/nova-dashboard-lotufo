@@ -1,9 +1,11 @@
 """Leitor da NFS-e (bloco 3) contra o texto real de cinco notas (pypdf), leiaute Prefeitura de Cuiaba."""
 import pathlib
+import re
 
 import pytest
+from fpdf import FPDF
 
-from app import leitura_nfse
+from app import leitura_nfse, leitura_pdf
 
 FIX = pathlib.Path(__file__).parent / "fixtures" / "nfse"
 
@@ -132,6 +134,157 @@ def test_danfse_numero_que_nao_bate_com_a_chave_vira_aviso():
     t = _txt("3106-mt402-danfse.txt").replace("NÚMERO DA NFS-E  3106", "NÚMERO DA NFS-E  3207")
     n = leitura_nfse.ler(t)
     assert n["ok"] and n["numero"] == 3207 and any("chave de acesso" in a for a in n["avisos"])
+
+
+# --- DANFSe gerado pelo proprio emissor nacional ("Ambiente Gerador: 2", 11/2026). Texto sintetico no formato que o
+# pypdf devolve: o canhoto do rodape ("DATA CIENTIFICAÇÃO ... CHAVE NFS-e") vem ANTES do cabecalho, os rotulos dizem
+# "NFS-e" (o gerador do municipio diz "NFS-E") e a CBS e' "Valor Total Apurado - CBS". O leitor recusava com
+# `leiaute-desconhecido` e a nota anexada nao nascia.
+
+NACIONAL = "3107-danfse-emissor-nacional.txt"
+_TITULOS = ("DANFSe v2.0", "CHAVE DE ACESSO DA NFS-e", "PRESTADOR / FORNECEDOR", "TOMADOR / ADQUIRENTE",
+            "DESTINATÁRIO DA OPERAÇÃO", "INTERMEDIÁRIO DA OPERAÇÃO", "SERVIÇO PRESTADO", "TRIBUTAÇÃO MUNICIPAL",
+            "TRIBUTAÇÃO FEDERAL", "TRIBUTAÇÃO IBS/CBS", "VALOR TOTAL DA NFS-e", "INFORMAÇÕES COMPLEMENTARES")
+
+
+def _quadros(texto: str) -> list[str]:
+    """O texto partido nos quadros do DANFSe (o canhoto e' o primeiro), cada um com as suas linhas."""
+    quadros: list[list[str]] = [[]]
+    for linha in texto.strip().split("\n"):
+        if linha.startswith(_TITULOS):
+            quadros.append([])
+        quadros[-1].append(linha)
+    return ["\n".join(q) for q in quadros]
+
+
+def _cabecalho_primeiro(texto: str) -> str:
+    canhoto, *resto = _quadros(texto)
+    return "\n".join([*resto, canhoto])
+
+
+def test_le_danfse_do_emissor_nacional_com_o_rodape_na_frente():
+    t = _txt(NACIONAL)
+    assert t.startswith("DATA CIENTIFICAÇÃO")
+    n = leitura_nfse.ler(t)
+    assert n["ok"] and n["leiaute"] == "danfse", n
+    assert (n["numero"], n["serie_dps"], n["emissao"], n["competencia"], n["periodo"]) == (
+        3107, "70000", "2026-08-26", "2026-07", ("2026-07-01", "2026-07-31"))
+    assert (n["prestador_cnpj"], n["prestador_nome"]) == ("31200101000130", "CONSTRUTORA ALFA LTDA")
+    assert (n["tomador_cnpj"], n["tomador_nome"]) == ("31300101000101", "SECRETARIA DE EXEMPLO")
+    assert n["municipio"] == "Cuiabá"
+    # centavo impar no bruto e em cada parcela; bruto - retencoes = liquido, ao centavo
+    assert (n["valor_centavos"], n["iss_centavos"], n["inss_centavos"], n["irrf_centavos"]) == (
+        98765433, 1975309, 4345679, 1481481)
+    assert (n["cbs_centavos"], n["ibs_centavos"], n["retencao_total_centavos"], n["liquido_centavos"]) == (
+        871111, 96790, 7802469, 90962964)
+    assert (n["natureza"], n["numero_medicao"], n["avisos"]) == ("medicao", 14, [])
+
+
+def test_danfse_do_emissor_nacional_le_igual_com_o_cabecalho_na_frente():
+    t = _txt(NACIONAL)
+    outro = _cabecalho_primeiro(t)
+    assert outro.startswith("DANFSe v2.0") and outro.rstrip().split("\n")[-2].startswith("DATA CIENTIFICAÇÃO")
+    assert leitura_nfse.ler(outro) == leitura_nfse.ler(t)
+
+
+def test_danfse_nao_depende_da_ordem_dos_quadros_nem_das_quebras_de_linha():
+    t = _txt(NACIONAL)
+    esperado = leitura_nfse.ler(t)
+    assert esperado["ok"]
+    q = _quadros(t)
+    assert len(q) == len(_TITULOS) + 1
+    ordens = [q[::-1], q[5:] + q[:5], q[1::2] + q[0::2], sorted(q), sorted(q, key=len)]
+    for ordem in ordens:
+        assert ordem != q
+        assert leitura_nfse.ler("\n".join(ordem)) == esperado
+        assert leitura_nfse.ler("  ".join(ordem).replace("\n", "  ")) == esperado
+    # o DANFSe do gerador do municipio (rotulos "NFS-E") tambem: o canhoto colado na frente nao muda a leitura
+    municipal = _txt("3106-mt402-danfse.txt")
+    chave = re.search(r"\d{50}", municipal).group()
+    canhoto = f"DATA CIENTIFICAÇÃO: IDENTIFICAÇÃO E ASSINATURA N° NFS-e / CHAVE NFS-e 3106 / {chave}  "
+    assert leitura_nfse.ler(canhoto + municipal) == leitura_nfse.ler(municipal)
+
+
+def _pdf_danfse(quadros: list[str]) -> bytes:
+    """PDF sintetico de uma pagina: os quadros desenhados na ordem dada (e' a ordem em que o pypdf devolve o texto),
+    com o canhoto no pe' da pagina, onde o DANFSe o imprime."""
+    f = FPDF(unit="pt", format="A4")
+    f.set_auto_page_break(False)
+    f.add_page()
+    f.set_font("Helvetica", size=5)
+    y = 20
+    for quadro in quadros:
+        no_pe = quadro.startswith("DATA CIENTIFICAÇÃO")
+        for i, linha in enumerate(quadro.split("\n")):
+            if no_pe:
+                f.text(20, 800 + 6 * i, linha)
+            else:
+                f.text(20, y, linha)
+                y += 5
+    return bytes(f.output())
+
+
+def test_danfse_em_pdf_sintetico_nas_duas_ordens():
+    t = _txt(NACIONAL)
+    q = _quadros(t)
+    rodape_primeiro = leitura_pdf.texto_de_pdf(_pdf_danfse(q))
+    cabecalho_primeiro = leitura_pdf.texto_de_pdf(_pdf_danfse(q[1:] + q[:1]))
+    assert rodape_primeiro.startswith("DATA CIENTIFICAÇÃO") and cabecalho_primeiro.startswith("DANFSe v2.0")
+    assert leitura_nfse.ler(rodape_primeiro) == leitura_nfse.ler(cabecalho_primeiro) == leitura_nfse.ler(t)
+
+
+def test_danfse_texto_livre_nao_e_lido_como_campo():
+    t = _txt(NACIONAL)
+    esperado = leitura_nfse.ler(t)
+    # a descricao e as informacoes complementares citam tributos, valores e a chave da nota substituida
+    outra_chave = re.search(r"\d{50}", _txt("3106-mt402-danfse.txt")).group()
+    livre = (t.replace("VALOR IRRF (1,50%) SOBRE O", "IRRF R$ 1,23 ISSQN Apurado R$ 4,56 VALOR IRRF (1,50%) SOBRE O")
+              .replace("Totais aproximados",
+                       f"NFS-e Subst.: {outra_chave} | VALOR LÍQUIDO DA NFS-e R$ 7,89 | Totais aproximados"))
+    assert livre.count("IRRF R$ 1,23") == 1 and outra_chave in livre
+    assert leitura_nfse.ler(livre) == esperado
+    assert leitura_nfse.ler(_cabecalho_primeiro(livre)) == esperado
+
+
+@pytest.mark.parametrize("a_mais, campo", [
+    # dois valores diferentes para o mesmo rotulo (duas notas no mesmo PDF, texto embaralhado)
+    ("VALOR DA OPERAÇÃO / SERVIÇO\nR$ 987.654,34", "valor_centavos"),
+    ("VALOR LÍQUIDO DA NFS-e\nR$ 909.629,65", "liquido_centavos"),
+    ("ISSQN Apurado\nR$ 0,01", "iss_centavos"),
+    ("NÚMERO DA NFS-e\n3108", "numero"),
+    ("DATA E HORA DA EMISSÃO DA NFS-e\n27/08/2026 08:00:00", "emissao"),
+])
+def test_danfse_leitura_ambigua_nao_e_proposta(a_mais, campo):
+    t = _txt(NACIONAL)
+    for texto in (t, _cabecalho_primeiro(t)):
+        n = leitura_nfse.ler(texto.replace("INFORMAÇÕES COMPLEMENTARES", a_mais + "\nINFORMAÇÕES COMPLEMENTARES"))
+        assert n == {"ok": False, "motivo": f"campos-ausentes:{campo}", "leiaute": "danfse"}
+    # o mesmo valor impresso duas vezes (segunda via na mesma pagina) nao e' ambiguidade
+    assert leitura_nfse.ler(t + "VALOR DA OPERAÇÃO / SERVIÇO\nR$987.654,33\n") == leitura_nfse.ler(t)
+
+
+def test_danfse_com_duas_chaves_de_acesso_nao_e_proposto():
+    t = _txt(NACIONAL)
+    outra_chave = re.search(r"\d{50}", _txt("3106-mt402-danfse.txt")).group()
+    chave = re.search(r"\d{50}", t).group()
+    n = leitura_nfse.ler(t.replace(f"3107 / {chave}", f"3106 / {outra_chave}"))
+    assert n == {"ok": False, "motivo": "campos-ausentes:chave_de_acesso", "leiaute": "danfse"}
+
+
+def test_danfse_leitura_parcial_cai_na_fila_com_o_motivo():
+    t = _txt(NACIONAL)
+    # rotulo separado do valor (o extrator devolveu os dois em quadros diferentes): o campo nao e' adivinhado
+    n = leitura_nfse.ler(t.replace("VALOR DA OPERAÇÃO / SERVIÇO\nR$ 987.654,33", "VALOR DA OPERAÇÃO / SERVIÇO"))
+    assert n == {"ok": False, "motivo": "campos-ausentes:valor_centavos", "leiaute": "danfse"}
+    n = leitura_nfse.ler(t.replace("DATA E HORA DA EMISSÃO DA NFS-e\n26/08/2026 10:42:07", "DATA E HORA DA EMISSÃO DA NFS-e"))
+    assert n == {"ok": False, "motivo": "campos-ausentes:emissao", "leiaute": "danfse"}
+    # o tomador e' por onde a nota e' conferida contra o orgao: sem ele, fila humana
+    n = leitura_nfse.ler(t.replace("TOMADOR / ADQUIRENTE CNPJ / CPF / NIF\n31.300.101/0001-01", "TOMADOR / ADQUIRENTE"))
+    assert n == {"ok": False, "motivo": "campos-ausentes:tomador_cnpj", "leiaute": "danfse"}
+    # sem o rotulo do numero e sem o CNPJ no quadro do prestador, valem os da chave de acesso
+    n = leitura_nfse.ler(t.replace("NÚMERO DA NFS-e\n3107\n", "")
+                          .replace("PRESTADOR / FORNECEDOR CNPJ / CPF / NIF\n31.200.101/0001-30", "PRESTADOR / FORNECEDOR"))
+    assert n["ok"] and n["numero"] == 3107 and n["prestador_cnpj"] == "31200101000130" and n["avisos"] == []
 
 
 # --- Centi (Prefeitura de Tangara da Serra): nota 20260000812 da Guaxe, consorciada do Integra BRT, 11a medicao

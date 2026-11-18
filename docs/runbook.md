@@ -555,7 +555,7 @@ A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_US
 
 ## Gravação de dado na produção
 
-Vale para todo comando do `app.cli` que grava dado no banco de produção e tem `--ensaio` (hoje: carga e correção de medições, `cadastro aplicar`, `legado remapear`, `documentos importar`, `medicoes planilhas` e `conciliacao`), rodado fora de um deploy. Essa gravação não espera autorização do dono (`docs/adr/0014`); quem a segura são estes passos, nesta ordem. Conta de acesso (`criar-admin`, senha, proteção) não é dado: fica fora deste rito e continua só com a autorização do dono na hora. A gravação pedida junto de um deploy segue a skill `deploy`.
+Vale para todo comando do `app.cli` que grava dado no banco de produção e tem `--ensaio` (hoje: carga e correção de medições, `cadastro aplicar`, `legado remapear`, `documentos importar`, `medicoes planilhas`, `conciliacao` e `notas reler`), rodado fora de um deploy. Essa gravação não espera autorização do dono (`docs/adr/0014`); quem a segura são estes passos, nesta ordem. Conta de acesso (`criar-admin`, senha, proteção) não é dado: fica fora deste rito e continua só com a autorização do dono na hora. A gravação pedida junto de um deploy segue a skill `deploy`.
 
 1. **Ensaio em produção** (`--ensaio`) e o relatório lido inteiro. Erro, conflito ou linha que não se esperava: parar e corrigir a origem. O código de saída do ensaio não substitui a leitura.
 2. **Backup do banco** logo antes de gravar, no mesmo script da gravação; sem ele a gravação não roda:
@@ -814,6 +814,33 @@ menos notas do que o espelho previa, **Declarar completas** com justificativa. N
 ou de leiaute desconhecido: o arquivo fica listado e a pessoa clica em
 "Informar número, data e valor". O vínculo manual com uma NF do RM ("Vincular nota do RM") foi
 retirado em 2026-09-25: a nota entra pelo PDF, e o RM confirma pelo número.
+
+**DANFSe: dois geradores, qualquer ordem.** O DANFSe v2.0 sai do sistema do município ("Ambiente Gerador: 1") e,
+desde 11/2026, também do próprio emissor nacional ("Ambiente Gerador: 2", numeração e série novas), que escreve os
+rótulos de outro jeito e põe o canhoto do rodapé na frente do texto. O leitor aceita os dois e não depende da ordem
+dos quadros. O que ele não consegue conferir não é proposto: rótulo com dois valores diferentes, duas chaves de
+acesso no mesmo PDF, campo obrigatório ou tomador que não foi achado deixam o arquivo listado com o motivo
+(`campos-ausentes:<campos>`), para a pessoa informar número, data e valor.
+
+**Reler anexos que o leitor não lia (`notas reler`).** O PDF anexado antes de o leitor reconhecer o leiaute fica com
+a leitura falha guardada, e a nota não nasce sozinha depois do deploy. Dois caminhos: a pessoa arrasta o mesmo PDF
+de novo na medição (o sistema reconhece o arquivo e relê), ou o administrador roda, no servidor, com ensaio antes:
+
+```
+cd C:\DashboardLotufo\app\backend
+$env:DASH_DB_PATH = "C:\DashboardLotufo\dados\dashboard.db"
+.venv\Scripts\python -m app.cli notas reler --usuario <e-mail do administrador> --ensaio
+.venv\Scripts\python -m app.cli notas reler --usuario <e-mail do administrador>
+```
+
+O ensaio só lê e lista, por documento, a nota que seria criada (número, emissão, valor, se o tomador é o órgão do
+contrato) ou o motivo de continuar sem leitura; não grava nada. Para valer, faz por documento o mesmo que arrastar
+o PDF de novo (guarda a leitura, cria a nota, liga à medição e confere contra o espelho) e grava `nota.releitura`
+na auditoria com quem rodou. Ficam como estão: o documento que já tem nota informada à mão, o de medição cancelada
+ou desistida e o que o leitor continua sem ler. Quando a nota já veio do RM, é a linha dela que ganha os valores
+lidos e a confirmação, sem nota nova. A medição não muda de estado por causa disso, salvo a que nasceu do espelho e
+estava só esperando a nota. Rodar de novo não repete nada. É gravação em produção: segue o rito da seção "Gravação
+de dado na produção" (ensaio lido, backup antes, conferência depois).
 
 **O que o RM faz.** Na rodada horária, a NF do RM com o mesmo número (e mesma emissão ou mesmo valor) da nota
 lida preenche a linha dela e a marca `confirmada` (valor igual) ou `divergente`; nota sem PDF nasce `so_rm`

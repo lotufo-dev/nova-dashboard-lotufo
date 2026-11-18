@@ -10,6 +10,13 @@ Leiaute `danfse` = DANFSe v2.0 do emissor nacional (notas de Cuiaba a partir de 
 nota 3106 da MT-402, tests/fixtures/nfse/3106-mt402-danfse.txt). Lido sobre o texto com os espacos
 e quebras de linha NORMALIZADOS (o extrator pode por rotulo e valor na mesma linha ou em linhas
 diferentes); o numero e o CNPJ do prestador sao conferidos contra a chave de acesso de 50 digitos.
+O DANFSe sai de dois geradores, e o leitor aceita os dois: o do municipio ("Ambiente Gerador: 1", rotulos
+"... DA NFS-E") e o do proprio emissor nacional ("Ambiente Gerador: 2", rotulos "... DA NFS-e", o canhoto
+"DATA CIENTIFICAÇÃO ... N° NFS-e / CHAVE NFS-e" na frente do cabecalho, "Valor Total Apurado - CBS"). Nada
+depende da ORDEM dos quadros no texto: cada campo e' o valor colado ao proprio rotulo, o quadro do prestador e
+o do tomador vao do titulo ate' o proximo titulo, seja qual for, e os rotulos sao procurados fora do texto livre
+(descricao do servico e informacoes complementares). Rotulo que aparece com dois valores diferentes, ou duas
+chaves de acesso no mesmo PDF, e' leitura ambigua: o campo nao e' proposto e a nota vai para a fila humana.
 
 Leiaute `centi` = NFS-e da Prefeitura de Tangara da Serra emitida pelo sistema da Centi Solucoes (as notas
 da Guaxe, consorciada do Integra BRT, para a FRC; amostra: nota 20260000812 da 11a medicao,
@@ -59,7 +66,7 @@ def _leiaute(texto: str) -> str | None:
     if "Número da Nota Fiscal" in texto and ("Vl. do Serviço" in texto or "ISSQN" in texto):
         return "cuiaba"
     plano = re.sub(r"\s+", " ", texto)
-    if "Documento Auxiliar da NFS-e" in plano and "CHAVE DE ACESSO DA NFS-E" in plano:
+    if "Documento Auxiliar da NFS-e" in plano and re.search(r"CHAVE DE ACESSO DA NFS-[Ee]", plano):
         return "danfse"
     # A Guaxe trocou o quadro "RETENÇÕES FEDERAIS" por "TRIBUTAÇÃO FEDERAL" a partir da 15ª do Integra (09/10/2026)
     if "Centi Soluções" in plano and ("RETENÇÕES FEDERAIS" in plano or "TRIBUTAÇÃO FEDERAL" in plano) \
@@ -140,59 +147,104 @@ def _cuiaba(texto: str) -> dict:
 
 
 _VALOR = r"\s*(R\$\s*[\d\.]+,\d{2}|-)"
+_NFSE = r"NFS-[Ee]"      # o gerador do municipio imprime "NFS-E"; o do emissor nacional, "NFS-e"
+# Titulos dos quadros do DANFSe. Um quadro vai do proprio titulo ate' o proximo titulo que aparecer no texto,
+# qualquer que seja: assim a leitura nao depende da ordem em que o extrator devolve os quadros.
+_DANFSE_TITULOS = re.compile(
+    r"DANFSe v\d|DATA CIENTIFICAÇÃO|CHAVE DE ACESSO DA " + _NFSE + r"|PRESTADOR / FORNECEDOR|TOMADOR / ADQUIRENTE"
+    r"|(?:O )?DESTINATÁRIO (?:DA OPERAÇÃO|É O PRÓPRIO)|INTERMEDIÁRI?O DA OPERAÇÃO|SERVIÇO PRESTADO"
+    r"|TRIBUTAÇÃO MUNICIPAL|TRIBUTAÇÃO FEDERAL|TRIBUTAÇÃO IBS ?/ ?CBS|VALOR TOTAL DA " + _NFSE
+    + r"|INFORMAÇÕES COMPLEMENTARES")
 
 
-def _danfse_moeda(rotulo_regex: str, plano: str) -> int | None:
-    m = re.search(rotulo_regex + _VALOR, plano)
-    return centavos(m.group(1)) if m else None
+def _danfse_quadro(plano: str, inicio: str) -> tuple[int, int] | None:
+    """(inicio, fim) do quadro que comeca em `inicio` (regex) e acaba no proximo titulo, ou None."""
+    m = re.search(inicio, plano)
+    if m is None:
+        return None
+    prox = _DANFSE_TITULOS.search(plano, m.end())
+    return m.start(), (prox.start() if prox else len(plano))
+
+
+def _danfse_unico(padrao: str, texto: str, campo: str, ambiguos: list) -> str | None:
+    """O valor colado ao rotulo (grupo 1 de `padrao`). O mesmo rotulo com valores DIFERENTES (duas notas no
+    mesmo PDF, texto embaralhado) nao e' proposto: devolve None e anota o campo em `ambiguos`."""
+    achados = {re.sub(r"\s+", "", v) for v in re.findall(padrao, texto)}
+    if len(achados) > 1:
+        ambiguos.append(campo)
+        return None
+    return achados.pop() if achados else None
 
 
 def _danfse(texto: str) -> dict:
     n: dict = {"leiaute": "danfse", "avisos": []}
+    ambiguos: list[str] = []
     plano = re.sub(r"\s+", " ", texto)
-    m = re.search(r"CHAVE DE ACESSO DA NFS-E\s*(\d{50})", plano)
-    chave = m.group(1) if m else None
-    # Chave de acesso: municipio(7) ambiente(1) tipo de inscricao(1) CNPJ(14) numero(13) AAMM(4) codigo(9) DV(1)
+    # Rotulos so' fora do texto livre: a descricao e as informacoes complementares citam valores e tributos
+    # ("VALOR IRRF ... R$ ...") e nao podem ser lidas como campo.
+    q_desc = _danfse_quadro(plano, r"Descrição do Serviço")
+    q_info = _danfse_quadro(plano, r"INFORMAÇÕES COMPLEMENTARES")
+    campos = plano
+    for q in sorted((q for q in (q_desc, q_info) if q), reverse=True):
+        campos = campos[:q[0]] + " " + campos[q[1]:]
+
+    # Chave de acesso: municipio(7) ambiente(1) tipo de inscricao(1) CNPJ(14) numero(13) AAMM(4) codigo(9) DV(1).
+    # Vale qualquer sequencia isolada de 50 digitos fora do texto livre (a do quadro e a do canhoto; as informacoes
+    # complementares trazem a chave da nota SUBSTITUIDA, "NFS-e Subst.: ..."): duas diferentes sao duas notas.
+    chaves = set(re.findall(r"(?<!\d)\d{50}(?!\d)", campos))
+    if len(chaves) > 1:
+        ambiguos.append("chave_de_acesso")
+    chave = chaves.pop() if len(chaves) == 1 else None
     numero_chave = int(chave[23:36]) if chave else None
     cnpj_chave = chave[9:23] if chave else None
 
-    m = re.search(r"NÚMERO DA NFS-E\s*(\d+)", plano)
-    n["numero"] = int(m.group(1)) if m and int(m.group(1)) > 0 else (numero_chave or None)
+    def unico(padrao, campo):
+        return _danfse_unico(padrao, campos, campo, ambiguos)
+
+    def moeda(rotulo, campo):
+        return centavos(unico(rotulo + _VALOR, campo))
+
+    v = unico(r"NÚMERO DA " + _NFSE + r"\s*(\d+)\b", "numero")
+    n["numero"] = int(v) if v and int(v) > 0 else (numero_chave or None)
     if numero_chave and n["numero"] and numero_chave != n["numero"]:
         n["avisos"].append("número da nota não confere com a chave de acesso")
-    m = re.search(r"DATA E HORA DA EMISSÃO DA NFS-E\s*(\d{2}/\d{2}/\d{4})", plano)
-    n["emissao"] = _iso(_DATA.search(m.group(1))) if m else None
+    v = unico(r"DATA E HORA DA EMISSÃO DA " + _NFSE + r"\s*(\d{2}/\d{2}/\d{4})", "emissao")
+    n["emissao"] = _iso(_DATA.search(v)) if v else None
+    n["serie_dps"] = unico(r"SÉRIE DA DPS\s*(\d+)\b", "serie_dps")
 
-    i_prest = plano.find("PRESTADOR / FORNECEDOR")
-    i_tom = plano.find("TOMADOR / ADQUIRENTE")
-    i_serv = plano.find("SERVIÇO PRESTADO")
-    trechos = {"prestador": plano[i_prest:i_tom] if 0 <= i_prest < i_tom else "",
-               "tomador": plano[i_tom:i_serv] if 0 <= i_tom < i_serv else ""}
-    for chave_parte, trecho in trechos.items():
+    for parte, titulo in (("prestador", "PRESTADOR / FORNECEDOR"), ("tomador", "TOMADOR / ADQUIRENTE")):
+        # o titulo do quadro vem colado ao primeiro rotulo dele; "TOMADOR/ADQUIRENTE" solto no texto nao e' o quadro
+        q = _danfse_quadro(campos, titulo + r"\s+CNPJ / CPF / NIF")
+        trecho = campos[q[0]:q[1]] if q else ""
         m = re.search(r"CNPJ / CPF / NIF\s*([\d\./-]{14,18})", trecho)
         c = _CNPJ.search(m.group(1)) if m else None
-        n[f"{chave_parte}_cnpj"] = "".join(c.groups()) if c else None
+        n[f"{parte}_cnpj"] = "".join(c.groups()) if c else None
         m = re.search(r"Nome / Nome Empresarial\s*(.+?)\s+Município / Sigla UF", trecho)
-        n[f"{chave_parte}_nome"] = m.group(1).strip() if m else None
+        n[f"{parte}_nome"] = m.group(1).strip() if m else None
     if n["prestador_cnpj"] is None:
         n["prestador_cnpj"] = cnpj_chave
     elif cnpj_chave and cnpj_chave != n["prestador_cnpj"]:
         n["avisos"].append("CNPJ do prestador não confere com a chave de acesso")
+    if n["tomador_cnpj"] is None:
+        # o DANFSe sempre imprime o tomador, e e' por ele que a nota e' conferida contra o orgao do contrato:
+        # sem ele a nota nao e' proposta (o prestador tem a chave de acesso como segunda fonte; o tomador, nao)
+        ambiguos.append("tomador_cnpj")
 
-    m = re.search(r"Local da Prestação / Sigla UF / País\s*(.+?)\s*/\s*MT\b", plano)
+    m = re.search(r"Local da Prestação / Sigla UF / País\s*(.+?)\s*/\s*MT\b", campos)
     n["municipio"] = m.group(1).strip() if m else None
-    n["valor_centavos"] = _danfse_moeda(r"VALOR DA OPERAÇÃO / SERVIÇO", plano)
-    n["iss_centavos"] = _danfse_moeda(r"ISSQN Apurado", plano)
-    n["irrf_centavos"] = _danfse_moeda(r"\bIRRF", plano)
-    n["inss_centavos"] = _danfse_moeda(r"Contribuição Previdenciária\s*[–-]\s*Retida", plano)
-    n["retencao_total_centavos"] = _danfse_moeda(r"Total das Retenções \(ISSQN / Federais\)", plano)
-    n["liquido_centavos"] = _danfse_moeda(r"VALOR LÍQUIDO DA NFS-e", plano)
-    n["cbs_centavos"] = _danfse_moeda(r"Valor Total Apuração\s*[–-]\s*CBS", plano)
-    n["ibs_centavos"] = _danfse_moeda(r"Valor Total Apurado\s*[–-]\s*IBS", plano)
+    n["valor_centavos"] = moeda(r"VALOR DA OPERAÇÃO / SERVIÇO", "valor_centavos")
+    n["iss_centavos"] = moeda(r"ISSQN Apurado", "iss_centavos")
+    n["irrf_centavos"] = moeda(r"\bIRRF", "irrf_centavos")
+    n["inss_centavos"] = moeda(r"Contribuição Previdenciária\s*[–-]\s*Retida", "inss_centavos")
+    n["retencao_total_centavos"] = moeda(r"Total das Retenções \(ISSQN / Federais\)", "retencao_total_centavos")
+    n["liquido_centavos"] = moeda(r"VALOR LÍQUIDO DA " + _NFSE, "liquido_centavos")
+    n["cbs_centavos"] = moeda(r"Valor Total Apura(?:ção|do)\s*[–-]\s*CBS", "cbs_centavos")
+    n["ibs_centavos"] = moeda(r"Valor Total Apurado\s*[–-]\s*IBS", "ibs_centavos")
 
-    m = re.search(r"Descrição do Serviço\s*(.*?)\s*TRIBUTAÇÃO MUNICIPAL", plano)
-    _descricao(n, (m.group(1) if m else "").upper())
+    desc = plano[q_desc[0]:q_desc[1]].removeprefix("Descrição do Serviço") if q_desc else ""
+    _descricao(n, desc.strip().upper())
     _autoconferir(n)
+    n["ambiguos"] = ambiguos
     return n
 
 
@@ -270,16 +322,19 @@ def _centi(texto: str) -> dict:
 
 def ler(texto: str) -> dict:
     """{ok, motivo, leiaute, ...campos}. `ok=False` com motivo `sem-texto`, `leiaute-desconhecido`,
-    `sem-numero` (rascunho) ou `campos-ausentes:<lista>`."""
+    `sem-numero` (rascunho) ou `campos-ausentes:<lista>` (campo obrigatorio que nao foi achado e, no DANFSe,
+    qualquer campo lido com dois valores diferentes: leitura ambigua nao vira nota)."""
     if not (texto or "").strip():
         return {"ok": False, "motivo": "sem-texto", "leiaute": None}
     leiaute = _leiaute(texto)
     if leiaute is None:
         return {"ok": False, "motivo": "leiaute-desconhecido", "leiaute": None}
     n = {"cuiaba": _cuiaba, "danfse": _danfse, "centi": _centi}[leiaute](texto)
-    if n["numero"] is None:
+    ambiguos = n.pop("ambiguos", [])
+    if n["numero"] is None and "numero" not in ambiguos:
         return {"ok": False, "motivo": "sem-numero", "leiaute": leiaute}
     faltando = [c for c in CAMPOS_OBRIGATORIOS if n.get(c) is None]
+    faltando += [c for c in ambiguos if c not in faltando]
     if faltando:
         return {"ok": False, "motivo": "campos-ausentes:" + ",".join(faltando), "leiaute": leiaute}
     return {"ok": True, "motivo": None, **n}

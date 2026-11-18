@@ -384,6 +384,75 @@ def anexar_pdf(conn, usuario: dict, medicao_id: int, pdf: bytes, nome: str, tipo
             "frc_gerada": gerada["numero"] if gerada else None}
 
 
+def reler_falhas(conn, usuario: dict, ensaio: bool = False) -> dict:
+    """Rele os PDFs de nota ja' anexados cuja leitura guardada FALHOU (leiaute que o leitor passou a reconhecer
+    depois do anexo). Para cada um que agora e' lido, faz o mesmo que arrastar o PDF de novo na medicao
+    (`anexar_pdf`): guarda a leitura, cria a nota, vincula e confere; e grava `nota.releitura` na auditoria.
+    Fica de fora o documento que ja' tem nota (digitada a mao) e a medicao cancelada ou desistida. O que continua
+    sem leitura fica como esta', com o motivo. `ensaio` so' le e relata: nao grava nada.
+    Devolve {ensaio, documentos, lidos, linhas}."""
+    rel = {"ensaio": ensaio, "documentos": 0, "lidos": 0, "linhas": []}
+    docs = conn.execute("""
+        SELECT d.id, d.medicao_id, d.nome, d.arquivo, d.leitura, m.estado, m.contrato_id,
+               (SELECT 1 FROM notas_fiscais n WHERE n.documento_id=d.id) AS tem_nota
+        FROM medicao_documentos d JOIN medicoes m ON m.id=d.medicao_id
+        WHERE d.tipo_doc='nfs' AND d.arquivo IS NOT NULL AND d.leitura IS NOT NULL ORDER BY d.id""").fetchall()
+    for d in docs:
+        anterior = json.loads(d["leitura"])
+        if anterior.get("ok"):
+            continue
+        rel["documentos"] += 1
+        rotulo = f"documento {d['id']} (medição {d['medicao_id']}, {d['nome']})"
+        if d["tem_nota"]:
+            rel["linhas"].append(f"{rotulo}: já tem nota informada à mão; fica como está")
+            continue
+        if d["estado"] in ("cancelada", "desistida"):
+            rel["linhas"].append(f"{rotulo}: medição {d['estado']}; fica como está")
+            continue
+        caminho = arquivos.caminho_seguro(d["arquivo"])
+        if not caminho.is_file():
+            rel["linhas"].append(f"{rotulo}: arquivo não está no disco; fica como está")
+            continue
+        pdf = caminho.read_bytes()
+        try:
+            lida = leitura_nfse.ler(leitura_pdf.texto_de_pdf_com_limite(pdf))
+        except ValueError as e:
+            rel["linhas"].append(f"{rotulo}: o PDF não pôde ser lido ({e}); fica como está")
+            continue
+        if not lida["ok"]:
+            rel["linhas"].append(f"{rotulo}: continua sem leitura ({lida['motivo']}; antes, {anterior.get('motivo')})")
+            continue
+        ent = _entidade_por_cnpj(conn, lida.get("prestador_cnpj"))
+        orgao = _cnpj_do_orgao(conn, d["contrato_id"])
+        descricao = (f"nota {lida['numero']} de {lida['emissao']}, {dinheiro.format_brl(lida['valor_centavos'])}, "
+                     + ("tomador é o órgão do contrato" if orgao and lida.get("tomador_cnpj") == orgao
+                        else "tomador NÃO é o órgão do contrato" if orgao else "contrato sem CNPJ do órgão"))
+        nasce = bool(ent and ent["coligada_rm"] is not None)
+        destino = ("a nota nasce e é ligada à medição" if nasce
+                   else "prestador sem coligada no cadastro: a leitura fica no documento (conta para a FRC), sem nota")
+        if ensaio:
+            rel["lidos"] += 1
+            rel["linhas"].append(f"{rotulo}: {descricao}; {destino}")
+            continue
+        try:
+            with db.mutacao(conn):
+                r = anexar_pdf(conn, usuario, d["medicao_id"], pdf, d["nome"])
+                auditoria.registrar(conn, usuario["id"], "nota.releitura", "medicao", d["medicao_id"],
+                                    {"documento_id": d["id"], "motivo": anterior.get("motivo")},
+                                    {"documento_id": d["id"], "leiaute": lida["leiaute"], "numero": lida["numero"],
+                                     "valor_centavos": lida["valor_centavos"], "nota_id": r["nota_id"]})
+        except ValueError as e:
+            rel["linhas"].append(f"{rotulo}: {descricao}; recusada ({e}); fica como está")
+            continue
+        rel["lidos"] += 1
+        divergencias = ", ".join(NOME_CAMPO.get(x["campo"], x["campo"]) for x in r["conferencia"]
+                                 if x.get("grau") == "divergente")
+        rel["linhas"].append(f"{rotulo}: {descricao}; " + (f"nota {r['nota_id']} ligada à medição" if r["nota_id"]
+                                                           else "leitura guardada no documento, sem nota")
+                             + (f"; diverge do espelho em: {divergencias}" if divergencias else ""))
+    return rel
+
+
 def registrar_manual(conn, usuario: dict, medicao_id: int, documento_id: int, numero: int, emissao: str,
                      valor_centavos: int) -> dict:
     """PDF sem texto ou leiaute desconhecido: a pessoa digita numero, data e valor (spec §7.1)."""
