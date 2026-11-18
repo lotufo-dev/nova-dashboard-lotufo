@@ -210,7 +210,9 @@ export const reconciliacaoComBaixados = (rec, reg) => ({ ...rec, baixados_com_di
 
 // A obra paralisada e a obra em encerramento: o cabecalho muda o selo do estado e a aba Prazos mostra a paralisacao
 // (sem o selo dos dias da execucao) ou o cartao do encerramento.
-export const cabecalhoCom = status => cabecalho => ({ ...cabecalho, status });
+// `extra`: desde quando a obra esta' assim (`status_desde`) e a ordem de paralisacao (`paralisada_desde`), que o
+// painel "Prazo" mostra no lugar dos dias do prazo.
+export const cabecalhoCom = (status, extra = {}) => cabecalho => ({ ...cabecalho, status, ...extra });
 export const prazosParalisada = prazos => ({
   ...prazos, situacao: { ...prazos.situacao, paralisacao: { desde: "2026-08-03", numero: "OP-01/2026" }, encerramento: null },
 });

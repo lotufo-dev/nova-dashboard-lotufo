@@ -56,6 +56,15 @@ def test_execucao_60_30_e_vencida_sem_pedido_vai_para_a_diretoria(cenario):
     assert (a["nivel"], a["publico"]) == ("critico", ["operacao", "diretoria"]) and "sem pedido" in a["mensagem"]
 
 
+def test_contagem_de_um_dia_sai_no_singular(cenario):
+    """Visto no Inicio sobre o volume real: "execução termina em 1 dias"."""
+    c, _ = cenario
+    assert _por_tipo(c, D(2026, 10, 19))["execucao_vencendo"]["mensagem"] == "execução termina em 1 dia (20/10/2026)"
+    assert _por_tipo(c, D(2026, 10, 18))["execucao_vencendo"]["mensagem"] == "execução termina em 2 dias (20/10/2026)"
+    assert _por_tipo(c, D(2026, 10, 21))["instrumento_pendente"]["mensagem"] == \
+        "execução vencida há 1 dia, sem pedido de prorrogação"
+
+
 def test_pedido_enviado_troca_o_aviso_e_instrumento_posterior_fecha(cenario):
     c, ids = cenario
     ids["pleito"]("prazo", "2026-09-05")

@@ -19,7 +19,7 @@ import zipfile
 from pathlib import Path
 
 from app import (arquivos, auditoria, certidoes, contratos, db, entidades, feriados, garantias, leitura_certidao,
-                 leitura_pdf, tempo)
+                 leitura_pdf, tempo, texto)
 
 TIPOS = leitura_certidao.TIPOS
 TIPOS_ZIP = ("federal", "fgts", "trabalhista", "estadual", "municipal")    # D7 (09/10/2026): falencia fora
@@ -533,7 +533,7 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                 grave = True
             elif s["situacao"] == "vencendo":
                 partes.append(f"{rot} vence hoje" if s["dias"] == 0 else
-                              f"{rot} vence em {s['dias']} dia{'s' if s['dias'] > 1 else ''}")
+                              f"{rot} vence em {texto.dias(s['dias'])}")
                 validades.append(s["certidao"]["validade"])
         if partes:
             # D10 (o dono, 2026-09-26): certidao vencida ou faltando e' CRITICO, no aviso e na tela

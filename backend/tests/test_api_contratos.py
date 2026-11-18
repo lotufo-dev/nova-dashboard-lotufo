@@ -409,6 +409,23 @@ def test_ficha_ritmo_e_prazo_na_cota(client_admin, monkeypatch):
     assert f["topo"]["saldo_centavos"] == 391_999_84
     assert set(r) == {"ritmo_centavos", "conclusao", "situacao", "dias_alem"}
     assert (r["conclusao"], r["situacao"], r["dias_alem"]) == (cheio["conclusao"], "atrasa", cheio["dias_alem"])
+    # so' a obra ativa, fora do encerramento e sem paralisacao tem prazo a cobrar: na que ja' fez a medicao final,
+    # o painel dizia "N dias alem do prazo" pelo ritmo ao lado de "vencido ha' N dias". O ritmo continua
+    conn = db.get_conn()
+    conn.execute("UPDATE contratos SET encerramento_iniciado_em='2026-10-01' WHERE id=?", (cid,))
+    conn.commit()
+    r = prazos.ritmo_e_prazo(conn, cid, hoje)
+    assert (r["ritmo_centavos"], r["conclusao"], r["situacao"], r["dias_alem"]) == (66_666_72, None, None, None)
+    conn.execute("UPDATE contratos SET encerramento_iniciado_em=NULL WHERE id=?", (cid,))
+    conn.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) VALUES (?, 'par-1', 'paralisacao', "
+                 "'2026-10-10', '{}')", (cid,))
+    conn.commit()
+    assert prazos.ritmo_e_prazo(conn, cid, hoje)["situacao"] is None
+    conn.execute("DELETE FROM instrumentos WHERE contrato_id=?", (cid,))
+    conn.execute("UPDATE contratos SET estado='encerrado' WHERE id=?", (cid,))
+    conn.commit()
+    assert prazos.ritmo_e_prazo(conn, cid, hoje)["situacao"] is None
+    conn.close()
 
 
 def test_listar_traz_a_posicao_na_cota_igual_ao_topo_da_pagina_da_obra(client_admin):

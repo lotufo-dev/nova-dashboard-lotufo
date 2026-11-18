@@ -24,7 +24,7 @@ import threading
 import time
 from pathlib import Path
 
-from app import auditoria, db, tempo
+from app import auditoria, db, tempo, texto
 
 log = logging.getLogger("app.integridade")
 
@@ -127,8 +127,7 @@ def _ler_registro(raiz: Path) -> dict | None:
     return r
 
 
-def _plural(n: int, singular: str, plural: str) -> str:
-    return f"{n} {singular if n == 1 else plural}"
+_plural = texto.contar
 
 
 def conferir(raiz: Path, clone: Path | None = None) -> dict:

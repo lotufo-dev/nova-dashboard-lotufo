@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Contador from "./Contador";
+import { contar } from "./formato";
 import { IconeClipe, IconeEnviarNuvem, IconeLinkExterno } from "./icones";
 import LegendaCor, { type ItemLegenda } from "./LegendaCor";
 import { Link } from "./Link";
@@ -303,7 +304,7 @@ function GrupoGarantias({ orgao, obras }: { orgao: string; obras: ObraDoc[] }) {
       </ul>
       {obras.length > OBRAS_POR_GRUPO && (
         <button type="button" className="doc-grupo__mais" onClick={() => setTudo(t => !t)}>
-          {tudo ? "mostrar menos" : `+${obras.length - OBRAS_POR_GRUPO} obras`}
+          {tudo ? "mostrar menos" : `+${contar(obras.length - OBRAS_POR_GRUPO, "obra", "obras")}`}
         </button>
       )}
     </section>

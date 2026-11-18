@@ -12,7 +12,7 @@ import re
 from decimal import Decimal
 from fractions import Fraction
 
-from app import avisos as _av, contratos, dinheiro, tempo
+from app import avisos as _av, contratos, dinheiro, tempo, texto
 
 # Os limites do prazo da obra, num lugar so' (spec de 21/09/2026, §11, aviso "Execução vencendo": 60 dias do fim,
 # critico aos 30). Valem para os avisos, o farol da lista de Obras (que sai dos avisos), a aba Prazos, o numero dos
@@ -329,6 +329,11 @@ def ritmo_e_prazo(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
     # #662: sem prazo de execucao conhecido nao ha' com o que comparar a conclusao (a conta nao fecha); a data fica
     if dias is not None and execucao_sem_prazo(conn, contrato_id, hoje):
         conclusao = dias = None
+    # so' a obra ativa, fora do encerramento e sem paralisacao tem prazo a cobrar (`_niveis`): na que ja' fez a
+    # medicao final, encerrou ou esta' parada, "N dias alem do prazo" pelo ritmo nao e' informacao
+    v = contratos.vigente(conn, contrato_id)
+    if v["estado"] != "ativo" or v.get("encerramento_iniciado_em") or _paralisacao(conn, contrato_id):
+        conclusao = dias = None
     return {"ritmo_centavos": s["ritmo_centavos"],
             "conclusao": conclusao.isoformat() if conclusao and dias is not None else None,
             "situacao": None if dias is None else "atrasa" if dias > 0 else "no_prazo",
@@ -348,7 +353,7 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                 dias = (hoje - desde).days
                 out.append(_av.aviso("conclusao_nao_comunicada", "acao",
                                      f"em encerramento desde {_br(s['encerramento']['desde'])} "
-                                     f"({dias} dias); conclusão não comunicada",
+                                     f"({texto.dias(dias)}); conclusão não comunicada",
                                      cid, nome, dias=dias, destino=destino,
                                      data=desde.isoformat(), sentido="desde"))
             continue
@@ -371,9 +376,9 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                 desde = (hoje - (_d(s["pedido"]["enviado_em"]) or hoje)).days
                 vencida = dias is not None and dias < 0
                 msg = (f"prorrogação pedida em {_br(s['pedido']['enviado_em'])} "
-                       f"({s['pedido']['numero_oficio']}); instrumento pendente há {desde} dias")
+                       f"({s['pedido']['numero_oficio']}); instrumento pendente há {texto.dias(desde)}")
                 if vencida:
-                    msg += f"; execução vencida há {-dias} dias"
+                    msg += f"; execução vencida há {texto.dias(-dias)}"
                 # #662: sem prazo de execucao conhecido o aviso conta desde o pedido, e nao ate' a execucao registrada
                 quando = {"dias": desde, "data": s["pedido"]["enviado_em"][:10], "sentido": "desde"} if sem_prazo \
                     else {"dias": dias, "data": s["execucao_fim"], "sentido": "prazo"}
@@ -382,28 +387,28 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                                      destino=destino, **quando))
             elif dias is not None and dias < 0:
                 out.append(_av.aviso("instrumento_pendente", "critico",
-                                     f"execução vencida há {-dias} dias, sem pedido de prorrogação",
+                                     f"execução vencida há {texto.dias(-dias)}, sem pedido de prorrogação",
                                      cid, nome, dias=dias, publico=("operacao", "diretoria"), destino=destino,
                                      data=s["execucao_fim"], sentido="prazo"))
             elif s["nivel_execucao"] != "normal":
                 out.append(_av.aviso("execucao_vencendo", s["nivel_execucao"],
-                                     f"execução termina em {dias} dias ({_br(s['execucao_fim'])})",
+                                     f"execução termina em {texto.dias(dias)} ({_br(s['execucao_fim'])})",
                                      cid, nome, dias=dias, destino=destino, data=s["execucao_fim"], sentido="prazo"))
         if s["nivel_vigencia"] != "normal":
             dv = s["dias_vigencia"]
             out.append(_av.aviso("vigencia_vencendo", s["nivel_vigencia"],
-                                 f"vigência termina em {dv} dias ({_br(s['vigencia_fim'])})" if dv >= 0
-                                 else f"vigência vencida há {-dv} dias ({_br(s['vigencia_fim'])})",
+                                 f"vigência termina em {texto.dias(dv)} ({_br(s['vigencia_fim'])})" if dv >= 0
+                                 else f"vigência vencida há {texto.dias(-dv)} ({_br(s['vigencia_fim'])})",
                                  cid, nome, dias=dv, destino=destino, data=s["vigencia_fim"], sentido="prazo"))
         if s["folga"]["quebrada"]:
             out.append(_av.aviso("folga_quebrada", "acao",
                                  f"execução até {_br(s['execucao_fim'])} e vigência até {_br(s['vigencia_fim'])}: "
-                                 f"folga de {s['folga']['real']} dias, o órgão pede {s['folga']['exigida']}",
+                                 f"folga de {texto.dias(s['folga']['real'])}, o órgão pede {s['folga']['exigida']}",
                                  cid, nome, destino=destino))
         e = s["endosso"]
         if e and not e["entregue"] and e["dias"] is not None and e["dias"] <= ENDOSSO_JANELA:
             falta = ENDOSSO_PRAZO - e["dias"]
-            quando = f"vence em {falta} dias" if falta >= 0 else f"atrasado {-falta} dias"
+            quando = f"vence em {texto.dias(falta)}" if falta >= 0 else f"atrasado {texto.dias(-falta)}"
             out.append(_av.aviso("endosso_garantia", "atencao" if falta >= 0 else "acao",
                                  f"endosso do seguro-garantia do {e['instrumento']} "
                                  f"(assinado em {_br(e['assinado_em'])}) {quando}", cid, nome, dias=falta,

@@ -17,7 +17,7 @@ Contrato em encerramento nao recebe este (a execucao ja' acabou).
 import datetime
 import json
 
-from app import tempo
+from app import tempo, texto
 
 LIMIAR_ATENCAO, LIMIAR_ACAO = 30, 15
 
@@ -76,7 +76,7 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
             else:
                 nivel = "acao" if dias <= LIMIAR_ACAO else "atencao"
                 msg = f"garantia vence hoje ({br})" if dias == 0 else \
-                    f"garantia vence em {dias} dia{'s' if dias > 1 else ''} ({br})"
+                    f"garantia vence em {texto.dias(dias)} ({br})"
             out.append({"tipo": "garantia_vencendo", "nivel": nivel, "natureza": "ausencia" if dias < 0 else "fato",
                         "publico": ["operacao", "diretoria"],
                         "contrato_id": cid, "dias": dias, "data": g["vigencia_fim"], "mensagem": msg})

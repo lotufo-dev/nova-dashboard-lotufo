@@ -7,6 +7,9 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 
 ## Código
 
+- 2026-11-17 Cota em consórcio com várias faturas na mesma medição: o Fechamento arredonda a cota uma vez, na soma das faturas, e a reparte (`fechamento._cotas`); o faturado e o recebido por mês direto do RM (`diretoria.rm_por_mes`) ainda arredondam nota a nota e podem ficar um centavo diferentes do Fechamento. Levar a mesma conta para lá.
+- 2026-11-17 Painel Prazo da obra encerrada ou rescindida: as linhas do tempo ainda trazem a marca "Hoje" no fim do trilho (`ExecucaoContrato.tsx`); o estado e a data já saem no lugar dos dias. Decidir se a marca some.
+- 2026-11-17 Envio da nota: a medição com menos PDFs anexados do que notas ligadas não é acusada (`notas_envio._itens` só olha a medição sem PDF nenhum); o PDF que a leitura não entende não diz de qual nota é.
 - 2026-11-16 Página da medição (#722), o que ficou diferente da página montada pelo dono: os botões de cor e de realce do editor do e-mail seguem com a cor escolhida.
 - 2026-11-16 Página da medição (#722), herdado e não mexido: a faixa verde "Tudo pronto para enviar" segue com o visto antes do envio; o aviso de resposta do órgão fica à esquerda só com a página da medição aberta (nas outras telas, à direita).
 - 2026-11-16 Editor do corpo do e-mail (`EditorCorpo.tsx`), visto no Chrome na #722: colar texto simples não deixa cor nem fonte em linha; colar texto COM formato no começo de uma linha recém-partida deixa `style="font-family: inherit;"` nos trechos colados (o limpador do servidor tira). Já era assim antes da #722; mexer no que o editor produz é decisão de envio.

@@ -1,5 +1,6 @@
 // Regras de APRESENTACAO da matriz de Documentos (NAVEGACAO.md › Documentos): funcoes puras sobre /api/documentos.
 // A situacao de cada certidao (em dia, vencendo, vencida, faltando) e' do servidor; aqui so' se conta, filtra e ordena.
+import { contar } from "./formato";
 import { situacaoDoNivel } from "./situacao";
 
 export type CertidaoDoc = { id: number; emissao: string; validade: string; natureza: string | null;
@@ -141,7 +142,7 @@ export function resumoEmpresa(e: EmpresaDoc, obras: ObraDoc[] = []): { texto: st
   if (vencidas) partes.push(vencidas === 1 ? "1 vencida" : `${vencidas} vencidas`);
   if (faltas) partes.push(faltas === 1 ? "1 falta" : `${faltas} faltam`);
   if (vencendo.length === 1) partes.push(`1 ${venceEm(vencendo[0].dias ?? 0)}`);
-  else if (vencendo.length > 1) partes.push(`${vencendo.length} vencem em até ${Math.max(...vencendo.map(l => l.dias ?? 0))} dias`);
+  else if (vencendo.length > 1) partes.push(`${vencendo.length} vencem em até ${contar(Math.max(...vencendo.map(l => l.dias ?? 0)), "dia", "dias")}`);
   if (regFora) partes.push(`regularidade ${e.regularidade!.situacao === "faltando" ? "não anexada" : "atrasada"}`);
   const o = pendenciasDeObras(e, obras);
   if (o.garantiasVencidas) partes.push(o.garantiasVencidas === 1 ? "garantia vencida" : `${o.garantiasVencidas} garantias vencidas`);

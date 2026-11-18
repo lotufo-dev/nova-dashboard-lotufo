@@ -1,5 +1,6 @@
 import { LinhasDoTempo, type Nivel, type StatusDaObra } from "./ExecucaoContrato";
-import { brl, fmtDias, fmtPercentual } from "./formato";
+import { brl, fmtDias } from "./formato";
+import { pctPiso } from "./listaObras";
 import { Link } from "./Link";
 import Selo, { Glifo } from "./Selo";
 import { fmtDataPura } from "./tempo";
@@ -44,7 +45,8 @@ const CARREGANDO = <p className="obra-nota">Carregando…</p>;
  *  `topo` do servidor. O percentual e a barra sao numero, nao situacao: vao em tinta, sem glifo. */
 export default function FichaObra({ ficha }: { ficha: Ficha | null | undefined }) {
   const topo = ficha?.topo;
-  const pctExec = topo && topo.vigente_centavos > 0 ? topo.medido_centavos / topo.vigente_centavos : null;
+  // o mesmo percentual da lista de Obras, por piso (#779): 99,96% e' 99%, e so' mostra 100% quem mediu tudo
+  const pctExec = topo ? pctPiso(topo.medido_centavos, topo.vigente_centavos) : null;
   return (
     <section className="obra-resumo" id="resumo" aria-label="Resumo da obra">
       {ficha === undefined ? CARREGANDO : ficha === null || !topo ? INDISPONIVEL : (
@@ -73,10 +75,10 @@ export default function FichaObra({ ficha }: { ficha: Ficha | null | undefined }
           </dl>
           <div className="obra-executado">
             <div className="obra-executado__barra" role="progressbar" aria-label="Execução do contrato" aria-valuemin={0} aria-valuemax={100}
-              aria-valuenow={pctExec === null ? undefined : Math.round(Math.min(1, pctExec) * 100)}>
-              <span style={{ width: `${Math.min(100, Math.max(0, (pctExec ?? 0) * 100))}%` }} />
+              aria-valuenow={pctExec === null ? undefined : Math.max(0, Math.min(100, pctExec))}>
+              <span style={{ width: `${Math.min(100, Math.max(0, pctExec ?? 0))}%` }} />
             </div>
-            <span className="obra-executado__pct">{pctExec === null ? "—" : `${fmtPercentual(pctExec, 0)} executado`}</span>
+            <span className="obra-executado__pct">{pctExec === null ? "—" : `${pctExec}% executado`}</span>
           </div>
           <p className="obra-nota">
             {[ficha.contrato.original_igual ? "original igual" : `original ${brl(ficha.contrato.original_centavos)}`,
@@ -92,7 +94,21 @@ export default function FichaObra({ ficha }: { ficha: Ficha | null | undefined }
 type PrazosDaObra = {
   execucao_inicio?: string | null; vigencia_inicio?: string | null; execucao_fim: string | null; vigencia_fim: string | null;
   status: StatusDaObra; execucao_sem_prazo?: boolean; nivel_execucao?: Nivel; nivel_vigencia?: Nivel;
+  // desde quando a obra esta' no status de hoje (ordem de paralisacao, inicio do encerramento, encerramento), se o
+  // sistema tem a data; e a ordem de paralisacao sem reinicio
+  status_desde?: string | null; paralisada_desde?: string | null;
 };
+
+/** A obra que nao esta' em execucao nao tem prazo correndo: o painel diz o estado e desde quando, no lugar de contar
+ *  os dias de um prazo que nao se cobra mais ("vencido ha' 453 dias" numa obra encerrada). Obra ativa: null. */
+export function estadoSemPrazo(p: PrazosDaObra): { texto: string; paralisada: boolean } | null {
+  const desde = (d: string | null | undefined) => d ? ` desde ${fmtDataPura(d)}` : "";
+  if (p.status === "suspenso" || p.paralisada_desde) return { texto: `paralisada${desde(p.paralisada_desde ?? p.status_desde)}`, paralisada: true };
+  if (p.status === "em_encerramento") return { texto: `em encerramento${desde(p.status_desde)}`, paralisada: false };
+  if (p.status === "encerrado") return { texto: `encerrada${desde(p.status_desde)}`, paralisada: false };
+  if (p.status === "rescindido") return { texto: `rescindida${desde(p.status_desde)}`, paralisada: false };
+  return null;
+}
 
 /** O prazo da obra num painel so': quantos dias faltam para o fim da execucao (o nivel e' do servidor, com o glifo
  *  alem da cor), as linhas do tempo da execucao e da vigencia e, embaixo, a conta do ritmo (#655): no ritmo das 6
@@ -100,17 +116,20 @@ type PrazosDaObra = {
 export function PrazoDaObra({ ficha, prazos }: { ficha: Ficha | null | undefined; prazos: PrazosDaObra }) {
   const r = ficha?.ritmo;
   const exec = ficha?.vencimentos.find(v => v.chave === "execucao") ?? null;
+  const parada = estadoSemPrazo(prazos);
   return (
     <section className="cartao obra-prazo" id="prazo" aria-labelledby="titulo-prazo">
       <div className="cartao__cabeca obra-prazo__cabeca">
         <h2 className="cartao__titulo" id="titulo-prazo">Prazo</h2>
-        {r?.situacao === "no_prazo" && <Selo situacao="feito">No prazo</Selo>}
-        {r?.situacao === "atrasa" && r.dias_alem !== null && <Selo situacao="critico">{fmtDias(r.dias_alem)} além do prazo</Selo>}
       </div>
       <div className="obra-prazo__corpo">
         <div className="obra-prazo__dias">
-          <span className="obra-rotulo">Fim da execução</span>
-          {ficha === undefined ? CARREGANDO : ficha === null || !exec ? INDISPONIVEL : (
+          <span className="obra-rotulo">{parada ? "Execução" : "Fim da execução"}</span>
+          {ficha === undefined ? CARREGANDO : ficha === null || !exec ? INDISPONIVEL : parada ? (
+            <p className={`obra-prazo__numero obra-prazo__numero--estado${parada.paralisada ? " obra-prazo__numero--breve" : ""}`}>
+              {parada.paralisada && <Glifo situacao="breve" />}{parada.texto}
+            </p>
+          ) : (
             <p className={`obra-prazo__numero${exec.nivel === "critico" ? " obra-prazo__numero--critico" : exec.nivel === "atencao" ? " obra-prazo__numero--breve" : ""}`}>
               {exec.nivel !== "normal" && <Glifo situacao={exec.nivel === "critico" ? "critico" : "breve"} />}
               {exec.dias === null ? "—" : exec.dias < 0 ? `vencido há ${fmtDias(-exec.dias)}` : exec.dias === 0 ? "vence hoje" : `em ${fmtDias(exec.dias)}`}
@@ -119,12 +138,22 @@ export function PrazoDaObra({ ficha, prazos }: { ficha: Ficha | null | undefined
         </div>
         <LinhasDoTempo execucaoInicio={prazos.execucao_inicio ?? null} execucaoFim={prazos.execucao_fim}
           vigenciaInicio={prazos.vigencia_inicio ?? null} vigenciaFim={prazos.vigencia_fim} status={prazos.status}
-          execucaoSemPrazo={prazos.execucao_sem_prazo} nivelExecucao={prazos.nivel_execucao} nivelVigencia={prazos.nivel_vigencia} />
+          execucaoSemPrazo={prazos.execucao_sem_prazo} nivelExecucao={prazos.nivel_execucao} nivelVigencia={prazos.nivel_vigencia}
+          paralisadaDesde={prazos.paralisada_desde ?? (prazos.status === "suspenso" ? prazos.status_desde : null) ?? null} />
       </div>
-      {ficha !== undefined && r && (
+      {/* o ritmo e' de obra em execucao; o selo fica na linha da conclusao estimada, que e' o que ele compara com o
+          fim da execucao (no alto do painel, ao lado de "vencido ha' N dias", lia-se como a mesma conta) */}
+      {ficha !== undefined && r && !parada && (
         <dl className="obra-ritmo" aria-label="Ritmo e prazo">
           <div><dt>Ritmo mensal</dt><dd>{r.ritmo_centavos === null ? "—" : brl(r.ritmo_centavos)}</dd></div>
-          <div><dt>Conclusão estimada</dt><dd>{data(r.conclusao)}</dd></div>
+          <div>
+            <dt>Conclusão estimada</dt>
+            <dd className="obra-ritmo__conclusao">
+              <span>{data(r.conclusao)}</span>
+              {r.situacao === "no_prazo" && <Selo situacao="feito">até o fim da execução</Selo>}
+              {r.situacao === "atrasa" && r.dias_alem !== null && <Selo situacao="critico">{fmtDias(r.dias_alem)} depois do fim da execução</Selo>}
+            </dd>
+          </div>
         </dl>
       )}
     </section>

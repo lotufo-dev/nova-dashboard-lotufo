@@ -11,7 +11,7 @@ from email import policy
 from email.parser import BytesParser
 from email.utils import parseaddr, parsedate_to_datetime
 
-from app import arquivos, auditoria, certidoes, db, documentos, frc, medicoes, notas, oficios, protocolo, tempo
+from app import arquivos, auditoria, certidoes, db, documentos, frc, medicoes, notas, oficios, protocolo, tempo, texto
 
 log = logging.getLogger(__name__)
 
@@ -155,6 +155,23 @@ def liberar_sem_a_outra(conn, usuario_id: int, medicao_id: int, justificativa: s
 
 # --- itens do envio --------------------------------------------------------------------------------
 
+def _sem_zeros(numero) -> str | None:
+    """"000000019" (como o RM guarda) -> "19", o numero como a nota o traz."""
+    s = str(numero or "").strip()
+    return (str(int(s)) if s.isdigit() else s) or None
+
+
+def _notas_sem_pdf(conn, m: dict) -> list[dict]:
+    """O que falta anexar numa medicao do envio que ainda nao tem PDF de nota: as notas ja' ligadas a ela (as mesmas
+    do passo Notas, que conta a nota do RM mesmo sem o PDF), uma linha por nota, com o numero. O passo Notas dizia
+    "2 de 2" e o envio "Falta a nota fiscal", sem dizer de qual: a nota existe, o que falta e' o PDF dela. Sem nota
+    ligada, uma linha so', sem numero (falta a nota mesmo)."""
+    ligadas = [n for n in notas._alocadas(conn, m["id"])
+               if (n.get("situacao") or "ativa") == "ativa" and not n.get("desconsiderada_em") and not n.get("excluida_rm_em")]
+    base = {"natureza": m["tipo"], "medicao_id": m["id"]}
+    return [{**base, "numero": _sem_zeros(n["numero"]), "valor_centavos": n["valor_alocado_centavos"]} for n in ligadas] \
+        or [{**base, "numero": None, "valor_centavos": None}]
+
 def _itens(conn, c: dict, familia: str, ms: list[dict], hoje: datetime.date) -> tuple[list[dict], list[dict], list[str]]:
     """(itens, notas, avisos curtos). Estados: ok | aviso (<15 dias) | falta (justifica) | vencida (bloqueia)."""
     e = protocolo._etapa(familia, _etapa(familia))
@@ -165,6 +182,13 @@ def _itens(conn, c: dict, familia: str, ms: list[dict], hoje: datetime.date) -> 
         f"AND arquivo IS NOT NULL ORDER BY tipo_doc='fatura', id", ids)]
     tipo_de = {m["id"]: m["tipo"] for m in ms}
     nfs = [d for d in docs if d["tipo_doc"] != "fatura"]
+    # o numero da nota: o lido do PDF; sem ele (PDF que a leitura nao entendeu), o da nota ligada a este documento. Sem
+    # nenhum dos dois fica nulo e a tela mostra o nome do arquivo: nunca "NF" sozinho
+    for d in nfs:
+        if not d["numero_nf"]:
+            r = conn.execute("SELECT numero FROM notas_fiscais WHERE documento_id=? ORDER BY id DESC LIMIT 1",
+                             (d["id"],)).fetchone()
+            d["numero_nf"] = _sem_zeros(r["numero"]) if r else None
     notas = [{"numero": d["numero_nf"], "natureza": tipo_de[d["medicao_id"]], "municipio": d["municipio"],
               "arquivo": d["nome"], "consorciada": d["consorciada"], "medicao_id": d["medicao_id"],
               "valor_centavos": None} for d in nfs]
@@ -179,7 +203,8 @@ def _itens(conn, c: dict, familia: str, ms: list[dict], hoje: datetime.date) -> 
                             if x)
         curtos.append("Falta a nota fiscal")
     itens.append({"chave": "notas", "rotulo": f"Notas fiscais ({len(nfs)})" if len(nfs) != 1 else "Nota fiscal (1)",
-                  "detalhe": detalhe, "estado": "falta" if sem_nota else "ok"})
+                  "detalhe": detalhe, "estado": "falta" if sem_nota else "ok",
+                  "sem_pdf": [x for m in sem_nota for x in _notas_sem_pdf(conn, m)]})
     if c.get("entidade_id"):
         faltas = protocolo.faltas_consorcio(conn, c, ms)
         consorciadas = conn.execute("SELECT 1 FROM entidade_consorciadas WHERE consorcio_id=?",
@@ -229,7 +254,7 @@ def _itens(conn, c: dict, familia: str, ms: list[dict], hoje: datetime.date) -> 
                 est, msg = "falta", f"{rot} sem certidão"
             elif s["situacao"] in ("ok", "vencendo") and s["dias"] < AVISO_DIAS:
                 est, msg = "aviso", f"{rot} vence hoje" if s["dias"] == 0 else \
-                    f"{rot} vence em {s['dias']} dia{'s' if s['dias'] > 1 else ''}"
+                    f"{rot} vence em {texto.dias(s['dias'])}"
             else:
                 continue
             msgs.append(msg)

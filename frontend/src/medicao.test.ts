@@ -87,6 +87,9 @@ describe("medição", () => {
       .toEqual(["Nota 1843 diverge do espelho: Líquido R$ 1,00 no espelho e R$ 51,00 na nota"]);
     expect(itensOQueFalta({ ...m23, estado: "espelho_gerado", notas: [] }, 2, [], null).map(i => i.texto))
       .toEqual(["Enviar o espelho ao faturamento", "Anexar as notas (faltam 2)"]);
+    const vence = (dias: number) => itensOQueFalta(m23, 0, [{ ...checklist[1], situacao: "vencendo", dias }], null).map(i => i.texto);
+    expect(vence(1).at(-1)).toBe("Lotufo: FGTS · vence em 1 dia");
+    expect(vence(2).at(-1)).toBe("Lotufo: FGTS · vence em 2 dias");
   });
 
   it("linha do tempo em ordem, sem repetir o protocolo enviado pelo sistema", () => {
