@@ -222,7 +222,7 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
 
   return (
     <form className="pilha" onSubmit={salvar} noValidate aria-label="Registrar boletim" onKeyDown={ev => ev.key === "Escape" && aoFechar()}>
-      <p className="painel__titulo">Registrar o boletim da {m.numero}ª medição</p>
+      <p className="painel__titulo">Registrar o boletim {m.tipo === "reajuste" ? "do reajuste " : ""}da {m.numero}ª medição</p>
       {erro && <Falha>{erro}</Falha>}
       <div className="campo">
         <span className="campo__rotulo" id="bol-arquivo-rotulo">PDF do boletim</span>

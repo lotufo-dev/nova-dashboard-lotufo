@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Aviso } from "./Alertas";
-import { avisoPrincipal, contratantesDe, escopoDaUrl, filtrarObras, gruposPorContratante, pctExecutado, pctPiso, posicaoDe, prazoDaObra, resumoContratante, totaisDe, type ObraLista } from "./listaObras";
+import { avisoPrincipal, contratantesDe, escopoDaUrl, filtrarObras, gruposPorContratante, pctExecutado, pctPiso, posicaoDe, prazoDaObra, totaisDe, type ObraLista } from "./listaObras";
 
 const o = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => ({
   id, orgao: "SINFRA", numero_instrumento: `${id}/2026`, nome_curto: nome, estado: "ativo", ...extra });
@@ -65,37 +65,20 @@ describe("contratantes (entrada de Obras, #159)", () => {
     expect(pctExecutado(cheia(9, "X", 1000_00, 1000_00))).toBe(100);
     expect(pctPiso(2_66, 4_00)).toBe(66);
     expect(pctPiso(1, 0)).toBeNull();
-    expect(resumoContratante([cheia(9, "X", 1000_00, 999_99)]).pct).toBe(99);
   });
 
   it("com aditivo de reajuste, % e saldo usam o vigente de execução, como a página da obra (#262)", () => {
     const ses = cheia(7, "SES", 1200_00, 400_00, { valor_vigente_execucao_centavos: 1000_00 });
     expect(pctExecutado(ses)).toBe(40);
-    expect(resumoContratante([ses])).toMatchObject({ vigente: 1000_00, saldo: 600_00, pct: 40 });
   });
 
-  it("o resumo conta só as obras em andamento; as encerradas só são contadas", () => {
-    const r = resumoContratante(lista.filter(x => x.orgao === "MTPAR"));
-    expect(r).toMatchObject({ obras: 1, encerradas: 1, vigente: 2000_00, medido: 1000_00, saldo: 1000_00, pct: 50 });
-    // a rescindida também fica fora dos números e entra na contagem das encerradas
-    expect(resumoContratante([...lista, cheia(5, "MTPAR", 100_00, 0, { estado: "rescindido" })].filter(x => x.orgao === "MTPAR")))
-      .toMatchObject({ obras: 1, encerradas: 2, vigente: 2000_00 });
-  });
-
-  it("'Todas as obras' é a soma das linhas dos contratantes (obras e saldo)", () => {
-    const todas = resumoContratante(lista);
-    const partes = contratantesDe(lista).map(c => resumoContratante(lista.filter(x => x.orgao === c)));
-    expect(partes.reduce((a, r) => a + r.obras, 0)).toBe(todas.obras);
-    expect(partes.reduce((a, r) => a + r.saldo, 0)).toBe(todas.saldo);
-    expect(todas.saldo).toBe((1000_00 - 250_00) + (3000_00 - 750_00) + (2000_00 - 1000_00));
+  it("os contratantes da lista, em ordem alfabética", () => {
     expect(contratantesDe(lista)).toEqual(["MTPAR", "SINFRA"]);
   });
 
-  it("avisos do contratante: obras com aviso, críticos e o nível mais grave", () => {
+  it("o aviso principal da obra é o mais grave", () => {
     const av = (nivel: string, contrato_id: number) => ({ tipo: "x", nivel, contrato_id, mensagem: "m" }) as unknown as Aviso;
     const mapa = new Map<number, Aviso[]>([[1, [av("atencao", 1), av("critico", 1)]], [2, [av("acao", 2)]]]);
-    expect(resumoContratante(lista.filter(x => x.orgao === "SINFRA"), mapa)).toMatchObject({ comAviso: 2, criticos: 1, nivelMax: "critico" });
-    expect(resumoContratante(lista.filter(x => x.orgao === "MTPAR"), mapa)).toMatchObject({ comAviso: 0, criticos: 0, nivelMax: null });
     expect(avisoPrincipal(mapa.get(1)!)?.nivel).toBe("critico");
   });
 

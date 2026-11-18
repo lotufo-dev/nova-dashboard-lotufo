@@ -250,9 +250,9 @@ function Comparacao({ f }: { f: RespostaFechamento }) {
     <section className="cartao fch-painel" aria-labelledby="fch-comparacao">
       <div className="fch-painel__cab">
         <h2 id="fch-comparacao">{b} × {a}</h2>
-        <div className="fch-botoes" role="group" aria-label="Número comparado">
+        <div className="escolhas" role="group" aria-label="Número comparado">
           {comparaveis.map(c => (
-            <button key={c.chave} type="button" className="fch-botao" aria-pressed={chave === c.chave} onClick={() => setChave(c.chave)}>{c.rotulo}</button>
+            <button key={c.chave} type="button" className="escolha" aria-pressed={chave === c.chave} onClick={() => setChave(c.chave)}>{c.rotulo}</button>
           ))}
         </div>
       </div>
@@ -512,9 +512,9 @@ export default function Fechamento({ ir }: { ir: Ir }) {
     <div className="fch">
       <div className="fch-cota">
         <h2>Cota da Lotufo</h2>
-        <div className="fch-botoes" role="group" aria-label="Ano">
+        <div className="escolhas" role="group" aria-label="Ano">
           {[...f.anos].reverse().map(a => (
-            <button key={a} type="button" className="fch-botao" aria-pressed={atual === a} onClick={() => setAno(a)}>{a}</button>
+            <button key={a} type="button" className="escolha" aria-pressed={atual === a} onClick={() => setAno(a)}>{a}</button>
           ))}
         </div>
       </div>

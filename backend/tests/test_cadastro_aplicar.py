@@ -142,6 +142,29 @@ def test_passos_medicao_do_contrato_grava_a_lista_e_sem_a_chave_fica_nulo(conn):
     assert gravado() is None
 
 
+def test_centro_custo_empresa_rm_grava_audita_e_o_ensaio_nao_grava(conn):
+    """docs/adr/0005: o centro de custo da propria empresa no contrato de consorcio entra pelo cadastro, fica na
+    auditoria e sai quando a chave sai do arquivo. O ensaio nao grava."""
+    def gravado():
+        return conn.execute("SELECT centro_custo_empresa_rm FROM contratos").fetchone()[0]
+    com = lambda centro: _cad(contratos=[_contrato(centro_custo_empresa_rm=centro)])
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    assert gravado() is None
+    assert cadastro_aplicar.aplicar(conn, 1, com(None))["contratos"] == {"criados": [], "alterados": [], "iguais": 1}
+    r = cadastro_aplicar.aplicar(conn, 1, com("9.005.001"), ensaio=True)
+    assert r["ensaio"] is True and r["contratos"]["alterados"] == ["MT-402"] and gravado() is None
+    assert cadastro_aplicar.aplicar(conn, 1, com("9.005.001"))["contratos"]["alterados"] == ["MT-402"]
+    assert gravado() == "9.005.001"
+    ev = conn.execute("SELECT usuario_id, antes, depois FROM audit_log WHERE acao='cadastro.contrato' "
+                      "ORDER BY id DESC LIMIT 1").fetchone()
+    assert ev["usuario_id"] == 1
+    assert (json.loads(ev["antes"]), json.loads(ev["depois"])) == (
+        {"centro_custo_empresa_rm": None}, {"centro_custo_empresa_rm": "9.005.001"})
+    assert cadastro_aplicar.aplicar(conn, 1, com("9.005.001"))["contratos"] == {"criados": [], "alterados": [], "iguais": 1}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    assert gravado() is None
+
+
 def test_tipos_cobranca_extras_rm_grava_audita_e_o_ensaio_mostra_a_troca_sem_gravar(conn):
     """docs/adr/0015: o tipo extra do contrato entra pelo cadastro. O relatorio diz o antes e o depois ao lado da obra
     (a troca muda o a receber e o faturado dela); o ensaio mostra o mesmo e nao grava; sem a chave ou com a lista

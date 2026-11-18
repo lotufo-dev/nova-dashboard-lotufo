@@ -257,11 +257,14 @@ export function FormRecebimento({ m, salvando, agir, aoFechar, erro }: Base) {
   const falta = [...motivo.trim()].length < MIN_MOTIVO_RECEBIMENTO
     ? `Escreva o motivo, com pelo menos ${MIN_MOTIVO_RECEBIMENTO} caracteres.` : undefined;
   const erroMotivo = tentou ? falta : undefined;
+  // Decisao de 17/11/2026 (docs/adr/0006): a data e' obrigatoria (o servidor recusa sem ela e com data futura)
+  const erroData = tentou && !data ? "Informe a data em que o dinheiro entrou." : undefined;
   async function salvar(ev: React.FormEvent) {
     ev.preventDefault();
     setTentou(true);
+    if (!data) { document.getElementById("campo-data-marco")?.focus(); return; }
     if (falta) { document.getElementById("campo-motivo-recebimento")?.focus(); return; }
-    const corpo = { estado: "recebida", motivo: motivo.trim(), ...(data ? { data } : {}) };
+    const corpo = { estado: "recebida", motivo: motivo.trim(), data };
     const ok = await agir(() => api(`/api/medicoes/${m.id}/estado`, {
       method: "POST", body: JSON.stringify(corpo),
     }), "Recebimento registrado.");
@@ -273,9 +276,11 @@ export function FormRecebimento({ m, salvando, agir, aoFechar, erro }: Base) {
       <Erro erro={erro} />
       <div className="form-inline">
         <div className="campo">
-          <label className="campo__rotulo" htmlFor="campo-data-marco">Data da baixa (opcional)</label>
-          <input id="campo-data-marco" name="data_baixa" autoComplete="off" type="date" className="entrada--media" autoFocus value={data}
+          <label className="campo__rotulo" htmlFor="campo-data-marco">Data do recebimento</label>
+          <input id="campo-data-marco" name="data_baixa" autoComplete="off" type="date" className="entrada--media" autoFocus required value={data}
+            {...(erroData ? { "aria-invalid": true as const, "aria-describedby": "campo-data-marco-erro" } : {})}
             onChange={ev => setData(ev.target.value)} />
+          <ErroCampo id="campo-data-marco-erro" erro={erroData} />
         </div>
         <CaixaJustificativa>
           <label className="campo__rotulo" htmlFor="campo-motivo-recebimento">Motivo</label>

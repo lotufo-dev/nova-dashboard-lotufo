@@ -33,21 +33,15 @@ export type Painel = {
   reajustes_apostilamento?: { competencias: number; valor_centavos: number; obras: ReajusteObra[] };
 };
 
-// O selo diz a palavra do nivel (D12, D10), a mesma do selo dos avisos, com a forma pelo mesmo criterio (Alertas.tsx
-// > SELO): Critico e Acao pedem acao agora e levam o octogono; Atencao leva o triangulo de "vence em breve". So' o
+// O selo diz a palavra do nivel (D12, D10), a mesma do selo dos avisos, com a forma pelo mesmo criterio (o mapa
+// unico de `situacao.ts`): Critico e Acao pedem acao agora e levam o octogono; Atencao leva o triangulo de "vence em breve". So' o
 // QDOP EXPORTADO (arquivo) segue com o vocabulario oficial (verde, amarelo, vermelho).
 type FarolObra = Obra["farol"];
-const FAROL: Record<FarolObra, { rotulo: string; classe: string }> = {
-  verde: { rotulo: "Em dia", classe: "feito" },
-  acao: { rotulo: "Ação", classe: "critico" },
-  atencao: { rotulo: "Atenção", classe: "breve" },
-  vermelho: { rotulo: "Crítico", classe: "critico" },
-};
+const FAROL: Record<FarolObra, string> = { verde: "Em dia", acao: "Ação", atencao: "Atenção", vermelho: "Crítico" };
 
 /** O farol da obra como selo: glifo e palavra. Farol que o servidor inventar conta como Atenção. */
 export function SeloFarol({ farol }: { farol: FarolObra }) {
-  const f = FAROL[farol] ?? FAROL.atencao;
-  return <Selo situacao={situacaoDoNivel(f.classe)}>{f.rotulo}</Selo>;
+  return <Selo situacao={situacaoDoNivel(farol) ?? "breve"}>{FAROL[farol] ?? FAROL.atencao}</Selo>;
 }
 
 function pct(f: number): string {
@@ -268,12 +262,12 @@ export function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
           <a className="btn btn--pequeno" href="/api/diretoria/qdop.xlsx"><IconeBaixar className="icone icone--p" /> Exportar QDOP (.xlsx)</a>
         </div>
       </div>
-      <div className="qdop-filtros" role="group" aria-label="Filtrar o QDOP pelo farol">
+      <div className="escolhas qdop-filtros" role="group" aria-label="Filtrar o QDOP pelo farol">
         {FILTROS.map(f => {
           const n = p.obras.filter(o => noFiltro(o, f.id)).length;
           return (
-            <button key={f.id} type="button" className="qdop-filtro" aria-pressed={filtro === f.id} onClick={() => setFiltro(f.id)}>
-              {f.rotulo} <span className="qdop-filtro__n num">{n}</span>
+            <button key={f.id} type="button" className="escolha" aria-pressed={filtro === f.id} onClick={() => setFiltro(f.id)}>
+              {f.rotulo} <span className="escolha__n num">{n}</span>
             </button>
           );
         })}
@@ -304,7 +298,9 @@ export function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
                   {/* 06/11/2026: a coluna "Desvio (p.p.)" (#296) saiu da tela */}
                   <td data-rotulo="Término" className="num">{data(o.termino)}<div className="qdop-tabela__sub">vigência {data(o.vigencia)}</div></td>
                   <td data-rotulo="Farol">
-                    <SeloFarol farol={o.farol} />
+                    {/* a obra em dia fica so' com a palavra, em tinta: o selo e' da excecao (com o banco real, mais de
+                        dez linhas repetiam o mesmo selo verde) */}
+                    {o.farol === "verde" ? "Em dia" : <SeloFarol farol={o.farol} />}
                     {!o.motivos ? (o.motivo ? <div className="qdop-tabela__motivo">{o.motivo}</div> : null) : visiveis.length === 0 ? null : (
                       <ul className="qdop-tabela__motivos">
                         {visiveis.map(x => <li key={`${x.tipo}-${x.texto}`}>{x.texto}</li>)}

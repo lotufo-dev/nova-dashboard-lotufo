@@ -12,7 +12,7 @@
 }
 .ini-titulo { margin: 0; font-size: var(--texto-titulo-pagina); text-wrap: balance; }
 .ini-carregando, .ini-vazio { margin: 0; color: var(--cor-texto-secundario); }
-.ini > .ini-carregando, .ini > .erro { margin-top: var(--espaco-m); }
+.ini > .ini-carregando, .ini > .aviso--falha { margin-top: var(--espaco-m); }
 
 .ini-grade {
   display: grid; grid-template-columns: minmax(0, 1fr); row-gap: var(--espaco-entre-blocos);

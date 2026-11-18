@@ -178,6 +178,7 @@ describe("FormRecebimento", () => {
     const agir = vi.fn(async () => true);
     render(<FormRecebimento m={protocolada} salvando={false} agir={agir} aoFechar={() => {}} />);
     const motivo = screen.getByLabelText("Motivo");
+    fireEvent.change(screen.getByLabelText("Data do recebimento"), { target: { value: "2026-09-30" } });
     fireEvent.change(motivo, { target: { value: "  curto  " } });
     fireEvent.click(screen.getByRole("button", { name: "Registrar recebimento" }));
     expect(agir).not.toHaveBeenCalled();
@@ -190,11 +191,24 @@ describe("FormRecebimento", () => {
     expect(agir).not.toHaveBeenCalled();
   });
 
+  it("sem a data mostra o erro no campo e não grava, mesmo com o motivo", () => {
+    const agir = vi.fn(async () => true);
+    render(<FormRecebimento m={protocolada} salvando={false} agir={agir} aoFechar={() => {}} />);
+    const data = screen.getByLabelText("Data do recebimento");
+    fireEvent.change(screen.getByLabelText("Motivo"), { target: { value: "a baixa não entrou no RM" } });
+    fireEvent.click(screen.getByRole("button", { name: "Registrar recebimento" }));
+    expect(agir).not.toHaveBeenCalled();
+    expect(api).not.toHaveBeenCalled();
+    expect(data.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(data.getAttribute("aria-describedby") ?? "")?.textContent)
+      .toContain("Informe a data em que o dinheiro entrou.");
+  });
+
   it("com o motivo manda o motivo e a data ao servidor", async () => {
     api.mockResolvedValue({ ok: true });
     const agir = vi.fn(async (fn: () => Promise<unknown>) => { await fn(); return true; });
     render(<FormRecebimento m={protocolada} salvando={false} agir={agir} aoFechar={() => {}} />);
-    fireEvent.change(screen.getByLabelText("Data da baixa (opcional)"), { target: { value: "2026-09-30" } });
+    fireEvent.change(screen.getByLabelText("Data do recebimento"), { target: { value: "2026-09-30" } });
     // #722: a justificativa obrigatoria fica na caixa propria (CaixaJustificativa)
     expect(screen.getByLabelText("Motivo").closest(".justificativa")).not.toBeNull();
     fireEvent.change(screen.getByLabelText("Motivo"), { target: { value: " a baixa não entrou no RM " } });

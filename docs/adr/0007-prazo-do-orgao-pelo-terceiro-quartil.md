@@ -9,6 +9,10 @@ padrão, porque seria inventado.
 
 ## Consequências
 
+- O caso contado é a medição recebida, não o pagamento: a execução e o reajuste pagos juntos contam dois casos, cada
+  um com o seu protocolo. Decidido em 17/11/2026: o prazo é contado do protocolo de cada medição, e juntar as duas num
+  caso só pediria saber que foram pagas no mesmo depósito, o que o sistema não lê.
+
 - "Atrasado" quer dizer fora do normal daquele órgão, e a previsão de entrada fica conservadora.
 - A medição recebida sem protocolo, na obra sem o passo "Envio da nota" (`docs/adr/0006`, #743), não entra na
   amostra: o prazo mede do protocolo ao pagamento, e misturar a emissão da nota como início encurtaria ou alongaria o

@@ -104,3 +104,102 @@ export const RM_EXCLUSAO_RECUSADA = {
   exclusao_aviso: "Exclusão em massa recusada: 412 notas deixaram de vir do RM, inteiras ou em algum título (teto de 30). "
     + "Nada foi marcado como excluído. Ver docs/runbook.md, TOTVS RM.",
 };
+
+// ---- Segunda passada do acabamento (#717): o que a primeira deixou sem estado na prova.
+
+// O espelho gerado e ainda nao enviado ao faturamento: o passo "Espelhos" com o botao de enviar, e o e-mail aberto.
+// A regra e' a verdadeira da obra de exemplo; so' o espelho e' posto.
+export const medicaoComEspelhoGerado = (medicoes, reg) => medicoes.map(m => (m.id === reg.medicao
+  ? { ...m, estado: "espelho_gerado", protocolos: [], congelada: 0 } : m));
+
+export const ESPELHO_ID = 9101;
+export const espelhoGerado = (resposta, reg) => ({
+  ...resposta,
+  espelhos: [{
+    id: ESPELHO_ID, numero: 1, competencia: "2025-04", versao: 1, situacao: "vigente",
+    entradas: Object.fromEntries((resposta.regra?.entradas ?? []).map(e => [e.chave, 41234567])),
+    periodo_inicio: "2025-04-01", periodo_fim: "2025-04-30", criado_em: "2025-05-20 10:00:00", criado_por_nome: "Engenharia",
+    motivo: null,
+    saidas: [{ chave: "nf", natureza: "execucao", rotulo: "Nota de execução", emissor: "Construtora Alfa Ltda", municipio: "Cidade de Exemplo",
+      valor: 41234567, mo: 16493827, material: 24740740, inss: 1814321, iss: 824691, irrf: 494815, ibs: null, cbs: null,
+      liquido: 38100740, nome_arquivo: "Espelho NF 1ª medição - Obra Própria.docx" }],
+    medicoes: [{ id: reg.medicao, tipo: "execucao", estado: "espelho_gerado" }],
+    arquivos: [{ documento_id: 9111, saida: "nf", nome: "Espelho NF 1ª medição - Obra Própria.docx", tamanho: 48211 }],
+    envio: null,
+  }],
+});
+
+// A previa do e-mail ao faturamento. O assunto e' comprido de proposito: o campo cresce para a segunda linha.
+export const PREVIA_DO_ESPELHO = {
+  para: ["faturamento@exemplo.com.br"], copia: ["controladoria@exemplo.com.br", "engenharia@exemplo.com.br"],
+  assunto: "Espelho para emissão de nota fiscal: 1ª medição da Obra Própria, competência 04/2025, contrato 001/2025/00/00-EXEMPLO da Secretaria de Exemplo",
+  corpo: "Bom dia,\n\nSegue o espelho da 1ª medição da Obra Própria para a emissão da nota fiscal.\n\nAtenciosamente,",
+  anexos: [{ nome: "Espelho NF 1ª medição - Obra Própria.docx", tamanho: 48211 }], total: 48211, limite: 26214400,
+  avisos: ["O boletim do órgão ainda não foi anexado a esta medição."],
+};
+
+// O envio da nota ao orgao ja' comecado (tem protocolo): a linha do envio abre o e-mail montado. `divergente` poe uma
+// nota que diverge do espelho, e o envio passa a pedir o motivo escrito (a caixa de justificativa acima do e-mail).
+export const PROTOCOLO_ID = 9201;
+const DIVERGENCIA = reg => ({ medicao_id: reg.medicao, nota_id: 9001, numero: "2322", campo: "iss", espelho: 824691, nota: 804691, grau: "divergente" });
+
+const envioAberto = (reg, divergente) => ({
+  ...notasAEnviar("sinfra")(reg).envios[0], protocolo_id: PROTOCOLO_ID,
+  itens: [{ chave: `nf:${reg.medicao}`, rotulo: "Nota fiscal 2322", estado: "ok" },
+    { chave: `frc:${reg.medicao}`, rotulo: "FRC assinada", estado: "falta", acao: "anexar_frc", medicao_id: reg.medicao }],
+  ...(divergente ? { divergencias: [DIVERGENCIA(reg)] } : {}),
+});
+
+export const notasComEnvioAberto = (divergente = false) => reg => ({ contadores: { Todas: 1 }, envios: [envioAberto(reg, divergente)] });
+
+export const detalheDoEnvio = (divergente = false) => reg => ({
+  envio: envioAberto(reg, divergente), familia: "sinfra", etapa: "nota", situacao_protocolo: "rascunho", carta: null,
+  previa: {
+    para: ["protocolo@exemplo.com.br"], copia: ["fiscal.do.contrato@exemplo.com.br"],
+    assunto: "Nota fiscal 2322 da 1ª medição da Obra Própria, contrato 001/2025/00/00-EXEMPLO, com a FRC e as certidões de regularidade",
+    corpo: "Prezados,\n\nEncaminhamos a nota fiscal 2322, referente à 1ª medição da Obra Própria, com os documentos de regularidade.\n\nAtenciosamente,",
+    anexos: [{ nome: "NF 2322.pdf", origem: "nota", tamanho: 182044 }, { nome: "Certidão federal.pdf", origem: "certidao", tamanho: 95120 }],
+    links: [],
+  },
+  bloqueio: null, pendencias: ["FRC assinada não anexada"], exige_justificativa: divergente, extras: [],
+});
+
+// A medicao com a nota emitida que diverge do espelho no ISS: o passo "Notas" destaca a celula e diz a diferenca, e o
+// resumo da pagina aponta a nota.
+const DIFERENCA_NO_ISS = [{ campo: "iss", espelho: 824691, nota: 804691, grau: "divergente" }];
+export const medicaoComNotaDivergente = (medicoes, reg) => medicaoComNotaEmitida(medicoes, reg).map(m => (m.id === reg.medicao ? {
+  ...m,
+  notas: [{ nota_id: 9001, coligada: 1, numero: "2322", serie: null, emissao: "2025-05-22", valor_centavos: 41234567,
+    recebido_centavos: 0, devido_centavos: 38120740, falta_centavos: 38120740, da_lotufo: true, da_cota: true,
+    recebido_em: null, origem: "pdf", regra: null, conferencia: DIFERENCA_NO_ISS, justificativa: null }],
+} : m));
+
+export const NOTAS_COM_DIVERGENCIA = {
+  esperadas: [{ chave: "nf", natureza: "execucao", rotulo: "Nota de execução", emissor: "lotufo", municipio: "Cidade de Exemplo",
+    valor: 41234567, iss: 824691, inss: 1814321, irrf: 494815, ibs: null, cbs: null, liquido: 38100740, nota_id: 9001 }],
+  notas: [{ alocacao_id: 9301, nota_id: 9001, coligada: 1, numero: "2322", serie: null, emissao: "2025-05-22",
+    valor_centavos: 41234567, valor_pdf_centavos: 41234567, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 9311,
+    conferencia: DIFERENCA_NO_ISS, justificativa: null, leitura: null, municipio: "Cidade de Exemplo", regra: null,
+    recebido_centavos: 0 }],
+  faltam: 0, documentos_sem_nota: [], pode_declarar: false,
+};
+
+// A obra com cadastro de custo: a aba Medicoes ganha a coluna do custo lancado no RM por competencia.
+export const CUSTO_DA_OBRA = {
+  linhas: [{ competencia: "2025-04", custo_centavos: 35120044 }, { competencia: "2025-05", custo_centavos: 41877310 },
+    { competencia: "2025-06", custo_centavos: 0 }],
+};
+
+// A obra paralisada e a obra em encerramento: o cabecalho muda o selo do estado e a aba Prazos mostra a paralisacao
+// (sem o selo dos dias da execucao) ou o cartao do encerramento.
+export const cabecalhoCom = status => cabecalho => ({ ...cabecalho, status });
+export const prazosParalisada = prazos => ({
+  ...prazos, situacao: { ...prazos.situacao, paralisacao: { desde: "2026-08-03", numero: "OP-01/2026" }, encerramento: null },
+});
+export const prazosEmEncerramento = prazos => ({
+  ...prazos, situacao: { ...prazos.situacao, paralisacao: null,
+    encerramento: { desde: "2026-10-01", marcos: { recebimento_provisorio: "2026-10-15" }, conclusao_comunicada: false } },
+});
+
+// Uma resposta que a tela nao sabe desenhar: o Inicio cai e a ultima rede ("A tela parou de responder") aparece.
+export const RESPOSTA_QUE_QUEBRA = { medido: null };

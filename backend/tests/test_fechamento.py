@@ -1372,6 +1372,65 @@ def test_a_receber_do_inicio_e_de_obras_segue_a_nota_da_empresa_em_consorcio(exe
     assert sum(1 for x in diretoria.a_receber_na_cota(c) if x.get("repasse")) == 1
 
 
+def _baixada_em(c, numero, dia):
+    c.execute("UPDATE baixas SET data_baixa=? WHERE nota_id=(SELECT id FROM notas_fiscais WHERE numero=?) "
+              "AND valor_baixado_centavos>0", (dia, f"{int(numero):09d}")); c.commit()
+
+
+def test_recebido_do_inicio_segue_a_nota_da_empresa_em_consorcio(exemplo):
+    """Issue #756 no recebido do Inicio (o do mes e o dos 12 meses), pela escolha do Fechamento (`_notas_da_conta`):
+    com a nota da propria empresa ligada a' medicao, o recebido e' a baixa do titulo DELA, pela face e no mes da baixa
+    dela (o repasse do consorcio), e a baixa da fatura do consorcio da mesma medicao nao entra. Sem a nota da empresa,
+    vale a baixa da fatura do consorcio vezes a cota, como antes. Centavo impar na cota."""
+    import datetime
+    from app import inicio
+    c, k = exemplo
+    # o orgao pagou o consorcio em junho; o consorcio repassou em agosto (baixa da nota da empresa)
+    repassada = medir(c, k, 1, "2026-05", "recebida", 2_000_001, aprovado=2_000_001, protocolo="2026-06-02")
+    _baixada_em(c, nota(c, 2_000_001, [repassada], coligada=CONSORCIO, titulos=PAGO(1_860_001)), "2026-06-20")
+    _baixada_em(c, nota(c, 1_000_001, [repassada], coligada=EMPRESA, centro="5.001.001", titulos=PAGO(930_001)), "2026-08-05")
+    # o orgao pagou o consorcio em julho e o repasse ainda nao foi baixado: nada entrou
+    sem_repasse = medir(c, k, 2, "2026-06", "recebida", 1_200_003, aprovado=1_200_003, protocolo="2026-07-03")
+    _baixada_em(c, nota(c, 1_200_003, [sem_repasse], coligada=CONSORCIO, titulos=PAGO(1_116_003)), "2026-07-20")
+    nota(c, 600_002, [sem_repasse], coligada=EMPRESA, centro="5.001.001", titulos=[(558_001, 0, 0)])
+    # repasse baixado em parte, em setembro: entra so' o que foi baixado
+    em_parte = medir(c, k, 3, "2026-07", "recebida", 800_001, aprovado=800_001, protocolo="2026-08-04")
+    _baixada_em(c, nota(c, 800_001, [em_parte], coligada=CONSORCIO, titulos=PAGO(744_001)), "2026-08-20")
+    _baixada_em(c, nota(c, 400_001, [em_parte], coligada=EMPRESA, centro="5.001.001", titulos=[(372_001, 100_001, 4)]), "2026-09-10")
+    # sem a nota da empresa: a baixa da fatura do consorcio vezes a cota (930.001 x 50% -> 465.001), em setembro
+    so_fatura = medir(c, k, 4, "2026-08", "recebida", 1_000_001, aprovado=1_000_001, protocolo="2026-09-06")
+    _baixada_em(c, nota(c, 1_000_001, [so_fatura], coligada=CONSORCIO, titulos=PAGO(930_001)), "2026-09-25")
+    # fatura do consorcio sem medicao ligada: continua pela cota (500.001 x 50% -> 250.001), em setembro
+    _baixada_em(c, nota(c, 540_001, coligada=CONSORCIO, titulos=PAGO(500_001)), "2026-09-26")
+
+    _, recebido = diretoria.rm_por_mes(c)
+    assert recebido == {"2026-08": 930_001, "2026-09": 100_001 + 465_001 + 250_001}
+    assert diretoria.recebido_rm_no_mes(c, "2026-06") == {"valor_centavos": 0, "notas": 0}
+    assert diretoria.recebido_rm_no_mes(c, "2026-08") == {"valor_centavos": 930_001, "notas": 1}
+    assert diretoria.recebido_rm_no_mes(c, "2026-09") == {"valor_centavos": 815_003, "notas": 3}
+    p = inicio.painel(c, datetime.date(2026, 9, 30))
+    assert {x["mes"]: x["valor_centavos"] for x in p["recebido_12m"] if x["valor_centavos"]} == recebido
+    assert next(x for x in p["ciclo"] if x["etapa"] == "recebido_mes")["valor_centavos"] == 815_003
+    # o estado das medicoes nao muda com a conta, e as duas telas escolhem as mesmas notas
+    assert [_estado(c, m) for m in (repassada, sem_repasse, em_parte, so_fatura)] == ["recebida"] * 4
+    f = fechamento.fechamento(c)
+    assert [nt["valor_centavos"] for nt in _medicao(f, repassada)["notas"]] == [1_000_001]
+
+    # desfeito o vinculo da nota da empresa, a medicao volta a' regra da fatura do consorcio: a baixa de julho conta
+    c.execute("UPDATE nf_alocacoes SET desfeita_em='2026-11-17' WHERE medicao_id=? AND nota_id IN "
+              "(SELECT id FROM notas_fiscais WHERE coligada=?)", (sem_repasse, EMPRESA)); c.commit()
+    assert diretoria.rm_por_mes(c)[1]["2026-07"] == 558_002                # 1.116.003 x 50%, meio para cima
+
+
+def test_recebido_do_inicio_na_obra_propria_nao_muda_com_a_regra_do_consorcio(exemplo):
+    c, _ = exemplo
+    p = _propria(c)
+    m = medir(c, p, 1, "2026-05", "recebida", 500_001, aprovado=500_001, protocolo="2026-06-02")
+    _baixada_em(c, nota(c, 500_001, [m], coligada=EMPRESA, centro="9.001.001", titulos=PAGO(465_001)), "2026-06-20")
+    assert diretoria.rm_por_mes(c)[1] == {"2026-06": 465_001}
+    assert diretoria.recebido_rm_no_mes(c, "2026-06") == {"valor_centavos": 465_001, "notas": 1}
+
+
 def test_passo_pagamento_em_consorcio_conta_a_nota_da_empresa_ou_a_fatura_pela_cota(exemplo):
     """Issue #756 no passo Pagamento da pagina da medicao (`sincronizacao_rm.pagamento_cota`, contra os TITULOS do RM):
     em consorcio, com a nota da propria empresa ligada contam os titulos dela, pela face, e a fatura do consorcio fica

@@ -418,6 +418,8 @@
 /* o e-mail ao orgao (ComporEmail dentro da pagina): linhas separadas por fio, rotulo a' esquerda, etiquetas neutras */
 .med .med-quadro .ol-janela { display: block; border: 0; border-radius: 0; background: none; box-shadow: none; font-size: var(--texto-corpo); }
 .med .med-quadro .ol-janela > .justificativa { margin: 0 0 var(--espaco-m); }
+/* o aviso da previa (boletim que falta, reenvio) nao cola no botao Enviar */
+.med .med-quadro :is(.aviso, label) + .ol-janela { margin-top: var(--espaco-m); }
 .med .med-quadro .ol-janela .ol-topo { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 0; padding: 0; }
 .med .med-quadro .ol-janela .ol-enviar { grid-column: 1 / -1; justify-self: start; height: var(--alvo-minimo); margin-bottom: var(--espaco-m); padding: 0 var(--espaco-m); gap: var(--espaco-pp);
   border: var(--borda-grossa) solid var(--cor-tinta); border-radius: var(--raio-controle); background: var(--cor-tinta); color: var(--cor-papel);

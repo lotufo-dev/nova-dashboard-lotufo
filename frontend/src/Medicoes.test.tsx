@@ -37,6 +37,14 @@ describe("Medições da obra", () => {
   });
 
   // #774: o estado nas situacoes da fundacao, com forma alem da cor; a competencia sob o nome e a marca sob o estado
+  it("obra sem medição: cada painel diz isso numa linha curta, sem tabela vazia", async () => {
+    api.mockImplementation(async (url: string) => url === "/api/rm/status" ? { configurado: false, ultima_sincronizacao: null, ultimo_erro: null } : []);
+    render(<Medicoes contratoId={3} busca={{}} />);
+    expect(await screen.findByText("Nenhuma medição aberta.")).toBeTruthy();
+    expect(screen.getByText("Nenhuma medição anterior.")).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
   it("o estado vira selo: em andamento e recebida com o glifo, cancelada neutra e riscada; nota diverge é crítico", async () => {
     const divergente = { nota_id: 9, numero: "0000009", serie: null, emissao: null, valor_centavos: 1, coligada: 1, recebido_centavos: 0,
       recebido_em: null, origem: "rm", regra: null, situacao: "ativa", confirmacao: "divergente", conferencia: [{ campo: "valor", espelho: 1, nota: 2, grau: "divergente" }] };
