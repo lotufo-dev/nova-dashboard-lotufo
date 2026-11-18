@@ -12,26 +12,57 @@ const AVISO = { tipo: "execucao_vencendo", nivel: "critico", publico: ["operacao
   valor_centavos: null, mensagem: "Granito: execução termina em 5 dias (04/11/2026)", destino: { tela: "contrato", id: 7, aba: "prazos" },
   data: "2026-11-04", sentido: "prazo" };
 
-describe("App: a rota antiga /avisos", () => {
-  beforeEach(() => {
-    api.mockImplementation(async (caminho: string) => {
-      if (caminho === "/api/auth/eu") return { id: 1, nome: "Admin Exemplo", email: "a@lotufo.com", perfil: "admin", csrf: "x" };
-      if (caminho === "/api/contratos") return [OBRA];
-      if (caminho === "/api/entidades") return [];
-      if (caminho === "/api/inicio") return { avisos: [AVISO] };
-      return [];
-    });
+describe("App: os Avisos têm página própria (#805)", () => {
+  const servir = (perfil: string) => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa Exemplo", email: "a@lotufo.com", perfil, csrf: "x" };
+    if (caminho === "/api/contratos") return [OBRA];
+    if (caminho === "/api/inicio") return { avisos: [AVISO] };
+    return [];
   });
+  beforeEach(() => { servir("admin"); });
   afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
 
-  it("abre Obras com os Avisos de todas as obras abertos, mantendo o filtro do link, e acende o item Avisos", async () => {
-    window.history.replaceState(null, "", "/avisos?obra=7");
+  const trilho = () => within(screen.getByRole("navigation", { name: "Navegação principal" }));
+
+  it("/avisos abre a página Avisos: o título do topo e o da aba do navegador dizem Avisos, e o item do menu fica aceso", async () => {
+    window.history.replaceState(null, "", "/avisos");
     render(<App />);
-    expect(await screen.findByRole("heading", { name: "Avisos · Todas as obras" })).toBeTruthy();
-    expect(window.location.pathname + window.location.search).toBe("/obras?c=todas&avisos=1&obra=7");
-    const trilho = within(screen.getByRole("navigation", { name: "Navegação principal" }));
-    expect(trilho.getByRole("link", { name: "Avisos" }).getAttribute("aria-current")).toBe("page");
-    expect(trilho.getByRole("link", { name: "Obras" }).getAttribute("aria-current")).toBeNull();
+    expect(await screen.findByRole("heading", { level: 1, name: "Avisos" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 2, name: "Agenda" })).toBeTruthy();
+    expect(window.location.pathname + window.location.search).toBe("/avisos");
+    expect(document.title).toBe("Avisos · grupolotufo");
+    expect(trilho().getByRole("link", { name: "Avisos" }).getAttribute("aria-current")).toBe("page");
+    expect(trilho().getByRole("link", { name: "Obras" }).getAttribute("aria-current")).toBeNull();
+    // não é mais a lista de Obras com os avisos em cima
+    expect(screen.queryByRole("heading", { name: /^Obras/ })).toBeNull();
+    expect(screen.queryByRole("table", { name: "Obras, posição financeira" })).toBeNull();
+  });
+
+  it("o endereço de antes (/obras?avisos=1, com os filtros) leva para /avisos com os filtros equivalentes", async () => {
+    window.history.replaceState(null, "", "/obras?c=todas&avisos=1&obra=7&familia=prazos&nivel=critico");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 2, name: "Avisos · Granito" })).toBeTruthy();
+    expect(window.location.pathname + window.location.search).toBe("/avisos?familia=prazos&obra=7");
+    expect(screen.getByRole("heading", { level: 1, name: "Avisos" })).toBeTruthy();
+    expect(trilho().getByRole("link", { name: "Avisos" }).getAttribute("aria-current")).toBe("page");
+    expect(trilho().getByRole("link", { name: "Obras" }).getAttribute("aria-current")).toBeNull();
+  });
+
+  it("quem só consulta (diretoria) abre a mesma página", async () => {
+    servir("diretoria");
+    window.history.replaceState(null, "", "/avisos");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 2, name: "Agenda" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/avisos");
+    expect(trilho().getByRole("link", { name: "Avisos" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("/obras sem ?avisos=1 continua sendo a lista de Obras", async () => {
+    window.history.replaceState(null, "", "/obras?c=SINFRA");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: /^Obras/ })).toBeTruthy();
+    expect(window.location.pathname + window.location.search).toBe("/obras?c=SINFRA");
+    expect(trilho().getByRole("link", { name: "Obras" }).getAttribute("aria-current")).toBe("page");
   });
 });
 

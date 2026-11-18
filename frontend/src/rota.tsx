@@ -278,7 +278,7 @@ export function irHref(href: string) {
 }
 
 /** Troca a tela no lugar, mantendo filtros, secao e origem (redirect de rota antiga, raiz -> entrada). Opcoes:
- *  `busca`: os filtros passam a ser esses (a rota antiga que muda de dono, como Avisos dentro de Obras);
+ *  `busca`: os filtros passam a ser esses (a rota antiga que muda de dono, como os Avisos que abriam dentro de Obras);
  *  `secao`: a ancora passa a ser essa (o endereco antigo que cai numa etapa da medicao);
  *  `semBusca`: o destino nao leva os filtros do endereco de antes. */
 export type OpcoesSubstituir = { busca?: Busca; secao?: string; semBusca?: boolean };
@@ -290,10 +290,17 @@ export function substituir(destino: Rota, opcoes: OpcoesSubstituir = {}) {
   avisar();
 }
 
-/** Os filtros com que a rota antiga /avisos abre no lugar novo: os Avisos dentro de Obras, de todas as obras, com os
- *  filtros que o link tinha (?familia= ?nivel= ?obra= ?agrupar=). */
-export function buscaDosAvisosEmObras(busca: Busca): Busca {
-  return { c: "todas", avisos: "1", ...busca };
+/** Os filtros com que o endereco de antes dos Avisos ("/obras?avisos=1", de quando abriam dentro de Obras) abre a
+ *  pagina Avisos (#805): o assunto (?familia=), a obra (?obra=) e o contratante (?c=, ou o ?orgao= mais antigo).
+ *  `c=todas` era o padrao e sai; `nivel` e `agrupar` nao filtravam mais nada desde a #511 e ficam para tras, como os
+ *  filtros que eram so' da lista de Obras. */
+export function buscaDosAvisos(busca: Busca): Busca {
+  const nova: Busca = {};
+  const c = busca.c ?? busca.orgao ?? "";
+  if (c && c !== "todas") nova.c = c;
+  if (busca.familia) nova.familia = busca.familia;
+  if (busca.obra) nova.obra = busca.obra;
+  return nova;
 }
 
 /** O número, a competência e a série que a janela "Iniciar processo" (#151) manda pela busca da URL

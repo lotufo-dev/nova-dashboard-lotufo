@@ -343,5 +343,75 @@ export const fichaComNecessario = noRitmo => ficha => {
 export const semAvisoDePrazo = inicio => ({
   ...inicio, avisos: inicio.avisos.filter(a => !["instrumento_pendente", "execucao_vencendo"].includes(a.tipo)) });
 
+// #805: a fila de avisos com o volume que o cadastro de exemplo nao tem: dezenas de vencidos em varias obras (e numa
+// empresa), alguns de mais de dois anos, e a agenda dos proximos 90 dias, com pelo menos um aviso de cada assunto da
+// pagina (Prazos, Reajustes, Garantias, Certidoes, Medicoes e SIGA). Os tipos sao os do servidor. `publico` e' o
+// recorte que o servidor faz para o perfil ("operacao" ou "diretoria"): a diretoria nao recebe certidao, prazo a
+// vencer, nota nem SIGA. A primeira obra e' a da prova (`reg.obra`), para o filtro `?obra=` ter o que mostrar; as
+// outras nao existem no banco. As datas andam com o dia da prova.
+const OBRAS_DOS_AVISOS = ["Obra Própria", "Ponte do Exemplo", "Escola Modelo", "Rodovia Alfa", "Hospital Beta", "Terminal Gama",
+  "Praça Delta", "Viaduto Ômega", "Creche Sigma", "Ginásio Lambda", "Avenida Kappa", "Canal Teta", "Parque Zeta",
+  "Complexo Esportivo e Cultural do Bairro de Exemplo, 2ª Etapa"];
+const dataBR = iso => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+const TODOS_VEEM = ["operacao", "diretoria"], SO_OPERACAO = ["operacao"];
+export const avisosEmVolume = publico => (inicio, reg) => {
+  const hoje = hojeDaProva();
+  const id = i => (i === 0 ? reg.obra : 9000 + i);
+  // `dias` com sinal no prazo (negativo = venceu); no fato parado "desde", os dias que ja' passaram
+  const base = (i, tipo, nivel, dias, sentido, fato, aba, quem = TODOS_VEEM) => {
+    const data = dataEm(hoje, sentido === "desde" ? -dias : dias);
+    return { tipo, nivel, natureza: "fato", publico: quem, contrato_id: id(i), obra: OBRAS_DOS_AVISOS[i], dias, valor_centavos: null,
+      mensagem: `${OBRAS_DOS_AVISOS[i]}: ${fato(dataBR(data))}`, destino: { tela: "contrato", id: id(i), aba }, data, sentido };
+  };
+  const daMedicao = (i, aviso) => ({ ...aviso, medicao_id: i === 0 ? reg.medicao : 9100 + i });
+  const emDocumentos = aviso => ({ ...aviso, destino: { tela: "documentos" }, entidade_id: reg.empresa });
+  // Reajustes
+  const semResposta = (i, dias) => base(i, "reajuste_sem_resposta", "acao", dias, "desde", d => `pleito de reajuste sem resposta do órgão desde ${d}`, "reajuste");
+  const apostilamento = (i, dias) => base(i, "reajuste_apostilamento", "atencao", dias, "desde", d => `apostilamento do reajuste pendente desde ${d}`, "reajuste");
+  // Prazos
+  const execucao = (i, dias) => (dias < 0
+    ? base(i, "instrumento_pendente", "critico", dias, "prazo", d => `execução vencida em ${d}, sem pedido de prorrogação`, "prazos")
+    : base(i, "execucao_vencendo", "atencao", dias, "prazo", d => `execução termina em ${d}`, "prazos", SO_OPERACAO));
+  const vigencia = (i, dias) => base(i, "vigencia_vencendo", dias < 0 ? "critico" : "atencao", dias, "prazo",
+    d => (dias < 0 ? `vigência vencida em ${d}` : `vigência termina em ${d}`), "prazos", SO_OPERACAO);
+  // Garantias: as tres abrem lugares diferentes (Documentos e a aba Prazos da obra) e sao do mesmo assunto
+  const garantiaAquem = (i, dias) => emDocumentos(base(i, "garantia_aquem_execucao", dias < 0 ? "critico" : "acao", dias, "prazo",
+    d => (dias < 0 ? `garantia venceu em ${d}, antes do fim da execução` : `garantia vence em ${d}, antes do fim da execução`), "prazos"));
+  const garantia = (i, dias) => emDocumentos(base(i, "garantia_vencendo", "atencao", dias, "prazo", d => `garantia vence em ${d}`, "prazos"));
+  const endosso = (i, dias) => base(i, "endosso_garantia", "atencao", dias, "prazo", d => `endosso do seguro-garantia do 2º aditivo vence em ${d}`,
+    "prazos", SO_OPERACAO);
+  // Medicoes: o pedido sem boletim, o aprovado abaixo do pedido (os dois com o destino padrao, a aba Medicoes) e a nota
+  const medicao = (i, dias) => daMedicao(i, [
+    base(i, "pedido_sem_boletim", "acao", dias, "desde", d => `3ª Medição: pedido enviado em ${d} sem boletim do órgão`, "medicoes"),
+    base(i, "aprovado_abaixo_do_pedido", "acao", dias, "desde", d => `2ª Medição: aprovado abaixo do pedido desde ${d}`, "medicoes"),
+    base(i, "nota_ausente_rm", "atencao", dias, "desde", d => `1ª Medição: nota ainda não confirmada no RM desde ${d}`, "notas", SO_OPERACAO),
+  ][i % 3]);
+  // Certidoes: da empresa, sem obra
+  const certidao = (dias, qual) => {
+    const data = dataEm(hoje, dias);
+    return { tipo: "documentos_empresa", nivel: dias < 0 ? "critico" : "atencao", natureza: "fato", publico: SO_OPERACAO, contrato_id: null,
+      obra: null, dias, valor_centavos: null, entidade_id: reg.empresa, entidade: "Construtora Alfa",
+      mensagem: `Construtora Alfa: ${qual} ${dias < 0 ? "vencida" : "vence"} em ${dataBR(data)}`, destino: { tela: "documentos" }, data, sentido: "prazo" };
+  };
+  // SIGA: o processo parado no orgao
+  const siga = (i, dias) => ({ ...base(i, "siga_parado", "acao", dias, "desde", d => `processo ORGAO-PRO-2026/00007 parado em COFIN desde ${d}`,
+    "medicoes", SO_OPERACAO), destino: { tela: "siga", processo: 2 } });
+  // os vencidos: de 2 a 6 por obra, o mais antigo de cada uma cada vez mais novo (890, 758, 641... dias)
+  const vencidos = OBRAS_DOS_AVISOS.flatMap((_, i) => {
+    const maisAntigo = Math.max(12, 890 - i * 66 - (i % 3) * 51);
+    return [semResposta(i, maisAntigo),
+      ...(i % 2 === 0 ? [execucao(i, -Math.round(maisAntigo / 2))] : [garantiaAquem(i, -Math.round(maisAntigo / 3))]),
+      ...(i < 9 ? [apostilamento(i, Math.round(maisAntigo / 4))] : []),
+      ...(i < 6 ? [medicao(i, 30 + i * 11)] : []),
+      ...(i < 3 ? [vigencia(i, -(8 + i * 5)), semResposta(i, 61 + i * 30)] : [])];
+  });
+  const agenda = [certidao(0, "certidão estadual"), execucao(3, 0), execucao(5, 4), certidao(5, "certidão do FGTS"), vigencia(0, 7),
+    garantia(7, 8), endosso(9, 12), garantia(0, 19), certidao(23, "certidão federal"), vigencia(11, 27), garantiaAquem(12, 30),
+    garantia(13, 34), vigencia(6, 45), execucao(8, 60), certidao(72, "certidão trabalhista"), vigencia(10, 88)];
+  const fila = [...vencidos, certidao(-18, "certidão municipal"), certidao(-3, "certidão trabalhista"), siga(2, 17), ...agenda];
+  return { ...inicio, avisos: fila.filter(a => a.publico.includes(publico)) };
+};
+export const semAvisos = inicio => ({ ...inicio, avisos: [] });
+
 // Uma resposta que a tela nao sabe desenhar: o Inicio cai e a ultima rede ("A tela parou de responder") aparece.
 export const RESPOSTA_QUE_QUEBRA = { medido: null };

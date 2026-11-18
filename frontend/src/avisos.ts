@@ -6,7 +6,8 @@ import { hojeLocal } from "./tempo";
 export type Familia = "prazo" | "reajuste" | "nota" | "siga" | "documentos" | "outros";
 
 // A ordem dos grupos e' a do mapa; "Outros" guarda o aviso de lar desconhecido, para nada sumir. A familia
-// Dinheiro saiu com o aviso de pagamento atrasado (issue #255), que era o unico dela.
+// Dinheiro saiu com o aviso de pagamento atrasado (issue #255), que era o unico dela. A pagina Avisos nao usa mais a
+// familia: as abas dela sao os ASSUNTOS (abaixo, #805), pelo tipo do aviso.
 export const FAMILIAS: { id: Familia; rotulo: string }[] = [
   { id: "prazo", rotulo: "Prazo" }, { id: "reajuste", rotulo: "Reajuste" }, { id: "nota", rotulo: "Nota" },
   { id: "siga", rotulo: "SIGA" }, { id: "documentos", rotulo: "Documentos" }, { id: "outros", rotulo: "Outros" },
@@ -23,6 +24,69 @@ export function familiaDoAviso(a: Aviso): Familia {
     if (d.aba === "notas") return "nota";
   }
   return "outros";
+}
+
+// ---- Assunto (#805): as abas da pagina Avisos, o resumo dos Vencidos por obra e a coluna da Agenda ----
+//
+// O assunto sai do `tipo` do aviso, e nao do destino: pelo destino, a garantia caia com a certidao (as duas abrem
+// Documentos) e o aviso de medicao caia em "Outros" (o destino padrao e' a aba Medicoes da obra). Sao os assuntos da
+// proposta aprovada pelo dono em 18/11/2026, mais o SIGA: o processo parado no orgao pode ser de aditivo ou de
+// indenizatorio, e o monitor sem leitura nao e' de medicao nenhuma. A familia (acima, pelo destino) nao muda.
+
+export type Assunto = "prazos" | "reajustes" | "garantias" | "certidoes" | "medicoes" | "siga" | "outros";
+
+/** Na ordem das abas. "Outros" so' aparece se o servidor mandar um tipo que o mapa nao conhece. */
+export const ASSUNTOS: { id: Assunto; rotulo: string }[] = [
+  { id: "prazos", rotulo: "Prazos" }, { id: "reajustes", rotulo: "Reajustes" }, { id: "garantias", rotulo: "Garantias" },
+  { id: "certidoes", rotulo: "Certidões" }, { id: "medicoes", rotulo: "Medições" }, { id: "siga", rotulo: "SIGA" },
+  { id: "outros", rotulo: "Outros" },
+];
+
+/** O assunto de CADA tipo de aviso que o servidor emite (`backend/app`: prazos.py, reajuste.py, garantias.py,
+ *  documentos.py, notas.py, avisos_medicao.py, capa_smo.py, siga.py e os dois do espelho em avisos.py). Tipo novo no
+ *  servidor entra AQUI: `avisos.test.ts` le os tipos do codigo do servidor e reprova o que faltar, para ele nao cair
+ *  calado em "Outros". */
+export const ASSUNTO_DO_TIPO: Readonly<Record<string, Exclude<Assunto, "outros">>> = {
+  // o prazo da obra: execucao, vigencia, o instrumento de prazo pendente, a folga, a paralisacao e o encerramento
+  execucao_vencendo: "prazos", vigencia_vencendo: "prazos", instrumento_pendente: "prazos", execucao_sem_prazo: "prazos",
+  folga_quebrada: "prazos", obra_paralisada: "prazos", conclusao_nao_comunicada: "prazos",
+  reajuste_pleito: "reajustes", reajuste_sem_resposta: "reajustes", reajuste_apostilamento: "reajustes",
+  reajuste_sem_apostilamento: "reajustes", reajuste_nota_antes_do_apostilamento: "reajustes", reajuste_reemitir: "reajustes",
+  // a garantia do contrato: a que vence, a que nao cobre o fim da execucao e o endosso depois de um aditivo
+  garantia_vencendo: "garantias", garantia_aquem_execucao: "garantias", endosso_garantia: "garantias",
+  // os documentos da empresa: as certidoes e a regularidade do mes
+  documentos_empresa: "certidoes", regularidade_mes: "certidoes",
+  // o ciclo da medicao: a planilha, o boletim (e a capa dele), o espelho e a nota
+  planilha_nao_enviada: "medicoes", pedido_sem_boletim: "medicoes", aprovado_abaixo_do_pedido: "medicoes",
+  medicao_fora_de_ordem: "medicoes",
+  capa_prazo_divergente: "medicoes", capa_instrumento_ausente: "medicoes", capa_valor_contrato_divergente: "medicoes",
+  capa_acumulado_divergente: "medicoes",
+  espelho_desatualizado: "medicoes", espelho_nao_conferido: "medicoes",
+  nota_divergente: "medicoes", nota_acima_da_medicao: "medicoes", notas_pagas_nao_cobrem: "medicoes",
+  recebida_notas_nao_cobrem: "medicoes", nota_ausente_rm: "medicoes", nota_cancelada_rm: "medicoes",
+  siga_parado: "siga", siga_sem_leitura: "siga",
+};
+
+/** O assunto do aviso, pelo `tipo`; o tipo que o mapa nao conhece fica em "Outros", para nada sumir. */
+export function assuntoDoAviso(a: Aviso): Assunto {
+  return Object.prototype.hasOwnProperty.call(ASSUNTO_DO_TIPO, a.tipo) ? ASSUNTO_DO_TIPO[a.tipo] : "outros";
+}
+
+/** O nome do assunto, como a aba, o resumo dos vencidos e a coluna da Agenda o escrevem. */
+export const rotuloDoAssunto = (id: Assunto) => ASSUNTOS.find(x => x.id === id)?.rotulo ?? id;
+
+// O `?familia=` dos links de antes. Os plurais que o Inicio mandava (prazos, reajustes, certidoes) sao hoje os ids
+// dos assuntos; aqui ficam os ids da familia (pelo destino). A familia "Documentos" juntava certidao e garantia: abre
+// Certidoes, como o `?familia=certidoes` de antes abria ela. A familia "Nota" eram avisos de medicao. "siga" e
+// "outros" tem o mesmo id nos dois.
+const ASSUNTO_DE_ANTES: Readonly<Record<string, Assunto>> = {
+  prazo: "prazos", reajuste: "reajustes", documentos: "certidoes", nota: "medicoes",
+};
+
+/** A aba da rota (`?familia=`): o id do assunto, ou o valor dos links de antes. Valor desconhecido: sem filtro. */
+export function assuntoDaBusca(v: string | undefined): Assunto | null {
+  const id = v !== undefined && Object.prototype.hasOwnProperty.call(ASSUNTO_DE_ANTES, v) ? ASSUNTO_DE_ANTES[v] : v;
+  return ASSUNTOS.find(x => x.id === id)?.id ?? null;
 }
 
 export type FiltroAvisos = { familia?: Familia | null; nivel?: Nivel | null; obra?: number | null };
@@ -117,6 +181,52 @@ export function porSecao(avisos: Aviso[], hoje?: string): { id: Secao; rotulo: s
   const ordem = (x: Aviso, y: Aviso) => (diasAteOAviso(x, hoje) ?? 0) - (diasAteOAviso(y, hoje) ?? 0)
     || (x.data ?? "").localeCompare(y.data ?? "");
   return SECOES.map(s => ({ ...s, itens: avisos.filter(a => secaoDoAviso(a, hoje) === s.id).sort(ordem) }));
+}
+
+/** Os dias com sinal, por extenso, como o selo os escreve: "há 3 dias" no que passou, "hoje", "em 5 dias". */
+export function diasPorExtenso(d: number): string {
+  const n = Math.abs(d), txt = `${n.toLocaleString("pt-BR")} ${n === 1 ? "dia" : "dias"}`;
+  return d < 0 ? `há ${txt}` : d === 0 ? "hoje" : `em ${txt}`;
+}
+
+// ---- Vencidos por obra (#805): o vencido deixa de ser lista corrida; a decisao da #656 (todos, sem limite de idade) fica ----
+
+/** Uma obra (ou uma empresa, no aviso sem obra) com os vencidos dela: `itens` do mais antigo ao mais novo,
+ *  `assuntos` na ordem das abas (o resumo da linha) e `maisAntigo` em dias, positivo. */
+export type GrupoVencido = {
+  chave: string; nome: string; contratoId: number | null; entidadeId: number | null;
+  assuntos: Assunto[]; itens: Aviso[]; maisAntigo: number;
+};
+
+/** Os vencidos agrupados pela obra (`contrato_id`); o aviso sem obra, pela empresa (`entidade_id`); o resto, num
+ *  grupo so'. Do grupo com o vencido mais antigo ao mais novo; no empate, o de mais avisos e depois o nome. O que nao
+ *  venceu (ou nao tem data) fica de fora. */
+export function vencidosPorObra(avisos: Aviso[], hoje?: string): GrupoVencido[] {
+  const vencidos = porSecao(avisos, hoje)[0].itens;
+  const grupos = new Map<string, GrupoVencido>();
+  for (const a of vencidos) {
+    const chave = a.contrato_id !== null ? `obra-${a.contrato_id}` : a.entidade_id != null ? `empresa-${a.entidade_id}` : "sem-obra";
+    const g = grupos.get(chave) ?? { chave, contratoId: a.contrato_id, entidadeId: a.contrato_id === null ? a.entidade_id ?? null : null,
+      nome: a.contrato_id !== null ? a.obra ?? `Obra ${a.contrato_id}` : a.entidade_id != null ? a.entidade ?? `Empresa ${a.entidade_id}` : "Sem obra",
+      assuntos: [], itens: [], maisAntigo: 0 };
+    g.itens.push(a);
+    g.maisAntigo = Math.max(g.maisAntigo, -(diasAteOAviso(a, hoje) ?? 0));
+    grupos.set(chave, g);
+  }
+  for (const g of grupos.values()) {
+    const tem = new Set(g.itens.map(assuntoDoAviso));
+    g.assuntos = ASSUNTOS.map(x => x.id).filter(x => tem.has(x));
+  }
+  return [...grupos.values()].sort((x, y) => y.maisAntigo - x.maisAntigo || y.itens.length - x.itens.length
+    || x.nome.localeCompare(y.nome, "pt-BR"));
+}
+
+/** Em quantas obras e empresas os vencidos estao: "em 14 obras", "em 3 obras e 1 empresa"; sem nenhuma das duas, "". */
+export function ondeEstao(grupos: GrupoVencido[]): string {
+  const obras = grupos.filter(g => g.contratoId !== null).length, empresas = grupos.filter(g => g.entidadeId !== null).length;
+  const partes = [obras > 0 && `${obras.toLocaleString("pt-BR")} ${obras === 1 ? "obra" : "obras"}`,
+    empresas > 0 && `${empresas.toLocaleString("pt-BR")} ${empresas === 1 ? "empresa" : "empresas"}`].filter(Boolean);
+  return partes.length ? `em ${partes.join(" e ")}` : "";
 }
 
 /** O filtro por categoria da rota (?familia=reajustes|prazos|certidoes, do "Ver todos" do Inicio); os ids das

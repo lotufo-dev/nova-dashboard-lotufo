@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Contratos from "./Contratos";
 import type { ObraLista } from "./listaObras";
@@ -319,21 +319,14 @@ describe("Obras: posição financeira na cota da Lotufo, por contratante", () =>
     expect(screen.queryByRole("columnheader", { name: "Avisos" })).toBeNull();
   });
 
-  it("os Avisos seguem abrindo por ?avisos=1, do recorte do contratante", async () => {
+  it("os Avisos saíram de dentro de Obras (#805): ?avisos=1 não abre mais nada na lista, e ela não lê a fila de avisos", async () => {
     abrir("/obras?c=SINFRA&avisos=1");
-    await screen.findByRole("heading", { name: "Avisos · SINFRA" });
-    const area = document.getElementById("avisos-area")!;
-    expect(area.textContent).toContain("execução termina em 5 dias");
-    expect(area.textContent).not.toContain("Construtora Alfa: certidão");
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Fechar os avisos" })); });
-    expect(window.location.search).toBe("?c=SINFRA");
-    expect(screen.queryByRole("heading", { name: /Avisos ·/ })).toBeNull();
-  });
-
-  it("'todas' com os Avisos abertos inclui os avisos sem obra", async () => {
-    abrir("/obras?c=todas&avisos=1");
-    await screen.findByRole("heading", { name: "Avisos · Todas as obras" });
-    expect(document.getElementById("avisos-area")!.textContent).toContain("Construtora Alfa");
+    await screen.findByRole("table");
+    expect(screen.queryByRole("heading", { name: /Avisos/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Fechar os avisos" })).toBeNull();
+    expect(document.body.textContent).not.toContain("execução termina em 5 dias");
+    expect(api).not.toHaveBeenCalledWith("/api/inicio");
+    expect(api).not.toHaveBeenCalledWith("/api/entidades");
   });
 
   it("?orgao= vira ?c= na URL e o nome inteiro do órgão continua filtrando", async () => {
