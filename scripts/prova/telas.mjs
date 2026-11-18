@@ -127,7 +127,7 @@ export const TELAS = [
   // um contratante; a lista vazia e a falha. As telas `-carteira` trocam o cadastro de exemplo (um orgao, duas obras)
   // por uma carteira de quatro contratantes, com obra devagar, em atencao, adiantada, paralisada e vencida
   { rota: "obras", id: "obras", caminho: "/obras", perfis: TODOS, espera: ".obras-contratantes" },
-  { rota: "obras", id: "obras-carteira", caminho: "/obras", perfis: TODOS, espera: ".obras-contratantes .obras-etiqueta--devagar",
+  { rota: "obras", id: "obras-carteira", caminho: "/obras", perfis: TODOS, espera: ".obras-contratantes .obras-etiquetas .selo",
     simular: comCarteira },
   { rota: "obras", id: "obras-todas", caminho: "/obras/todas", perfis: TODOS, espera: ".obras-posicao" },
   { rota: "obras", id: "obras-todas-carteira", caminho: "/obras/todas", perfis: TODOS, espera: ".obras-posicao .andamento",
