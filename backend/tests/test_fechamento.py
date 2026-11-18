@@ -213,6 +213,32 @@ def test_consorcio_na_cota_com_centavo_impar_e_nfse_de_outra_consorciada_fora(ce
     _confere_soma(f)
 
 
+def test_consorcio_com_varias_faturas_o_protocolado_fecha_com_o_aprovado(cenario):
+    """Visto no Fechamento sobre o volume real: a medicao de consorcio cobrada em varias faturas saia com o
+    protocolado um centavo acima do aprovado. A cota era arredondada fatura a fatura (tres vezes 500.000,5 ->
+    1.500.003) e o aprovado uma vez so' (3.000.003 x 50% = 1.500.001,5 -> 1.500.002). As faturas de uma medicao sao
+    uma parcela so': a cota da soma, repartida entre elas, com o residuo nos maiores restos."""
+    c, ids = cenario
+    k = ids["consorcio"]
+    mid = medir(c, k, 1, "2026-04", "recebida", 3_000_003, aprovado=3_000_003, protocolo="2026-04-30")
+    for _ in range(3):
+        nota(c, 1_000_001, [mid], coligada=12, titulos=PAGO(1_000_001))
+    outra = medir(c, k, 2, "2026-04", "protocolada", 1_000_001, aprovado=1_000_001, protocolo="2026-05-05")
+    nota(c, 1_000_001, [outra], coligada=12)                 # uma fatura so': a cota dela, como sempre (500.001)
+    f = fechamento.fechamento(c)
+    md = _medicao(f, mid)
+    assert _numeros(md) == (1_500_002, 1_500_002, 1_500_002, 1_500_002, 0)
+    assert sorted(n["valor_centavos"] for n in md["notas"]) == [500_000, 500_001, 500_001]
+    assert _numeros(_medicao(f, outra)) == (500_001, 500_001, 500_001, 0, 500_001)
+    m = _mes(f, "2026-04")
+    assert m["protocolado_centavos"] == m["aprovado_centavos"] == 2_000_003
+    _confere_soma(f)
+    # paga em parte: o que falta numa das tres faturas nao passa da cota que coube a ela
+    assert fechamento._cotas([1_000_001] * 3, 5000) == [500_001, 500_001, 500_000]
+    assert fechamento._cotas([1_000_001], 5000) == [500_001] and fechamento._cotas([7, 3], None) == [7, 3]
+    assert fechamento._cotas([], 5000) == [] and fechamento._cotas([0, 0], 5000) == [0, 0]
+
+
 def test_mes_sem_lancamento_nao_vira_linha_e_o_acumulado_compara_os_mesmos_meses(cenario):
     c, ids = cenario
     p = ids["propria"]

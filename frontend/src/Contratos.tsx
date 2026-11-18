@@ -7,6 +7,7 @@ import {
   type ObraLista, type TotaisObras,
 } from "./listaObras";
 import { brl } from "./Medicoes";
+import { Glifo } from "./Selo";
 import { CurvaDaCarteira, Qdop, Reajustes, SeloFarol, type Painel } from "./ObrasCarteira";
 import { trocarBusca, type AbaObras, type Busca, type Ir } from "./rota";
 import { Link } from "./Link";
@@ -189,7 +190,9 @@ export default function Contratos({ ir, busca = {}, aba = "posicao" }: { ir: Ir;
                             </td>
                             <td data-rotulo="Valor vigente" className="col-num dinheiro num">{brl(p.vigente_centavos)}</td>
                             <td data-rotulo="Medido" className="col-num dinheiro num">{brl(p.medido_centavos)}</td>
-                            <td data-rotulo="Saldo a executar" className="col-num dinheiro num">{brl(p.saldo_centavos)}</td>
+                            <td data-rotulo="Saldo a executar" className={`col-num dinheiro num${p.saldo_centavos < 0 ? " negativo" : ""}`}>
+                              {/* o medido passou do valor vigente: em critico, como no alto da pagina da obra */}
+                              {p.saldo_centavos < 0 && <Glifo situacao="critico" />}{brl(p.saldo_centavos)}</td>
                             <td data-rotulo="Executado"><Executado pct={pctExecutado(o)} /></td>
                             <td data-rotulo="A receber" className="col-num dinheiro num">{p.a_receber_centavos == null ? "—" : brl(p.a_receber_centavos)}</td>
                           </tr>

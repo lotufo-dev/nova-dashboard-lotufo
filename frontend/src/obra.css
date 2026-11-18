@@ -47,6 +47,8 @@
 }
 .obra-prazo__numero--critico { color: var(--situacao-critico-texto); }
 .obra-prazo__numero--breve { color: var(--situacao-breve-texto); }
+/* o estado da obra que nao tem prazo correndo (paralisada, em encerramento, encerrada): palavras, nao numero */
+.obra-prazo__numero--estado { font-size: var(--texto-valor-menor); align-items: baseline; }
 /* as linhas do tempo dentro do painel: sem o respiro lateral de quando eram um cartao */
 .obra-prazo .lt { padding: var(--espaco-mini) 0 var(--espaco-p); }
 .obra-prazo .lt + .lt { border-top: var(--borda-linha); padding-top: var(--espaco-p); }
@@ -60,6 +62,11 @@
 }
 .obra-ritmo dt { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .obra-ritmo dd { margin: 0; font-family: var(--fonte-numero); font-variant-numeric: tabular-nums; font-weight: var(--peso-numero); white-space: nowrap; }
+/* a conclusao estimada com o selo do que ela diz sobre o prazo: o selo quebra para baixo da data se nao couber */
+.obra-ritmo .obra-ritmo__conclusao { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-p); white-space: normal; }
+.obra-ritmo__conclusao > span { white-space: nowrap; }
+.obra-ritmo__conclusao .selo { flex: 0 1 auto; white-space: normal; }
+.obra-ritmo__conclusao .selo__texto { white-space: normal; overflow: visible; }
 
 /* ------------------------------------------------------------ as medicoes de agora (coluna do lado) */
 .obra-agora__lista { display: grid; margin: 0; padding: 0 var(--espaco-g) var(--espaco-m); }
@@ -134,7 +141,9 @@
   .obra-prazo__corpo { grid-template-columns: minmax(0, 1fr); padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
   .obra-prazo__numero { font-size: var(--texto-valor-menor); }
   .obra-ritmo { grid-template-columns: minmax(0, 1fr); gap: var(--espaco-mini); margin: 0 var(--espaco-m); }
-  .obra-ritmo > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--espaco-m); }
+  .obra-ritmo > div { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--espaco-mini) var(--espaco-m); }
+  .obra-ritmo dd { margin-left: auto; min-width: 0; }
+  .obra-ritmo .obra-ritmo__conclusao { justify-content: flex-end; }
   .obra-agora__lista { grid-template-columns: minmax(0, 1fr); padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
   .obra-agora__lista > div + div { border-left: 0; border-top: var(--borda-linha); padding: var(--espaco-p) 0 var(--espaco-mini); }
   .obra .cartao__cabeca { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }

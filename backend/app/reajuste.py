@@ -8,7 +8,7 @@ import datetime
 import json
 import re
 
-from app import auditoria, avisos as _av, contratos, db, dinheiro, tempo
+from app import auditoria, avisos as _av, contratos, db, dinheiro, tempo, texto
 
 JANELA_DIAS, DIRETORIA_DIAS = 30, 90
 
@@ -1047,8 +1047,8 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
             base = _rotulo_base(k["data_base_mes"], k.get("aplica_a"))
             aniv = datetime.date.fromisoformat(k["aniversario"])
             if k["situacao"] == "pleito_pendente":
-                quando = (f"faz aniversário em {aniv:%d/%m/%Y} (em {k['dias']} dias)" if k["dias"] >= 0
-                          else f"fez aniversário em {aniv:%d/%m/%Y} (há {-k['dias']} dias)")
+                quando = (f"faz aniversário em {aniv:%d/%m/%Y} (em {texto.dias(k['dias'])})" if k["dias"] >= 0
+                          else f"fez aniversário em {aniv:%d/%m/%Y} (há {texto.dias(-k['dias'])})")
                 previsto = previstos.get((k["data_base_mes"], k["ciclo"]))
                 valor = (f"{dinheiro.format_brl(previsto)} previstos para o ciclo de {k['ciclo']}; "
                          if previsto is not None else "")
@@ -1060,7 +1060,7 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
             elif k["situacao"] in SEM_APOSTILAMENTO:
                 publico = ("operacao", "diretoria") if k["dias"] > DIRETORIA_DIAS else ("operacao",)
                 out.append({**_av.aviso("reajuste_apostilamento", "atencao",
-                                        f"pleito da data-base {base} enviado há {k['dias']} dias; "
+                                        f"pleito da data-base {base} enviado há {texto.dias(k['dias'])}; "
                                         f"apostilamento pendente", c["id"], nome, dias=k["dias"],
                                         publico=publico, destino=destino,
                                         data=(k.get("pedido") or k["pleito"])["enviado_em"][:10], sentido="desde"),

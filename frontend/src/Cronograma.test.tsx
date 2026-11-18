@@ -67,6 +67,20 @@ describe("Cronograma: saldo e reajuste contratado", () => {
     render(<Cronograma contratoId={1} podeEditar={false} />);
     expect(await screen.findByText("Vigente de execução")).toBeTruthy();
     expect(screen.queryByText("Reajuste contratado (fora do saldo)")).toBeNull();
+    expect(screen.queryByText("valor cheio do consórcio")).toBeNull();
+  });
+
+  it("em consórcio o cabeçalho diz a base: aqui é o valor cheio, e o alto da página mostra o mesmo saldo na cota", async () => {
+    comSaldo({ vigente_centavos: 100000, vigente_execucao_centavos: 100000, reajuste_contratado_centavos: 0,
+      medido_centavos: 99000, saldo_centavos: 1000, formula: "f", percentual_bp: 8000 });
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    expect(await screen.findByText("valor cheio do consórcio")).toBeTruthy();
+    cleanup();
+    comSaldo({ vigente_centavos: 100000, vigente_execucao_centavos: 100000, reajuste_contratado_centavos: 0,
+      medido_centavos: 99000, saldo_centavos: 1000, formula: "f", percentual_bp: 10000 });
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByText("Vigente de execução");
+    expect(screen.queryByText("valor cheio do consórcio")).toBeNull();
   });
 });
 

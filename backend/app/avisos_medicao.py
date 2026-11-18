@@ -17,7 +17,7 @@
 import datetime
 import json
 
-from app import avisos as _av, contratos, prazos, tempo
+from app import avisos as _av, contratos, prazos, tempo, texto
 from app.medicao_planilhas import _mes_br, _mes_seguinte
 from app.medicoes import _data_br, diferenca_aceita, passos_do_cadastro, tem_boletim, titulo
 
@@ -122,7 +122,7 @@ def _pedidos_sem_boletim(conn, hoje: datetime.date) -> list[dict]:
         diretoria = dias > 2 * x
         out.append({**_av.aviso(
             "pedido_sem_boletim", "acao" if diretoria else "atencao",
-            f"{titulo(m)}: pedido enviado há {dias} dias sem boletim do órgão (prazo de {x} dias)",
+            f"{titulo(m)}: pedido enviado há {texto.dias(dias)} sem boletim do órgão (prazo de {texto.dias(x)})",
             m["contrato_id"], m["nome_curto"] or m["numero_instrumento"], dias=dias,
             valor_centavos=m["valor_protocolado_centavos"],
             publico=("operacao", "diretoria") if diretoria else ("operacao",), destino=_destino(m["contrato_id"]),

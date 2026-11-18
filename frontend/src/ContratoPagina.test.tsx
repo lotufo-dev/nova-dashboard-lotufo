@@ -165,7 +165,7 @@ describe("Página da obra: o desenho novo", () => {
     const ritmo = await screen.findByRole("region", { name: "Prazo" });
     await waitFor(() => expect(within(ritmo).getByText(/110,00/)).toBeTruthy());
     expect(within(ritmo).getByText("15/03/2027")).toBeTruthy();
-    expect(ritmo.querySelector(".selo--critico")!.textContent).toBe("74\u00a0dias além do prazo");
+    expect(ritmo.querySelector(".selo--critico")!.textContent).toBe("74\u00a0dias depois do fim da execução");
     // o cartao vem antes das abas, na coluna principal
     const secoes = screen.getByRole("region", { name: "Seções da obra" });
     expect(ritmo.compareDocumentPosition(secoes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -260,9 +260,43 @@ describe("Página da obra: o desenho novo", () => {
     responderCom({ status: "suspenso" });
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
     const cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
-    expect(within(cartao).getByText("paralisada")).toBeTruthy();
+    expect(cartao.querySelector(".lt__titulo .selo")!.textContent).toBe("paralisada");
     expect(within(cartao).queryByText("obra paralisada: o vencimento não conta")).toBeNull();
     expect(within(cartao).queryByText("vencida")).toBeNull();
+  });
+
+  it("obra paralisada: o painel diz desde quando e a linha da execução para no dia da ordem, sem o 'Hoje' nem o ritmo", async () => {
+    fixarDia("2027-01-05T15:00:00Z");
+    // sem prazo de execucao conhecido (#662) a linha ficava so' com a data, sem barra: com a paralisacao, mostra onde parou
+    responderCom({ status: "suspenso", status_desde: "2026-11-21", paralisada_desde: "2026-11-21", execucao_sem_prazo: true,
+      dias_execucao: null });
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    const cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
+    await waitFor(() => expect(cartao.querySelector(".obra-prazo__numero")!.textContent).toBe("paralisada desde 21/11/2026"));
+    expect(cartao.querySelector(".obra-prazo__numero .glifo--breve")).toBeTruthy();
+    expect(within(cartao).getByText("Paralisada em 21/11/2026")).toBeTruthy();
+    const trilhos = cartao.querySelectorAll(".lt__trilho");
+    expect(trilhos[0].getAttribute("aria-label")).toMatch(/^Execução: de .* paralisada em 21\/11\/2026, com \d+% do prazo corrido$/);
+    expect(within(cartao).getAllByText(/^Hoje /)).toHaveLength(1);            // so' a vigencia continua correndo
+    expect(within(cartao).queryByText("Ritmo mensal")).toBeNull();
+    expect(within(cartao).queryByText(/vencid/)).toBeNull();
+  });
+
+  it("obra encerrada ou em encerramento: o estado e desde quando, no lugar de 'vencido há N dias', e sem o ritmo", async () => {
+    fixarDia("2027-01-05T15:00:00Z");
+    responderCom({ status: "encerrado", status_desde: null });
+    const { unmount } = render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    let cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
+    await waitFor(() => expect(cartao.querySelector(".obra-prazo__numero")!.textContent).toBe("encerrada"));
+    expect(cartao.querySelector(".obra-prazo__numero .glifo")).toBeNull();
+    expect(within(cartao).queryByText(/vencid/)).toBeNull();
+    expect(within(cartao).queryByText("Conclusão estimada")).toBeNull();
+    unmount();
+    responderCom({ status: "em_encerramento", status_desde: "2026-07-31" });
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
+    await waitFor(() => expect(cartao.querySelector(".obra-prazo__numero")!.textContent).toBe("em encerramento desde 31/07/2026"));
+    expect(within(cartao).queryByText("Conclusão estimada")).toBeNull();
   });
 
   it("o selo das linhas do tempo é o nível que o servidor manda: a tela não decide pelos dias nem pelo status", async () => {

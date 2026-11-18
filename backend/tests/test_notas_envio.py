@@ -2456,3 +2456,41 @@ def test_reajuste_absorvido_nao_e_oferecido_como_irma(api):
     familia, _, o = protocolo._orgao(c, contrato)
     ms = [dict(c.execute("SELECT * FROM medicoes WHERE id=?", (ex,)).fetchone())]
     assert notas_envio._irmas(c, contrato, familia, o, ms, HOJE) == []
+
+
+def test_envio_que_junta_diz_o_numero_das_notas_e_de_qual_nota_falta_o_pdf(svc):
+    """Visto no passo "Envio da nota" sobre o volume real: as notas saiam so' como "NF", sem numero, e o cartao dizia
+    "Falta a nota fiscal" enquanto o passo Notas contava as duas notas do reajuste. O PDF que a leitura nao entendeu
+    leva o numero da nota ligada a ele, ou fica sem numero (a tela mostra o arquivo); a medicao sem PDF lista as notas
+    ja' ligadas a ela, uma a uma, com o numero como a nota o traz."""
+    c, ids = svc
+    ex, rj = ids["sinfra_exec"], ids["sinfra_reaj"]
+    c.execute("UPDATE medicao_documentos SET numero_nf=NULL WHERE medicao_id=?", (ex,))        # PDF sem leitura
+    c.execute("DELETE FROM medicao_documentos WHERE medicao_id=?", (rj,))                      # reajuste: sem PDF
+    for k, (numero, valor) in enumerate((("000009019", 700_001), ("000009024", 299_999))):   # mas com as notas do RM
+        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv) "
+                        "VALUES (1, ?, ?, '2026-09-16', ?, 'ativa', '2.2.01')", (9100 + k, numero, valor)).lastrowid
+        c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
+                  "VALUES (?, ?, ?, 'manual', 't')", (rj, nid, valor))
+    c.commit()
+    sinfra, = _por_contrato(notas_envio.a_enviar(c, HOJE), ids["sinfra"])
+    assert [(n["numero"], n["natureza"], n["arquivo"]) for n in sinfra["notas"]] == [(None, "execucao", f"NFS 23{ex:02d}.pdf")]
+    item = next(i for i in sinfra["itens"] if i["chave"] == "notas")
+    assert item["estado"] == "falta" and sinfra["situacao"] == "pendente"
+    assert item["sem_pdf"] == [
+        {"natureza": "reajuste", "medicao_id": rj, "numero": "9019", "valor_centavos": 700_001},
+        {"natureza": "reajuste", "medicao_id": rj, "numero": "9024", "valor_centavos": 299_999}]
+    # o PDF ligado a uma nota (a leitura manual, ou a nota lida do proprio PDF) leva o numero dela
+    doc = c.execute("SELECT id FROM medicao_documentos WHERE medicao_id=?", (ex,)).fetchone()[0]
+    c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv, documento_id) "
+              "VALUES (1, 9200, '000009023', '2026-09-15', 1000000, 'ativa', '2.2.01', ?)", (doc,))
+    # sem nota ligada nem PDF: uma linha so', sem numero (falta a nota mesmo)
+    c.execute("UPDATE nf_alocacoes SET desfeita_em='2026-09-17' WHERE medicao_id=?", (rj,))
+    c.commit()
+    sinfra, = _por_contrato(notas_envio.a_enviar(c, HOJE), ids["sinfra"])
+    assert [n["numero"] for n in sinfra["notas"]] == ["9023"]
+    assert next(i for i in sinfra["itens"] if i["chave"] == "notas")["sem_pdf"] == [
+        {"natureza": "reajuste", "medicao_id": rj, "numero": None, "valor_centavos": None}]
+    # com o PDF de todas, nada falta
+    pronto, = _por_contrato(notas_envio.a_enviar(c, HOJE), ids["vg"])
+    assert next(i for i in pronto["itens"] if i["chave"] == "notas")["sem_pdf"] == []

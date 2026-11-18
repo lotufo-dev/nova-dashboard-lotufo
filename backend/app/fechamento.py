@@ -8,7 +8,9 @@ O MES de todo numero e' a competencia da medicao. A nota e o recebimento caem na
 esta' ligada (vinculo vigente em `nf_alocacoes`), nunca no mes da emissao ou da baixa.
 
 Os numeros, por medicao (centavos inteiros; a cota de cada parcela por `contratos.cota`, arredondamento unico por
-parcela; os totais sao somas dessas parcelas, entao fecham ao centavo com as linhas abertas):
+parcela; os totais sao somas dessas parcelas, entao fecham ao centavo com as linhas abertas). As faturas do
+consorcio de uma mesma medicao sao UMA parcela: a cota e' a da soma delas, repartida entre elas (`_cotas`), para o
+protocolado da medicao fechar com o aprovado quando as faturas somam o valor aprovado:
 - Medido: medicao enviada ao orgao (`medicoes.ESTADOS_NO_MEDIDO`: da planilha/carta enviada em diante; cancelada,
   desistida, prevista e planilha so' gerada ficam fora), pelo glossario: o aprovado e, sem boletim, o pedido.
   Medicao sem valor nenhum nao entra no medido.
@@ -133,13 +135,26 @@ def _notas_da_conta(m: dict, ligadas: list[dict]) -> tuple[list[dict], list[dict
     coligada da entidade do contrato, pelo percentual do contrato. Nunca as duas na mesma medicao. Nota de qualquer
     outra coligada (a NFS-e de outra consorciada) nao conta nem aparece.
     `pela_baixa` marca a nota da empresa ao consorcio: o recebido dela vem so' da baixa dos titulos dela
-    (`_recebimento`), nao do estado da medicao."""
+    (`_recebimento`), nao do estado da medicao.
+    Cada nota que conta sai com `cota`, o valor dela na cota (`_cotas`): e' esse o numero que entra em toda soma."""
     do_contrato = [x for x in ligadas if x["coligada"] == m["coligada"]]
     empresa = m["coligada_empresa"]
     da_empresa = [x for x in ligadas if x["coligada"] == empresa] if m["consorcio"] and empresa != m["coligada"] else []
     if da_empresa:
-        return [{**x, "pct": None, "pela_baixa": True} for x in da_empresa], do_contrato
-    return [{**x, "pct": m["pct"], "pela_baixa": False} for x in do_contrato], []
+        return [{**x, "pct": None, "pela_baixa": True, "cota": x["valor"] or 0} for x in da_empresa], do_contrato
+    return [{**x, "pct": m["pct"], "pela_baixa": False, "cota": v}
+            for x, v in zip(do_contrato, _cotas([x["valor"] or 0 for x in do_contrato], m["pct"]))], []
+
+
+def _cotas(valores: list[int], pct: int | None) -> list[int]:
+    """A cota de cada fatura do consorcio de UMA medicao. O arredondamento e' um so', no total: a cota da soma das
+    faturas, repartida entre elas na proporcao do valor cheio, com o residuo nos maiores restos
+    (`dinheiro.ratear_proporcional`). Arredondar a cota fatura a fatura somava um centavo a mais (ou a menos) que a
+    cota do valor aprovado quando a medicao tem varias faturas: o protocolado do mes passava do aprovado. Com uma
+    fatura so', ou em obra propria, e' `contratos.cota` de sempre."""
+    if len(valores) < 2 or any(v < 0 for v in valores) or sum(valores) <= 0:
+        return [contratos.cota(v, pct) or 0 for v in valores]
+    return dinheiro.ratear_proporcional(contratos.cota(sum(valores), pct) or 0, valores)
 
 
 def _recebimento(m: dict, nota: dict, valor_cota: int) -> tuple[int, int]:
@@ -188,7 +203,7 @@ def _pela_nota_da_empresa(conn) -> tuple[dict[int, int], set[int], set[int]]:
             contam_em_alguma |= {x["nota_id"] for x in contam}
             if not _cobrada(m) or not any(x["pela_baixa"] for x in contam):
                 continue
-            aberto[m["id"]] = sum(_recebimento(m, x, contratos.cota(x["valor"], x["pct"]) or 0)[1] for x in contam)
+            aberto[m["id"]] = sum(_recebimento(m, x, x["cota"])[1] for x in contam)
             da_empresa |= {x["nota_id"] for x in contam}
             fora_em_alguma |= {x["nota_id"] for x in fora}
         return aberto, da_empresa, fora_em_alguma - contam_em_alguma
@@ -226,8 +241,7 @@ def notas_da_cota_em_consorcio(conn, medicao_id: int) -> tuple[list[dict], list[
     # outros vinculos dela (`_notas_por_medicao`)
     contam, fora = _notas_da_conta(m, _notas_por_medicao(conn, {x["id"] for x in ms}).get(medicao_id, []))
     for x in contam:
-        valor = contratos.cota(x["valor"], x["pct"]) or 0
-        x["quitada"] = _recebimento(m, x, valor)[1] == 0
+        x["quitada"] = _recebimento(m, x, x["cota"])[1] == 0
     return contam, fora
 
 
@@ -322,7 +336,7 @@ def _difere_da_cota(conn, m: dict, ligadas: list[dict]) -> dict | None:
     if valor is None:
         return None
     cota = contratos.cota(valor, m["pct"]) or 0
-    soma = sum(contratos.cota(x["valor"], x["pct"]) or 0 for x in ligadas)
+    soma = sum(x["cota"] for x in ligadas)
     if abs(soma - cota) <= diretoria.TOLERANCIA_CENTAVOS:
         return None
     return {"notas_centavos": soma, "cota_centavos": cota, "diferenca_centavos": soma - cota}
@@ -371,7 +385,7 @@ def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
         # a fatura do consorcio preterida pela nota da empresa: aparece na medicao, sem valor, e nao entra em soma
         saida_fora = [{"nota_id": x["nota_id"], "numero": _numero_nota(x["numero"])} for x in fora]
         for x in ligadas:
-            v = contratos.cota(x["valor"], x["pct"]) or 0
+            v = x["cota"]
             recebido, aberto = _recebimento(m, x, v)
             # (a'): o orgao ja' pagou o consorcio (medicao recebida) e a nota da empresa segue sem baixa do repasse
             repasse = x["pela_baixa"] and m["estado"] == "recebida" and aberto > 0

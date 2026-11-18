@@ -56,6 +56,9 @@ type Ponto = {
 type Saldo = {
   vigente_centavos: number; vigente_execucao_centavos?: number; reajuste_contratado_centavos?: number;
   medido_centavos: number; saldo_centavos: number; formula: string;
+  // a cota da empresa no contrato: em consorcio (menos de 100%) os numeros daqui sao o valor cheio, e o topo da
+  // pagina da obra mostra o mesmo saldo na cota
+  percentual_bp?: number;
 };
 type Curva = { curva: Ponto[]; saldo: Saldo };
 
@@ -280,6 +283,7 @@ export default function Cronograma({ contratoId, podeEditar }:
     <section className="cartao" aria-labelledby="titulo-evolucao-mensal" id="evolucao-mensal">
       <div className="cartao__cabeca">
         <h2 className="cartao__titulo" id="titulo-evolucao-mensal">Evolução mensal</h2>
+        {saldo && (saldo.percentual_bp ?? 10000) < 10000 && <span className="cartao__dica">valor cheio do consórcio</span>}
       </div>
 
       {erro && <div className="cartao__corpo"><Falha>{erro}</Falha></div>}
@@ -339,7 +343,7 @@ export default function Cronograma({ contratoId, podeEditar }:
                 <tr>
                   <td colSpan={6}>
                     <button type="button" className="btn btn--pequeno" onClick={() => setVerTodos(true)}>
-                      Ver os {anteriores} meses anteriores
+                      {anteriores === 1 ? "Ver o mês anterior" : `Ver os ${anteriores} meses anteriores`}
                     </button>
                   </td>
                 </tr>

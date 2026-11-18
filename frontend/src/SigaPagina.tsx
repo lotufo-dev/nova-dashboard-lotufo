@@ -368,7 +368,8 @@ function CorrigirCategoria({ p, aoGravar }: { p: ProcessoSiga; aoGravar: () => P
   if (!aberto) {
     return (
       <>
-        <button type="button" className="btn btn--pequeno" onClick={() => { setValor(atual()); setGravado(false); setAberto(true); }}>Corrigir categoria</button>
+        <button type="button" className="btn btn--pequeno" onClick={() => { setValor(atual()); setGravado(false); setAberto(true); }}>
+          {p.categoria_sugerida ? "Confirmar categoria" : "Corrigir categoria"}</button>
         <span className="sg__gravado" role="status">{gravado ? "Categoria gravada." : ""}</span>
       </>
     );

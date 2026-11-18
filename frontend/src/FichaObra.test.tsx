@@ -5,7 +5,7 @@ import FichaObra, { MedicoesAgora, PrazoDaObra, mesAno, type Ficha } from "./Fic
 // O alto da pagina da obra (#646, redesenhado na #774) nao le nada: a pagina unica (`ContratoPagina`) le a ficha e
 // passa para ca'.
 const PRAZOS = { execucao_inicio: "2026-01-01", execucao_fim: "2026-11-18", vigencia_inicio: "2026-01-01", vigencia_fim: "2027-02-16",
-  status: "encerrado" as const };
+  status: "ativo" as const };
 const FICHA: Ficha = {
   // base de execucao e cota: 1.000.000,01 − 812.345,67 = 187.654,34
   topo: { vigente_centavos: 100000001, medido_centavos: 81234567, saldo_centavos: 18765434, reajuste_centavos: 0 },
@@ -38,6 +38,17 @@ describe("Resumo da obra: a faixa de números", () => {
     const pct = within(regiao("Resumo da obra")).getByText("81% executado");
     expect(pct.className).not.toMatch(/feito|info--/);
     expect(regiao("Resumo da obra").querySelector(".glifo")).toBeNull();
+    cleanup();
+    // por piso, como na lista de Obras (#779): com 99,96% medido a página dizia "100% executado" ao lado de um saldo
+    // a executar, e a lista, 99%
+    render(<FichaObra ficha={{ ...FICHA, topo: { vigente_centavos: 1000000, medido_centavos: 999600, saldo_centavos: 400, reajuste_centavos: 0 } }} />);
+    expect(within(regiao("Resumo da obra")).getByText("99% executado")).toBeTruthy();
+    expect(within(regiao("Resumo da obra")).getByRole("progressbar").getAttribute("aria-valuenow")).toBe("99");
+    cleanup();
+    // medido acima do vigente: 100% (a barra não passa do fim) e o saldo negativo em crítico
+    render(<FichaObra ficha={{ ...FICHA, topo: { vigente_centavos: 1000000, medido_centavos: 1002500, saldo_centavos: -2500, reajuste_centavos: 0 } }} />);
+    expect(within(regiao("Resumo da obra")).getByText("100% executado")).toBeTruthy();
+    expect(numero("Saldo a executar").className).toContain("obra-numero--critico");
     expect(within(regiao("Resumo da obra")).getByText("original igual · 2 TAs · data-base jan/2025")).toBeTruthy();
     expect(within(regiao("Resumo da obra")).queryByRole("link")).toBeNull();
   });
@@ -112,30 +123,33 @@ describe("Prazo da obra: os dias da execução, as linhas do tempo e o ritmo (#6
   it("mostra o ritmo mensal e a conclusão estimada; o saldo e o fim da execução não se repetem", () => {
     montar();
     expect(valor("Ritmo mensal").textContent).toMatch(/^R\$\s50\.000,00$/);
-    expect(valor("Conclusão estimada").textContent).toBe("08/03/2027");
+    expect(valor("Conclusão estimada").querySelector("span")!.textContent).toBe("08/03/2027");
     expect(within(regiao("Prazo")).queryByText("Saldo")).toBeNull();
     expect(within(regiao("Prazo")).getAllByText("18/11/2026")).toHaveLength(1);
   });
 
-  it("conclusão depois do fim da execução: selo crítico com os dias", () => {
-    montar();
-    const selo = regiao("Prazo").querySelector(".cartao__cabeca .selo")!;
+  it("conclusão depois do fim da execução: selo crítico com os dias, na linha da conclusão estimada", () => {
+    // no alto do painel, ao lado de "vencido há N dias", o selo lia-se como a mesma conta: são duas medidas
+    montar({ ...FICHA, vencimentos: FICHA.vencimentos.map(v => ({ ...v, dias: -82, nivel: "critico" })) });
+    expect(dias().textContent).toMatch(/^vencido há 82.dias$/);
+    expect(regiao("Prazo").querySelector(".cartao__cabeca .selo")).toBeNull();
+    const selo = valor("Conclusão estimada").querySelector(".selo")!;
     expect(selo.className).toContain("selo--critico");
-    expect(selo.textContent).toBe("110 dias além do prazo");
+    expect(selo.textContent).toBe("110 dias depois do fim da execução");
   });
 
   it("conclusão até o fim da execução: selo de feito", () => {
     comRitmo({ conclusao: "2026-11-10", situacao: "no_prazo", dias_alem: null });
-    const selo = regiao("Prazo").querySelector(".cartao__cabeca .selo")!;
+    const selo = valor("Conclusão estimada").querySelector(".selo")!;
     expect(selo.className).toContain("selo--feito");
-    expect(selo.textContent).toBe("No prazo");
+    expect(selo.textContent).toBe("até o fim da execução");
   });
 
   it("sem medição nas 6 últimas competências: '—' no ritmo e na conclusão e nenhum selo", () => {
     comRitmo({ ritmo_centavos: null, conclusao: null, situacao: null, dias_alem: null });
     expect(valor("Ritmo mensal").textContent).toBe("—");
     expect(valor("Conclusão estimada").textContent).toBe("—");
-    expect(regiao("Prazo").querySelector(".cartao__cabeca .selo")).toBeNull();
+    expect(regiao("Prazo").querySelector(".selo")).toBeNull();
   });
 
   it("carregando e falha da ficha: sem número inventado e sem selo", () => {

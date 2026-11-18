@@ -17,7 +17,7 @@ import unicodedata
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from app import auditoria, db, medicoes, tempo
+from app import auditoria, db, medicoes, tempo, texto
 from app import avisos as registro_avisos
 from app.feriados import dia_util
 
@@ -547,6 +547,27 @@ def _categoria(p) -> str:
     return p["categoria"] if p["categoria"] != "medicoes" else "outros"
 
 
+# O robo manda o processo so' com o nome que ele tem na lista dele; o SIGA nao informa um tipo. Enquanto ninguem
+# classifica, o processo ficava em Outros mesmo com o nome dizendo "7ª Medição", "Aditivo de prazo" ou
+# "Indenizatório". A sugestao sai dessas palavras do nome, na ordem abaixo ("Aditivo de reajuste" e' aditivo), e so'
+# da categoria: obra e medicao ninguem adivinha.
+_SUGESTAO = (("indenizatorios", re.compile(r"indenizat", re.I)), ("aditivos", re.compile(r"aditiv", re.I)),
+             ("medicoes", re.compile(r"medi[cç][aã]o|medi[cç][oõ]es|reajuste", re.I)))
+
+
+def categoria_sugerida(nome: str | None) -> str | None:
+    """A categoria que o nome do processo diz, ou None quando ele nao diz nenhuma (fica em Outros)."""
+    return next((c for c, padrao in _SUGESTAO if padrao.search(nome or "")), None)
+
+
+def _classificados_por_pessoa(conn) -> set[int]:
+    """Os processos cuja categoria alguem ja' escolheu, ao acompanhar pela tela ou ao corrigir no historico (o
+    registro da auditoria). Neles a categoria gravada vale, mesmo sendo Outros: a sugestao nao volta."""
+    return {int(r[0]) for r in conn.execute(
+        "SELECT DISTINCT entidade_id FROM audit_log WHERE entidade='siga_processo' "
+        "AND acao IN ('siga.classificacao', 'protocolo.siga')") if str(r[0]).isdigit()}
+
+
 def _titulo_das_medicoes(conn, medicao_id: int | None, protocolo_id: int | None) -> str | None:
     """Titulo da medicao do processo; ligado so' ao protocolo (medicao e reajuste juntos), os titulos com " e "."""
     if medicao_id is not None:
@@ -766,6 +787,7 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
     hoje = tempo.para_local(agora).date()
     lido_em = conn.execute("SELECT MAX(lido_em) FROM siga_leituras").fetchone()[0]
     saida = []
+    classificados = _classificados_por_pessoa(conn)
     for p in conn.execute(
             "SELECT sp.*, c.nome_curto, c.numero_instrumento, m.numero AS m_numero, m.tipo AS m_tipo, "
             "m.estado AS m_estado "
@@ -787,6 +809,10 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
         if derivado["ultima"]:
             derivado["ultima"] = {**derivado["ultima"], "data": tempo.iso_local(derivado["ultima"]["data"])}
         categoria = _categoria(p)
+        # em Outros sem ninguem ter escolhido: a secao da tela e' a que o nome do processo diz, marcada como sugerida
+        # ate' alguem confirmar ou corrigir no historico (nada e' gravado por aqui)
+        sugerida = categoria_sugerida(p["nome"]) if categoria == "outros" and p["id"] not in classificados else None
+        categoria = sugerida or categoria
         medicao_titulo = medicoes.titulo({"numero": p["m_numero"], "tipo": p["m_tipo"]}) if p["medicao_id"] \
             else _titulo_das_medicoes(conn, None, p["protocolo_id"])
         saida.append({
@@ -794,7 +820,7 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
             "contrato_id": p["contrato_id"],
             "obra": (p["nome_curto"] or p["numero_instrumento"]) if p["contrato_id"] else None,
             "medicao_id": p["medicao_id"], "medicao_titulo": medicao_titulo,
-            "categoria": categoria, "complemento": p["complemento"],
+            "categoria": categoria, "categoria_sugerida": sugerida is not None, "complemento": p["complemento"],
             "o_que_e": o_que_e(categoria, p["complemento"], medicao_titulo),
             "protocolo_id": p["protocolo_id"], "situacao": situacao, "encerrado": encerrado,
             **derivado,
@@ -1048,7 +1074,8 @@ def situacao_robo(conn, agora: datetime.datetime | None = None, fora: dict[int, 
         da_rodada = json.loads(ultima["processos"])
         faltaram = len({n["processo_id"] for n in nao_lidos} & set(da_rodada))
         if faltaram:
-            avisos.append(_aviso_robo("nao_lidos", f"{faltaram} de {len(da_rodada)} processos não foram lidos"))
+            avisos.append(_aviso_robo("nao_lidos", f"{faltaram} de {texto.contar(len(da_rodada), 'processo', 'processos')} "
+                                      + ("não foi lido" if faltaram == 1 else "não foram lidos")))
     # so' a mais recente: rodadas mortas seguidas (todas passando dos 10 minutos) nao viram uma linha cada
     morta = conn.execute("SELECT iniciada_em FROM siga_rodadas WHERE terminada_em IS NULL AND iniciada_em < ? "
                          "AND id > ? ORDER BY id DESC LIMIT 1",
@@ -1103,7 +1130,7 @@ def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) ->
         onde = f" em {d['setor']}" if d["setor"] else ""
         out.append({**registro_avisos.aviso(
             "siga_parado", "acao" if dias >= DIAS_ACAO else "atencao",
-            f"processo {p['numero']} parado{onde} há {dias} dias úteis", p["contrato_id"],
+            f"processo {p['numero']} parado{onde} há {texto.dias_uteis(dias)}", p["contrato_id"],
             registro_avisos.obra(conn, p["contrato_id"]), dias=dias,
             destino={"tela": "siga", "processo": p["id"]}, data=parado_desde, sentido="desde"),
             "medicao_id": p["medicao_id"]})

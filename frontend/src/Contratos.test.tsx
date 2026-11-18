@@ -109,6 +109,28 @@ describe("Obras: posição financeira na cota da Lotufo, por contratante", () =>
     expect(grupos()[0].querySelector(".obras-exec__pct")!.textContent).toBe("99%");
   });
 
+  it("medido acima do valor vigente: o saldo negativo sai em crítico com o glifo, como no alto da página da obra", async () => {
+    api.mockImplementation(async (caminho: string) => {
+      if (caminho === "/api/contratos") return [obra(1, "5 Bairros", { posicao: posicao(1000_00, 1002_50, null) }),
+        obra(2, "Leblon", { posicao: posicao(1000_00, 400_00, null) })];
+      if (caminho === "/api/entidades") return [];
+      if (caminho === "/api/inicio") return { avisos: [] };
+      if (caminho === "/api/diretoria") return { ...PAINEL, obras: [] };
+      throw new Error(`chamada inesperada: ${caminho}`);
+    });
+    abrir("/obras");
+    const tabela = await screen.findByRole("table", { name: /Obras, posição/ });
+    const saldos = [...tabela.querySelectorAll<HTMLElement>('tbody td[data-rotulo="Saldo a executar"]')]
+      .filter(td => td.closest("tr")!.querySelector(".obras-exec"));
+    const negativo = saldos.find(td => td.textContent!.includes("2,50"))!;
+    expect(negativo.className).toContain("negativo");
+    expect(negativo.querySelector(".glifo--critico")).toBeTruthy();
+    expect(negativo.closest("tr")!.querySelector(".obras-exec__pct")!.textContent).toBe("100%");
+    const positivo = saldos.find(td => td.textContent!.includes("600,00"))!;
+    expect(positivo.className).not.toContain("negativo");
+    expect(positivo.querySelector(".glifo")).toBeNull();
+  });
+
   it("#774: ?termina=90 (os links do QDOP) recorta a lista pelo fim do prazo e oferece voltar a todas", async () => {
     abrir("/obras?termina=150");
     await screen.findByRole("table");

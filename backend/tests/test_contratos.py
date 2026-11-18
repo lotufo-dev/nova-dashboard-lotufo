@@ -136,6 +136,32 @@ def test_cabecalho_e_cadastro_da_obra(tmp_path, monkeypatch):
     assert cab["status"] == "em_encerramento" and cab["dias_execucao"] == 10 and cab["orgao"] == "SINFRA-MT"
     ap = contratos.cadastro_da_obra(conn, cid)["instrumentos"][0]
     assert ap["tipo"] == "apostilamento_reajuste" and ap["dados"]["percentual"] == "4,21"
+    assert cab["status_desde"] == "2026-09-01" and cab["paralisada_desde"] is None
+
+
+def test_cabecalho_diz_desde_quando_a_obra_esta_parada_ou_encerrada(tmp_path, monkeypatch):
+    """O painel "Prazo" da obra que nao esta' ativa diz o estado e desde quando, no lugar de "vencido ha' N dias":
+    a ordem de paralisacao sem reinicio, o evento do encerramento. O evento da carga inicial leva a data da carga,
+    nao a do fato: fica de fora. Sem data, nula (nada e' inferido)."""
+    import datetime
+    conn = _conn(tmp_path, monkeypatch)
+    hoje = datetime.date(2027, 6, 20)
+    cid = contratos.criar(conn, 1, BASE)
+    assert contratos.cabecalho(conn, cid, hoje)["status_desde"] is None            # ativa
+    conn.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) VALUES (?, 'par-1', 'paralisacao', "
+                 "'2026-11-21', '{}')", (cid,))
+    conn.commit()
+    contratos.mudar_estado(conn, 1, cid, "suspenso", "2026-12-17", None)
+    cab = contratos.cabecalho(conn, cid, hoje)
+    assert (cab["status"], cab["status_desde"], cab["paralisada_desde"]) == ("suspenso", "2026-11-21", "2026-11-21")
+    outro = contratos.criar(conn, 1, {**BASE, "numero_instrumento": "IC 083/2025"})
+    contratos.mudar_estado(conn, 1, outro, "encerrado", "2027-03-05", None)
+    assert contratos.cabecalho(conn, outro, hoje)["status_desde"] == "2027-03-05"
+    conn.execute("UPDATE contrato_eventos SET observacao='Carga inicial: estado do cadastro legado' WHERE contrato_id=?",
+                 (outro,))
+    conn.commit()
+    cab = contratos.cabecalho(conn, outro, hoje)
+    assert (cab["status"], cab["status_desde"]) == ("encerrado", None)
 
 
 def test_cabecalho_traz_o_inicio_da_execucao_e_da_vigencia(tmp_path, monkeypatch):

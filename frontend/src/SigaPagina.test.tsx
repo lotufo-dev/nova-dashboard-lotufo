@@ -451,6 +451,21 @@ describe("SigaPagina", () => {
     expect((await within(form).findByRole("alert")).textContent).toContain("Escolha a obra do processo");
   });
 
+  it("processo que o robô mandou sem classificação: entra na seção que o servidor sugere pelo nome e o histórico oferece confirmar", async () => {
+    const SUGERIDO = processo({ id: 30, nome: "CT-901 - Aditivo de prazo - Obra Alfa", categoria: "aditivos", categoria_sugerida: true, o_que_e: "Aditivo" });
+    api.mockImplementation(async (caminho: string) => caminho === "/api/contratos" ? OBRAS : painel([SUGERIDO, BETA]));
+    const { unmount } = render(<SigaPagina busca={{}} agora={AGORA} />);
+    const grade = await screen.findByRole("grid");
+    const secoes = within(grade).getAllByRole("rowgroup").filter(g => g.tagName === "TBODY");
+    expect(secoes.map(s => s.getAttribute("aria-label"))).toEqual(["Aditivos", "Outros"]);
+    expect(nomesEm(secoes[0])).toEqual(["CT-901 - Aditivo de prazo - Obra Alfa"]);
+    unmount();
+    render(<SigaPagina busca={{ processo: "30" }} agora={AGORA} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Confirmar categoria" }));
+    const form = screen.getByRole("form", { name: "Corrigir categoria" });
+    expect((within(form).getByLabelText("Categoria") as HTMLSelectElement).value).toBe("aditivos");
+  });
+
   it("quem só consulta não vê Corrigir categoria nem Acompanhar processo; processo de protocolo do sistema não tem o que corrigir (#663)", async () => {
     api.mockResolvedValue(painel([ALFA, ADITIVO]));
     const { unmount } = render(<SigaPagina busca={{ processo: "21" }} agora={AGORA} podeEditar={false} />);
