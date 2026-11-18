@@ -498,6 +498,23 @@ def _contratante(m: dict) -> str:
         if m.get("orgao_nome") else "sem órgão"
 
 
+def chave_do_contratante(familia: str | None, chave: str | None) -> str | None:
+    """A chave estavel do contratante, para o endereco da pagina dele em Obras (issue #805): sai do que
+    `medicoes.contratante` usa para agrupar, nunca do nome escrito. A familia "sinfra" e' um contratante so' (todas as
+    superintendencias); nos outros, a chave do orgao no cadastro (`orgaos.chave`). Contrato sem orgao no cadastro nao
+    tem chave (nem pagina de contratante)."""
+    return "sinfra" if familia == "sinfra" else chave or None
+
+
+def contratante_da_obra(conn, contrato_id: int) -> dict:
+    """O contratante de UMA obra, com a chave da pagina dele: o que o caminho "Obras > contratante > obra" da pagina
+    da obra precisa (issue #805). A sigla e' a da lista de Obras (`medicoes.contratante`)."""
+    r = conn.execute("SELECT c.orgao AS orgao_texto, o.familia, o.chave, o.nome FROM contratos c "
+                     "LEFT JOIN orgaos o ON o.id=c.orgao_id WHERE c.id=?", (contrato_id,)).fetchone()
+    return {"contratante": medicoes.contratante(r["familia"], r["chave"], r["nome"], r["orgao_texto"])[0],
+            "contratante_chave": chave_do_contratante(r["familia"], r["chave"])}
+
+
 def _numero_nf(numero) -> str:
     s = str(numero or "").strip()
     return str(int(s)) if s.isdigit() else s
@@ -727,4 +744,8 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
         return {"hoje": hoje.isoformat(), "medido_ano": _medido_ano(ms, hoje, _complemento_na_cota(conn, compl)),
                 # #279: o reajuste ja' medido das competencias sem apostilamento, por obra (bloco do Resumo de Obras)
                 "reajustes_apostilamento": _reajustes_sem_apostilamento(conn),
+                # #805: o prazo de pagamento de cada contratante, em dias, pela conta unica (`prazos_do_orgao`,
+                # docs/adr/0007); a chave e' a sigla do contratante da lista de Obras. Contratante sem casos
+                # suficientes fica fora: e' "sem previsao"
+                "prazo_pagamento": prazos_do_orgao(ms, hoje),
                 "obras": _obras(conn, ms, hoje, avisos, cache, no_medido, compl), "avisos": avisos}

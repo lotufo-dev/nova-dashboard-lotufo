@@ -1803,3 +1803,37 @@ def test_medido_do_ano_anterior_so_em_competencia_encerrada(cenario):
     # a referencia nao entra nas somas nem desce para a obra e a medicao
     assert "medido_ano_anterior_centavos" not in fechamento.SOMAS
     assert all("medido_ano_anterior_centavos" not in o for m in f["meses"] for o in m["obras"])
+
+
+def test_medido_do_mes_fechado_e_o_medido_do_fechamento_obra_a_obra(cenario):
+    # #805 (Obras por contratante): o "medido no mes" da lista de Obras e' o medido que o Fechamento mostra para a
+    # obra na ultima competencia fechada (o mes anterior ao de hoje), e a referencia e' o do mes antes dela
+    c, ids = cenario
+    hoje = datetime.date(2026, 11, 18)
+    medir(c, ids["propria"], 1, "2026-09", "recebida", 8_000_001, 7_900_001)
+    medir(c, ids["propria"], 2, "2026-10", "boletim_recebido", 10_000_000, 9_000_033)       # o aprovado vale
+    medir(c, ids["propria"], 2, "2026-10", "planilha_enviada", 500_001, tipo="reajuste")    # em analise: o pedido
+    medir(c, ids["propria"], 3, "2026-10", "cancelada", 777)                                # fora do medido
+    medir(c, ids["consorcio"], 1, "2026-10", "protocolada", 30_000_001)                     # cota de 50%, centavo impar
+    medir(c, ids["consorcio"], 2, "2026-11", "planilha_enviada", 999)                       # o mes em curso fica fora
+    r = fechamento.medido_do_mes_fechado(c, hoje)
+    assert (r["competencia"], r["referencia_competencia"]) == ("2026-10", "2026-09")
+    assert r["por_obra"] == {ids["propria"]: 9_000_033 + 500_001, ids["consorcio"]: 15_000_001}
+    assert r["referencia_por_obra"] == {ids["propria"]: 7_900_001}
+    f = fechamento.fechamento(c, hoje)
+    do_fechamento = lambda comp: {o["contrato_id"]: o["medido_centavos"] for o in _mes(f, comp)["obras"]}   # noqa: E731
+    assert r["por_obra"] == do_fechamento("2026-10") and r["referencia_por_obra"] == do_fechamento("2026-09")
+    assert sum(r["por_obra"].values()) == _mes(f, "2026-10")["medido_centavos"]
+
+
+def test_medido_do_mes_fechado_sem_referencia_antes_do_primeiro_ano_da_pagina(cenario):
+    # o mes anterior ao primeiro ano que as telas da diretoria contam nao serve de referencia, com ou sem medicao
+    c, ids = cenario
+    medir(c, ids["propria"], 1, "2024-12", "recebida", 600_001, 600_001)
+    medir(c, ids["propria"], 2, "2025-01", "recebida", 700_001, 700_001)
+    r = fechamento.medido_do_mes_fechado(c, datetime.date(2025, 2, 10))
+    assert r == {"competencia": "2025-01", "por_obra": {ids["propria"]: 700_001},
+                 "referencia_competencia": None, "referencia_por_obra": {}}
+    # virou o ano: dezembro e' a competencia fechada e novembro a referencia
+    r = fechamento.medido_do_mes_fechado(c, datetime.date(2027, 1, 5))
+    assert (r["competencia"], r["referencia_competencia"]) == ("2026-12", "2026-11")

@@ -23,8 +23,10 @@ def test_painel_e_qdop_para_a_diretoria_e_401_sem_sessao(client):
     c.close()
     _login(client, "dir@l.com")
     r = client.get("/api/diretoria")
-    # #748: so' o que o Resumo e o QDOP da lista de Obras mostram; #802: a curva do previsto e do medido saiu
-    assert r.status_code == 200 and set(r.json()) == {"hoje", "medido_ano", "obras", "avisos", "reajustes_apostilamento"}
+    # #748: so' o que o Resumo e o QDOP da lista de Obras mostram; #802: a curva do previsto e do medido saiu;
+    # #805: o prazo de pagamento por contratante, que os blocos e a pagina do contratante mostram
+    assert r.status_code == 200 and set(r.json()) == {"hoje", "medido_ano", "obras", "avisos", "reajustes_apostilamento",
+                                                      "prazo_pagamento"}
     x = client.get("/api/diretoria/qdop.xlsx")
     assert x.status_code == 200 and "QDOP" in x.headers["content-disposition"]
     assert openpyxl.load_workbook(io.BytesIO(x.content)).active["S1"].value == "FRM.EXEMPLO.001"
