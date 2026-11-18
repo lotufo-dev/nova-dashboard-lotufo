@@ -51,8 +51,54 @@ def test_medido_da_ultima_competencia_fechada(cenario):
     _medicao(c, cid, 8, "2026-10-09 14:00:00", 9, competencia="2026-10")       # o mes corrente nao entra no cartao
     p = inicio.painel(c, HOJE)
     m = p["medido"]
-    assert m == {"competencia": "2026-09", "valor_centavos": 1_000_005, "quantidade": 2, "ultimo_lancamento": "2026-10-09"}
+    # #805: as duas referencias da variacao, cada uma com a mesma conta do numero (competencia inteira, valor cheio)
+    assert m == {"competencia": "2026-09", "valor_centavos": 1_000_005, "quantidade": 2, "ultimo_lancamento": "2026-10-09",
+                 "anterior": {"competencia": "2026-08", "valor_centavos": 450_999},
+                 "ano_anterior": {"competencia": "2025-09", "valor_centavos": 3}}
     assert "por_contratante" not in p and "protocolado_mes" not in p
+
+
+def test_referencias_do_medido_so_com_lastro(cenario):
+    # #805: sem medicao na competencia de referencia nao ha' com o que comparar, e a referencia vem nula; a
+    # cancelada nao conta na referencia, como nao conta no numero
+    c, cid = cenario
+    _medicao(c, cid, 1, "2026-10-05 12:00:00", 300_001, competencia="2026-09")
+    _medicao(c, cid, 2, "2026-09-05 12:00:00", 999, estado="cancelada", competencia="2026-08")
+    m = inicio.painel(c, HOJE)["medido"]
+    assert (m["valor_centavos"], m["anterior"], m["ano_anterior"]) == (300_001, None, None)
+
+
+def test_referencia_do_medido_anterior_ao_ano_inicial_fica_nula(cenario):
+    # #805: as telas da diretoria contam de `diretoria.ANO_INICIAL` em diante. Em fevereiro de 2026 o cartao e' de
+    # janeiro: a competencia anterior (12/2025) compara, e a do ano anterior (01/2025) tambem; em fevereiro de 2025, o
+    # cartao e' de janeiro de 2025 e as duas referencias (12/2024 e 01/2024) ficam fora, mesmo com medicao lancada
+    c, cid = cenario
+    _medicao(c, cid, 1, "2025-01-10 12:00:00", 70_001, competencia="2024-12")
+    _medicao(c, cid, 2, "2025-02-05 12:00:00", 80_001, competencia="2025-01")
+    _medicao(c, cid, 3, "2024-02-05 12:00:00", 60_001, competencia="2024-01")
+    _medicao(c, cid, 4, "2026-01-05 12:00:00", 90_001, competencia="2025-12")
+    _medicao(c, cid, 5, "2026-02-05 12:00:00", 100_001, competencia="2026-01")
+    m = inicio.painel(c, D(2025, 2, 10))["medido"]
+    assert (m["competencia"], m["valor_centavos"], m["anterior"], m["ano_anterior"]) == ("2025-01", 80_001, None, None)
+    m = inicio.painel(c, D(2026, 2, 10))["medido"]
+    assert m["anterior"] == {"competencia": "2025-12", "valor_centavos": 90_001}
+    assert m["ano_anterior"] == {"competencia": "2025-01", "valor_centavos": 80_001}
+
+
+def test_referencia_do_medido_leva_a_nota_do_rm_sem_medicao_como_o_numero(cenario):
+    # #805: a referencia e' a mesma conta do numero, entao a competencia de referencia tambem vale pela nota do RM que
+    # ainda nao tem medicao lancada (`diretoria.complemento_rm`): em novembro, o cartao e' de outubro e a competencia
+    # anterior (setembro) so' tem a nota emitida em outubro
+    c, cid = cenario
+    _medicao(c, cid, 1, "2026-11-03 12:00:00", 500_001, competencia="2026-10")
+    col = c.execute("SELECT e.coligada_rm FROM contratos k JOIN entidades e ON e.id=COALESCE(k.entidade_id, 1) WHERE k.id=?",
+                    (cid,)).fetchone()[0]
+    c.execute("UPDATE contratos SET centro_custo_rm='9.001.002' WHERE id=?", (cid,))
+    c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo, codtmv) "
+              "VALUES (?, 501, '501', '2026-10-06', 700001, 'ativa', '9.001.002', '2.2.01')", (col,))
+    c.commit()
+    m = inicio.painel(c, D(2026, 11, 18))["medido"]
+    assert (m["valor_centavos"], m["anterior"]) == (500_001, {"competencia": "2026-09", "valor_centavos": 700_001})
 
 
 def test_mes_sem_medicao_da_competencia(cenario):
@@ -133,7 +179,67 @@ def test_notas_protocoladas_no_mes_contam_notas_e_obras_distintas(cenario):
               "VALUES (?, ?, 1, 'manual', '2026-10-07')", (m1, nota[4]))   # alocacao desfeita nao conta
     c.commit()
     n = inicio.painel(c, HOJE)["notas_mes"]
-    assert n == {"mes": "2026-10", "valor_centavos": 7_000, "notas": 2, "obras": 2}
+    # #805: hoje e' dia 9; a medicao protocolada em 20/09 fica depois do dia 9 de setembro, entao nao ha' referencia
+    assert n == {"mes": "2026-10", "valor_centavos": 7_000, "notas": 2, "obras": 2, "anterior": None}
+
+
+def _nota_da_medicao(c, mid, idmov, valor, situacao="ativa"):
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv) "
+                    "VALUES (1, ?, ?, '2026-09-01', ?, ?, '2.2.01')", (idmov, str(idmov), valor, situacao)).lastrowid
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem) VALUES (?, ?, 1, 'manual')",
+              (mid, nid))
+    c.commit()
+    return nid
+
+
+def test_notas_do_mes_anterior_ate_o_mesmo_dia(cenario):
+    # #805: a referencia das notas protocoladas no mes e' o mes anterior ATE' O MESMO DIA (hoje e' dia 9: de 1 a 9 de
+    # setembro, o dia 9 incluido), com a mesma conta do numero: nota ativa, cada nota uma vez, reprotocolo nao conta
+    c, cid = cenario
+    ate_o_dia = _medicao(c, cid, 1, "2026-09-01 10:00:00", 100, estado="protocolada")
+    no_dia = _medicao(c, cid, 2, "2026-09-01 10:00:00", 100, estado="protocolada")
+    depois = _medicao(c, cid, 3, "2026-09-01 10:00:00", 100, estado="protocolada")
+    reprotocolada = _medicao(c, cid, 4, "2026-08-01 10:00:00", 100, estado="protocolada")
+    do_mes = _medicao(c, cid, 5, "2026-10-01 10:00:00", 100, estado="protocolada")
+    for m, d in ((ate_o_dia, "2026-09-03"), (no_dia, "2026-09-09"), (depois, "2026-09-10"),
+                 (reprotocolada, "2026-08-20"), (reprotocolada, "2026-09-05"),      # a primeira data e' de agosto
+                 (do_mes, "2026-10-02")):
+        _protocolar(c, m, d)
+    partilhada = _nota_da_medicao(c, ate_o_dia, 1, 300_001)
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem) VALUES (?, ?, 1, 'manual')",
+              (no_dia, partilhada))                                               # a mesma nota: conta uma vez
+    _nota_da_medicao(c, no_dia, 2, 200_002)
+    _nota_da_medicao(c, no_dia, 3, 999, situacao="cancelada")
+    _nota_da_medicao(c, depois, 4, 70_000)
+    _nota_da_medicao(c, reprotocolada, 5, 60_000)
+    _nota_da_medicao(c, do_mes, 6, 400_003)
+    n = inicio.painel(c, HOJE)["notas_mes"]
+    assert (n["valor_centavos"], n["anterior"]) == (400_003, {"mes": "2026-09", "ate_dia": 9, "valor_centavos": 500_003})
+
+
+def test_notas_do_mes_anterior_quando_ele_nao_tem_o_dia_de_hoje(cenario):
+    # #805: em 31 de marco, fevereiro vai ate' o ultimo dia dele (28 em 2026), e a resposta diz o dia usado
+    c, cid = cenario
+    fim = _medicao(c, cid, 1, "2026-02-01 10:00:00", 100, estado="protocolada")
+    _protocolar(c, fim, "2026-02-28")
+    _nota_da_medicao(c, fim, 1, 150_001)
+    n = inicio.painel(c, D(2026, 3, 31))["notas_mes"]
+    assert n["anterior"] == {"mes": "2026-02", "ate_dia": 28, "valor_centavos": 150_001}
+    assert inicio.painel(c, D(2026, 3, 27))["notas_mes"]["anterior"] is None      # dia 27: o protocolo do dia 28 fica fora
+    # em 30 de marco de 2028 (bissexto), fevereiro vai ate' o dia 29
+    bissexto = _medicao(c, cid, 2, "2028-02-01 10:00:00", 100, estado="protocolada")
+    _protocolar(c, bissexto, "2028-02-29")
+    _nota_da_medicao(c, bissexto, 2, 90_001)
+    assert inicio.painel(c, D(2028, 3, 30))["notas_mes"]["anterior"] == {"mes": "2028-02", "ate_dia": 29, "valor_centavos": 90_001}
+
+
+def test_notas_do_mes_anterior_antes_do_ano_inicial_ficam_sem_referencia(cenario):
+    # #805: em janeiro de 2025 o mes anterior e' dezembro de 2024, antes de `diretoria.ANO_INICIAL`
+    c, cid = cenario
+    velha = _medicao(c, cid, 1, "2024-12-01 10:00:00", 100, estado="protocolada")
+    _protocolar(c, velha, "2024-12-05")
+    _nota_da_medicao(c, velha, 1, 150_001)
+    assert inicio.painel(c, D(2025, 1, 20))["notas_mes"]["anterior"] is None
 
 
 def test_painel_sem_as_chaves_que_nenhuma_tela_le(cenario):

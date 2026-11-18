@@ -265,6 +265,24 @@
   --largura-medida: 75ch;                                                  /* medida do texto corrido (corpo do e-mail) */
   --largura-aviso-resposta: calc(var(--largura-menu) + var(--espaco-xxg) * 2);              /* aviso de resposta do orgao: 360px */
   --borda-tracejada: var(--borda-fina) dashed var(--cor-borda-controle);   /* area de soltar arquivo */
+
+  /* familias de valor (#805; Variacao.tsx, Diferenca.tsx, Andamento.tsx, MarcaEtapa.tsx). Nenhuma cor nova: sao os
+     tons das situacoes e os neutros, com o nome pelo papel que tem no valor. Valor nao e' situacao (a forma e'
+     outra: seta, ponto, sinal de igual, barra), mas "melhor" e "pior" se leem nos mesmos tons de "feito" e "critico". */
+  --valor-bom-texto: var(--situacao-feito-texto);
+  --valor-bom-fundo: var(--situacao-feito-fundo);
+  --valor-bom-ponto: var(--situacao-feito-ponto);
+  --valor-atencao-texto: var(--situacao-breve-texto);
+  --valor-atencao-fundo: var(--situacao-breve-fundo);
+  --valor-atencao-ponto: var(--situacao-breve-ponto);
+  --valor-ruim-texto: var(--situacao-critico-texto);
+  --valor-ruim-fundo: var(--situacao-critico-fundo);
+  --valor-ruim-ponto: var(--situacao-critico-ponto);
+  --valor-estavel-texto: var(--cor-texto-terciario);
+  --valor-estavel-fundo: var(--cor-papel-escuro);
+  --etapa-em-aberto: var(--situacao-breve-texto);                          /* a marca do "em aberto": o tom escuro, que se ve sobre o papel */
+  --altura-barra-andamento: 10px;                                          /* a barra do ritmo; o risco do necessario passa dela */
+  --largura-min-andamento: 168px;                                          /* abaixo disso a barra nao se le */
 }
 
 /* --------------------------------------------------------------- elementos */
@@ -435,6 +453,61 @@ td.col-num, .dinheiro, .entrada--num, .saldo__valor, .alerta__valor {
 .contador--andamento { background: var(--situacao-andamento-fundo); color: var(--situacao-andamento-texto); }
 .contador--breve { background: var(--situacao-breve-fundo); color: var(--situacao-breve-texto); }
 .contador--critico { background: var(--situacao-critico-fundo); color: var(--situacao-critico-texto); }
+
+/* FAMILIAS DE VALOR (#805, decisao do dono de 18/11/2026): o valor que se compara leva cor e forma, como o aviso.
+   A regra esta' em docs/identidade-visual.md, secao "Valores"; as contas e os limites, em valores.ts. Quatro pecas:
+   - MarcaEtapa.tsx: o quadradinho do tom da etapa do dinheiro ao lado do rotulo (o "em aberto" e' um triangulo);
+   - Variacao.tsx: subiu, caiu ou ficou estavel contra uma referencia escrita (seta e percentual);
+   - Diferenca.tsx: quanto um valor se afasta de outro que deveria ser igual (em reais e em percentual);
+   - Andamento.tsx: a barra do ritmo contra o necessario, com o risco de tinta no necessario.
+   As formas (seta, ponto, sinal de igual, barra) nao sao as dos glifos de situacao, de proposito. */
+/* a marca assenta na linha de base do rotulo (como uma letra), para o rotulo com marca alinhar com o rotulo sem ela
+   na mesma linha de cabecalho */
+.marca-etapa { display: inline-flex; align-items: baseline; gap: var(--espaco-pp); }
+.marca-etapa__cor { flex: none; width: var(--tamanho-chave); height: var(--tamanho-chave); border-radius: var(--raio-canto); }
+.marca-etapa__cor--em_analise { background: var(--etapa-analise); box-shadow: inset 0 0 0 var(--etapa-borda-largura) var(--etapa-analise-borda); }
+.marca-etapa__cor--boletim { background: var(--etapa-boletim); }
+.marca-etapa__cor--nota { background: var(--etapa-nota); }
+.marca-etapa__cor--protocolado { background: var(--etapa-protocolado); }
+.marca-etapa__cor--recebido { background: var(--etapa-recebido); }
+.marca-etapa__cor--atrasado { background: var(--etapa-atrasado); }
+.marca-etapa__cor--em_aberto { background: var(--etapa-em-aberto); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+
+/* a etiqueta da variacao e da diferenca: letra de apoio, forte, com algarismos de mesma largura. As duas partes (o
+   numero e a referencia) nao quebram por dentro; em coluna estreita a segunda desce para a linha de baixo. */
+.variacao, .diferenca {
+  display: inline-flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 0 var(--espaco-mini);
+  max-width: 100%; padding: var(--espaco-traco) var(--espaco-mini); border-radius: var(--raio-selo);
+  font-family: var(--fonte-texto); font-stretch: var(--largura-texto); text-transform: none; letter-spacing: normal;
+  font-size: var(--texto-mini); font-weight: var(--peso-forte); line-height: var(--entrelinha-titulo);
+  font-variant-numeric: tabular-nums lining-nums; text-align: right;
+}
+.variacao__parte, .diferenca__parte { white-space: nowrap; }
+.variacao--bom, .diferenca--igual { background: var(--valor-bom-fundo); color: var(--valor-bom-texto); }
+.variacao--ruim, .diferenca--ruim { background: var(--valor-ruim-fundo); color: var(--valor-ruim-texto); }
+.variacao--estavel { background: var(--valor-estavel-fundo); color: var(--valor-estavel-texto); }
+.diferenca--leve { background: var(--valor-atencao-fundo); color: var(--valor-atencao-texto); }
+
+/* andamento: o trilho, a barra do ritmo no tom da palavra e o risco de tinta no necessario, que passa da barra */
+.andamento { display: grid; gap: var(--espaco-mini); min-width: var(--largura-min-andamento); }
+.andamento__trilho {
+  position: relative; display: block; height: var(--altura-barra-andamento); margin: var(--espaco-grade) 0;
+  background: var(--cor-papel-escuro); border-radius: var(--raio-canto);
+}
+.andamento__barra { position: absolute; top: 0; bottom: 0; left: 0; border-radius: var(--raio-canto); }
+.andamento__necessario {
+  position: absolute; top: calc(var(--espaco-grade) * -1); bottom: calc(var(--espaco-grade) * -1);
+  width: var(--espaco-traco); background: var(--cor-tinta);
+}
+.andamento__texto { margin: 0; font-size: var(--texto-mini); line-height: var(--entrelinha-titulo); color: var(--cor-texto-secundario); }
+.andamento__palavra { font-weight: var(--peso-forte); }
+.andamento--adiantada .andamento__barra { background: var(--valor-bom-ponto); }
+.andamento--adiantada .andamento__palavra { color: var(--valor-bom-texto); }
+/* o amarelo sozinho quase nao se ve sobre o trilho: a barra da atencao leva o contorno do tom escuro, como o glifo */
+.andamento--atencao .andamento__barra { background: var(--valor-atencao-ponto); box-shadow: inset 0 0 0 var(--borda-fina) var(--valor-atencao-texto); }
+.andamento--atencao .andamento__palavra { color: var(--valor-atencao-texto); }
+.andamento--devagar .andamento__barra { background: var(--valor-ruim-ponto); }
+.andamento--devagar .andamento__palavra { color: var(--valor-ruim-texto); }
 
 /* EM ABERTO A' PARTE (EmAbertoAParte.tsx, docs/adr/0006): o a receber que fica fora do total (competencia anterior ao
    ano inicial, nota sem atualizacao do RM). Uma linha por parte, rotulo a' esquerda e valor a' direita, na letra de

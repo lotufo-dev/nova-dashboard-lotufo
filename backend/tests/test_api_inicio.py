@@ -103,6 +103,10 @@ def test_painel_do_inicio(client_admin):
                              "recebido_12m", "previsao", "matriz"}
     assert [e["etapa"] for e in r.json()["ciclo"]] == ["em_analise", "boletim", "nota", "protocolado", "recebido_mes"]
     assert r.json()["protocoladas"]["obras_ativas"] == 1
+    # #805: os dois numeros do alto saem com as referencias da variacao (nulas quando nao ha' com o que comparar)
+    assert set(r.json()["medido"]) == {"competencia", "valor_centavos", "quantidade", "ultimo_lancamento", "anterior",
+                                       "ano_anterior"}
+    assert set(r.json()["notas_mes"]) == {"mes", "valor_centavos", "notas", "obras", "anterior"}
 
 
 def test_faixa_do_ciclo_e_a_mesma_para_admin_diretoria_e_engenharia(client_admin):

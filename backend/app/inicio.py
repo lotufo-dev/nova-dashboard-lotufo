@@ -15,7 +15,14 @@ Medido no mes: B-01 (10/10/2026) -- a regra da Carteira: medicoes pela COMPETENC
 (atestado, senao protocolado), como a pagina da medicao mostra. A data de
 lancamento fazia a carga do legado virar "setembro R$ 765 mi". Cancelada, desistida e prevista nao contam (a
 mesma exclusao do "medido" da Carteira).
+
+Referencias dos dois numeros do alto (issue #805, decisao do dono de 18/11/2026: o valor diz se esta' melhor ou pior
+que antes). Cada referencia e' a MESMA conta do numero, em outro periodo; a tela so' desenha a variacao:
+- medido: a competencia anterior (`anterior`) e a mesma competencia do ano anterior (`ano_anterior`);
+- notas protocoladas no mes: o mes anterior ate' o mesmo dia do mes (`anterior`, com `ate_dia`).
+A referencia vem nula quando nao ha' com o que comparar: periodo anterior a `diretoria.ANO_INICIAL` ou sem valor.
 """
+import calendar
 import datetime
 
 from app import avisos, diretoria, tempo
@@ -33,26 +40,48 @@ def _dia_local(utc: str | None) -> datetime.date | None:
         return None
 
 
+def _medido_da_competencia(linhas: list, compl: dict, mes: str) -> tuple[int, int]:
+    """(valor, quantidade de medicoes) do medido de UMA competencia: a unica conta do "Medido em <mes>" do Inicio, que
+    serve ao numero do cartao e a's referencias dele. Valor cheio das medicoes da competencia, mais o que o RM mostra e
+    ainda nao tem medicao lancada (`diretoria.complemento_rm`)."""
+    valor = quantidade = 0
+    for r in linhas:
+        if r["competencia"] == mes:
+            valor += r["valor"]; quantidade += 1
+    return valor + sum(por_comp.get(mes, 0) for por_comp in compl.values()), quantidade
+
+
+def _referencia_do_medido(linhas: list, compl: dict, mes: str) -> dict | None:
+    """O medido de outra competencia, para a variacao do cartao (issue #805). Nulo quando a competencia e' anterior a
+    `diretoria.ANO_INICIAL` (o que as telas da diretoria nao contam) ou nao tem valor: sem lastro, nao se compara."""
+    if mes[:4] < diretoria.ANO_INICIAL:
+        return None
+    valor, _ = _medido_da_competencia(linhas, compl, mes)
+    return {"competencia": mes, "valor_centavos": valor} if valor > 0 else None
+
+
 def _medido(conn, hoje: datetime.date) -> dict:
     """06/11/2026: o mes do cartao e' a ULTIMA COMPETENCIA FECHADA (o mes anterior a hoje): a medicao de um mes so' e'
     lancada no seguinte, entao o mes corrente ficava sempre zerado. Entra tambem o que o RM mostra e ainda nao tem
-    medicao lancada (`diretoria.complemento_rm`), em valor cheio, como as medicoes daqui. Issue #642: a comparacao
-    com a competencia anterior e a quebra por contratante sairam da tela e daqui."""
+    medicao lancada (`diretoria.complemento_rm`), em valor cheio, como as medicoes daqui. Issue #642: a quebra por
+    contratante saiu da tela e daqui. Issue #805 (decisao do dono de 18/11/2026): a comparacao voltou, como variacao
+    contra duas referencias, cada uma com a mesma conta do numero (`_medido_da_competencia`): a competencia anterior
+    (`anterior`) e a mesma competencia do ano anterior (`ano_anterior`)."""
     mes = diretoria._mes(hoje, -1)
     linhas = conn.execute(
         "SELECT criado_em, competencia, COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS valor "
         f"FROM medicoes WHERE estado NOT IN ({','.join('?' * len(FORA))})", FORA).fetchall()
-    atual = quantidade = 0
     ultimo = None
     for r in linhas:
         d = _dia_local(r["criado_em"])
         if d is not None and d <= hoje:
             ultimo = max(ultimo, d) if ultimo else d
-        if r["competencia"] == mes:
-            atual += r["valor"]; quantidade += 1
-    atual += sum(por_comp.get(mes, 0) for por_comp in diretoria.complemento_rm(conn).values())
+    compl = diretoria.complemento_rm(conn)
+    atual, quantidade = _medido_da_competencia(linhas, compl, mes)
     return {"competencia": mes, "valor_centavos": atual, "quantidade": quantidade,
-            "ultimo_lancamento": ultimo.isoformat() if ultimo else None}
+            "ultimo_lancamento": ultimo.isoformat() if ultimo else None,
+            "anterior": _referencia_do_medido(linhas, compl, diretoria._mes(hoje, -2)),
+            "ano_anterior": _referencia_do_medido(linhas, compl, diretoria._mes(hoje, -13))}
 
 
 # Issue #642: a faixa do ciclo. Cada etapa com os estados dela e a coluna da data do evento que e' a evidencia (envio
@@ -207,24 +236,42 @@ def _protocoladas_dia(conn) -> list[dict]:
         "WHERE m.estado NOT IN ('cancelada','desistida') GROUP BY m.id")]
 
 
-def _notas_mes(conn, hoje: datetime.date, linhas: list[dict] | None = None) -> dict:
-    """Notas fiscais ativas alocadas (alocacao nao desfeita) as medicoes protocoladas no mes de hoje: valor da nota
-    (cada nota uma vez), quantidade de notas e de obras distintas. Issue #642: o acumulado por dia saiu com o
-    minigrafico do cartao."""
-    mes = hoje.strftime("%Y-%m")
-    linhas = _protocoladas_dia(conn) if linhas is None else linhas
-    do_mes = {r["id"]: r for r in linhas if (r["data"] or "")[:7] == mes}
+def _soma_das_notas(alocacoes: list, medicoes_: dict[int, dict]) -> dict:
+    """A unica conta das "notas fiscais protocoladas" do Inicio, para o mes e para a referencia dele: das notas ativas
+    alocadas (`alocacoes`), as que estao ligadas a alguma das medicoes dadas, cada nota UMA vez, pelo valor da nota."""
     notas: dict[int, dict] = {}
-    for a in conn.execute("SELECT a.medicao_id, a.nota_id, n.valor_centavos FROM nf_alocacoes a "
-                          "JOIN notas_fiscais n ON n.id=a.nota_id "
-                          "WHERE a.desfeita_em IS NULL AND n.situacao='ativa'"):
-        m = do_mes.get(a["medicao_id"])
+    for a in alocacoes:
+        m = medicoes_.get(a["medicao_id"])
         if m is None:
             continue
         n = notas.setdefault(a["nota_id"], {"valor": a["valor_centavos"], "obras": set()})
         n["obras"].add(m["contrato_id"])
-    return {"mes": mes, "valor_centavos": sum(n["valor"] for n in notas.values()), "notas": len(notas),
+    return {"valor_centavos": sum(n["valor"] for n in notas.values()), "notas": len(notas),
             "obras": len({o for n in notas.values() for o in n["obras"]})}
+
+
+def _notas_mes(conn, hoje: datetime.date, linhas: list[dict] | None = None) -> dict:
+    """Notas fiscais ativas alocadas (alocacao nao desfeita) as medicoes protocoladas no mes de hoje: valor da nota
+    (cada nota uma vez), quantidade de notas e de obras distintas. Issue #642: o acumulado por dia saiu com o
+    minigrafico do cartao.
+    Issue #805: `anterior` e' a mesma conta no mes anterior ATE' O MESMO DIA do mes (hoje e' dia N: as medicoes
+    protocoladas do dia 1 ao dia N do mes anterior; se ele nao tem o dia N, ate' o ultimo dia dele, que vai em
+    `ate_dia`). Comparar o mes corrente, que esta' pela metade, com o mes anterior inteiro diria sempre "caiu". Nulo
+    quando o mes anterior e' de antes de `diretoria.ANO_INICIAL` ou nao teve nota protocolada ate' esse dia."""
+    mes = hoje.strftime("%Y-%m")
+    linhas = _protocoladas_dia(conn) if linhas is None else linhas
+    alocacoes = conn.execute("SELECT a.medicao_id, a.nota_id, n.valor_centavos FROM nf_alocacoes a "
+                             "JOIN notas_fiscais n ON n.id=a.nota_id "
+                             "WHERE a.desfeita_em IS NULL AND n.situacao='ativa'").fetchall()
+    do_mes = {r["id"]: r for r in linhas if (r["data"] or "")[:7] == mes}
+    mes_anterior = diretoria._mes(hoje, -1)
+    ate_dia = min(hoje.day, calendar.monthrange(int(mes_anterior[:4]), int(mes_anterior[5:7]))[1])
+    limite = f"{mes_anterior}-{ate_dia:02d}"
+    ate_o_dia = {r["id"]: r for r in linhas if (r["data"] or "")[:7] == mes_anterior and (r["data"] or "")[:10] <= limite}
+    referencia = _soma_das_notas(alocacoes, ate_o_dia)["valor_centavos"]
+    return {"mes": mes, **_soma_das_notas(alocacoes, do_mes),
+            "anterior": {"mes": mes_anterior, "ate_dia": ate_dia, "valor_centavos": referencia}
+            if referencia > 0 and mes_anterior[:4] >= diretoria.ANO_INICIAL else None}
 
 
 def painel(conn, hoje: datetime.date | None = None) -> dict:

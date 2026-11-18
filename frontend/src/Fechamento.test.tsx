@@ -389,3 +389,154 @@ describe("Fechamento (#748)", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("Não foi possível carregar o fechamento");
   });
 });
+
+// #805: as familias de valor na tabela do mes. Valores inventados; as referencias e o limite vem do servidor.
+describe("Fechamento: famílias de valor (#805)", () => {
+  afterEach(() => { cleanup(); api.mockReset(); });
+
+  // marco: aprovado R$ 30,00 abaixo do pedido das medicoes comparaveis (0,2%: pequena), medido 66,7% acima de 03/2025;
+  // maio: em analise, sem aprovado; o total do ano leva a mesma diferenca
+  // os dois lados comparaveis e o corte, como o servidor manda: o corte e' so' o que ficou abaixo do pedido
+  const par = (aprovado: number, pedido: number, abaixo = Math.max(0, pedido - aprovado)) => ({
+    aprovado_com_pedido_centavos: aprovado, pedido_do_aprovado_centavos: pedido, abaixo_do_pedido_centavos: abaixo });
+  const MAR = { ...MAR26, ...par(1_400_001, 1_403_001) };
+  const VALORES: RespostaFechamento = {
+    ...FECHAMENTO,
+    diferenca_critica_por_mil: 5,
+    meses: [
+      { ...FECHAMENTO.meses[0], ...par(900_000, 900_000), medido_ano_anterior_centavos: null },
+      { ...FECHAMENTO.meses[1], ...MAR, medido_ano_anterior_centavos: 900_000,
+        obras: [{ ...FECHAMENTO.meses[1].obras[0], ...MAR,
+          medicoes: [{ ...FECHAMENTO.meses[1].obras[0].medicoes[0], ...MAR }] }] },
+      { ...FECHAMENTO.meses[2], ...par(0, 0), medido_ano_anterior_centavos: null },
+    ],
+    por_ano: { "2025": { ...FECHAMENTO.por_ano["2025"], ...par(900_000, 900_000) }, "2026": { ...FECHAMENTO.por_ano["2026"], ...MAR } },
+  };
+  const tabelaDe = async (anoDaTabela = "2026") =>
+    screen.findByRole("table", { name: new RegExp(`por mês de competência de ${anoDaTabela}`) });
+  const etiquetas = (el: Element, classe: string) =>
+    [...el.querySelectorAll(`.${classe}`)].map(e => [e.className, [...e.querySelectorAll(`.${classe}__parte`)].map(x => texto(x)).join(" ")]);
+
+  it("o cabeçalho de cada coluna leva a marca da etapa do dinheiro; o medido, que junta etapas, não", async () => {
+    api.mockResolvedValue(VALORES);
+    render(<Fechamento ir={() => {}} />);
+    const cabecalho = within(await tabelaDe()).getAllByRole("columnheader");
+    expect(cabecalho.map(th => [texto(th), th.querySelector(".marca-etapa__cor")?.className ?? null])).toEqual([
+      ["Mês", null], ["Medido", null], ["Aprovado", "marca-etapa__cor marca-etapa__cor--boletim"],
+      ["Protocolado", "marca-etapa__cor marca-etapa__cor--protocolado"], ["Recebido", "marca-etapa__cor marca-etapa__cor--recebido"],
+      ["Em aberto", "marca-etapa__cor marca-etapa__cor--em_aberto"]]);
+  });
+
+  it("medido: a variação contra o mesmo mês do ano anterior, só no mês que tem a referência", async () => {
+    api.mockResolvedValue(VALORES);
+    render(<Fechamento ir={() => {}} />);
+    const [, marco, maio, total] = within(await tabelaDe()).getAllByRole("row");
+    expect(etiquetas(marco, "variacao")).toEqual([["variacao variacao--bom", "▲ +66,7% × mar/25"]]);
+    expect(texto(marco.querySelector(".variacao .sr-only"))).toBe("subiu 66,7% em relação a março de 2025");
+    expect(etiquetas(maio, "variacao")).toEqual([]);
+    expect(etiquetas(total, "variacao")).toEqual([]);                  // o total do ano não compara com o ano inteiro anterior
+    // o valor continua lá, em tinta, acima da etiqueta
+    expect(texto(within(marco).getAllByRole("cell")[0].querySelector(".fch-cel > span"))).toBe("R$ 15.000,01");
+  });
+
+  it("aprovado: a diferença contra o pedido, do mês até a medição; sem os dois lados, nada", async () => {
+    api.mockResolvedValue(VALORES);
+    render(<Fechamento ir={() => {}} />);
+    const tabela = await tabelaDe();
+    const [, marco, maio, total] = within(tabela).getAllByRole("row");
+    const pequena = [["diferenca diferenca--leve", "\u2212 R$ 30,00 (\u22120,2%)"]];
+    expect(etiquetas(marco, "diferenca")).toEqual(pequena);
+    expect(etiquetas(total, "diferenca")).toEqual(pequena);
+    expect(texto(marco.querySelector(".diferenca .sr-only"))).toBe("R$ 30,00 abaixo do pedido, 0,2%");
+    // maio so' tem medicao em analise: nao e' diferenca, e' etapa nao alcancada
+    expect(etiquetas(maio, "diferenca")).toEqual([]);
+    expect(within(maio).getAllByRole("cell").map(c => texto(c))).toEqual(["R$ 2.000,00", "—", "—", "—", "—"]);
+    // a diferenca fica na coluna Aprovado; protocolado e recebido nao levam etiqueta
+    const celulas = within(marco).getAllByRole("cell");
+    expect(celulas.map(c => c.querySelector(".diferenca") !== null)).toEqual([false, true, false, false, false]);
+    fireEvent.click(within(tabela).getByRole("button", { name: /Março de 2026, por obra/ }));
+    fireEvent.click(within(tabela).getByRole("button", { name: /Obra Alfa, medições de 03\/2026/ }));
+    const medicao = within(tabela).getByRole("link", { name: "15ª Medição" }).closest("tr") as HTMLElement;
+    expect(etiquetas(medicao, "diferenca")).toEqual(pequena);
+    expect(etiquetas(medicao, "variacao")).toEqual([]);                // a referencia e' do mes
+  });
+
+  it("aprovado igual ao pedido leva o sinal de igual; acima do limite do servidor, o tom do crítico", async () => {
+    api.mockResolvedValue(VALORES);
+    render(<Fechamento ir={() => {}} />);
+    await tabelaDe();
+    fireEvent.click(screen.getByRole("button", { name: "2025" }));
+    const [, marco25] = within(await tabelaDe("2025")).getAllByRole("row");
+    expect(etiquetas(marco25, "diferenca")).toEqual([["diferenca diferenca--igual", "= igual ao pedido"]]);
+    cleanup();
+    // a mesma diferenca de 0,2% com o limite em 1 por mil passa a ser critica: quem decide e' o servidor
+    api.mockResolvedValue({ ...VALORES, diferenca_critica_por_mil: 1 });
+    render(<Fechamento ir={() => {}} />);
+    const [, marco] = within(await tabelaDe()).getAllByRole("row");
+    expect(etiquetas(marco, "diferenca")).toEqual([["diferenca diferenca--ruim", "\u2212 R$ 30,00 (\u22120,2%)"]]);
+  });
+
+  it("no mês, na obra e no total a diferença é só o corte; o aprovado acima do pedido aparece só na medição e não o anula", async () => {
+    // a 15ª teve corte de R$ 1.000,00; a 16ª tem o pedido gravado errado (aprovado R$ 5.500,00 acima). Somadas, o mes
+    // daria "+ R$ 4.500,00": o servidor manda so' o corte, e o percentual e' sobre o pedido das duas
+    const corte = { ...n(1_900_001, 1_900_001, 0, 0), ...par(1_900_001, 2_000_001) };
+    const errado = { ...n(600_001, 600_001, 0, 0), ...par(600_001, 50_001), acima_do_pedido_centavos: 550_000 };
+    const soma = { ...n(2_500_002, 2_500_002, 0, 0), ...par(2_500_002, 2_050_002, 100_000) };
+    api.mockResolvedValue({ ...VALORES,
+      meses: [{ competencia: "2026-03", ...soma, medido_ano_anterior_centavos: null,
+        obras: [{ contrato_id: 7, obra: "Obra Alfa", ...soma,
+          medicoes: [medicao(2, 15, "2026-03", corte, []), medicao(5, 16, "2026-03", errado, [])] }] }],
+      por_ano: { ...VALORES.por_ano, "2026": { ...VALORES.por_ano["2026"], ...soma } } });
+    render(<Fechamento ir={() => {}} />);
+    const tabela = await tabelaDe();
+    const [, marco, total] = within(tabela).getAllByRole("row");
+    const doMes = [["diferenca diferenca--ruim", "\u2212 R$ 1.000,00 (\u22124,9%)"]];
+    expect(etiquetas(marco, "diferenca")).toEqual(doMes);
+    expect(etiquetas(total, "diferenca")).toEqual(doMes);
+    fireEvent.click(within(tabela).getByRole("button", { name: /Março de 2026, por obra/ }));
+    const obra = within(tabela).getByRole("button", { name: /Obra Alfa, medições de 03\/2026/ });
+    expect(etiquetas(obra.closest("tr") as HTMLElement, "diferenca")).toEqual(doMes);
+    fireEvent.click(obra);
+    const linha = (nome: string) => within(tabela).getByRole("link", { name: nome }).closest("tr") as HTMLElement;
+    expect(etiquetas(linha("15ª Medição"), "diferenca")).toEqual([["diferenca diferenca--ruim", "\u2212 R$ 1.000,00 (\u22125,0%)"]]);
+    // acima do pedido: diz o sentido, no tom da atenção, nunca crítico, e só aqui
+    expect(etiquetas(linha("16ª Medição"), "diferenca")).toEqual([["diferenca diferenca--leve", "+ R$ 5.500,00 acima do pedido"]]);
+    expect(tabela.querySelectorAll(".diferenca--leve")).toHaveLength(1);
+  });
+
+  it("diferença que o servidor conta como arredondamento (sem corte e sem acima) é igual ao pedido, do mês à medição", async () => {
+    // aprovado R$ 0,02 abaixo do pedido: dentro da tolerancia do servidor, que manda corte zero
+    const quase = { ...n(900_000, 900_000, 0, 0), ...par(900_000, 900_002, 0) };
+    api.mockResolvedValue({ ...VALORES,
+      meses: [{ competencia: "2026-03", ...quase, medido_ano_anterior_centavos: null,
+        obras: [{ contrato_id: 7, obra: "Obra Alfa", ...quase,
+          medicoes: [{ ...medicao(2, 15, "2026-03", quase, []), acima_do_pedido_centavos: 0 }] }] }],
+      por_ano: { ...VALORES.por_ano, "2026": { ...VALORES.por_ano["2026"], ...quase } } });
+    render(<Fechamento ir={() => {}} />);
+    const tabela = await tabelaDe();
+    fireEvent.click(within(tabela).getByRole("button", { name: /Março de 2026, por obra/ }));
+    fireEvent.click(within(tabela).getByRole("button", { name: /Obra Alfa, medições de 03\/2026/ }));
+    const igual = [["diferenca diferenca--igual", "= igual ao pedido"]];
+    expect(within(tabela).getAllByRole("row").slice(1).map(l => etiquetas(l, "diferenca"))).toEqual([igual, igual, igual, igual]);
+  });
+
+  it("em aberto no tom do “vence em breve”, só onde há valor; sem o limite do servidor, nenhuma diferença", async () => {
+    api.mockResolvedValue({ ...VALORES, diferenca_critica_por_mil: undefined });
+    render(<Fechamento ir={() => {}} />);
+    const tabela = await tabelaDe();
+    const [, marco, maio, total] = within(tabela).getAllByRole("row");
+    const emAberto = (linha: HTMLElement) => within(linha).getAllByRole("cell").map(c => c.classList.contains("fch-em-aberto"));
+    expect(emAberto(marco)).toEqual([false, false, false, false, true]);
+    expect(emAberto(maio)).toEqual([false, false, false, false, false]);        // "—" fica em tinta
+    expect(emAberto(total)).toEqual([false, false, false, false, true]);
+    expect(tabela.querySelector(".diferenca")).toBeNull();
+    expect(tabela.querySelector(".variacao")).not.toBeNull();
+  });
+
+  it("a resposta sem os campos novos desenha a tabela de antes, sem etiqueta", async () => {
+    api.mockResolvedValue(FECHAMENTO);
+    render(<Fechamento ir={() => {}} />);
+    const tabela = await tabelaDe();
+    expect(tabela.querySelector(".variacao, .diferenca, .fch-cel")).toBeNull();
+  });
+});

@@ -35,6 +35,10 @@ montadas pelo dono: onde outra tela divergir delas, valem elas.
 | o símbolo da situação solto (célula, lista) | `Glifo` (`Selo.tsx`) |
 | quantidade ao lado de um título | `Contador` |
 | explicar as situações que a tela usa | `LegendaCor` |
+| a etapa do dinheiro de um valor ou de uma coluna (em análise, boletim, nota, protocolado, recebido, em aberto) | `MarcaEtapa`, ao lado do rótulo |
+| valor melhor ou pior que antes | `Variacao`, com a referência que o servidor manda e o rótulo dela ("set", "out/25") |
+| dois valores que deveriam ser iguais (aprovado × pedido) | `Diferenca`, com o corte (`abaixo`), a base e o limite que o servidor manda; o `acima` só na linha da medição, nunca na que soma |
+| ritmo da obra contra o necessário | `Andamento` |
 | falha de leitura ou de ação | `Falha` |
 | ação impedida, ou motivo de botão desligado | `CaixaAviso nivel="trava"`, com o botão desligado ao lado |
 | algo venceu, diverge ou passou do limite, sem impedir | `CaixaAviso nivel="critico"` |
@@ -49,6 +53,10 @@ montadas pelo dono: onde outra tela divergir delas, valem elas.
 - **Situação: uma das quatro de `situacao.ts`** (feito, andamento, breve, critico), sempre com o glifo; ponto de cor
   sozinho não existe. Critério de qual usar: seção "Quando usar cada uma" de `docs/identidade-visual.md`. O que não
   tem situação fica em tinta, sem marca.
+- **Valor que se compara não é situação: usa uma das famílias de valor** (seção "Valores" de
+  `docs/identidade-visual.md`): etapa, variação, diferença, andamento ou tempo parado. O número fica em tinta e a
+  família vai na marca, na etiqueta ou na barra; a referência e o limite vêm do servidor, a tela não os calcula.
+  Valor de contrato, data e número de documento seguem em tinta.
 
 ## Comportamento
 

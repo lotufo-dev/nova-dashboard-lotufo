@@ -42,8 +42,10 @@ def test_fechamento_so_leitura_e_401_sem_sessao_e_a_receber_saiu(client, monkeyp
     r = client.get("/api/fechamento")
     assert r.status_code == 200 and set(r.json()) == {"anos", "meses", "por_ano", "acumulado", "em_aberto",
                                                       "em_aberto_anteriores", "notas_sem_medicao", "cobertura",
-                                                      "notas_diferem", "pares_mistos", "total_a_receber_liberado"}
+                                                      "notas_diferem", "pares_mistos", "total_a_receber_liberado",
+                                                      "diferenca_critica_por_mil"}       # #805: o limite da diferenca
     assert r.json()["anos"] == ["2025", "2026"] and r.json()["meses"] == []
+    assert r.json()["diferenca_critica_por_mil"] == 5
     assert client.get("/api/a-receber").status_code == 404
     assert client.get("/api/diretoria/custo").status_code == 404
     assert client.post("/api/fechamento").status_code == 405

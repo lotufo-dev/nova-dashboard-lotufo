@@ -21,7 +21,8 @@ const celulas = (ultimas: Celula[]): Celula[] => [...Array<Celula>(12 - ultimas.
 const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   hoje: "2026-10-09",
   protocoladas: { obras_protocoladas: 2, obras_ativas: 18, ultima: "2026-09-30" },
-  medido: { competencia: "2026-09", valor_centavos: 1_827_715_696, quantidade: 2, ultimo_lancamento: "2026-10-08" },
+  medido: { competencia: "2026-09", valor_centavos: 1_827_715_696, quantidade: 2, ultimo_lancamento: "2026-10-08",
+    anterior: null, ano_anterior: null },
   a_receber: { liberado: true, valor_centavos: 1_720_000_000, mais_60_centavos: 210_000_000,
     a_parte: { ano_inicial: "2025", valor_centavos: 0, anterior_centavos: 0, sem_atualizacao_centavos: 0, sem_atualizacao_desde: null } },
   ciclo: [
@@ -49,7 +50,7 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
       { contratante: "Contratante B", obras: [{ contrato_id: 9, obra: "Obra C", celulas: celulas([]) }] },
     ],
   },
-  notas_mes: { mes: "2026-10", valor_centavos: 1_522_295_618, notas: 5, obras: 2 },
+  notas_mes: { mes: "2026-10", valor_centavos: 1_522_295_618, notas: 5, obras: 2, anterior: null },
   ...extra,
 });
 
@@ -300,10 +301,11 @@ describe("Início", () => {
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const regiao = await screen.findByRole("region", { name: MATRIZ });
     const legenda = within(regiao).getByRole("list", { name: "Legenda das etapas" });
-    expect([...legenda.children].map(li => [limpo(li), li.querySelector("span")?.className])).toEqual([
-      ["Em análise", "ini-matriz__cor ini-matriz__cor--em_analise"], ["Boletim", "ini-matriz__cor ini-matriz__cor--boletim"],
-      ["Nota", "ini-matriz__cor ini-matriz__cor--nota"], ["Protocolado", "ini-matriz__cor ini-matriz__cor--protocolado"],
-      ["Recebido", "ini-matriz__cor ini-matriz__cor--recebida"], ["Atrasado", "ini-matriz__cor ini-matriz__cor--atrasado"]]);
+    // #805: a chave de cor de cada etapa e' a peca MarcaEtapa, a mesma do cabecalho das colunas do Fechamento
+    expect([...legenda.children].map(li => [limpo(li), li.querySelector(".marca-etapa__cor")?.className])).toEqual([
+      ["Em análise", "marca-etapa__cor marca-etapa__cor--em_analise"], ["Boletim", "marca-etapa__cor marca-etapa__cor--boletim"],
+      ["Nota", "marca-etapa__cor marca-etapa__cor--nota"], ["Protocolado", "marca-etapa__cor marca-etapa__cor--protocolado"],
+      ["Recebido", "marca-etapa__cor marca-etapa__cor--recebido"], ["Atrasado", "marca-etapa__cor marca-etapa__cor--atrasado"]]);
     // o cabecalho: o mes em cada coluna; o ano so' na primeira e em janeiro
     expect([...regiao.querySelectorAll(".ini-matriz__mes")].map(m => [...m.children].map(limpo).join(" "))).toEqual(
       ["out 25", "nov", "dez", "jan 26", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set"]);
@@ -375,14 +377,57 @@ describe("Início", () => {
     expect(document.body.textContent).not.toContain("Recebido em 2026");
   });
 
-  it("#642: saíram a curva diária, a variação, as barras por contratante, a barra verde e o selo de mês fechado", async () => {
+  it("#805: a variação dos dois números contra as referências do servidor, com a referência escrita", async () => {
+    // hoje e' 09/10/2026: as notas de outubro contra setembro ate' o dia 9; o medido de setembro contra agosto e
+    // contra setembro de 2025. Valores inventados
+    const base = painel();
+    api.mockResolvedValue(painel({
+      notas_mes: { ...base.notas_mes, valor_centavos: 112_400_000, anterior: { mes: "2026-09", ate_dia: 9, valor_centavos: 100_000_000 } },
+      medido: { ...base.medido, valor_centavos: 919_000_000,
+        anterior: { competencia: "2026-08", valor_centavos: 1_000_000_000 },
+        ano_anterior: { competencia: "2025-09", valor_centavos: 915_000_000 } },
+    }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: "Números do mês" });
+    const [notas, medido] = [...regiao.querySelectorAll(".ini-numero")];
+    const variacoes = (c: Element) => [...c.querySelectorAll(".variacao")].map(v =>
+      [v.className, [...v.querySelectorAll(".variacao__parte")].map(limpo).join(" "), limpo(v.querySelector(".sr-only"))]);
+    expect(variacoes(notas)).toEqual([
+      ["variacao variacao--bom", "▲ +12,4% × set até o dia 9", "subiu 12,4% em relação a setembro até o dia 9"]]);
+    expect(variacoes(medido)).toEqual([
+      ["variacao variacao--ruim", "▼ \u22128,1% × ago", "caiu 8,1% em relação a agosto"],
+      ["variacao variacao--estavel", "● estável × set/25", "estável em relação a setembro de 2025"]]);
+    // o numero continua em tinta, no dd dele; as variacoes vem num dd proprio, logo abaixo
+    expect([...medido.children].map(e => [e.tagName, e.className])).toEqual(
+      [["DT", "ini-numero__rotulo"], ["DD", "ini-numero__valor"], ["DD", "ini-numero__variacoes"]]);
+    expect(limpo(medido.querySelector(".ini-numero__valor"))).toBe("R$ 9.190.000,00");
+  });
+
+  it("#805: só a referência que existe aparece; a de outro ano leva o ano no rótulo", async () => {
+    // em janeiro, a competencia do cartao e' dezembro: a anterior e' novembro, do mesmo ano; nas notas de janeiro, o
+    // mes anterior e' dezembro do ano passado
+    const base = painel();
+    api.mockResolvedValue(painel({
+      hoje: "2027-01-31",
+      notas_mes: { ...base.notas_mes, mes: "2027-01", valor_centavos: 50_000_000, anterior: { mes: "2026-12", ate_dia: 31, valor_centavos: 100_000_000 } },
+      medido: { ...base.medido, competencia: "2026-12", valor_centavos: 500_000_000,
+        anterior: { competencia: "2026-11", valor_centavos: 400_000_000 }, ano_anterior: null },
+    }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: "Números do mês" });
+    expect([...regiao.querySelectorAll(".variacao")].map(v => [...v.querySelectorAll(".variacao__parte")].map(limpo).join(" "))).toEqual(
+      ["▼ \u221250,0% × dez/26 até o dia 31", "▲ +25,0% × nov"]);
+    expect(limpo(regiao.querySelector(".variacao .sr-only"))).toBe("caiu 50,0% em relação a dezembro de 2026 até o dia 31");
+  });
+
+  it("#642 e #805: sem referência não há variação nem percentual; a curva diária, as barras por contratante e o selo de mês fechado não voltaram", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     await screen.findByRole("region", { name: "Números do mês" });
     expect(screen.queryByRole("region", { name: "Medições protocoladas" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Medido por contratante" })).toBeNull();
     expect(screen.queryByRole("img")).toBeNull();
-    expect(document.querySelector(".ini-mini, .ini-grafico, .ini-barra, .ini-barras, .ini-variacao")).toBeNull();
+    expect(document.querySelector(".ini-mini, .ini-grafico, .ini-barra, .ini-barras, .ini-variacao, .variacao, .ini-numero__variacoes")).toBeNull();
     const tudo = document.body.textContent ?? "";
     for (const velho of ["mesmo período", "mês fechado", "vs.", "%", "Medido por contratante", "até dia"])
       expect(tudo).not.toContain(velho);

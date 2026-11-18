@@ -25,8 +25,12 @@ valem elas.
   PR #723). Um teste confere que `--cor-marca` não aparece em nenhuma outra regra (`pecasBase.test.tsx`).
 - **Ação é tinta.** O botão principal é preto cheio; o secundário tem a borda grossa preta. Link tem a cor do texto
   em volta e é sublinhado. Motivo: sobra uma cor só para o que pede atenção, a da situação (PR #725).
-- **Número e data são tinta por padrão.** Só leva cor o que tem situação. Percentual executado é número, não
-  situação: 14% executado não é "feito", e fica em tinta (PR #776).
+- **Valor que se compara leva cor e forma; o que não se compara fica em tinta.** Valor de contrato, data e número
+  de documento são tinta. O valor que tem etapa, variação, diferença, andamento ou tempo parado diz isso por uma
+  das cinco famílias da seção "Valores". Percentual executado continua número, não situação: 14% executado não é
+  "feito", e fica em tinta (PR #776). Motivo: com todo número em preto não dava para saber se o faturamento ou a
+  medição protocolada estava melhor ou pior que no mês passado, nem ver a diferença entre o aprovado e o pedido
+  (decisão do dono de 18/11/2026, #805). Antes a regra era "número e data são tinta por padrão".
 - **Superfície igual ao papel.** O painel tem o mesmo fundo da página e se separa pela moldura e pela sombra.
 - **Etapas do ciclo e previsão têm tons próprios**, que não são situação: do azul claro (em análise) ao azul escuro
   (protocolado), verde no recebido; a previsão vai da tinta (neste mês) ao cinza claro (sem previsão). O atrasado é
@@ -80,6 +84,55 @@ Quatro caixas que se distinguem de relance (decisões 4, 10 e 17 da página da m
 - **Justificativa:** caixa de moldura grossa preta com o campo obrigatório dentro, junto do botão que a exige.
 - **Falha** (de leitura ou de ação) é sempre a faixa de crítico com o octógono. Motivo: o triângulo é a forma de
   "vence em breve", e uma falha com triângulo se confundiria com aviso de prazo (PRs #773, #781).
+
+## Valores
+
+Cinco famílias dizem o que um valor é e como ele vai. Decisão do dono de 18/11/2026 (#805): os avisos tinham
+categorização por cor e forma, e os números não. O número continua em tinta; a família aparece na marca ao lado
+do rótulo, na etiqueta sob o valor ou na barra.
+
+| Família | Responde | Forma | Peça |
+|---|---|---|---|
+| Etapa do dinheiro | o que o valor é | quadradinho no tom da etapa, ao lado do rótulo | `MarcaEtapa` |
+| Variação | está melhor ou pior que antes | seta para cima, seta para baixo ou ponto, com o percentual e a referência | `Variacao` |
+| Diferença | quanto dois valores que deveriam ser iguais se afastam | sinal de igual, ou a diferença em reais e em percentual | `Diferenca` |
+| Andamento | o ritmo contra o necessário para o prazo | barra com um risco preto no necessário, e a palavra | `Andamento` |
+| Tempo parado | há quantos dias está numa etapa ou num setor | o selo da situação | `Selo` |
+
+- **Valor não é situação.** As formas das famílias (seta, ponto, sinal de igual, barra) são outras que as dos
+  quatro glifos, de propósito: a seta para cima não pode ser lida como o triângulo de "vence em breve".
+- **Não há cor nova.** Melhor é o verde do feito, pior é o vermelho do crítico, atenção é o amarelo de "vence em
+  breve", e o estável é neutro. Motivo: "melhor" e "pior" se leem como "feito" e "crítico", e uma segunda paleta
+  disputaria com a das situações. A cor da marca continua fora.
+- **A conta é do servidor.** A referência da variação e os dois lados da diferença chegam prontos, com a mesma
+  definição do número; a tela só desenha. Sem referência, nada aparece.
+
+### Quando usar cada uma
+
+- **Etapa do dinheiro:** em análise, boletim, nota, protocolado e recebido, nos tons que a Início já usa. A marca
+  acompanha o rótulo e o cabeçalho da coluna. O aprovado é o valor do boletim e leva a marca dele. O em aberto não é
+  etapa do ciclo: leva um triângulo no tom de "vence em breve", e o valor dele sai nesse tom. O medido junta etapas
+  (o aprovado e, sem boletim, o pedido) e fica sem marca.
+- **Variação:** só contra uma referência escrita ao lado ("× set", "× out/25"). A seta diz a direção e a cor diz
+  se é bom: no em aberto, cair é bom. Até 2% para cima ou para baixo é estável. O mês em curso compara com o mês
+  anterior até o mesmo dia, e o rótulo diz ("× out até o dia 18"). Motivo: mês pela metade contra mês inteiro diria
+  sempre "caiu". Período sem valor, ou anterior ao primeiro ano que as telas da diretoria contam, não serve de
+  referência.
+- **Diferença:** entre dois valores que deveriam ser iguais (o aprovado e o pedido). Igual leva o sinal de igual.
+  Diferente mostra os reais e o percentual: até 0,5% da base, no tom de "vence em breve"; acima, no tom do crítico.
+  É o limite do aviso "aprovado abaixo do pedido" (#741), um número só no sistema. Só entre medições que têm os
+  dois valores: medição em análise não é diferença, é etapa não alcançada, e pintá-la de vermelho enganaria quem lê.
+  Falta de nota ou de pagamento também não é diferença de valor. Na linha que soma (mês, obra, ano) a diferença é
+  só o corte: o que ficou abaixo do pedido, sobre o pedido de todas as medições comparadas. O aprovado acima do
+  pedido aparece só na linha da medição, escrito ("+ R$ … acima do pedido") e sempre no tom de "vence em breve":
+  quase sempre é o pedido gravado errado, e somado no mês anulava o corte de outra obra. Até R$ 0,05 por medição é
+  arredondamento do órgão e conta como igual (decisão do dono de 10/11/2026).
+- **Andamento:** a partir de 100% do necessário, "Adiantada", no tom do feito; de 70% a 99%, "Atenção", no tom de
+  "vence em breve"; abaixo de 70%, "Devagar", no tom do crítico. Sem necessário ou sem ritmo, nada aparece.
+- **Tempo parado:** os dias numa etapa ou num setor, com o selo da situação e os limites do SIGA (seção "Quando
+  usar cada uma" das situações).
+- **Fica em tinta:** valor de contrato, data, número de documento e o próprio número ao lado da marca ou da
+  etiqueta.
 
 ## Letras e tamanhos
 

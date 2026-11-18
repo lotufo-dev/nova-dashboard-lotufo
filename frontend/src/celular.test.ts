@@ -114,7 +114,7 @@ describe("celular", () => {
     expect(inicioCss).toMatch(/\.ini-painel\s*\{[^}]*container-type:\s*inline-size/);
     expect(inicioCss).toMatch(/\.ini-matriz__linha\s*\{[^}]*grid-template-columns:\s*minmax\(0, var\(--largura-nome-obra\)\) repeat\(12, minmax\(0, 1fr\)\)/);
     expect(inicioCss).toMatch(/\.ini-matriz__obra\s*\{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere/);
-    const bloco = inicioCss.slice(inicioCss.indexOf(".ini-matriz__cor--atrasado"));
+    const bloco = inicioCss.slice(inicioCss.indexOf(".ini-matriz__celula--atrasado {"));
     expect(bloco).toMatch(/@container \(max-width:\s*\d+px\)\s*\{\s*\.ini-matriz__linha\s*\{\s*grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\)/);
     expect(bloco).toMatch(/\.ini-matriz__obra\s*\{\s*grid-column:\s*1 \/ -1/);
   });
