@@ -30,6 +30,7 @@ type Cabecalho = {
   execucao_sem_prazo?: boolean;      // #662: execucao registrada vencida e aditivo posterior so' de vigencia
   nivel_execucao?: "critico" | "atencao" | "normal"; nivel_vigencia?: "critico" | "atencao" | "normal";   // `prazos.situacao` no servidor
   status: StatusObra;
+  status_desde?: string | null; paralisada_desde?: string | null;   // desde quando a obra esta' parada ou encerrada
   sem_fluxo_medicao?: boolean;       // #660: `passos_medicao: []` no cadastro: a obra não inicia medição
 };
 

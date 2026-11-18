@@ -168,6 +168,9 @@ def saldo(conn: sqlite3.Connection, contrato_id: int) -> dict:
             "reajuste_contratado_centavos": vig["valor_reajuste_centavos"],
             "medido_centavos": medido,
             "saldo_centavos": vig["valor_vigente_execucao_centavos"] - medido,
+            # a base destes numeros e' o valor cheio; em consorcio a tela diz isso, porque o topo da pagina da obra
+            # mostra o mesmo saldo na cota (`posicao_na_cota`)
+            "percentual_bp": vig["percentual_direito_bp"] or contratos.DIREITO_INTEGRAL_BP,
             "formula": "saldo = vigente de execução (sem aditivo de reajuste) − medido (execução e projeto: atestado; "
                        "pedido enviado ao órgão ou protocolado enquanto não atestado); reajustes em série própria"}
 

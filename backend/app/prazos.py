@@ -329,6 +329,11 @@ def ritmo_e_prazo(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
     # #662: sem prazo de execucao conhecido nao ha' com o que comparar a conclusao (a conta nao fecha); a data fica
     if dias is not None and execucao_sem_prazo(conn, contrato_id, hoje):
         conclusao = dias = None
+    # so' a obra ativa, fora do encerramento e sem paralisacao tem prazo a cobrar (`_niveis`): na que ja' fez a
+    # medicao final, encerrou ou esta' parada, "N dias alem do prazo" pelo ritmo nao e' informacao
+    v = contratos.vigente(conn, contrato_id)
+    if v["estado"] != "ativo" or v.get("encerramento_iniciado_em") or _paralisacao(conn, contrato_id):
+        conclusao = dias = None
     return {"ritmo_centavos": s["ritmo_centavos"],
             "conclusao": conclusao.isoformat() if conclusao and dias is not None else None,
             "situacao": None if dias is None else "atrasa" if dias > 0 else "no_prazo",

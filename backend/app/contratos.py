@@ -156,6 +156,23 @@ def _dias_ate(iso: str | None, hoje: datetime.date) -> int | None:
         return None
 
 
+def _status_desde(conn, contrato_id: int, status: str, v: dict, prazo: dict) -> str | None:
+    """A data em que a obra entrou no status de hoje, quando o sistema a tem: a ordem de paralisacao sem reinicio
+    (suspensa), o inicio do encerramento, ou o evento de encerramento/rescisao. A obra ativa nao tem; o evento
+    gravado pela carga inicial leva a data da carga, nao a do fato, e fica de fora. Nada e' inferido."""
+    if status == "em_encerramento":
+        return v["encerramento_iniciado_em"][:10]
+    if status == "suspenso":
+        return prazo["paralisacao"]["desde"][:10] if prazo["paralisacao"] else None
+    tipo = EVENTO_POR_ESTADO.get(status)
+    if status == "ativo" or tipo is None:
+        return None
+    r = conn.execute("SELECT data FROM contrato_eventos WHERE contrato_id=? AND tipo=? "
+                     "AND COALESCE(observacao, '') NOT LIKE 'Carga inicial%' ORDER BY data DESC, id DESC LIMIT 1",
+                     (contrato_id, tipo)).fetchone()
+    return r["data"][:10] if r and r["data"] else None
+
+
 def cabecalho(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | None = None) -> dict:
     """Orgao, instrumento, valor vigente e cota, prazos com os dias que faltam e o status da obra."""
     hoje = hoje or tempo.hoje_local()
@@ -179,6 +196,10 @@ def cabecalho(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | 
             "dias_execucao": dias_execucao,
             "vigencia_fim": v["vigencia_fim_vigente"], "dias_vigencia": dias_vigencia,
             "status": status,
+            # desde quando a obra esta' assim, para o painel "Prazo" dizer o estado no lugar de contar dias de um
+            # prazo que nao corre mais: a ordem de paralisacao, o inicio do encerramento, o evento do encerramento
+            "status_desde": _status_desde(conn, contrato_id, status, v, prazo),
+            "paralisada_desde": prazo["paralisacao"]["desde"][:10] if prazo["paralisacao"] else None,
             # o nivel de cada prazo, decidido num lugar so' (`prazos.situacao`, a regra dos avisos e da aba Prazos): o
             # numero dos dias e o selo das linhas do tempo da pagina da obra mostram o mesmo
             "nivel_execucao": prazo["nivel_execucao"], "nivel_vigencia": prazo["nivel_vigencia"],
