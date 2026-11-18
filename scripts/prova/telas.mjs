@@ -80,8 +80,13 @@ const comNecessario = noRitmo => [
   { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaComNecessario(noRitmo) },
   { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
 ];
-// issue #805: a fila de avisos com o volume da producao (dezenas de vencidos em varias obras; ver simulados.mjs)
-const comAvisosEmVolume = [{ caminho: /^\/api\/inicio$/, ajustar: avisosEmVolume }];
+// issue #805: a fila de avisos com o volume da producao (dezenas de vencidos em varias obras, um aviso de cada assunto
+// pelo menos; ver simulados.mjs). O servidor recorta a fila pelo perfil, e a simulada tambem: a tela entra duas vezes
+// na lista com o mesmo id, uma para quem opera (com certidao, prazo a vencer, nota e SIGA) e outra para a diretoria
+const comAvisosEmVolume = tela => [
+  { ...tela, perfis: OPERA, simular: [{ caminho: /^\/api\/inicio$/, ajustar: avisosEmVolume("operacao") }] },
+  { ...tela, perfis: ["diretoria"], simular: [{ caminho: /^\/api\/inicio$/, ajustar: avisosEmVolume("diretoria") }] },
+];
 
 export const TELAS = [
   // ---- Inicio
@@ -122,17 +127,15 @@ export const TELAS = [
     simular: falha(/^\/api\/contratos$/) },
 
   // ---- Avisos (#805): a pagina propria com o cadastro de exemplo; com o volume da producao (dezenas de vencidos em
-  // varias obras), fechada e com uma obra aberta; filtrada por uma obra e por um assunto; vazia; a falha; e o
-  // endereco de antes, de quando os Avisos abriam dentro de Obras
+  // varias obras, todos os assuntos), fechada e com uma obra aberta; filtrada por uma obra e por um assunto (o
+  // endereco de antes, `?familia=nota`, abre a aba Medicoes); vazia; a falha; e o endereco de antes, de quando os
+  // Avisos abriam dentro de Obras
   { rota: "avisos", id: "avisos", caminho: "/avisos", perfis: TODOS, espera: ".avs-numeros" },
-  { rota: "avisos", id: "avisos-volume", caminho: "/avisos", perfis: TODOS, espera: ".avs-vencidos",
-    simular: comAvisosEmVolume },
-  { rota: "avisos", id: "avisos-volume-aberta", caminho: "/avisos", perfis: TODOS, antes: ".avs-vencidos", espera: ".avs-vencido__itens",
-    simular: comAvisosEmVolume, passos: [{ clicar: ".avs-vencido:nth-child(1) .avs-abre" }] },
-  { rota: "avisos", id: "avisos-obra", caminho: "/avisos?obra=:obra", perfis: TODOS, espera: ".avs-recorte + .avs-numeros",
-    simular: comAvisosEmVolume },
-  { rota: "avisos", id: "avisos-assunto", caminho: "/avisos?familia=reajuste", perfis: ["diretoria"], espera: ".avs-vencidos",
-    simular: comAvisosEmVolume },
+  ...comAvisosEmVolume({ rota: "avisos", id: "avisos-volume", caminho: "/avisos", espera: ".avs-vencidos" }),
+  ...comAvisosEmVolume({ rota: "avisos", id: "avisos-volume-aberta", caminho: "/avisos", antes: ".avs-vencidos", espera: ".avs-vencido__itens",
+    passos: [{ clicar: ".avs-vencido:nth-child(1) .avs-abre" }] }),
+  ...comAvisosEmVolume({ rota: "avisos", id: "avisos-obra", caminho: "/avisos?obra=:obra", espera: ".avs-recorte + .avs-numeros" }),
+  ...comAvisosEmVolume({ rota: "avisos", id: "avisos-assunto", caminho: "/avisos?familia=nota", espera: ".avs-vencidos" }),
   { rota: "avisos", id: "avisos-vazia", caminho: "/avisos", perfis: SO_ADMIN, espera: ".avs-barra + .avs-vazio",
     simular: [{ caminho: /^\/api\/inicio$/, ajustar: semAvisos }] },
   { rota: "avisos", id: "avisos-erro", caminho: "/avisos", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,

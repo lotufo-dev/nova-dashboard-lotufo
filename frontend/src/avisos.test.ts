@@ -1,7 +1,10 @@
+/// <reference types="node" />
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Aviso } from "./Alertas";
 import { FAMILIAS, familiaDaBusca, familiaDoAviso, filtrarAvisos, porFamilia, porObra, porSecao, quandoDoAviso, secaoDoAviso, daAgenda, diasAteOAviso,
-  diasPorExtenso, ondeEstao, rotuloDaFamilia, vencidosPorObra } from "./avisos";
+  ASSUNTOS, ASSUNTO_DO_TIPO, assuntoDaBusca, assuntoDoAviso, diasPorExtenso, ondeEstao, rotuloDoAssunto, vencidosPorObra } from "./avisos";
 
 const av = (tipo: string, nivel: Aviso["nivel"], contrato_id: number | null, aba: string | null, data: string | null = null): Aviso => ({
   tipo, nivel, publico: ["operacao"], contrato_id, obra: contrato_id ? `Obra ${contrato_id}` : null, dias: null,
@@ -105,50 +108,130 @@ describe("avisos pelo tempo (#511)", () => {
   it("os dias por extenso, como o selo os escreve", () => {
     const sem = (t: string) => t.replace(/ /g, " ");
     expect([-1200, -1, 0, 1, 45].map(d => sem(diasPorExtenso(d)))).toEqual(["há 1.200 dias", "há 1 dia", "hoje", "em 1 dia", "em 45 dias"]);
-    expect(rotuloDaFamilia("documentos")).toBe("Documentos");
+  });
+});
+
+describe("assunto do aviso (#805): as abas da página Avisos", () => {
+  const doTipo = (tipo: string, aba: string | null = "medicoes"): Aviso => av(tipo, "atencao", 7, aba);
+
+  it("os assuntos aprovados, nesta ordem, mais o SIGA e o Outros de reserva", () => {
+    expect(ASSUNTOS.map(a => a.rotulo)).toEqual(["Prazos", "Reajustes", "Garantias", "Certidões", "Medições", "SIGA", "Outros"]);
+    expect(rotuloDoAssunto("certidoes")).toBe("Certidões");
+  });
+
+  it("o assunto sai do tipo, não do destino: a garantia não cai com a certidão, nem o aviso de medição em Outros", () => {
+    // os dois abrem Documentos; o servidor manda o aprovado abaixo do pedido com o destino padrão (a aba Medições)
+    expect(assuntoDoAviso(doTipo("garantia_aquem_execucao", "documentos"))).toBe("garantias");
+    expect(assuntoDoAviso(doTipo("documentos_empresa", "documentos"))).toBe("certidoes");
+    expect(assuntoDoAviso(doTipo("aprovado_abaixo_do_pedido"))).toBe("medicoes");
+    // o endosso da garantia nasce com os prazos (destino: a aba Prazos) e é assunto de garantia
+    expect(assuntoDoAviso(doTipo("endosso_garantia", "prazos"))).toBe("garantias");
+    expect(assuntoDoAviso(doTipo("instrumento_pendente", "prazos"))).toBe("prazos");
+    expect(assuntoDoAviso(doTipo("reajuste_sem_resposta", "reajuste"))).toBe("reajustes");
+    expect(assuntoDoAviso(doTipo("nota_divergente", "notas"))).toBe("medicoes");
+    expect(assuntoDoAviso({ ...doTipo("siga_parado", null), destino: { tela: "siga", processo: 4 } })).toBe("siga");
+  });
+
+  it("tipo que o mapa não conhece fica em Outros, para nada sumir; nome herdado de objeto não vira assunto", () => {
+    expect(assuntoDoAviso(doTipo("tipo_que_nao_existe"))).toBe("outros");
+    expect(assuntoDoAviso(doTipo("toString"))).toBe("outros");
+    expect(assuntoDoAviso(doTipo("constructor"))).toBe("outros");
+  });
+
+  it("o mapa só aponta para assunto que tem aba, e nunca para Outros", () => {
+    const ids = new Set(ASSUNTOS.map(a => a.id));
+    for (const [tipo, assunto] of Object.entries(ASSUNTO_DO_TIPO)) {
+      expect(ids.has(assunto), tipo).toBe(true);
+      expect(assunto, tipo).not.toBe("outros");
+    }
+  });
+
+  it("?familia= dos links de antes abre a aba equivalente; os ids novos valem; valor desconhecido não filtra", () => {
+    expect(["prazos", "reajustes", "certidoes"].map(assuntoDaBusca)).toEqual(["prazos", "reajustes", "certidoes"]);      // o plural do Início
+    expect(["prazo", "reajuste", "documentos", "nota", "siga"].map(assuntoDaBusca)).toEqual(["prazos", "reajustes", "certidoes", "medicoes", "siga"]);
+    expect(["garantias", "medicoes", "outros"].map(assuntoDaBusca)).toEqual(["garantias", "medicoes", "outros"]);
+    expect([undefined, "", "x", "toString"].map(assuntoDaBusca)).toEqual([null, null, null, null]);
+  });
+
+  // Os tipos que o servidor emite, lidos do codigo dele (o vitest roda na pasta frontend). Tres formas no codigo:
+  // `aviso("tipo", ...)`, o dicionario `{"tipo": "tipo", ...}` dos modulos que so' montam a lista (o tipo passa por
+  // `avisos.py` como variavel) e os dois do espelho, escolhidos numa linha de `avisos.py`.
+  const BACKEND = join(process.cwd(), "..", "backend", "app");
+  const ler = (nome: string) => readFileSync(join(BACKEND, nome), "utf8");
+  const COM_DICIONARIO = ["documentos.py", "notas.py", "garantias.py", "capa_smo.py"];
+  // as fontes da fila (`FONTES`, em avisos.py): fonte nova pode trazer os tipos de outra forma, e este teste precisa saber
+  const FONTES = ["_de_documentos", "_de_notas", "_de_prazos", "_de_reajuste", "_de_garantias", "_de_siga", "_de_espelhos",
+    "_de_motor_medicao", "_de_capa_smo"];
+
+  function tiposDoServidor(): Set<string> {
+    const tipos = new Set<string>();
+    for (const nome of readdirSync(BACKEND).filter(n => n.endsWith(".py"))) {
+      for (const m of ler(nome).matchAll(/\baviso\(\s*"([a-z_]+)"/g)) tipos.add(m[1]);
+    }
+    for (const nome of COM_DICIONARIO) {
+      for (const m of ler(nome).matchAll(/\{"tipo":\s*"([a-z_]+)"/g)) tipos.add(m[1]);
+    }
+    for (const m of ler("avisos.py").matchAll(/\btipo = "([a-z_]+)" if .* else "([a-z_]+)"/g)) { tipos.add(m[1]); tipos.add(m[2]); }
+    return tipos;
+  }
+
+  it("todo tipo de aviso que o servidor emite tem assunto no mapa, e o mapa não guarda tipo que o servidor não emite", () => {
+    const fontes = /^FONTES = \[([^\]]*)\]/m.exec(ler("avisos.py"))?.[1].split(",").map(f => f.trim()).filter(Boolean);
+    // fonte nova em `avisos.py`: confira como ela escreve o tipo (e ponha o arquivo em COM_DICIONARIO se for o caso)
+    expect(fontes).toEqual(FONTES);
+    const doServidor = [...tiposDoServidor()].sort();
+    expect(doServidor.length).toBeGreaterThanOrEqual(36);
+    // tipo novo no servidor: ponha o assunto dele em ASSUNTO_DO_TIPO (avisos.ts), para ele não cair calado em "Outros"
+    expect(doServidor.filter(t => !Object.prototype.hasOwnProperty.call(ASSUNTO_DO_TIPO, t))).toEqual([]);
+    expect(Object.keys(ASSUNTO_DO_TIPO).filter(t => !doServidor.includes(t))).toEqual([]);
   });
 });
 
 describe("vencidos por obra (#805)", () => {
-  const venc = (contrato_id: number | null, dias: number, aba: string, extra: Partial<Aviso> = {}): Aviso => ({
-    ...av("x", "atencao", contrato_id, aba), dias, sentido: "prazo", ...extra });
+  const venc = (contrato_id: number | null, dias: number, tipo: string, extra: Partial<Aviso> = {}): Aviso => ({
+    ...av(tipo, "atencao", contrato_id, tipo === "documentos_empresa" || tipo === "garantia_vencendo" ? "documentos" : "prazos"),
+    dias, sentido: "prazo", ...extra });
   const lista = [
-    venc(7, -3, "prazos"), venc(7, -400, "reajuste"), venc(7, -50, "prazos"),
-    venc(8, -90, "reajuste"),
-    { ...venc(null, -10, "documentos"), entidade_id: 2, entidade: "Construtora Alfa" },
-    { ...venc(null, -10, "documentos"), entidade_id: 2, entidade: "Construtora Alfa" },
-    venc(null, -5, "x"),
-    venc(9, 5, "prazos"), venc(9, null as unknown as number, "prazos"),       // a vencer e sem data: fora
+    venc(7, -3, "execucao_vencendo"), venc(7, -400, "reajuste_sem_resposta"), venc(7, -50, "vigencia_vencendo"),
+    venc(7, -20, "aprovado_abaixo_do_pedido"),
+    venc(8, -90, "reajuste_sem_resposta"),
+    { ...venc(null, -10, "documentos_empresa"), entidade_id: 2, entidade: "Construtora Alfa" },
+    { ...venc(null, -10, "regularidade_mes"), entidade_id: 2, entidade: "Construtora Alfa" },
+    venc(null, -5, "siga_sem_leitura"),
+    venc(9, 5, "execucao_vencendo"), venc(9, null as unknown as number, "folga_quebrada"),       // a vencer e sem data: fora
   ];
 
   it("agrupa pela obra, o aviso sem obra pela empresa e o resto num grupo só; da maior idade para a menor", () => {
     const g = vencidosPorObra(lista);
     expect(g.map(x => [x.chave, x.nome, x.itens.length, x.maisAntigo])).toEqual([
-      ["obra-7", "Obra 7", 3, 400], ["obra-8", "Obra 8", 1, 90], ["empresa-2", "Construtora Alfa", 2, 10], ["sem-obra", "Sem obra", 1, 5]]);
-    // dentro do grupo, do mais antigo ao mais novo; os assuntos, na ordem do mapa, sem repetir
-    expect(g[0].itens.map(a => a.dias)).toEqual([-400, -50, -3]);
-    expect(g[0].familias).toEqual(["prazo", "reajuste"]);
-    expect(g[2].familias).toEqual(["documentos"]);
+      ["obra-7", "Obra 7", 4, 400], ["obra-8", "Obra 8", 1, 90], ["empresa-2", "Construtora Alfa", 2, 10], ["sem-obra", "Sem obra", 1, 5]]);
+    // dentro do grupo, do mais antigo ao mais novo; os assuntos, na ordem das abas, sem repetir
+    expect(g[0].itens.map(a => a.dias)).toEqual([-400, -50, -20, -3]);
+    expect(g[0].assuntos).toEqual(["prazos", "reajustes", "medicoes"]);
+    expect(g[2].assuntos).toEqual(["certidoes"]);
+    expect(g[3].assuntos).toEqual(["siga"]);
     expect([g[0].contratoId, g[0].entidadeId, g[2].contratoId, g[2].entidadeId]).toEqual([7, null, null, 2]);
     // todo vencido entra, sem limite de idade (#656)
-    expect(g.flatMap(x => x.itens)).toHaveLength(7);
+    expect(g.flatMap(x => x.itens)).toHaveLength(8);
   });
 
   it("no empate de idade, o grupo com mais avisos primeiro e depois o nome", () => {
-    const g = vencidosPorObra([venc(3, -20, "prazos"), venc(2, -20, "prazos"), venc(1, -20, "prazos"), venc(1, -2, "prazos")]);
+    const g = vencidosPorObra([venc(3, -20, "execucao_vencendo"), venc(2, -20, "execucao_vencendo"), venc(1, -20, "execucao_vencendo"),
+      venc(1, -2, "vigencia_vencendo")]);
     expect(g.map(x => x.nome)).toEqual(["Obra 1", "Obra 2", "Obra 3"]);
   });
 
-  it("a garantia traz a obra e a empresa: fica no grupo da obra", () => {
-    const g = vencidosPorObra([{ ...venc(7, -30, "documentos"), entidade_id: 2, entidade: "Construtora Alfa" }]);
-    expect(g.map(x => [x.chave, x.entidadeId])).toEqual([["obra-7", null]]);
+  it("a garantia traz a obra e a empresa: fica no grupo da obra, com o assunto Garantias", () => {
+    const g = vencidosPorObra([{ ...venc(7, -30, "garantia_vencendo"), entidade_id: 2, entidade: "Construtora Alfa" }]);
+    expect(g.map(x => [x.chave, x.entidadeId, x.assuntos])).toEqual([["obra-7", null, ["garantias"]]]);
   });
 
   it("diz em quantas obras e empresas os vencidos estão", () => {
     expect(ondeEstao(vencidosPorObra(lista))).toBe("em 2 obras e 1 empresa");
-    expect(ondeEstao(vencidosPorObra([venc(7, -3, "prazos")]))).toBe("em 1 obra");
-    expect(ondeEstao(vencidosPorObra([{ ...venc(null, -3, "documentos"), entidade_id: 2 }, { ...venc(null, -3, "documentos"), entidade_id: 3 }]))).toBe("em 2 empresas");
-    expect(ondeEstao(vencidosPorObra([venc(null, -3, "x")]))).toBe("");
+    expect(ondeEstao(vencidosPorObra([venc(7, -3, "execucao_vencendo")]))).toBe("em 1 obra");
+    expect(ondeEstao(vencidosPorObra([{ ...venc(null, -3, "documentos_empresa"), entidade_id: 2 },
+      { ...venc(null, -3, "documentos_empresa"), entidade_id: 3 }]))).toBe("em 2 empresas");
+    expect(ondeEstao(vencidosPorObra([venc(null, -3, "siga_sem_leitura")]))).toBe("");
     expect(ondeEstao([])).toBe("");
   });
 });

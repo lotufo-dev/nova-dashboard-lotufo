@@ -2,8 +2,8 @@ import { Fragment, useEffect, useState } from "react";
 import { destinoDoAviso, semEmpresa, semObra, type Aviso } from "./Alertas";
 import { api } from "./api";
 import {
-  FAMILIAS, daAgenda, diasAteOAviso, diasPorExtenso, familiaDaBusca, familiaDoAviso, filtrarAvisos, ondeEstao, porSecao,
-  rotuloDaFamilia, semRSOrfao, vencidosPorObra, type GrupoVencido, type Secao,
+  ASSUNTOS, assuntoDaBusca, assuntoDoAviso, daAgenda, diasAteOAviso, diasPorExtenso, ondeEstao, porSecao, rotuloDoAssunto,
+  semRSOrfao, vencidosPorObra, type GrupoVencido, type Secao,
 } from "./avisos";
 import Contador from "./Contador";
 import Falha from "./Falha";
@@ -21,7 +21,8 @@ import "./avisosPagina.css";
 // A pagina responde "o que vence quando, e onde ja' venceu":
 //  - as contagens pelo prazo (Vencidos, Esta semana, Este mes, Proximos 90 dias): as secoes de `avisos.ts`, a mesma
 //    regra da caixa "Avisos importantes" do Inicio;
-//  - as abas por assunto, com a quantidade (?familia=);
+//  - as abas por assunto (Prazos, Reajustes, Garantias, Certidoes, Medicoes...), com a quantidade (?familia=); o
+//    assunto sai do tipo do aviso (`ASSUNTO_DO_TIPO`, em avisos.ts);
 //  - a Agenda: o que ainda vai vencer, em ordem de data, uma linha por aviso;
 //  - os Vencidos por obra: agrupados pela obra (ou pela empresa), da maior idade para a menor; a linha abre os avisos
 //    dela ali mesmo. Todo vencido aparece, sem limite de idade (#656).
@@ -53,7 +54,7 @@ function LinhaAviso({ a, secao, semQuem = false }: { a: Aviso; secao: Secao; sem
           {destino ? <Link para={destino.para} busca={destino.busca} secao={destino.secao} className="avs-linha__link">{quem && <span className="sr-only">{quem}: </span>}{texto}</Link> : texto}
         </span>
       </span>
-      <span className="avs-linha__assunto">{rotuloDaFamilia(familiaDoAviso(a))}</span>
+      <span className="avs-linha__assunto">{rotuloDoAssunto(assuntoDoAviso(a))}</span>
     </li>
   );
 }
@@ -121,7 +122,7 @@ function Vencidos({ grupos }: { grupos: GrupoVencido[] }) {
                         <button type="button" className="avs-abre" aria-expanded={aberto} aria-controls={itens} onClick={() => trocar(g.chave)}>
                           <span className="avs-abre__seta" aria-hidden="true" />{g.nome}
                         </button>
-                        <span className="avs-vencido__assuntos">{g.familias.map(rotuloDaFamilia).join(" · ")}</span>
+                        <span className="avs-vencido__assuntos">{g.assuntos.map(rotuloDoAssunto).join(" · ")}</span>
                       </th>
                       <td className="col-num num avs-vencido__n" data-unidade={g.itens.length === 1 ? "aviso" : "avisos"}>{g.itens.length.toLocaleString("pt-BR")}</td>
                       <td className="avs-vencido__antigo"><Selo situacao="critico" className="avs-dias">{diasPorExtenso(-g.maisAntigo)}</Selo></td>
@@ -151,7 +152,8 @@ export default function AvisosPagina({ busca }: { busca: Busca }) {
   const [avisos, setAvisos] = useState<Aviso[] | null | undefined>(undefined);
   const [obras, setObras] = useState<ObraLista[] | null | undefined>(undefined);
 
-  const familia = familiaDaBusca(busca.familia);
+  // a aba (o assunto) fica no `?familia=` do endereco, como nos links de antes
+  const assunto = assuntoDaBusca(busca.familia);
   const obra = /^[1-9][0-9]{0,14}$/.test(busca.obra ?? "") ? Number(busca.obra) : null;
   const contratante = busca.c && busca.c !== "todas" ? busca.c : null;
   // a lista de obras so' e' lida com recorte: da' o nome da obra filtrada e diz quais obras sao do contratante
@@ -180,7 +182,8 @@ export default function AvisosPagina({ busca }: { busca: Busca }) {
   const daPagina = daAgenda(avisos ?? [])
     .filter(a => doContratante === null || (a.contrato_id !== null && doContratante.has(a.contrato_id)))
     .filter(a => obra === null || a.contrato_id === obra);
-  const filtrados = filtrarAvisos(daPagina, { familia });
+  const doAssunto = (id: typeof assunto) => daPagina.filter(a => id === null || assuntoDoAviso(a) === id);
+  const filtrados = doAssunto(assunto);
   const secoes = porSecao(filtrados);
   const onde = ondeEstao(vencidosPorObra(daPagina));
 
@@ -223,14 +226,14 @@ export default function AvisosPagina({ busca }: { busca: Busca }) {
 
         <div className="avs-barra">
           <nav className="escolhas avs-abas" aria-label="Assunto dos avisos">
-            <Link className="escolha" para={aqui} busca={com({ familia: null })} aria-current={familia === null ? "true" : undefined}>
+            <Link className="escolha" para={aqui} busca={com({ familia: null })} aria-current={assunto === null ? "true" : undefined}>
               Tudo <span className="escolha__n num">{daPagina.length.toLocaleString("pt-BR")}</span>
             </Link>
-            {FAMILIAS.map(f => {
-              const n = filtrarAvisos(daPagina, { familia: f.id }).length;
+            {ASSUNTOS.map(f => {
+              const n = doAssunto(f.id).length;
               // o assunto sem aviso nao vira aba; o que esta' na URL aparece mesmo vazio, para dizer o filtro em vigor
-              return n === 0 && familia !== f.id ? null : (
-                <Link key={f.id} className="escolha" para={aqui} busca={com({ familia: f.id })} aria-current={familia === f.id ? "true" : undefined}>
+              return n === 0 && assunto !== f.id ? null : (
+                <Link key={f.id} className="escolha" para={aqui} busca={com({ familia: f.id })} aria-current={assunto === f.id ? "true" : undefined}>
                   {f.rotulo} <span className="escolha__n num">{n.toLocaleString("pt-BR")}</span>
                 </Link>
               );
@@ -241,14 +244,14 @@ export default function AvisosPagina({ busca }: { busca: Busca }) {
 
         {filtrados.length === 0 ? (
           <p className="avs-vazio">
-            <span>{familia !== null || comRecorte ? "Nenhum aviso com esse filtro." : "Nenhum aviso."}</span>
-            {(familia !== null || comRecorte) && <> <Link para={aqui}>Limpar o filtro</Link></>}
+            <span>{assunto !== null || comRecorte ? "Nenhum aviso com esse filtro." : "Nenhum aviso."}</span>
+            {(assunto !== null || comRecorte) && <> <Link para={aqui}>Limpar o filtro</Link></>}
           </p>
         ) : (
           <div className="avs-blocos">
             <Agenda secoes={secoes.slice(1)} />
             {/* a chave refaz o bloco quando o recorte muda: o que estava aberto era de outra lista */}
-            <Vencidos key={`${familia}-${obra}-${contratante}`} grupos={vencidosPorObra(filtrados)} />
+            <Vencidos key={`${assunto}-${obra}-${contratante}`} grupos={vencidosPorObra(filtrados)} />
           </div>
         )}
       </>}

@@ -14,7 +14,7 @@ const aviso = (extra: Record<string, unknown> = {}) => ({
   data: "2026-11-26", sentido: "prazo", ...extra });
 const reajuste = (extra: Record<string, unknown> = {}) => aviso({ tipo: "reajuste_sem_resposta", sentido: "desde",
   mensagem: "Granito: reajuste sem resposta", destino: { tela: "contrato", id: 7, aba: "reajuste" }, ...extra });
-const certidao = (extra: Record<string, unknown> = {}) => aviso({ tipo: "documento_vencendo", contrato_id: null, obra: null,
+const certidao = (extra: Record<string, unknown> = {}) => aviso({ tipo: "documentos_empresa", contrato_id: null, obra: null,
   entidade_id: 3, entidade: "Construtora Alfa", mensagem: "Construtora Alfa: FGTS vence", destino: { tela: "documentos" }, ...extra });
 
 const OBRAS = [
@@ -63,10 +63,16 @@ describe("Avisos: página própria, por data e por assunto", () => {
       destino: { tela: "contrato", id: 8, aba: "reajuste" } }),
     certidao({ mensagem: "Construtora Alfa: FGTS vencida", dias: -10, data: "2026-10-28" }),
     certidao({ dias: 0, data: "2026-11-07" }),
-    aviso({ contrato_id: 8, obra: "Maternidade", mensagem: "Maternidade: vigência termina", dias: 5, data: "2026-11-12",
+    aviso({ tipo: "vigencia_vencendo", contrato_id: 8, obra: "Maternidade", mensagem: "Maternidade: vigência termina", dias: 5, data: "2026-11-12",
       destino: { tela: "contrato", id: 8, aba: "prazos" } }),
     aviso({ dias: 20, data: "2026-11-27" }),
-    aviso({ mensagem: "Granito: vigência termina", dias: 60, data: "2027-01-06" }),
+    aviso({ tipo: "vigencia_vencendo", mensagem: "Granito: vigência termina", dias: 60, data: "2027-01-06" }),
+    // a garantia abre Documentos, como a certidão, e o aprovado abaixo do pedido vem com o destino padrão (a aba
+    // Medições da obra): o assunto de cada um sai do tipo
+    aviso({ tipo: "garantia_aquem_execucao", nivel: "critico", mensagem: "Granito: garantia não cobre o fim da execução", dias: -30,
+      data: "2026-10-08", destino: { tela: "documentos" }, entidade_id: 3 }),
+    aviso({ tipo: "aprovado_abaixo_do_pedido", nivel: "acao", contrato_id: 8, obra: "Maternidade", sentido: "desde", dias: 15, data: "2026-10-23",
+      mensagem: "Maternidade: 3ª Medição: aprovado abaixo do pedido", destino: { tela: "contrato", id: 8, aba: "medicoes" }, medicao_id: 31 }),
     aviso({ obra: "Distante", contrato_id: 9, dias: 120, data: "2027-03-07" }),                                   // além de 90 dias
     aviso({ obra: "Parada", contrato_id: 10, tipo: "nota_divergente", dias: null, data: null, sentido: null,      // sem data
       mensagem: "Parada: nota divergente", destino: { tela: "contrato", id: 10, aba: "notas" } }),
@@ -76,7 +82,7 @@ describe("Avisos: página própria, por data e por assunto", () => {
     const { container } = await abrir("/avisos", FILA);
     expect(api).toHaveBeenCalledWith("/api/inicio");
     expect(api).not.toHaveBeenCalledWith("/api/contratos");       // sem recorte, a lista de obras não é lida
-    expect(numeros()).toEqual(["Vencidos · 4 · em 2 obras e 1 empresa", "Esta semana · 2", "Este mês · 1", "Próximos 90 dias · 1"]);
+    expect(numeros()).toEqual(["Vencidos · 6 · em 2 obras e 1 empresa", "Esta semana · 2", "Este mês · 1", "Próximos 90 dias · 1"]);
     // a situação vai no símbolo ao lado do rótulo (cor e forma); o que vence depois de 30 dias é neutro
     expect([...document.querySelectorAll(".avs-numero dt")].map(d => d.querySelector(".glifo")?.className ?? null))
       .toEqual(["glifo glifo--critico", "glifo glifo--breve", "glifo glifo--breve", null]);
@@ -91,26 +97,42 @@ describe("Avisos: página própria, por data e por assunto", () => {
     expect(document.querySelectorAll(".avs-numero dt .glifo")).toHaveLength(1);
   });
 
-  it("as abas por assunto trazem a quantidade, só as que têm aviso, e ficam no endereço", async () => {
+  it("as abas são os assuntos aprovados (Prazos, Reajustes, Garantias, Certidões, Medições), com a quantidade, e ficam no endereço", async () => {
     await abrir("/avisos", FILA);
     expect(abas().map(a => [limpo(a), a.getAttribute("href"), a.getAttribute("aria-current")])).toEqual([
-      ["Tudo 8", "/avisos", "true"], ["Prazo 4", "/avisos?familia=prazo", null], ["Reajuste 2", "/avisos?familia=reajuste", null],
-      ["Documentos 2", "/avisos?familia=documentos", null]]);
+      ["Tudo 10", "/avisos", "true"], ["Prazos 4", "/avisos?familia=prazos", null], ["Reajustes 2", "/avisos?familia=reajustes", null],
+      ["Garantias 1", "/avisos?familia=garantias", null], ["Certidões 2", "/avisos?familia=certidoes", null],
+      ["Medições 1", "/avisos?familia=medicoes", null]]);
     await act(async () => { fireEvent.click(abas()[2]); });
-    expect(window.location.pathname + window.location.search).toBe("/avisos?familia=reajuste");
+    expect(window.location.pathname + window.location.search).toBe("/avisos?familia=reajustes");
     expect(abas()[2].getAttribute("aria-current")).toBe("true");
     // os dois blocos mostram só o assunto; as contagens do alto continuam as da página
-    expect(grupos().map(g => g[0])).toEqual(["GranitoReajuste", "MaternidadeReajuste"]);
+    expect(grupos().map(g => g[0])).toEqual(["GranitoReajustes", "MaternidadeReajustes"]);
     expect(bloco("Agenda").textContent).toContain("Nada a vencer em 90 dias.");
-    expect(numeros()[0]).toBe("Vencidos · 4 · em 2 obras e 1 empresa");
+    expect(numeros()[0]).toBe("Vencidos · 6 · em 2 obras e 1 empresa");
+    // a garantia e o aviso de medição têm aba própria: não caem com a certidão nem em "Outros"
+    await act(async () => { fireEvent.click(abas()[3]); });
+    expect(grupos()).toEqual([["GranitoGarantias", "1", "há 30 dias"]]);
+    await act(async () => { fireEvent.click(abas()[5]); });
+    expect(grupos()).toEqual([["MaternidadeMedições", "1", "há 15 dias"]]);
   });
 
-  it("o endereço de antes (?familia=reajustes, do plural) abre a aba; assunto sem aviso no endereço aparece para dizer o filtro", async () => {
-    await abrir("/avisos?familia=reajustes", FILA);
-    expect(abas().find(a => a.getAttribute("aria-current") === "true")?.textContent).toBe("Reajuste 2");
-    cleanup();
+  it("tipo de aviso que o mapa não conhece aparece na aba Outros, que só existe quando há um", async () => {
+    await abrir("/avisos", [aviso({ dias: -3, data: "2026-11-04" }), aviso({ tipo: "tipo_que_o_servidor_inventou", dias: 4, data: "2026-11-11" })]);
+    expect(abas().map(limpo)).toEqual(["Tudo 2", "Prazos 1", "Outros 1"]);
+    expect(linhasDe(bloco("Agenda"))).toEqual([["em 4 dias", "GranitoGranito: execução termina", "Outros"]]);
+  });
+
+  it("?familia= dos links de antes abre a aba equivalente; assunto sem aviso no endereço aparece para dizer o filtro", async () => {
+    const aberta = () => abas().find(a => a.getAttribute("aria-current") === "true")?.textContent;
+    for (const [antes, aba] of [["reajustes", "Reajustes 2"], ["reajuste", "Reajustes 2"], ["prazo", "Prazos 4"], ["certidoes", "Certidões 2"],
+      ["documentos", "Certidões 2"], ["nota", "Medições 1"], ["valor-desconhecido", "Tudo 10"]]) {
+      await abrir(`/avisos?familia=${antes}`, FILA);
+      expect(aberta(), antes).toBe(aba);
+      cleanup();
+    }
     await abrir("/avisos?familia=siga", FILA);
-    expect(abas().map(limpo)).toEqual(["Tudo 8", "Prazo 4", "Reajuste 2", "SIGA 0", "Documentos 2"]);
+    expect(abas().map(limpo)).toEqual(["Tudo 10", "Prazos 4", "Reajustes 2", "Garantias 1", "Certidões 2", "Medições 1", "SIGA 0"]);
     expect(screen.getByText("Nenhum aviso com esse filtro.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Limpar o filtro" }).getAttribute("href")).toBe("/avisos");
     expect(screen.queryByRole("heading", { level: 2, name: "Agenda" })).toBeNull();
@@ -123,10 +145,10 @@ describe("Avisos: página própria, por data e por assunto", () => {
     expect(within(agenda).getAllByRole("heading", { level: 3 }).map(h => `${limpo(h)} ${limpo(h.parentElement!.querySelector(".contador [aria-hidden='true']:not(.glifo)"))}`))
       .toEqual(["Esta semana 2", "Este mês 1", "Próximos 90 dias 1"]);
     expect(linhasDe(agenda)).toEqual([
-      ["hoje", "Construtora AlfaConstrutora Alfa: FGTS vence", "Documentos"],
-      ["em 5 dias", "MaternidadeMaternidade: vigência termina", "Prazo"],
-      ["em 20 dias", "GranitoGranito: execução termina", "Prazo"],
-      ["em 60 dias", "GranitoGranito: vigência termina", "Prazo"],
+      ["hoje", "Construtora AlfaConstrutora Alfa: FGTS vence", "Certidões"],
+      ["em 5 dias", "MaternidadeMaternidade: vigência termina", "Prazos"],
+      ["em 20 dias", "GranitoGranito: execução termina", "Prazos"],
+      ["em 60 dias", "GranitoGranito: vigência termina", "Prazos"],
     ]);
     // vence em até 30 dias = vence em breve, com forma além da cor; depois disso, neutro e sem símbolo
     expect([...agenda.querySelectorAll(".avs-linha > .selo")].map(s => [s.className, s.querySelector(".glifo")?.className ?? null])).toEqual([
@@ -145,10 +167,12 @@ describe("Avisos: página própria, por data e por assunto", () => {
     await abrir("/avisos", FILA);
     const vencidos = bloco("Vencidos por obra");
     expect(vencidos.querySelector(".cartao__cabeca .contador")!.className).toBe("contador contador--critico");
-    expect(limpo(vencidos.querySelector(".cartao__cabeca .contador"))).toBe("44 avisos");
+    expect(limpo(vencidos.querySelector(".cartao__cabeca .contador"))).toBe("66 avisos");
     expect(within(vencidos).getAllByRole("columnheader").map(limpo)).toEqual(["Obra ou empresa", "Avisos", "Mais antigo"]);
+    // o resumo da linha usa os nomes das abas, na ordem delas
     expect(grupos()).toEqual([
-      ["GranitoPrazo · Reajuste", "2", "há 400 dias"], ["MaternidadeReajuste", "1", "há 90 dias"], ["Construtora AlfaDocumentos", "1", "há 10 dias"]]);
+      ["GranitoPrazos · Reajustes · Garantias", "3", "há 400 dias"], ["MaternidadeReajustes · Medições", "2", "há 90 dias"],
+      ["Construtora AlfaCertidões", "1", "há 10 dias"]]);
     expect([...vencidos.querySelectorAll("tr.avs-vencido .selo")].every(s => s.className === "selo selo--critico avs-dias")).toBe(true);
     // fechado: os avisos da obra só aparecem ao abrir a linha, ali mesmo, do mais antigo ao mais novo, cada um com o destino dele
     expect(vencidos.querySelectorAll(".avs-linha")).toHaveLength(0);
@@ -157,15 +181,18 @@ describe("Avisos: página própria, por data e por assunto", () => {
     fireEvent.click(botao);
     expect(botao.getAttribute("aria-expanded")).toBe("true");
     const itens = document.getElementById(botao.getAttribute("aria-controls")!)!;
-    expect(linhasDe(itens)).toEqual([["há 400 dias", "reajuste sem resposta", "Reajuste"], ["há 3 dias", "execução vencida", "Prazo"]]);
+    expect(linhasDe(itens)).toEqual([["há 400 dias", "reajuste sem resposta", "Reajustes"],
+      ["há 30 dias", "garantia não cobre o fim da execução", "Garantias"], ["há 3 dias", "execução vencida", "Prazos"]]);
     expect(itens.querySelector(".avs-linha__obra")).toBeNull();          // o grupo já diz a obra
-    expect([...itens.querySelectorAll(".avs-linha__link")].map(l => l.getAttribute("href"))).toEqual(["/obras/7/reajuste", "/obras/7/prazos"]);
+    expect([...itens.querySelectorAll(".avs-linha__link")].map(l => l.getAttribute("href")))
+      .toEqual(["/obras/7/reajuste", "/documentos/3/garantia", "/obras/7/prazos"]);
     // a linha inteira também abre e fecha
     fireEvent.click(vencidos.querySelectorAll("tr.avs-vencido")[1].querySelector("td")!);
     expect(within(vencidos).getByRole("button", { name: "Maternidade" }).getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(botao);
     expect(botao.getAttribute("aria-expanded")).toBe("false");
-    expect(vencidos.querySelectorAll(".avs-linha")).toHaveLength(1);
+    expect(linhasDe(vencidos)).toEqual([["há 90 dias", "reajuste sem resposta", "Reajustes"],
+      ["há 15 dias", "3ª Medição: aprovado abaixo do pedido", "Medições"]]);
   });
 
   it("todo vencido aparece, sem limite de idade nem corte '… e mais N' (#656): só deixa de ser lista corrida", async () => {
@@ -174,8 +201,8 @@ describe("Avisos: página própria, por data e por assunto", () => {
     await abrir("/avisos", muitos);
     expect(numeros()[0]).toBe("Vencidos · 30 · em 6 obras");
     expect(grupos().map(g => `${g[0]} ${g[1]} ${g[2]}`)).toEqual([
-      "Obra 6Prazo 5 há 1.200 dias", "Obra 5Prazo 5 há 1.160 dias", "Obra 4Prazo 5 há 1.120 dias", "Obra 3Prazo 5 há 1.080 dias",
-      "Obra 2Prazo 5 há 1.040 dias", "Obra 1Prazo 5 há 1.000 dias"]);
+      "Obra 6Prazos 5 há 1.200 dias", "Obra 5Prazos 5 há 1.160 dias", "Obra 4Prazos 5 há 1.120 dias", "Obra 3Prazos 5 há 1.080 dias",
+      "Obra 2Prazos 5 há 1.040 dias", "Obra 1Prazos 5 há 1.000 dias"]);
     for (const b of within(bloco("Vencidos por obra")).getAllByRole("button")) fireEvent.click(b);
     expect(bloco("Vencidos por obra").querySelectorAll(".avs-linha")).toHaveLength(30);
     expect(screen.getAllByRole("columnheader").map(limpo)[0]).toBe("Obra");
@@ -185,17 +212,18 @@ describe("Avisos: página própria, por data e por assunto", () => {
     const { container } = await abrir("/avisos?obra=7&familia=prazo", FILA);
     expect(api).toHaveBeenCalledWith("/api/contratos");
     expect(screen.getByRole("heading", { level: 2, name: "Avisos · Granito" })).toBeTruthy();
-    expect(numeros()).toEqual(["Vencidos · 2 · em 1 obra", "Esta semana · 0", "Este mês · 1", "Próximos 90 dias · 1"]);
+    expect(numeros()).toEqual(["Vencidos · 3 · em 1 obra", "Esta semana · 0", "Este mês · 1", "Próximos 90 dias · 1"]);
     expect(container.textContent).not.toMatch(/Maternidade|Construtora Alfa/);
-    expect(abas().map(limpo)).toEqual(["Tudo 4", "Prazo 3", "Reajuste 1"]);
-    expect(abas().map(a => a.getAttribute("href"))).toEqual(["/avisos?obra=7", "/avisos?obra=7&familia=prazo", "/avisos?obra=7&familia=reajuste"]);
+    expect(abas().map(limpo)).toEqual(["Tudo 5", "Prazos 3", "Reajustes 1", "Garantias 1"]);
+    expect(abas().map(a => a.getAttribute("href")))
+      .toEqual(["/avisos?obra=7", "/avisos?obra=7&familia=prazos", "/avisos?obra=7&familia=reajustes", "/avisos?obra=7&familia=garantias"]);
     expect(within(bloco("Vencidos por obra")).getByRole("button", { name: "Granito" }).getAttribute("aria-expanded")).toBe("true");
-    expect(linhasDe(bloco("Vencidos por obra"))).toEqual([["há 3 dias", "execução vencida", "Prazo"]]);
+    expect(linhasDe(bloco("Vencidos por obra"))).toEqual([["há 3 dias", "execução vencida", "Prazos"]]);
     const limpar = screen.getByRole("link", { name: "Todos os avisos" });
     expect(limpar.getAttribute("href")).toBe("/avisos?familia=prazo");
     await act(async () => { fireEvent.click(limpar); });
     expect(screen.queryByRole("heading", { level: 2, name: /Avisos ·/ })).toBeNull();
-    expect(abas().map(limpo)).toEqual(["Tudo 8", "Prazo 4", "Reajuste 2", "Documentos 2"]);
+    expect(abas().map(limpo)).toEqual(["Tudo 10", "Prazos 4", "Reajustes 2", "Garantias 1", "Certidões 2", "Medições 1"]);
   });
 
   it("?obra= de uma obra sem aviso: o nome vem da lista de obras, e uma linha curta no lugar dos blocos", async () => {
@@ -215,7 +243,7 @@ describe("Avisos: página própria, por data e por assunto", () => {
   it("?c= (o contratante do link de antes) mostra só os avisos das obras dele; o aviso sem obra fica fora", async () => {
     const { container } = await abrir("/avisos?c=MTPAR", FILA);
     expect(screen.getByRole("heading", { level: 2, name: "Avisos · MTPAR" })).toBeTruthy();
-    expect(numeros()).toEqual(["Vencidos · 1 · em 1 obra", "Esta semana · 1", "Este mês · 0", "Próximos 90 dias · 0"]);
+    expect(numeros()).toEqual(["Vencidos · 2 · em 1 obra", "Esta semana · 1", "Este mês · 0", "Próximos 90 dias · 0"]);
     expect(container.textContent).not.toMatch(/Granito|Construtora Alfa/);
     expect(screen.getByRole("link", { name: "Todos os avisos" }).getAttribute("href")).toBe("/avisos");
     cleanup();
@@ -231,10 +259,10 @@ describe("Avisos: página própria, por data e por assunto", () => {
     vi.setSystemTime(new Date("2026-11-11T15:00:00Z"));
     try {
       await abrir("/avisos", [aviso({ dias: -2, data: "2026-11-09" }),
-        certidao({ tipo: "documento_vencido", nivel: "critico", dias: null, data: "2026-11-01", mensagem: "Construtora Alfa: FGTS vencida" }),
+        certidao({ nivel: "critico", dias: null, data: "2026-11-01", mensagem: "Construtora Alfa: FGTS vencida" }),
         certidao({ entidade_id: 4, entidade: "Construtora Beta", dias: null, data: "2026-11-20", mensagem: "Construtora Beta: FGTS vence" })]);
-      expect(grupos()).toEqual([["Construtora AlfaDocumentos", "1", "há 10 dias"], ["GranitoPrazo", "1", "há 2 dias"]]);
-      expect(linhasDe(bloco("Agenda"))).toEqual([["em 9 dias", "Construtora BetaConstrutora Beta: FGTS vence", "Documentos"]]);
+      expect(grupos()).toEqual([["Construtora AlfaCertidões", "1", "há 10 dias"], ["GranitoPrazos", "1", "há 2 dias"]]);
+      expect(linhasDe(bloco("Agenda"))).toEqual([["em 9 dias", "Construtora BetaConstrutora Beta: FGTS vence", "Certidões"]]);
     } finally { vi.useRealTimers(); }
   });
 
