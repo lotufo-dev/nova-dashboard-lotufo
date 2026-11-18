@@ -27,12 +27,11 @@ const OBRAS: ObraLista[] = [
   obra(4, "Deciolândia", { orgao: "MTPAR", contratante: "MTPAR", orgao_sub: null, estado: "encerrado", execucao_fim_vigente: "2025-12-31" }),
 ];
 
-// o painel da diretoria (`/api/diretoria`): o farol de cada obra, o medido do ano, a curva e os reajustes
+// o painel da diretoria (`/api/diretoria`): o farol de cada obra, o medido do ano e os reajustes
 const farol = (contrato_id: number, obra: string, f: "verde" | "atencao" | "vermelho") => ({ contrato_id, seq: contrato_id, obra,
   contratante: "SINFRA", empreita: "PRÓPRIA", direito: 1, pi_va: 0, faturados: 0, saldo: 0, status: "EM ANDAMENTO", termino: null,
   farol: f, motivo: "", motivos: [] });
 const PAINEL = { hoje: "2026-09-24", medido_ano: { ano: "2026", valor_centavos: 100_00 },
-  curva_carteira: [{ competencia: "2026-09", previsto_centavos: 200_00, previsto_anterior_centavos: 200_00, medido_centavos: 150_00 }],
   avisos: [],
   obras: [farol(1, "Estações BRT", "vermelho"), farol(2, "MT-388", "verde"), farol(3, "Granito", "atencao")],
   reajustes_apostilamento: { competencias: 2, valor_centavos: 300_00, obras: [{ contrato_id: 2, obra: "MT-388", competencias: 2, valor_centavos: 300_00 }] } };
@@ -169,7 +168,7 @@ describe("Obras: posição financeira na cota da Lotufo, por contratante", () =>
     expect(screen.queryByText(/Medido em 2026/)).toBeNull();
   });
 
-  it("#774: sem o painel da diretoria a lista continua, com um aviso no lugar do farol, da curva e dos reajustes", async () => {
+  it("#774: sem o painel da diretoria a lista continua, com um aviso no lugar do farol e dos reajustes", async () => {
     const base = api.getMockImplementation()!;
     api.mockImplementation(async (caminho: string) => {
       if (caminho === "/api/diretoria") throw new Error("falhou");
@@ -177,7 +176,7 @@ describe("Obras: posição financeira na cota da Lotufo, por contratante", () =>
     });
     abrir("/obras");
     await screen.findByRole("table");
-    expect((await screen.findByRole("alert")).textContent).toContain("Não foi possível carregar o farol, a curva e os reajustes.");
+    expect((await screen.findByRole("alert")).textContent).toContain("Não foi possível carregar o farol e os reajustes.");
     expect(nomes()).toHaveLength(3);
     expect(totais()).not.toContain("Medido em");
   });
@@ -364,11 +363,13 @@ describe("Obras: as vistas Resumo e QDOP vieram da Carteira (#748)", () => {
     expect(within(vistas).getAllByRole("link").map(a => [a.textContent, a.getAttribute("href")])).toEqual(
       [["Posição", "/obras"], ["QDOP", "/obras/qdop"]]);
     expect(within(vistas).getByRole("link", { name: "Posição" }).getAttribute("aria-current")).toBe("page");
-    // o que era do Resumo mora na lista: o medido do ano entre os totais, a curva e os reajustes
+    // o que era do Resumo mora na lista: o medido do ano entre os totais e os reajustes
     expect(await screen.findByText("Medido em 2026")).toBeTruthy();
     expect(screen.getByLabelText("Totais")).toBeTruthy();
     expect(screen.getByRole("searchbox", { name: "Buscar obra" })).toBeTruthy();
-    expect(screen.getByRole("img", { name: /Previsto e medido de execução acumulados/ })).toBeTruthy();
+    // #802: sem previsto x medido em tela nenhuma; a curva saiu da lista
+    expect(screen.queryByRole("img", { name: /previsto/i })).toBeNull();
+    expect(document.body.textContent).not.toMatch(/previsto/i);
     const reajustes = screen.getByRole("table", { name: /Reajustes esperando apostilamento/ });
     expect(within(reajustes).getByRole("link", { name: "MT-388" }).getAttribute("href")).toBe("/obras/2/reajuste");
     // os cartoes por contratante sairam: o subtotal de cada um ja' esta' na tabela
@@ -378,6 +379,8 @@ describe("Obras: as vistas Resumo e QDOP vieram da Carteira (#748)", () => {
     render(<Contratos ir={() => {}} busca={{}} aba="qdop" />);
     expect((await screen.findByRole("link", { name: /Exportar QDOP/ })).getAttribute("href")).toBe("/api/diretoria/qdop.xlsx");
     expect(screen.queryByLabelText("Totais")).toBeNull();
+    expect(screen.queryByRole("img", { name: /previsto/i })).toBeNull();
+    expect(document.body.textContent).not.toMatch(/previsto/i);
     expect(screen.queryByRole("searchbox", { name: "Buscar obra" })).toBeNull();
   });
 

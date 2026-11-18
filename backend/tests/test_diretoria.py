@@ -843,52 +843,6 @@ def test_nota_e_titulo_excluidos_no_rm_saem_do_a_receber_do_faturado_e_do_recebi
     assert retrato() == em_dobro
 
 
-# --- issue #296: curva S da carteira (soma das obras ativas, na cota) e desvio em p.p. por obra no QDOP -----
-
-def _repactuar_consorcio(c, k):
-    """Consorcio: contratual (4 mi em 05/2026, 2 mi em 08/2026) e o 1º TA, que repactua para 3 mi e 1 mi."""
-    from app import cronograma
-    for numero, itens, data, chave, origem in (
-            (1, [("2026-05", 400_000_000), ("2026-08", 200_000_000)], "2024-01-01", "contratual", "contratual"),
-            (2, [("2026-05", 300_000_000), ("2026-08", 100_000_000)], "2025-06-01", "ta1", "aditivo")):
-        cronograma.nova_versao(c, 1, k, itens, "manual", data_documento=data)
-        vid = c.execute("SELECT id FROM cronograma_versoes WHERE contrato_id=? AND numero=?", (k, numero)).fetchone()[0]
-        c.execute("INSERT INTO cronograma_versoes_cadastro (versao_id, contrato_id, chave, origem, data_documento, instrumento)"
-                  " VALUES (?,?,?,?,?,NULL)", (vid, k, chave, origem, data))
-        c.commit()
-
-
-def test_curva_da_carteira_soma_as_obras_ativas_na_cota_com_as_duas_linhas(cenario):
-    c, ids = cenario
-    _repactuar_consorcio(c, ids["consorcio"])
-    curva = diretoria.painel(c, HOJE)["curva_carteira"]
-    assert [p["competencia"] for p in curva] == ["2025-10", "2025-11", "2025-12"] + [f"2026-{m:02d}" for m in range(1, 10)]
-    por = {p["competencia"]: p for p in curva}
-    # 05/2026: o consorcio entra com 50% (TA 3 mi, anterior 4 mi, medido 4 mi) e a propria com o medido de 1 mil
-    assert por["2026-05"] == {"competencia": "2026-05", "previsto_centavos": 150_000_000,
-                              "previsto_anterior_centavos": 200_000_000, "medido_centavos": 200_000_000 + 100_000}
-    # 08/2026: a propria mede 1 mil (recebida) + 7 mil (protocolada); o consorcio so' preve
-    assert por["2026-08"] == {"competencia": "2026-08", "previsto_centavos": 50_000_000,
-                              "previsto_anterior_centavos": 100_000_000, "medido_centavos": 800_000}
-    # 09/2026: a propria nao tem repactuacao e entra na linha anterior com o vigente; o espelho mede (#561): 10 mil da propria + 50% de 10 mil
-    assert por["2026-09"] == {"competencia": "2026-09", "previsto_centavos": 2_000_000,
-                              "previsto_anterior_centavos": 2_000_000, "medido_centavos": 1_500_000}
-    # o reajuste nao e' medido de execucao
-    c.execute("UPDATE medicoes SET tipo='reajuste' WHERE contrato_id=? AND competencia='2026-08'", (ids["propria"],))
-    c.commit()
-    assert {p["competencia"]: p for p in diretoria.painel(c, HOJE)["curva_carteira"]}["2026-08"]["medido_centavos"] == 0
-
-
-def test_curva_da_carteira_deixa_de_fora_a_obra_que_nao_esta_ativa(cenario):
-    c, ids = cenario
-    _repactuar_consorcio(c, ids["consorcio"])
-    c.execute("UPDATE contratos SET estado='encerrado' WHERE id=?", (ids["consorcio"],))
-    c.commit()
-    por = {p["competencia"]: p for p in diretoria.painel(c, HOJE)["curva_carteira"]}
-    assert por["2026-05"] == {"competencia": "2026-05", "previsto_centavos": 0, "previsto_anterior_centavos": 0,
-                              "medido_centavos": 100_000}
-
-
 def _reajuste_no_consorcio(c, ids, valor=240_000_001):
     """#262: aditivo de reajuste (SES) de 2.400.000,01 no consorcio: entra no vigente, fica fora da base de execucao."""
     c.execute("INSERT INTO aditivos (contrato_id, tipo, delta_valor_centavos, status, data_assinatura, natureza) "
@@ -972,9 +926,9 @@ def test_painel_le_uma_fotografia_do_banco(cenario, monkeypatch):
     segura a escrita) e o painel continua todo em 50% (PI, VA, PI+VA e direito da mesma linha batem)."""
     c, ids = cenario
     assert c.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-    original = diretoria._curva_carteira
+    original = diretoria._reajustes_sem_apostilamento
 
-    def cadastro_no_meio(conn, *a, **k):             # depois da carteira, antes das obras
+    def cadastro_no_meio(conn, *a, **k):             # depois do medido do ano, antes das obras
         outra = db.get_conn()
         try:
             outra.execute("UPDATE contratos SET percentual_direito_bp=4000 WHERE id=?", (ids["consorcio"],))
@@ -982,13 +936,13 @@ def test_painel_le_uma_fotografia_do_banco(cenario, monkeypatch):
         finally:
             outra.close()
         return original(conn, *a, **k)
-    monkeypatch.setattr(diretoria, "_curva_carteira", cadastro_no_meio)
+    monkeypatch.setattr(diretoria, "_reajustes_sem_apostilamento", cadastro_no_meio)
     p = diretoria.painel(c, HOJE)
     o = {x["contrato_id"]: x for x in p["obras"]}[ids["consorcio"]]
     assert o["pi_va"] - o["pi"] == 100_000_000
     assert (o["direito"], o["pi"], o["pi_va"]) == (0.5, 500_000_000, 600_000_000)
     assert not c.in_transaction                        # a transacao de leitura fechou
-    monkeypatch.setattr(diretoria, "_curva_carteira", original)
+    monkeypatch.setattr(diretoria, "_reajustes_sem_apostilamento", original)
     o = {x["contrato_id"]: x for x in diretoria.painel(c, HOJE)["obras"]}[ids["consorcio"]]
     assert (o["direito"], o["pi_va"]) == (0.4, 480_000_000)      # a escrita gravou; o painel seguinte a ve
 
@@ -1080,11 +1034,9 @@ def test_nota_do_rm_sem_medicao_lancada_entra_no_medido_da_diretoria(cenario):
     cota = 900_001 + 500_001                              # 1.000.001 x 50% = 500.001 (arredondamento unico)
     assert depois["medido_ano"]["valor_centavos"] - antes["medido_ano"]["valor_centavos"] == cota
     # o saldo a executar cai o mesmo tanto (no consorcio, a cota e' aplicada uma vez sobre o saldo cheio: o meio centavo
-    # do 1.000.001 cai do outro lado); a curva da carteira ganha o medido de 07/2026
+    # do 1.000.001 cai do outro lado)
     saldo = lambda p: sum(o["saldo"] for o in p["obras"])
     assert saldo(antes) - saldo(depois) == 900_001 + 500_000
-    curva = lambda p: {s["competencia"]: s["medido_centavos"] for s in p["curva_carteira"]}
-    assert curva(depois)["2026-07"] - curva(antes)["2026-07"] == cota
     # na tabela de obras (QDOP na tela), a nota sem medicao e' faturado e baixa o saldo da obra
     obra = lambda p, k: next(o for o in p["obras"] if o["contrato_id"] == ids[k])
     assert obra(depois, "propria")["faturados"] - obra(antes, "propria")["faturados"] == 900_001
