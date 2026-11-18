@@ -224,8 +224,9 @@ a.rdm-obra:hover { text-decoration: underline; text-underline-offset: var(--afas
   /* o cabecalho de grupo forte: o nome a' esquerda e o medido do grupo a' direita, na faixa de tinta */
   .rdm .rdm-tabela.tabela tr.rdm-grupo { justify-content: space-between; column-gap: var(--espaco-p); padding: var(--espaco-pp); border-bottom: 0; background: var(--cor-tinta); }
   .rdm .rdm-tabela.tabela tr.rdm-grupo > :is(th, td) { font-size: var(--texto-meta); }
-  /* o nome encolhe e a quantidade desce para a linha de baixo, para o medido do grupo ficar na mesma linha */
+  /* o nome numa linha e a quantidade embaixo dele, para o medido do grupo ficar na linha do nome */
   .rdm .rdm-tabela.tabela tr.rdm-grupo > th { flex: 1 1 0; }
+  .rdm-grupo__n { display: block; margin-left: 0; }
   .rdm .rdm-tabela.tabela tr.rdm-grupo > td { flex: none; white-space: nowrap; }
   .rdm .rdm-tabela.tabela tr > .rdm-primeira { order: 1; flex: 1 1 calc(100% - var(--rdm-largura-valor)); width: auto; font-size: var(--texto-meta); }
   .rdm .rdm-tabela.tabela tr > .rdm-valor { order: 2; flex: 0 0 var(--rdm-largura-valor); text-align: right; white-space: nowrap; font-size: var(--texto-meta); }
