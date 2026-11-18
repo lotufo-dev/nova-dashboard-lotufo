@@ -1,7 +1,9 @@
 // Familias de valor (#805, decisao do dono de 18/11/2026): as contas e os limites das pecas Variacao.tsx,
 // Diferenca.tsx, Andamento.tsx e MarcaEtapa.tsx, num lugar so'. A regra esta' em docs/identidade-visual.md, secao
 // "Valores". Os valores comparados vem do servidor (a mesma conta nos dois lados); aqui so' a razao entre eles, para
-// a etiqueta. Limite em inteiros, sem arredondar antes de comparar.
+// a etiqueta. Limite em inteiros, sem arredondar antes de comparar. O andamento vem lido do servidor (#822).
+
+import { fmtCompetencia } from "./tempo";
 
 // ---------------------------------------------------------------- etapa do dinheiro
 
@@ -63,19 +65,43 @@ export function diferenca(abaixo: number | null | undefined, acima: number | nul
 
 // ---------------------------------------------------------------- andamento
 
-/** Os limites do andamento: a partir de 100% do necessario, adiantada; de 70% a 99%, atencao; abaixo de 70%, devagar. */
-export const ADIANTADA_DESDE_PCT = 100;
-export const ATENCAO_DESDE_PCT = 70;
-
 export type LeituraDoAndamento = "adiantada" | "atencao" | "devagar";
 
-/** A leitura e o percentual inteiro do ritmo sobre o necessario; nulo sem necessario (nulo ou zero) ou sem ritmo. O
- *  percentual arredonda para baixo: 99,6% ainda e' atencao, e a frase nao pode dizer "100%" ao lado dessa palavra. */
-export function andamento(ritmo: number | null | undefined, necessario: number | null | undefined):
-    { leitura: LeituraDoAndamento; pct: number } | null {
-  if (ritmo === null || ritmo === undefined || ritmo < 0 || necessario === null || necessario === undefined || necessario <= 0) return null;
-  const pct = Math.floor(ritmo * 100 / necessario);
-  return { leitura: pct >= ADIANTADA_DESDE_PCT ? "adiantada" : pct >= ATENCAO_DESDE_PCT ? "atencao" : "devagar", pct };
+/** Por que a obra com prazo a cumprir ficou fora da regua (decisao do dono de 18/11/2026, #822). */
+export type MotivoForaDaRegua = "prazo_no_fim" | "prorrogacao_pedida" | "sem_medicao";
+
+/** A leitura do andamento como o servidor a manda (`prazos.leitura_do_andamento`), a mesma em `/api/contratos`
+ *  (`andamento.leitura`) e na ficha da obra (`ritmo.leitura`). O corte (70% e 100%) e' dele: a tela nao o repete, so'
+ *  escreve a palavra, o percentual e o motivo que chegam. Com `situacao`, vem o `pct` (inteiro, por piso); sem ela, o
+ *  `motivo` de a obra ficar fora da regua, ou nada (sem prazo a cumprir, ou obra que ainda nao mediu). Os dois
+ *  limites vem junto, para o desenho da barra. */
+export type AndamentoDoServidor = {
+  situacao: LeituraDoAndamento | null; pct: number | null;
+  motivo: MotivoForaDaRegua | null; prorrogacao_pedida: boolean; sem_medicao_desde: string | null;
+  atencao_desde_pct: number; adiantada_desde_pct: number;
+};
+
+/** A leitura (Adiantada, Atencao, Devagar) e o percentual do necessario que o servidor mandou; nulo na obra sem
+ *  leitura (sem prazo a cumprir, sem ritmo ou fora da regua). */
+export function andamento(l: AndamentoDoServidor | null | undefined): { leitura: LeituraDoAndamento; pct: number } | null {
+  return l && l.situacao !== null && l.pct !== null ? { leitura: l.situacao, pct: l.pct } : null;
+}
+
+/** O que a tela escreve no lugar da leitura na obra fora da regua: o prazo no fim (com o pedido de prorrogacao, se
+ *  ha'), o pedido de prorrogacao sem resposta ou o mes da ultima medicao de execucao. Nulo quando nao ha' o que
+ *  escrever: a celula fica com o tracinho. */
+export function foraDaRegua(l: AndamentoDoServidor | null | undefined): { palavra: string; complemento: string | null } | null {
+  if (!l || l.situacao !== null) return null;
+  if (l.motivo === "prazo_no_fim") return { palavra: "Prazo no fim", complemento: l.prorrogacao_pedida ? "prorrogação pedida" : null };
+  if (l.motivo === "prorrogacao_pedida") return { palavra: "Prorrogação pedida", complemento: null };
+  if (l.motivo === "sem_medicao" && l.sem_medicao_desde) return { palavra: `Sem medição desde ${fmtCompetencia(l.sem_medicao_desde)}`, complemento: null };
+  return null;
+}
+
+/** A obra tem o que escrever no andamento? A leitura, ou o motivo de estar fora da regua. Sem um nem outro a peca
+ *  `Andamento` nao desenha nada, e quem a usa poe o tracinho. */
+export function temAndamento(l: AndamentoDoServidor | null | undefined): boolean {
+  return andamento(l) !== null || foraDaRegua(l) !== null;
 }
 
 /** Valor em reais abreviado, so' para a frase do andamento ("R$ 2,4 mi/mês de R$ 8,8 mi"): "R$ 2,4 mi", "R$ 350 mil",

@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { comLeitura, leituraDeTeste } from "./andamentoTeste";
 import Contratos from "./Contratos";
 import type { ObraLista } from "./listaObras";
 import { useRota } from "./rota";
@@ -11,7 +12,8 @@ vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api"
 // a lista mostra (na cota da Lotufo, do servidor); os valores cheios ao lado são outros de propósito.
 const posicao = (vigente: number, medido: number, aReceber: number | null) =>
   ({ vigente_centavos: vigente, medido_centavos: medido, saldo_centavos: vigente - medido, a_receber_centavos: aReceber });
-const obra = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => ({
+// #822: a leitura do andamento vem do servidor; `comLeitura` põe em cada obra a que ele mandaria para o ritmo e o necessário dela
+const obra = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => comLeitura({
   id, orgao: "SINFRA - SUEF II", contratante: "SINFRA", orgao_sub: "SUEF II", numero_instrumento: `IC ${id}/2026`, nome_curto: nome,
   estado: "ativo", entidade_id: 1, valor_vigente_centavos: 1000_00, medido_centavos: 250_00, saldo_centavos: 750_00, percentual_direito_bp: 10000,
   posicao: posicao(1000_00, 250_00, 100_00), contratante_chave: "sinfra",
@@ -507,6 +509,47 @@ describe("Obras em níveis (#805): Por contratante, Todas as obras, Andamento e 
     expect(tabela.querySelector(".andamento--devagar .andamento__barra")).toBeTruthy();
     expect(screen.getByLabelText("Números da carteira")).toBeTruthy();
     expect(screen.queryByRole("searchbox", { name: "Buscar obra" })).toBeNull();
+  });
+
+  it("#822: fora da régua, a vista Andamento e 'Todas as obras' escrevem o motivo no lugar da leitura, e a contagem do alto não as conta", async () => {
+    // as três mediriam 10% do necessário (devagar); o servidor as tirou da régua
+    const fora = (motivo: Parameters<typeof leituraDeTeste>[2]) => ({ ritmo_centavos: 10_00, necessario_centavos: 100_00, leitura: leituraDeTeste(10_00, 100_00, motivo) });
+    const obras = [
+      obra(1, "Estações BRT", { andamento: { ritmo_centavos: 27_00, necessario_centavos: 100_00 } }),
+      obra(5, "Cavalaria", { execucao_fim_vigente: "2026-12-20", andamento: fora({ motivo: "prazo_no_fim", prorrogacao_pedida: true }) }),
+      obra(6, "Leblon", { execucao_fim_vigente: "2026-11-30", andamento: fora({ motivo: "prazo_no_fim" }) }),
+      obra(7, "Maternidade", { execucao_fim_vigente: "2027-12-31", andamento: fora({ motivo: "prorrogacao_pedida", prorrogacao_pedida: true }) }),
+      obra(8, "Orla", { andamento: fora({ motivo: "sem_medicao", sem_medicao_desde: "2026-07" }) }),
+    ];
+    const base = api.getMockImplementation()!;
+    api.mockImplementation(async (caminho: string) => (caminho === "/api/contratos" ? obras : base(caminho)));
+    abrir("/obras/andamento");
+    const tabela = await screen.findByRole("table", { name: /Obras pelo andamento/ });
+    const linhas = [...tabela.querySelectorAll("tbody tr")].map(tr => [...tr.querySelectorAll("td")].map(td => limpo(td.textContent)));
+    // primeiro quem tem leitura; depois a sem medição, e as de prazo no fim ou prorrogação pedida pela que termina antes
+    expect(linhas).toEqual([
+      ["Estações BRTSINFRA", "27%", "Devagar", "R$ 27,00", "R$ 100,00", "31/03/2027"],
+      ["OrlaSINFRA", "—", "Sem medição desde 07/2026", "R$ 10,00", "R$ 100,00", "31/03/2027"],
+      ["LeblonSINFRA", "—", "Prazo no fim", "R$ 10,00", "R$ 100,00", "30/11/2026"],
+      ["CavalariaSINFRA", "—", "Prazo no fim · prorrogação pedida", "R$ 10,00", "R$ 100,00", "20/12/2026"],
+      ["MaternidadeSINFRA", "—", "Prorrogação pedida", "R$ 10,00", "R$ 100,00", "31/12/2027"],
+    ]);
+    // só a obra com leitura tem barra; o motivo vai em tinta, sem tom de valor
+    expect(tabela.querySelectorAll(".andamento__trilho").length).toBe(1);
+    expect(tabela.querySelectorAll(".andamento--fora").length).toBe(4);
+    // "1 de 1" é só quem tem leitura; as duas com o prazo no fim vão ao lado, em tinta (sem tom de valor)
+    const andamentoDaFaixa = [...screen.getByLabelText("Números da carteira").querySelectorAll(".obras-numero")].at(-1)!;
+    expect(limpo(andamentoDaFaixa.textContent)).toBe("Andamento1 de 1obra devagar2 com prazo no fim");
+    expect(andamentoDaFaixa.querySelectorAll(".obras-etiqueta").length).toBe(1);
+    cleanup();
+    abrir("/obras/todas");
+    const todas = await screen.findByRole("table", { name: /Obras, posição/ });
+    const andamento = (nome: string) => within(todas).getByRole("link", { name: nome }).closest("tr")!.querySelector('td[data-rotulo="Andamento"]')!;
+    expect(limpo(andamento("Cavalaria").textContent)).toBe("Prazo no fim · prorrogação pedida");
+    expect(limpo(andamento("Orla").textContent)).toBe("Sem medição desde 07/2026");
+    expect(limpo(andamento("Estações BRT").textContent)).toBe("Devagar · mede 27% do necessário");
+    // a célula com o motivo não é a "sem leitura" que a faixa média esconde
+    expect(andamento("Cavalaria").className).toBe("obras-posicao__andamento");
   });
 
   it("Todas as obras: os reajustes esperando apostilamento ficam acima da tabela, recolhidos, e o painel é pedido uma vez", async () => {
