@@ -417,6 +417,37 @@ def medido_na_cota(m: dict) -> int:
     return (contratos.cota(valor, m["pct"]) or 0) if valor is not None else 0
 
 
+def medido_das_competencias(conn, competencias, contratos_ids=None) -> dict[str, int]:
+    """Issue #805 (Resumo das medicoes em quadro): o medido de cada competencia pedida, na cota. E' o `medido_centavos`
+    que esta pagina mostra no mes: as mesmas medicoes (`_medicoes`) e a mesma conta por medicao (`medido_na_cota`),
+    sem montar o fechamento inteiro. `contratos_ids` recorta as obras (o filtro por contratante do Resumo das
+    medicoes); sem ele, todas. Competencia sem medicao vem com zero."""
+    soma = dict.fromkeys(competencias, 0)
+    for m in _medicoes(conn):
+        if m["competencia"] in soma and (contratos_ids is None or m["contrato_id"] in contratos_ids):
+            soma[m["competencia"]] += medido_na_cota(m)
+    return soma
+
+
+def diferenca_do_pedido(estado: str, aprovado: int | None, pedido: int | None, pct: int | None) -> dict | None:
+    """Issue #805: os dois lados da diferenca aprovado x pedido de UMA medicao, na cota, com o corte e o acima (ver o
+    cabecalho). So' existe com o valor do boletim gravado E o pedido, numa medicao ja' aprovada (`ESTADOS_APROVADO`):
+    sem isso, nulo (nao ha' dois valores para comparar). A tolerancia (`TOLERANCIA_DO_PEDIDO_CENTAVOS`) e' do valor
+    cheio, o do orgao; o corte e o acima saem na cota, como os outros numeros. A UNICA conta da diferenca: a desta
+    pagina (`_linha_medicao`) e a do cartao e da tabela do Resumo das medicoes (`resumo_medicoes.py`)."""
+    if estado not in ESTADOS_APROVADO or aprovado is None or pedido is None:
+        return None
+    na_cota = lambda v: contratos.cota(v, pct) or 0
+    d = {"aprovado_com_pedido_centavos": na_cota(aprovado), "pedido_do_aprovado_centavos": na_cota(pedido),
+         "abaixo_do_pedido_centavos": 0, "acima_do_pedido_centavos": 0}
+    falta = pedido - aprovado
+    if falta > TOLERANCIA_DO_PEDIDO_CENTAVOS:
+        d["abaixo_do_pedido_centavos"] = max(0, d["pedido_do_aprovado_centavos"] - d["aprovado_com_pedido_centavos"])
+    elif -falta > TOLERANCIA_DO_PEDIDO_CENTAVOS:
+        d["acima_do_pedido_centavos"] = max(0, d["aprovado_com_pedido_centavos"] - d["pedido_do_aprovado_centavos"])
+    return d
+
+
 def medido_do_mes_fechado(conn, hoje: datetime.date) -> dict:
     """Issue #805 (Obras por contratante): o medido de cada obra na ultima competencia FECHADA (o mes anterior ao de
     `hoje`; o mes em curso ainda recebe medicao, como em `_medido_do_ano_anterior`) e na competencia anterior a ela, a
@@ -444,17 +475,10 @@ def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
     n["medido_centavos"] = medido_na_cota(m)
     n["aprovado_centavos"] = cota(aprovado) if aprovado is not None else 0
     # issue #805: a diferenca aprovado x pedido so' existe com o valor do boletim gravado e o pedido; a medicao em
-    # analise e a de nota emitida sem o valor do boletim ficam fora dos dois lados
-    acima = 0
-    if m["estado"] in ESTADOS_APROVADO and m["aprovado"] is not None and m["pedido"] is not None:
-        n["aprovado_com_pedido_centavos"] = cota(m["aprovado"])
-        n["pedido_do_aprovado_centavos"] = cota(m["pedido"])
-        # a tolerancia e' do valor cheio (o do orgao); o corte e o acima saem na cota, como os outros numeros
-        falta = m["pedido"] - m["aprovado"]
-        if falta > TOLERANCIA_DO_PEDIDO_CENTAVOS:
-            n["abaixo_do_pedido_centavos"] = max(0, n["pedido_do_aprovado_centavos"] - n["aprovado_com_pedido_centavos"])
-        elif -falta > TOLERANCIA_DO_PEDIDO_CENTAVOS:
-            acima = max(0, n["aprovado_com_pedido_centavos"] - n["pedido_do_aprovado_centavos"])
+    # analise e a de nota emitida sem o valor do boletim ficam fora dos dois lados (`diferenca_do_pedido`)
+    diferenca = diferenca_do_pedido(m["estado"], m["aprovado"], m["pedido"], m["pct"]) or {}
+    acima = diferenca.pop("acima_do_pedido_centavos", 0)
+    n.update(diferenca)
     ligadas, fora = _notas_da_conta(m, notas)
     saida, saida_fora = [], []
     if _cobrada(m):

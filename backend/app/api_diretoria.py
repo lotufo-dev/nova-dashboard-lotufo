@@ -28,20 +28,25 @@ def fechamento_mensal(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sq
     return fechamento.fechamento(conn)
 
 
+# issue #805: o filtro por contratante da pagina; a sigla que a propria resposta lista em `contratantes`
+CONTRATANTE = Query(None, min_length=1, max_length=120)
+
+
 @router.get("/api/resumo-medicoes")
-def resumo_das_medicoes(mes: str | None = Query(None, pattern=MES), _=Depends(exigir("ver_paineis", com_csrf=False)),
-                        conn: sqlite3.Connection = Depends(conexao)):
-    """Issue #749: a etapa do ciclo da medicao de cada obra na competencia `mes` (AAAA-MM; sem ela, a competencia em
-    trabalho), as obras sem medicao nela e as medicoes abertas de competencias anteriores (`app/resumo_medicoes.py`)."""
-    return resumo_medicoes.resumo(conn, mes=mes)
+def resumo_das_medicoes(mes: str | None = Query(None, pattern=MES), contratante: str | None = CONTRATANTE,
+                        _=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
+    """Issues #749 e #805: a etapa do ciclo da medicao de cada obra na competencia `mes` (AAAA-MM; sem ela, a
+    competencia em trabalho), o medido do mes com as referencias, as obras sem medicao nela e as medicoes abertas de
+    competencias anteriores (`app/resumo_medicoes.py`). `contratante` recorta tudo para as obras dele."""
+    return resumo_medicoes.resumo(conn, mes=mes, contratante=contratante)
 
 
 @router.get("/api/resumo-medicoes.csv")
-def resumo_das_medicoes_csv(mes: str | None = Query(None, pattern=MES), _=Depends(exigir("ver_paineis", com_csrf=False)),
-                            conn: sqlite3.Connection = Depends(conexao)):
-    """A relacao que a pagina mostra, na mesma ordem. Obra, contratante e medicao sao texto do cadastro: passam pelo
-    `_texto_seguro` (formula em planilha)."""
-    r = resumo_medicoes.resumo(conn, mes=mes)
+def resumo_das_medicoes_csv(mes: str | None = Query(None, pattern=MES), contratante: str | None = CONTRATANTE,
+                            _=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
+    """A relacao que a pagina mostra, na mesma ordem e com o mesmo recorte. Obra, contratante e medicao sao texto do
+    cadastro: passam pelo `_texto_seguro` (formula em planilha)."""
+    r = resumo_medicoes.resumo(conn, mes=mes, contratante=contratante)
     linhas = [[*(_texto_seguro(v) for v in linha[:4]), *linha[4:]] for linha in resumo_medicoes.linhas_csv(r, format_brl)]
     return _csv(f"resumo-das-medicoes-{r['mes']}.csv", resumo_medicoes.CABECALHO_CSV, linhas)
 

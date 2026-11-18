@@ -474,6 +474,202 @@ def test_atualizacao_e_o_ultimo_lancamento_de_uma_pessoa_e_a_ultima_leitura_do_r
         "ultimo_lancamento": "2026-11-14 18:40:00", "rm_lido_em": "2026-11-16 11:00:00"}
 
 
+# --- issue #805: o quadro por etapa (medido do mes, mesma altura, tempo na etapa, diferenca, filtro) -------------
+
+def test_medido_do_mes_e_o_do_fechamento_e_fecha_com_a_soma_das_etapas(conn, cenario):
+    """O medido do mes e' o numero do Fechamento, e as cinco etapas somam esse numero: a pagina pode mostrar as
+    etapas ao lado dele. As referencias sao o mesmo medido no mes anterior e no mesmo mes do ano anterior."""
+    c, ids = conn, cenario
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    assert r["medido"]["valor_centavos"] == _medido_do_fechamento(conn, MES) == sum(e["valor_centavos"] for e in r["etapas"])
+    # setembro: a 5ª da Obra Parada (20.000) e a 11ª recebida da Obra Propria (5.000); outubro de 2025 nao teve medicao
+    assert r["medido"]["mes_anterior"] == {"competencia": "2026-09", "valor_centavos": 25_000}
+    assert r["medido"]["mes_anterior"]["valor_centavos"] == _medido_do_fechamento(conn, "2026-09")
+    assert r["medido"]["ano_anterior"] is None
+    _medicao(c, ids["propria"], 1, "recebida", 61_000, comp="2025-10", recebida_em="2025-12-01")
+    c.commit()
+    assert resumo_medicoes.resumo(conn, HOJE, mes=MES)["medido"]["ano_anterior"] == {"competencia": "2025-10", "valor_centavos": 61_000}
+
+
+def test_medido_sem_referencia_no_mes_em_curso_e_antes_do_primeiro_ano(conn, cenario):
+    c, ids = conn, cenario
+    _medicao(c, ids["propria"], 14, "planilha_enviada", 7_000, comp="2026-11", planilha_enviada_em="2026-11-12")
+    _medicao(c, ids["propria"], 2, "recebida", 8_000, comp="2025-01", recebida_em="2025-03-01")
+    _medicao(c, ids["propria"], 1, "recebida", 9_000, comp="2024-12", recebida_em="2025-02-01")
+    c.commit()
+    # novembro ainda recebe medicao: contra outubro inteiro diria sempre "caiu"
+    em_curso = resumo_medicoes.resumo(conn, HOJE, mes="2026-11")["medido"]
+    assert em_curso == {"valor_centavos": 7_000, "mes_anterior": None, "ano_anterior": None}
+    # dezembro de 2024 e' anterior ao primeiro ano das telas da diretoria: nao serve de referencia
+    janeiro = resumo_medicoes.resumo(conn, HOJE, mes="2025-01")
+    assert janeiro["medido"] == {"valor_centavos": 8_000, "mes_anterior": None, "ano_anterior": None}
+    assert janeiro["mesma_altura"] is None
+
+
+def test_um_mes_antes_no_mesmo_dia_ou_no_ultimo_dia_do_mes():
+    antes = resumo_medicoes._um_mes_antes
+    assert antes(datetime.date(2026, 11, 18)) == datetime.date(2026, 10, 18)
+    assert antes(datetime.date(2026, 1, 5)) == datetime.date(2025, 12, 5)
+    assert antes(datetime.date(2026, 3, 31)) == datetime.date(2026, 2, 28)
+    assert antes(datetime.date(2028, 3, 30)) == datetime.date(2028, 2, 29)
+    assert antes(datetime.date(2026, 7, 31)) == datetime.date(2026, 6, 30)
+
+
+def test_mesma_altura_e_o_retrato_da_competencia_anterior_um_mes_antes_pelas_datas_dos_eventos(conn, cenario):
+    """Hoje e' 16/11 e a competencia e' outubro: a referencia e' o que as medicoes de setembro tinham no protocolado e
+    no recebido em 16/10. Cada medicao entra pela data do evento, com o medido de hoje."""
+    c, ids = conn, cenario
+    # a 11ª recebida da Obra Propria (cenario) nao tem protocolo registrado: ganha um, para a referencia ter lastro
+    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) SELECT id, '2026-10-01', 'manual' FROM medicoes "
+              "WHERE contrato_id=? AND numero=11", (ids["propria"],))
+    # recebida antes de 16/10: estava no recebido; recebida depois e protocolada antes: estava no protocolado
+    _medicao(c, ids["consorcio"], 6, "recebida", 300_000, comp="2026-09", recebida_em="2026-10-14", protocolo=("2026-10-05",))
+    _medicao(c, ids["companhia"], 2, "recebida", 40_000, comp="2026-09", recebida_em="2026-10-25", protocolo=("2026-10-12",))
+    # protocolada ate' 16/10 e ainda nao recebida: no protocolado; a obra sem o envio da nota recebe sem protocolo
+    _medicao(c, ids["sem_envio"], 2, "protocolada", 15_000, comp="2026-09", protocolo=("2026-10-16",))
+    _medicao(c, ids["sem_envio"], 1, "recebida", 9_000, comp="2026-09", recebida_em="2026-10-16")
+    c.commit()
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    # protocolado em 16/10: a 11ª (5.000: protocolo em 01/10, recebida em 30/10), a 2ª da Companhia (40.000) e a 2ª da
+    # Sem Envio (15.000); a 5ª da Obra Parada so' foi protocolada em 20/10. Recebido: 300.000 x 33,33% = 99.990, e 9.000
+    assert r["mesma_altura"] == {"competencia": "2026-09", "ate": "2026-10-16",
+                                 "protocolado_centavos": 5_000 + 40_000 + 15_000, "recebido_centavos": 99_990 + 9_000}
+    # o numero comparado e' o da propria etapa hoje
+    assert next(e for e in r["etapas"] if e["etapa"] == "protocolado")["valor_centavos"] == 99_999
+    # olhando setembro, a referencia e' agosto, na mesma data
+    assert resumo_medicoes.resumo(conn, HOJE, mes="2026-09")["mesma_altura"] == {
+        "competencia": "2026-08", "ate": "2026-10-16", "protocolado_centavos": 0, "recebido_centavos": 0}
+
+
+def test_mesma_altura_sem_a_data_do_evento_nao_tem_referencia(conn, cenario):
+    """So' aparece o que tem lastro: a etapa em que alguma medicao da competencia anterior chegou sem a data do evento
+    vem nula, e a outra continua."""
+    c, ids = conn, cenario
+    # o cenario: a 11ª da Obra Propria foi recebida em 30/10 sem protocolo registrado, numa obra que tem a etapa. Nao
+    # da' para dizer se estava no protocolado em 16/10; o recebido tem a data
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    assert r["mesma_altura"] == {"competencia": "2026-09", "ate": "2026-10-16", "protocolado_centavos": None, "recebido_centavos": 0}
+    # recebida antes de 16/10, mesmo sem o protocolo: ja' tinha saido do protocolado, e a referencia volta
+    c.execute("UPDATE medicoes SET recebida_em='2026-10-15' WHERE contrato_id=? AND numero=11", (ids["propria"],))
+    c.commit()
+    assert resumo_medicoes.resumo(conn, HOJE, mes=MES)["mesma_altura"] == {
+        "competencia": "2026-09", "ate": "2026-10-16", "protocolado_centavos": 0, "recebido_centavos": 5_000}
+    # recebida sem a data do recebimento: nem o recebido nem o protocolado daquele dia tem lastro
+    _medicao(c, ids["consorcio"], 6, "recebida", 300_000, comp="2026-09", protocolo=("2026-10-05",))
+    c.commit()
+    assert resumo_medicoes.resumo(conn, HOJE, mes=MES)["mesma_altura"] == {
+        "competencia": "2026-09", "ate": "2026-10-16", "protocolado_centavos": None, "recebido_centavos": None}
+    # protocolada pelo estado, sem a data do protocolo (o legado `nf_emitida`): o protocolado nao tem lastro
+    c.execute("UPDATE medicoes SET recebida_em='2026-10-10' WHERE contrato_id=? AND numero=6", (ids["consorcio"],))
+    _medicao(c, ids["companhia"], 2, "nf_emitida", 40_000, comp="2026-09")
+    c.commit()
+    assert resumo_medicoes.resumo(conn, HOJE, mes=MES)["mesma_altura"] == {
+        "competencia": "2026-09", "ate": "2026-10-16", "protocolado_centavos": None, "recebido_centavos": 5_000 + 99_990}
+
+
+def test_tempo_na_etapa_conta_da_data_do_evento_em_dias_uteis(conn, cenario):
+    c, ids = conn, cenario
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    # protocolada em 10/11 (terca); hoje e' segunda, 16/11: 10, 11, 12 e 13 (o dia do evento conta, hoje nao)
+    p = _linha(r, "Obra Própria")
+    assert (p["na_etapa_desde"], p["dias_uteis_na_etapa"], p["dias_da_nota_ao_recebimento"]) == ("2026-11-10", 4, None)
+    k = _linha(r, "Obra Consórcio")
+    assert (k["na_etapa_desde"], k["dias_uteis_na_etapa"]) == ("2026-11-05", 7)
+    # a etapa da vez sem a data do evento: nada e' contado da competencia
+    comp = _linha(r, "Obra da Companhia")
+    assert (comp["na_etapa_desde"], comp["dias_uteis_na_etapa"], comp["dias_da_nota_ao_recebimento"]) == (None, None, None)
+    # a recebida nao esta' parada: a data e os dias corridos da emissao da nota (09/11) ao recebimento
+    c.execute("UPDATE medicoes SET estado='recebida', recebida_em='2026-11-14' WHERE id=?", (ids["p12"],))
+    # a par dela, com a nota de 11/11: a linha conjunta conta da ultima das duas
+    _medicao(c, ids["propria"], 12, "recebida", 1_001, tipo="reajuste", atestado_em="2026-11-06", valor_atestado_centavos=1_001,
+             nota_emitida_em="2026-11-11", recebida_em="2026-11-14", protocolo=("2026-11-12",))
+    c.commit()
+    p = _linha(resumo_medicoes.resumo(conn, HOJE, mes=MES), "Obra Própria")
+    assert p["titulo"] == "12ª Medição + Reajuste"
+    assert (p["na_etapa_desde"], p["dias_uteis_na_etapa"], p["dias_da_nota_ao_recebimento"]) == ("2026-11-14", None, 3)
+    # recebida sem a emissao da nota registrada: so' a data
+    c.execute("UPDATE medicoes SET nota_emitida_em=NULL WHERE contrato_id=? AND numero=12", (ids["propria"],))
+    c.commit()
+    p = _linha(resumo_medicoes.resumo(conn, HOJE, mes=MES), "Obra Própria")
+    assert (p["na_etapa_desde"], p["dias_da_nota_ao_recebimento"]) == ("2026-11-14", None)
+
+
+def test_diferenca_entre_o_aprovado_e_o_pedido_e_a_conta_do_fechamento(conn, cenario):
+    c, ids = conn, cenario
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    assert r["diferenca_critica_por_mil"] == 5
+    # aprovado 2 centavos abaixo do pedido: dentro da tolerancia de R$ 0,05, conta como igual
+    p = _linha(r, "Obra Própria")
+    assert (p["pedido_do_aprovado_centavos"], p["abaixo_do_pedido_centavos"], p["acima_do_pedido_centavos"]) == (100_001, 0, 0)
+    # em analise: nao ha' dois valores para comparar
+    k = _linha(r, "Obra Consórcio")
+    assert (k["pedido_do_aprovado_centavos"], k["abaixo_do_pedido_centavos"], k["acima_do_pedido_centavos"]) == (None, None, None)
+    # consorcio (33,33%): aprovado 900.000 de 1.000.001 pedidos; o corte sai na cota, e o reajuste da mesma linha, com
+    # o aprovado acima do pedido, soma do lado dele
+    c.execute("UPDATE medicoes SET estado='espelho_enviado', atestado_em='2026-11-08', valor_atestado_centavos=900_000 "
+              "WHERE id=?", (ids["k7"],))
+    _medicao(c, ids["consorcio"], 7, "espelho_enviado", 30_000, tipo="reajuste", atestado_em="2026-11-08",
+             valor_atestado_centavos=33_000)
+    c.commit()
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    k = _linha(r, "Obra Consórcio")
+    assert k["titulo"] == "7ª Medição + Reajuste"
+    # 1.000.001 -> 333.300; 900.000 -> 299.970; 30.000 -> 9.999; 33.000 -> 10.999 (10.998,9)
+    assert (k["pedido_do_aprovado_centavos"], k["abaixo_do_pedido_centavos"], k["acima_do_pedido_centavos"]) == (
+        333_300 + 9_999, 333_300 - 299_970, 10_999 - 9_999)
+    # os mesmos numeros do Fechamento para as duas medicoes
+    [obra] = [o for m in fechamento.fechamento(conn)["meses"] if m["competencia"] == MES for o in m["obras"]
+              if o["contrato_id"] == ids["consorcio"]]
+    assert obra["pedido_do_aprovado_centavos"] == k["pedido_do_aprovado_centavos"]
+    assert obra["abaixo_do_pedido_centavos"] == k["abaixo_do_pedido_centavos"]
+    assert sum(m["acima_do_pedido_centavos"] for m in obra["medicoes"]) == k["acima_do_pedido_centavos"]
+
+
+def test_filtro_por_contratante_recorta_tudo_e_a_lista_de_contratantes_fica_inteira(conn, cenario):
+    ids = cenario
+    inteiro = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    assert inteiro["contratante"] is None
+    assert inteiro["contratantes"] == [{"contratante": "Companhia de Exemplo", "medicoes": 1, "anteriores": 0},
+                                       {"contratante": "SINFRA", "medicoes": 3, "anteriores": 2}]
+    assert [(g["contratante"], g["medicoes"], g["valor_centavos"]) for g in inteiro["grupos"]] == [
+        ("Companhia de Exemplo", 1, 50_000), ("SINFRA", 3, 333_300 + 99_999 + 70_000)]
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES, contratante="Companhia de Exemplo")
+    assert r["contratante"] == "Companhia de Exemplo" and r["contratantes"] == inteiro["contratantes"]
+    assert [g["contratante"] for g in r["grupos"]] == ["Companhia de Exemplo"]
+    assert [(e["etapa"], e["medicoes"], e["valor_centavos"]) for e in r["etapas"] if e["medicoes"]] == [("boletim", 1, 50_000)]
+    assert r["medido"] == {"valor_centavos": 50_000, "mes_anterior": None, "ano_anterior": None}
+    assert r["sem_medicao"] == [] and r["anteriores"] == []
+    assert r["mesma_altura"] == {"competencia": "2026-09", "ate": "2026-10-16", "protocolado_centavos": 0, "recebido_centavos": 0}
+    sinfra = resumo_medicoes.resumo(conn, HOJE, mes=MES, contratante="SINFRA")
+    assert sinfra["medido"]["valor_centavos"] == 333_300 + 99_999 + 70_000
+    assert sinfra["medido"]["mes_anterior"] == {"competencia": "2026-09", "valor_centavos": 25_000}
+    assert [o["contrato_id"] for o in sinfra["sem_medicao"]] == [ids["parada"]]
+    assert [g["competencia"] for g in sinfra["anteriores"]] == ["2026-08", "2026-09"]
+    # o contratante que nao existe nao tem nada, e a lista continua dizendo quem tem
+    nada = resumo_medicoes.resumo(conn, HOJE, mes=MES, contratante="Órgão Inexistente")
+    assert nada["grupos"] == [] and nada["medido"]["valor_centavos"] == 0 and nada["contratantes"] == inteiro["contratantes"]
+
+
+def test_meses_anteriores_so_do_primeiro_ano_em_diante_com_o_subtotal_de_cada_competencia(conn, cenario):
+    """Decisao do dono (#805): pendencia de competencia anterior a 2025 fica fora das telas da diretoria."""
+    c, ids = conn, cenario
+    velha = _medicao(c, ids["propria"], 1, "protocolada", 77_000, comp="2024-12", protocolo=("2025-01-20",))
+    de_2025 = _medicao(c, ids["propria"], 2, "protocolada", 66_000, comp="2025-01", protocolo=("2025-02-20",))
+    c.commit()
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    abertas = [x["medicao_id"] for g in r["anteriores"] for x in g["linhas"]]
+    assert de_2025 in abertas and velha not in abertas
+    assert [(g["competencia"], g["medicoes"], g["valor_centavos"]) for g in r["anteriores"]] == [
+        ("2025-01", 1, 66_000), ("2026-08", 1, 1_000), ("2026-09", 1, 20_000)]
+    # a contagem por etapa dos meses anteriores: 3.000 x 33,33% = 999,9 -> 1.000 em analise; duas protocoladas
+    assert [(e["etapa"], e["medicoes"], e["valor_centavos"]) for e in r["anteriores_etapas"] if e["medicoes"]] == [
+        ("em_analise", 1, 1_000), ("protocolado", 2, 86_000)]
+    assert r["contratantes"][-1] == {"contratante": "SINFRA", "medicoes": 3, "anteriores": 3}
+    # a exportacao segue a pagina: a de 2024 nao sai
+    linhas = resumo_medicoes.linhas_csv(r, lambda v: str(v))
+    assert [x[4] for x in linhas if x[0] == "meses anteriores"] == ["01/2025", "08/2026", "09/2026"]
+
+
 # --- rotas ---------------------------------------------------------------------------------------------------
 
 @pytest.fixture
@@ -497,7 +693,9 @@ def test_rota_e_exportacao_da_relacao(client_admin, _sem_certidoes):
     r = client_admin.get(f"/api/resumo-medicoes?mes={MES}")
     assert r.status_code == 200
     d = r.json()
-    assert set(d) == {"hoje", "mes", "em_trabalho", "atualizacao", "etapas", "grupos", "sem_medicao", "anteriores"}
+    assert set(d) == {"hoje", "mes", "em_trabalho", "atualizacao", "contratante", "contratantes", "etapas", "medido",
+                      "mesma_altura", "diferenca_critica_por_mil", "grupos", "sem_medicao", "anteriores_etapas", "anteriores"}
+    assert d["medido"]["valor_centavos"] == 152_001 == sum(e["valor_centavos"] for e in d["etapas"])
     [linha] = [x for g in d["grupos"] for x in g["linhas"]]
     assert (linha["medicao_ids"], linha["etapa"], linha["valor_centavos"]) == ([mid, reajuste], "nota", 152_001)
     assert [o["contrato_id"] for o in d["sem_medicao"]] == [outra]
@@ -518,6 +716,16 @@ def test_rota_e_exportacao_da_relacao(client_admin, _sem_certidoes):
     # meses anteriores em aberto, com a competencia de cada linha
     assert texto[3] == "meses anteriores;Secretaria de Exemplo;'=Obra Própria;2ª Medição;09/2026;Protocolado;;;05/10/2026;09/10/2026;;R$ 800,00"
     assert texto[4:] == [""]
+
+    # #805: o filtro por contratante recorta a resposta e a exportacao
+    assert d["contratantes"] == [{"contratante": "Secretaria de Exemplo", "medicoes": 2, "anteriores": 1}]
+    do_orgao = client_admin.get("/api/resumo-medicoes", params={"mes": MES, "contratante": "Secretaria de Exemplo"}).json()
+    assert do_orgao["contratante"] == "Secretaria de Exemplo" and do_orgao["grupos"] == d["grupos"]
+    de_outro = client_admin.get("/api/resumo-medicoes", params={"mes": MES, "contratante": "Outro Órgão"})
+    assert de_outro.status_code == 200 and de_outro.json()["grupos"] == [] and de_outro.json()["contratantes"] == d["contratantes"]
+    x = client_admin.get("/api/resumo-medicoes.csv", params={"mes": MES, "contratante": "Outro Órgão"})
+    assert x.status_code == 200 and x.content.decode("utf-8-sig").split("\r\n")[1:] == [""]
+    assert client_admin.get("/api/resumo-medicoes?contratante=").status_code == 422
 
 
 @pytest.mark.parametrize("perfil", ["diretoria", "engenharia"])
