@@ -128,7 +128,9 @@ _Avoid_: saldo do contrato
 
 **Ritmo**:
 O medido de execução por mês, numa janela de seis meses. O projeto fica fora: projeto pago não é obra
-andando. A conclusão estimada é o saldo a executar nesse ritmo (`docs/adr/0012`).
+andando. A conclusão estimada é o saldo a executar nesse ritmo (`docs/adr/0012`). O necessário por mês é o saldo a
+executar dividido pelas competências que restam, da de hoje à do fim da execução; com o ritmo igual ou acima
+dele, a obra está no ritmo do prazo.
 
 **Medição final**:
 A última medição do contrato, marcada pela engenharia; põe o contrato em encerramento.

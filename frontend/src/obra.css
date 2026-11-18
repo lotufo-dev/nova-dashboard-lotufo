@@ -55,13 +55,18 @@
 .obra-prazo .lt__titulo { align-items: center; min-height: var(--altura-contador); margin-bottom: var(--espaco-gg); }
 .obra-prazo .lt__trilho { height: var(--altura-barra-etapa); }
 .obra-prazo .lt__feito { background: var(--cor-barra-recebido); }
-/* a conta do ritmo, embaixo, sob a regua de secao */
+/* a conta do ritmo, embaixo, sob a regua de secao: ritmo, necessario por mes (#803) e conclusao estimada. As duas
+   primeiras colunas tem a largura do que mostram e a sobra fica com a conclusao, para o selo dela caber numa linha */
 .obra-ritmo {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--espaco-p) var(--espaco-g);
+  display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: var(--espaco-p) var(--espaco-gg);
   margin: 0 var(--espaco-g); padding: var(--regua-secao-respiro) 0 var(--espaco-m); border-top: var(--regua-secao);
 }
 .obra-ritmo dt { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .obra-ritmo dd { margin: 0; font-family: var(--fonte-numero); font-variant-numeric: tabular-nums; font-weight: var(--peso-numero); white-space: nowrap; }
+/* o necessario por mes com as competencias que restam: a unidade e a contagem sao texto, na linha de baixo do valor
+   (ao lado dele a coluna alargava e tirava da conclusao o espaco do selo) */
+.obra-ritmo .obra-ritmo__necessario { display: grid; justify-items: start; }
+.obra-ritmo .obra-ritmo__resta { color: var(--cor-texto-secundario); font-family: var(--fonte-texto); font-size: var(--texto-meta); font-weight: var(--peso-normal); }
 /* a conclusao estimada com o selo do que ela diz sobre o prazo: o selo quebra para baixo da data se nao couber */
 .obra-ritmo .obra-ritmo__conclusao { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-p); white-space: normal; }
 .obra-ritmo__conclusao > span { white-space: nowrap; }
@@ -143,6 +148,7 @@
   .obra-ritmo { grid-template-columns: minmax(0, 1fr); gap: var(--espaco-mini); margin: 0 var(--espaco-m); }
   .obra-ritmo > div { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--espaco-mini) var(--espaco-m); }
   .obra-ritmo dd { margin-left: auto; min-width: 0; }
+  .obra-ritmo .obra-ritmo__necessario { justify-items: end; }
   .obra-ritmo .obra-ritmo__conclusao { justify-content: flex-end; }
   .obra-agora__lista { grid-template-columns: minmax(0, 1fr); padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
   .obra-agora__lista > div + div { border-left: 0; border-top: var(--borda-linha); padding: var(--espaco-p) 0 var(--espaco-mini); }

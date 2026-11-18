@@ -9,7 +9,7 @@ import {
 } from "./listaObras";
 import { brl } from "./Medicoes";
 import { Glifo } from "./Selo";
-import { CurvaDaCarteira, Qdop, Reajustes, SeloFarol, type Painel } from "./ObrasCarteira";
+import { Qdop, Reajustes, SeloFarol, type Painel } from "./ObrasCarteira";
 import { trocarBusca, type AbaObras, type Busca, type Ir } from "./rota";
 import { Link } from "./Link";
 import Rolagem from "./Rolagem";
@@ -21,7 +21,7 @@ import Falha from "./Falha";
 // por contratante e por obra, e que obra pede atencao. Tudo NA COTA DA LOTUFO (o cabecalho diz uma vez; os numeros vem
 // prontos do servidor, em `posicao`). Duas vistas:
 //  - "Obras" ("/obras"): os numeros da lista, a tabela por contratante com o subtotal de cada um e o farol da obra
-//    que nao esta' em dia, a curva do previsto e do medido e os reajustes esperando apostilamento. E' a Posicao com o
+//    que nao esta' em dia e os reajustes esperando apostilamento. E' a Posicao com o
 //    Resumo que veio da Carteira (#748): os dois mostravam os mesmos totais, por contratante, em dois lugares.
 //  - "QDOP" ("/obras/qdop"): o quadro no leiaute oficial, com o farol, os motivos e o arquivo exportado.
 // O estado fica na URL: ?q=<busca>, ?situacao=todas (com as encerradas) e ?c=<contratante> (ou, nos links de antes,
@@ -53,7 +53,7 @@ export default function Contratos({ ir, busca = {}, aba = "posicao" }: { ir: Ir;
   const [lista, setLista] = useState<Obra[] | null>(null);
   const [empresas, setEmpresas] = useState<Map<number, string> | null>(new Map());
   const [avisos, setAvisos] = useState<Aviso[] | null | undefined>(undefined);
-  // o painel da diretoria (`/api/diretoria`): o farol de cada obra, o medido do ano, a curva, os reajustes e o QDOP;
+  // o painel da diretoria (`/api/diretoria`): o farol de cada obra, o medido do ano, os reajustes e o QDOP;
   // undefined = carregando; null = nao carregou
   const [painel, setPainel] = useState<Painel | null | undefined>(undefined);
   const [erroPainel, setErroPainel] = useState("");
@@ -223,9 +223,8 @@ export default function Contratos({ ir, busca = {}, aba = "posicao" }: { ir: Ir;
         )}
 
         {lista && painel === null && (
-          <Falha>Não foi possível carregar o farol, a curva e os reajustes. Recarregue a página para tentar de novo.</Falha>
+          <Falha>Não foi possível carregar o farol e os reajustes. Recarregue a página para tentar de novo.</Falha>
         )}
-        {lista && painel && listaInteira && <CurvaDaCarteira serie={painel.curva_carteira ?? []} />}
         {/* #279: o reajuste ja' medido das competencias sem apostilamento, por obra; so' quando existe */}
         {lista && painel?.reajustes_apostilamento && listaInteira && painel.reajustes_apostilamento.obras.length > 0
           && <Reajustes r={painel.reajustes_apostilamento} ir={ir} />}

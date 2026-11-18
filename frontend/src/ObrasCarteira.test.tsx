@@ -1,14 +1,12 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CurvaDaCarteira, Qdop, Reajustes, SeloFarol, type Painel } from "./ObrasCarteira";
+import { Qdop, Reajustes, SeloFarol, type Painel } from "./ObrasCarteira";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
 
 const PAINEL: Painel = {
   hoje: "2026-09-24", medido_ano: { ano: "2026", valor_centavos: 1_000_000 },
-  curva_carteira: [{ competencia: "2026-08", previsto_centavos: 150_000, previsto_anterior_centavos: 300_000, medido_centavos: 100_000 },
-                   { competencia: "2026-09", previsto_centavos: 200_000, previsto_anterior_centavos: 200_000, medido_centavos: 150_000 }],
   reajustes_apostilamento: { competencias: 0, valor_centavos: 0, obras: [] },
   obras: [{ contrato_id: 7, seq: 1, obra: "Obra Própria", contratante: "Secretaria de Exemplo", empreita: "PRÓPRIA", direito: 1,
             // #262: faturado (QDOP, com projeto) e saldo (execucao - medido de execucao) nao fecham entre si
@@ -20,30 +18,6 @@ const PAINEL: Painel = {
 
 describe("As peças da lista de Obras que vieram da Carteira (#748, redesenho #774)", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
-
-  it("a curva da carteira tem o previsto vigente, o anterior à última repactuação e o medido (#296)", () => {
-    render(<CurvaDaCarteira serie={PAINEL.curva_carteira} />);
-    // curva acumulada: previsto 150.000 + 200.000 e medido 100.000 + 150.000 até 09/2026
-    const curva = screen.getByRole("img", { name: /Previsto e medido de execução acumulados de 08\/2026 a 09\/2026/ });
-    expect(curva.querySelector(".cart-c-prev")).toBeTruthy();
-    expect(curva.querySelector(".cart-c-ant")).toBeTruthy();
-    expect(curva.querySelector(".cart-c-med")).toBeTruthy();
-    expect((curva.getAttribute("aria-label") ?? "").replace(/\s/g, " ")).toContain("previsto anterior à última repactuação R$ 5.000,00");
-    const leitura = (screen.getByRole("status").textContent ?? "").replace(/\s/g, " ");
-    expect(leitura).toContain("previsto R$ 3.500,00");
-    expect(leitura).toContain("previsto anterior R$ 5.000,00");
-    expect(leitura).toContain("medido de execução R$ 2.500,00");
-    expect(leitura).not.toContain("do previsto");
-    expect(screen.getByText("previsto anterior à última repactuação")).toBeTruthy();
-    // a curva conta outra regra de medido que o "Medido em <ano>": o nome diz qual (revisão da PR #326)
-    expect(screen.getByText("Previsto e medido de execução acumulados nos últimos 12 meses")).toBeTruthy();
-    expect(screen.getByText("medido de execução")).toBeTruthy();
-  });
-
-  it("sem série, a curva não desenha painel vazio", () => {
-    const { container } = render(<CurvaDaCarteira serie={[]} />);
-    expect(container.textContent).toBe("");
-  });
 
   it("o farol vira selo com glifo e palavra; Ação pede ação agora (octógono) e Atenção se acompanha (triângulo)", () => {
     const { container } = render(<><SeloFarol farol="vermelho" /><SeloFarol farol="acao" /><SeloFarol farol="atencao" /><SeloFarol farol="verde" /></>);
@@ -62,6 +36,9 @@ describe("As peças da lista de Obras que vieram da Carteira (#748, redesenho #7
     // #262: a tabela soma o contratual sem o aditivo de reajuste (a base do saldo)
     expect(cabecas).toEqual(["Obra", "Contratual de execução (PI+VA)", "Faturado", "Saldo", "Término", "Farol"]);
     expect(tabela.textContent).not.toMatch(/−16,7|anterior/);
+    // #802: a curva do previsto e do medido saiu; o QDOP não desenha gráfico
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/previsto/i);
     const [, linha] = within(tabela).getAllByRole("row");
     expect(linha.children).toHaveLength(6);
     const celulas = within(linha).getAllByRole("cell").map(c => (c.textContent ?? "").replace(/\s/g, " "));

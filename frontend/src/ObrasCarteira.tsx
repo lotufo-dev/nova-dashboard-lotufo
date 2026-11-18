@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { type Aviso } from "./Alertas";
 import { api } from "./api";
 import { motivosDaLinha, porFarol, type Motivo } from "./carteira";
@@ -8,18 +8,16 @@ import { filtrarObras, type ObraLista } from "./listaObras";
 import { brl } from "./Medicoes";
 import { type Ir } from "./rota";
 import { Link } from "./Link";
-import { fmtCompetencia, fmtDataPura, fmtMesCurto as mesCurto } from "./tempo";
+import { fmtDataPura } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import { situacaoDoNivel } from "./situacao";
 import Falha from "./Falha";
 
-// As pecas da lista de Obras que vieram da Carteira (#748; bloco 8, spec §10.5): a curva do previsto e do medido, os
-// reajustes esperando apostilamento e o QDOP. Tudo na COTA da Lotufo, com as regras em `app/diretoria.py`
-// (`/api/diretoria`); quem pede o painel e' a lista (`Contratos.tsx`), uma vez para as duas vistas.
+// As pecas da lista de Obras que vieram da Carteira (#748; bloco 8, spec §10.5): os reajustes esperando apostilamento
+// e o QDOP. Tudo na COTA da Lotufo, com as regras em `app/diretoria.py` (`/api/diretoria`); quem pede o painel e' a
+// lista (`Contratos.tsx`), uma vez para as duas vistas. A curva do previsto e do medido saiu na #802.
 
-/** Issue #296: a curva S da carteira (obras ativas, cada uma na cota), com o previsto anterior a ultima repactuacao. */
-type PontoCarteira = { competencia: string; previsto_centavos: number; previsto_anterior_centavos: number; medido_centavos: number };
 type Obra = {
   contrato_id: number; seq: number; obra: string; contratante: string; empreita: string; direito: number;
   pi_va: number; faturados: number; saldo: number; status: string; termino: string | null;
@@ -28,8 +26,7 @@ type Obra = {
 /** #279: por obra, as competências de reajuste já medidas sem apostilamento e o medido delas, na cota. */
 type ReajusteObra = { contrato_id: number; obra: string; competencias: number; valor_centavos: number };
 export type Painel = {
-  hoje: string; medido_ano: { ano: string; valor_centavos: number }; curva_carteira: PontoCarteira[];
-  obras: Obra[]; avisos: Aviso[];
+  hoje: string; medido_ano: { ano: string; valor_centavos: number }; obras: Obra[]; avisos: Aviso[];
   reajustes_apostilamento?: { competencias: number; valor_centavos: number; obras: ReajusteObra[] };
 };
 
@@ -51,21 +48,6 @@ function data(iso: string | null | undefined): string {
   return iso ? fmtDataPura(iso.slice(0, 10)) : "—";
 }
 
-// Escala e unidade repetidas do Cronograma de proposito (a linguagem visual mora no tokens.css).
-function escala(maxCentavos: number): { topo: number; passo: number } {
-  const max = Math.max(1, maxCentavos);
-  const alvo = max / 4;
-  const mag = Math.pow(10, Math.floor(Math.log10(alvo)));
-  const passo = Math.max(1, [1, 2, 2.5, 5, 10].map(m => m * mag).find(p => p >= alvo) ?? mag * 10);
-  return { topo: Math.ceil(max / passo) * passo, passo };
-}
-function unidade(topo: number): { divisor: number; rotulo: string } {
-  const reais = topo / 100;
-  if (reais >= 1_000_000) return { divisor: 100_000_000, rotulo: "R$ mi" };
-  if (reais >= 10_000) return { divisor: 100_000, rotulo: "R$ mil" };
-  return { divisor: 100, rotulo: "R$" };
-}
-
 function Secao({ id, titulo, acoes, children }:
     { id: string; titulo: string; acoes?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -81,124 +63,6 @@ function Secao({ id, titulo, acoes, children }:
 
 // O que termina, pela regra da lista de Obras (`listaObras.ts`), com o link para ela filtrada.
 const PRAZOS = [{ dias: 90, busca: "90", quando: `em ${fmtDias(90)}` }, { dias: 180, busca: "180", quando: "em 6\u00a0meses" }];
-
-/** Largura do contêiner, acompanhada (jsdom não tem ResizeObserver: lá a medição única basta). */
-function useLargura() {
-  const ref = useRef<HTMLDivElement>(null);
-  const [larg, setLarg] = useState(0);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const medir = () => setLarg(el.clientWidth);
-    medir();
-    if (typeof ResizeObserver === "undefined") return;
-    const observador = new ResizeObserver(medir);
-    observador.observe(el);
-    return () => observador.disconnect();
-  }, []);
-  return { ref, larg };
-}
-
-/** O previsto anterior à última repactuação só é uma terceira linha quando difere do vigente em algum mês. */
-function temAnterior(serie: PontoCarteira[]): boolean {
-  return serie.some(s => s.previsto_anterior_centavos !== s.previsto_centavos);
-}
-
-/** Curva S da carteira (#296): o previsto vigente, o previsto anterior à última repactuação e o medido de execução
- *  ACUMULADOS na janela de 12 meses (`curva_carteira`, a soma das curvas das obras ativas), com a leitura de cada mês
- *  embaixo (passar o ponteiro troca o mês; sem ponteiro, o último). */
-function CurvaS({ serie }: { serie: PontoCarteira[] }) {
-  const { ref, larg } = useLargura();
-  const [sel, setSel] = useState<number | null>(null);
-  const acc = useMemo(() => {
-    const out: { competencia: string; previsto: number; anterior: number; medido: number }[] = [];
-    for (const s of serie) {
-      const ant = out[out.length - 1];
-      out.push({ competencia: s.competencia, previsto: (ant?.previsto ?? 0) + s.previsto_centavos,
-        anterior: (ant?.anterior ?? 0) + s.previsto_anterior_centavos, medido: (ant?.medido ?? 0) + s.medido_centavos });
-    }
-    return out;
-  }, [serie]);
-  if (acc.length === 0) return null;
-  const comAnterior = temAnterior(serie);
-  const ultimo = acc.length - 1;
-  const i = Math.min(sel ?? ultimo, ultimo);
-  const a = acc[i];
-  const W = Math.max(280, larg), H = W < 480 ? 220 : 260, mE = 48, mD = 12, T = 22, B = 30;
-  const { topo, passo } = escala(Math.max(1, ...acc.map(x => Math.max(x.previsto, x.anterior, x.medido))));
-  const { divisor, rotulo } = unidade(topo);
-  const larguraMes = (W - mE - mD) / acc.length;
-  const x = (k: number) => mE + (k + 0.5) * larguraMes;
-  const y = (v: number) => T + (1 - v / topo) * (H - T - B);
-  const linha = (k: "previsto" | "anterior" | "medido") => acc.map((p, n) => `${n ? "L" : "M"}${x(n).toFixed(1)} ${y(p[k]).toFixed(1)}`).join(" ");
-  const grade: number[] = [];
-  for (let v = 0; v <= topo + passo / 2; v += passo) grade.push(v);
-  const pular = Math.max(1, Math.ceil(46 / larguraMes));
-  const mover = (ev: React.PointerEvent<SVGRectElement>) => {
-    const r = ev.currentTarget.ownerSVGElement?.getBoundingClientRect();
-    if (!r || r.width === 0) return;
-    const px = ((ev.clientX - r.left) * W) / r.width;
-    setSel(Math.max(0, Math.min(ultimo, Math.floor((px - mE) / larguraMes))));
-  };
-  return (
-    <>
-      <div ref={ref} className="cart-curva">
-        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img"
-          aria-label={`Previsto e medido de execução acumulados de ${fmtCompetencia(acc[0].competencia)} a ${fmtCompetencia(acc[ultimo].competencia)}, `
-            + `nas obras ativas, na cota da Lotufo. Ao fim, previsto ${brl(acc[ultimo].previsto)}`
-            + (comAnterior ? `, previsto anterior à última repactuação ${brl(acc[ultimo].anterior)}` : "")
-            + ` e medido de execução ${brl(acc[ultimo].medido)}.`}>
-          <text className="g-eixo num" x={mE - 8} y={T - 10} textAnchor="end">{rotulo}</text>
-          {grade.map(v => (
-            <g key={v}>
-              <line className={v === 0 ? "g-base" : "g-grade"} x1={mE} y1={y(v)} x2={W - mD} y2={y(v)} />
-              <text className="g-eixo num" x={mE - 8} y={y(v) + 4} textAnchor="end">
-                {(v / divisor).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}
-              </text>
-            </g>
-          ))}
-          {acc.map((p, n) => (ultimo - n) % pular === 0
-            && <text key={p.competencia} className="g-eixo-x" x={x(n)} y={H - 10} textAnchor="middle">{mesCurto(p.competencia)}</text>)}
-          <path className="cart-c-area" d={`${linha("medido")} L${x(ultimo)} ${y(0)} L${x(0)} ${y(0)} Z`} />
-          {comAnterior && <path className="cart-c-ant" d={linha("anterior")} />}
-          <path className="cart-c-prev" d={linha("previsto")} />
-          <path className="cart-c-med" d={linha("medido")} />
-          <line className="cart-c-guia" x1={x(i)} x2={x(i)} y1={T} y2={y(0)} />
-          {acc.map((p, n) => (
-            <g key={p.competencia}>
-              <circle className="cart-c-ponto-prev" cx={x(n)} cy={y(p.previsto)} r={3.5} />
-              <circle className="cart-c-ponto-med" cx={x(n)} cy={y(p.medido)} r={4} />
-            </g>
-          ))}
-          <rect x={mE} y={T} width={W - mE - mD} height={H - T - B} fill="transparent"
-            onPointerMove={mover} onPointerDown={mover} onPointerLeave={() => setSel(null)} />
-        </svg>
-      </div>
-      <p className="cartao__corpo cart-leitura" role="status">
-        Até {fmtCompetencia(a.competencia)}: previsto <span className="num">{brl(a.previsto)}</span>
-        {comAnterior && <> · previsto anterior <span className="num">{brl(a.anterior)}</span></>} · medido de execução{" "}
-        <span className="num">{brl(a.medido)}</span>
-      </p>
-    </>
-  );
-}
-
-/** O painel da curva: previsto e medido de execução acumulados em 12 meses, com a legenda. */
-export function CurvaDaCarteira({ serie }: { serie: PontoCarteira[] }) {
-  if (serie.length === 0) return null;
-  return (
-    <Secao id="dir-curva" titulo="Previsto e medido de execução acumulados nos últimos 12 meses">
-      <CurvaS serie={serie} />
-      <div className="legenda">
-        <span className="legenda__item"><span className="legenda__chave legenda__chave--previsto" aria-hidden="true" />previsto</span>
-        {temAnterior(serie) && (
-          <span className="legenda__item"><span className="legenda__chave legenda__chave--anterior" aria-hidden="true" />previsto anterior à última repactuação</span>
-        )}
-        <span className="legenda__item"><span className="legenda__chave legenda__chave--execucao" aria-hidden="true" />medido de execução</span>
-      </div>
-    </Secao>
-  );
-}
 
 /** #279 (spec 2026-10-20 §2.2): o reajuste já medido (pedido ou aprovado) das competências sem apostilamento, por
  *  obra; a obra leva à aba Reajuste dela, com cada competência. */
