@@ -587,6 +587,8 @@ A pasta vem de `DASH_CADASTRO_DIR` (produção: `C:\DashboardLotufo\cadastro`, c
    deploy, o snapshot horário do backup cobre o antes.
 4. Instrumento assinado já aplicado não se altera: correção é instrumento novo com `corrige: <chave>`.
 
+**Estado da obra e a data dele.** No YAML do contrato, `status` é `ativo`, `suspenso`, `em_encerramento`, `encerrado` ou `rescindido`, e `status_desde` (AAAA-MM-DD) é o dia em que a obra entrou nele. Em `em_encerramento` a data é obrigatória (a da medição final). Em `encerrado` e `rescindido` ela é opcional e é a data do encerramento ou da rescisão: o `cadastro validar` recusa data futura e data anterior a `execucao_inicio`; a fonte da data vai em comentário na mesma linha do YAML. O `cadastro aplicar` grava a data como evento do contrato (encerramento ou rescisão, origem "Cadastro versionado", auditado em `cadastro.contrato_evento`), inclusive na obra que já entra no cadastro encerrada, e a página da obra passa a dizer "encerrada desde". Sem a data, a obra fica só com o estado e a página diz "encerrada". Evento gravado não muda: aplicar de novo o mesmo cadastro não grava nada; trocar a data no YAML grava um evento novo, que diz a data que corrige e passa a valer (vale o último gravado, mesmo que a data seja anterior); tirar a data do YAML não apaga o evento. O exemplo é `cadastro-exemplo/contratos/obra-encerrada.yaml`.
+
 O esquema de cada tipo de instrumento (apostilamento de reajuste SINFRA e MT-PAR, retificação, paralisação e reinício, endosso de garantia, aditivo de reajuste, `datas_base` com `aplica_a`, `pleitos_anteriores`) está comentado em `cadastro-exemplo/contratos/obra-propria.yaml`.
 
 ## Carga do histórico de medições

@@ -21,7 +21,10 @@ from app.medicoes import CHAVES_PASSO
 
 FAMILIAS = ("mtpar", "sinfra", "ses", "prefeitura")
 LEIS = ("8.666", "14.133", "13.303")
-STATUS = ("ativo", "suspenso", "em_encerramento", "encerrado")
+STATUS = ("ativo", "suspenso", "em_encerramento", "encerrado", "rescindido")
+# status que acabam o contrato: `status_desde` e' a data do fato (o encerramento ou a rescisao) e vira o evento que a
+# pagina da obra le em "encerrada desde"
+STATUS_FINAIS = ("encerrado", "rescindido")
 PAPEIS = ("lotufo", "consorcio", "consorciada")
 # tipo do cadastro -> tipo da tabela `aditivos` (o que altera valor e prazo)
 TIPOS_ADITIVO = {"aditivo_valor": "valor", "aditivo_prazo": "prazo", "aditivo_misto": "misto",
@@ -768,6 +771,14 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
             falha(campo, str(e))
     if c["status"] == "em_encerramento" and not c["status_desde"]:
         falha("status_desde", "obrigatório quando status é em_encerramento (data da medição final)")
+    if c["status"] in STATUS_FINAIS and c["status_desde"]:
+        # opcional: sem a data, a obra entra so' com o estado, como antes. Com ela, e' a data do fato
+        fato = "da rescisão" if c["status"] == "rescindido" else "do encerramento"
+        if c["status_desde"] > tempo.hoje_local().isoformat():
+            falha("status_desde", f"a data {fato} ({c['status_desde']}) está no futuro")
+        elif c["execucao_inicio"] and c["status_desde"] < c["execucao_inicio"]:
+            falha("status_desde", f"a data {fato} ({c['status_desde']}) é anterior ao início da execução "
+                                  f"({c['execucao_inicio']})")
     if c["execucao_fim"] and c["vigencia_fim"] and c["vigencia_fim"] < c["execucao_fim"]:
         avisos.append(f"{onde}: vigência ({c['vigencia_fim']}) termina antes da execução "
                       f"({c['execucao_fim']})")

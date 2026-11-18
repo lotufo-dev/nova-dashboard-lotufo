@@ -299,6 +299,18 @@ describe("Página da obra: o desenho novo", () => {
     expect(within(cartao).queryByText("Conclusão estimada")).toBeNull();
   });
 
+  it("obra encerrada ou rescindida com a data do cadastro: 'encerrada desde' e 'rescindida desde'", async () => {
+    fixarDia("2027-01-05T15:00:00Z");
+    for (const [status, texto] of [["encerrado", "encerrada desde 17/11/2023"], ["rescindido", "rescindida desde 17/11/2023"]] as const) {
+      responderCom({ status, status_desde: "2023-11-17" });
+      const { unmount } = render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+      const cartao = (await screen.findByRole("heading", { name: "Prazo" })).closest("section")!;
+      await waitFor(() => expect(cartao.querySelector(".obra-prazo__numero")!.textContent).toBe(texto));
+      expect(within(cartao).queryByText(/vencid/)).toBeNull();
+      unmount();
+    }
+  });
+
   it("o selo das linhas do tempo é o nível que o servidor manda: a tela não decide pelos dias nem pelo status", async () => {
     fixarDia("2027-01-05T15:00:00Z");     // execucao vencida (31/12/2026), vigencia a 26 dias
     // obra ativa vencida, mas o servidor diz que nao ha' prazo a cobrar: nenhum selo

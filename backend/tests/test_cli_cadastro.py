@@ -182,10 +182,12 @@ def test_cadastro_exemplo_valida_e_aplica_em_banco_vazio(tmp_path, monkeypatch, 
     monkeypatch.delenv("DASH_CADASTRO_DIR", raising=False)
     conn = _banco(tmp_path, monkeypatch)
     assert cli.main(["cadastro", "validar"]) == 0
-    assert "2 contratos" in capsys.readouterr().out
+    assert "3 contratos" in capsys.readouterr().out
     assert cli.main(["cadastro", "aplicar", "--usuario", "leo@l.com"]) == 0
     assert [r[0] for r in conn.execute("SELECT nome_curto FROM contratos ORDER BY nome_curto")] == [
-        "Obra Consórcio", "Obra Própria"]
+        "Obra Consórcio", "Obra Encerrada", "Obra Própria"]
+    # a obra que entra encerrada leva a data do encerramento do YAML como evento do contrato
+    assert [tuple(r) for r in conn.execute("SELECT tipo, data FROM contrato_eventos")] == [("encerramento", "2023-11-17")]
     assert conn.execute("SELECT COUNT(*) FROM espelho_regras").fetchone()[0] == 2
     # issue #256: a obra de exemplo traz duas versoes de cronograma, cada uma com a data do documento
     assert [tuple(r) for r in conn.execute("SELECT chave, data_documento FROM cronograma_versoes_cadastro "

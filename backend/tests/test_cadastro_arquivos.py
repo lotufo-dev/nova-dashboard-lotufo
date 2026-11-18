@@ -87,6 +87,27 @@ def test_em_encerramento_exige_status_desde(tmp_path):
     assert any("status_desde" in e for e in erros)
 
 
+def test_encerrado_ou_rescindido_aceita_a_data_do_fato_em_status_desde(tmp_path):
+    """`status_desde` e' opcional na obra encerrada ou rescindida; com ela, e' a data do encerramento (ou da
+    rescisao): valida, nao futura e nao anterior ao inicio da execucao."""
+    def obra(**troca):
+        return _escrever(tmp_path, contratos=[{**CONTRATO, "execucao_inicio": "2024-03-11", **troca}])
+    for status in ("encerrado", "rescindido"):
+        assert ca.preparar(obra(status=status))["contratos"][0]["status_desde"] is None      # sem a data, como antes
+        c = ca.preparar(obra(status=status, status_desde="2026-09-30"))["contratos"][0]
+        assert (c["status"], c["status_desde"]) == (status, "2026-09-30")
+    assert any("status_desde" in e for e in _erros(obra(status="encerrado", status_desde="30/09/2026")))
+    erros = _erros(obra(status="encerrado", status_desde="2999-01-01"))
+    assert any("status_desde" in e and "encerramento" in e and "futuro" in e for e in erros)
+    erros = _erros(obra(status="rescindido", status_desde="2999-01-01"))
+    assert any("status_desde" in e and "rescisão" in e and "futuro" in e for e in erros)
+    erros = _erros(obra(status="encerrado", status_desde="2024-03-10"))
+    assert any("status_desde" in e and "anterior ao início da execução (2024-03-11)" in e for e in erros)
+    # no proprio dia do inicio, e sem inicio de execucao cadastrado, nao ha' o que recusar
+    assert ca.preparar(obra(status="encerrado", status_desde="2024-03-11"))
+    assert ca.preparar(obra(status="encerrado", status_desde="2020-01-01", execucao_inicio=None))
+
+
 # --- bloco 2: geral.yaml, espelho/<slug>.yaml, modelos e emails_faturamento ---------------
 
 import hashlib
@@ -289,13 +310,13 @@ def test_centro_custo_empresa_rm_so_em_consorcio_e_sem_repetir(tmp_path):
 def test_cadastro_de_exemplo_declara_o_centro_da_empresa_so_na_obra_de_consorcio():
     from tests.conftest import CADASTRO_EXEMPLO
     centros = {c["nome_curto"]: c["centro_custo_empresa_rm"] for c in ca.preparar(CADASTRO_EXEMPLO)["contratos"]}
-    assert centros == {"Obra Própria": None, "Obra Consórcio": "5.001.001"}
+    assert centros == {"Obra Própria": None, "Obra Consórcio": "5.001.001", "Obra Encerrada": None}
 
 
 def test_cadastro_de_exemplo_declara_um_tipo_extra_so_na_obra_de_consorcio():
     from tests.conftest import CADASTRO_EXEMPLO
     tipos = {c["nome_curto"]: c["tipos_cobranca_extras_rm"] for c in ca.preparar(CADASTRO_EXEMPLO)["contratos"]}
-    assert tipos == {"Obra Própria": [], "Obra Consórcio": ["2.2.03"]}
+    assert tipos == {"Obra Própria": [], "Obra Consórcio": ["2.2.03"], "Obra Encerrada": []}
 
 
 def test_orgao_com_cnpj_valido_normaliza_e_invalido_e_erro(tmp_path):

@@ -133,6 +133,10 @@ andando. A conclusão estimada é o saldo a executar nesse ritmo (`docs/adr/0012
 **Medição final**:
 A última medição do contrato, marcada pela engenharia; põe o contrato em encerramento.
 
+**Data do encerramento**:
+O dia em que o contrato acabou, pelo encerramento ou pela rescisão. Vem do cadastro (`status_desde` do contrato
+encerrado ou rescindido) e é o que a página da obra mostra em "encerrada desde". Sem ela, a página diz só o estado.
+
 ### Documentos do ciclo
 
 **Planilha/carta**:
