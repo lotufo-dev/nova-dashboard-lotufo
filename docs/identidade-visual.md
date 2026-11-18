@@ -227,3 +227,14 @@ A casca é o que fica igual em toda tela: o menu à esquerda e o topo (decisões
   computador; no celular nada se sobrepõe, e o que não cabe rola dentro da área da tela.
 - **Na Início e na página da medição, o bloco que muda de disposição mede o próprio painel**, não a janela, porque
   a largura útil depende de o menu estar aberto ou recolhido (PR #729).
+
+## Tela de entrada
+
+A única tela fora da casca (#821).
+
+- **Duas metades iguais: a marca no lado escuro, o formulário no papel.** O lado escuro tem a cor do menu e só a
+  marca: o símbolo L e o nome em dois pesos, as mesmas peças do menu, um em cima do outro. O símbolo cresce na
+  proporção do menu e o nome vai no maior passo da escala de letra. Motivo: dois terços da tela eram um fundo preto
+  com linhas finas, sem marca nem texto, e o formulário ficava num canto (decisão do dono de 18/11/2026, #805).
+- **Nada se move.** O desenho animado saiu, com a biblioteca de 3D que só ele usava.
+- **No celular** o formulário vem primeiro e a marca fica embaixo, no que sobra da altura.

@@ -409,3 +409,20 @@ export const RESPOSTAS_ESPERADAS = [
 export function telasDoPerfil(perfil) {
   return TELAS.filter(t => t.perfis.includes(perfil));
 }
+
+// ---- Tela de login (#821): os estados alem da tela parada. A prova abre cada um antes de entrar, uma vez por
+// largura, preenche e-mail e senha de mentira e aperta "Entrar", com a resposta do servidor simulada.
+//   id       vira o nome da captura: `login-<id>-<largura>.png`
+//   simular  como nas telas; `pendurar: true` deixa o pedido sem resposta, e o botao fica em "Entrando…"
+//   espera   seletor do estado ja' na tela
+import { LOGIN_NO_LIMITE, LOGIN_RECUSADO } from "./simulados.mjs";
+
+const ENTRAR = /^\/api\/auth\/login$/;
+export const ESTADOS_DO_LOGIN = [
+  { id: "recusa", simular: [{ metodo: "POST", caminho: ENTRAR, status: 401, corpo: LOGIN_RECUSADO }],
+    espera: "form.entrar__form .aviso--falha [role=alert]" },
+  { id: "limite", simular: [{ metodo: "POST", caminho: ENTRAR, status: 429, corpo: LOGIN_NO_LIMITE }],
+    espera: "form.entrar__form .aviso--falha [role=alert]" },
+  { id: "espera", simular: [{ metodo: "POST", caminho: ENTRAR, pendurar: true }],
+    espera: 'form.entrar__form button[type="submit"]:disabled' },
+];

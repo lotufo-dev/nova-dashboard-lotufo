@@ -737,3 +737,8 @@ export const filaSimulada = (resposta, reg) => {
     anteriores: { linhas: anteriores, esperam_pagamento: 17, antes_do_ano_inicial: 4, ano_inicial: "2025" },
   };
 };
+
+// ---- Tela de login (#821): o que o servidor responde a quem tenta entrar. Simuladas porque a recusa de verdade
+// conta no limite de tentativas por computador, e a prova ja' entra uma vez por perfil e largura.
+export const LOGIN_RECUSADO = { detail: "E-mail ou senha inválidos, ou usuário bloqueado" };
+export const LOGIN_NO_LIMITE = { detail: "Muitas tentativas de entrar a partir deste computador. Tente de novo em alguns minutos." };
