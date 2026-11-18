@@ -137,6 +137,15 @@ A última medição do contrato, marcada pela engenharia; põe o contrato em enc
 O dia em que o contrato acabou, pelo encerramento ou pela rescisão. Vem do cadastro (`status_desde` do contrato
 encerrado ou rescindido) e é o que a página da obra mostra em "encerrada desde". Sem ela, a página diz só o estado.
 
+**Feito por fora**:
+O ato do ciclo que a pessoa fez por e-mail ou no sistema do órgão, sem passar pela dashboard. A tela tem registro
+próprio para ele (envio e protocolo feitos por fora).
+
+**Ronda**:
+A rotina diária da sessão do agente, fora do produto, que procura o que foi feito por fora nas fontes do dono e
+lança o que tem documento que prova. É temporária (`docs/adr/0016`; roteiro na skill `ronda`).
+_Avoid_: varredura, monitor de e-mail
+
 ### Documentos do ciclo
 
 **Planilha/carta**:
