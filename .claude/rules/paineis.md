@@ -10,8 +10,16 @@ paths:
   - "backend/app/api_inicio.py"
   - "backend/app/api_diretoria.py"
   - "backend/app/api_paineis.py"
+  - "backend/app/api_contratos.py"
+  - "backend/app/fila_medicoes.py"
   - "frontend/src/Inicio.tsx"
   - "frontend/src/ObrasCarteira.tsx"
+  - "frontend/src/Contratos.tsx"
+  - "frontend/src/ContratantePagina.tsx"
+  - "frontend/src/ObrasContratantes.tsx"
+  - "frontend/src/ObrasAndamento.tsx"
+  - "frontend/src/ObrasPecas.tsx"
+  - "frontend/src/listaObras.ts"
   - "frontend/src/Fechamento.tsx"
   - "frontend/src/ResumoDasMedicoes.tsx"
   - "frontend/src/AvisosPagina.tsx"
@@ -28,6 +36,11 @@ Os nomes das etapas e dos valores são os do `GLOSSARY.md`.
 - **Aviso com data vai para a agenda; pendência sem data aparece onde se resolve** e na lista do administrador
   (`docs/adr/0008`).
 - **Prazo do órgão:** uma conta só, a de `docs/adr/0007`.
+- **Tempo parado tem uma leitura só.** "Com quem está" e "parada há" de uma medição saem de `fila_medicoes` (o passo
+  da vez diz com quem está; os dias úteis contam do evento que abriu o passo; no Pagamento, crítico só depois do
+  prazo do órgão). Tela nova que mostre tempo parado usa essa leitura, para a mesma medição não ter dois tons.
+- **Contagem que resume uma tabela nasce no servidor, junto com a leitura que pinta a linha.** A tela não repete
+  limite (dias, percentual): recebe a situação pronta e os limites para escrever o rótulo.
 - **Custo** é "custo lançado no RM"; margem e lucro ficam fora (`docs/adr/0004`).
 - **O backend calcula o que alguma tela mostra.** Número sem tela sai junto com a tela.
 - **A apresentação é do sistema:** tela que substitui um controle manual da equipe parte do dado do sistema e da

@@ -38,7 +38,13 @@ montadas pelo dono: onde outra tela divergir delas, valem elas.
 | a etapa do dinheiro de um valor ou de uma coluna (em análise, boletim, nota, protocolado, recebido, em aberto) | `MarcaEtapa`, ao lado do rótulo |
 | valor melhor ou pior que antes | `Variacao`, com a referência que o servidor manda e o rótulo dela ("set", "out/25") |
 | dois valores que deveriam ser iguais (aprovado × pedido) | `Diferenca`, com o corte (`abaixo`), a base e o limite que o servidor manda; o `acima` só na linha da medição, nunca na que soma |
-| ritmo da obra contra o necessário | `Andamento` |
+| ritmo da obra contra o necessário | `Andamento`; `detalhe="percentual"` é o padrão, `"valores"` escreve "R$ x/mês de R$ y" onde a tabela não tem coluna para eles, `"palavra"` onde o percentual e os valores já estão em colunas |
+| quantas obras estão devagar ou em atenção | a etiqueta do tom da leitura, sem glifo (`.obras-etiqueta`); a contagem usa `andamentoDaObra` (`listaObras.ts`), a mesma régua da peça `Andamento` |
+| o fluxo da medição de uma obra numa linha de tabela (feitos, o da vez, os que faltam) | `BarraDePassos`, com os passos que o servidor manda; a barra com data e clique é a da página da medição (`Passos`) |
+| há quantos dias úteis uma medição está no passo da vez | `TempoParado`, com o `parada` que o servidor manda (dias, situação e, no Pagamento, o prazo do órgão); em cartão, com `frase` |
+| há quanto tempo um processo do SIGA está no setor | o `Selo` da situação que o servidor leu; na tabela em que o tempo é a pergunta da tela (SIGA), a borda esquerda da linha leva a mesma cor |
+| abrir um grupo de linhas ou um bloco (contratante, quem tem de agir, categoria) | o cabeçalho de grupo forte: faixa de tinta cheia com a letra clara, o nome à esquerda e a contagem à direita; o subtotal do grupo nas colunas, quando a tabela tem valores; o que está parado ou atrasado no grupo vai no `Selo`, dentro da faixa |
+| onde está o dinheiro de um conjunto de medições, por etapa | o quadro por etapa (`ResumoQuadro`) e o cartão de medição (`CartaoDaMedicao`); para comparar valores entre linhas, a tabela |
 | falha de leitura ou de ação | `Falha` |
 | ação impedida, ou motivo de botão desligado | `CaixaAviso nivel="trava"`, com o botão desligado ao lado |
 | algo venceu, diverge ou passou do limite, sem impedir | `CaixaAviso nivel="critico"` |
@@ -63,6 +69,10 @@ montadas pelo dono: onde outra tela divergir delas, valem elas.
 - **Português** em rótulo, erro e confirmação ("Nota enviada às HH:MM."). Erro mostra o que aconteceu em palavras
   da pessoa: código interno, nome de exceção e "Failed to fetch" ficam fora da tela.
 - **Quem só consulta** (diretoria) não vê botão de escrita; o 403 vira "Seu perfil só consulta esta tela…".
+- **Filtro de uma mesma lista vai na busca do endereço** (`?categoria=aditivos`, `?familia=nota`), com `.escolha` e a
+  quantidade em `.escolha__n`; vista diferente da tela vai no caminho (`/medicoes/quadro`), com `.aba`. A opção sem
+  item continua na fileira, com zero.
+- **Linha clicável com link dentro:** o clique no link leva ao destino do link e não dispara a ação da linha.
 - **Largura.** A 1024 px a página não rola de lado; tabela larga rola dentro da própria caixa. Celular (390 px) é
   requisito nas telas de leitura da diretoria: Início, Obras, página da obra, Fechamento e Resumo das medições; nelas
   a tabela vira um bloco por linha. As telas de operação são de computador, mas a 390 px nada se sobrepõe.
