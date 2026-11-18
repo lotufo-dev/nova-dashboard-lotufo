@@ -118,7 +118,7 @@ describe("administração", () => {
       "cadastro.pleito", "cadastro.cronograma", "certidao.marcar_estado", "certidao.nao_se_aplica", "certidao.registrar", "certidao_tipo.criar",
       "contrato.atualizar", "contrato.criar", "contrato.encerramento", "contrato.mudar_estado", "correio.assinatura",
       "correio.envio", "cronograma.nova_versao", "entidade.coligada_rm", "entidade.criar", "entidade.desativar", "envio.liberar",
-      "espelho.enviar", "espelho.gerar", "frc.gerar", "medicao.criar", "medicao.documento", "medicao.estado",
+      "espelho.enviar", "espelho.envio_externo", "espelho.gerar", "frc.gerar", "medicao.criar", "medicao.documento", "medicao.estado",
       "medicao.faturada_legado", "medicao.final", "medicao.numero_orgao", "medicao.protocolo", "medicao.recebida_com_diferenca",
       "medicao.remover_teste", "medicao.planilha_envio", "medicao.planilha_peca",
       "medicao.valor_atestado", "medicao.valor_protocolado", "nf.alocar", "nf.desalocar", "nota.conferencia", "nota.confirmacao",
@@ -144,6 +144,7 @@ describe("administração", () => {
     expect(rotuloAcao("medicao.planilha_envio")).toBe("Planilha/carta enviada ao protocolo");   // #282
     expect(rotuloAcao("medicao.planilha_peca")).toBe("Peça da planilha/carta");
     expect(rotuloAcao("medicao.sem_boletim")).toBe("Espelho gerado sem boletim");   // #284
+    expect(rotuloAcao("espelho.envio_externo")).toBe("Envio do espelho feito por fora registrado");   // #798
     expect(rotuloAcao("medicao.reajuste_congelado")).toBe("Pedido do reajuste congelado no envio da planilha/carta");   // #590
     expect(rotuloAcao("algo.novo_aqui")).toBe("Algo novo aqui");
   });

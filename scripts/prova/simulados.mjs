@@ -129,6 +129,23 @@ export const espelhoGerado = (resposta, reg) => ({
   }],
 });
 
+// Issue #798: o mesmo espelho com o envio ao faturamento registrado como feito por fora. A medicao passa a "espelho
+// enviado" e a linha do tempo ganha o registro, com quem fez.
+export const medicaoComEspelhoEnviadoPorFora = (medicoes, reg) => medicoes.map(m => (m.id === reg.medicao ? {
+  ...m, estado: "espelho_enviado", protocolos: [], congelada: 0,
+  edicoes_valor: [...(m.edicoes_valor ?? []), { data: "2025-05-21",
+    texto: "Espelho enviado ao faturamento por fora em 21/05/2025 (pelo Outlook), registrado por Engenharia" }],
+} : m));
+
+export const espelhoEnviadoPorFora = (resposta, reg) => {
+  const gerado = espelhoGerado(resposta, reg);
+  return { ...gerado, espelhos: gerado.espelhos.map(e => ({
+    ...e, medicoes: [{ id: reg.medicao, tipo: "execucao", estado: "espelho_enviado" }],
+    envio_externo: { enviado_em: "2025-05-21", observacao: "pelo Outlook", registrado_em: "2025-05-23 14:00:00",
+      registrado_por_nome: "Engenharia" },
+  })) };
+};
+
 // A previa do e-mail ao faturamento. O assunto e' comprido de proposito: o campo cresce para a segunda linha.
 export const PREVIA_DO_ESPELHO = {
   para: ["faturamento@exemplo.com.br"], copia: ["controladoria@exemplo.com.br", "engenharia@exemplo.com.br"],

@@ -1356,6 +1356,120 @@ def test_reenvio_do_espelho_nao_solta_a_nota_emitida_entre_os_envios(conn, tmp_p
     assert r["alocacoes"] == 1, r
 
 
+def _espelho_enviado_por_fora(conn, mid, dia):
+    """O espelho da medicao sem envio pelo sistema (o fixture envia) e com o envio por fora registrado em `dia`."""
+    from app import espelhos
+    eid = conn.execute("SELECT espelho_id FROM espelho_medicoes WHERE medicao_id=?", (mid,)).fetchone()[0]
+    with db.mutacao(conn):
+        conn.execute("UPDATE espelhos SET envio_id=NULL")
+        conn.execute("DELETE FROM envio_medicoes")
+        conn.execute("UPDATE medicoes SET estado='espelho_gerado' WHERE id=?", (mid,))
+    espelhos.registrar_envio_externo(conn, 1, eid, dia)
+    return eid
+
+
+@pytest.mark.parametrize("emissao, liga", [
+    ("2026-09-14", True),       # a nota do dia do envio por fora vale, como no envio pelo sistema
+    ("2026-09-16", True),
+    ("2026-09-13", False),      # a de antes do envio nao e' a nota pedida pelo espelho
+])
+def test_data_do_envio_por_fora_vale_como_o_dia_do_envio_do_espelho(conn, tmp_path, espelho_mt402, emissao, liga):
+    """Issue #798 (docs/adr/0005): o dia informado no registro por fora e' o dia do pedido da nota."""
+    _, mid = espelho_mt402
+    _espelho_enviado_por_fora(conn, mid, "2026-09-14")
+    assert medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado"
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910, emissao=emissao)], []))
+    assert r["alocacoes"] == (1 if liga else 0), r
+    if liga:
+        assert conn.execute("SELECT regra FROM nf_alocacoes WHERE medicao_id=?", (mid,)).fetchone()[0] == "saida_espelho"
+        assert medicoes.detalhe(conn, mid)["estado"] == "nota_emitida"
+    else:
+        assert not _tem_nf(conn, mid) and medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado"
+
+
+def test_envio_pelo_sistema_depois_do_registro_por_fora_nao_empurra_o_dia_do_pedido(conn, tmp_path, espelho_mt402):
+    """Issue #798: entre o envio por fora e o envio pelo sistema vale o mais antigo, como no reenvio (#708)."""
+    _, mid = espelho_mt402
+    eid = _espelho_enviado_por_fora(conn, mid, "2026-09-10")
+    _enviar_espelho(conn, eid, [mid], em="2026-09-20 14:00:00")        # reenvio pelo sistema, confirmado
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910, emissao="2026-09-14")], []))
+    assert r["alocacoes"] == 1, r
+
+
+def _26a_sem_envio_e_27a_por_fora(conn, cid, mid27, dia):
+    """O caso da segunda revisao da PR #799: a 26a e a 27a da obra com o MESMO valor de saida. A 26a tem espelho
+    gerado e nenhum envio registrado (a nota dela, de 06/08/2026, esta' livre); o espelho da 27a foi por fora em
+    03/09/2026 e a pessoa registra `dia`. Devolve (medicao da 26a, espelho da 27a)."""
+    from app import espelhos
+    e26 = espelhos.gerar(conn, {"id": 1, "email": "u@l.com"}, cid, 26, "2026-07", {"medicao": 71919072})
+    mid26 = conn.execute("SELECT medicao_id FROM espelho_medicoes WHERE espelho_id=?", (e26,)).fetchone()[0]
+    return mid26, _espelho_enviado_por_fora(conn, mid27, dia)
+
+
+def test_data_do_envio_por_fora_digitada_cedo_na_versao_vigente_liga_a_nota_de_outra_medicao(conn, tmp_path,
+                                                                                            espelho_mt402):
+    """Issue #798, o limite que fica (docs/runbook.md): a data errada na versao VIGENTE vale. Com 03/08 no lugar de
+    03/09, a nota da 26a (06/08), livre e de mesmo valor, liga a' 27a pela saida do espelho. Com a data certa, nao."""
+    cid, mid27 = espelho_mt402
+    mid26, _ = _26a_sem_envio_e_27a_por_fora(conn, cid, mid27, "2026-08-03")
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910, emissao="2026-08-06")], []))
+    assert r["alocacoes"] == 1, r
+    assert conn.execute("SELECT regra FROM nf_alocacoes WHERE medicao_id=?", (mid27,)).fetchone()[0] == "saida_espelho"
+    assert medicoes.detalhe(conn, mid27)["estado"] == "nota_emitida" and not _tem_nf(conn, mid26)
+
+
+def test_data_certa_do_envio_por_fora_nao_liga_a_nota_de_outra_medicao(conn, tmp_path, espelho_mt402):
+    cid, mid27 = espelho_mt402
+    mid26, _ = _26a_sem_envio_e_27a_por_fora(conn, cid, mid27, "2026-09-03")
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910, emissao="2026-08-06")], []))
+    assert r["alocacoes"] == 0, r
+    assert not _tem_nf(conn, mid27) and not _tem_nf(conn, mid26)
+
+
+def test_versao_nova_com_a_data_certa_conserta_a_data_do_envio_por_fora_digitada_errada(conn, tmp_path, espelho_mt402):
+    """Issue #798 (segunda revisao da PR #799): a data do registro por fora so' conta da versao em vigor. A data errada
+    (03/08) ficou na versao 1, substituida; a versao 2, vigente, tem a certa (03/09). A nota da 26a (06/08) NAO liga
+    a' 27a, e a nota emitida depois do envio certo liga."""
+    from app import espelhos
+    cid, mid27 = espelho_mt402
+    mid26, e1 = _26a_sem_envio_e_27a_por_fora(conn, cid, mid27, "2026-08-03")
+    e2 = espelhos.gerar(conn, {"id": 1, "email": "u@l.com"}, cid, 27, "2026-08", {"medicao": 71919072},
+                        motivo="data do envio registrada errada")
+    espelhos.registrar_envio_externo(conn, 1, e2, "2026-09-03")
+    assert [tuple(x) for x in conn.execute("SELECT id, situacao, envio_externo_em FROM espelhos WHERE id IN (?,?) "
+                                           "ORDER BY id", (e1, e2))] == [
+        (e1, "substituido", "2026-08-03"), (e2, "vigente", "2026-09-03")]
+    assert sincronizacao_rm._dia_do_envio_do_espelho(conn, mid27) == "2026-09-03"
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910, emissao="2026-08-06")], []))
+    assert r["alocacoes"] == 0, r
+    assert not _tem_nf(conn, mid27) and not _tem_nf(conn, mid26)
+    assert medicoes.detalhe(conn, mid27)["estado"] == "espelho_enviado"
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='nf.alocar'").fetchone()[0] == 0
+    # a nota da 27a, emitida depois do envio certo, liga normalmente (a de 06/08 continua solta)
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910, emissao="2026-08-06"),
+                                                                _nota_da_27a(911, emissao="2026-09-05")], []))
+    assert r["alocacoes"] == 1, r
+    assert [x[0] for x in conn.execute("SELECT n.idmov FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id "
+                                       "WHERE a.medicao_id=?", (mid27,))] == [911]
+    assert [n["idmov"] for n in sincronizacao_rm.reconciliacao(conn)["nfs_sem_medicao"]] == [910]
+
+
+def test_versao_nova_sem_registro_nao_herda_a_data_por_fora_da_versao_substituida(conn, tmp_path, espelho_mt402):
+    """A versao nova ainda sem envio registrado nao tem dia: a data digitada na versao substituida nao vale mais. O
+    e-mail do sistema de uma versao anterior continua valendo (#708), porque e' fato, nao digitacao."""
+    from app import espelhos
+    cid, mid27 = espelho_mt402
+    e1 = _espelho_enviado_por_fora(conn, mid27, "2026-08-03")
+    espelhos.gerar(conn, {"id": 1, "email": "u@l.com"}, cid, 27, "2026-08", {"medicao": 71919072}, motivo="corrigido")
+    assert sincronizacao_rm._dia_do_envio_do_espelho(conn, mid27) is None
+    with db.mutacao(conn):      # a versao 1 tinha saido tambem pelo sistema, em 20/08: esse dia continua contando
+        envio = conn.execute("INSERT INTO envios (tipo, usuario_id, remetente, para, copia, assunto, enviado_em) "
+                             "VALUES ('espelho', 1, 'u@l.com', '[]', '[]', 'Espelho', '2026-08-20 14:00:00')").lastrowid
+        conn.execute("INSERT INTO envio_medicoes (envio_id, medicao_id) VALUES (?,?)", (envio, mid27))
+        conn.execute("UPDATE espelhos SET envio_id=? WHERE id=?", (envio, e1))
+    assert sincronizacao_rm._dia_do_envio_do_espelho(conn, mid27) == "2026-08-20"
+
+
 def test_nota_com_um_centavo_de_diferenca_da_saida_nao_liga(conn, tmp_path, espelho_mt402):
     """A saida so' vale pelo valor EXATO: R$ 719.190,71 (centavo impar) contra R$ 719.190,72 fica sem vinculo."""
     _, mid = espelho_mt402

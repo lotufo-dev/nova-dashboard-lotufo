@@ -1219,3 +1219,258 @@ def test_aviso_nota_acima_da_medicao_usa_o_valor_do_par(ambiente_projeto):
     conn.commit()
     av = [a for a in notas.avisos(conn) if a["tipo"] == "nota_acima_da_medicao"]
     assert [(a["medicao_id"], a["nota_id"]) for a in av] == [(xid, nid)]
+
+
+# --- issue #798: o envio ao faturamento feito por fora --------------------------------------------------------
+
+def _externo(conn, eid):
+    return tuple(conn.execute("SELECT envio_externo_em, envio_externo_observacao, envio_externo_por, envio_id, "
+                              "envio_reservado_em FROM espelhos WHERE id=?", (eid,)).fetchone())
+
+
+def _auditados(conn):
+    return conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='espelho.envio_externo'").fetchone()[0]
+
+
+def _por_fora_na_linha_do_tempo(conn, mid):
+    return [e["texto"] for e in medicoes.edicoes_valor(conn, [mid])[mid] if "por fora" in e["texto"]]
+
+
+def test_registro_por_fora_leva_a_espelho_enviado_sem_email_e_fica_na_linha_do_tempo(ambiente, tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 12_345_67})
+    mid = _mid(conn, eid, "execucao")
+    r = espelhos.registrar_envio_externo(conn, u["id"], eid, "2026-02-10", "  pelo Outlook, ao faturamento  ")
+    assert r == {"espelho_id": eid, "enviado_em": "2026-02-10"}
+    assert medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado"
+    assert _externo(conn, eid) == ("2026-02-10", "pelo Outlook, ao faturamento", u["id"], None, None)
+    d = espelhos.detalhe(conn, eid)
+    assert d["envio"] is None and d["envio_externo"]["enviado_em"] == "2026-02-10"
+    assert d["envio_externo"]["registrado_por_nome"] == "Maria" and d["envio_externo"]["registrado_em"]
+    # nenhum e-mail: nem linha em `envios`, nem elo de envio, nem arquivo no simulador
+    assert conn.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM envio_medicoes").fetchone()[0] == 0
+    assert not (tmp_path / "sim").exists()
+    a = conn.execute("SELECT usuario_id, entidade, entidade_id, depois FROM audit_log "
+                     "WHERE acao='espelho.envio_externo'").fetchall()
+    assert len(a) == 1 and (a[0]["usuario_id"], a[0]["entidade"], a[0]["entidade_id"]) == (u["id"], "espelho", str(eid))
+    assert json.loads(a[0]["depois"]) == {"envio_externo_em": "2026-02-10", "observacao": "pelo Outlook, ao faturamento",
+                                         "versao": 1, "medicoes": [mid]}
+    assert {"data": "2026-02-10", "texto": "Espelho enviado ao faturamento por fora em 10/02/2026 (pelo Outlook, ao "
+                                           "faturamento), registrado por Maria"} in medicoes.edicoes_valor(conn, [mid])[mid]
+    # o dia informado e' o marco de quem espera a nota e o dia do passo Espelhos
+    linha = next(x for x in medicoes.linhas_em_andamento(conn) if x["medicao_id"] == mid)
+    assert (linha["situacao"], linha["marco"]) == ("aguardando-nota", "2026-02-10")
+    aberta = {**medicoes.detalhe(conn, mid), **next(m for m in medicoes.em_andamento(conn) if m["id"] == mid)}
+    assert medicoes._datas_dos_passos(conn, aberta)[3].isoformat() == "2026-02-10"
+
+
+def test_registro_por_fora_sem_observacao_vale_para_as_medicoes_do_espelho(ambiente_projeto):
+    conn, u, cid = ambiente_projeto
+    eid = espelhos.gerar(conn, u, cid, 3, "2026-01", {"medicao": 100, "projeto": 500})
+    espelhos.registrar_envio_externo(conn, u["id"], eid, "2026-01-31")
+    assert {m["tipo"]: m["estado"] for m in espelhos.detalhe(conn, eid)["medicoes"]} == {
+        "execucao": "espelho_enviado", "projeto": "espelho_enviado"}
+    assert espelhos.detalhe(conn, eid)["envio_externo"]["observacao"] is None
+    for tipo in ("execucao", "projeto"):
+        assert _por_fora_na_linha_do_tempo(conn, _mid(conn, eid, tipo)) == [
+            "Espelho enviado ao faturamento por fora em 31/01/2026, registrado por Maria"]
+
+
+@pytest.mark.parametrize("data, recusa", [
+    ("", "Data do envio inválida"), ("10/02/2026", "Data do envio inválida"), ("20260210", "Data do envio inválida"),
+    ("2026-02-30", "Data do envio inválida"),
+    ("2025-12-31", r"anterior ao período do espelho \(início em 01/01/2026\)"),
+])
+def test_registro_por_fora_confere_a_data(ambiente, data, recusa):
+    conn, u, cid = ambiente
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    with pytest.raises(ValueError, match=recusa):
+        espelhos.registrar_envio_externo(conn, u["id"], eid, data)
+    assert _externo(conn, eid)[0] is None and _auditados(conn) == 0
+    assert medicoes.detalhe(conn, _mid(conn, eid, "execucao"))["estado"] == "espelho_gerado"
+
+
+def test_registro_por_fora_recusa_data_futura_e_aceita_hoje_e_o_inicio_do_periodo(ambiente):
+    import datetime
+    from app import tempo
+    conn, u, cid = ambiente
+    hoje = tempo.hoje_local()
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100}, periodo=("2025-12-20", "2026-01-19"))
+    with pytest.raises(ValueError, match="não pode ser futura"):
+        espelhos.registrar_envio_externo(conn, u["id"], eid, (hoje + datetime.timedelta(days=1)).isoformat())
+    with pytest.raises(ValueError, match="início em 20/12/2025"):          # o periodo proprio do espelho manda
+        espelhos.registrar_envio_externo(conn, u["id"], eid, "2025-12-19")
+    espelhos.registrar_envio_externo(conn, u["id"], eid, "2025-12-20")
+    e2 = espelhos.gerar(conn, u, cid, 24, "2026-02", {"medicao": 100})
+    espelhos.registrar_envio_externo(conn, u["id"], e2, hoje.isoformat())
+    assert (_externo(conn, eid)[0], _externo(conn, e2)[0]) == ("2025-12-20", hoje.isoformat())
+
+
+def test_registro_por_fora_recusa_versao_substituida_superada_e_medicao_encerrada(ambiente_projeto):
+    conn, u, cid = ambiente_projeto
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    e2 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 200}, motivo="corrigido")
+    with pytest.raises(ValueError, match="foi substituída; registre o envio da versão vigente"):
+        espelhos.registrar_envio_externo(conn, u["id"], e1, "2026-02-10")
+    a, b = _misto_desmembrado(conn, u, cid)
+    with pytest.raises(ValueError, match=r"Medição 3 de projeto tem espelho mais novo \(versão 2\): registre o envio "
+                                         "daquela versão"):
+        espelhos.registrar_envio_externo(conn, u["id"], a, "2026-02-10")
+    medicoes.mudar_estado(conn, u["id"], _mid(conn, e2, "execucao"), "cancelada", "lançada em duplicidade")
+    with pytest.raises(ValueError, match="Medição 23 de execução está cancelada: o envio do espelho não pode ser "
+                                         "registrado"):
+        espelhos.registrar_envio_externo(conn, u["id"], e2, "2026-02-10")
+    with pytest.raises(ValueError, match="Observação longa demais"):
+        espelhos.registrar_envio_externo(conn, u["id"], b, "2026-02-10", "x" * 501)
+    assert [_externo(conn, e)[0] for e in (e1, e2, a, b)] == [None] * 4 and _auditados(conn) == 0
+    espelhos.registrar_envio_externo(conn, u["id"], b, "2026-02-10")      # a versao vigente do Projeto registra
+    assert medicoes.detalhe(conn, _mid(conn, b, "projeto"))["estado"] == "espelho_enviado"
+
+
+def test_espelho_ja_enviado_pelo_sistema_nao_recebe_registro_por_fora(ambiente, tmp_path, monkeypatch):
+    from app import envio_reserva
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    p = espelhos.previa_envio(conn, eid)
+    envio_id = espelhos.enviar(conn, u, eid, p["para"], p["copia"], p["assunto"], p["corpo"])
+    with pytest.raises(envio_reserva.EnvioEmAndamento, match="já foi enviada ao faturamento pelo sistema") as e:
+        espelhos.registrar_envio_externo(conn, u["id"], eid, "2026-02-10")
+    assert e.value.codigo == "ESPELHO_JA_ENVIADO"
+    assert _externo(conn, eid) == (None, None, None, envio_id, None) and _auditados(conn) == 0
+
+
+def test_registro_por_fora_repetido_nao_duplica(ambiente):
+    from app import envio_reserva
+    conn, u, cid = ambiente
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    mid = _mid(conn, eid, "execucao")
+    espelhos.registrar_envio_externo(conn, u["id"], eid, "2026-02-10", "pelo Outlook")
+    for data, obs in (("2026-02-10", "pelo Outlook"), ("2026-02-11", "outra")):     # identico ou nao: ja' registrado
+        with pytest.raises(envio_reserva.EnvioEmAndamento, match=r"já está registrado \(em 10/02/2026, por Maria\)") as e:
+            espelhos.registrar_envio_externo(conn, u["id"], eid, data, obs)
+        assert e.value.codigo == "ESPELHO_ENVIO_EXTERNO_JA_REGISTRADO"
+    assert _externo(conn, eid)[:2] == ("2026-02-10", "pelo Outlook") and _auditados(conn) == 1
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='medicao.estado' AND entidade_id=?",
+                        (str(mid),)).fetchone()[0] == 1
+    assert len(_por_fora_na_linha_do_tempo(conn, mid)) == 1
+
+
+def test_registro_por_fora_com_o_email_do_sistema_saindo_e_recusado(ambiente, tmp_path, monkeypatch):
+    """Envio pelo sistema reservado (o e-mail 'saindo'): o registro por fora, em outra conexao, e' recusado, e o
+    envio termina."""
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    p = espelhos.previa_envio(conn, eid)
+    outra = db.get_conn()
+    erros = []
+
+    def registrar_na_outra():
+        with pytest.raises(ValueError) as e:
+            espelhos.registrar_envio_externo(outra, u["id"], eid, "2026-02-10")
+        erros.append(str(e.value))
+    try:
+        _enviar_no_meio(monkeypatch, durante_o_email=registrar_na_outra)
+        envio_id = espelhos.enviar(conn, u, eid, p["para"], p["copia"], p["assunto"], p["corpo"])
+    finally:
+        outra.close()
+    assert len(erros) == 1 and erros[0].startswith("A versão 1 deste espelho está sendo enviada ao faturamento "
+                                                   "(iniciado às ")
+    assert "por Maria): aguarde o envio terminar para registrar o envio por fora." in erros[0]
+    assert _externo(conn, eid) == (None, None, None, envio_id, None) and _auditados(conn) == 0
+    assert conn.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 1
+
+
+def test_envio_preso_do_sistema_segura_o_registro_por_fora_ate_a_liberacao(ambiente):
+    """A reserva que ficou presa (o processo caiu, ou o e-mail saiu e o registro falhou) tambem recusa: quem decide
+    e' a pessoa, pela liberacao."""
+    from app import envio_reserva
+    conn, u, cid = ambiente
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    envio_reserva.reservar(conn, "espelhos", eid, u["id"])
+    with pytest.raises(ValueError, match="confira a caixa de Enviados do Outlook e libere o envio"):
+        espelhos.registrar_envio_externo(conn, u["id"], eid, "2026-02-10")
+    assert _externo(conn, eid)[0] is None
+    envio_reserva.liberar(conn, "espelhos", eid)
+    espelhos.registrar_envio_externo(conn, u["id"], eid, "2026-02-10")
+    assert _externo(conn, eid)[0] == "2026-02-10"
+
+
+def test_registro_por_fora_entre_a_leitura_e_a_reserva_barra_o_email_do_sistema(ambiente, tmp_path, monkeypatch):
+    """A outra janela da corrida: o envio pelo sistema leu o espelho sem registro, e o registro por fora entrou antes
+    da reserva. O e-mail nao sai, a reserva e' solta e o registro fica."""
+    from app import envio_reserva
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    p = espelhos.previa_envio(conn, eid)
+    outra = db.get_conn()
+    try:
+        _enviar_no_meio(monkeypatch, antes_de_reservar=lambda: espelhos.registrar_envio_externo(
+            outra, u["id"], eid, "2026-02-10"))
+        with pytest.raises(envio_reserva.EnvioEmAndamento, match="já está registrado como feito por fora") as e:
+            espelhos.enviar(conn, u, eid, p["para"], p["copia"], p["assunto"], p["corpo"])
+    finally:
+        outra.close()
+    assert e.value.codigo == "ESPELHO_JA_ENVIADO"
+    assert not (tmp_path / "sim").exists()                  # nenhum e-mail saiu
+    assert _externo(conn, eid) == ("2026-02-10", None, u["id"], None, None)
+    assert conn.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    assert medicoes.detalhe(conn, _mid(conn, eid, "execucao"))["estado"] == "espelho_enviado"
+
+
+def test_depois_do_registro_por_fora_o_envio_pelo_sistema_so_sai_confirmado(ambiente, tmp_path, monkeypatch):
+    from app import envio_reserva
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    conn, u, cid = ambiente
+    eid = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    espelhos.registrar_envio_externo(conn, u["id"], eid, "2026-02-10")
+    p = espelhos.previa_envio(conn, eid)
+    assert any("a versão 1 deste espelho já foi enviada ao faturamento" in a for a in p["avisos"])
+    with pytest.raises(envio_reserva.EnvioEmAndamento,
+                       match=r"feito por fora \(em 10/02/2026, registrado por Maria\). Para mandar pelo sistema, "
+                             "confirme o reenvio.") as e:
+        espelhos.enviar(conn, u, eid, p["para"], p["copia"], p["assunto"], p["corpo"])
+    assert e.value.codigo == "ESPELHO_JA_ENVIADO" and e.value.reservado_por_nome == "Maria"
+    assert not (tmp_path / "sim").exists() and _externo(conn, eid)[3:] == (None, None)
+    envio_id = espelhos.enviar(conn, u, eid, p["para"], p["copia"], p["assunto"], p["corpo"], reenviar=True)
+    assert _externo(conn, eid) == ("2026-02-10", None, u["id"], envio_id, None)     # o registro por fora fica
+
+
+def test_versao_nova_depois_do_registro_por_fora_volta_a_pedir_o_envio(ambiente):
+    conn, u, cid = ambiente
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 100})
+    mid = _mid(conn, e1, "execucao")
+    espelhos.registrar_envio_externo(conn, u["id"], e1, "2026-02-10")
+    e2 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 200}, motivo="corrigido")
+    assert medicoes.detalhe(conn, mid)["estado"] == "espelho_gerado"            # #359: volta a pedir o envio
+    assert espelhos.detalhe(conn, e2)["envio_externo"] is None
+    assert espelhos.detalhe(conn, e1)["envio_externo"]["enviado_em"] == "2026-02-10"     # o historico fica
+    espelhos.registrar_envio_externo(conn, u["id"], e2, "2026-02-12")
+    assert medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado"
+    assert _por_fora_na_linha_do_tempo(conn, mid) == [
+        "Espelho enviado ao faturamento por fora em 10/02/2026, registrado por Maria",
+        "Versão 2 do espelho enviada ao faturamento por fora em 12/02/2026, registrado por Maria"]
+
+
+def test_registro_por_fora_fecha_nota_emitida_quando_a_nota_ja_alocada_atende_o_espelho_novo(ambiente):
+    """Como no envio pelo sistema (gate Sol, rodada 5 da PR #555): a versao nova do espelho ja' atendida pela nota
+    alocada fecha `nota_emitida` no registro, em vez de ficar esperando a nota que ja' chegou."""
+    from app import sincronizacao_rm
+    conn, u, cid = ambiente
+    e1 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 1_000_01})
+    mid = _mid(conn, e1, "execucao")
+    espelhos.registrar_envio_externo(conn, u["id"], e1, "2026-02-01")
+    nid = conn.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, valor_centavos, emissao) "
+                       "VALUES (1, 901, '901', 100003, '2026-02-03')").lastrowid
+    conn.commit()
+    sincronizacao_rm.alocar(conn, u["id"], nid, mid, "manual", None, "teste")
+    assert (notas.faltam(conn, mid), medicoes.detalhe(conn, mid)["estado"]) == (1, "espelho_enviado")
+    e2 = espelhos.gerar(conn, u, cid, 23, "2026-01", {"medicao": 1_000_03}, motivo="corrigido")
+    assert (notas.faltam(conn, mid), medicoes.detalhe(conn, mid)["estado"]) == (0, "espelho_gerado")
+    espelhos.registrar_envio_externo(conn, u["id"], e2, "2026-02-05")
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["nota_emitida_em"]) == ("nota_emitida", "2026-02-03")

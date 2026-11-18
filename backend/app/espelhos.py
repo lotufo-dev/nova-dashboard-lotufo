@@ -244,10 +244,11 @@ def _espelhos_anteriores(conn, contrato_id, numero, tipos) -> list[int]:
     return ids
 
 
-def _recusar_envio_reservado(conn, contrato_id, numero, tipos) -> None:
+def _recusar_envio_reservado(conn, contrato_id, numero, tipos, para: str = "gerar uma versão nova") -> None:
     """Espelho vigente destas medicoes com envio ao faturamento reservado nao se substitui (#210): o e-mail que
     esta' saindo leva os arquivos dele, e a medicao seria marcada enviada com o valor velho. Vale tambem para o
-    misto que ficaria superado (fica vigente, mas a medicao gerada passaria a valer pela versao nova)."""
+    misto que ficaria superado (fica vigente, mas a medicao gerada passaria a valer pela versao nova).
+    `para` (issue #798): o ato recusado, no texto; o registro do envio por fora usa a mesma recusa."""
     marcas = ",".join("?" * len(tipos))
     r = conn.execute(
         "SELECT e.versao, e.envio_reservado_em, e.envio_reservado_por FROM espelhos e "
@@ -258,9 +259,8 @@ def _recusar_envio_reservado(conn, contrato_id, numero, tipos) -> None:
         return
     em = envio_reserva.reservado(conn, r["envio_reservado_em"], r["envio_reservado_por"])
     raise ValueError(f"A versão {r['versao']} deste espelho está sendo enviada ao faturamento (iniciado às "
-                     f"{em.reservado_em[11:16]} por {em.reservado_por_nome}): aguarde o envio terminar para gerar "
-                     "uma versão nova. Se o envio foi interrompido, confira a caixa de Enviados do Outlook e libere "
-                     "o envio.")
+                     f"{em.reservado_em[11:16]} por {em.reservado_por_nome}): aguarde o envio terminar para {para}. "
+                     "Se o envio foi interrompido, confira a caixa de Enviados do Outlook e libere o envio.")
 
 
 def previa(conn, contrato_id: int, numero: int, competencia: str, entradas: dict[str, int],
@@ -425,6 +425,14 @@ def detalhe(conn, espelho_id: int) -> dict | None:
         e = conn.execute("SELECT id, remetente, para, copia, assunto, enviado_em FROM envios WHERE id=?",
                          (d["envio_id"],)).fetchone()
         d["envio"] = {**dict(e), "para": json.loads(e["para"]), "copia": json.loads(e["copia"])}
+    # issue #798: o envio ao faturamento feito por fora, registrado nesta versao (o dia informado, sem hora)
+    d["envio_externo"] = None
+    if d["envio_externo_em"]:
+        d["envio_externo"] = {
+            "enviado_em": d["envio_externo_em"], "observacao": d["envio_externo_observacao"],
+            "registrado_em": d["envio_externo_registrado_em"],
+            "registrado_por_nome": (conn.execute("SELECT nome FROM usuarios WHERE id=?",
+                                                 (d["envio_externo_por"],)).fetchone() or [None])[0]}
     return d
 
 
@@ -536,15 +544,16 @@ def saudacao() -> str:
     return "Bom dia." if tempo.para_local(tempo.agora_utc()).hour < 12 else "Boa tarde."
 
 
-def _recusar_superado(conn, d: dict) -> None:
+def _recusar_superado(conn, d: dict, faca: str = "envie aquela versão") -> None:
     """Espelho misto com uma medicao que ja' tem espelho mais novo (#208) nao se envia: mandaria ao faturamento
-    o valor velho dela. A versao mais nova e' a que vale para essa medicao."""
+    o valor velho dela. A versao mais nova e' a que vale para essa medicao. `faca` (issue #798): o que fazer, no
+    texto; o registro do envio por fora usa a mesma recusa."""
     for m in d["medicoes"]:
         if m["superado"]:
             v = conn.execute("SELECT MAX(e.versao) FROM espelhos e JOIN espelho_medicoes em ON em.espelho_id=e.id "
                              "WHERE em.medicao_id=? AND e.situacao='vigente'", (m["id"],)).fetchone()[0]
             raise ValueError(f"{medicoes.nome_medicao(d['numero'], m['tipo'])} tem espelho mais novo "
-                             f"(versão {v}): envie aquela versão")
+                             f"(versão {v}): {faca}")
 
 
 def previa_envio(conn, espelho_id: int, remetente: str | None = None) -> dict:
@@ -580,7 +589,9 @@ def previa_envio(conn, espelho_id: int, remetente: str | None = None) -> dict:
     mids = [m["id"] for m in d["medicoes"]]
     ja = conn.execute(
         "SELECT MAX(e.versao) FROM espelhos e JOIN espelho_medicoes em ON em.espelho_id=e.id "
-        f"WHERE e.envio_id IS NOT NULL AND em.medicao_id IN ({','.join('?' * len(mids))})",
+        # issue #798: o envio registrado como feito por fora tambem e' envio desta medicao ao faturamento
+        "WHERE (e.envio_id IS NOT NULL OR e.envio_externo_em IS NOT NULL) "
+        f"AND em.medicao_id IN ({','.join('?' * len(mids))})",
         mids).fetchone()[0] if mids else None
     if ja is not None:
         avisos.append(f"a versão {ja} deste espelho já foi enviada ao faturamento; este envio substitui")
@@ -604,11 +615,7 @@ def enviar(conn, usuario: dict, espelho_id: int, para: list[str], copia: list[st
         raise ValueError("informe ao menos um destinatário")
     # Antes de mandar o e-mail (que nao se desfaz): medicao encerrada nesse meio-tempo nao
     # recebe espelho. Protocolada continua podendo (o estado so' anda para a frente).
-    fechadas = [m for m in d["medicoes"] if m["estado"] in ("cancelada", "desistida")]
-    if fechadas:
-        raise ValueError(f"{medicoes.nome_medicao(d['numero'], fechadas[0]['tipo'])} está "
-                         f"{medicoes.rotulo_estado(fechadas[0]['estado'])}: "
-                         "o espelho não pode ser enviado")
+    _recusar_medicao_fechada(d, "o espelho não pode ser enviado")
     # Reenviar a versao vigente continua permitido ("este envio substitui"), mas so' confirmado (S8, 10/10/2026):
     # um clique repetido depois de o primeiro terminar le o envio_id novo, passa pela reserva e manda o segundo
     # e-mail ao faturamento sem ninguem decidir. Leitura so', antes de reservar.
@@ -620,10 +627,20 @@ def enviar(conn, usuario: dict, espelho_id: int, para: list[str], copia: list[st
         raise envio_reserva.EnvioEmAndamento(
             f"Esta versão do espelho já foi enviada ao faturamento (às {em:%H:%M} por {nome}). Para mandar de novo, "
             "confirme o reenvio.", "ESPELHO_JA_ENVIADO", em.isoformat(), nome)
+    # Issue #798: o envio registrado como feito por fora tambem e' envio. Mandar pelo sistema depois dele e' reenvio,
+    # e so' sai confirmado (seria o segundo pedido de emissao das mesmas notas ao faturamento).
+    if d["envio_externo"] is not None and not reenviar:
+        raise _ja_enviado_por_fora(d["envio_externo"])
     # Reserva atomica antes do e-mail (A-01, 10/10/2026): barra o envio SIMULTANEO, ou o que leu antes de outro
     # terminar.
     envio_reserva.reservar(conn, "espelhos", espelho_id, usuario["id"], d["envio_id"])
     try:
+        # Issue #798: o registro por fora gravado entre a leitura acima e a reserva. Com a reserva tomada nenhum
+        # registro novo entra (ele a recusa), entao esta leitura decide: se ja' ha' registro que este envio nao viu,
+        # o e-mail nao sai e a reserva e' solta pelo `except` abaixo. Dos dois atos ao mesmo tempo, so' um vence.
+        agora = detalhe(conn, espelho_id)
+        if agora["envio_externo_em"] != d["envio_externo_em"]:
+            raise _ja_enviado_por_fora(agora["envio_externo"])
         anexos = []
         for a in d["arquivos"]:
             rel = conn.execute("SELECT arquivo FROM medicao_documentos WHERE id=?",
@@ -654,3 +671,130 @@ def enviar(conn, usuario: dict, espelho_id: int, para: list[str], copia: list[st
         auditoria.registrar(conn, usuario["id"], "espelho.enviar", "espelho", espelho_id, None,
                             {"envio_id": envio_id, "medicoes": [m["id"] for m in d["medicoes"]]})
     return envio_id
+
+
+# --- envio ao faturamento feito por fora (issue #798) ----------------------------------------------------------
+
+ENVIO_EXTERNO = "espelho.envio_externo"
+TETO_OBSERVACAO_EXTERNO = 500
+
+
+def _recusar_medicao_fechada(d: dict, consequencia: str) -> None:
+    """Medicao cancelada ou desistida nao recebe espelho, nem pelo e-mail do sistema nem pelo registro por fora."""
+    fechadas = [m for m in d["medicoes"] if m["estado"] in ("cancelada", "desistida")]
+    if fechadas:
+        raise ValueError(f"{medicoes.nome_medicao(d['numero'], fechadas[0]['tipo'])} está "
+                         f"{medicoes.rotulo_estado(fechadas[0]['estado'])}: {consequencia}")
+
+
+def _data_br(iso: str) -> str:
+    return datetime.date.fromisoformat(iso).strftime("%d/%m/%Y")
+
+
+def _registrado_em_local(externo: dict) -> str:
+    """O instante do registro por fora em ISO local (Cuiaba), como o `reservado_em` das outras recusas de envio."""
+    return tempo.para_local(datetime.datetime.fromisoformat(externo["registrado_em"])).isoformat()
+
+
+def _ja_enviado_por_fora(externo: dict) -> envio_reserva.EnvioEmAndamento:
+    """409 `ESPELHO_JA_ENVIADO` do envio pelo sistema depois do registro por fora: a tela pede a confirmacao do
+    reenvio, como na versao ja' enviada pelo sistema."""
+    nome = externo["registrado_por_nome"] or "outro usuário"
+    return envio_reserva.EnvioEmAndamento(
+        "O envio desta versão do espelho ao faturamento já está registrado como feito por fora (em "
+        f"{_data_br(externo['enviado_em'])}, registrado por {nome}). Para mandar pelo sistema, confirme o reenvio.",
+        "ESPELHO_JA_ENVIADO", _registrado_em_local(externo), nome)
+
+
+def _data_do_envio_externo(d: dict, enviado_em: str) -> str:
+    """O dia do envio feito por fora (AAAA-MM-DD): obrigatorio, nao futuro e nao anterior ao periodo do espelho. O
+    dia pode ser anterior a' geracao do espelho no sistema (o registro vem depois do fato), mas nao ao periodo que
+    ele mede: a data vale como o dia do pedido da nota (docs/adr/0005), e um ano digitado errado abriria o vinculo
+    pela saida do espelho a nota antiga de mesmo valor."""
+    try:
+        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", enviado_em or ""):
+            raise ValueError
+        data = datetime.date.fromisoformat(enviado_em)
+    except (TypeError, ValueError):
+        raise ValueError("Data do envio inválida (use AAAA-MM-DD)") from None
+    if data > tempo.hoje_local():
+        raise ValueError("A data do envio não pode ser futura")
+    inicio = d["periodo_inicio"] or espelho.periodo_do_mes(d["competencia"])[0]
+    if data.isoformat() < inicio:
+        raise ValueError(f"A data do envio é anterior ao período do espelho (início em {_data_br(inicio)})")
+    return data.isoformat()
+
+
+def registrar_envio_externo(conn, usuario_id: int, espelho_id: int, enviado_em: str,
+                            observacao: str | None = None) -> dict:
+    """"Já enviei por fora" (issue #798): o espelho foi ao faturamento por e-mail, fora do sistema. Grava o dia do
+    envio, a observacao e quem registrou na versao vigente e leva as medicoes dela de `espelho_gerado` a
+    `espelho_enviado` (e a `nota_emitida`, se as notas ja' estao alocadas), como o envio pelo sistema. Nenhum e-mail
+    sai e nenhuma reserva e' tomada: tudo acontece num `db.mutacao` (BEGIN IMMEDIATE), o mesmo lock da reserva do
+    envio pelo sistema, entao de dois registros simultaneos, ou de um registro e um envio, so' um vence.
+
+    Recusas: versao substituida ou superada, medicao cancelada ou desistida e data invalida (ValueError); versao ja'
+    enviada pelo sistema ou ja' registrada por fora (EnvioEmAndamento, 409: o registro repetido nao duplica); envio
+    pelo sistema reservado ou em andamento (ValueError, como nos registros por fora da planilha/carta e dos
+    assinados)."""
+    from app import notas   # import local: notas importa este modulo pela cadeia frc/medicoes
+    obs = (observacao or "").strip() or None
+    if obs and len(obs) > TETO_OBSERVACAO_EXTERNO:
+        raise ValueError(f"Observação longa demais (até {TETO_OBSERVACAO_EXTERNO} caracteres)")
+    with db.mutacao(conn):
+        d = detalhe(conn, espelho_id)
+        if d is None:
+            raise ValueError("espelho não encontrado")
+        if d["situacao"] != "vigente":
+            raise ValueError("esta versão do espelho foi substituída; registre o envio da versão vigente")
+        _recusar_superado(conn, d, "registre o envio daquela versão")
+        _recusar_medicao_fechada(d, "o envio do espelho não pode ser registrado")
+        data = _data_do_envio_externo(d, enviado_em)
+        if d["envio"] is not None:
+            em = tempo.para_local(datetime.datetime.fromisoformat(d["envio"]["enviado_em"]))
+            raise envio_reserva.EnvioEmAndamento(
+                f"Esta versão do espelho já foi enviada ao faturamento pelo sistema (em {em:%d/%m/%Y} às {em:%H:%M}): "
+                "não há envio por fora a registrar.", "ESPELHO_JA_ENVIADO", em.isoformat())
+        if d["envio_externo"] is not None:
+            ja = d["envio_externo"]
+            nome = ja["registrado_por_nome"] or "outro usuário"
+            raise envio_reserva.EnvioEmAndamento(
+                f"O envio por fora desta versão do espelho já está registrado (em {_data_br(ja['enviado_em'])}, por "
+                f"{nome}).", "ESPELHO_ENVIO_EXTERNO_JA_REGISTRADO", _registrado_em_local(ja), nome)
+        # o e-mail que esta' saindo (ou ficou preso) pelo sistema nao se registra por fora: seriam dois envios
+        _recusar_envio_reservado(conn, d["contrato_id"], d["numero"], [m["tipo"] for m in d["medicoes"]],
+                                 "registrar o envio por fora")
+        # as mesmas condicoes no UPDATE: quem barra o perdedor de uma corrida e' ele, nao a leitura acima
+        cur = conn.execute(
+            "UPDATE espelhos SET envio_externo_em=?, envio_externo_observacao=?, envio_externo_por=?, "
+            "envio_externo_registrado_em=datetime('now') WHERE id=? AND situacao='vigente' AND envio_id IS NULL "
+            "AND envio_externo_em IS NULL AND envio_reservado_em IS NULL", (data, obs, usuario_id, espelho_id))
+        db.exigir_uma_linha(cur, "O espelho mudou enquanto o envio era registrado: confira e tente de novo")
+        for m in d["medicoes"]:
+            medicoes.marcar_espelho_enviado(conn, usuario_id, m["id"])
+            # como no envio pelo sistema: as notas ja' alocadas (anexadas antes do registro) fecham a medicao
+            notas.fechar_se_completa(conn, usuario_id, m["id"])
+        auditoria.registrar(conn, usuario_id, ENVIO_EXTERNO, "espelho", espelho_id, {"envio_externo_em": None},
+                            {"envio_externo_em": data, "observacao": obs, "versao": d["versao"],
+                             "medicoes": [m["id"] for m in d["medicoes"]]})
+    return {"espelho_id": espelho_id, "enviado_em": data}
+
+
+def eventos_envio_externo(conn, medicao_ids: list[int], out: dict[int, list[dict]]) -> None:
+    """Linha do tempo da medicao: um evento por envio do espelho registrado como feito por fora, no dia informado
+    (como o envio por fora da planilha/carta), com a observacao e quem registrou."""
+    for i in range(0, len(medicao_ids), medicoes.LOTE_AUDITORIA):
+        lote = medicao_ids[i:i + medicoes.LOTE_AUDITORIA]
+        for r in conn.execute(
+                "SELECT em.medicao_id, e.versao, e.envio_externo_em, e.envio_externo_observacao, u.nome "
+                "FROM espelho_medicoes em JOIN espelhos e ON e.id=em.espelho_id "
+                "LEFT JOIN usuarios u ON u.id=e.envio_externo_por "
+                f"WHERE e.envio_externo_em IS NOT NULL AND em.medicao_id IN ({','.join('?' * len(lote))}) "
+                "ORDER BY e.id", lote):
+            qual = "Espelho enviado" if r["versao"] == 1 else f"Versão {r['versao']} do espelho enviada"
+            texto = f"{qual} ao faturamento por fora em {_data_br(r['envio_externo_em'])}"
+            if r["envio_externo_observacao"]:
+                texto += f" ({r['envio_externo_observacao']})"
+            out[r["medicao_id"]].append({"data": r["envio_externo_em"],
+                                         "texto": f"{texto}, registrado por {r['nome']}" if r["nome"]
+                                         else f"{texto}, registrado pelo sistema"})

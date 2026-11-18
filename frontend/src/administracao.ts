@@ -210,6 +210,7 @@ const ROTULO_ACAO: Record<string, string> = {
   "medicao.sem_boletim": "Espelho gerado sem boletim",
   "medicao.reajuste_congelado": "Pedido do reajuste congelado no envio da planilha/carta",
   "espelho.gerar": "Espelho gerado", "espelho.enviar": "Espelho enviado",
+  "espelho.envio_externo": "Envio do espelho feito por fora registrado",   // #798
   "protocolo.criar": "Protocolo criado", "protocolo.peca": "Peça do protocolo anexada",
   "protocolo.peca_removida": "Peça do protocolo removida", "protocolo.montar": "Protocolo montado",
   "protocolo.assinado": "Protocolo assinado", "protocolo.enviar": "Protocolo enviado",

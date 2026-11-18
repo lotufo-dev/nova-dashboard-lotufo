@@ -34,8 +34,9 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
    `valor_exato`; proximos ate' 5% -> log, sem alocacao. Sem candidato -> so' reconciliacao.
    Duas travas em TODAS as regras de valor (issue #708; na medicao sem espelho desde 17/11/2026):
    - de data: a medicao so' recebe a nota emitida no dia do pedido dela ou depois (`_dia_do_pedido`: o primeiro
-     envio do espelho ao faturamento; sem espelho, o boletim do orgao e, sem ele, o envio da planilha/carta). Nota
-     mais antiga, nota sem data, espelho que nao saiu pelo sistema ou medicao sem data nenhuma: nao liga por valor;
+     envio do espelho ao faturamento, pelo sistema ou registrado como feito por fora (issue #798); sem espelho, o
+     boletim do orgao e, sem ele, o envio da planilha/carta). Nota mais antiga, nota sem data, espelho sem envio
+     registrado ou medicao sem data nenhuma: nao liga por valor;
    - de nota repetida: havendo mais notas ativas e livres daquele valor, candidatas a' mesma medicao, do que vagas
      para aquele valor (saidas esperando nota; uma, sem espelho; as do proprio par, na soma do dia), nenhuma liga
      sozinha e todas contam como ambiguas na rodada.
@@ -761,18 +762,30 @@ def _contrato_por_centro_custo(conn, coligada: int, centro_custo) -> int | None:
 def _dia_do_envio_do_espelho(conn, medicao_id: int) -> str | None:
     """Issue #708 (docs/adr/0005): o dia, em Cuiaba, do PRIMEIRO envio do espelho desta medicao ao faturamento. E' a
     partir dele que o sistema pediu a nota: reenvio e versao nova do espelho nao empurram a data, porque a nota
-    emitida entre um envio e outro responde ao primeiro pedido. None quando nenhum espelho dela saiu pelo sistema."""
+    emitida entre um envio e outro responde ao primeiro pedido.
+    Issue #798: o envio registrado como feito por fora conta com o dia informado, mas SO' o da versao do espelho que
+    vale hoje para a medicao (a vigente mais nova dela). O e-mail do sistema e' fato e conta de qualquer versao; a data
+    do registro por fora foi digitada, e vale enquanto a versao dela vale: gerar a versao nova e registrar o envio com
+    a data certa conserta uma data digitada errada. Entre o registro por fora e o envio pelo sistema, vale o mais
+    antigo. None quando nenhum espelho dela saiu pelo sistema e a versao em vigor nao tem envio por fora registrado."""
     r = conn.execute("""SELECT MIN(v.enviado_em) FROM envio_medicoes en JOIN envios v ON v.id=en.envio_id
                         WHERE en.medicao_id=? AND v.tipo='espelho'""", (medicao_id,)).fetchone()
-    if r is None or r[0] is None:
-        return None
-    return tempo.para_local(datetime.datetime.fromisoformat(r[0])).date().isoformat()
+    # o dia informado no registro por fora (AAAA-MM-DD, ja' do negocio) da versao em vigor para a medicao: o misto que
+    # ficou vigente para outra medicao (superado para esta, #208) nao e' a versao dela
+    fora = conn.execute("""SELECT e.envio_externo_em FROM espelho_medicoes em JOIN espelhos e ON e.id=em.espelho_id
+                           WHERE em.medicao_id=? AND e.situacao='vigente'
+                           ORDER BY e.versao DESC, e.id DESC LIMIT 1""", (medicao_id,)).fetchone()
+    dias = [fora[0] if fora else None]
+    if r is not None and r[0] is not None:
+        dias.append(tempo.para_local(datetime.datetime.fromisoformat(r[0])).date().isoformat())
+    return min((d for d in dias if d), default=None)
 
 
 def _dia_do_pedido(m: dict, com_espelho: bool) -> str | None:
     """docs/adr/0005 (trava de data): o dia a partir do qual uma nota pode ser a nota desta medicao.
     - Medicao COM espelho vigente: o dia do primeiro envio do espelho ao faturamento (`espelho_enviado_em`, issue
-      #708). Espelho que nao saiu pelo sistema nao tem dia: nenhuma nota liga a ela por valor.
+      #708), pelo sistema ou registrado como feito por fora (issue #798). Espelho sem envio nenhum registrado nao
+      tem dia: nenhuma nota liga a ela por valor.
     - Medicao SEM espelho (decisao delegada de 17/11/2026): o dia do boletim do orgao (`atestado_em`: a nota so' e'
       emitida depois de o orgao aprovar); sem boletim gravado, o dia do envio da planilha/carta, em Cuiaba. Sem
       nenhuma das duas datas nao ha' como provar a ordem, e nenhuma nota liga a ela por valor: a pessoa liga pelo PDF."""

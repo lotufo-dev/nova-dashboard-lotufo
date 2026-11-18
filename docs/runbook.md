@@ -757,6 +757,26 @@ o valor da medição segue a versão vigente. Opcional: anexar o PDF que o órg�
 Protocolar continua pelo botão da linha da medição até o bloco 5. Obra sem regra ativa mostra "fluxo
 antigo" e continua gerando o espelho pelo Power Automate.
 
+**Espelho enviado por fora (issue #798).** Quando o espelho foi ao faturamento por e-mail, fora do sistema,
+o passo Espelhos da página da medição tem "Já enviei por fora", ao lado de "Enviar ao faturamento": a
+pessoa informa a data do envio (não futura, não anterior ao período do espelho) e, se quiser, uma
+observação. Nenhum e-mail sai. A medição passa a `espelho_enviado`, o passo Notas abre e o registro entra
+na linha do tempo, com quem fez. A data informada vale como o dia do envio do espelho no vínculo da nota
+pela saída do espelho (`docs/adr/0005`), enquanto a versão dela for a vigente. O registro vale para a
+versão vigente: a versão nova volta a pedir o envio. Versão já enviada pelo sistema não recebe o
+registro, o repetido responde 409 e, com um envio pelo sistema em andamento ou preso, o registro espera
+o envio terminar ou a liberação. Depois do registro, "Enviar de novo" continua possível e pede a
+confirmação do reenvio.
+
+**Data do envio por fora registrada errada.** Não há desfazer pela tela. O conserto é gerar o espelho de
+novo (mesmos valores, com o motivo) e registrar o envio da versão nova com a data certa: a data da
+versão substituída deixa de contar para o vínculo da nota (o e-mail do sistema, que é fato, continua
+contando de qualquer versão). Enquanto a data errada estiver na versão vigente, ela vale: uma data
+anterior à verdadeira pode ligar à medição uma nota livre de mesmo valor da obra, emitida entre as duas
+datas; esse vínculo se desfaz à mão, no passo Notas. Custo da regra: quem registra a versão nova com a
+data do envio dela deixa sem vínculo automático a nota emitida entre o envio da versão anterior e o da
+nova; essa nota entra pelo PDF.
+
 **Arquivos.** `dados/espelhos/<sha>.docx` (gerados), `dados/modelos/<sha>.docx` (modelos copiados pelo
 `cadastro aplicar`), `dados/evidencias/<sha>.pdf`. O snapshot horário do backup cobre só o banco; essas
 pastas vão pela cópia dos arquivos do backup (issues #55 e #441). O caminho gravado no banco é relativo à pasta do banco.
