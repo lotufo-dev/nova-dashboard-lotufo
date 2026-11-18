@@ -1195,6 +1195,33 @@ describe("Página da obra em medição: barra de passos (issue #508)", () => {
     expect(within(barra).getByRole("button", { name: "Passo 6: Pagamento" }).closest("li")!.className).toContain("passo--futuro");
   });
 
+  // issue #798: o espelho que foi ao faturamento por fora tem o dia informado no registro, sem e-mail do sistema
+  const POR_FORA = { "/api/contratos/1/espelho": { espelhos: [{ id: 3, numero: 1, versao: 1, situacao: "vigente", criado_em: "2026-11-12 12:00:00",
+    criado_por_nome: null, medicoes: [{ id: 5, tipo: "execucao" }], envio: null,
+    envio_externo: { enviado_em: "2026-11-10", observacao: null, registrado_em: "2026-11-12 13:00:00", registrado_por_nome: "Operação" } }],
+    regra: { situacao: "ativa" } } };
+
+  it("o passo Espelhos leva o dia do envio feito por fora (#798)", async () => {
+    responder({ ...POR_FORA, "/api/contratos/1/medicoes": [{ ...SINFRA, estado: "espelho_enviado", atestado_em: "2026-11-09",
+      boletins: [{ id: 9, tem_arquivo: true, atestado_em: "2026-11-09" }] }] });
+    pagina();
+    const barra = await screen.findByRole("navigation", { name: "Passos da medição" });
+    await waitFor(() => expect(within(barra).getByRole("button", { name: "Passo 3: Espelhos, feito em 10/11" })).toBeTruthy());
+    expect(within(barra).getByRole("button", { name: "Passo 4: Notas" }).closest("li")!.className).toContain("passo--atual");
+  });
+
+  it("medição cancelada depois do registro por fora: o passo Espelhos continua feito, com a data (#798)", async () => {
+    responder({ ...POR_FORA, "/api/contratos/1/medicoes": [{ ...SINFRA, estado: "cancelada", atestado_em: "2026-11-09",
+      boletins: [{ id: 9, tem_arquivo: true, atestado_em: "2026-11-09" }] }] });
+    pagina();
+    const barra = await screen.findByRole("navigation", { name: "Passos da medição" });
+    const espelhos = await waitFor(() => within(barra).getByRole("button", { name: "Passo 3: Espelhos, feito em 10/11" }));
+    expect(espelhos.closest("li")!.className).toContain("passo--feito");
+    expect(espelhos.querySelector(".glifo--feito")).not.toBeNull();
+    // o que nao aconteceu fica sem o visto
+    expect(within(barra).getByRole("button", { name: "Passo 4: Notas" }).closest("li")!.className).toContain("passo--encerrado");
+  });
+
   it("na MT-PAR a barra começa em Espelhos, com 4 passos, e a planilha/carta mora no passo dos espelhos", async () => {
     responder({ "/api/contratos/1/espelho": ATIVA, "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "prevista", com_envio_planilha: false }] });
     const { container } = pagina();

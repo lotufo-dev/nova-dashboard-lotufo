@@ -472,6 +472,27 @@ describe("Espelho: o passo Espelhos (#514)", () => {
     await waitFor(() => expect(corpos).toEqual([{ enviado_em: data }]));
   });
 
+  // segunda revisao da PR #799: a confirmacao so' diz "passou a Espelho enviado" quando foi isso que aconteceu
+  it.each([
+    ["espelho_gerado", "nota_emitida", "Envio por fora registrado. A medição passou a Nota emitida."],   // as notas ja' estavam alocadas
+    ["protocolada", "protocolada", "Envio por fora registrado."],                                        // ja' estava adiante
+    ["espelho_gerado", "espelho_gerado", "Envio por fora registrado."],                                  // a leitura nao mostrou mudanca
+  ])("a confirmação do registro por fora diz o que aconteceu com a medição: de %s a %s (#798)", async (antes, depois, frase) => {
+    let registrado = false;
+    api.mockImplementation((caminho: string, opts?: RequestInit) => {
+      if (opts?.method === "POST") { registrado = true; return Promise.resolve({ espelho_id: 7, enviado_em: "2026-10-20" }); }
+      if (caminho === "/api/contratos/1/espelho") return Promise.resolve({ regra: REGRA, espelhos: [registrado
+        ? { ...POR_FORA, medicoes: [{ id: 1, tipo: "execucao", estado: depois }] }
+        : { ...ESPELHO, medicoes: [{ id: 1, tipo: "execucao", estado: antes }] }] });
+      return Promise.resolve([]);
+    });
+    faturamento();
+    fireEvent.click(await screen.findByRole("button", { name: "Já enviei por fora" }));
+    fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
+    expect(await screen.findByText("Enviado por fora em 20/10/2026")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe(frase);
+  });
+
   it("quem só consulta não vê “Já enviei por fora”, e o espelho já enviado não o oferece (#798)", async () => {
     api.mockResolvedValue({ regra: REGRA, espelhos: [ESPELHO] });
     const { unmount } = faturamento(false);

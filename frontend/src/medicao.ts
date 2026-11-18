@@ -22,7 +22,9 @@ export type MedicaoBase = {
 };
 export type EspelhoResumo = { id: number; numero: number; versao: number; situacao: string; criado_em: string;
   criado_por_nome: string | null; medicoes: { id: number; tipo: string; superado?: boolean }[];
-  envio: { enviado_em: string; remetente: string } | null };
+  envio: { enviado_em: string; remetente: string } | null;
+  /** #798: o envio ao faturamento feito por fora, registrado na versao (o dia informado, sem hora). */
+  envio_externo?: { enviado_em: string } | null };
 export type ProtocoloResumo = { id: number; etapa_rotulo: string; numero_oficio: string | null; situacao: string;
   criado_em: string; enviado_em?: string | null; enviado_por?: string | null;
   medicoes: { id: number; titulo: string }[]; pendencias: { codigo: string; mensagem: string }[];

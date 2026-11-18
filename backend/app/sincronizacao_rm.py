@@ -763,13 +763,19 @@ def _dia_do_envio_do_espelho(conn, medicao_id: int) -> str | None:
     """Issue #708 (docs/adr/0005): o dia, em Cuiaba, do PRIMEIRO envio do espelho desta medicao ao faturamento. E' a
     partir dele que o sistema pediu a nota: reenvio e versao nova do espelho nao empurram a data, porque a nota
     emitida entre um envio e outro responde ao primeiro pedido.
-    Issue #798: o envio registrado como feito por fora conta com o dia informado; entre ele e o envio pelo sistema,
-    vale o mais antigo. None quando nenhum espelho dela saiu pelo sistema nem tem envio por fora registrado."""
+    Issue #798: o envio registrado como feito por fora conta com o dia informado, mas SO' o da versao do espelho que
+    vale hoje para a medicao (a vigente mais nova dela). O e-mail do sistema e' fato e conta de qualquer versao; a data
+    do registro por fora foi digitada, e vale enquanto a versao dela vale: gerar a versao nova e registrar o envio com
+    a data certa conserta uma data digitada errada. Entre o registro por fora e o envio pelo sistema, vale o mais
+    antigo. None quando nenhum espelho dela saiu pelo sistema e a versao em vigor nao tem envio por fora registrado."""
     r = conn.execute("""SELECT MIN(v.enviado_em) FROM envio_medicoes en JOIN envios v ON v.id=en.envio_id
                         WHERE en.medicao_id=? AND v.tipo='espelho'""", (medicao_id,)).fetchone()
-    # o dia informado no registro por fora (AAAA-MM-DD, ja' do negocio), de qualquer versao do espelho da medicao
-    dias = [conn.execute("""SELECT MIN(e.envio_externo_em) FROM espelho_medicoes em JOIN espelhos e ON e.id=em.espelho_id
-                            WHERE em.medicao_id=? AND e.envio_externo_em IS NOT NULL""", (medicao_id,)).fetchone()[0]]
+    # o dia informado no registro por fora (AAAA-MM-DD, ja' do negocio) da versao em vigor para a medicao: o misto que
+    # ficou vigente para outra medicao (superado para esta, #208) nao e' a versao dela
+    fora = conn.execute("""SELECT e.envio_externo_em FROM espelho_medicoes em JOIN espelhos e ON e.id=em.espelho_id
+                           WHERE em.medicao_id=? AND e.situacao='vigente'
+                           ORDER BY e.versao DESC, e.id DESC LIMIT 1""", (medicao_id,)).fetchone()
+    dias = [fora[0] if fora else None]
     if r is not None and r[0] is not None:
         dias.append(tempo.para_local(datetime.datetime.fromisoformat(r[0])).date().isoformat())
     return min((d for d in dias if d), default=None)

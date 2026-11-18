@@ -280,8 +280,14 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
       return mensagem(e);
     }
     setFora(null);
-    setFeito("Envio por fora registrado. A medição passou a Espelho enviado");
-    await carregar().catch(() => {});
+    // a confirmacao diz o que aconteceu com a medicao da pagina (ou a casa do espelho): de espelho gerado ela vai a
+    // espelho enviado ou, com as notas ja' alocadas, direto a nota emitida; a que ja' estava adiante nao muda
+    const novos = await carregar().catch(() => undefined);
+    const alvo = medicao && esp.medicoes.some(x => x.id === medicao.id && !x.superado) ? medicao.id : larDoEspelho(esp);
+    const antes = esp.medicoes.find(x => x.id === alvo)?.estado;
+    const depois = novos?.espelhos.find(e => e.id === esp.id)?.medicoes.find(x => x.id === alvo)?.estado;
+    const passou = antes === "espelho_gerado" ? ({ espelho_enviado: "Espelho enviado", nota_emitida: "Nota emitida" } as Record<string, string>)[depois ?? ""] : undefined;
+    setFeito(passou ? `Envio por fora registrado. A medição passou a ${passou}` : "Envio por fora registrado");
     aoMudar();
     return null;
   };

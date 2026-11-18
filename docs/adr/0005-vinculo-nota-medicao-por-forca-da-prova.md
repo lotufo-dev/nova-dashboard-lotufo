@@ -21,10 +21,12 @@ receber como órfã. Decidimos por uma hierarquia, do mais forte ao mais fraco:
 ## As duas travas valem para todo vínculo por valor
 
 - **De data.** A medição só recebe por valor a nota emitida no dia do pedido dela ou depois. Com espelho, o pedido
-  é o primeiro envio do espelho ao faturamento: o e-mail do sistema ou o envio feito por fora, com a data que a
-  pessoa registrou (issue #798); havendo os dois, o mais antigo. Sem espelho, é o dia do boletim do órgão (a nota só
-  é emitida depois de o órgão aprovar) e, sem boletim gravado, o dia do envio da planilha/carta. Medição sem nenhuma
-  dessas datas, espelho sem envio registrado e nota sem data de emissão não provam a ordem: não ligam por valor.
+  é o primeiro envio do espelho ao faturamento: o e-mail do sistema, de qualquer versão do espelho, ou o envio feito
+  por fora, com a data que a pessoa registrou na versão vigente (issue #798); havendo os dois, o mais antigo. A data
+  digitada vale enquanto a versão dela vale: a de versão substituída não conta. Sem espelho, é o dia do boletim do
+  órgão (a nota só é emitida depois de o órgão aprovar) e, sem boletim gravado, o dia do envio da planilha/carta.
+  Medição sem nenhuma dessas datas, espelho sem envio registrado e nota sem data de emissão não provam a ordem: não
+  ligam por valor.
 - **De nota repetida.** Havendo mais notas ativas e livres daquele valor que alcançam a medição (mesma coligada,
   cobrança ao órgão naquele contrato, emitidas depois do pedido, na obra dela) do que vagas para aquele valor,
   nenhuma liga sozinha. As vagas são as saídas do espelho daquele valor que esperam nota; na medição sem espelho,
