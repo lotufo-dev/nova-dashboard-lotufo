@@ -407,8 +407,14 @@ def test_ficha_ritmo_e_prazo_na_cota(client_admin, monkeypatch):
     assert cheio["ritmo_centavos"] == 66_666_72 and cheio["situacao"] == "atrasa" and cheio["dias_alem"] > 0
     assert r["ritmo_centavos"] == contratos.cota(66_666_72, 4900) == 32_666_69
     assert f["topo"]["saldo_centavos"] == 391_999_84
-    assert set(r) == {"ritmo_centavos", "conclusao", "situacao", "dias_alem"}
+    assert set(r) == {"ritmo_centavos", "necessario_centavos", "competencias_restantes", "conclusao", "situacao", "dias_alem"}
     assert (r["conclusao"], r["situacao"], r["dias_alem"]) == (cheio["conclusao"], "atrasa", cheio["dias_alem"])
+    # #803: o necessario por mes vai na cota e fecha com o topo da tela: vigente - medido = saldo, e o saldo dividido
+    # pelas competencias que restam (outubro, novembro e dezembro) e' o necessario mostrado, ao centavo
+    t = f["topo"]
+    assert (cheio["necessario_centavos"], cheio["competencias_restantes"]) == (266_666_56, 3)   # 799.999,68 / 3
+    assert r["competencias_restantes"] == 3
+    assert r["necessario_centavos"] == prazos.necessario_por_mes(t["vigente_centavos"] - t["medido_centavos"], 3) == 130_666_61
     # so' a obra ativa, fora do encerramento e sem paralisacao tem prazo a cobrar: na que ja' fez a medicao final,
     # o painel dizia "N dias alem do prazo" pelo ritmo ao lado de "vencido ha' N dias". O ritmo continua
     conn = db.get_conn()
@@ -416,6 +422,9 @@ def test_ficha_ritmo_e_prazo_na_cota(client_admin, monkeypatch):
     conn.commit()
     r = prazos.ritmo_e_prazo(conn, cid, hoje)
     assert (r["ritmo_centavos"], r["conclusao"], r["situacao"], r["dias_alem"]) == (66_666_72, None, None, None)
+    assert (r["necessario_centavos"], r["competencias_restantes"]) == (None, None)
+    nulo = client_admin.get(f"/api/contratos/{cid}/ficha").json()["ritmo"]
+    assert (nulo["ritmo_centavos"], nulo["necessario_centavos"], nulo["competencias_restantes"]) == (32_666_69, None, None)
     conn.execute("UPDATE contratos SET encerramento_iniciado_em=NULL WHERE id=?", (cid,))
     conn.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) VALUES (?, 'par-1', 'paralisacao', "
                  "'2026-10-10', '{}')", (cid,))
@@ -426,6 +435,26 @@ def test_ficha_ritmo_e_prazo_na_cota(client_admin, monkeypatch):
     conn.commit()
     assert prazos.ritmo_e_prazo(conn, cid, hoje)["situacao"] is None
     conn.close()
+
+
+def test_ficha_necessario_na_cota_fecha_com_o_saldo_da_tela(client_admin, monkeypatch):
+    """#803: na cota, o necessario e' o saldo do topo (a diferenca de dois valores ja' arredondados) dividido pelas
+    competencias que restam, para a conta da tela fechar ao centavo; a cota do necessario cheio ficaria a um centavo."""
+    import datetime
+    from app import contratos, db, prazos, tempo
+    hoje = datetime.date(2026, 10, 15)
+    monkeypatch.setattr(tempo, "hoje_local", lambda: hoje)
+    cid = _obra_com_reajuste_e_medicoes(bp=4900)
+    conn = db.get_conn()
+    conn.execute("UPDATE contratos SET execucao_fim='2026-12-20' WHERE id=?", (cid,))
+    conn.execute("UPDATE medicoes SET valor_protocolado_centavos=100_000_17 WHERE contrato_id=? AND numero=2", (cid,))
+    conn.commit()
+    cheio = prazos.ritmo_e_prazo(conn, cid, hoje)
+    conn.close()
+    f = client_admin.get(f"/api/contratos/{cid}/ficha").json()
+    assert f["topo"]["saldo_centavos"] == 391_999_75 and f["ritmo"]["competencias_restantes"] == 3
+    assert f["ritmo"]["necessario_centavos"] == 130_666_58                       # 391.999,75 / 3 = 130.666,583
+    assert cheio["necessario_centavos"] == 266_666_50 and contratos.cota(266_666_50, 4900) == 130_666_59
 
 
 def test_listar_traz_a_posicao_na_cota_igual_ao_topo_da_pagina_da_obra(client_admin):

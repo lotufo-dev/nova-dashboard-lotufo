@@ -444,8 +444,8 @@ def test_ritmo_e_prazo_sem_prazo_de_execucao_conhecido_nao_diz_que_atrasa(cenari
     assert prazos.ritmo_e_prazo(c, cid, D(2026, 12, 1))["situacao"] == "atrasa"
     ids["aditivo"]("2026-11-10", None, "2027-06-30")
     r = prazos.ritmo_e_prazo(c, cid, D(2026, 12, 1))
-    assert r == {"ritmo_centavos": 100_00, "conclusao": None,
-                 "situacao": None, "dias_alem": None}
+    assert r == {"ritmo_centavos": 100_00, "necessario_centavos": None, "competencias_restantes": None,
+                 "conclusao": None, "situacao": None, "dias_alem": None}
 
 
 # --- issue #655: cartao "Ritmo e prazo" da pagina da obra (a mesma conta da sugestao, so' mostrada) --------
@@ -456,8 +456,9 @@ def test_ritmo_e_prazo_conclusao_depois_do_fim_atrasa_com_os_dias(cenario):
     _valor(c, cid, 1_000_00); _fim(c, cid, "2026-12-20")
     _medicao(c, cid, 1, "2026-09", atestado=600_00)   # ritmo 100,00; saldo 400,00; conclusao 15/02/2027
     r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
-    assert r == {"ritmo_centavos": 100_00, "conclusao": "2027-02-15",
-                 "situacao": "atrasa", "dias_alem": 57}
+    # #803: restam outubro, novembro e dezembro; 400,00 / 3 = 133,33 por mes, acima do ritmo
+    assert r == {"ritmo_centavos": 100_00, "necessario_centavos": 133_33, "competencias_restantes": 3,
+                 "conclusao": "2027-02-15", "situacao": "atrasa", "dias_alem": 57}
 
 
 def test_ritmo_e_prazo_conclusao_ate_o_fim_e_no_prazo(cenario):
@@ -477,8 +478,9 @@ def test_ritmo_e_prazo_acima_do_teto_do_pedido_nao_fecha_a_conta(cenario):
     _valor(c, cid, 1_006_00)
     _medicao(c, cid, 1, "2026-09", atestado=6_00)   # ritmo 1,00; saldo 1.000,00 = 1.000 meses
     r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
-    assert r == {"ritmo_centavos": 1_00, "conclusao": None,
-                 "situacao": None, "dias_alem": None}
+    # #803: o necessario nao depende do ritmo: 1.000,00 em outubro, o mes do fim da execucao (20/10/2026)
+    assert r == {"ritmo_centavos": 1_00, "necessario_centavos": 1_000_00, "competencias_restantes": 1,
+                 "conclusao": None, "situacao": None, "dias_alem": None}
 
 
 def test_ritmo_e_prazo_no_teto_do_pedido_ainda_atrasa(cenario):
@@ -501,8 +503,9 @@ def test_ritmo_e_prazo_sem_medicao_na_janela_sem_ritmo_sem_conclusao_sem_situaca
     _valor(c, cid, 900_00)
     _medicao(c, cid, 1, "2026-03", atestado=300_00)   # antes da janela
     r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
-    assert r == {"ritmo_centavos": None, "conclusao": None,
-                 "situacao": None, "dias_alem": None}
+    # #803: sem ritmo ainda ha' quanto medir por mes: 600,00 em outubro, o mes do fim da execucao
+    assert r == {"ritmo_centavos": None, "necessario_centavos": 600_00, "competencias_restantes": 1,
+                 "conclusao": None, "situacao": None, "dias_alem": None}
 
 
 def test_ritmo_e_prazo_sem_saldo_ou_sem_fim_de_execucao_nao_tem_situacao(cenario):
@@ -515,3 +518,98 @@ def test_ritmo_e_prazo_sem_saldo_ou_sem_fim_de_execucao_nao_tem_situacao(cenario
     _valor(c, cid, 1_000_00); _fim(c, cid, None)
     r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
     assert (r["ritmo_centavos"], r["conclusao"], r["situacao"], r["dias_alem"]) == (100_00, None, None, None)
+
+
+# --- issue #803: o necessario por mes para terminar no prazo (saldo a executar / competencias que restam) ---
+
+def test_competencias_que_restam_contam_o_mes_de_hoje_e_o_do_fim_da_execucao():
+    assert prazos.competencias_restantes(D(2026, 11, 18), D(2027, 3, 31)) == 5     # nov, dez, jan, fev, mar
+    assert prazos.competencias_restantes(D(2026, 11, 18), D(2026, 11, 30)) == 1    # o fim no mes de hoje
+    assert prazos.competencias_restantes(D(2026, 12, 31), D(2027, 1, 1)) == 2      # a virada de ano
+    assert prazos.competencias_restantes(D(2026, 1, 1), D(2026, 12, 31)) == 12
+    assert prazos.competencias_restantes(D(2026, 11, 18), D(2028, 2, 10)) == 16
+
+
+def test_necessario_por_mes_arredonda_uma_vez_a_centavos_como_o_ritmo():
+    assert prazos.necessario_por_mes(10_000_000_00, 5) == 2_000_000_00
+    assert prazos.necessario_por_mes(100_00, 3) == 33_33
+    assert prazos.necessario_por_mes(200_00, 3) == 66_67
+    assert prazos.necessario_por_mes(5, 2) == 3                                    # meio centavo sobe, como no ritmo
+    # centavo impar num valor que o float nao guarda inteiro: a conta e' decimal
+    assert prazos.necessario_por_mes(90_071_992_547_409_93, 1) == 90_071_992_547_409_93
+
+
+def test_necessario_e_o_saldo_a_executar_pelas_competencias_que_restam_com_virada_de_ano(cenario):
+    """O exemplo da issue: saldo de 10.000.000,00, hoje em novembro, execucao ate' marco: 5 competencias."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 12_000_000_00); _fim(c, cid, "2027-03-31")
+    _medicao(c, cid, 1, "2026-09", atestado=2_000_000_00)   # saldo 10.000.000,00; ritmo 2.000.000,00 / 6
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 11, 18))
+    assert (r["necessario_centavos"], r["competencias_restantes"]) == (2_000_000_00, 5)
+    assert r["ritmo_centavos"] == 333_333_33 and r["situacao"] == "atrasa" and r["dias_alem"] > 0
+    # o saldo e' o de `paineis.saldo`, o mesmo do ritmo: a medicao de projeto baixa o saldo e o necessario
+    _medicao(c, cid, 2, "2026-10", atestado=1_000_000_00, tipo="projeto")
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 11, 18))
+    assert (r["necessario_centavos"], r["competencias_restantes"]) == (1_800_000_00, 5)
+
+
+def test_necessario_com_o_fim_da_execucao_no_mes_de_hoje_e_o_saldo_inteiro(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 1_000_00)
+    _medicao(c, cid, 1, "2026-09", atestado=600_00)        # saldo 400,00; ritmo 100,00
+    for fim in ("2026-11-30", "2026-11-18"):               # no dia do fim a execucao ainda nao venceu
+        _fim(c, cid, fim)
+        r = prazos.ritmo_e_prazo(c, cid, D(2026, 11, 18))
+        assert (r["necessario_centavos"], r["competencias_restantes"], r["situacao"]) == (400_00, 1, "atrasa")
+    # venceu ontem, no mesmo mes: nao ha' competencia que reste; o selo dos dias alem do fim continua
+    _fim(c, cid, "2026-11-17")
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 11, 18))
+    assert (r["necessario_centavos"], r["competencias_restantes"]) == (None, None)
+    assert r["ritmo_centavos"] == 100_00 and r["situacao"] == "atrasa" and r["dias_alem"] > 0
+
+
+def test_ritmo_igual_ou_acima_do_necessario_e_no_prazo_e_um_centavo_abaixo_atrasa(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    _valor(c, cid, 1_000_00); _fim(c, cid, "2027-01-31")
+    _medicao(c, cid, 1, "2026-09", atestado=600_00)        # ritmo 100,00; saldo 400,00
+    # restam out, nov, dez e jan: necessario 100,00 = ritmo. A conclusao estimada conta os meses do dia de hoje e
+    # passa do fim por menos de um mes; o necessario conta inteira a competencia de hoje, e e' ele que decide
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
+    assert r == {"ritmo_centavos": 100_00, "necessario_centavos": 100_00, "competencias_restantes": 4,
+                 "conclusao": "2027-02-15", "situacao": "no_prazo", "dias_alem": None}
+    _valor(c, cid, 1_000_04)                                # saldo 400,04: necessario 100,01, um centavo acima do ritmo
+    r = prazos.ritmo_e_prazo(c, cid, D(2026, 10, 15))
+    assert r == {"ritmo_centavos": 100_00, "necessario_centavos": 100_01, "competencias_restantes": 4,
+                 "conclusao": "2027-02-16", "situacao": "atrasa", "dias_alem": 16}
+
+
+def test_necessario_nulo_sem_fim_sem_saldo_e_na_obra_parada_encerrada_ou_com_medicao_final(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    hoje = D(2026, 11, 18)
+    _valor(c, cid, 1_000_00); _fim(c, cid, "2027-03-31")
+    _medicao(c, cid, 1, "2026-09", atestado=600_00)
+
+    def necessario():
+        r = prazos.ritmo_e_prazo(c, cid, hoje)
+        return r["necessario_centavos"], r["competencias_restantes"]
+
+    assert necessario() == (80_00, 5)
+    _fim(c, cid, None)                                       # sem fim de execucao
+    assert necessario() == (None, None)
+    _fim(c, cid, "2027-03-31"); _valor(c, cid, 600_00)       # sem saldo
+    assert necessario() == (None, None)
+    _valor(c, cid, 1_000_00)
+    ids["instrumento"]("paralisacao", "2026-11-01")          # obra parada
+    assert necessario() == (None, None)
+    ids["instrumento"]("reinicio", "2026-11-10")
+    assert necessario() == (80_00, 5)
+    c.execute("UPDATE contratos SET encerramento_iniciado_em='2026-11-05' WHERE id=?", (cid,)); c.commit()   # medicao final
+    assert necessario() == (None, None)
+    c.execute("UPDATE contratos SET encerramento_iniciado_em=NULL, estado='encerrado' WHERE id=?", (cid,)); c.commit()
+    assert necessario() == (None, None)
+    r = prazos.ritmo_e_prazo(c, cid, hoje)                   # o ritmo continua; situacao, nao
+    assert (r["ritmo_centavos"], r["situacao"], r["dias_alem"]) == (100_00, None, None)

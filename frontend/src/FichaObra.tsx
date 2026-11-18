@@ -1,5 +1,5 @@
 import { LinhasDoTempo, type Nivel, type StatusDaObra } from "./ExecucaoContrato";
-import { brl, fmtDias } from "./formato";
+import { brl, contar, fmtDias } from "./formato";
 import { pctPiso } from "./listaObras";
 import { Link } from "./Link";
 import Selo, { Glifo } from "./Selo";
@@ -22,9 +22,10 @@ export type Ficha = {
   // #646: base de execucao (sem o aditivo de reajuste) e cota da Lotufo; vigente − medido = saldo
   topo: { vigente_centavos: number; medido_centavos: number; saldo_centavos: number; reajuste_centavos: number };
   contrato: { original_centavos: number; original_igual: boolean; tas: number; data_base: string | null };
-  // #655: a conta de `prazos.ritmo_e_prazo`, na mesma base do topo; `situacao` nula quando a conta nao fecha
-  ritmo: { ritmo_centavos: number | null; conclusao: string | null;
-    situacao: "no_prazo" | "atrasa" | null; dias_alem: number | null };
+  // #655: a conta de `prazos.ritmo_e_prazo`, na mesma base do topo; `situacao` nula quando a conta nao fecha.
+  // #803: o necessario por mes para terminar no prazo (saldo / competencias que restam); nulos sem prazo a cumprir
+  ritmo: { ritmo_centavos: number | null; necessario_centavos: number | null; competencias_restantes: number | null;
+    conclusao: string | null; situacao: "no_prazo" | "atrasa" | null; dias_alem: number | null };
   ultima_medicao: (Medicao & { recebida_em: string | null; dias_apos_nota: number | null }) | null;
   em_andamento: (Medicao & { etapa: string; desde: string | null }) | null;
   vencimentos: Vencimento[];
@@ -111,8 +112,10 @@ export function estadoSemPrazo(p: PrazosDaObra): { texto: string; paralisada: bo
 }
 
 /** O prazo da obra num painel so': quantos dias faltam para o fim da execucao (o nivel e' do servidor, com o glifo
- *  alem da cor), as linhas do tempo da execucao e da vigencia e, embaixo, a conta do ritmo (#655): no ritmo das 6
- *  ultimas competencias fechadas, a obra termina ate' o fim da execucao? Sem conta, "—" e nenhum selo. */
+ *  alem da cor), as linhas do tempo da execucao e da vigencia e, embaixo, a conta do ritmo (#655, #803): o ritmo das
+ *  6 ultimas competencias fechadas, quanto a obra precisa medir por mes para terminar no prazo e a conclusao estimada
+ *  no ritmo de hoje. O selo compara os dois primeiros (`situacao` vem do servidor): ritmo igual ou acima do
+ *  necessario, "No ritmo do prazo"; abaixo, os dias da conclusao alem do fim da execucao. Sem conta, "—" e nenhum selo. */
 export function PrazoDaObra({ ficha, prazos }: { ficha: Ficha | null | undefined; prazos: PrazosDaObra }) {
   const r = ficha?.ritmo;
   const exec = ficha?.vencimentos.find(v => v.chave === "execucao") ?? null;
@@ -147,10 +150,21 @@ export function PrazoDaObra({ ficha, prazos }: { ficha: Ficha | null | undefined
         <dl className="obra-ritmo" aria-label="Ritmo e prazo">
           <div><dt>Ritmo mensal</dt><dd>{r.ritmo_centavos === null ? "—" : brl(r.ritmo_centavos)}</dd></div>
           <div>
+            <dt>Necessário para terminar no prazo</dt>
+            <dd className="obra-ritmo__necessario">
+              {r.necessario_centavos === null || r.competencias_restantes === null ? "—" : (
+                <>
+                  <span>{brl(r.necessario_centavos)}</span>
+                  <span className="obra-ritmo__resta">por mês, em {contar(r.competencias_restantes, "competência", "competências")}</span>
+                </>
+              )}
+            </dd>
+          </div>
+          <div>
             <dt>Conclusão estimada</dt>
             <dd className="obra-ritmo__conclusao">
               <span>{data(r.conclusao)}</span>
-              {r.situacao === "no_prazo" && <Selo situacao="feito">até o fim da execução</Selo>}
+              {r.situacao === "no_prazo" && <Selo situacao="feito">No ritmo do prazo</Selo>}
               {r.situacao === "atrasa" && r.dias_alem !== null && <Selo situacao="critico">{fmtDias(r.dias_alem)} depois do fim da execução</Selo>}
             </dd>
           </div>

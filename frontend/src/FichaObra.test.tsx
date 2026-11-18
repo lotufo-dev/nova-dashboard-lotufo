@@ -14,8 +14,9 @@ const FICHA: Ficha = {
     recebida_em: "2026-10-16", dias_apos_nota: 14 },
   em_andamento: { id: 16, titulo: "16ª Medição", rotulo: "16ª", competencia: "2026-10", valor_centavos: 6000022,
     etapa: "Pagamento", desde: "2026-11-05" },
-  // ritmo 50.000,00/mes para 187.654,34 de saldo: conclusao depois do fim da execucao
-  ritmo: { ritmo_centavos: 5000000, conclusao: "2027-03-08",
+  // ritmo 50.000,00/mes para 187.654,34 de saldo: conclusao depois do fim da execucao. #803: o fim da execucao cai no
+  // mes de hoje, resta 1 competencia e o necessario e' o saldo inteiro
+  ritmo: { ritmo_centavos: 5000000, necessario_centavos: 18765434, competencias_restantes: 1, conclusao: "2027-03-08",
     situacao: "atrasa", dias_alem: 110 },
   // #661: so' o que e' da obra; a certidao da empresa saiu daqui
   vencimentos: [
@@ -120,9 +121,16 @@ describe("Prazo da obra: os dias da execução, as linhas do tempo e o ritmo (#6
     expect(within(regiao("Prazo")).getByText("16/02/2027")).toBeTruthy();
   });
 
-  it("mostra o ritmo mensal e a conclusão estimada; o saldo e o fim da execução não se repetem", () => {
+  it("mostra o ritmo mensal, o necessário por mês e a conclusão estimada; o saldo e o fim da execução não se repetem", () => {
     montar();
+    const conta = within(regiao("Prazo")).getByLabelText("Ritmo e prazo");
+    expect([...conta.querySelectorAll("dt")].map(dt => dt.textContent)).toEqual(
+      ["Ritmo mensal", "Necessário para terminar no prazo", "Conclusão estimada"]);
     expect(valor("Ritmo mensal").textContent).toMatch(/^R\$\s50\.000,00$/);
+    // #803: o valor por mês e as competências que restam; o saldo do topo dividido por elas é o necessário
+    const [porMes, restam] = [...valor("Necessário para terminar no prazo").querySelectorAll("span")].map(x => x.textContent);
+    expect(porMes).toMatch(/^R\$\s187\.654,34$/);
+    expect(restam).toBe("por mês, em 1 competência");
     expect(valor("Conclusão estimada").querySelector("span")!.textContent).toBe("08/03/2027");
     expect(within(regiao("Prazo")).queryByText("Saldo")).toBeNull();
     expect(within(regiao("Prazo")).getAllByText("18/11/2026")).toHaveLength(1);
@@ -138,17 +146,36 @@ describe("Prazo da obra: os dias da execução, as linhas do tempo e o ritmo (#6
     expect(selo.textContent).toBe("110 dias depois do fim da execução");
   });
 
-  it("conclusão até o fim da execução: selo de feito", () => {
-    comRitmo({ conclusao: "2026-11-10", situacao: "no_prazo", dias_alem: null });
+  it("ritmo igual ou acima do necessário: selo de feito 'No ritmo do prazo' (#803)", () => {
+    comRitmo({ ritmo_centavos: 7000000, necessario_centavos: 6255145, competencias_restantes: 3, conclusao: "2027-01-26",
+      situacao: "no_prazo", dias_alem: null });
+    expect(valor("Necessário para terminar no prazo").textContent).toMatch(/^R\$\s62\.551,45por mês, em 3 competências$/);
+    const selos = regiao("Prazo").querySelectorAll(".obra-ritmo .selo");
+    expect(selos).toHaveLength(1);
     const selo = valor("Conclusão estimada").querySelector(".selo")!;
     expect(selo.className).toContain("selo--feito");
-    expect(selo.textContent).toBe("até o fim da execução");
+    expect(selo.querySelector(".glifo--feito")).toBeTruthy();
+    expect(selo.textContent).toBe("No ritmo do prazo");
   });
 
-  it("sem medição nas 6 últimas competências: '—' no ritmo e na conclusão e nenhum selo", () => {
+  it("execução vencida: '—' no necessário, e o selo crítico dos dias além do fim continua (#803)", () => {
+    comRitmo({ necessario_centavos: null, competencias_restantes: null });
+    expect(valor("Necessário para terminar no prazo").textContent).toBe("—");
+    expect(valor("Ritmo mensal").textContent).toMatch(/^R\$\s50\.000,00$/);
+    expect(valor("Conclusão estimada").querySelector(".selo--critico")!.textContent).toMatch(/^110.dias depois do fim da execução$/);
+  });
+
+  it("sem medição nas 6 últimas competências: '—' no ritmo e na conclusão e nenhum selo; o necessário continua", () => {
     comRitmo({ ritmo_centavos: null, conclusao: null, situacao: null, dias_alem: null });
     expect(valor("Ritmo mensal").textContent).toBe("—");
     expect(valor("Conclusão estimada").textContent).toBe("—");
+    expect(valor("Necessário para terminar no prazo").textContent).toMatch(/^R\$\s187\.654,34por mês, em 1 competência$/);
+    expect(regiao("Prazo").querySelector(".selo")).toBeNull();
+  });
+
+  it("sem prazo a cumprir e sem ritmo: '—' nos três e nenhum selo", () => {
+    comRitmo({ ritmo_centavos: null, necessario_centavos: null, competencias_restantes: null, conclusao: null, situacao: null, dias_alem: null });
+    expect(["Ritmo mensal", "Necessário para terminar no prazo", "Conclusão estimada"].map(r => valor(r).textContent)).toEqual(["—", "—", "—"]);
     expect(regiao("Prazo").querySelector(".selo")).toBeNull();
   });
 

@@ -26,8 +26,8 @@
 //   destino  o caminho em que a tela termina, quando ela so' leva a outra (`/notas/envio/:id` abre a pagina da medicao)
 //
 // Todo item do menu de um perfil precisa de uma tela aqui para esse perfil: a prova reprova o item sem tela.
-import { cabecalhoCom, CUSTO_DA_OBRA, detalheDoEnvio, espelhoEnviadoPorFora, espelhoGerado, falha, fechamentoComValores,
-         inicioComAParte, inicioComVariacoes,
+import { cabecalhoCom, cabecalhoEmDia, CUSTO_DA_OBRA, detalheDoEnvio, espelhoEnviadoPorFora, espelhoGerado, falha,
+         fechamentoComValores, fichaComNecessario, inicioComAParte, inicioComVariacoes, semAvisoDePrazo,
          medicaoComEspelhoEnviadoPorFora, medicaoComEspelhoGerado, medicaoComExcluidosNoRm, obrasComAParte, reconciliacaoComBaixados,
          medicaoComNotaDivergente, medicaoComNotaEmitida, medicaoDaMtpar, NOTAS_COM_DIVERGENCIA, notasAEnviar, notasComEnvioAberto,
          PDF_ILEGIVEL,
@@ -74,6 +74,12 @@ const comEnvioAberto = divergente => [
 ];
 const abrirEnvio = [...passo("Envio da nota"), { clicar: '#passo-5 button:has-text("Enviar a nota")' }];
 const OBRA_GRADE = ".obra-grade";
+// issue #803: a obra com a execucao em dia e o necessario por mes; `noRitmo` poe o ritmo acima dele
+const comNecessario = noRitmo => [
+  { caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoEmDia },
+  { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaComNecessario(noRitmo) },
+  { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
+];
 
 export const TELAS = [
   // ---- Inicio
@@ -185,6 +191,12 @@ export const TELAS = [
   // a obra encerrada sem a data do encerramento no sistema: o painel "Prazo" diz so' "encerrada"
   { rota: "obra", id: "obra-encerrada", caminho: "/obras/:obra", perfis: TODOS, espera: OBRA_GRADE,
     simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoCom("encerrado", { status_desde: null }) }] },
+  // #803: a obra de exemplo tem a execucao vencida e mostra "—" no necessario; aqui, a execucao em dia com o ritmo
+  // abaixo do necessario (selo critico com os dias) e com o ritmo acima dele (selo "No ritmo do prazo")
+  { rota: "obra", id: "obra-ritmo-abaixo", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .selo--critico",
+    simular: comNecessario(false) },
+  { rota: "obra", id: "obra-no-ritmo", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .selo--feito",
+    simular: comNecessario(true) },
   { rota: "obra", id: "obra-erro", caminho: "/obras/:obra", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/contratos\/\d+\/cabecalho$/) },
 
