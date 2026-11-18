@@ -489,3 +489,93 @@ export const semAvisos = inicio => ({ ...inicio, avisos: [] });
 
 // Uma resposta que a tela nao sabe desenhar: o Inicio cai e a ultima rede ("A tela parou de responder") aparece.
 export const RESPOSTA_QUE_QUEBRA = { medido: null };
+
+// #805, Medicoes como fila de trabalho: o mes cheio que o cadastro de exemplo nao tem (as medicoes dele sao de 2025).
+// Medicao com cada um (a Lotufo, o faturamento, o orgao), parada ha' pouco e ha' muito, alem do prazo do orgao e
+// dentro dele, com o aprovado abaixo (pouco e muito), acima e igual ao pedido, obra de cinco e de tres passos, medicao
+// com o reajuste, concluida e obra sem medicao; nos meses anteriores, o que pede acao e o que so' espera pagamento.
+// Obras, medicoes e valores inventados (os links das linhas nao abrem nada no banco da prova). As obras sem medicao e a
+// lista de obras da janela "Iniciar" sao as verdadeiras, com mais tres inventadas.
+const NOMES_DOS_PASSOS = ["Planilha e carta", "Análise do órgão", "Espelhos", "Notas", "Envio da nota", "Pagamento"];
+const paradaDaFila = (dias, situacao, x = {}) => ({
+  desde: dias === null ? null : dataEm(hojeDaProva(), -Math.round(dias * 1.4)), dias_uteis: dias, hoje: dias === 0, situacao,
+  prazo_orgao_dias: x.prazo ?? null, esperada: x.esperada === undefined ? null : dataEm(hojeDaProva(), x.esperada), alem_do_prazo: (x.esperada ?? 1) < 0,
+});
+const comparadosDaFila = (pedido, aprovado) => {
+  const p = pedido === null ? null : pedido * REAIS, a = aprovado === null ? null : aprovado * REAIS, ha = p !== null && a !== null;
+  return { pedido_centavos: p, aprovado_centavos: a, aprovado_com_pedido_centavos: ha ? a : null, pedido_do_aprovado_centavos: ha ? p : null,
+    abaixo_do_pedido_centavos: ha ? Math.max(0, p - a) : null, acima_do_pedido_centavos: ha ? Math.max(0, a - p) : null };
+};
+const linhaDaFila = (reg, n, obra, titulo, quem, tem, atual, parada, pedido, aprovado, x = {}) => ({
+  contrato_id: 9100 + n, obra, contratante: x.contratante ?? "SINFRA", orgao_sub: x.sub === undefined ? "SUEF II" : x.sub,
+  medicao_id: reg.medicao + n * 1000, medicao_ids: [reg.medicao + n * 1000], titulo, competencia: x.competencia ?? competenciaHa(1), com_quem: quem,
+  passo: { numero: atual, nome: NOMES_DOS_PASSOS[atual - 1], posicao: tem.indexOf(atual) + 1, total: tem.length },
+  passos: tem.map(p => ({ numero: p, nome: NOMES_DOS_PASSOS[p - 1], situacao: p < atual ? "feito" : p === atual ? "atual" : "futuro" })),
+  parada, ...comparadosDaFila(pedido, aprovado), acao: x.acao ?? null,
+});
+const SEIS = [1, 2, 3, 4, 5, 6], CINCO = [2, 3, 4, 5, 6], TRES = [3, 4, 6];
+const somaDaFila = linhas => {
+  const soma = k => { const v = linhas.map(l => l[k]).filter(x => x !== null); return v.length ? v.reduce((a, b) => a + b, 0) : null; };
+  return { pedido_centavos: soma("pedido_centavos"), aprovado_centavos: soma("aprovado_centavos"),
+    aprovado_com_pedido_centavos: soma("aprovado_com_pedido_centavos"), pedido_do_aprovado_centavos: soma("pedido_do_aprovado_centavos"),
+    abaixo_do_pedido_centavos: soma("abaixo_do_pedido_centavos") };
+};
+export const filaSimulada = (resposta, reg) => {
+  const mtpar = { contratante: "MTPAR", sub: null };
+  const lotufo = [
+    linhaDaFila(reg, 1, "Maternidade Alfa", "5ª Medição", "lotufo", CINCO, 3, paradaDaFila(12, "critico"), 172_000, 172_000,
+      { acao: "gerar_espelho", contratante: "Pref. Várzea Grande", sub: null }),
+    linhaDaFila(reg, 2, "Corredor Beta", "30ª Medição + Reajuste", "lotufo", SEIS, 5, paradaDaFila(6, "breve"), 1_720_000, 1_660_000, { acao: "enviar_nota", sub: "SUPU" }),
+    linhaDaFila(reg, 3, "Estações Gama", "16ª Medição", "lotufo", SEIS, 3, paradaDaFila(4, "andamento"), 8_400_000, 8_380_000, { acao: "enviar_espelho", sub: "SUPU" }),
+    linhaDaFila(reg, 4, "Terminais Delta", "3ª Medição de Projeto", "lotufo", SEIS, 1, paradaDaFila(0, "feito"), 980_000, null, { acao: "enviar_planilha" }),
+    linhaDaFila(reg, 5, "Trevo Eta", "9ª Medição", "lotufo", CINCO, 2, paradaDaFila(null, null), 310_000, null, { acao: "registrar_boletim", ...mtpar }),
+  ];
+  const faturamento = [
+    linhaDaFila(reg, 6, "Quartel Delta", "8ª Medição", "faturamento", SEIS, 4, paradaDaFila(7, "breve"), 593_000, 593_400),
+    linhaDaFila(reg, 7, "Anel Teta", "12ª Medição", "faturamento", CINCO, 4, paradaDaFila(1, "andamento"), 2_050_000, 2_050_000, mtpar),
+  ];
+  const orgao = [
+    linhaDaFila(reg, 8, "Bairros Épsilon", "35ª Medição", "orgao", SEIS, 6, paradaDaFila(41, "critico", { prazo: 45, esperada: -9 }), 209_000, 209_000, { sub: "SUPU" }),
+    linhaDaFila(reg, 9, "Rodovia Capa", "29ª Medição", "orgao", SEIS, 2, paradaDaFila(11, "critico"), 856_000, null),
+    linhaDaFila(reg, 10, "Avenida Alfa", "11ª Medição", "orgao", SEIS, 2, paradaDaFila(5, "breve"), 1_600_000, null),
+    linhaDaFila(reg, 11, "Complexo Lambda", "25ª Medição + Reajuste", "orgao", CINCO, 6, paradaDaFila(4, "andamento", { prazo: 45, esperada: 39 }), 1_904_000, 1_904_000, mtpar),
+    linhaDaFila(reg, 12, "Praça Mi", "2ª Medição", "orgao", TRES, 6, paradaDaFila(3, "andamento"), 77_000, 77_000, { contratante: "Pref. Cuiabá", sub: null }),
+  ];
+  const doMes = [...lotufo, ...faturamento, ...orgao];
+  const contar = ls => ({ quantidade: ls.length, criticas: ls.filter(l => l.parada.situacao === "critico").length,
+    breves: ls.filter(l => l.parada.situacao === "breve").length, alem_do_prazo: ls.filter(l => l.parada.alem_do_prazo).length });
+  const concluidas = [
+    { contrato_id: reg.obra, obra: "Ponte Ni", medicao_id: reg.medicao, titulo: "8ª Medição", recebida_em: dataEm(hojeDaProva(), -8) },
+    { contrato_id: reg.obra, obra: "Rodovia Csi", medicao_id: reg.medicao + 500, titulo: "15ª Medição", recebida_em: dataEm(hojeDaProva(), -2) },
+  ];
+  const semMedicao = [...resposta.sem_medicao,
+    ...["Orla Iota", "Hospital Ômicron", "Travessia Zeta"].map((obra, i) => ({ contrato_id: 9900 + i, obra, contratante: "SINFRA" }))];
+  // o quadro: as mesmas medicoes, uma linha por obra, agrupadas pelo contratante
+  const noQuadro = l => ({
+    contrato_id: l.contrato_id, obra: l.obra, contratante: l.contratante, orgao_sub: l.orgao_sub, medicoes: [{ id: l.medicao_id, titulo: l.titulo }],
+    iniciar: false, pedido_centavos: l.pedido_centavos, aprovado_centavos: l.aprovado_centavos,
+    aprovado_com_pedido_centavos: l.aprovado_com_pedido_centavos, pedido_do_aprovado_centavos: l.pedido_do_aprovado_centavos,
+    abaixo_do_pedido_centavos: l.abaixo_do_pedido_centavos, acima_do_pedido_centavos: l.acima_do_pedido_centavos,
+    passos: l.passos.map(p => ({ ...p, data: p.situacao === "feito" ? dataEm(hojeDaProva(), -30 + p.numero * 3) : null,
+      medicao_id: p.situacao === "atual" ? l.medicao_id : null, parada: p.situacao === "atual" ? l.parada : null,
+      siga: p.situacao === "atual" && p.numero === 2 && l.parada.dias_uteis === 11
+        ? { processo_id: 1, setor: "SUPE", dias_uteis: 6, desde: "2026-10-20T10:00:00-04:00", hoje: 0 } : null })),
+  });
+  const contratantes = [...new Set(doMes.map(l => l.contratante))];
+  const quadro = contratantes.map(c => { const ls = doMes.filter(l => l.contratante === c); return { contratante: c, ...somaDaFila(ls), linhas: ls.map(noQuadro) }; })
+    .sort((a, b) => b.linhas.length - a.linhas.length);
+  const anteriores = [
+    linhaDaFila(reg, 13, "Corredor Beta", "29ª Medição", "lotufo", SEIS, 5, paradaDaFila(19, "critico"), 1_510_000, 1_480_000,
+      { acao: "enviar_nota", sub: "SUPU", competencia: competenciaHa(2) }),
+    linhaDaFila(reg, 14, "Trevo Eta", "8ª Medição", "faturamento", CINCO, 4, paradaDaFila(8, "breve"), 290_000, 290_000, { ...mtpar, competencia: competenciaHa(2) }),
+    linhaDaFila(reg, 15, "Rodovia Capa", "27ª Medição", "orgao", SEIS, 2, paradaDaFila(33, "critico"), 640_000, null, { competencia: competenciaHa(3) }),
+  ];
+  return {
+    ...resposta,
+    numeros: { com: { lotufo: contar(lotufo), faturamento: contar(faturamento), orgao: contar(orgao) }, concluidas: concluidas.length,
+      sem_medicao: semMedicao.length, ...somaDaFila(doMes) },
+    grupos: [{ com_quem: "lotufo", linhas: lotufo }, { com_quem: "faturamento", linhas: faturamento }, { com_quem: "orgao", linhas: orgao }],
+    concluidas, sem_medicao: semMedicao, quadro,
+    anteriores: { linhas: anteriores, esperam_pagamento: 17, antes_do_ano_inicial: 4, ano_inicial: "2025" },
+  };
+};

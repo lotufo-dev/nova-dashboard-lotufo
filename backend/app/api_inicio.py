@@ -1,12 +1,12 @@
 """Tela inicial e lista de medicoes em andamento (bloco 6; spec 2026-09-21 §10.1 e §10.2). So' leitura.
 
-Registrado ANTES do router de medicoes: `/api/medicoes/andamento` e `/api/medicoes/resumo` nao podem cair em
+Registrado ANTES do router de medicoes: `/api/medicoes/andamento`, `/api/medicoes/resumo` e `/api/medicoes/fila` nao podem cair em
 `/api/medicoes/{medicao_id}`."""
 import sqlite3
 
 from fastapi import APIRouter, Depends, Query
 
-from app import avisos, inicio as pagina_inicio, medicoes
+from app import avisos, fila_medicoes, inicio as pagina_inicio, medicoes
 from app.api_auth import conexao
 from app.api_medicoes import MAX_INT64
 from app.permissoes import exigir
@@ -41,3 +41,12 @@ def resumo(mes: str | None = Query(None, pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$"),
     ativas, com `sem_no_mes` para a competencia `mes` (AAAA-MM; padrao, o mes de hoje). #643: o `quadro` da
     competencia (uma linha por obra, um passo por coluna) e as medicoes abertas dos meses `anteriores`."""
     return medicoes.resumo(conn, mes=mes)
+
+
+@router.get("/api/medicoes/fila")
+def fila(mes: str | None = Query(None, pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$"),
+         _=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
+    """Tela Medicoes como fila de trabalho (issue #805): a competencia `mes` (AAAA-MM; padrao, o mes de hoje) em tres
+    vistas: a fila por quem tem de agir, o quadro do mes por contratante e os meses anteriores que pedem acao
+    (`fila_medicoes.fila`). So' leitura, para todo perfil que ve os paineis."""
+    return fila_medicoes.fila(conn, mes=mes)

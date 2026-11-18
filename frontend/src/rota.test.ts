@@ -100,15 +100,26 @@ describe("rota", () => {
     expect(hrefDe({ tela: "avisos" }, { familia: "prazo", obra: "7" })).toBe("/avisos?familia=prazo&obra=7");
   });
 
-  it("Medições é uma tela só, o quadro do mês; Iniciar medição e Em andamento levam a ela (#643)", () => {
+  it("Medições abre na fila de trabalho; Iniciar medição e Em andamento levam a ela (#643, #805)", () => {
     expect(caminhoDe({ tela: "medicoes" })).toBe("/medicoes");
     expect(parseRota("/medicoes")).toEqual({ tela: "medicoes" });
     expect(parseRota("/medicoes/iniciar")).toEqual({ tela: "medicoes" });
     expect(parseRota("/medicoes/em-andamento")).toEqual({ tela: "medicoes" });
-    for (const c of ["/medicoes/x", "/medicoes/enviar-nota/1", "/medicoes/em-andamento/1"]) expect(parseRota(c)).toEqual({ tela: "raiz" });
+    for (const c of ["/medicoes/x", "/medicoes/enviar-nota/1", "/medicoes/em-andamento/1", "/medicoes/quadro/1"]) expect(parseRota(c)).toEqual({ tela: "raiz" });
   });
 
-  it("as abas antigas de Medições levam ao quadro", () => {
+  it("as vistas de Medições têm endereço: o quadro do mês e os meses anteriores; a fila é a padrão e não entra na URL (#805)", () => {
+    expect(parseRota("/medicoes/quadro")).toEqual({ tela: "medicoes", aba: "quadro" });
+    expect(parseRota("/medicoes/anteriores")).toEqual({ tela: "medicoes", aba: "anteriores" });
+    expect(caminhoDe({ tela: "medicoes", aba: "quadro" })).toBe("/medicoes/quadro");
+    expect(caminhoDe({ tela: "medicoes", aba: "anteriores" })).toBe("/medicoes/anteriores");
+    expect(parseRota("/medicoes/fila")).toEqual({ tela: "medicoes" });
+    expect(caminhoDe({ tela: "medicoes", aba: "fila" })).toBe("/medicoes");
+    // a competência vai na busca, em qualquer vista
+    expect(hrefDe({ tela: "medicoes", aba: "quadro" }, { mes: "2026-09" })).toBe("/medicoes/quadro?mes=2026-09");
+  });
+
+  it("as abas antigas de Medições levam à fila", () => {
     for (const a of ["resumo", "sem-medicao", "planilha-gerada", "planilha-enviada", "boletim-recebido", "faturamento",
       "aguardando-nota", "enviar-nota", "aguardando-pagamento"]) {
       expect(parseRota(`/medicoes/${a}`)).toEqual({ tela: "medicoes" });

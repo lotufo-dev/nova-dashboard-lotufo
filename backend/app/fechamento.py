@@ -436,6 +436,27 @@ def medido_do_mes_fechado(conn, hoje: datetime.date) -> dict:
             "referencia_por_obra": por_obra[anterior] if com_referencia else {}}
 
 
+def aprovado_contra_o_pedido(estado: str, pedido: int | None, aprovado: int | None, pct: int | None = None) -> dict | None:
+    """A diferenca aprovado x pedido de UMA medicao (cabecalho, "Diferenca aprovado x pedido"), a UNICA conta dela: a
+    do Fechamento (`_linha_medicao`, na cota) e a da tela Medicoes (`fila_medicoes`, no valor cheio, sem `pct`).
+    `pedido` e `aprovado` sao o valor cheio gravado na medicao (o pedido e o valor do boletim); `pct`, a cota do
+    contrato (`percentual_direito_bp`). So' ha' o que comparar a partir do boletim (`ESTADOS_APROVADO`) e com os dois
+    valores gravados: senao, None. Devolve os tres `COMPARAVEIS` (os dois lados e o corte) e
+    `acima_do_pedido_centavos`, que nao soma em mes, obra nem ano. A tolerancia de arredondamento e' do valor cheio
+    (o do orgao); o corte e o acima saem na base pedida, como os outros numeros."""
+    if estado not in ESTADOS_APROVADO or aprovado is None or pedido is None:
+        return None
+    n = {"aprovado_com_pedido_centavos": contratos.cota(aprovado, pct) or 0,
+         "pedido_do_aprovado_centavos": contratos.cota(pedido, pct) or 0,
+         "abaixo_do_pedido_centavos": 0, "acima_do_pedido_centavos": 0}
+    falta = pedido - aprovado
+    if falta > TOLERANCIA_DO_PEDIDO_CENTAVOS:
+        n["abaixo_do_pedido_centavos"] = max(0, n["pedido_do_aprovado_centavos"] - n["aprovado_com_pedido_centavos"])
+    elif -falta > TOLERANCIA_DO_PEDIDO_CENTAVOS:
+        n["acima_do_pedido_centavos"] = max(0, n["aprovado_com_pedido_centavos"] - n["pedido_do_aprovado_centavos"])
+    return n
+
+
 def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
     cota = lambda v: contratos.cota(v, m["pct"]) or 0
     valor = m["aprovado"] if m["aprovado"] is not None else m["pedido"]
@@ -445,16 +466,9 @@ def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
     n["aprovado_centavos"] = cota(aprovado) if aprovado is not None else 0
     # issue #805: a diferenca aprovado x pedido so' existe com o valor do boletim gravado e o pedido; a medicao em
     # analise e a de nota emitida sem o valor do boletim ficam fora dos dois lados
-    acima = 0
-    if m["estado"] in ESTADOS_APROVADO and m["aprovado"] is not None and m["pedido"] is not None:
-        n["aprovado_com_pedido_centavos"] = cota(m["aprovado"])
-        n["pedido_do_aprovado_centavos"] = cota(m["pedido"])
-        # a tolerancia e' do valor cheio (o do orgao); o corte e o acima saem na cota, como os outros numeros
-        falta = m["pedido"] - m["aprovado"]
-        if falta > TOLERANCIA_DO_PEDIDO_CENTAVOS:
-            n["abaixo_do_pedido_centavos"] = max(0, n["pedido_do_aprovado_centavos"] - n["aprovado_com_pedido_centavos"])
-        elif -falta > TOLERANCIA_DO_PEDIDO_CENTAVOS:
-            acima = max(0, n["aprovado_com_pedido_centavos"] - n["pedido_do_aprovado_centavos"])
+    comparada = aprovado_contra_o_pedido(m["estado"], m["pedido"], m["aprovado"], m["pct"])
+    acima = comparada.pop("acima_do_pedido_centavos") if comparada else 0
+    n.update(comparada or {})
     ligadas, fora = _notas_da_conta(m, notas)
     saida, saida_fora = [], []
     if _cobrada(m):
