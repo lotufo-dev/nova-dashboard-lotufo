@@ -311,7 +311,7 @@ def test_nota_da_medicao_falta_conta_o_titulo_aberto_inteiro_e_o_parcial(conn, c
     """Titulo aberto entra pelo original inteiro; o parcial, pelo que falta dele (titulo a titulo)."""
     mid = _medicao(conn, cid, 12, 1000_00)
     nfs = [_nf(100, 1000.0)]
-    cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 500.0, 0.0, 0), _baixa(2, 100, 424.0, 100.01, 1, "2026-09-01T00:00:00-04:00")])
+    cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 500.0, 0.0, 0), _baixa(2, 100, 424.0, 100.01, 4, "2026-09-01T00:00:00-04:00")])
     sincronizacao_rm.sincronizar(conn, cli)
     n = medicoes.detalhe(conn, mid)["notas"][0]
     assert (n["devido_centavos"], n["recebido_centavos"], n["falta_centavos"]) == (924_00, 100_01, 500_00 + 323_99)
@@ -346,7 +346,7 @@ def test_tolerancia_de_recebimento_ate_um_real(conn, cid, tmp_path, pago, recebe
     recebida; acima disso fica aberta para conferencia. Sem tolerancia percentual."""
     mid = _medicao(conn, cid, 12, 1000_00)
     cli = _simulador(tmp_path, [_nf(100, 1000.0)],
-                     [_baixa(1, 100, 924.0, pago, 1, "2026-09-01T00:00:00-04:00")])
+                     [_baixa(1, 100, 924.0, pago, 4, "2026-09-01T00:00:00-04:00")])
     r = sincronizacao_rm.sincronizar(conn, cli)
     m = medicoes.detalhe(conn, mid)
     assert (r["recebimentos"], m["estado"]) == ((1, "recebida") if recebe else (0, "protocolada"))
@@ -355,11 +355,29 @@ def test_tolerancia_de_recebimento_ate_um_real(conn, cid, tmp_path, pago, recebe
     assert auditoria.verificar_cadeia(conn)
 
 
-def test_tolerancia_nao_alcanca_diferenca_grande(conn, cid, tmp_path):
-    """O caso de R$ 2.016,48 a menos do backlog continua aberto para conferencia, sem evento de diferenca."""
+def test_titulo_baixado_no_rm_com_valor_menor_nao_tem_falta_e_fecha_a_medicao(conn, cid, tmp_path):
+    """Decisao de 17/11/2026 (docs/adr/0006): o titulo que o RM da' como BAIXADO (status 1) nao tem falta, mesmo com o
+    valor baixado menor que o original (desconto, retencao ou acerto lancado na baixa). A medicao fecha, e a diferenca
+    acima da tolerancia fica na auditoria do recebimento. O baixado em parte (status 4) continua pela tolerancia."""
     mid = _medicao(conn, cid, 12, 50_000_00)
     cli = _simulador(tmp_path, [_nf(100, 50_000.0)],
-                     [_baixa(1, 100, 46_200.0, 44_183.52, 1, "2026-09-01T00:00:00-04:00")])
+                     [_baixa(1, 100, 46_200.0, 44_183.53, 1, "2026-09-01T00:00:00-04:00")])
+    assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 1
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-01")
+    assert (m["notas"][0]["falta_centavos"], m["notas"][0]["recebido_centavos"]) == (0, 44_183_53)
+    eventos = _eventos_diferenca(conn, mid)
+    assert [e["diferenca_centavos"] for e in eventos] == [2_016_47]
+    assert eventos[0]["notas"][0]["baixa_total_no_rm"] is True
+    assert auditoria.verificar_cadeia(conn)
+
+
+def test_tolerancia_nao_alcanca_diferenca_grande(conn, cid, tmp_path):
+    """O titulo baixado EM PARTE (status 4) com R$ 2.016,48 a menos continua aberto para conferencia, sem evento de
+    diferenca."""
+    mid = _medicao(conn, cid, 12, 50_000_00)
+    cli = _simulador(tmp_path, [_nf(100, 50_000.0)],
+                     [_baixa(1, 100, 46_200.0, 44_183.52, 4, "2026-09-01T00:00:00-04:00")])
     assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
     assert _tem_nf(conn, mid)
     assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
@@ -373,7 +391,7 @@ def test_recebida_com_diferenca_audita_evento_novo(conn, cid, tmp_path):
     nfs = [_nf(100, 1000.0), _nf(101, 500.0)]
     sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
     _ligar(conn, mid, 100, 101)
-    cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 924.0, 923.99, 1, "2026-09-01T00:00:00-04:00"),
+    cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 924.0, 923.99, 4, "2026-09-01T00:00:00-04:00"),
                                      _baixa(2, 101, 462.0, 462.0, 1, "2026-09-03T00:00:00-04:00")])
     assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 1
     m = medicoes.detalhe(conn, mid)
@@ -397,8 +415,8 @@ def test_tolerancia_soma_a_falta_de_todas_as_notas_da_medicao(conn, cid, tmp_pat
     nfs = [_nf(100, 1000.0), _nf(101, 500.0)]
     sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, nfs, []))
     _ligar(conn, mid, 100, 101)
-    cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 924.0, 923.01, 1, "2026-09-01T00:00:00-04:00"),
-                                     _baixa(2, 101, 462.0, 461.01, 1, "2026-09-03T00:00:00-04:00")])
+    cli = _simulador(tmp_path, nfs, [_baixa(1, 100, 924.0, 923.01, 4, "2026-09-01T00:00:00-04:00"),
+                                     _baixa(2, 101, 462.0, 461.01, 4, "2026-09-03T00:00:00-04:00")])
     assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 0
     assert len(medicoes.detalhe(conn, mid)["notas"]) == 2
     assert medicoes.detalhe(conn, mid)["estado"] == "protocolada"
@@ -484,7 +502,7 @@ def test_juros_num_titulo_e_outro_curto_dentro_da_tolerancia_audita_a_falta(conn
     mid = _medicao(conn, cid, 12, 1000_00)
     cli = _simulador(tmp_path, [_nf(100, 1000.0)],
                      [_baixa(1, 100, 500.0, 551.0, 1, "2026-09-01T00:00:00-04:00"),
-                      _baixa(2, 100, 50.01, 50.0, 1, "2026-09-02T00:00:00-04:00")])
+                      _baixa(2, 100, 50.01, 50.0, 4, "2026-09-02T00:00:00-04:00")])
     assert sincronizacao_rm.sincronizar(conn, cli)["recebimentos"] == 1
     assert medicoes.detalhe(conn, mid)["estado"] == "recebida"
     eventos = _eventos_diferenca(conn, mid)

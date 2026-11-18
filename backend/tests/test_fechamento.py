@@ -554,7 +554,7 @@ def test_nota_paga_em_parte_ligada_a_medicao_fica_em_aberto_pelo_que_falta_nos_t
     g = medir(c, p, 5, "2026-05", "protocolada", 300_000, aprovado=300_000, protocolo="2026-06-05")
     nota(c, 300_000, [g], titulos=[(279_000, 278_900, 1)])                                   # faltam R$ 1,00: paga
     h = medir(c, p, 6, "2026-05", "protocolada", 300_000, aprovado=300_000, protocolo="2026-06-06")
-    um = nota(c, 300_000, [h], titulos=[(279_000, 278_899, 1)])                              # faltam R$ 1,01: em parte
+    um = nota(c, 300_000, [h], titulos=[(279_000, 278_899, 4)])                              # faltam R$ 1,01: em parte
     i = medir(c, p, 7, "2026-05", "protocolada", 200_000, aprovado=200_000, protocolo="2026-06-07")
     inteira = nota(c, 200_000, [i], titulos=[(186_000, 0, 0)])                               # nenhuma baixa: pelo bruto
     f = fechamento.fechamento(c)
@@ -600,7 +600,7 @@ def test_nota_sem_medicao_com_baixa_quase_total_aparece_pelo_que_falta(cenario):
     paga em parte), nao pelo valor bruto inteiro; sem baixa com valor, pelo bruto; quitada dentro da tolerancia, so'
     contada entre as pagas."""
     c, ids = cenario
-    quase = nota(c, 1_000_001, centro="9.001.001", emissao="2024-09-10", titulos=[(1_000_001, 995_000, 1)])
+    quase = nota(c, 1_000_001, centro="9.001.001", emissao="2024-09-10", titulos=[(1_000_001, 995_000, 4)])
     cons = nota(c, 600_001, coligada=12, emissao="2025-10-01", titulos=[(560_001, 500_000, 4)])     # falta 60.001 x 50%
     sem_valor = nota(c, 80_000, centro="9.001.001", emissao="2026-01-05", titulos=[(74_000, 0, 1)])   # baixada sem valor
     nota(c, 90_000, centro="9.001.001", emissao="2026-02-01", titulos=[(83_000, 82_900, 1)])        # faltam R$ 1,00: paga

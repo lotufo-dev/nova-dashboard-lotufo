@@ -28,7 +28,8 @@ from app.cadastro_arquivos import slug
 ORIGEM = "correção de cadastro"
 REGRA_NF = "correcao_cadastro"
 TIPOS = ("execucao", "projeto", "reajuste")
-OPERACOES_DE_NOTA = ("desconsiderar_nf", "reconsiderar_nf")      # issue #638: sem medicao, o alvo e' a nota
+# issue #638 e docs/adr/0006 (residuo): sem medicao, o alvo e' a nota
+OPERACOES_DE_NOTA = ("desconsiderar_nf", "reconsiderar_nf", "encerrar_residuo_nf", "reabrir_residuo_nf")
 OPERACOES = ("cancelar", "reabrir", "trocar_tipo", "desligar_nf", "ligar_nf", "protocolar", "estado", "devolver",
              "desfazer_recebimento",
              *OPERACOES_DE_NOTA)
@@ -42,7 +43,8 @@ CAMPOS = {"cancelar": {"duplicata_de", "motivo"}, "reabrir": CAMPOS_DEVOLVER, "t
           "desligar_nf": {"nf", "coligada"}, "ligar_nf": {"nfs", "coligada", "forcar_centro", "parcial"},
           "protocolar": {"data", "processo", "oficio"}, "estado": {"novo", "motivo", "data", "processo", "oficio"},
           "desconsiderar_nf": {"nf", "coligada", "motivo", "substituida_por"},
-          "reconsiderar_nf": {"nf", "coligada", "motivo"}}
+          "reconsiderar_nf": {"nf", "coligada", "motivo"},
+          "encerrar_residuo_nf": {"nf", "coligada", "motivo"}, "reabrir_residuo_nf": {"nf", "coligada", "motivo"}}
 CAMPOS_COMUNS = {"operacao", "fonte", "medicao_id", "obra", "numero", "tipo"}
 CAMPOS_COMUNS_DE_NOTA = {"operacao", "fonte"}
 
@@ -954,7 +956,70 @@ def _reconsiderar_nf(conn, uid, nota, op, fonte):
     return ["AVISO: o RM cancelou a nota: ela continua cancelada"] if nova == "cancelada" else ["volta a contar"]
 
 
-EXECUTORES_DE_NOTA = {"desconsiderar_nf": _desconsiderar_nf, "reconsiderar_nf": _reconsiderar_nf}
+AVISO_RESIDUO_PCT = 1    # acima disto do valor dos titulos, o ensaio avisa: pode ser nota paga em parte, nao residuo
+
+
+def _conferir_nota_do_residuo(conn, nota, op) -> str:
+    _exigir_migracao(conn, "notas_fiscais", "residuo_encerrado_centavos", "092")
+    motivo = _texto(op, "motivo")
+    if motivo is None:
+        raise ValueError("diga o motivo (motivo: ...)")
+    if nota["desconsiderada_em"] is not None or _excluida_no_rm(nota) or nota["situacao"] != "ativa":
+        raise ValueError(f"NF {nota['numero']} está {_situacao_da_nota(nota)} e já não conta")
+    return motivo
+
+
+def _encerrar_residuo_nf(conn, uid, nota, op, fonte):
+    """docs/adr/0006 ("Titulo baixado no RM nao tem falta"): a nota ja' paga cujo titulo ficou com um resto que o RM
+    nunca vai baixar (baixa parcial antiga) deixa de aparecer como divida. Grava quanto do que falta foi dado por
+    encerrado; nada se apaga, e os titulos continuam como o RM os deu. So' para nota PAGA: todo titulo dela precisa de
+    baixa com valor (o titulo inteiro em aberto e' divida, nao residuo)."""
+    from app import sincronizacao_rm   # import local: sincronizacao_rm importa medicoes
+    motivo = _conferir_nota_do_residuo(conn, nota, op)
+    if nota["residuo_encerrado_centavos"]:
+        raise _JaFeito(f"resíduo de {dinheiro.format_brl(nota['residuo_encerrado_centavos'])} já encerrado")
+    falta = sincronizacao_rm._falta_por_titulo(conn, nota["id"])
+    if falta is None:
+        raise ValueError(f"NF {nota['numero']} tem título sem baixa no RM: isso é título em aberto, não resíduo de "
+                         "nota paga")
+    _, devido, _ = sincronizacao_rm._recebido_da_nota(conn, nota["id"])
+    if devido <= 0:
+        raise ValueError(f"NF {nota['numero']} não tem título no RM: não há resíduo a encerrar")
+    if falta <= 0:
+        raise ValueError(f"NF {nota['numero']} não tem resíduo: os títulos dela não têm falta")
+    cur = conn.execute("UPDATE notas_fiscais SET residuo_encerrado_centavos=?, residuo_encerrado_em=datetime('now') "
+                       "WHERE id=? AND residuo_encerrado_centavos IS NULL", (falta, nota["id"]))
+    db.exigir_uma_linha(cur, f"A NF {nota['numero']} mudou concorrentemente; tente novamente")
+    auditoria.registrar(conn, uid, "nota.residuo_encerrado", "nota_fiscal", nota["id"],
+                        {"residuo_encerrado_centavos": None},
+                        {**_registro_da_nota(nota), "residuo_encerrado_centavos": falta, "titulos_centavos": devido,
+                         "motivo": motivo, "fonte": fonte, "origem": ORIGEM})
+    detalhes = [f"resíduo de {dinheiro.format_brl(falta)} encerrado: deixa de contar no a receber (valor cheio; "
+                f"títulos de {dinheiro.format_brl(devido)})"]
+    if falta * 100 > devido * AVISO_RESIDUO_PCT:
+        detalhes.append(f"AVISO: o resíduo passa de {AVISO_RESIDUO_PCT}% do valor dos títulos; confira se não é "
+                        "nota paga em parte")
+    return detalhes
+
+
+def _reabrir_residuo_nf(conn, uid, nota, op, fonte):
+    """O inverso de `encerrar_residuo_nf`: o residuo volta a contar como falta da nota."""
+    motivo = _conferir_nota_do_residuo(conn, nota, op)
+    if not nota["residuo_encerrado_centavos"]:
+        raise _JaFeito("não tem resíduo encerrado")
+    cur = conn.execute("UPDATE notas_fiscais SET residuo_encerrado_centavos=NULL, residuo_encerrado_em=NULL "
+                       "WHERE id=? AND residuo_encerrado_centavos IS NOT NULL", (nota["id"],))
+    db.exigir_uma_linha(cur, f"A NF {nota['numero']} mudou concorrentemente; tente novamente")
+    auditoria.registrar(conn, uid, "nota.residuo_reaberto", "nota_fiscal", nota["id"],
+                        {"residuo_encerrado_centavos": nota["residuo_encerrado_centavos"],
+                         "residuo_encerrado_em": nota["residuo_encerrado_em"]},
+                        {**_registro_da_nota(nota), "residuo_encerrado_centavos": None, "motivo": motivo, "fonte": fonte,
+                         "origem": ORIGEM})
+    return [f"resíduo de {dinheiro.format_brl(nota['residuo_encerrado_centavos'])} volta a contar como falta da nota"]
+
+
+EXECUTORES_DE_NOTA = {"desconsiderar_nf": _desconsiderar_nf, "reconsiderar_nf": _reconsiderar_nf,
+                      "encerrar_residuo_nf": _encerrar_residuo_nf, "reabrir_residuo_nf": _reabrir_residuo_nf}
 
 
 def _aplicar_nota(conn, uid: int, op: dict, item: dict, nome: str, fonte: str) -> None:

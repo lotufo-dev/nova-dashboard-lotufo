@@ -996,17 +996,41 @@ def _falta_por_titulo(conn, nota_id: int, aberto_inteiro: bool = False, baixa_to
     (falta zero): o a receber da diretoria e o aviso da Saude nao o tratam como divida. Sem ele (recebimento
     automatico, pagina da medicao), o titulo continua sem baixa: status 1 com valor zero pode ser glosa, compensacao
     ou encontro de contas, e nao fecha medicao sozinho.
-    Issue #755: o titulo excluido no RM (`excluida_rm_em`) fica fora, como o cancelado."""
+    Issue #755: o titulo excluido no RM (`excluida_rm_em`) fica fora, como o cancelado.
+    Decisao de 17/11/2026 (docs/adr/0006, "Titulo baixado no RM nao tem falta"): o titulo que o RM da' como BAIXADO
+    (status 1, baixa total) com valor baixado nao tem falta, qualquer que seja a diferenca para o valor original: o
+    desconto, a retencao ou o acerto lancado na baixa nao e' divida. Falta e' so' do titulo em aberto (status 0) e do
+    baixado em parte (status 4, e o 3, por acordo). Vale em toda leitura; a baixa total SEM valor continua pedindo
+    `baixa_total_quita` (pode ser glosa ou compensacao).
+    Mesma decisao: o residuo que a correcao de cadastro encerrou (`encerrar_residuo_nf`:
+    `notas_fiscais.residuo_encerrado_centavos`) e' abatido da falta da nota. O que passar dele (um titulo novo, por
+    exemplo) volta a aparecer."""
     falta = 0
     for b in conn.execute("SELECT status_lan, valor_original_centavos, valor_baixado_centavos FROM baixas "
                           "WHERE nota_id=? AND status_lan<>2 AND excluida_rm_em IS NULL", (nota_id,)):
         baixado = (b["valor_baixado_centavos"] or 0) if b["status_lan"] in STATUS_RECEBIDO else 0
-        if baixa_total_quita and b["status_lan"] == STATUS_BAIXA_TOTAL and baixado <= 0:
-            continue                    # #563: baixa total no RM e' titulo quitado, mesmo com valor baixado zero
+        if b["status_lan"] == STATUS_BAIXA_TOTAL and (baixado > 0 or baixa_total_quita):
+            continue                    # o RM deu o titulo como baixado: nao ha' falta (com valor zero, so' #563)
         if baixado <= 0 and not aberto_inteiro:
             return None
         falta += max(0, (b["valor_original_centavos"] or 0) - baixado)
+    if falta > 0:
+        try:
+            encerrado = conn.execute("SELECT residuo_encerrado_centavos FROM notas_fiscais WHERE id=?",
+                                     (nota_id,)).fetchone()
+        except sqlite3.OperationalError:
+            encerrado = None            # copia do banco de antes da migracao 092 (o ensaio da correcao nao migra)
+        falta = max(0, falta - ((encerrado[0] if encerrado else None) or 0))
     return falta
+
+
+def diferenca_da_baixa_total(conn, nota_id: int) -> int:
+    """Quanto os titulos BAIXADOS (status 1, com valor) da nota receberam a menos que o valor original: a diferenca que
+    o RM lancou na baixa (desconto, retencao, acerto). Nao e' falta (`_falta_por_titulo`); serve para a auditoria do
+    recebimento e para a reconciliacao dizerem o valor."""
+    return sum(max(0, (b["valor_original_centavos"] or 0) - (b["valor_baixado_centavos"] or 0)) for b in conn.execute(
+        "SELECT valor_original_centavos, valor_baixado_centavos FROM baixas WHERE nota_id=? AND status_lan=? "
+        "AND valor_baixado_centavos>0 AND excluida_rm_em IS NULL", (nota_id, STATUS_BAIXA_TOTAL)))
 
 
 _SQL_ESPERAM_BAIXA = """SELECT m.id, m.contrato_id, m.tipo, m.estado, m.planilha_enviada_em, e.coligada_rm,
@@ -1074,6 +1098,15 @@ def _leitura_do_recebimento(conn, m, extras, passos_de, tolerancia: int) -> dict
         curtas = [{"nota_id": x["nota_id"], "numero": x["numero"], "devido_centavos": x["devido_centavos"],
                    "recebido_centavos": x["recebido_centavos"], "diferenca_centavos": f}
                   for x, f in faltas if f > 0]
+    # docs/adr/0006: o titulo baixado no RM com valor menor nao tem falta e fecha a medicao; a diferenca que passa da
+    # tolerancia fica na auditoria do recebimento, como a do titulo pago com ate' R$ 1,00 a menos
+    if not curtas:
+        for x in notas:
+            dif = diferenca_da_baixa_total(conn, x["nota_id"])
+            if dif > tolerancia:
+                curtas.append({"nota_id": x["nota_id"], "numero": x["numero"], "devido_centavos": x["devido_centavos"],
+                               "recebido_centavos": x["recebido_centavos"], "diferenca_centavos": dif,
+                               "baixa_total_no_rm": True})
     return {"cobre": valor is None or soma >= valor, "notas_centavos": soma, "valor_centavos": valor,
             "datas": [x["recebido_em"] for x in notas if x["recebido_em"]], "curtas": curtas}
 
