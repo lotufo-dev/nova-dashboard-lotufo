@@ -555,7 +555,7 @@ A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_US
 
 ## Gravação de dado na produção
 
-Vale para todo comando do `app.cli` que grava dado no banco de produção e tem `--ensaio` (hoje: carga e correção de medições, `cadastro aplicar`, `legado remapear`, `documentos importar`, `medicoes planilhas` e `conciliacao`), rodado fora de um deploy. Essa gravação não espera autorização do dono (`docs/adr/0014`); quem a segura são estes passos, nesta ordem. Conta de acesso (`criar-admin`, senha, proteção) não é dado: fica fora deste rito e continua só com a autorização do dono na hora. A gravação pedida junto de um deploy segue a skill `deploy`.
+Vale para todo comando do `app.cli` que grava dado no banco de produção e tem `--ensaio` (hoje: carga e correção de medições, `cadastro aplicar`, `legado remapear`, `documentos importar`, `medicoes planilhas`, `conciliacao` e `notas reler`), rodado fora de um deploy. Essa gravação não espera autorização do dono (`docs/adr/0014`); quem a segura são estes passos, nesta ordem. Conta de acesso (`criar-admin`, senha, proteção) não é dado: fica fora deste rito e continua só com a autorização do dono na hora. A gravação pedida junto de um deploy segue a skill `deploy`.
 
 1. **Ensaio em produção** (`--ensaio`) e o relatório lido inteiro. Erro, conflito ou linha que não se esperava: parar e corrigir a origem. O código de saída do ensaio não substitui a leitura.
 2. **Backup do banco** logo antes de gravar, no mesmo script da gravação; sem ele a gravação não roda:
@@ -837,8 +837,10 @@ O ensaio só lê e lista, por documento, a nota que seria criada (número, emiss
 contrato) ou o motivo de continuar sem leitura; não grava nada. Para valer, faz por documento o mesmo que arrastar
 o PDF de novo (guarda a leitura, cria a nota, liga à medição e confere contra o espelho) e grava `nota.releitura`
 na auditoria com quem rodou. Ficam como estão: o documento que já tem nota informada à mão, o de medição cancelada
-ou desistida e o que o leitor continua sem ler. Rodar de novo não repete nada. É gravação em produção: pede a
-autorização do dono, como as outras.
+ou desistida e o que o leitor continua sem ler. Quando a nota já veio do RM, é a linha dela que ganha os valores
+lidos e a confirmação, sem nota nova. A medição não muda de estado por causa disso, salvo a que nasceu do espelho e
+estava só esperando a nota. Rodar de novo não repete nada. É gravação em produção: segue o rito da seção "Gravação
+de dado na produção" (ensaio lido, backup antes, conferência depois).
 
 **O que o RM faz.** Na rodada horária, a NF do RM com o mesmo número (e mesma emissão ou mesmo valor) da nota
 lida preenche a linha dela e a marca `confirmada` (valor igual) ou `divergente`; nota sem PDF nasce `so_rm`
