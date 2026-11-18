@@ -122,7 +122,11 @@ do rótulo, na etiqueta sob o valor ou na barra.
   Diferente mostra os reais e o percentual: até 0,5% da base, no tom de "vence em breve"; acima, no tom do crítico.
   É o limite do aviso "aprovado abaixo do pedido" (#741), um número só no sistema. Só entre medições que têm os
   dois valores: medição em análise não é diferença, é etapa não alcançada, e pintá-la de vermelho enganaria quem lê.
-  Falta de nota ou de pagamento também não é diferença de valor.
+  Falta de nota ou de pagamento também não é diferença de valor. Na linha que soma (mês, obra, ano) a diferença é
+  só o corte: o que ficou abaixo do pedido, sobre o pedido de todas as medições comparadas. O aprovado acima do
+  pedido aparece só na linha da medição, escrito ("+ R$ … acima do pedido") e sempre no tom de "vence em breve":
+  quase sempre é o pedido gravado errado, e somado no mês anulava o corte de outra obra. Até R$ 0,05 por medição é
+  arredondamento do órgão e conta como igual (decisão do dono de 10/11/2026).
 - **Andamento:** a partir de 100% do necessário, "Adiantada", no tom do feito; de 70% a 99%, "Atenção", no tom de
   "vence em breve"; abaixo de 70%, "Devagar", no tom do crítico. Sem necessário ou sem ritmo, nada aparece.
 - **Tempo parado:** os dias numa etapa ou num setor, com o selo da situação e os limites do SIGA (seção "Quando

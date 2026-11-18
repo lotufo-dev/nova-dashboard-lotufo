@@ -277,8 +277,9 @@ anterior. Até 2% para cima ou para baixo é estável.
 _Avoid_: diferença (é entre dois valores que deveriam ser iguais)
 
 **Diferença**:
-O quanto dois valores que deveriam ser iguais se afastam, em reais e em percentual: o aprovado e o pedido. Acima de
-0,5% da base é crítica.
+O quanto dois valores que deveriam ser iguais se afastam: o aprovado e o pedido. No mês, na obra e no ano é só o
+corte (o aprovado abaixo do pedido), em reais e em percentual do pedido; acima de 0,5% é crítica. Até R$ 0,05 por
+medição é arredondamento do órgão e conta como igual.
 _Avoid_: variação
 
 **Andamento**:
