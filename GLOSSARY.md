@@ -236,6 +236,11 @@ A SINFRA conta inteira, não cada superintendência.
 **Custo lançado no RM**:
 O custo que o RM registra para uma obra. Não é margem nem lucro.
 
+**Participação do contratante**:
+Quanto do medido do ano, na cota, é de um contratante, em percentual com uma casa. As participações de um ano somam
+100%. Aparece na aba Por contratante do Fechamento. Sem medido no ano, não há participação.
+_Avoid_: fatia, share, peso
+
 ### Tela
 
 **Aviso**:
