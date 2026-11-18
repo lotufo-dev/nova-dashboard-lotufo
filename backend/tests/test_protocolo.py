@@ -1318,3 +1318,66 @@ def test_enviar_execucao_leva_o_reajuste_negativo_absorvido_no_protocolo_e_no_en
     assert [tuple(x) for x in c.execute("SELECT protocolo_id, numero_oficio FROM medicao_protocolos WHERE medicao_id=?",
                                         (rj,))] == [(pid, "CT-301-LT-2026")]
     assert c.execute("SELECT 1 FROM envio_medicoes WHERE envio_id=? AND medicao_id=?", (envio, rj)).fetchone()
+
+
+# --- fiscal sem e-mail (migracao 094): A/C da carta, nunca destinatario --------------------------------------------
+
+def _fiscal_sem_email(c):
+    c.execute("UPDATE contrato_fiscais SET email=NULL"); c.commit()
+
+
+def test_fiscal_sem_email_continua_no_ac_da_carta(cenario):
+    c, ids = cenario
+    _fiscal_sem_email(c)
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    texto = _textos(protocolo.montar(c, ids["uid"], pid)["arquivo"])[0]
+    assert "A/C: Beatriz Exemplo" in texto and "Engenheiro(a) Fiscal: Beatriz Exemplo" in texto
+    assert "Prezada Senhora" in texto and "None" not in texto
+
+
+def test_fiscal_sem_email_fica_fora_dos_destinatarios_e_dos_contatos(cenario):
+    c, ids = cenario
+    _fiscal_sem_email(c)
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    pv = protocolo.previa_envio(c, [pid], remetente="maria@l.com")
+    assert pv["para"] == ["protocolo@orgao-b.exemplo.com.br"] and pv["copia"] == ["leo@l.com"]
+    locais = correio._contatos_locais(c, ids["uid"])
+    assert "Beatriz Exemplo" not in locais.values() and None not in locais and "none" not in locais
+    assert all("beatriz" not in (x["nome"] or "").lower() for x in correio.contatos(c, ids["uid"], "beatriz"))
+
+
+def test_envio_com_fiscal_sem_email_sai_para_os_destinatarios_do_orgao_e_os_extras(cenario):
+    c, ids = cenario
+    _fiscal_sem_email(c)
+    c.execute("UPDATE contratos SET destinatarios_extras=? WHERE id=?",
+              (json.dumps(["gabinete@orgao-b.exemplo.com.br"]), ids["mtpar"]))
+    c.commit()
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    pv = protocolo.previa_envio(c, [pid], remetente="maria@l.com")
+    assert pv["para"] == ["protocolo@orgao-b.exemplo.com.br", "gabinete@orgao-b.exemplo.com.br"]
+    envio = protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"])
+    e = c.execute("SELECT para, copia FROM envios WHERE id=?", (envio,)).fetchone()
+    assert json.loads(e["para"]) == ["protocolo@orgao-b.exemplo.com.br", "gabinete@orgao-b.exemplo.com.br"]
+    assert "None" not in e["para"] + e["copia"] and "null" not in e["para"] + e["copia"]
+
+
+def test_obra_cujo_unico_contato_era_o_fiscal_sem_email_nao_envia(cenario):
+    """O orgao sem endereco de protocolo e a obra sem extras: a previa vem sem destinatario e o envio e' recusado
+    pela trava de sempre, antes da reserva; nada sai e a medicao nao muda."""
+    c, ids = cenario
+    _fiscal_sem_email(c)
+    regras = json.loads(c.execute("SELECT regras FROM orgaos WHERE chave='mtpar'").fetchone()[0])
+    regras["protocolo_para"] = []
+    c.execute("UPDATE orgaos SET regras=? WHERE chave='mtpar'", (json.dumps(regras),)); c.commit()
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    protocolo.receber_assinado(c, ids["uid"], pid, _assinar(_montado(c, ids, pid)))
+    pv = protocolo.previa_envio(c, [pid], remetente="maria@l.com")
+    assert pv["para"] == []
+    antes = c.execute("SELECT COUNT(*) FROM envios").fetchone()[0]
+    with pytest.raises(ValueError, match="Informe ao menos um destinatário"):
+        protocolo.enviar(c, ids["usuario"], [pid], pv["para"], pv["copia"], pv["assunto"], pv["corpo"])
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == antes
+    assert c.execute("SELECT estado FROM medicoes WHERE id=?", (ids["mtpar_exec"],)).fetchone()[0] == "nota_emitida"
+    assert protocolo.detalhe(c, pid)["envio_id"] is None

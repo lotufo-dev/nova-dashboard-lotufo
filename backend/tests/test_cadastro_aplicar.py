@@ -2509,3 +2509,46 @@ def test_pleito_do_aditivo_corrigido_passa_ao_apostilamento_mais_antigo_no_mesmo
     assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-122-LT-2026: atendido por ap-21 "
                                          "(termo de 15/06/2026, anterior ao ta-08)"]
     assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+
+
+# --- fiscal sem e-mail (migracao 094) ---------------------------------------------------------------------------------
+
+def _fiscais(conn):
+    return [tuple(r) for r in conn.execute("SELECT nome, email, desde, cargo, portaria FROM contrato_fiscais ORDER BY id")]
+
+
+def test_fiscal_sem_email_grava_nulo_e_aplicar_de_novo_nao_duplica(conn):
+    ana = {"nome": "Ana", "email": None, "desde": "2026-01-01", "cargo": "Fiscal do Contrato", "tratamento": "Senhora",
+           "portaria": "Portaria n.º 1/2026"}
+    zeno = {"nome": "Zeno", "email": "z@orgao-a.exemplo.com.br", "desde": "2025-01-01"}
+    cad = _cad(contratos=[_contrato(fiscais=[zeno, ana])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    esperado = [("Zeno", "z@orgao-a.exemplo.com.br", "2025-01-01", None, None),
+                ("Ana", None, "2026-01-01", "Fiscal do Contrato", "Portaria n.º 1/2026")]
+    assert _fiscais(conn) == esperado
+    auditoria_antes = conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.fiscal'").fetchone()[0]
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _fiscais(conn) == esperado
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.fiscal'").fetchone()[0] == auditoria_antes
+    # a descricao do fiscal sem e-mail tambem se corrige
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(fiscais=[zeno, {**ana, "portaria": "Portaria n.º 2/2026"}])]))
+    assert _fiscais(conn)[1] == ("Ana", None, "2026-01-01", "Fiscal do Contrato", "Portaria n.º 2/2026")
+
+
+def test_email_generico_que_sai_do_cadastro_sai_da_linha_do_fiscal_e_o_que_entra_depois_volta_nela(conn):
+    ana = {"nome": "Ana", "email": "protocolo@orgao-a.exemplo.com.br", "desde": "2026-01-01", "cargo": "Fiscal"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(fiscais=[ana])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(fiscais=[{**ana, "email": None}])]))
+    assert _fiscais(conn) == [("Ana", None, "2026-01-01", "Fiscal", None)]
+    ev = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='cadastro.fiscal' ORDER BY id DESC LIMIT 1").fetchone()
+    assert json.loads(ev["antes"])["email"] == "protocolo@orgao-a.exemplo.com.br" and json.loads(ev["depois"])["email"] is None
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(fiscais=[{**ana, "email": "ana@orgao-a.exemplo.com.br"}])]))
+    assert _fiscais(conn) == [("Ana", "ana@orgao-a.exemplo.com.br", "2026-01-01", "Fiscal", None)]
+
+
+def test_email_que_muda_de_um_endereco_para_outro_continua_acrescentando(conn):
+    """So' a entrada e a saida do e-mail corrigem a linha; a troca de endereco segue o historico de sempre."""
+    ana = {"nome": "Ana", "email": "a1@orgao-a.exemplo.com.br", "desde": "2026-01-01"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(fiscais=[ana])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(fiscais=[{**ana, "email": "a2@orgao-a.exemplo.com.br"}])]))
+    assert [f[1] for f in _fiscais(conn)] == ["a1@orgao-a.exemplo.com.br", "a2@orgao-a.exemplo.com.br"]

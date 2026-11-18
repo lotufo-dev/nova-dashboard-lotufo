@@ -804,3 +804,51 @@ def test_reserva_presa_responde_409_nas_rotas_de_edicao_do_protocolo(api, monkey
         assert d["codigo"] == "ENVIO_RESERVADO" and d["reservado_por_nome"] == "Admin" and d["liberavel_a_partir_de"]
     d = cl.get(f"/api/protocolos/{pid}").json()
     assert d["situacao"] == "montado" and len(d["pecas"]) == 1
+
+
+# --- fiscal sem e-mail (migracao 094) ---------------------------------------------------------------------------------
+
+def _tira_o_email_do_fiscal():
+    c = db.get_conn()
+    c.execute("UPDATE contrato_fiscais SET email=NULL"); c.commit(); c.close()
+
+
+def test_fiscal_sem_email_dois_envios_simultaneos_saem_uma_vez_so_ao_orgao(api, monkeypatch):
+    """O fiscal sem e-mail fica fora do Para; o envio continua unico: um 200, um 409, um e-mail."""
+    cl, cid, mid = api
+    _tira_o_email_do_fiscal()
+    pid, corpo = _pronto(cl, cid, mid)
+    assert corpo["para"] == ["protocolo@orgao-b.exemplo.com.br"]
+    falso = CorreioFalso(espera=0.3)
+    monkeypatch.setattr(correio, "cliente", falso)
+    largada, respostas = threading.Barrier(2), []
+
+    def dispara():
+        largada.wait()
+        respostas.append(cl.post("/api/protocolos/envio", json=corpo))
+
+    ts = [threading.Thread(target=dispara) for _ in range(2)]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    assert sorted(r.status_code for r in respostas) == [200, 409], [r.text for r in respostas]
+    assert len(falso.enviados) == 1 and _estado(pid)[1] == 1
+    c = db.get_conn()
+    para = c.execute("SELECT para FROM envios ORDER BY id DESC LIMIT 1").fetchone()[0]
+    c.close()
+    assert json.loads(para) == ["protocolo@orgao-b.exemplo.com.br"]
+
+
+def test_obra_sem_destinatario_e_fiscal_sem_email_a_api_recusa_com_mensagem_clara(api, monkeypatch):
+    cl, cid, mid = api
+    _tira_o_email_do_fiscal()
+    c = db.get_conn()
+    regras = json.loads(c.execute("SELECT regras FROM orgaos WHERE chave='mtpar'").fetchone()[0])
+    regras["protocolo_para"] = []
+    c.execute("UPDATE orgaos SET regras=? WHERE chave='mtpar'", (json.dumps(regras),)); c.commit(); c.close()
+    pid, corpo = _pronto(cl, cid, mid)
+    assert corpo["para"] == []
+    falso = CorreioFalso()
+    monkeypatch.setattr(correio, "cliente", falso)
+    r = cl.post("/api/protocolos/envio", json=corpo)
+    assert r.status_code in (400, 422) and "Informe ao menos um destinatário" in r.text, r.text
+    assert falso.enviados == []
+    assert _estado(pid) == ({"situacao": "assinado", "envio_id": None, "envio_reservado_em": None}, 0)

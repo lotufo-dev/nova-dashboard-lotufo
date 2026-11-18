@@ -1,10 +1,12 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DocumentosObra } from "./ObraAbas";
+import { ContratoObra, DocumentosObra } from "./ObraAbas";
 import { hrefDe } from "./rota";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
+vi.mock("./Cronograma", () => ({ default: () => null }));
+vi.mock("./Instrumentos", () => ({ default: () => null }));
 
 const item = (situacao: string, extra: Record<string, unknown> = {}) => ({ entidade_id: 1, entidade: "Construtora Alfa", tipo_id: 1,
   tipo: "CND Federal", chave: null, jurisdicao: null, situacao, validade: "2026-12-31", dias: 60, certidao_id: 1,
@@ -65,5 +67,28 @@ describe("Documentos da obra", () => {
     render(<DocumentosObra contratoId={1} />);
     expect((await screen.findAllByText("Nenhum documento exigido.")).length).toBe(2);
     expect(screen.queryByText("Pronto para protocolar")).toBeNull();
+  });
+});
+
+// O e-mail do fiscal so' entra no cadastro quando um documento do orgao o prova: sem ele, o fiscal aparece com nome,
+// cargo e portaria e a indicacao de que nao ha' e-mail cadastrado.
+describe("Contrato da obra: fiscais", () => {
+  afterEach(() => { cleanup(); api.mockReset(); });
+
+  it("mostra o fiscal sem e-mail com nome, cargo e a indicação, e o e-mail de quem tem", async () => {
+    api.mockImplementation((url: string) => Promise.resolve(url.endsWith("/cadastro")
+      ? { datas_base: [], instrumentos: [], fiscais: [
+          { nome: "Fiscal de Exemplo", email: "fiscal@exemplo.gov.br", desde: "2025-06-02", cargo: null, portaria: null },
+          { nome: "Fiscal Substituta de Exemplo", email: null, desde: "2026-02-02", cargo: "Fiscal do Contrato",
+            portaria: "Portaria n.º 000/2026/EXEMPLO" },
+          { nome: "Fiscal Substituta de Exemplo", email: null, desde: "2026-05-04", cargo: null, portaria: null }] }
+      : { numero_instrumento: "IC 002/2025", orgao: "Secretaria de Exemplo", objeto: "Obra de exemplo", lei: null }));
+    render(<ContratoObra contratoId={7} />);
+    const linhas = (await screen.findAllByRole("listitem")).map(li => li.textContent);
+    expect(linhas).toEqual([
+      "Fiscal de Exemplo, fiscal@exemplo.gov.br",
+      "Fiscal Substituta de Exemplo, Fiscal do Contrato, Portaria n.º 000/2026/EXEMPLO, sem e-mail cadastrado",
+      "Fiscal Substituta de Exemplo, sem e-mail cadastrado"]);
+    expect(document.body.textContent).not.toMatch(/null|undefined/);
   });
 });

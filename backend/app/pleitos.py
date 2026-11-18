@@ -649,7 +649,7 @@ def _carta(conn, p: dict, corpo: str, hoje: datetime.date) -> carta.Carta:
     campos = _campos(conn, p, c, hoje)
     f = carta.fiscal_vigente(conn, c["id"], hoje.isoformat())
     ac = []
-    if f:
+    if f and (f["nome"] or f["email"]):      # o e-mail e' opcional (migracao 094): sem ele, o nome e' obrigatorio
         ac.append(f"A/C: {f['nome'] or f['email']}")
         ac += [x for x in (f.get("cargo"), f.get("portaria")) if x]
     vocativo = {"Senhor": "Prezado Senhor,", "Senhora": "Prezada Senhora,"}.get((f or {}).get("tratamento"),

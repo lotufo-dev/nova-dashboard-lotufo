@@ -34,6 +34,13 @@ fiscais:
 - nome: Fiscal de Exemplo
   email: fiscal@exemplo.gov.br
   desde: '2025-06-02'
+# O email é opcional: só entra o endereço que aparece em documento ou mensagem do próprio órgão. Sem ele, o fiscal
+# vale como A/C da carta (nome, cargo, portaria) e não entra como destinatário; aí o nome é obrigatório.
+- nome: Fiscal Substituta de Exemplo
+  desde: '2026-02-02'
+  cargo: Fiscal do Contrato
+  tratamento: Senhora
+  portaria: Portaria n.º 000/2026/EXEMPLO
 destinatarios_extras: []
 copia_extras: []
 # Opcional (docs/adr/0015): tipos de movimento do RM que, SÓ nesta obra, também são cobrança ao órgão, além da lista
