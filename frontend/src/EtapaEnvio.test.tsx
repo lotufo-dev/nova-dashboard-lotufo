@@ -456,6 +456,29 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
     expect(within(certidoes).getByText("FGTS vencida em 01/11")).toBeTruthy();
   });
 
+  it("o cartão Notas fiscais fala das mesmas notas do passo Notas: o número de cada uma e de qual falta o PDF", () => {
+    // as notas saíam só como "NF", sem número, e o cartão dizia "2 de 3 · Falta a nota fiscal" com o passo Notas completo
+    api.mockResolvedValue({ itens: [] });
+    montar([envio({ medicao_ids: [631, 632], situacao: "pendente", aviso: "Falta a nota fiscal",
+      notas: [{ numero: null, natureza: "execucao", arquivo: "NFS OBRA ALFA.pdf", valor_centavos: null },
+        { numero: "9018", natureza: "execucao", valor_centavos: null }],
+      itens: [{ chave: "notas", rotulo: "Notas fiscais (2)", estado: "falta", sem_pdf: [
+        { numero: "9019", natureza: "reajuste", medicao_id: 632, valor_centavos: 70000 },
+        { numero: "9024", natureza: "reajuste", medicao_id: 632, valor_centavos: 30000 }] }] })]);
+    const notas = screen.getByRole("region", { name: "Notas fiscais" });
+    expect(within(notas).getByText("2 de 4")).toBeTruthy();
+    const linhas = [...notas.querySelectorAll(".envio-itens li")].map(li => li.querySelector(".envio-item__texto")!.textContent);
+    expect(linhas).toEqual(["NFS OBRA ALFA.pdf · medição", "NF 9018 · medição", "NF 9019 · reajustefalta o PDF da nota", "NF 9024 · reajustefalta o PDF da nota"]);
+    expect(within(notas).queryByText("Falta a nota fiscal")).toBeNull();
+    expect(notas.querySelectorAll(".glifo--breve")).toHaveLength(3);      // o contador e as duas notas sem PDF
+    cleanup();
+    // medição sem nota nenhuma: a linha diz que falta a nota
+    montar([envio({ situacao: "pendente", notas: [],
+      itens: [{ chave: "notas", rotulo: "Notas fiscais (0)", estado: "falta", sem_pdf: [{ numero: null, natureza: "execucao", medicao_id: 631, valor_centavos: null }] }] })]);
+    expect(within(screen.getByRole("region", { name: "Notas fiscais" })).getByText("Falta a nota fiscal")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Notas fiscais" })).getByText("0 de 1")).toBeTruthy();
+  });
+
   it("tudo pronto: faixa verde e os cartões Notas fiscais e Documentos completos", () => {
     api.mockResolvedValue({ itens: [] });
     montar([envio({ notas: [{ numero: "2351", natureza: "execucao", municipio: "Cuiabá", valor_centavos: 418330386 }],

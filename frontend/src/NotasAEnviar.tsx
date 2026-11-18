@@ -20,8 +20,16 @@ export type ItemEnvio = {
   acao?: string | null; entidade_id?: number | null; competencia?: string | null; medicao_id?: number | null;
   frc_gerada?: number | null;   // issue #148: numero da FRC gerada (sem assinatura) vigente, no item da FRC
   bloqueia?: boolean;           // o item trava o envio sem ser certidao vencida (FRC assinada recusada, notas_envio._itens)
+  // no item "notas": as notas das medicoes do envio que ainda nao tem o PDF anexado (as ja' ligadas a' medicao, com o
+  // numero; sem nota ligada, uma linha sem numero)
+  sem_pdf?: { numero: string | null; natureza: string; medicao_id: number; valor_centavos: number | null }[];
 };
-export type NotaEnvio = { numero: string; natureza: string; municipio?: string | null; arquivo?: string | null; valor_centavos: number };
+// `numero` nulo: o PDF anexado que a leitura nao entendeu e que nao esta' ligado a nenhuma nota; vale o nome do arquivo
+export type NotaEnvio = { numero: string | null; natureza: string; municipio?: string | null; arquivo?: string | null; valor_centavos: number | null };
+
+/** Como a nota aparece numa linha: "NF 2322"; sem o numero, o nome do arquivo anexado (nunca "NF" sozinho). */
+export const rotuloDaNota = (n: { numero: string | null; arquivo?: string | null }) =>
+  n.numero ? `NF ${n.numero}` : n.arquivo || "Nota sem número";
 export type Envio = {
   chave: string; contrato_id: number; obra: string; orgao: string; orgao_sub?: string | null; familia: string;
   grupo: string; a_pedido: boolean; medicao_ids: number[]; descricao: string; notas: NotaEnvio[];
@@ -51,7 +59,8 @@ export function mensagem(e: unknown): string {
 
 /** "NF 2322" / "NF 2322, 2323" (vazio sem nota) */
 export function notasDe(e: Envio): string {
-  return e.notas.length ? `NF ${e.notas.map(n => n.numero).join(", ")}` : "";
+  const [com, sem] = [e.notas.filter(n => n.numero), e.notas.filter(n => !n.numero)];
+  return [com.length ? `NF ${com.map(n => n.numero).join(", ")}` : "", ...sem.map(rotuloDaNota)].filter(Boolean).join(", ");
 }
 
 /** Orgaos que levam carta com numero de oficio (MTPAR, SES e prefeituras); a SINFRA (etapa nota) nao. */

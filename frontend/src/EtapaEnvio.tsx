@@ -8,7 +8,7 @@ import Janela from "./Janela";
 import { Link } from "./Link";
 import type { Metade } from "./medicao";
 import { IconeCheck, iniciarEnvio, ListaCertidoes, mensagem, naturezaDoEnvio, pedeOficio, resumoDe, useCertidoes,
-         type Envio, type ItemCertidao, type ListaEnvios } from "./NotasAEnviar";
+         rotuloDaNota, type Envio, type ItemCertidao, type ListaEnvios } from "./NotasAEnviar";
 import RegistrarFora from "./RegistrarFora";
 import Selo, { Glifo } from "./Selo";
 import { situacaoDoNivel } from "./situacao";
@@ -112,7 +112,7 @@ function CelulaNotas({ e }: { e: Envio }) {
   return (
     <div className="envios__nfs">
       {e.notas.map(n => (
-        <span key={`${n.numero}-${n.natureza}`}>NF {n.numero}{mistura && <> <small>· {n.natureza === "reajuste" ? "reajuste" : "medição"}</small></>}</span>
+        <span key={`${n.numero ?? n.arquivo}-${n.natureza}`}>{rotuloDaNota(n)}{mistura && <> <small>· {n.natureza === "reajuste" ? "reajuste" : "medição"}</small></>}</span>
       ))}
     </div>
   );
@@ -207,12 +207,19 @@ export function CartoesEnvio({ envios, certidoes, semNotaDaVencida = false }: {
 }) {
   const itens = envios.flatMap(e => e.itens.map(i => ({ ...i, chave: `${e.chave}|${i.chave}` })));
   const base = (c: string) => c.split("|")[1];
-  const mistura = new Set(envios.flatMap(e => e.notas.map(n => n.natureza === "reajuste"))).size > 1;
+  const semPdf = itens.filter(i => base(i.chave) === "notas" && i.estado !== "ok").flatMap(i => (i.sem_pdf ?? []).map(n => ({ ...n, item: i })));
+  const mistura = new Set([...envios.flatMap(e => e.notas), ...semPdf].map(n => n.natureza === "reajuste")).size > 1;
+  const natureza = (n: { natureza: string }) => mistura ? ` · ${n.natureza === "reajuste" ? "reajuste" : "medição"}` : "";
   const notas: Linha[] = [
-    ...envios.flatMap(e => e.notas.map(n => ({ chave: `${e.chave}|nf-${n.numero}-${n.natureza}`, ok: true, valor: n.valor_centavos,
-      texto: <>NF {n.numero}{mistura ? ` · ${n.natureza === "reajuste" ? "reajuste" : "medição"}` : ""}</>, apoio: n.municipio }))),
+    ...envios.flatMap(e => e.notas.map((n, k) => ({ chave: `${e.chave}|nf-${n.numero ?? k}-${n.natureza}`, ok: true, valor: n.valor_centavos,
+      texto: <>{rotuloDaNota(n)}{natureza(n)}</>, apoio: n.municipio }))),
+    // a nota que o passo Notas ja' conta (ligada a' medicao) e ainda nao tem o PDF para ir no e-mail: uma linha por
+    // nota, com o numero, para os dois passos falarem das mesmas notas
+    ...semPdf.map((n, k) => ({ chave: `${n.item.chave}|sem-pdf-${n.medicao_id}-${n.numero ?? k}`, ok: false, trava: travaDoItem(n.item),
+      valor: n.valor_centavos, texto: <>{n.numero ? `NF ${n.numero}` : "Falta a nota fiscal"}{natureza(n)}</>,
+      detalhe: n.numero ? "falta o PDF da nota" : null })),
     // sem o detalhe do servidor: ele fala em etapa antiga e "anexe aqui", e a acao mora no e-mail aberto (revisor, PR #555)
-    ...itens.filter(i => (base(i.chave) === "notas" && i.estado !== "ok") || base(i.chave).startsWith("frc:") || base(i.chave) === "consorcio")
+    ...itens.filter(i => (base(i.chave) === "notas" && i.estado !== "ok" && !i.sem_pdf?.length) || base(i.chave).startsWith("frc:") || base(i.chave) === "consorcio")
       .map(i => ({ chave: i.chave, ok: i.estado === "ok", trava: travaDoItem(i), texto: base(i.chave) === "notas" ? "Falta a nota fiscal" : i.rotulo })),
   ];
   const certs = itens.filter(i => base(i.chave).startsWith("certidoes:"));
