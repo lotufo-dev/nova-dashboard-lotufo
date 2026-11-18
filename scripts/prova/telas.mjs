@@ -48,6 +48,11 @@ const SO_ADMIN = ["admin"];
 
 const MEDICAO = "/obras/:obra/medicoes/:medicao";
 const JANELA = "dialog[open] .iniciar__caixa";
+// issue #805: a carteira de quatro contratantes no lugar do cadastro de exemplo (ver simulados.mjs)
+const comCarteira = [
+  { caminho: /^\/api\/contratos$/, corpo: carteiraSimulada },
+  { caminho: /^\/api\/diretoria$/, ajustar: painelDaCarteira },
+];
 const maisAcoes = item => [{ clicar: '#conteudo button:has-text("Mais ações")' }, { clicar: `#conteudo button:has-text("${item}")` }];
 const passo = nome => [{ clicar: `nav.passos button:has-text("${nome}")` }];
 // a medicao com a nota emitida e o envio ao orgao por fazer (ver simulados.mjs)
@@ -82,12 +87,6 @@ const comNecessario = noRitmo => [
   { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaComNecessario(noRitmo) },
   { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
 ];
-// issue #805: a carteira de quatro contratantes no lugar do cadastro de exemplo (ver simulados.mjs)
-const comCarteira = [
-  { caminho: /^\/api\/contratos$/, corpo: carteiraSimulada },
-  { caminho: /^\/api\/diretoria$/, ajustar: painelDaCarteira },
-];
-
 export const TELAS = [
   // ---- Inicio
   { rota: "inicio", id: "inicio", caminho: "/inicio", perfis: TODOS, espera: ".ini" },

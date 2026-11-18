@@ -297,52 +297,6 @@ export const fechamentoComValores = reg => {
 export const obrasComAParte = obras => obras.map((o, i) => ({ ...o, posicao: { ...o.posicao, a_receber_ano_inicial: "2025",
   a_receber_anterior_centavos: i === 0 ? 70003 : 0, a_receber_sem_atualizacao_centavos: i === 0 ? 40001 : 0 } }));
 
-// A reconciliacao com o grupo "Títulos baixados no RM por valor menor" (docs/adr/0006): o banco da prova nao tem titulo
-// baixado com diferenca. Uma linha com medicao e outra de nota sem medicao, na primeira obra da prova.
-export const reconciliacaoComBaixados = (rec, reg) => ({ ...rec, baixados_com_diferenca: [
-  { titulo_id: 9301, nota_id: 9311, contrato_id: reg.obra, numero_instrumento: "001/2025/00/00-EXEMPLO", medicao_id: reg.medicao, numero: 1,
-    tipo: "execucao", competencia: "2025-04", numero_nf: "101", serie: "1", valor_original_centavos: 38000001,
-    valor_baixado_centavos: 37800000, diferenca_centavos: 200001, data_baixa: "2025-07-10" },
-  { titulo_id: 9302, nota_id: 9312, contrato_id: reg.obra, numero_instrumento: "001/2025/00/00-EXEMPLO", medicao_id: null, numero: null,
-    tipo: null, competencia: null, numero_nf: "115", serie: null, valor_original_centavos: 50001, valor_baixado_centavos: 40000,
-    diferenca_centavos: 10001, data_baixa: null }] });
-
-// A obra paralisada e a obra em encerramento: o cabecalho muda o selo do estado e a aba Prazos mostra a paralisacao
-// (sem o selo dos dias da execucao) ou o cartao do encerramento.
-// `extra`: desde quando a obra esta' assim (`status_desde`) e a ordem de paralisacao (`paralisada_desde`), que o
-// painel "Prazo" mostra no lugar dos dias do prazo.
-export const cabecalhoCom = (status, extra = {}) => cabecalho => ({ ...cabecalho, status, ...extra });
-export const prazosParalisada = prazos => ({
-  ...prazos, situacao: { ...prazos.situacao, paralisacao: { desde: "2026-08-03", numero: "OP-01/2026" }, encerramento: null },
-});
-export const prazosEmEncerramento = prazos => ({
-  ...prazos, situacao: { ...prazos.situacao, paralisacao: null,
-    encerramento: { desde: "2026-10-01", marcos: { recebimento_provisorio: "2026-10-15" }, conclusao_comunicada: false } },
-});
-
-// #803: a obra com a execucao em dia, que a de exemplo nao tem (a dela venceu e nao ha' medicao na janela do ritmo:
-// o painel "Prazo" mostra "—" no ritmo, no necessario e na conclusao). O fim da execucao vai para o ultimo dia do mes
-// daqui a 4 meses, entao restam 5 competencias, e o necessario e' o saldo do topo dividido por elas. `noRitmo`: o
-// ritmo acima do necessario (selo "No ritmo do prazo"); senao abaixo, com os dias da conclusao alem do fim. As datas
-// andam com o dia da prova, para a linha do tempo nao mostrar vencida a execucao que o painel diz em dia.
-const DIA = 86_400_000;
-const hojeDaProva = () => { const h = new Date(); return Date.UTC(h.getFullYear(), h.getMonth(), h.getDate()); };
-const fimEmDia = () => { const h = new Date(); return Date.UTC(h.getFullYear(), h.getMonth() + 5, 0); };
-const dataEm = (ms, dias = 0) => new Date(ms + dias * DIA).toISOString().slice(0, 10);
-const diasAte = ms => Math.round((ms - hojeDaProva()) / DIA);
-export const cabecalhoEmDia = cabecalho => ({
-  ...cabecalho, execucao_fim: dataEm(fimEmDia()), dias_execucao: diasAte(fimEmDia()), execucao_sem_prazo: false,
-  nivel_execucao: "normal", vigencia_fim: dataEm(fimEmDia(), 90), dias_vigencia: diasAte(fimEmDia()) + 90, nivel_vigencia: "normal" });
-export const fichaComNecessario = noRitmo => ficha => {
-  const fim = fimEmDia(), necessario = Math.round(ficha.topo.saldo_centavos / 5);
-  return { ...ficha,
-    vencimentos: ficha.vencimentos.map(v => (v.chave === "execucao" ? { ...v, data: dataEm(fim), dias: diasAte(fim), nivel: "normal" } : v)),
-    ritmo: { ritmo_centavos: Math.round(necessario * (noRitmo ? 5 : 3) / 4), necessario_centavos: necessario, competencias_restantes: 5,
-      conclusao: dataEm(fim, noRitmo ? -13 : 70), situacao: noRitmo ? "no_prazo" : "atrasa", dias_alem: noRitmo ? null : 70 } };
-};
-export const semAvisoDePrazo = inicio => ({
-  ...inicio, avisos: inicio.avisos.filter(a => !["instrumento_pendente", "execucao_vencendo"].includes(a.tipo)) });
-
 // #805, Obras por contratante: a carteira que o cadastro de exemplo nao tem (ele tem um orgao so', duas obras em
 // andamento e nenhuma medicao no mes fechado). Quatro contratantes (as siglas sao as que o codigo conhece; as obras e
 // os valores sao inventados): obra devagar, em atencao e adiantada; obra paralisada, com a execucao vencida, em
@@ -416,6 +370,52 @@ export const painelDaCarteira = painel => {
     avisos: obras.flatMap(o => o.motivos.map(m => ({ tipo: m.tipo, nivel: m.nivel, publico: ["diretoria"], contrato_id: o.contrato_id, obra: o.obra,
       dias: null, valor_centavos: null, mensagem: `${o.obra}: ${m.texto}`, destino: { tela: "contrato", id: o.contrato_id, aba: "prazos" } }))) };
 };
+
+// A reconciliacao com o grupo "Títulos baixados no RM por valor menor" (docs/adr/0006): o banco da prova nao tem titulo
+// baixado com diferenca. Uma linha com medicao e outra de nota sem medicao, na primeira obra da prova.
+export const reconciliacaoComBaixados = (rec, reg) => ({ ...rec, baixados_com_diferenca: [
+  { titulo_id: 9301, nota_id: 9311, contrato_id: reg.obra, numero_instrumento: "001/2025/00/00-EXEMPLO", medicao_id: reg.medicao, numero: 1,
+    tipo: "execucao", competencia: "2025-04", numero_nf: "101", serie: "1", valor_original_centavos: 38000001,
+    valor_baixado_centavos: 37800000, diferenca_centavos: 200001, data_baixa: "2025-07-10" },
+  { titulo_id: 9302, nota_id: 9312, contrato_id: reg.obra, numero_instrumento: "001/2025/00/00-EXEMPLO", medicao_id: null, numero: null,
+    tipo: null, competencia: null, numero_nf: "115", serie: null, valor_original_centavos: 50001, valor_baixado_centavos: 40000,
+    diferenca_centavos: 10001, data_baixa: null }] });
+
+// A obra paralisada e a obra em encerramento: o cabecalho muda o selo do estado e a aba Prazos mostra a paralisacao
+// (sem o selo dos dias da execucao) ou o cartao do encerramento.
+// `extra`: desde quando a obra esta' assim (`status_desde`) e a ordem de paralisacao (`paralisada_desde`), que o
+// painel "Prazo" mostra no lugar dos dias do prazo.
+export const cabecalhoCom = (status, extra = {}) => cabecalho => ({ ...cabecalho, status, ...extra });
+export const prazosParalisada = prazos => ({
+  ...prazos, situacao: { ...prazos.situacao, paralisacao: { desde: "2026-08-03", numero: "OP-01/2026" }, encerramento: null },
+});
+export const prazosEmEncerramento = prazos => ({
+  ...prazos, situacao: { ...prazos.situacao, paralisacao: null,
+    encerramento: { desde: "2026-10-01", marcos: { recebimento_provisorio: "2026-10-15" }, conclusao_comunicada: false } },
+});
+
+// #803: a obra com a execucao em dia, que a de exemplo nao tem (a dela venceu e nao ha' medicao na janela do ritmo:
+// o painel "Prazo" mostra "—" no ritmo, no necessario e na conclusao). O fim da execucao vai para o ultimo dia do mes
+// daqui a 4 meses, entao restam 5 competencias, e o necessario e' o saldo do topo dividido por elas. `noRitmo`: o
+// ritmo acima do necessario (selo "No ritmo do prazo"); senao abaixo, com os dias da conclusao alem do fim. As datas
+// andam com o dia da prova, para a linha do tempo nao mostrar vencida a execucao que o painel diz em dia.
+const DIA = 86_400_000;
+const hojeDaProva = () => { const h = new Date(); return Date.UTC(h.getFullYear(), h.getMonth(), h.getDate()); };
+const fimEmDia = () => { const h = new Date(); return Date.UTC(h.getFullYear(), h.getMonth() + 5, 0); };
+const dataEm = (ms, dias = 0) => new Date(ms + dias * DIA).toISOString().slice(0, 10);
+const diasAte = ms => Math.round((ms - hojeDaProva()) / DIA);
+export const cabecalhoEmDia = cabecalho => ({
+  ...cabecalho, execucao_fim: dataEm(fimEmDia()), dias_execucao: diasAte(fimEmDia()), execucao_sem_prazo: false,
+  nivel_execucao: "normal", vigencia_fim: dataEm(fimEmDia(), 90), dias_vigencia: diasAte(fimEmDia()) + 90, nivel_vigencia: "normal" });
+export const fichaComNecessario = noRitmo => ficha => {
+  const fim = fimEmDia(), necessario = Math.round(ficha.topo.saldo_centavos / 5);
+  return { ...ficha,
+    vencimentos: ficha.vencimentos.map(v => (v.chave === "execucao" ? { ...v, data: dataEm(fim), dias: diasAte(fim), nivel: "normal" } : v)),
+    ritmo: { ritmo_centavos: Math.round(necessario * (noRitmo ? 5 : 3) / 4), necessario_centavos: necessario, competencias_restantes: 5,
+      conclusao: dataEm(fim, noRitmo ? -13 : 70), situacao: noRitmo ? "no_prazo" : "atrasa", dias_alem: noRitmo ? null : 70 } };
+};
+export const semAvisoDePrazo = inicio => ({
+  ...inicio, avisos: inicio.avisos.filter(a => !["instrumento_pendente", "execucao_vencendo"].includes(a.tipo)) });
 
 // Uma resposta que a tela nao sabe desenhar: o Inicio cai e a ultima rede ("A tela parou de responder") aparece.
 export const RESPOSTA_QUE_QUEBRA = { medido: null };
