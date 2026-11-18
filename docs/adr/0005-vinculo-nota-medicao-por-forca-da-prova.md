@@ -60,6 +60,26 @@ todos pela saída; 20 são de medição do legado, que o casador não olha; e 4 
 boletim nem de envio da planilha/carta (a trava de data). Em 26 das 27 notas o valor é a cota ao centavo; uma difere
 dois centavos.
 
+## Uma nota em mais de uma medição (17/11/2026)
+
+Há nota que fatura duas ou mais medições. O vínculo era sempre da nota inteira e uma nota só entrava numa medição.
+
+- A correção de cadastro liga a mesma nota a mais de uma medição com o valor de cada parte (`ligar_nf` com `valor`),
+  pela prova do documento (o PDF da nota diz as medições). O vínculo de parte é marcado (`nf_alocacoes.partilhada`)
+  e vale o valor gravado nele; o vínculo da nota inteira continua valendo o valor atual da nota.
+- Os vínculos de parte vigentes de uma nota somam no máximo o valor dela. A nota já ligada inteira a uma medição não
+  recebe parte: desfaz-se o vínculo e liga-se de novo com o valor de cada parte.
+- Toda conta que usa o vínculo respeita o valor da parte: a cobertura que fecha a medição pela baixa
+  (`docs/adr/0006`), o aviso de notas pagas que não cobrem, a página da medição, o protocolado e o recebido do
+  Fechamento. O que é dos títulos da nota (devido, recebido, falta) reparte-se pelas partes na proporção do valor de
+  cada uma, só com inteiros, e as partes somam a nota (`sincronizacao_rm.partes_da_nota`). No a receber do Início,
+  a parte da medição em aberto conta pela medição; a parte de medição fechada sem pagamento provado e o resto da
+  nota que nenhuma medição levou contam pelo que falta nos títulos.
+- Onde a nota entra uma vez só (faturado do mês, notas protocoladas no mês), continua uma vez só.
+- O casador automático e a tela não criam vínculo de parte, e a medição com espelho não o recebe: nela a nota liga
+  pela saída do espelho, inteira. A nota partilhada que o RM deixa de devolver e volta a devolver não tem o vínculo
+  refeito sozinha (`docs/adr/0006`): religa-se pela correção de cadastro.
+
 ## Consequências
 
 - Duas notas ativas com o mesmo valor para a mesma saída, ou para a mesma medição sem espelho, ficam soltas e a

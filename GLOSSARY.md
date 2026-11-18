@@ -100,7 +100,8 @@ _Avoid_: pago, quitado
 **Paga em parte**:
 A nota com alguma baixa com valor no RM e falta acima da tolerância de R$ 1,00. O em aberto dela é o que falta nos
 títulos do RM, limitado ao valor da nota; o resto do valor bruto conta como recebido. Título baixado sem valor não é
-recebimento.
+recebimento. O título que o RM dá como baixado (baixa total) com valor não tem falta, mesmo com o valor baixado
+menor que o original (`docs/adr/0006`).
 
 **Pedido**:
 O valor que a planilha/carta pede ao órgão.
