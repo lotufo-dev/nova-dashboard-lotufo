@@ -243,7 +243,7 @@ def _medicoes(conn) -> list[dict]:
                    m.valor_protocolado_centavos AS pedido, m.valor_atestado_centavos AS aprovado,
                    c.percentual_direito_bp AS pct, COALESCE(c.nome_curto, c.numero_instrumento) AS obra,
                    e.coligada_rm AS coligada, e.papel='consorcio' AS consorcio,
-                   (SELECT MIN(mp.data) FROM medicao_protocolos mp WHERE mp.medicao_id=m.id AND mp.etapa='nota') AS protocolo_em
+                   (SELECT MIN(mp.data) FROM medicao_protocolos mp WHERE mp.medicao_id=m.id AND mp.etapa='nota' AND mp.desfeita_em IS NULL) AS protocolo_em
             FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
             JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
             WHERE m.estado IN ({','.join('?' * len(estados))})

@@ -186,7 +186,7 @@ def _protocoladas_dia(conn) -> list[dict]:
     `avisos.resumo_mes`): reprotocolo nao conta de novo."""
     return [dict(r) for r in conn.execute(
         "SELECT m.id, m.contrato_id, COALESCE(m.valor_protocolado_centavos, 0) AS valor, MIN(mp.data) AS data "
-        "FROM medicoes m JOIN medicao_protocolos mp ON mp.medicao_id=m.id AND mp.etapa='nota' "
+        "FROM medicoes m JOIN medicao_protocolos mp ON mp.medicao_id=m.id AND mp.etapa='nota' AND mp.desfeita_em IS NULL "
         "WHERE m.estado NOT IN ('cancelada','desistida') GROUP BY m.id")]
 
 
@@ -218,7 +218,7 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
     resumo = avisos.resumo_mes(conn, hoje)
     ultima = conn.execute("SELECT MAX(mp.data) FROM medicao_protocolos mp JOIN medicoes m ON m.id=mp.medicao_id "
-                          "WHERE mp.etapa='nota' AND m.estado NOT IN ('cancelada','desistida')").fetchone()[0]
+                          "WHERE mp.etapa='nota' AND mp.desfeita_em IS NULL AND m.estado NOT IN ('cancelada','desistida')").fetchone()[0]
     return {
         "hoje": hoje.isoformat(),
         "protocoladas": {"obras_protocoladas": resumo["obras_protocoladas"], "obras_ativas": resumo["obras_ativas"],

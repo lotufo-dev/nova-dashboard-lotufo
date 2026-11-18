@@ -191,7 +191,7 @@ def _resumo(conn, hoje: datetime.date | None, mes: str | None) -> dict:
     marcas = ",".join("?" * len(_FORA))
     # a data do protocolo e' a do PRIMEIRO protocolo da nota (a que comeca a contar o prazo do orgao), como no Inicio
     sql = ("SELECT m.*, c.percentual_direito_bp AS pct, (SELECT MIN(p.data) FROM medicao_protocolos p "
-           "WHERE p.medicao_id=m.id AND p.etapa='nota') AS protocolado_em FROM medicoes m "
+           "WHERE p.medicao_id=m.id AND p.etapa='nota' AND p.desfeita_em IS NULL) AS protocolado_em FROM medicoes m "
            f"JOIN contratos c ON c.id=m.contrato_id WHERE m.estado NOT IN ({marcas}) ")
     do_mes, anteriores = [], []
     for r in conn.execute(sql + "AND (m.competencia=? OR (m.competencia<? AND m.estado<>'recebida'))", (*_FORA, mes, mes)):

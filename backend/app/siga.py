@@ -321,7 +321,7 @@ def _so_da_planilha(conn, medicao_id: int, numero: str, ocupantes: list) -> bool
     'planilha', migracao 054): corrigido o nº do SIGA da planilha, o processo que o robo ligou pelo numero antigo
     tambem cede."""
     notas = {normalizar_numero(r[0]) for r in conn.execute(
-        "SELECT numero_processo FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' "
+        "SELECT numero_processo FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' AND desfeita_em IS NULL "
         "AND numero_processo IS NOT NULL", (medicao_id,))}
     if normalizar_numero(numero) not in notas:
         return False

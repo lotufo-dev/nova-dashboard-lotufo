@@ -147,7 +147,7 @@ def _detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     # Issue #283: `protocolos` e' so' o da nota (o que conta como protocolo nas telas e nos marcos); o nº do SIGA da
     # planilha/carta (etapa 'planilha', migracao 054) vem a' parte
     d["protocolos"] = [dict(p) for p in conn.execute(
-        "SELECT * FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' ORDER BY id", (medicao_id,))]
+        "SELECT * FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' AND desfeita_em IS NULL ORDER BY id", (medicao_id,))]
     p = conn.execute("SELECT data, numero_processo FROM medicao_protocolos WHERE medicao_id=? AND etapa='planilha'",
                      (medicao_id,)).fetchone()
     d["planilha_siga"] = {"data": p["data"], "numero": p["numero_processo"]} if p else None
@@ -198,7 +198,8 @@ def _linhas_edicoes(conn: sqlite3.Connection, medicao_ids: list[int]) -> list:
             "SELECT a.id, a.acao, a.entidade_id, a.antes, a.depois, a.criado_em, u.nome FROM audit_log a "
             "LEFT JOIN usuarios u ON u.id=a.usuario_id WHERE a.entidade='medicao' "
             f"AND a.entidade_id IN ({','.join('?' * len(lote))}) "
-            "AND a.acao IN ('medicao.valor_protocolado', 'medicao.estado', 'medicao.sem_boletim')", lote).fetchall()
+            "AND a.acao IN ('medicao.valor_protocolado', 'medicao.estado', 'medicao.sem_boletim', "
+            "'medicao.protocolo_desfeito')", lote).fetchall()
     return sorted(linhas, key=lambda r: r["id"])
 
 
@@ -742,6 +743,21 @@ def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int,
                 out[int(r["entidade_id"])].append({"data": r["criado_em"],
                                                    "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
             continue
+        if r["acao"] == "medicao.protocolo_desfeito":
+            # docs/adr/0006: o protocolo de nota que a correcao de cadastro desfez fica na historia, dito como desfeito
+            if a_d and d_d:
+                texto = (f"Protocolo da nota de {_data_br(a_d.get('data') or '')} desfeito pela correção de cadastro"
+                         + (f": {d_d['motivo']}" if d_d.get("motivo") else ""))
+                out[int(r["entidade_id"])].append({"data": r["criado_em"],
+                                                   "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
+            continue
+        if r["acao"] == "medicao.estado" and d_d and d_d.get("origem") == "correção de cadastro" \
+                and d_d.get("estado") in ("prevista", "planilha_enviada", "boletim_recebido", "protocolada") and d_d.get("motivo"):
+            # docs/adr/0006: a medicao que a correcao de cadastro devolveu, reabriu ou tirou de recebida, com o motivo
+            out[int(r["entidade_id"])].append({"data": r["criado_em"],
+                                               "texto": f"{d_d['motivo']} por {r['nome']}" if r["nome"]
+                                               else f"{d_d['motivo']} pelo sistema"})
+            continue
         if r["acao"] == "medicao.estado":
             # Issue #260: cancelamento e desistencia entram na linha do tempo com o motivo (a duplicata cancelada
             # pela carga do historico diz de qual medicao ela e' copia); as outras transicoes ja' tem marco proprio
@@ -918,7 +934,7 @@ def _protocolar_absorvidas(conn, usuario_id: int, execucao_id: int, linha: tuple
                                (r["id"], r["estado"]))
         elif r["estado"] in ESTADOS_DE_NOVO_PROTOCOLO:
             # revisor da PR #608: o que ja' tem esta linha (mesmo dia e protocolo do sistema) nao ganha outra
-            if conn.execute("SELECT 1 FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' AND data=? "
+            if conn.execute("SELECT 1 FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' AND desfeita_em IS NULL AND data=? "
                             "AND numero_oficio IS ? AND protocolo_id IS ?",
                             (r["id"], linha[0], linha[1], linha[4])).fetchone():
                 continue
@@ -960,7 +976,7 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
         if m["tipo"] == "reajuste" and atual in ESTADOS_DE_NOVO_PROTOCOLO and absorvida(conn, medicao_id):
             # issue #589: o reajuste absorvido ja' protocolado pela execucao no mesmo envio (pelo sistema ou por fora,
             # que tambem o listam) nao ganha outra linha: o protocolo dele e' o da execucao
-            ja = conn.execute("SELECT id FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' AND data=? "
+            ja = conn.execute("SELECT id FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' AND desfeita_em IS NULL AND data=? "
                               "AND (? IS NULL OR protocolo_id IS ?) ORDER BY id DESC LIMIT 1",
                               (medicao_id, data, protocolo_id, protocolo_id)).fetchone()
             if ja is not None:
@@ -1287,7 +1303,7 @@ PROXIMO_PASSO = {"planilha_gerada": "Planilha e carta", "planilha_enviada": "An�
 def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None) -> list[dict]:
     """Medicoes entre o espelho e o pagamento, com o proximo passo e a data do ultimo marco."""
     sql = ("SELECT m.*, c.nome_curto, c.numero_instrumento, o.familia, "
-           "(SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') AS protocolado_em "
+           "(SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota' AND p.desfeita_em IS NULL) AS protocolado_em "
            "FROM medicoes m JOIN contratos c ON c.id=m.contrato_id LEFT JOIN orgaos o ON o.id=c.orgao_id "
            f"WHERE m.estado IN ({','.join('?' * len(PROXIMO_PASSO))})")
     args: list = list(PROXIMO_PASSO)
@@ -1692,7 +1708,7 @@ def _quadro_do_mes(conn, mes: str, obras: dict[int, dict], sem_fluxo_medicao: se
     passos_de = passos_das_medicoes(conn)
     do_mes: dict[int, list[dict]] = {}
     for r in conn.execute(
-            "SELECT m.*, (SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') "
+            "SELECT m.*, (SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota' AND p.desfeita_em IS NULL) "
             "AS protocolado_em FROM medicoes m WHERE m.competencia=? "
             "AND m.estado NOT IN ('prevista','cancelada','desistida')", (mes,)):
         do_mes.setdefault(r["contrato_id"], []).append(dict(r))
