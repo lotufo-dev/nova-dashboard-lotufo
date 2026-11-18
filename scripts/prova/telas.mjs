@@ -87,6 +87,7 @@ const comNecessario = noRitmo => [
   { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaComNecessario(noRitmo) },
   { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
 ];
+
 export const TELAS = [
   // ---- Inicio
   { rota: "inicio", id: "inicio", caminho: "/inicio", perfis: TODOS, espera: ".ini" },
