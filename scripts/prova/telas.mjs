@@ -89,6 +89,14 @@ const comNecessario = noRitmo => [
   { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaComNecessario(noRitmo) },
   { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
 ];
+// issue #822: a pagina da obra fora da regua do andamento: o motivo no lugar da leitura, sem selo na conclusao.
+// `noFim`: a execucao termina no mes que vem (duas competencias)
+import { cabecalhoNoFim, fichaForaDaRegua } from "./simulados.mjs";
+const foraDaRegua = (fora, noFim = false) => [
+  { caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: noFim ? cabecalhoNoFim : cabecalhoEmDia },
+  { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaForaDaRegua(fora, noFim) },
+  { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
+];
 // issue #805: a fila de avisos com o volume da producao (dezenas de vencidos em varias obras, um aviso de cada assunto
 // pelo menos; ver simulados.mjs). O servidor recorta a fila pelo perfil, e a simulada tambem: a tela entra duas vezes
 // na lista com o mesmo id, uma para quem opera (com certidao, prazo a vencer, nota e SIGA) e outra para a diretoria
@@ -288,6 +296,12 @@ export const TELAS = [
     simular: comNecessario(false) },
   { rota: "obra", id: "obra-no-ritmo", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .selo--feito",
     simular: comNecessario(true) },
+  // #822: fora da regua do andamento, o painel "Prazo" escreve o motivo (prazo no fim com a prorrogacao pedida; sem
+  // medicao ha' tres competencias) e a conclusao estimada fica sem selo
+  { rota: "obra", id: "obra-prazo-no-fim", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .andamento--fora",
+    simular: foraDaRegua({ motivo: "prazo_no_fim", prorrogacao_pedida: true }, true) },
+  { rota: "obra", id: "obra-sem-medicao", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .andamento--fora",
+    simular: foraDaRegua({ motivo: "sem_medicao", sem_medicao_desde: "2026-07" }) },
   { rota: "obra", id: "obra-erro", caminho: "/obras/:obra", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/contratos\/\d+\/cabecalho$/) },
 
