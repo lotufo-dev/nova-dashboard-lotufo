@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Aviso } from "./Alertas";
 import AvisosPagina from "./AvisosPagina";
@@ -533,11 +533,11 @@ describe("Início", () => {
     await within(caixa).findByRole("region", { name: "Vencido" });
     const total = totalDaCaixa();
     cleanup();
-    render(<AvisosPagina busca={{}} avisos={FILA} nome="Todas as obras" onFechar={() => {}} />);
-    // na tela Avisos a contagem fica ao lado do título da seção (o número desenhado do Contador)
-    const naTela = screen.getAllByRole("heading", { level: 3 })
-      .map(h => `${limpo(h)} · ${h.closest("section")!.querySelector(".contador [aria-hidden]:not(.glifo)")!.textContent}`);
-    expect(naTela).toEqual(["Vencido · 2", "Esta semana · 2", "Este mês · 1", "Depois · 1"]);
+    render(<AvisosPagina busca={{}} />);
+    await act(async () => {});
+    // na tela Avisos as contagens ficam no alto da página, com a mesma fila e a mesma regra de seção
+    const naTela = [...document.querySelectorAll(".avs-numero")].map(n => `${limpo(n.querySelector("dt"))} · ${limpo(n.querySelector(".avs-numero__valor"))}`);
+    expect(naTela).toEqual(["Vencidos · 2", "Esta semana · 2", "Este mês · 1", "Próximos 90 dias · 1"]);
     expect(total).toBe(String(2 + 2 + 1));
   });
 

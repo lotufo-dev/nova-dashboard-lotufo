@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
-import AvisosPagina from "./AvisosPagina";
 import EmAbertoAParte from "./EmAbertoAParte";
 import {
   andamentoDaObra, ehDoContratante, escopoDaUrl, fimDaExecucao, filtrarObras, gruposPorContratante, nomeDaObra, pctExecutado, pctPiso, posicaoDe, totaisDe,
@@ -35,9 +33,7 @@ import Falha from "./Falha";
 // "/obras?c=<contratante>" abre a pagina do contratante; "/obras/posicao" e "/obras/resumo" estao em rota.tsx.
 // O estado fica na URL: ?q=<busca>, ?situacao=todas (com as encerradas) e ?c=<contratante> (ou, nos links de antes,
 // ?orgao=). "/obras/resumo" (link de antes) abre a vista Obras.
-// Os Avisos (?avisos=1) continuam abrindo acima da tabela para os links de antes.
 
-type Entidade = { id: number; nome: string; nome_curto?: string | null };
 type Obra = ObraLista;
 
 const FORA = new Set(["encerrado", "rescindido"]);
@@ -49,8 +45,6 @@ const pctDe = (t: TotaisObras) => pctPiso(t.medido, t.contratado);
 
 export default function Contratos({ ir, busca = {}, aba = "contratantes" }: { ir: Ir; busca?: Busca; aba?: AbaObras }) {
   const [lista, setLista] = useState<Obra[] | null>(null);
-  const [empresas, setEmpresas] = useState<Map<number, string> | null>(new Map());
-  const [avisos, setAvisos] = useState<Aviso[] | null | undefined>(undefined);
   // o painel da diretoria (`/api/diretoria`): o farol de cada obra, o medido do ano, os reajustes e o QDOP;
   // undefined = carregando; null = nao carregou
   const [painel, setPainel] = useState<Painel | null | undefined>(undefined);
@@ -61,11 +55,6 @@ export default function Contratos({ ir, busca = {}, aba = "contratantes" }: { ir
     let vivo = true;
     api<Obra[]>("/api/contratos").then(l => { if (vivo) setLista(l); })
       .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
-    api<Entidade[]>("/api/entidades")
-      .then(l => { if (vivo) setEmpresas(new Map(l.map(e => [e.id, e.nome_curto || e.nome]))); })
-      .catch(() => { if (vivo) setEmpresas(null); });
-    api<{ avisos: Aviso[] }>("/api/inicio").then(d => { if (vivo) setAvisos(d.avisos); })
-      .catch(() => { if (vivo) setAvisos(null); });
     api<Painel>("/api/diretoria").then(d => { if (vivo) setPainel(d); })
       .catch(e => { if (vivo) { setPainel(null); setErroPainel(mensagemDeErro(e)); } });
     return () => { vivo = false; };
@@ -91,10 +80,8 @@ export default function Contratos({ ir, busca = {}, aba = "contratantes" }: { ir
     else substituir({ tela: "obras", aba: "todas" });
   }, [paraTodas, orgao, lista, chaveDoFiltro, soContratante]);
   const comEncerradas = busca.situacao === "todas";
-  const avisosAbertos = busca.avisos === "1";
 
   const doContratante = useMemo(() => (lista ?? []).filter(o => !orgao || ehDoContratante(o, orgao)), [lista, orgao]);
-  const idsDoContratante = useMemo(() => (orgao ? new Set(doContratante.map(o => o.id)) : null), [orgao, doContratante]);
   const q = busca.q ?? "";
   // ?termina=90 (os links do QDOP): so' as obras cuja execucao ou vigencia acaba em ate' N dias, a que acaba antes primeiro
   const termina = /^\d{1,4}$/.test(busca.termina ?? "") ? Number(busca.termina) : null;
@@ -107,7 +94,6 @@ export default function Contratos({ ir, busca = {}, aba = "contratantes" }: { ir
   const pctTotal = pctDe(totais);
   // o medido do ano e' da carteira inteira: so' aparece ao lado dos totais quando a lista nao esta' filtrada
   const listaInteira = !orgao && !q.trim() && !comEncerradas && termina === null;
-  const nomeLista = orgao ?? "Todas as obras";
   const aqui = { tela: "obras" as const };
   const semContratante: Busca = { ...busca };
   delete semContratante.c; delete semContratante.orgao; delete semContratante.termina;
@@ -157,15 +143,6 @@ export default function Contratos({ ir, busca = {}, aba = "contratantes" }: { ir
         {vista === "todas" && <>
         {!lista && !erro && <div className="vazio"><p>Carregando as obras…</p></div>}
         {erro && <Falha>{erro} Recarregue a página para tentar de novo.</Falha>}
-        {lista && (empresas === null || avisos === null) && avisosAbertos && (
-          <Falha>Não foi possível carregar {[empresas === null && "os nomes das empresas", avisos === null && "os avisos"].filter(Boolean).join(" nem ")};
-            recarregue a página para tentar de novo.</Falha>
-        )}
-
-        {lista && avisosAbertos && (
-          <AvisosPagina busca={busca} avisos={avisos} escopo={idsDoContratante} nome={nomeLista}
-            onFechar={() => { trocarBusca({ avisos: null, familia: null, nivel: null, obra: null, agrupar: null }); }} />
-        )}
 
         {lista && (
           <dl className="obras-numeros" aria-label="Totais">

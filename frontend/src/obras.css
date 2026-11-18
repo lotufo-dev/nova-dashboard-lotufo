@@ -1,5 +1,5 @@
 /* Obras (lista), redesenho da #774: os numeros da lista, a tabela de posicao por contratante, os reajustes e
-   o QDOP; e os Avisos que ainda abrem dentro da pagina para os links de antes. So' a disposicao e os blocos proprios
+   o QDOP. So' a disposicao e os blocos proprios
    da tela: painel, tabela, selo e botao sao pecas de base de tokens.css. Cor, letra, espaco e borda so' por variavel. */
 
 .topbar__titulo--grande { font-size: var(--texto-numero); line-height: var(--entrelinha-titulo); overflow: visible; white-space: normal; }
@@ -250,15 +250,7 @@
   .qdop-filtros { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
 }
 
-/* #511: secoes pelo tempo, com faixa de cabecalho e uma linha por aviso */
-.avisos-area .form-inline select { max-width: 100%; }
 @media (max-width: 700px) {
-  /* as colunas fixas (112 + 150 + 72 px) nao cabem no celular: a tabela ganha largura minima e a Rolagem rola,
-     em vez de a coluna "Aviso" ficar sem espaco e o texto se sobrepor */
-            .avisos-area .cartao__acoes { flex-wrap: wrap; }
-  .avisos-area .form-inline { flex-wrap: wrap; }
-  .avisos-area .form-inline .campo { min-width: 0; flex: 1 1 140px; }
-  .avisos-area .cartao__cabeca { flex-wrap: wrap; }
   /* Reajustes esperando apostilamento: tres colunas em 290 px; o nome quebra em vez de cortar e o valor vai na letra de apoio */
   .cartao:has(#dir-reajustes) .tabela :is(th, td) { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
   .cartao:has(#dir-reajustes) .tabela .truncar--nome { max-width: none; white-space: normal; overflow: visible; }
