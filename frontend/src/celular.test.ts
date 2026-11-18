@@ -140,6 +140,9 @@ describe("celular", () => {
     expect(tokensCss).toMatch(/\.caminho ol\s*\{[^}]*display:\s*block/);
     expect(tokensCss).toMatch(/\.caminho__trecho > a,[^{]*\{[^}]*display:\s*inline-block;\s*max-width:\s*100%;\s*white-space:\s*normal;\s*overflow-wrap:\s*anywhere/);
     expect(tokensCss).not.toMatch(/\.caminho[^{]*\{[^}]*text-overflow/);
+    // o nome quebra nos espaços, e não em qualquer letra: a regra do caminho de PASTA (Minha conta) vale só no <code>
+    expect(tokensCss).toMatch(/(^|\n)code\.caminho\s*\{\s*word-break:\s*break-all/);
+    expect(tokensCss).not.toMatch(/(^|[\n,}]\s*)\.caminho[^{,]*\{[^}]*word-break/);
     expect(blocoMedia(tokensCss, 767)).toMatch(/\.abas\s*\{[^}]*overflow-x:\s*auto/);
     expect(blocoMedia(tokensCss, 767)).toMatch(/\.topo\s*\{[^}]*padding:\s*var\(--espaco-pp\) var\(--espaco-pp\) var\(--espaco-pp\) var\(--espaco-m\)/);
     // no celular os trechos de antes vão numa linha pequena e o título desce para a de baixo

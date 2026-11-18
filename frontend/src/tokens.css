@@ -1851,4 +1851,6 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .coluna-conta .assinatura-alvo.arrastando { border-color: var(--cor-tinta); background: var(--cor-papel-sombreado); color: var(--cor-tinta); }
 .coluna-conta .assinatura-alvo img { max-width: 100%; max-height: 160px; border: 1px solid var(--cor-linha); border-radius: var(--raio-canto); background: var(--cor-superficie); }
 .assinatura-alvo__dica { font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
-.caminho { word-break: break-all; }
+/* o caminho de PASTA escrito na Minha conta (`<code class="caminho">`): quebra em qualquer letra. So' no <code>: a
+   classe `.caminho` sozinha e' o caminho da pagina, na barra do topo (#814), que quebra nos espacos. */
+code.caminho { word-break: break-all; }
