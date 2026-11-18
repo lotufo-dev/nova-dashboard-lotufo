@@ -34,6 +34,8 @@ import { cabecalhoCom, cabecalhoEmDia, CUSTO_DA_OBRA, detalheDoEnvio, espelhoEnv
          prazosEmEncerramento, prazosParalisada, PREVIA_DO_ESPELHO, PROTOCOLO_ID, RESPOSTA_QUE_QUEBRA, RM_EXCLUSAO_RECUSADA,
          SIGA_COM_PROCESSOS } from "./simulados.mjs";
 
+import { carteiraSimulada, painelDaCarteira } from "./simulados.mjs";
+
 export const PERFIS = ["admin", "engenharia", "diretoria"];
 export const LARGURAS = [1440, 1024, 390];
 
@@ -80,6 +82,11 @@ const comNecessario = noRitmo => [
   { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaComNecessario(noRitmo) },
   { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
 ];
+// issue #805: a carteira de quatro contratantes no lugar do cadastro de exemplo (ver simulados.mjs)
+const comCarteira = [
+  { caminho: /^\/api\/contratos$/, corpo: carteiraSimulada },
+  { caminho: /^\/api\/diretoria$/, ajustar: painelDaCarteira },
+];
 
 export const TELAS = [
   // ---- Inicio
@@ -109,12 +116,36 @@ export const TELAS = [
   { rota: "resumo-medicoes", id: "resumo-medicoes-erro", caminho: "/resumo-medicoes", perfis: SO_ADMIN, espera: "#conteudo [role=alert]",
     erro: true, simular: falha(/^\/api\/resumo-medicoes$/) },
 
-  // ---- Obras: a lista (Posicao), o QDOP, a lista vazia e a falha
-  { rota: "obras", id: "obras", caminho: "/obras", perfis: TODOS, espera: ".obras-numeros" },
+  // ---- Obras em niveis (#805): "Por contratante" (a entrada), "Todas as obras", "Andamento" e o QDOP; a pagina de
+  // um contratante; a lista vazia e a falha. As telas `-carteira` trocam o cadastro de exemplo (um orgao, duas obras)
+  // por uma carteira de quatro contratantes, com obra devagar, em atencao, adiantada, paralisada e vencida
+  { rota: "obras", id: "obras", caminho: "/obras", perfis: TODOS, espera: ".obras-contratantes" },
+  { rota: "obras", id: "obras-carteira", caminho: "/obras", perfis: TODOS, espera: ".obras-contratantes .obras-etiqueta--devagar",
+    simular: comCarteira },
+  { rota: "obras", id: "obras-todas", caminho: "/obras/todas", perfis: TODOS, espera: ".obras-posicao" },
+  { rota: "obras", id: "obras-todas-carteira", caminho: "/obras/todas", perfis: TODOS, espera: ".obras-posicao .andamento",
+    simular: comCarteira },
+  { rota: "obras", id: "obras-todas-reajustes", caminho: "/obras/todas", perfis: ["diretoria"], antes: ".obras-reajustes",
+    espera: ".obras-reajustes[open] table", simular: comCarteira, passos: [{ clicar: ".obras-reajustes > summary" }] },
+  { rota: "obras", id: "obras-andamento", caminho: "/obras/andamento", perfis: TODOS, espera: ".obras-painel" },
+  { rota: "obras", id: "obras-andamento-carteira", caminho: "/obras/andamento", perfis: TODOS, espera: ".obras-andamento .andamento",
+    simular: comCarteira },
   { rota: "obras", id: "obras-qdop", caminho: "/obras/qdop", perfis: TODOS, espera: "#conteudo .cartao" },
+  // a pagina do contratante: o do cadastro de exemplo (a familia "sinfra"); da carteira simulada, um com prazo de
+  // pagamento e de tudo um pouco (SINFRA, com as encerradas a' vista) e um sem prazo no sistema (MTPAR)
+  { rota: "contratante", id: "contratante", caminho: "/obras/contratante/sinfra", perfis: TODOS, espera: ".obras-do-contratante" },
+  { rota: "contratante", id: "contratante-carteira", caminho: "/obras/contratante/sinfra", perfis: TODOS,
+    espera: ".obras-do-contratante .andamento", simular: comCarteira },
+  { rota: "contratante", id: "contratante-todas", caminho: "/obras/contratante/sinfra?situacao=todas", perfis: ["diretoria"],
+    espera: ".obras-do-contratante .andamento", simular: comCarteira },
+  { rota: "contratante", id: "contratante-sem-prazo", caminho: "/obras/contratante/mtpar", perfis: ["diretoria"],
+    espera: ".obras-do-contratante .andamento", simular: comCarteira },
+  { rota: "contratante", id: "contratante-nao-encontrado", caminho: "/obras/contratante/nao-existe", perfis: SO_ADMIN, espera: "#conteudo .vazio" },
+  { rota: "contratante", id: "contratante-erro", caminho: "/obras/contratante/sinfra", perfis: SO_ADMIN, espera: "#conteudo [role=alert]",
+    erro: true, simular: falha(/^\/api\/contratos$/) },
   { rota: "obras", id: "obras-a-parte", caminho: "/obras", perfis: ["diretoria"], espera: ".em-aberto-a-parte",
     simular: [{ caminho: /^\/api\/contratos$/, ajustar: obrasComAParte }] },
-  { rota: "obras", id: "obras-vazia", caminho: "/obras", perfis: SO_ADMIN, espera: ".obras-painel .vazio",
+  { rota: "obras", id: "obras-vazia", caminho: "/obras/todas", perfis: SO_ADMIN, espera: ".obras-painel .vazio",
     simular: [{ caminho: /^\/api\/contratos$/, corpo: [] }] },
   { rota: "obras", id: "obras-erro", caminho: "/obras", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/contratos$/) },
