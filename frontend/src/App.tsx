@@ -6,7 +6,7 @@ import { BarraSuperior, Trilho } from "./Casca";
 import Documentos from "./Documentos";
 import DocumentosEmpresa from "./DocumentosEmpresa";
 import AbrirEnvio from "./AbrirEnvio";
-import ContratantePagina from "./ContratantePagina";
+import ContratantePagina, { ABAS_PRONTAS } from "./ContratantePagina";
 import ContratoPagina from "./ContratoPagina";
 import Contratos from "./Contratos";
 import Inicio from "./Inicio";
@@ -72,8 +72,10 @@ export default function App() {
     if (rota.tela === "raiz" || (rota.tela === "admin" && usuario.perfil !== "admin")
       || ((rota.tela === "siga" || rota.tela === "ancoras-docusign") && usuario.perfil === "diretoria")) {
       substituir(entradaDe(usuario.perfil));
-    } else if (rota.tela === "contratante" && rota.aba === "siga" && usuario.perfil === "diretoria") {
-      // a aba do SIGA do contratante segue a tela SIGA: quem nao a ve cai na pagina do contratante
+    } else if (rota.tela === "contratante" && rota.aba
+      && (!ABAS_PRONTAS.includes(rota.aba) || (rota.aba === "siga" && usuario.perfil === "diretoria"))) {
+      // A aba do contratante que a pagina ainda nao desenha (ContratantePagina.ABAS_PRONTAS) abre a pagina como ela e'
+      // hoje. E a aba do SIGA segue a tela SIGA: quem nao a ve cai na pagina do contratante.
       substituir({ tela: "contratante", chave: rota.chave });
     } else if (rota.tela === "obras" && busca.avisos === "1") {
       // os Avisos tem pagina propria (#805): o link de antes, de quando abriam dentro de Obras, leva para la'

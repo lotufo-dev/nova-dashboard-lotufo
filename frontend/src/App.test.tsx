@@ -501,6 +501,18 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     expect(aceso()).toEqual(["Obras"]);
   });
 
+  it.each(["medicoes", "a-receber", "avisos"])("a aba %s do contratante já tem endereço; enquanto a página não a desenha (#818), ele abre a página", async (aba) => {
+    entrar("engenharia");
+    window.history.replaceState(null, "", `/obras/contratante/sinfra/${aba}?situacao=todas`);
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
+    await waitFor(() => expect(endereco()).toBe("/obras/contratante/sinfra?situacao=todas"));
+    // e fica lá: a troca do endereço não briga com a do endereço canônico
+    await act(async () => {});
+    expect(endereco()).toBe("/obras/contratante/sinfra?situacao=todas");
+    expect(trechos()).toEqual(["Obras", "SINFRA"]);
+  });
+
   it("a aba do SIGA do contratante segue a tela SIGA: a diretoria cai na página do contratante", async () => {
     entrar("diretoria");
     window.history.replaceState(null, "", "/obras/contratante/sinfra/siga");

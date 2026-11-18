@@ -13,7 +13,7 @@ import { type Painel } from "./ObrasCarteira";
 import { AReceber, EtiquetasDeAtencao, Executado, MedidoNoMes, NumerosDeObras, SituacaoDaObra } from "./ObrasPecas";
 import Rolagem from "./Rolagem";
 import { useNomesDoCaminho } from "./nomesDoCaminho";
-import { substituir, type AbaContratante, type Busca, type Ir } from "./rota";
+import { type AbaContratante, type Busca, type Ir } from "./rota";
 import "./obras.css";
 
 // A pagina do contratante (#805), o segundo nivel de Obras: "/obras/contratante/<chave>". A chave e' a que o servidor
@@ -26,7 +26,13 @@ import "./obras.css";
 
 const FORA = new Set(["encerrado", "rescindido"]);
 
-export default function ContratantePagina({ chave, aba = "obras", perfil, busca = {}, ir }: {
+/** As abas que a pagina ja' desenha. As outras (Medicoes, A receber, Processos no SIGA, Avisos) ja' tem endereco na
+ *  rota (#814) e chegam com a issue #818: ate' la' o App leva o endereco delas para a pagina como ela e' hoje. Quem
+ *  construir uma aba a acrescenta aqui, e o endereco dela passa a abrir. */
+export const ABAS_PRONTAS: readonly AbaContratante[] = ["obras"];
+
+// `aba`: a aba do endereco. Por ora so' existe a de Obras (ver ABAS_PRONTAS).
+export default function ContratantePagina({ chave, perfil, busca = {}, ir }: {
   chave: string; aba?: AbaContratante; perfil: string; busca?: Busca; ir: Ir;
 }) {
   const [lista, setLista] = useState<ObraLista[] | null>(null);
@@ -58,9 +64,6 @@ export default function ContratantePagina({ chave, aba = "obras", perfil, busca 
   useEffect(() => { document.title = `${nome ?? "Contratante"} · Obras · grupolotufo`; }, [nome]);
   // o caminho ("Obras › SINFRA") e' da barra do topo (#814): a pagina so' diz o nome do contratante, quando a lista chega
   useNomesDoCaminho({ contratante: nome ? { nome, chave } : null });
-  // As abas Medicoes, A receber, Processos no SIGA e Avisos ja' tem endereco (#814) e chegam com a issue #818. Ate' la'
-  // o endereco delas abre a pagina como ela e' hoje (a aba Obras), e a URL diz isso.
-  useEffect(() => { if (aba !== "obras") substituir({ tela: "contratante", chave }); }, [aba, chave]);
 
   return (
     <>

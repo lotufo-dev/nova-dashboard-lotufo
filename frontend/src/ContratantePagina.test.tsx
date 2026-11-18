@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Caminho from "./Caminho";
-import ContratantePagina from "./ContratantePagina";
+import ContratantePagina, { ABAS_PRONTAS } from "./ContratantePagina";
 import type { ObraLista } from "./listaObras";
 import { useRota } from "./rota";
 
@@ -78,11 +78,8 @@ describe("Página do contratante (#805)", () => {
     expect(document.querySelector(".topbar .caminho, .topbar__trilha")).toBeNull();
   });
 
-  it("as abas do contratante já têm endereço (#814); enquanto não chegam (#818), o endereço delas abre a página", async () => {
-    abrir("/obras/contratante/sinfra/medicoes?situacao=todas");
-    await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
-    await waitFor(() => expect(window.location.pathname + window.location.search).toBe("/obras/contratante/sinfra?situacao=todas"));
-    expect(screen.getByRole("table")).toBeTruthy();
+  it("por ora a página só desenha a aba Obras; as outras já têm endereço (#814) e chegam com a #818", async () => {
+    expect(ABAS_PRONTAS).toEqual(["obras"]);
   });
 
   it("o cabeçalho traz os números do bloco: contratado e participação, medido, medido no mês, a receber, prazo e andamento", async () => {
