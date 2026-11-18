@@ -1346,3 +1346,39 @@ def test_cadastro_exemplo_traz_o_pacote_assinado_na_familia_sinfra():
     orgao = next(o for o in ca.preparar(CADASTRO_EXEMPLO)["orgaos"] if o["familia"] == "sinfra")
     assert "Relatório de Cronograma Físico-Financeiro de Evolução Mensal" in orgao["regras"]["pacote_assinado"]["medicao"]
     assert "Relatório de Cálculo de Medição Reajustada" in orgao["regras"]["pacote_assinado"]["reajuste"]
+
+
+# --- fiscal sem e-mail (migracao 091): o e-mail so' entra quando um documento do orgao o prova ----------------------
+
+def test_fiscal_sem_email_e_aceito_com_nome_e_sai_com_email_nulo(tmp_path):
+    c = {**CONTRATO, "fiscais": [
+        {"nome": "Ana", "desde": "2026-01-01", "cargo": "Fiscal do Contrato", "portaria": "Portaria n.º 1/2026"},
+        {"nome": "Bia", "email": "  ", "desde": "2026-02-01"},
+        {"nome": "Caio", "email": " Caio@Orgao-A.exemplo.com.br ", "desde": "2026-03-01"}]}
+    cad = ca.preparar(_escrever(tmp_path, contratos=[c]))
+    fiscais = cad["contratos"][0]["fiscais"]
+    assert [(f["nome"], f["email"]) for f in fiscais] == [
+        ("Ana", None), ("Bia", None), ("Caio", "caio@orgao-a.exemplo.com.br")]
+    assert fiscais[0]["cargo"] == "Fiscal do Contrato" and fiscais[0]["portaria"] == "Portaria n.º 1/2026"
+    assert cad["avisos"] == []
+
+
+def test_fiscal_sem_email_e_sem_nome_e_erro_e_sem_desde_tambem(tmp_path):
+    c = {**CONTRATO, "fiscais": [{"desde": "2026-01-01", "cargo": "Fiscal"}, {"nome": "Ana"},
+                                 {"nome": "Bia", "email": "bia@orgao-a.exemplo.com.br"}]}
+    erros = _erros(_escrever(tmp_path, contratos=[c]))
+    assert any("fiscais[0]" in e and "nome é obrigatório" in e for e in erros)
+    assert any("fiscais[1]" in e and "desde é obrigatório" in e for e in erros)
+    assert any("fiscais[2]" in e and "desde é obrigatório" in e for e in erros)
+
+
+def test_fiscal_sem_email_repetido_na_mesma_data_e_erro(tmp_path):
+    c = {**CONTRATO, "fiscais": [{"nome": "Ana", "desde": "2026-01-01"}, {"nome": "Ana", "desde": "2026-01-01"}]}
+    assert any("fiscais[1]" in e and "repetido" in e for e in _erros(_escrever(tmp_path, contratos=[c])))
+
+
+def test_cadastro_de_exemplo_tem_fiscal_sem_email():
+    import pathlib
+    cad = ca.preparar(pathlib.Path(__file__).parents[2] / "cadastro-exemplo")
+    fiscais = [f for c in cad["contratos"] for f in c["fiscais"]]
+    assert any(f["email"] is None and f["nome"] for f in fiscais) and any(f["email"] for f in fiscais)

@@ -799,14 +799,25 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
         except ValueError as e:
             falha(f"fiscais[{i}].desde", str(e))
             continue
-        if not (f or {}).get("email") or not desde:
-            falha(f"fiscais[{i}]", "email e desde são obrigatórios")
+        if not isinstance(f, dict) or not desde:
+            falha(f"fiscais[{i}]", "desde é obrigatório")
+            continue
+        # O e-mail e' opcional: so' entra o endereco que aparece em documento ou mensagem do proprio orgao. Sem ele o
+        # fiscal vale como A/C da carta (nome, cargo, portaria) e nao e' destinatario; ai' e' o nome que o identifica.
+        email = str(f.get("email") or "").strip().lower() or None
+        nome = str(f.get("nome") or "").strip()
+        if email is None and not nome:
+            falha(f"fiscais[{i}]", "sem email, o nome é obrigatório")
             continue
         if f.get("tratamento") is not None and f["tratamento"] not in TRATAMENTOS:
             falha(f"fiscais[{i}].tratamento", f"use {' ou '.join(TRATAMENTOS)}")
-        if not str(f.get("nome") or "").strip():
-            avisos.append(f"Contrato {c['nome_curto']}: fiscal {str(f['email']).strip().lower()} sem nome")
-        c["fiscais"].append({"nome": str(f.get("nome") or ""), "email": str(f["email"]).strip().lower(),
+        if not nome:
+            avisos.append(f"Contrato {c['nome_curto']}: fiscal {email} sem nome")
+        if email is None and any(x["email"] is None and x["nome"].strip() == nome and x["desde"] == desde
+                                 for x in c["fiscais"]):
+            falha(f"fiscais[{i}]", f"fiscal {nome} sem email repetido na mesma data")
+            continue
+        c["fiscais"].append({"nome": str(f.get("nome") or ""), "email": email,
                              "desde": desde, "cargo": f.get("cargo"), "tratamento": f.get("tratamento"),
                              "portaria": f.get("portaria")})
 

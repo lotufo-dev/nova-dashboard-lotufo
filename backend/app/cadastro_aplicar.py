@@ -388,15 +388,34 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
         auditoria.registrar(conn, usuario_id, "cadastro.datas_base", "contrato", cid, atuais, desejadas)
 
     # Fiscais: historico. So' acrescenta; o fiscal vigente e' o de `desde` mais recente.
+    # O e-mail e' opcional (migracao 091): sem ele, a linha e' a de mesmo nome e data, e o e-mail fica nulo.
     for f in c["fiscais"]:
-        cur = conn.execute("INSERT OR IGNORE INTO contrato_fiscais (contrato_id, nome, email, desde) "
-                           "VALUES (?,?,?,?)", (cid, f["nome"], f["email"], f["desde"]))
-        if cur.rowcount:
+        onde, args = ("email=?", (cid, f["email"], f["desde"])) if f["email"] is not None else \
+            ("email IS NULL AND nome=?", (cid, f["nome"], f["desde"]))
+        sql_linha = f"SELECT id, cargo, tratamento, portaria FROM contrato_fiscais WHERE contrato_id=? AND {onde} AND desde=?"
+        if conn.execute(sql_linha, args).fetchone() is None:
+            # O e-mail entrou ou saiu do cadastro: a linha do mesmo fiscal (nome e data) e' corrigida, em vez de o
+            # fiscal aparecer duas vezes. Sai o endereco generico do orgao que so' preenchia o campo; entra o que
+            # um documento do orgao passou a provar. Endereco que outra linha do cadastro usa nao e' mexido.
+            emails_do_cadastro = {x["email"] for x in c["fiscais"] if x["desde"] == f["desde"] and x["email"]}
+            outra = None
+            if f["nome"].strip():
+                outra = next((r for r in conn.execute(
+                    "SELECT id, email FROM contrato_fiscais WHERE contrato_id=? AND nome=? AND desde=? ORDER BY id",
+                    (cid, f["nome"], f["desde"]))
+                    if (r["email"] is None) != (f["email"] is None) and r["email"] not in emails_do_cadastro), None)
+            if outra is not None:
+                conn.execute("UPDATE contrato_fiscais SET email=? WHERE id=?", (f["email"], outra["id"]))
+                auditoria.registrar(conn, usuario_id, "cadastro.fiscal", "contrato", cid,
+                                    {"nome": f["nome"], "desde": f["desde"], "email": outra["email"]},
+                                    {"nome": f["nome"], "desde": f["desde"], "email": f["email"]})
+            else:
+                conn.execute("INSERT INTO contrato_fiscais (contrato_id, nome, email, desde) VALUES (?,?,?,?)",
+                             (cid, f["nome"], f["email"], f["desde"]))
+                auditoria.registrar(conn, usuario_id, "cadastro.fiscal", "contrato", cid, None, f)
             mudou = True
-            auditoria.registrar(conn, usuario_id, "cadastro.fiscal", "contrato", cid, None, f)
         # Bloco 5: cargo, tratamento e portaria sao descricao do fiscal (vao na carta) e podem ser corrigidos.
-        linha = conn.execute("SELECT id, cargo, tratamento, portaria FROM contrato_fiscais "
-                             "WHERE contrato_id=? AND email=? AND desde=?", (cid, f["email"], f["desde"])).fetchone()
+        linha = conn.execute(sql_linha, args).fetchone()
         antes_f = {k: linha[k] for k in _CAMPOS_FISCAL}
         depois_f = {k: f.get(k) for k in _CAMPOS_FISCAL}
         if antes_f != depois_f:
