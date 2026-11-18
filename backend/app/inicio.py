@@ -69,13 +69,16 @@ def _ciclo(conn, hoje: datetime.date) -> list[dict]:
     antiga. So' entra a medicao que tem a data do evento da etapa: a idade conta dessa data ate' hoje, nunca da
     competencia; medicao no estado e sem a data fica fora do valor e da quantidade. "Recebido no mes" sao as baixas
     do RM com data no mes de hoje (`diretoria.recebido_rm_no_mes`); a quantidade dele e' de notas, e nao tem idade."""
-    ms = diretoria._medicoes(conn)
+    ms = diretoria.marcar_a_parte(conn, diretoria._medicoes(conn))
     out = []
     for etapa, estados, campo in CICLO:
         if etapa == "protocolado":
             # #743: na obra sem o passo "Envio da nota", a nota emitida ja' e' a cobranca; a medicao esta' aqui, com
             # a data da emissao da nota (`diretoria.cobrada_em`), e nao na etapa "Nota", que espera o protocolo
-            datadas = [(m, diretoria._d(diretoria.cobrada_em(m))) for m in ms if diretoria.espera_pagamento(m)]
+            # 17/11/2026 (docs/adr/0006): a pendencia a' parte (competencia anterior a 2025, ou nota sem atualizacao
+            # do RM) fica fora da etapa; a tela a mostra numa linha propria (`_a_receber`, `a_parte`)
+            datadas = [(m, diretoria._d(diretoria.cobrada_em(m))) for m in ms
+                       if diretoria.espera_pagamento(m) and not m["a_parte"]]
         else:
             datadas = [(m, diretoria._d(m[campo])) for m in ms if m["estado"] in estados and not m["sem_protocolo"]]
         com_data = [(m, d) for m, d in datadas if d]
@@ -106,15 +109,15 @@ def _previsao(conn, hoje: datetime.date) -> dict:
     docs/adr/0007: o prazo e' o terceiro quartil, entao so' quem passou do normal daquele orgao esta' atrasado):
     `atrasado` (a data ja' passou), `neste_mes`, `proximo_mes`, `depois` (alem do proximo mes) e `sem_previsao`
     (contratante sem prazo: menos de cinco recebimentos em doze meses)."""
-    ms = diretoria._medicoes(conn)
+    ms = diretoria.marcar_a_parte(conn, diretoria._medicoes(conn))
     prazos_ = diretoria.prazos_do_orgao(ms, hoje)
     neste, proximo = diretoria._mes(hoje), diretoria._mes(hoje, 1)
     out = {k: {"valor_centavos": 0, "quantidade": 0} for k in ("neste_mes", "proximo_mes", "atrasado", "sem_previsao", "depois")}
     for m in ms:
         # as mesmas medicoes da etapa "Protocolado" de `_ciclo`; a que espera o pagamento sem protocolo (#743) nao tem
         # data esperada (o prazo do orgao conta do protocolo, docs/adr/0007) e cai em `sem_previsao`
-        if not diretoria.espera_pagamento(m) or not diretoria._d(diretoria.cobrada_em(m)):
-            continue
+        if not diretoria.espera_pagamento(m) or not diretoria._d(diretoria.cobrada_em(m)) or m["a_parte"]:
+            continue                    # a pendencia a' parte (docs/adr/0006) fica fora, como na etapa do ciclo
         esperada = None if m["sem_protocolo"] else diretoria.esperada(m, prazos_)
         if esperada is None:
             linha = "sem_previsao"
@@ -171,14 +174,28 @@ def _a_receber(conn, hoje: datetime.date) -> dict:
     medicoes que esperam o pagamento, as cobrancas do RM em aberto e, em consorcio com a nota da propria empresa
     ligada, o em aberto dela, #756), a mesma da lista de Obras. A idade conta do protocolo; na medicao sem protocolo
     da obra sem o passo "Envio da nota" (#743) e na nota do RM, da emissao. Sem o total liberado (antes da
-    conciliacao), nulo."""
+    conciliacao), nulo.
+    Decisao do dono de 17/11/2026 (docs/adr/0006, "A receber antigo, a' parte"): o total e a faixa de mais de 60 dias
+    somam so' a competencia de `diretoria.ANO_INICIAL` em diante que o RM ainda informa. O resto sai em `a_parte`,
+    fora dos dois: `anterior_centavos` (competencia anterior ao ano inicial) e `sem_atualizacao_centavos` (nota que
+    saiu da janela de 24 meses da sincronizacao com o RM e ficou em aberto: a dashboard nao sabe se foi paga), com o
+    dia mais antigo em que o RM informou uma delas (`sem_atualizacao_desde`). A linha que e' as duas coisas conta em
+    "sem atualizacao". As tres somas fecham com a lista inteira (`diretoria.a_receber_na_cota`)."""
     liberado = diretoria._liberado(conn)
     if not liberado:
-        return {"liberado": False, "valor_centavos": None, "mais_60_centavos": None}
+        return {"liberado": False, "valor_centavos": None, "mais_60_centavos": None, "a_parte": None}
     todas = diretoria.a_receber_na_cota(conn)
-    datas = [(x, diretoria._d(x["protocolo_em"])) for x in todas]
-    return {"liberado": True, "valor_centavos": sum(diretoria._a_receber_cota(x) for x in todas),
-            "mais_60_centavos": sum(diretoria._a_receber_cota(x) for x, d in datas if d and (hoje - d).days > MAIS_DE_DIAS)}
+    no_total = [x for x in todas if not x["a_parte"]]
+    sem = [x for x in todas if x["sem_atualizacao_desde"]]
+    anteriores = [x for x in todas if x["a_parte"] and not x["sem_atualizacao_desde"]]
+    soma = lambda xs: sum(diretoria._a_receber_cota(x) for x in xs)
+    datas = [(x, diretoria._d(x["protocolo_em"])) for x in no_total]
+    return {"liberado": True, "valor_centavos": soma(no_total),
+            "mais_60_centavos": sum(diretoria._a_receber_cota(x) for x, d in datas if d and (hoje - d).days > MAIS_DE_DIAS),
+            "a_parte": {"ano_inicial": diretoria.ANO_INICIAL,
+                        "valor_centavos": soma(anteriores) + soma(sem), "anterior_centavos": soma(anteriores),
+                        "sem_atualizacao_centavos": soma(sem),
+                        "sem_atualizacao_desde": min((x["sem_atualizacao_desde"] for x in sem), default=None)}}
 
 
 def _protocoladas_dia(conn) -> list[dict]:
@@ -186,7 +203,7 @@ def _protocoladas_dia(conn) -> list[dict]:
     `avisos.resumo_mes`): reprotocolo nao conta de novo."""
     return [dict(r) for r in conn.execute(
         "SELECT m.id, m.contrato_id, COALESCE(m.valor_protocolado_centavos, 0) AS valor, MIN(mp.data) AS data "
-        "FROM medicoes m JOIN medicao_protocolos mp ON mp.medicao_id=m.id AND mp.etapa='nota' "
+        "FROM medicoes m JOIN medicao_protocolos mp ON mp.medicao_id=m.id AND mp.etapa='nota' AND mp.desfeita_em IS NULL "
         "WHERE m.estado NOT IN ('cancelada','desistida') GROUP BY m.id")]
 
 
@@ -218,7 +235,7 @@ def painel(conn, hoje: datetime.date | None = None) -> dict:
     hoje = hoje or tempo.hoje_local()
     resumo = avisos.resumo_mes(conn, hoje)
     ultima = conn.execute("SELECT MAX(mp.data) FROM medicao_protocolos mp JOIN medicoes m ON m.id=mp.medicao_id "
-                          "WHERE mp.etapa='nota' AND m.estado NOT IN ('cancelada','desistida')").fetchone()[0]
+                          "WHERE mp.etapa='nota' AND mp.desfeita_em IS NULL AND m.estado NOT IN ('cancelada','desistida')").fetchone()[0]
     return {
         "hoje": hoje.isoformat(),
         "protocoladas": {"obras_protocoladas": resumo["obras_protocoladas"], "obras_ativas": resumo["obras_ativas"],

@@ -239,6 +239,46 @@ def test_consorcio_com_varias_faturas_o_protocolado_fecha_com_o_aprovado(cenario
     assert fechamento._cotas([], 5000) == [] and fechamento._cotas([0, 0], 5000) == [0, 0]
 
 
+def test_consorcio_com_varias_faturas_e_uma_delas_partilhada_com_outra_medicao(cenario):
+    """As duas regras juntas: a cota das faturas do consorcio e' a da soma delas (um arredondamento, repartido), e a
+    fatura que cobre duas medicoes entra em cada uma pelo valor da PARTE (docs/adr/0005), nao inteira. A execucao tem
+    duas faturas inteiras e uma parte da terceira; o reajuste, a outra parte dela."""
+    c, ids = cenario
+    k = ids["consorcio"]
+    execucao = medir(c, k, 7, "2026-05", "protocolada", 3_000_003, aprovado=3_000_003, protocolo="2026-06-01")
+    reajuste = medir(c, k, 7, "2026-05", "protocolada", 500_003, aprovado=500_003, tipo="reajuste", protocolo="2026-06-01")
+    for _ in range(2):
+        nota(c, 1_000_001, [execucao], coligada=12)
+    partilhada = nota(c, 1_500_004, coligada=12)                    # 1.000.001 da execucao + 500.003 do reajuste
+    nid = c.execute("SELECT id FROM notas_fiscais WHERE numero=?", (f"{int(partilhada):09d}",)).fetchone()[0]
+    for mid, parte in ((execucao, 1_000_001), (reajuste, 500_003)):
+        c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra, partilhada) "
+                  "VALUES (?, ?, ?, 'manual', 'correcao_cadastro', 1)", (mid, nid, parte))
+    c.commit()
+    f = fechamento.fechamento(c)
+    # execucao: tres parcelas de 1.000.001; a cota e' a da soma (3.000.003 x 50% = 1.500.002), repartida com o residuo
+    md = _medicao(f, execucao)
+    assert sorted(n["valor_centavos"] for n in md["notas"]) == [500_000, 500_001, 500_001]
+    assert md["protocolado_centavos"] == md["aprovado_centavos"] == 1_500_002
+    # reajuste: so' a parte dele da nota partilhada (500.003 x 50% = 250.002), nao a nota inteira
+    mr = _medicao(f, reajuste)
+    assert [n["valor_centavos"] for n in mr["notas"]] == [250_002] and mr["protocolado_centavos"] == mr["aprovado_centavos"]
+    m = _mes(f, "2026-05")
+    assert m["protocolado_centavos"] == m["aprovado_centavos"] == 1_750_004
+    # nenhuma tem baixa: tudo em aberto, e a nota partilhada aparece nas duas medicoes pelas partes
+    assert m["em_aberto_centavos"] == 1_750_004 and m["recebido_centavos"] == 0
+    _confere_soma(f)
+    # a nota partilhada paga em parte: a falta dos titulos (300.001) reparte-se pelas partes, na proporcao (200.000 e
+    # 100.001, com o residuo), e cada medicao fica em aberto pela cota da parte dela (100.000 e 50.000,5 -> 50.001)
+    c.execute("UPDATE baixas SET valor_baixado_centavos=valor_original_centavos-300001, status_lan=4, data_baixa='2026-07-01' "
+              "WHERE nota_id=?", (nid,))
+    c.commit()
+    f = fechamento.fechamento(c)
+    da_partilhada = lambda mid: next(n for n in _medicao(f, mid)["notas"] if n["nota_id"] == nid)
+    assert (da_partilhada(execucao)["em_aberto_centavos"], da_partilhada(reajuste)["em_aberto_centavos"]) == (100_000, 50_001)
+    _confere_soma(f)
+
+
 def test_mes_sem_lancamento_nao_vira_linha_e_o_acumulado_compara_os_mesmos_meses(cenario):
     c, ids = cenario
     p = ids["propria"]
@@ -580,7 +620,7 @@ def test_nota_paga_em_parte_ligada_a_medicao_fica_em_aberto_pelo_que_falta_nos_t
     g = medir(c, p, 5, "2026-05", "protocolada", 300_000, aprovado=300_000, protocolo="2026-06-05")
     nota(c, 300_000, [g], titulos=[(279_000, 278_900, 1)])                                   # faltam R$ 1,00: paga
     h = medir(c, p, 6, "2026-05", "protocolada", 300_000, aprovado=300_000, protocolo="2026-06-06")
-    um = nota(c, 300_000, [h], titulos=[(279_000, 278_899, 1)])                              # faltam R$ 1,01: em parte
+    um = nota(c, 300_000, [h], titulos=[(279_000, 278_899, 4)])                              # faltam R$ 1,01: em parte
     i = medir(c, p, 7, "2026-05", "protocolada", 200_000, aprovado=200_000, protocolo="2026-06-07")
     inteira = nota(c, 200_000, [i], titulos=[(186_000, 0, 0)])                               # nenhuma baixa: pelo bruto
     f = fechamento.fechamento(c)
@@ -626,7 +666,7 @@ def test_nota_sem_medicao_com_baixa_quase_total_aparece_pelo_que_falta(cenario):
     paga em parte), nao pelo valor bruto inteiro; sem baixa com valor, pelo bruto; quitada dentro da tolerancia, so'
     contada entre as pagas."""
     c, ids = cenario
-    quase = nota(c, 1_000_001, centro="9.001.001", emissao="2024-09-10", titulos=[(1_000_001, 995_000, 1)])
+    quase = nota(c, 1_000_001, centro="9.001.001", emissao="2024-09-10", titulos=[(1_000_001, 995_000, 4)])
     cons = nota(c, 600_001, coligada=12, emissao="2025-10-01", titulos=[(560_001, 500_000, 4)])     # falta 60.001 x 50%
     sem_valor = nota(c, 80_000, centro="9.001.001", emissao="2026-01-05", titulos=[(74_000, 0, 1)])   # baixada sem valor
     nota(c, 90_000, centro="9.001.001", emissao="2026-02-01", titulos=[(83_000, 82_900, 1)])        # faltam R$ 1,00: paga
@@ -1340,7 +1380,8 @@ def test_sem_o_total_liberado_a_nota_emitida_sem_protocolo_nao_aparece_em_a_rece
     nota(c, 500_001, [a], coligada=EMPRESA, emissao="2026-09-01")
     c.execute("UPDATE cadastro_geral SET valor=? WHERE chave='diretoria'", (json.dumps({"total_a_receber_liberado": False}),))
     c.commit()
-    assert inicio._a_receber(c, HOJE_TESTE) == {"liberado": False, "valor_centavos": None, "mais_60_centavos": None}
+    assert inicio._a_receber(c, HOJE_TESTE) == {"liberado": False, "valor_centavos": None, "mais_60_centavos": None,
+                                                "a_parte": None}
     assert diretoria.a_receber_por_obra(c, na_cota=True) is None and diretoria.da_obra(c, p)["a_receber_centavos"] is None
     f = fechamento.fechamento(c)
     assert f["em_aberto"] == [] and _medicao(f, a)["em_aberto_centavos"] is None

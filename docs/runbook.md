@@ -610,10 +610,14 @@ Separador `;`, codificação UTF-8 (ou CP1252 do Excel), uma linha de cabeçalho
 | `meio` | como veio a aprovação: `e-mail`, `smo`, `ofício`, `carimbo`, `protocolo físico`, `ci` ou `outro`; meio desconhecido é erro da linha |
 | `nº do processo no órgão` | processo do órgão |
 | `data do protocolo da nota` | data em que a nota foi protocolada no órgão |
+| `data do envio` | opcional: data em que a planilha/carta foi enviada ao órgão (a medição em análise conta a idade dela) |
+| `data do recebimento` | opcional: data do pagamento que o documento da `fonte` prova; a medição nova entra recebida, e a `fonte` é obrigatória |
 | `NF` | número da NF, procurada no RM da empresa do contrato e vinculada se achada |
 | `fonte` | de onde veio o dado (boletim, planilha, ofício); fica no atesto e na auditoria |
 | `cancelar` | opcional: nº da medição que substitui esta; a linha é duplicata dela e será cancelada com motivo |
 | `corrige competência` | opcional: `sim` corrige a competência de uma medição que já existe com outra |
+
+**Estado da medição nova** (`docs/adr/0006`, desde 17/11/2026): a carga cria no estado que a linha prova. Só com o pedido, em análise no órgão (o reajuste fica previsto, com o pedido congelado pela `data do envio`); com o aprovado e sem nota, boletim recebido; com `NF` ou `data do protocolo da nota`, protocolada, como antes; com `data do recebimento`, recebida. O ensaio diz "entra como ..." em cada linha nova que não entra protocolada. Medição que já existe não muda de estado pela carga: a linha continua "igual" (para devolver uma protocolada sem nota, use o ato `devolver` da correção de cadastro).
 
 ### Onde o CSV mora
 
@@ -709,6 +713,30 @@ Tudo numa transação: uma operação inválida recusa o arquivo inteiro e o rel
 ```
 
 `nf` é o número, `{idmov: N}` ou `{numero: N, serie: S}`; `motivo` e `fonte` são obrigatórios no `desconsiderar_nf` (`substituida_por` é só registro). Sem `coligada`, a nota é procurada em todas as coligadas e o número que existe em mais de uma (ou se repete) é recusado com a lista. A nota desconsiderada vale como cancelada para a dashboard: sai do faturado, o título dela sai do a receber, ela some de "NFs sem medição", o casador não a liga e `ligar_nf` e a tela de vincular nota a recusam. Nenhuma tela mostra a correção: o registro é o evento "Nota desconsiderada" em Administração › Auditoria, com a nota, o motivo e a fonte. A linha da nota, os títulos e o que veio do RM continuam no banco (`notas_fiscais.desconsiderada_em` é a marca; `status_rm` segue o RM), e a sincronização não desfaz a marca. Recusas: nota ligada a medição (use `desligar_nf` antes), nota com baixa no RM, nota já cancelada no RM, nota que não existe. `reconsiderar_nf` devolve a nota aos números (se o RM a cancelou nesse meio-tempo, ela continua cancelada).
+
+**Atos de 17/11/2026 (`docs/adr/0006`, "Atos de correção de cadastro").** Todos com `--ensaio`, auditados, sem apagar nada, e "já feito" ao rodar de novo. Pedem o banco já migrado (091 a 093): na produção, depois do deploy; numa cópia de antes dele, aplique as migrações na cópia.
+
+```yaml
+# 1. Devolver ao estado provado: a medição "protocolada" SEM nota volta ao que o documento prova
+- {operacao: devolver, medicao_id: 21, novo: em_analise, data: 2026-10-02, processo: PROC-0002, motivo: a carga criou como protocolada e só houve o pedido, fonte: carta e protocolo de 02/10/2026}
+- {operacao: devolver, medicao_id: 22, novo: boletim_recebido, aprovado: "1.234,56", data_aprovacao: 2026-10-20, meio: oficio, motivo: aprovada e sem nota, fonte: ofício de aprovação}
+# 2. Reabrir a cancelada direto no estado provado (sem `novo`, volta a protocolada, como sempre)
+- {operacao: reabrir, medicao_id: 23, novo: em_analise, data: 2026-10-01, motivo: cancelada por falta do ato de devolver, fonte: carta de 01/10/2026}
+# 4. Desfazer o recebimento sem prova: recebida pelo corte, pela correção em lote ou pela carga → protocolada
+- {operacao: desfazer_recebimento, medicao_id: 24, motivo: a carta de cobrança ainda cobra esta medição, fonte: carta de cobrança p. 1}
+# 5. Resíduo de nota já paga (baixa parcial antiga com um resto que o RM não baixa); e o inverso
+- {operacao: encerrar_residuo_nf, nf: {idmov: 12345}, coligada: 1, motivo: sobra de baixa parcial antiga, fonte: extrato}
+- {operacao: reabrir_residuo_nf, nf: {idmov: 12345}, coligada: 1, motivo: encerrado por engano, fonte: conferência}
+# 6. Uma nota em mais de uma medição: o valor de cada parte, entre aspas; as partes somam no máximo a nota
+- {operacao: ligar_nf, medicao_id: 25, nfs: [{idmov: 12346, valor: "1.000,01"}], fonte: PDF da nota (fatura a 4ª e a 5ª)}
+- {operacao: ligar_nf, medicao_id: 26, nfs: [{idmov: 12346, valor: "2.000,02"}], fonte: PDF da nota (fatura a 4ª e a 5ª)}
+```
+
+- **`devolver`** (`motivo` e `fonte` obrigatórios). `novo: em_analise` pede `data` (o envio da planilha/carta ao órgão; `processo` é o nº do protocolo dela); `novo: boletim_recebido` pede o aprovado (o da medição, ou `aprovado` com `data_aprovacao`). O estado gravado é o que a tela usa: execução e projeto ficam com a planilha/carta enviada; o reajuste em análise continua previsto, com o pedido congelado pela data do envio. O pedido não muda. O protocolo de nota que a carga ou a correção gravou fica no banco, marcado como desfeito (`medicao_protocolos.desfeita_em`), aparece na linha do tempo da medição dito como desfeito e deixa de contar em toda tela. Recusa: nota vigente ligada, nota enviada ao órgão pelo sistema, espelho, medição que não está protocolada (a recebida, inclusive). Depois do ato a medição segue pelo fluxo da tela.
+- **`reabrir` com `novo`** aceita os mesmos campos do `devolver` e faz os dois passos no mesmo ato. Sem `novo`, a medição volta a protocolada e o `devolver` vale em seguida, no mesmo arquivo.
+- **`desfazer_recebimento`** (`motivo` e `fonte` obrigatórios). Recusa a recebida pela baixa do RM (o RM é a prova), a recebida à mão pelo administrador (não há caminho que desfaça esse registro), a medição com nota que tem baixa no RM, mesmo parcial (o que falta do título já segue a receber pela nota) e a obra sem o passo "Envio da nota". A medição volta a contar no a receber pelo valor dela.
+- **`encerrar_residuo_nf`** só vale para nota paga (todo título com baixa com valor); o título inteiro em aberto é dívida e é recusado. Grava quanto do que falta foi dado por encerrado (`notas_fiscais.residuo_encerrado_centavos`); os títulos e as baixas ficam como o RM os deu, e o que passar desse valor volta a aparecer. Acima de 1% do valor dos títulos o ensaio avisa. O título que o RM dá como baixado (baixa total) já não tem falta; se a baixa veio com mais de R$ 1,00 a menos, ele aparece em Administração › Reconciliação ("Títulos baixados no RM por valor menor") até alguém conferir, e o mesmo ato o tira de lá (registra a conferência; não há falta a abater).
+- **`ligar_nf` com `valor`** liga só aquela parte da nota (`nf_alocacoes.partilhada`). Recusa: partes que passam do valor da nota, nota já ligada inteira a outra medição (desligue e religue com o valor de cada parte), medição com espelho. A parte que não cobre a medição pede `parcial: true`, como na nota inteira.
 
 ### Regra: competência de medição com planilha ou carta enviada
 

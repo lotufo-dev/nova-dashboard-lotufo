@@ -5,7 +5,7 @@ import { rotuloPerfil } from "./navegacao";
 import CaixaAviso from "./CaixaAviso";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import {
-  ABAS_ADMIN, type PendenciasCadastro, campoDoErroDeUsuario, CATEGORIAS_REC, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, pendenciasAgrupadas, pessoaDoEvento,
+  ABAS_ADMIN, type PendenciasCadastro, campoDoErroDeUsuario, CATEGORIAS_REC, completarRec, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, pendenciasAgrupadas, pessoaDoEvento,
   quantidadeRec,
   reconciliacaoDaObra, rotaDoObjeto, rotuloAcao, rotuloObjeto, rotuloRec, urlPaginaRec,
   type CategoriaRec, type Evento, type Reconciliacao,
@@ -264,7 +264,7 @@ function ReconciliacaoResumo({ versao }: { versao: number }) {
   const [rec, setRec] = useState<Reconciliacao | null>(null);
   const [erro, setErro] = useState("");
   useEffect(() => {
-    api<Reconciliacao>("/api/rm/reconciliacao").then(r => { setRec(r); setErro(""); }).catch(e => setErro(falhaDeCarga(e)));
+    api<Reconciliacao>("/api/rm/reconciliacao").then(r => { setRec(completarRec(r)); setErro(""); }).catch(e => setErro(falhaDeCarga(e)));
   }, [versao]);
   return (
     <section className="cartao" aria-labelledby="titulo-rec-resumo">
@@ -584,7 +584,7 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
   const [carregando, setCarregando] = useState<CategoriaRec | null>(null);
   const [erroMais, setErroMais] = useState<{ c: CategoriaRec; texto: string } | null>(null);
   useEffect(() => {
-    api<Reconciliacao>("/api/rm/reconciliacao").then(setRec).catch(e => setErro(falhaDeCarga(e)));
+    api<Reconciliacao>("/api/rm/reconciliacao").then(r => setRec(completarRec(r))).catch(e => setErro(falhaDeCarga(e)));
     api<ObraLista[]>("/api/contratos").then(setObras).catch(() => setObras(null));
   }, []);
 
@@ -782,6 +782,36 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
                     {/* docs/adr/0006: so' o recebimento registrado a' mao tira a nota do a receber */}
                     <td>{x.a_mao ? "não: recebimento à mão" : "sim"}</td>
                     <td className="col-num dinheiro num">{brl(x.falta_centavos)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Rolagem>
+        </Grupo>
+      )}
+
+      {/* docs/adr/0006: o titulo baixado no RM nao tem falta; a diferenca acima de R$ 1,00 fica a' vista aqui */}
+      {mostra("baixados") && (
+        <Grupo id="baixados" titulo="Títulos baixados no RM por valor menor" conta={conta("baixados")} carregadas={d.baixados_com_diferenca.length}
+          mostrando={quantas(d.baixados_com_diferenca.length)} verTodas={verTodas("baixados")} mais={null}>
+          <Rolagem rotulo="Títulos baixados no RM por valor menor">
+            <table className="tabela">
+              <caption className="sr-only">Títulos que o RM deu como baixados com valor baixado menor que o original, um por linha</caption>
+              <thead><tr><th scope="col">Obra</th><th scope="col">Medição</th><th scope="col">NF</th><th scope="col">Baixa em</th>
+                <th scope="col" className="col-num">Valor do título</th><th scope="col" className="col-num">Valor baixado</th>
+                <th scope="col" className="col-num">Diferença</th></tr></thead>
+              <tbody>
+                {d.baixados_com_diferenca.slice(0, quantas(d.baixados_com_diferenca.length)).map((x, i) => (
+                  <tr key={x.titulo_id} className={`linha${i % 2 === 1 ? " par" : ""}`}>
+                    <td>{nomeObra(x.contrato_id, x.numero_instrumento)}</td>
+                    <td>{x.medicao_id !== null && x.numero !== null && x.tipo !== null
+                      ? <Link para={{ tela: "medicao", obra: x.contrato_id, id: x.medicao_id }} secao="notas">{tituloMedicao({ numero: x.numero, tipo: x.tipo })}</Link>
+                      : "—"}</td>
+                    <td className="num">{x.numero_nf}{x.serie ? `/${x.serie}` : ""}</td>
+                    <td className="num">{x.data_baixa ? fmtDataPura(x.data_baixa) : "—"}</td>
+                    <td className="col-num dinheiro num">{brl(x.valor_original_centavos)}</td>
+                    <td className="col-num dinheiro num">{brl(x.valor_baixado_centavos)}</td>
+                    <td className="col-num dinheiro num">{brl(x.diferenca_centavos)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -83,12 +83,14 @@ def test_a_receber_so_com_total_liberado_e_na_cota(cenario):
     c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) VALUES (?, '2026-07-02', 'manual')", (mid,))
     c.commit()
     p = inicio.painel(c, HOJE)
-    assert p["a_receber"] == {"liberado": False, "valor_centavos": None, "mais_60_centavos": None}
+    assert p["a_receber"] == {"liberado": False, "valor_centavos": None, "mais_60_centavos": None,
+                                                "a_parte": None}
     assert p["protocoladas"] == {"obras_protocoladas": 0, "obras_ativas": 1, "ultima": "2026-07-02"}
     c.execute("INSERT INTO cadastro_geral (chave, valor) VALUES ('diretoria', ?)",
               (json.dumps({"total_a_receber_liberado": True}),))
     c.commit()
-    assert inicio.painel(c, HOJE)["a_receber"] == {"liberado": True, "valor_centavos": 100_000, "mais_60_centavos": 100_000}
+    r = inicio.painel(c, HOJE)["a_receber"]
+    assert (r["liberado"], r["valor_centavos"], r["mais_60_centavos"], r["a_parte"]["valor_centavos"]) == (True, 100_000, 100_000, 0)
 
 
 def _protocolar(c, mid, data, etapa="nota"):

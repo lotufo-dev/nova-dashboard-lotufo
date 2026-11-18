@@ -170,7 +170,7 @@ def proximos_protocolos(conn: sqlite3.Connection, hoje: datetime.date | None = N
     for r in conn.execute(
             "SELECT c.id, "
             "(SELECT MAX(mp.data) FROM medicao_protocolos mp JOIN medicoes m ON m.id=mp.medicao_id "
-            " WHERE m.contrato_id=c.id AND mp.etapa='nota' AND m.estado NOT IN ('cancelada','desistida')) AS ultimo "
+            " WHERE m.contrato_id=c.id AND mp.etapa='nota' AND mp.desfeita_em IS NULL AND m.estado NOT IN ('cancelada','desistida')) AS ultimo "
             "FROM contratos c WHERE c.estado='ativo' ORDER BY c.id").fetchall():
         if r["id"] in esperando:
             out[r["id"]] = hoje

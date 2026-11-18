@@ -79,6 +79,35 @@ describe("Obras: posição financeira na cota da Lotufo, por contratante", () =>
     expect(totais()).toBe("ContratadoR$ 2.000,00Medido (25%)R$ 500,00Saldo a executarR$ 1.500,00A receberR$ 100,00");
   });
 
+  it("o a receber antigo e o sem atualização do RM ficam numa linha própria, fora do total, e seguem o filtro", async () => {
+    // docs/adr/0006: o servidor manda o que fica à parte em cada obra; a lista soma as obras que mostra
+    const comAntigo = OBRAS.map(o => ({ ...o, posicao: { ...o.posicao!, a_receber_ano_inicial: "2025",
+      a_receber_anterior_centavos: o.id === 1 ? 70_003 : 0, a_receber_sem_atualizacao_centavos: o.id === 3 ? 40_001 : 0 } }));
+    api.mockImplementation(async (caminho: string) => {
+      if (caminho === "/api/contratos") return comAntigo;
+      if (caminho === "/api/entidades") return [{ id: 1, nome: "Construtora Alfa Ltda", nome_curto: "Alfa" }];
+      if (caminho === "/api/inicio") return { avisos: AVISOS };
+      if (caminho === "/api/diretoria") return { ...PAINEL, obras: [], reajustes_apostilamento: undefined };
+      throw new Error(`chamada inesperada: ${caminho}`);
+    });
+    abrir("/obras");
+    await screen.findByRole("table");
+    expect(totais()).toContain("A receberR$ 249,01");                       // o total não muda
+    const bloco = screen.getByLabelText("Em aberto fora do total");
+    expect((bloco.textContent ?? "").replace(/\u00a0/g, " ")).toContain("Em aberto de competências anteriores a 2025R$ 700,03");
+    expect((bloco.textContent ?? "").replace(/\u00a0/g, " ")).toContain("Sem atualização do RMR$ 400,01");
+    cleanup();
+    abrir("/obras?q=granito");
+    await screen.findByRole("table");
+    expect(screen.getByLabelText("Em aberto fora do total").textContent?.replace(/\u00a0/g, " ")).toBe("Sem atualização do RMR$ 400,01");
+  });
+
+  it("sem nada à parte, a lista não ganha a linha", async () => {
+    abrir("/obras");
+    await screen.findByRole("table");
+    expect(screen.queryByLabelText("Em aberto fora do total")).toBeNull();
+  });
+
   it("#774: a obra que não está em dia leva o selo do farol sob o nome; a em dia não leva marca", async () => {
     const base = api.getMockImplementation()!;
     api.mockImplementation(async (caminho: string) => (caminho === "/api/diretoria" ? PAINEL : base(caminho)));
