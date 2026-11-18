@@ -32,7 +32,7 @@ import { avisosEmVolume, semAvisos, cabecalhoCom, cabecalhoEmDia, CUSTO_DA_OBRA,
          medicaoComNotaDivergente, medicaoComNotaEmitida, medicaoDaMtpar, NOTAS_COM_DIVERGENCIA, notasAEnviar, notasComEnvioAberto,
          PDF_ILEGIVEL,
          prazosEmEncerramento, prazosParalisada, PREVIA_DO_ESPELHO, PROTOCOLO_ID, RESPOSTA_QUE_QUEBRA, resumoEmQuadro, RM_EXCLUSAO_RECUSADA,
-         SIGA_COM_PROCESSOS } from "./simulados.mjs";
+         SIGA_COM_NAO_LIDOS, SIGA_COM_PROCESSOS, SIGA_SO_MEDICOES } from "./simulados.mjs";
 
 import { carteiraSimulada, filaSimulada, painelDaCarteira } from "./simulados.mjs";
 
@@ -97,6 +97,8 @@ const comAvisosEmVolume = tela => [
   { ...tela, perfis: ["diretoria"], simular: [{ caminho: /^\/api\/inicio$/, ajustar: avisosEmVolume("diretoria") }] },
 ];
 
+// issue #805: o SIGA com processos, que o cadastro de exemplo nao tem (ver simulados.mjs)
+const comSiga = corpo => [{ caminho: /^\/api\/siga$/, corpo }];
 // issue #805: o mes do Resumo das medicoes com medicao em cada etapa (ver simulados.mjs)
 const comResumo = opcoes => [{ caminho: /^\/api\/resumo-medicoes$/, ajustar: resumoEmQuadro(opcoes) }];
 
@@ -201,16 +203,24 @@ export const TELAS = [
   { rota: "avisos", id: "avisos-endereco-de-antes", caminho: "/obras?c=todas&avisos=1", destino: "/avisos", perfis: SO_ADMIN,
     espera: ".avs-numeros" },
 
-  // ---- SIGA: sem processo (o cadastro de exemplo), com processos, o historico de um e os dois formularios
-  { rota: "siga", id: "siga", caminho: "/siga", perfis: OPERA, espera: ".sg__quadro" },
-  { rota: "siga", id: "siga-acompanhar", caminho: "/siga", perfis: OPERA, antes: ".sg__quadro", espera: 'form[aria-label="Acompanhar processo"]',
+  // ---- SIGA (#805, um painel por categoria): sem processo (o cadastro de exemplo); todos, com processo em cada
+  // categoria e em cada faixa do tempo parado; uma categoria; a categoria sem processo; com nao lidos; o historico de
+  // um processo e os dois formularios
+  // a faixa de numeros existe com ou sem processo: a tela abre tambem sobre uma copia do banco, que tem processos
+  { rota: "siga", id: "siga", caminho: "/siga", perfis: OPERA, espera: ".sg-numeros" },
+  { rota: "siga", id: "siga-acompanhar", caminho: "/siga", perfis: OPERA, antes: ".sg-numeros", espera: 'form[aria-label="Acompanhar processo"]',
     passos: [{ clicar: '#conteudo button:has-text("Acompanhar processo")' }] },
-  { rota: "siga", id: "siga-processos", caminho: "/siga", perfis: OPERA, espera: ".sg__quadro table",
-    simular: [{ caminho: /^\/api\/siga$/, corpo: SIGA_COM_PROCESSOS }] },
-  { rota: "siga", id: "siga-historico", caminho: "/siga?processo=1", perfis: OPERA, espera: ".sg__quadro table",
-    simular: [{ caminho: /^\/api\/siga$/, corpo: SIGA_COM_PROCESSOS }] },
+  { rota: "siga", id: "siga-processos", caminho: "/siga", perfis: OPERA, espera: ".sg-grupo table", simular: comSiga(SIGA_COM_PROCESSOS) },
+  { rota: "siga", id: "siga-categoria", caminho: "/siga?categoria=medicoes", perfis: OPERA, espera: ".sg-grupo table",
+    simular: comSiga(SIGA_COM_PROCESSOS) },
+  { rota: "siga", id: "siga-categoria-vazia", caminho: "/siga?categoria=aditivos", perfis: OPERA, espera: ".sg__barra + .sg__quadro",
+    simular: comSiga(SIGA_SO_MEDICOES) },
+  { rota: "siga", id: "siga-nao-lidos", caminho: "/siga", perfis: OPERA, espera: ".sg__etiqueta", simular: comSiga(SIGA_COM_NAO_LIDOS) },
+  { rota: "siga", id: "siga-encerrados", caminho: "/siga", perfis: OPERA, antes: ".sg-grupo table", espera: ".sg__encerrados[open] table",
+    simular: comSiga(SIGA_COM_PROCESSOS), passos: [{ clicar: ".sg__encerrados > summary" }] },
+  { rota: "siga", id: "siga-historico", caminho: "/siga?processo=1", perfis: OPERA, espera: ".sg__quadro table", simular: comSiga(SIGA_COM_PROCESSOS) },
   { rota: "siga", id: "siga-corrigir", caminho: "/siga?processo=2", perfis: OPERA, antes: ".sg__quadro",
-    espera: 'form[aria-label="Corrigir categoria"]', simular: [{ caminho: /^\/api\/siga$/, corpo: SIGA_COM_PROCESSOS }],
+    espera: 'form[aria-label="Corrigir categoria"]', simular: comSiga(SIGA_COM_PROCESSOS),
     passos: [{ clicar: '#conteudo button:has-text("Corrigir categoria")' }] },
   { rota: "siga", id: "siga-erro", caminho: "/siga", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/siga$/) },

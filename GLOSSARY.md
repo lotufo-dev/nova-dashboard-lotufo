@@ -315,6 +315,15 @@ Os dias úteis desde o evento que abriu o passo da vez da medição (o envio, o 
 protocolo). Nunca conta da competência nem do lançamento. É a mesma leitura na fila de trabalho e no cartão de
 medição do Resumo das medições.
 
+**Parado (processo do SIGA)**:
+O processo que está há 10 dias úteis ou mais no mesmo setor do órgão e não andou hoje. É o que a faixa de números e
+o cabeçalho do painel da categoria contam na tela SIGA.
+_Avoid_: atrasado (é o monitor sem leitura), vencido (o processo não tem prazo)
+
+**Categoria a conferir**:
+Aviso na linha do processo do SIGA quando o nome mostrado indica outra categoria que a escolhida por quem cadastrou
+("Outros" com o complemento "Aditivo de prazo"). Nada muda sozinho: quem edita corrige no histórico do processo.
+
 **Barra de passos**:
 Os passos do fluxo da medição de uma obra, em ordem: os feitos, o da vez e os que faltam. Na página da medição é a
 faixa de abas; na fila de trabalho, a miniatura na linha, do tamanho do fluxo da obra.

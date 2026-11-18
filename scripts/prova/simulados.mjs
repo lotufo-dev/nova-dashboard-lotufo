@@ -6,44 +6,104 @@ const mov = (data, evento, tipo, extra = {}) => ({
   data, evento, tipo, cad_lotacao: "PROTOC/ORGAO", cad_pessoa: "Beltrano", at_lotacao: "COFIN/ORGAO", at_pessoa: "Fulano", ...extra,
 });
 
-const processo = extra => ({
-  id: 1, codigo: null, link: null, numero: null, nome: null, contrato_id: null, obra: null, medicao_id: null,
-  categoria: "outros", complemento: null, o_que_e: "Outro", medicao_titulo: null, protocolo_id: null,
-  situacao: "1º Volume - Aguardando Andamento [COFIN, [X]]", encerrado: null, setor: "COFIN", caixa_entrada: false,
-  com_quem: "Fulano", desde: "2026-10-20T10:00:00-04:00", dias_uteis: 6, hoje: 0,
-  ultima: mov("2026-10-20T10:00:00-04:00", "Recebimento", "recebimento"), protocolado_em: "2026-10-01T08:00:00-04:00",
-  movimentacoes: [mov("2026-10-20T10:00:00-04:00", "Recebimento", "recebimento")], ...extra,
-});
+// a leitura do tempo no setor, como o servidor a manda (`siga.situacao_do_tempo`): o encerrado nao tem
+const tempoDe = p => (p.encerrado ? null : p.hoje > 0 ? "feito" : p.dias_uteis === null ? null
+  : p.dias_uteis >= 10 ? "critico" : p.dias_uteis >= 5 ? "breve" : "andamento");
 
-// Um processo de cada situacao da coluna de tempo (hoje, em andamento, vence em breve, critico), um na caixa de
-// entrada, um encerrado e um com o historico longo.
-export const SIGA_COM_PROCESSOS = {
-  lido_em: "2026-10-28T15:00:00+00:00", atrasado: false, pode_atualizar: true,
-  robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] },
-  processos: [
-    processo({
-      id: 1, codigo: "ABC123", link: "https://siga.exemplo.com.br/acompanhar?n=ABC123", numero: "ORGAO-PRO-2026/00001",
-      nome: "Processo Alfa", contrato_id: 2, obra: "Obra Própria", medicao_id: 1, medicao_titulo: "1ª Medição",
-      categoria: "medicoes", o_que_e: "1ª Medição", protocolo_id: 5, desde: "2026-10-28T08:00:00-04:00", dias_uteis: 0, hoje: 1,
-      ultima: mov("2026-10-28T09:30:00-04:00", "Recebimento | texto escrito pelo órgão ao receber o processo no setor", "recebimento"),
-      movimentacoes: [
-        mov("2026-10-20T10:00:00-04:00", "Cadastro", "outras", { at_pessoa: "Beltrano", at_lotacao: "PROTOC/ORGAO" }),
-        mov("2026-10-25T08:00:00-04:00", "Transferência", "transferencia", { cad_pessoa: "Sicrana", at_lotacao: "GABIN/ORGAO", at_pessoa: "" }),
-        mov("2026-10-26T14:10:00-04:00", "Juntada | documento ORGAO-DIC-2026/96012-A", "juntada", { cad_lotacao: "COFIN/ORGAO", cad_pessoa: "Bruna", at_lotacao: "", at_pessoa: "" }),
-        mov("2026-10-27T09:00:00-04:00", "Marcação", "marcacao", { cad_lotacao: "COFIN/ORGAO", cad_pessoa: "Camila", at_lotacao: "GSAGPM/ORGAO", at_pessoa: "Helia" }),
-        mov("2026-10-28T08:00:00-04:00", "Recebimento", "recebimento", { cad_lotacao: "COFIN/ORGAO", cad_pessoa: "Fulano" }),
-      ],
-    }),
-    processo({ id: 2, nome: "Processo Delta", numero: "ORGAO-PRO-2026/00007", contrato_id: 1, obra: "Obra Consórcio", categoria: "aditivos",
-      complemento: "de prazo", o_que_e: "Aditivo de prazo", dias_uteis: 3 }),
-    processo({ id: 3, nome: "Processo Beta", numero: "ORGAO-PRO-2026/00011", situacao: "2º Volume - Caixa de Entrada [GABIN, [X]]",
-      setor: "GABIN", caixa_entrada: true, com_quem: "", dias_uteis: 6 }),
-    processo({ id: 4, nome: "Processo Gama de nome comprido, como o órgão costuma escrever o assunto do processo", contrato_id: 2,
-      obra: "Obra Própria", categoria: "indenizatorios", o_que_e: "Indenizatório", dias_uteis: 12, setor: "CCONT" }),
-    processo({ id: 5, nome: "Processo Ômega", numero: "ORGAO-PRO-2025/00090", contrato_id: 2, obra: "Obra Própria", medicao_id: 2,
-      medicao_titulo: "2ª Medição", categoria: "medicoes", o_que_e: "2ª Medição", encerrado: "recebida", dias_uteis: 40 }),
-  ],
+const processo = extra => {
+  const p = {
+    id: 1, codigo: null, link: null, numero: null, nome: null, contrato_id: null, obra: null, contratante: null, orgao_sub: null,
+    medicao_id: null, categoria: "outros", categoria_sugerida: false, categoria_a_conferir: null, complemento: null, o_que_e: "Outro",
+    medicao_titulo: null, protocolo_id: null,
+    situacao: "1º Volume - Aguardando Andamento [COFIN, [X]]", encerrado: null, setor: "COFIN", caixa_entrada: false,
+    com_quem: "Fulano", desde: "2026-10-20T10:00:00-04:00", dias_uteis: 6, hoje: 0,
+    ultima: mov("2026-10-20T10:00:00-04:00", "Recebimento", "recebimento"), protocolado_em: "2026-10-01T08:00:00-04:00",
+    movimentacoes: [mov("2026-10-20T10:00:00-04:00", "Recebimento", "recebimento")], ...extra,
+  };
+  return { ...p, situacao_tempo: tempoDe(p) };
 };
+
+// a resposta de GET /api/siga com a faixa de numeros contada como o servidor conta (so' os vivos; parado = critico)
+const painelDoSiga = (processos, avisos = []) => {
+  const vivos = processos.filter(p => !p.encerrado);
+  const naoLidos = new Set(avisos.filter(a => a.tipo === "nao_lido").map(a => a.processo_id));
+  return {
+    lido_em: "2026-10-28T15:00:00+00:00", atrasado: false, pode_atualizar: true,
+    robo: { estado: "parado", rodada: null, pedidos: [], avisos },
+    processos,
+    numeros: { acompanhados: vivos.length, parados: vivos.filter(p => p.situacao_tempo === "critico").length,
+      andaram_hoje: vivos.filter(p => p.hoje > 0).length, nao_lidos: vivos.filter(p => naoLidos.has(p.id)).length },
+    limites: { dias_atencao: 5, dias_critico: 10 },
+  };
+};
+
+// #805, um painel por categoria: processo em cada categoria (Medicoes, Aditivos, Indenizatorios, Outros) e em cada
+// faixa do tempo parado (andou hoje, em andamento, vence em breve, critico, sem data de entrada), um na caixa de
+// entrada, um com a categoria a conferir, um sem obra (so' o nome do robo), dois encerrados e um com o historico longo.
+const sinfra = { contratante: "SINFRA", orgao_sub: "SUEF II" };
+const mtpar = { contratante: "MTPAR", orgao_sub: null };
+const PROCESSOS_DO_SIGA = [
+  processo({
+    id: 1, codigo: "ABC123", link: "https://siga.exemplo.com.br/acompanhar?n=ABC123", numero: "ORGAO-PRO-2026/00001",
+    nome: "Processo Alfa", contrato_id: 2, obra: "Obra Própria", ...sinfra, medicao_id: 1, medicao_titulo: "1ª Medição",
+    categoria: "medicoes", o_que_e: "1ª Medição", protocolo_id: 5, desde: "2026-10-28T08:00:00-04:00", dias_uteis: 0, hoje: 1,
+    ultima: mov("2026-10-28T09:30:00-04:00", "Recebimento | texto escrito pelo órgão ao receber o processo no setor", "recebimento"),
+    movimentacoes: [
+      mov("2026-10-20T10:00:00-04:00", "Cadastro", "outras", { at_pessoa: "Beltrano", at_lotacao: "PROTOC/ORGAO" }),
+      mov("2026-10-25T08:00:00-04:00", "Transferência", "transferencia", { cad_pessoa: "Sicrana", at_lotacao: "GABIN/ORGAO", at_pessoa: "" }),
+      mov("2026-10-26T14:10:00-04:00", "Juntada | documento ORGAO-DIC-2026/96012-A", "juntada", { cad_lotacao: "COFIN/ORGAO", cad_pessoa: "Bruna", at_lotacao: "", at_pessoa: "" }),
+      mov("2026-10-27T09:00:00-04:00", "Marcação", "marcacao", { cad_lotacao: "COFIN/ORGAO", cad_pessoa: "Camila", at_lotacao: "GSAGPM/ORGAO", at_pessoa: "Helia" }),
+      mov("2026-10-28T08:00:00-04:00", "Recebimento", "recebimento", { cad_lotacao: "COFIN/ORGAO", cad_pessoa: "Fulano" }),
+    ],
+  }),
+  processo({ id: 2, nome: "Processo Delta", numero: "ORGAO-PRO-2026/00007", contrato_id: 1, obra: "Obra Consórcio", ...sinfra,
+    categoria: "aditivos", complemento: "de prazo", o_que_e: "Aditivo de prazo", dias_uteis: 3 }),
+  processo({ id: 3, nome: "Processo Beta", numero: "ORGAO-PRO-2026/00011", situacao: "2º Volume - Caixa de Entrada [GABIN, [X]]",
+    setor: "GABIN", caixa_entrada: true, com_quem: "", dias_uteis: 6 }),
+  processo({ id: 4, nome: "Processo Gama de nome comprido, como o órgão costuma escrever o assunto do processo", contrato_id: 2,
+    obra: "Obra Própria", ...sinfra, categoria: "indenizatorios", o_que_e: "Indenizatório", dias_uteis: 28, setor: "CCONT",
+    desde: "2026-09-17T10:00:00-04:00", protocolado_em: "2026-09-02T08:00:00-04:00" }),
+  processo({ id: 5, nome: "Processo Ômega", numero: "ORGAO-PRO-2025/00090", contrato_id: 2, obra: "Obra Própria", ...sinfra, medicao_id: 2,
+    medicao_titulo: "2ª Medição", categoria: "medicoes", o_que_e: "2ª Medição", encerrado: "recebida", dias_uteis: 40 }),
+  processo({ id: 6, nome: "Processo Zeta", numero: "ORGAO-PRO-2026/00031", contrato_id: 9011, obra: "Complexo Lambda", ...mtpar, medicao_id: 9701,
+    medicao_titulo: "24ª Medição", categoria: "medicoes", o_que_e: "24ª Medição", dias_uteis: 25, setor: "NUCLEO-ADM", com_quem: "Sicrana",
+    desde: "2026-09-22T10:00:00-04:00", ultima: mov("2026-10-13T11:00:00-04:00", "Juntada | despacho", "juntada"),
+    protocolado_em: "2026-09-08T08:00:00-04:00" }),
+  processo({ id: 7, nome: "Processo Eta", numero: "ORGAO-PRO-2026/00032", contrato_id: 9012, obra: "Ponte Mi", ...sinfra, protocolo_id: 6,
+    medicao_titulo: "7ª Medição e Reajuste da 7ª Medição", categoria: "medicoes", o_que_e: "7ª Medição e Reajuste da 7ª Medição",
+    dias_uteis: 17, setor: "CCONT", com_quem: "Beltrano", desde: "2026-10-02T10:00:00-04:00", protocolado_em: "2026-09-25T08:00:00-04:00" }),
+  processo({ id: 8, nome: "Processo Teta", numero: "ORGAO-PRO-2026/00033", contrato_id: 1, obra: "Obra Consórcio", ...sinfra, medicao_id: 3,
+    medicao_titulo: "7ª Medição", categoria: "medicoes", o_que_e: "7ª Medição", dias_uteis: 7, setor: "CCONT",
+    desde: "2026-10-19T10:00:00-04:00" }),
+  processo({ id: 9, nome: "Processo Iota", numero: "ORGAO-PRO-2026/00034", contrato_id: 9014, obra: "Rodovia Csi lote 2", ...mtpar, medicao_id: 9704,
+    medicao_titulo: "3ª Medição", categoria: "medicoes", o_que_e: "3ª Medição", dias_uteis: 2, setor: "NUCLEO-ADM", com_quem: "Sicrana",
+    desde: "2026-10-26T10:00:00-04:00" }),
+  processo({ id: 10, nome: "Processo Capa", numero: "ORGAO-PRO-2026/00040", contrato_id: 9012, obra: "Ponte Mi", ...sinfra,
+    categoria: "aditivos", complemento: "de valor", o_que_e: "Aditivo de valor", desde: "2026-10-28T09:00:00-04:00", dias_uteis: 0, hoje: 3,
+    setor: "GEFOR", ultima: mov("2026-10-28T10:40:00-04:00", "Sobrestar", "outras") }),
+  // a pessoa escolheu Outros e escreveu o que e' um aditivo: a linha avisa "categoria a conferir" e nada muda sozinho
+  processo({ id: 11, nome: "Obra Consórcio · Aditivo de prazo de dezembro", numero: "ORGAO-PRO-2026/00041", contrato_id: 1,
+    obra: "Obra Consórcio", ...sinfra, complemento: "Aditivo de prazo de dezembro", o_que_e: "Aditivo de prazo de dezembro",
+    categoria_a_conferir: "aditivos", dias_uteis: 12, setor: "GSAGPM", desde: "2026-10-09T10:00:00-04:00" }),
+  // o robo mandou so' o nome e a situacao ainda nao diz o setor: sem data de entrada, sem leitura de tempo
+  processo({ id: 12, nome: "Terminais de exemplo - IC 044/2026 (ORGAO-PRO-2026/00042)", numero: "ORGAO-PRO-2026/00042",
+    situacao: null, setor: "", com_quem: "", desde: null, dias_uteis: null, ultima: null, protocolado_em: null, movimentacoes: [] }),
+  processo({ id: 13, nome: "Processo Lambda", numero: "ORGAO-PRO-2025/00077", contrato_id: 9013, obra: "Praça Ni", contratante: "Pref. Cuiabá",
+    categoria: "aditivos", complemento: "de prazo", o_que_e: "Aditivo de prazo", encerrado: "arquivado", setor: "ARQUIVO", dias_uteis: 60 }),
+];
+
+export const SIGA_COM_PROCESSOS = painelDoSiga(PROCESSOS_DO_SIGA);
+
+// #805: dois processos que o robo nao conseguiu ler na ultima rodada: a etiqueta "Nao lido" na linha de cada um, com a
+// hora e o motivo, o numero da faixa e o resumo no alto
+export const SIGA_COM_NAO_LIDOS = painelDoSiga(PROCESSOS_DO_SIGA, [
+  { tipo: "nao_lido", processo_id: 8, texto: "não lido às 11:02: A página do processo não abriu" },
+  { tipo: "nao_lido", processo_id: 2, texto: "não lido às 11:02: Processo sem código de acompanhamento" },
+  { tipo: "nao_lidos", processo_id: null, texto: "2 de 11 processos não foram lidos" },
+]);
+
+// #805: a categoria escolhida sem processo em andamento (so' ha' medicoes): as escolhas continuam, com zero
+export const SIGA_SO_MEDICOES = painelDoSiga(PROCESSOS_DO_SIGA.filter(p => p.categoria === "medicoes"));
 
 // A medicao com a nota emitida e ainda nao enviada ao orgao: o passo "Envio da nota" aberto, com a lista de envios.
 // O cadastro de exemplo so' tem medicao ja' protocolada, entao a resposta verdadeira e' ajustada (o estado volta um

@@ -71,7 +71,10 @@ valem elas.
 - **Falta que trava é crítico; falta que não trava é vence em breve.** Certidão vencida ou item que o servidor
   marca como bloqueio é crítico; documento que falta sem impedir o envio é o triângulo (PR #739).
 - **Tempo parado** (SIGA): andou hoje é feito; menos de 5 dias úteis, em andamento; 5 ou mais, vence em breve; 10 ou
-  mais, crítico (PR #771).
+  mais, crítico (PR #771). A leitura é do servidor, e "parado", na faixa de números e no cabeçalho do painel, é só o
+  crítico (#805).
+- **Não lido** (SIGA): o processo que o robô não leu na última rodada leva a etiqueta no tom de "vence em breve":
+  falta sem travar, e se acompanha (#805).
 
 ### Aviso, trava, falha e justificativa
 
@@ -163,9 +166,12 @@ do rótulo, na etiqueta sob o valor ou na barra.
   seção:** linha preta de 1 px sob o cabeçalho da tabela, acima de subtítulo dentro de painel e na base de gráfico.
   Linhas de uma tabela se separam por um fio cinza, sem zebra.
 - **Cabeçalho de grupo forte:** faixa de tinta cheia com a letra clara, que abre um grupo de linhas de tabela ou um
-  bloco (o contratante, em Obras e no quadro do mês; quem tem de agir, na fila de trabalho), com o subtotal do grupo
-  nas colunas. Motivo: na linha cinza o contratante sumia
+  bloco (o contratante, em Obras e no quadro do mês; quem tem de agir, na fila de trabalho; a categoria, no SIGA),
+  com o subtotal do grupo nas colunas. Motivo: na linha cinza o contratante sumia
   entre as obras, e a página parecia uma lista só (decisão do dono de 18/11/2026, #805).
+- **Borda do tempo parado:** no SIGA, a borda esquerda da linha leva a cor da situação do tempo no setor, a mesma
+  do selo da linha; o encerrado não leva. Motivo: com tudo em tinta não dava para ver o que estava travado antes de
+  ler (decisão do dono de 18/11/2026, #805).
 - **Barra de passos:** o fluxo da medição de uma obra em miniatura, na linha da tabela: um segmento por passo que
   a obra tem, os feitos no tom do feito, o da vez no tom do em andamento e os que faltam no papel escuro, com o nome
   do passo da vez e a posição escritos ("Espelhos · 3 de 5"). Motivo: na fila de trabalho a linha diz onde a

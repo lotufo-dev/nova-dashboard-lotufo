@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { api, mensagemDeErro } from "./api";
 import CaixaAviso from "./CaixaAviso";
 import Contador from "./Contador";
+import { contar } from "./formato";
 import { IconeLinkExterno, IconeSeta, IconeSiga } from "./icones";
 import LegendaCor, { type ItemLegenda } from "./LegendaCor";
 import { Link } from "./Link";
@@ -9,71 +10,99 @@ import type { ObraLista } from "./listaObras";
 import { FINAIS, tituloMedicao } from "./medicao";
 import { ir, trocarBusca, type Busca } from "./rota";
 import {
-  CATEGORIAS, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, nomeDoProcesso, ordenar, periodoDe, porCategoria,
-  DIAS_ACAO, DIAS_ATENCAO, roboAtivo, ROTULO_ENCERRADO, setorPessoa, situacaoDoBotao, situacaoDoTempo, tempoNoSetor, tituloDoEvento, TIPOS, volumeDe, type Movimentacao, type PainelSiga,
-  type ProcessoSiga, type Robo, type TipoMovimentacao,
+  CATEGORIAS, categoriaDaBusca, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, naoLidoDe, nomeDoProcesso, ordenar,
+  periodoDe, porCategoria, roboAtivo, ROTULO_ENCERRADO, setorPessoa, situacaoDoBotao, tempoNoSetor, tituloDoEvento, TIPOS, volumeDe,
+  type Categoria, type LimitesSiga, type Movimentacao, type PainelSiga, type ProcessoSiga, type Robo, type TipoMovimentacao,
 } from "./siga";
 import Selo, { Glifo } from "./Selo";
+import type { Situacao } from "./situacao";
 import { fmtData, fmtDataHora, fmtHora } from "./tempo";
 import "./siga.css";
 import Falha from "./Falha";
 
-// Tela SIGA (#329; redesenho #512; fundacao do redesenho na #767): responde "onde esta' cada processo e qual esta'
-// parado ha' mais tempo". Duas paginas. A principal e' uma tabela com a
-// posicao atual de cada processo, do mais parado ao menos; clicar na linha abre o historico completo do processo
-// (a mesma rota, com ?processo=<id>). Tudo vem de GET /api/siga; aqui so' se desenha.
-// #663: a tabela principal tem uma secao por categoria (Medicoes, Aditivos, Indenizatorios, Outros) e o nome do
-// processo e' montado pelo sistema; quem edita cadastros corrige categoria, obra e complemento no historico.
+// Tela SIGA (#329; redesenho #512; fundacao do redesenho na #767; um painel por categoria na #805): responde "onde
+// esta' cada processo e qual esta' parado ha' mais tempo". Duas paginas. A principal abre com a faixa de numeros
+// (acompanhados, parados, andaram hoje, nao lidos), as categorias como escolha na URL (?categoria=aditivos) e UM
+// PAINEL POR CATEGORIA, com o cabecalho de grupo forte; dentro dele, do processo mais parado ao menos, com a borda da
+// linha na cor do tempo parado. Clicar na linha abre o historico completo do processo (a mesma rota, com
+// ?processo=<id>). Tudo vem de GET /api/siga, inclusive as contagens e a leitura do tempo; aqui so' se desenha.
+// #663: o nome do processo e' montado pelo sistema (obra e assunto); quem edita cadastros corrige categoria, obra e
+// complemento no historico.
 
 const RELER_A_CADA_MS = 60 * 60_000;   // o robo le de hora em hora (#657)
 const RELER_COM_ROBO_MS = 5_000;   // pedido na fila ou rodada em andamento (#343): a tela acompanha o robo
-const dataOuTraco = (iso: string | null) => (iso ? fmtData(iso) : "—");
+const traco = <span className="sg__traco">—</span>;
 
-// O tempo no setor e' a situacao da linha: um selo com a forma e a cor de uma das quatro situacoes (siga.ts).
+// O tempo no setor e' a situacao da linha: o selo da situacao que o SERVIDOR leu (a regua do tempo parado).
 function NoSetor({ p, agora }: { p: ProcessoSiga; agora: Date }) {
-  const situacao = situacaoDoTempo(p);
-  const texto = p.hoje > 0 ? "hoje" : tempoNoSetor(p, agora);
-  if (!situacao) return <span className="sg__traco">{texto}</span>;
-  return <Selo situacao={situacao} className={`sg__dias sg__dias--${situacao}`}>{texto}</Selo>;
+  const texto = p.hoje > 0 ? "andou hoje" : tempoNoSetor(p, agora);
+  if (!p.situacao_tempo) return <span className="sg__traco">{texto}</span>;
+  return <Selo situacao={p.situacao_tempo} className="sg__dias">{texto}</Selo>;
 }
 
-const LEGENDA: ItemLegenda[] = [
+const legendaDe = (l: LimitesSiga): ItemLegenda[] => [
   { situacao: "feito", texto: "andou hoje" },
-  { situacao: "andamento", texto: `menos de ${DIAS_ATENCAO} dias úteis no setor` },
-  { situacao: "breve", texto: `parado há ${DIAS_ATENCAO} dias úteis ou mais` },
-  { situacao: "critico", texto: `${DIAS_ACAO} dias úteis ou mais` },
+  { situacao: "andamento", texto: `menos de ${l.dias_atencao} dias úteis no setor` },
+  { situacao: "breve", texto: `parado há ${l.dias_atencao} dias úteis ou mais` },
+  { situacao: "critico", texto: `${l.dias_critico} dias úteis ou mais` },
 ];
 
-const abrirHistorico = (id: number) => ir({ tela: "siga" }, { busca: { processo: String(id) } });
+/** A busca da tela sem o processo aberto: so' a categoria escolhida, quando ha'. */
+const buscaDa = (categoria: Categoria | null): Busca => (categoria ? { categoria } : {});
+const abrirHistorico = (id: number, categoria: Categoria | null) =>
+  ir({ tela: "siga" }, { busca: { ...buscaDa(categoria), processo: String(id) } });
 
-function Linha({ p, agora, robo }: { p: ProcessoSiga; agora: Date; robo: Robo }) {
+// As sete colunas, as mesmas em todo painel: o olho desce pela mesma coluna de uma categoria para a outra.
+const COLUNAS = (
+  <colgroup>
+    <col className="sg__c-proc" /><col className="sg__c-contr" /><col className="sg__c-onde" /><col className="sg__c-quem" />
+    <col className="sg__c-setor" /><col className="sg__c-ultima" /><col className="sg__c-seta" />
+  </colgroup>
+);
+
+function Linha({ p, agora, robo, categoria }: { p: ProcessoSiga; agora: Date; robo: Robo; categoria: Categoria | null }) {
   const volume = volumeDe(p.situacao);
   const ultima = p.ultima;
   const lendo = robo.rodada?.processos.includes(p.id) ?? false;
   // encerrado (#657): sem "nao lido" e sem cor de atraso; no lugar de "Com quem" e "No setor ha'", a situacao
-  const avisos = p.encerrado ? [] : robo.avisos.filter(a => a.processo_id === p.id);
+  const naoLido = p.encerrado ? null : naoLidoDe(robo, p.id);
+  const abrir = () => abrirHistorico(p.id, categoria);
   return (
-    <tr className="sg__linha" tabIndex={0} aria-label={nomeDoProcesso(p)}
-      onClick={() => abrirHistorico(p.id)}
-      onKeyDown={ev => { if (ev.target === ev.currentTarget && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); abrirHistorico(p.id); } }}>
-      <td>
-        {p.obra ? (
-          <>
-            <span className="sg__nome">{p.obra}</span>
-            <span className="sg__fraco">{p.o_que_e}</span>
-          </>
-        ) : <span className="sg__nome">{nomeDoProcesso(p)}</span>}
+    <tr className={`sg__linha${p.situacao_tempo ? ` sg__linha--${p.situacao_tempo}` : ""}`} tabIndex={0} aria-label={nomeDoProcesso(p)}
+      // o link da obra ou da medicao dentro da linha leva para la', sem abrir tambem o historico
+      onClick={ev => { if (!(ev.target as HTMLElement).closest("a")) abrir(); }}
+      onKeyDown={ev => { if (ev.target === ev.currentTarget && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); abrir(); } }}>
+      {/* sem obra nao ha' contratante: o nome que o robo mandou, que e' comprido, ocupa as duas colunas */}
+      <td className="sg__proc" colSpan={p.contratante ? undefined : 2}>
+        <span className="sg__nome">
+          {p.obra && p.contrato_id !== null ? (
+            <>
+              <Link className="sg__link" para={{ tela: "obra", id: p.contrato_id, aba: "ficha" }}>{p.obra}</Link>
+              {" · "}
+              {p.medicao_id !== null
+                ? <Link className="sg__link" para={{ tela: "medicao", obra: p.contrato_id, id: p.medicao_id }} secao="passo-5">{p.o_que_e}</Link>
+                : p.o_que_e}
+            </>
+          ) : nomeDoProcesso(p)}
+        </span>
+        {p.protocolado_em && <span className="sg__fraco">protocolado em <span className="num">{fmtData(p.protocolado_em)}</span></span>}
         {lendo && <span className="sg__fraco sg__lendo">lendo...</span>}
-        {avisos.map((a, i) => <span key={i} className="sg__fraco sg__nao-lido">{a.texto}</span>)}
+        {naoLido !== null && (
+          <span className="sg__etiqueta"><Selo situacao="breve">Não lido</Selo>{naoLido && <span className="sg__fraco">{naoLido}</span>}</span>
+        )}
+        {p.categoria_a_conferir && <span className="sg__fraco sg__conferir">categoria a conferir</span>}
       </td>
+      {p.contratante && (
+        <td data-rotulo="Contratante">{p.contratante}{p.orgao_sub && <span className="sg__fraco">{p.orgao_sub}</span>}</td>
+      )}
       <td data-rotulo="Onde está">
         <span className="sg__nome">{p.setor || "—"}</span>
         {p.caixa_entrada && <span className="sg__fraco">caixa de entrada</span>}
         {volume && <span className="sg__fraco">{volume}</span>}
       </td>
-      {p.encerrado ? <td data-rotulo="Situação">{ROTULO_ENCERRADO[p.encerrado]}</td> : (
+      {p.encerrado ? <td colSpan={2} data-rotulo="Situação">{ROTULO_ENCERRADO[p.encerrado]}</td> : (
         <>
-          <td data-rotulo="Com quem">{p.com_quem || <span className="sg__traco">—</span>}</td>
+          <td data-rotulo="Com quem">{p.com_quem || traco}</td>
           <td data-rotulo="No setor há"><NoSetor p={p} agora={agora} /></td>
         </>
       )}
@@ -83,11 +112,62 @@ function Linha({ p, agora, robo }: { p: ProcessoSiga; agora: Date; robo: Robo })
             <span className="num">{fmtData(ultima.data).slice(0, 5)}</span>{" "}
             <span>{tituloDoEvento(ultima.evento)}</span>
           </>
-        ) : <span className="sg__traco">—</span>}
+        ) : traco}
       </td>
-      <td className="num" data-rotulo="Protocolado em">{dataOuTraco(p.protocolado_em)}</td>
       <td className="sg__seta" aria-hidden="true"><IconeSeta className="icone" /></td>
     </tr>
+  );
+}
+
+/** O painel de uma categoria (#805): o cabecalho de grupo forte, com quantos processos ela tem e quantos estao
+ *  parados alem do limite critico, e as linhas do mais parado ao menos (a ordem de `porCategoria`). */
+function PainelDaCategoria({ secao, limites, agora, robo, categoria }: {
+  secao: { categoria: Categoria; rotulo: string; processos: ProcessoSiga[] }; limites: LimitesSiga; agora: Date; robo: Robo;
+  categoria: Categoria | null;
+}) {
+  const id = `sg-grupo-${secao.categoria}`;
+  const parados = secao.processos.filter(p => p.situacao_tempo === "critico").length;
+  return (
+    <section className="sg-grupo" aria-labelledby={id}>
+      <div className="sg-grupo__cabeca">
+        <h2 id={id} className="sg-grupo__nome">{secao.rotulo}</h2>
+        <span className="sg-grupo__n">
+          <span className="num">{contar(secao.processos.length, "processo", "processos")}</span>
+          {parados > 0 && (
+            <Selo situacao="critico">
+              {/* a faixa e' estreita: "10+ dias úteis" para quem ve, por extenso para quem ouve */}
+              <span aria-hidden="true">{contar(parados, "parado", "parados")} há {limites.dias_critico}+ dias úteis</span>
+              <span className="sr-only">{contar(parados, "parado", "parados")} há {limites.dias_critico} dias úteis ou mais</span>
+            </Selo>
+          )}
+        </span>
+      </div>
+      <table className="sg__tabela" role="grid" aria-labelledby={id}>
+        <caption className="sr-only">Do processo mais parado ao menos. Escolha um para ver o histórico.</caption>
+        {COLUNAS}
+        <thead>
+          <tr>
+            <th scope="col">Processo</th><th scope="col">Contratante</th><th scope="col">Onde está</th><th scope="col">Com quem</th>
+            <th scope="col">No setor há</th><th scope="col">Última movimentação</th><th scope="col"><span className="sr-only">Abrir</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {secao.processos.map(p => <Linha key={p.id} p={p} agora={agora} robo={robo} categoria={categoria} />)}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+/** Um numero da faixa: o rotulo com o simbolo da situacao (so' quando ha' o que contar), o numero em tinta e, embaixo,
+ *  o apoio (a hora da ultima leitura). */
+function Numero({ rotulo, n, situacao, children }: { rotulo: string; n: number; situacao?: Situacao; children?: React.ReactNode }) {
+  return (
+    <div className="sg-numero">
+      <dt>{situacao && n > 0 && <Glifo situacao={situacao} />}{rotulo}</dt>
+      <dd className="sg-numero__valor">{n.toLocaleString("pt-BR")}</dd>
+      {children && <dd className="sg-numero__apoio">{children}</dd>}
+    </div>
   );
 }
 
@@ -135,7 +215,9 @@ const PASSO_HISTORICO = 30;
 const PRIMEIRAS = 15;
 
 // Pagina do historico de um processo (#512): todas as movimentacoes gravadas, com filtro por tipo e busca.
-function Historico({ p, dados, aoPedir, podeEditar }: { p: ProcessoSiga; dados: PainelSiga; aoPedir: () => Promise<void>; podeEditar: boolean }) {
+function Historico({ p, dados, aoPedir, podeEditar, categoria }: {
+  p: ProcessoSiga; dados: PainelSiga; aoPedir: () => Promise<void>; podeEditar: boolean; categoria: Categoria | null;
+}) {
   const [tipo, setTipo] = useState<TipoMovimentacao | null>(null);
   const [texto, setTexto] = useState("");
   const [mostrando, setMostrando] = useState(PRIMEIRAS);
@@ -148,7 +230,8 @@ function Historico({ p, dados, aoPedir, podeEditar }: { p: ProcessoSiga; dados: 
   return (
     <div className="pagina siga sg-hist">
       <nav className="sg__trilha" aria-label="Você está em">
-        <Link className="sg__link" para={{ tela: "siga" }}>SIGA</Link>
+        {/* volta para a categoria de onde se veio */}
+        <Link className="sg__link" para={{ tela: "siga" }} busca={buscaDa(categoria)}>SIGA</Link>
         <IconeSeta className="icone icone--p" />
         <span>{nome}</span>
         <IconeSeta className="icone icone--p" />
@@ -157,7 +240,9 @@ function Historico({ p, dados, aoPedir, podeEditar }: { p: ProcessoSiga; dados: 
       <header className="sg__cabeca sg__cabeca--regua">
         <h1>Histórico · {nome}</h1>
         <p className="sg__sub">
-          {[p.numero, `${total} ${total === 1 ? "movimentação" : "movimentações"}`, periodo].filter(Boolean).join(" · ")}
+          {/* o aviso da linha continua aqui, onde quem edita corrige a categoria (#805) */}
+          {[p.numero, `${total} ${total === 1 ? "movimentação" : "movimentações"}`, periodo, p.categoria_a_conferir && "categoria a conferir"]
+            .filter(Boolean).join(" · ")}
         </p>
         <div className="sg__acoes">
           {p.link && (
@@ -419,14 +504,19 @@ export default function SigaPagina({ busca, agora, podeEditar = true }: { busca:
     );
   }
   // ?processo=<id> abre o historico (o "Abrir" do aviso tambem); id que nao existe cai na tabela
+  const categoria = categoriaDaBusca(busca);
   const aberto = /^\d+$/.test(busca.processo ?? "") ? processos.find(p => p.id === Number(busca.processo)) : undefined;
-  if (aberto) return <Historico key={aberto.id} p={aberto} dados={dados} aoPedir={carregar} podeEditar={podeEditar} />;
+  if (aberto) return <Historico key={aberto.id} p={aberto} dados={dados} aoPedir={carregar} podeEditar={podeEditar} categoria={categoria} />;
 
   const robo = dados.robo;
-  // #657: a tabela principal so' tem os vivos; os encerrados ficam recolhidos no fim da pagina
+  // #657: os paineis so' tem os vivos; os encerrados ficam recolhidos no fim da pagina
   const vivos = processos.filter(p => p.encerrado === null);
-  const encerrados = processos.filter(p => p.encerrado !== null);
   const n = vivos.length;
+  // #805: um painel por categoria que tem processo; com a categoria escolhida na URL, so' o dela (e os encerrados dela)
+  const secoes = porCategoria(vivos);
+  const mostradas = categoria ? secoes.filter(s => s.categoria === categoria) : secoes;
+  const encerrados = processos.filter(p => p.encerrado !== null && (categoria === null || p.categoria === categoria));
+  const quantos = (c: Categoria) => secoes.find(s => s.categoria === c)?.processos.length ?? 0;
   const topo = (
     <div className="sg__topo">
       <div className="sg__vivo" aria-live="polite">{robo.estado !== "parado" && <RoboAgora robo={robo} />}</div>
@@ -444,57 +534,63 @@ export default function SigaPagina({ busca, agora, podeEditar = true }: { busca:
       )}
     </div>
   );
-  const subtitulo = [`${n} ${n === 1 ? "processo" : "processos"}`, dados.lido_em ? `última leitura ${fmtHora(dados.lido_em)}` : null]
-    .filter(Boolean).join(" · ");
-  const cabeca = (
-    <header className="sg__cabeca sg__cabeca--principal sg__cabeca--regua">
-      <p className="sg__sub">{subtitulo}</p>
-      <LegendaCor itens={LEGENDA} />
-    </header>
+  // A faixa de numeros (#805): as contagens e os limites vem do servidor, pela mesma leitura que pinta a linha. O
+  // numero fica em tinta; a situacao vai no simbolo ao lado do rotulo, so' quando ha' o que contar.
+  const numeros = (
+    <dl className="sg-numeros" aria-label="Processos no SIGA">
+      <Numero rotulo="Processos acompanhados" n={dados.numeros.acompanhados}>
+        {dados.lido_em && <>última leitura <span className="num">{fmtHora(dados.lido_em)}</span></>}
+      </Numero>
+      <Numero rotulo={`Parados há ${dados.limites.dias_critico} dias úteis ou mais`} n={dados.numeros.parados} situacao="critico" />
+      <Numero rotulo="Andaram hoje" n={dados.numeros.andaram_hoje} situacao="feito" />
+      <Numero rotulo="Não lidos na última rodada" n={dados.numeros.nao_lidos} situacao="breve" />
+    </dl>
+  );
+  // As categorias (#805): escolha com endereco proprio e a quantidade de processos vivos. A categoria sem processo
+  // continua na fileira, com zero, para as escolhas nao mudarem de lugar de um dia para o outro.
+  const categorias = (
+    <div className="sg__barra">
+      <nav className="escolhas sg__categorias" aria-label="Categoria dos processos">
+        <Link className="escolha" para={{ tela: "siga" }} aria-current={categoria === null ? "true" : undefined}>
+          Todos <span className="escolha__n num">{n.toLocaleString("pt-BR")}</span>
+        </Link>
+        {CATEGORIAS.map(c => (
+          <Link key={c.categoria} className="escolha" para={{ tela: "siga" }} busca={buscaDa(c.categoria)}
+            aria-current={categoria === c.categoria ? "true" : undefined}>
+            {c.rotulo} <span className="escolha__n num">{quantos(c.categoria).toLocaleString("pt-BR")}</span>
+          </Link>
+        ))}
+      </nav>
+      <LegendaCor itens={legendaDe(dados.limites)} />
+    </div>
   );
   const agoraDe = agora ?? new Date();
-  const vazio = processos.length === 0 ? "Nenhum processo acompanhado." : "Nenhum processo em andamento.";
+  const vazio = processos.length === 0 ? "Nenhum processo acompanhado."
+    : categoria && n > 0 ? `Nenhum processo em andamento em ${CATEGORIAS.find(c => c.categoria === categoria)?.rotulo}.`
+    : "Nenhum processo em andamento.";
   return (
     <div className="pagina siga">
-      {cabeca}
+      {numeros}
       {topo}
-      {n === 0 ? (
+      {(n > 0 || categoria !== null) && categorias}
+      {mostradas.length === 0 ? (
         <section className="cartao sg__quadro"><div className="sg__vazio"><IconeSiga className="icone" /><p>{vazio}</p></div></section>
-      ) : (
-        <section className="cartao sg__quadro" aria-label="Processos no SIGA">
-          <table className="sg__tabela" role="grid">
-            <caption className="sr-only">Processos acompanhados no SIGA, por categoria, do mais parado ao menos. Escolha um para ver o histórico.</caption>
-            <colgroup><col className="sg__c-proc" /><col className="sg__c-onde" /><col className="sg__c-quem" /><col className="sg__c-setor" /><col className="sg__c-ultima" /><col className="sg__c-prot" /><col className="sg__c-seta" /></colgroup>
-            <thead>
-              <tr>
-                <th scope="col">Processo</th><th scope="col">Onde está</th><th scope="col">Com quem</th><th scope="col">No setor há</th>
-                <th scope="col">Última movimentação</th><th scope="col">Protocolado em</th><th scope="col"><span className="sr-only">Abrir</span></th>
-              </tr>
-            </thead>
-            {porCategoria(vivos).map(s => (
-              <tbody key={s.categoria} aria-label={s.rotulo}>
-                <tr className="sg__secao"><th colSpan={7} scope="rowgroup">{s.rotulo}</th></tr>
-                {s.processos.map(p => <Linha key={p.id} p={p} agora={agoraDe} robo={robo} />)}
-              </tbody>
-            ))}
-          </table>
-        </section>
-      )}
+      ) : mostradas.map(s => <PainelDaCategoria key={s.categoria} secao={s} limites={dados.limites} agora={agoraDe} robo={robo} categoria={categoria} />)}
       {encerrados.length > 0 && (
         <details className="sg__encerrados" aria-label="Encerrados">
           <summary>Encerrados <Contador>{encerrados.length}</Contador></summary>
           <section className="cartao sg__quadro">
             <table className="sg__tabela">
               <caption className="sr-only">Processos encerrados: medição recebida ou processo arquivado. Escolha um para ver o histórico.</caption>
-              <colgroup><col className="sg__c-proc-enc" /><col className="sg__c-onde-enc" /><col className="sg__c-sit" /><col className="sg__c-ultima-enc" /><col className="sg__c-prot" /><col className="sg__c-seta" /></colgroup>
+              {COLUNAS}
               <thead>
                 <tr>
-                  <th scope="col">Processo</th><th scope="col">Onde está</th><th scope="col">Situação</th>
-                  <th scope="col">Última movimentação</th><th scope="col">Protocolado em</th><th scope="col"><span className="sr-only">Abrir</span></th>
+                  <th scope="col">Processo</th><th scope="col">Contratante</th><th scope="col">Onde está</th><th scope="col" colSpan={2}>Situação</th>
+                  <th scope="col">Última movimentação</th><th scope="col"><span className="sr-only">Abrir</span></th>
                 </tr>
               </thead>
               <tbody>
-                {encerrados.map(p => <Linha key={p.id} p={p} agora={agoraDe} robo={robo} />)}
+                {encerrados.map(p => <Linha key={p.id} p={p} agora={agoraDe} robo={robo} categoria={categoria} />)}
               </tbody>
             </table>
           </section>

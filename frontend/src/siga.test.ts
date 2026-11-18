@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  casaComBusca, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, nivelDias, nomeDoProcesso, ordenar, periodoDe, porCategoria, situacaoDoAtraso, situacaoDoTempo,
+  casaComBusca, categoriaDaBusca, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, naoLidoDe, nivelDias, nomeDoProcesso, ordenar, periodoDe, porCategoria, situacaoDoAtraso,
   roboAtivo, setorPessoa, situacaoDoBotao, tempoNoSetor, tituloDoEvento, volumeDe, type Movimentacao, type ProcessoSiga, type Robo,
 } from "./siga";
 
 const p = (extra: Partial<ProcessoSiga>): ProcessoSiga => ({
   id: 1, codigo: null, link: null, numero: null, nome: null, contrato_id: null, obra: null, medicao_id: null,
-  categoria: "outros", complemento: null, o_que_e: "Outro",
-  medicao_titulo: null, protocolo_id: null, situacao: null, encerrado: null, setor: "", caixa_entrada: false, com_quem: "",
+  categoria: "outros", complemento: null, o_que_e: "Outro", categoria_a_conferir: null, contratante: null, orgao_sub: null,
+  situacao_tempo: null, medicao_titulo: null, protocolo_id: null, situacao: null, encerrado: null, setor: "", caixa_entrada: false, com_quem: "",
   desde: null, dias_uteis: null, hoje: 0, ultima: null, protocolado_em: null, movimentacoes: [], ...extra });
 
 describe("siga", () => {
@@ -15,15 +15,30 @@ describe("siga", () => {
     expect([null, 0, 4, 5, 9, 10, 30].map(nivelDias)).toEqual([null, null, null, "atencao", "atencao", "acao", "acao"]);
   });
 
-  it("tempo no setor numa das quatro situações: feito se andou hoje, crítico em 10 dias úteis, vence em breve em 5, em andamento antes", () => {
-    const de = (dias_uteis: number | null, hoje = 0) => situacaoDoTempo(p({ dias_uteis, hoje }));
-    expect([0, 4, 5, 9, 10, 30].map(d => de(d))).toEqual(["andamento", "andamento", "breve", "breve", "critico", "critico"]);
-    expect(de(12, 1)).toBe("feito");          // andou hoje: nao e' atraso, mesmo com muitos dias no setor
-    expect(de(null)).toBeUndefined();         // sem data de entrada no setor nao ha' situacao
-    // o atraso sozinho (quadro de Medicoes): dentro do prazo nao tem situacao; o resto e' igual
+  it("o atraso no setor (quadro de Medições): feito se andou hoje, crítico em 10 dias úteis, vence em breve em 5; dentro do prazo, nenhuma", () => {
+    // a leitura do tempo da tela SIGA (com o "em andamento") vem pronta do servidor, em `situacao_tempo` (#805)
     const atraso = (dias_uteis: number | null, hoje = 0) => situacaoDoAtraso(p({ dias_uteis, hoje }));
     expect([0, 4, 5, 10, null].map(d => atraso(d))).toEqual([undefined, undefined, "breve", "critico", undefined]);
     expect(atraso(12, 1)).toBe("feito");
+  });
+
+  it("a categoria escolhida vem da URL (?categoria=); sem ela, ou com valor que não é categoria, todas (#805)", () => {
+    expect(categoriaDaBusca({ categoria: "aditivos" })).toBe("aditivos");
+    expect(categoriaDaBusca({ categoria: "medicoes", processo: "3" })).toBe("medicoes");
+    expect(categoriaDaBusca({})).toBeNull();
+    expect(categoriaDaBusca({ categoria: "reajustes" })).toBeNull();   // nao e' categoria do sistema
+    expect(categoriaDaBusca({ categoria: "toString" })).toBeNull();
+  });
+
+  it("o não lido do processo: o aviso do robô para ele, sem as palavras que viram a etiqueta (#805)", () => {
+    const robo: Robo = { estado: "parado", rodada: null, pedidos: [], avisos: [
+      { tipo: "nao_lidos", processo_id: null, texto: "1 de 2 processos não foi lido" },
+      { tipo: "nao_lido", processo_id: 4, texto: "não lido às 11:02: A página não abriu" },
+      { tipo: "falha", processo_id: 5, texto: "outro aviso" },
+    ] };
+    expect(naoLidoDe(robo, 4)).toBe("às 11:02: A página não abriu");
+    expect(naoLidoDe(robo, 5)).toBeNull();     // so' o aviso de nao lido vira etiqueta
+    expect(naoLidoDe(robo, 9)).toBeNull();
   });
 
   it("No setor há: dias úteis, depois minutos, horas e, passado um dia corrido sem dia útil, 'menos de 1 dia útil'", () => {

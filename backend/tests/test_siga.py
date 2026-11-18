@@ -667,6 +667,122 @@ def test_classificar_troca_categoria_obra_e_complemento_sem_tocar_no_nome_do_rob
         siga.classificar(conn, None, 999, "outros", None, None, None)
 
 
+# --- a tela com um painel por categoria (issue #805) --------------------------------------------------------
+
+def test_situacao_do_tempo_segue_a_regua_do_tempo_parado():
+    """Uma regua so': andou hoje e' feito; critico a partir de 10 dias uteis no setor, vence em breve a partir de 5,
+    em andamento antes disso; sem a data de entrada no setor, nenhuma."""
+    assert siga.situacao_do_tempo(12, 1) == "feito"                      # andou hoje vale mais que os dias
+    assert [siga.situacao_do_tempo(d, 0) for d in (0, 4, 5, 9, 10, 40)] == [
+        "andamento", "andamento", "breve", "breve", "critico", "critico"]
+    assert siga.situacao_do_tempo(None, 0) is None
+    assert (siga.DIAS_ATENCAO, siga.DIAS_ACAO) == (5, 10)
+
+
+def test_painel_traz_os_numeros_da_faixa_os_limites_e_a_leitura_do_tempo_de_cada_processo(conn, robo):
+    """A faixa de numeros nasce no servidor, pela mesma leitura que pinta a linha: so' os vivos; parado e' o critico;
+    nao lido e' o processo vivo que leva o aviso na linha."""
+    agora = _cuiaba(2026, 10, 28, 11)
+    alfa, beta, gama = robo.ids
+    with db.mutacao(conn):
+        # Alfa andou hoje; Beta entrou no setor em 05/10 (16 dias uteis); Gama foi arquivado (encerrado)
+        conn.execute("INSERT INTO siga_leituras (processo_id, lido_em, situacao) VALUES (?, '2026-10-28 14:55:00', ?)",
+                     (alfa, "1º Volume - Aguardando Andamento [COFIN, [X]]"))
+        conn.execute("INSERT INTO siga_movimentacoes (processo_id, data, evento, at_lotacao, at_pessoa) "
+                     "VALUES (?, '2026-10-28 09:00:00', 'Recebimento', 'COFIN/ORGAO', 'Fulano')", (alfa,))
+        conn.execute("INSERT INTO siga_movimentacoes (processo_id, data, evento, at_lotacao, at_pessoa) "
+                     "VALUES (?, '2026-10-05 09:00:00', 'Recebimento', 'GABIN/ORGAO', 'Sicrana')", (beta,))
+    _ler(conn, beta, _cuiaba(2026, 10, 28, 8, 30))
+    conn.execute("UPDATE siga_leituras SET situacao='1º Volume - Aguardando Andamento [GABIN, [X]]' WHERE processo_id=?",
+                 (beta,))
+    conn.commit()
+    _arquivar(conn, gama, _cuiaba(2026, 10, 27, 9))
+    r = siga.iniciar_rodada(conn, agora)
+    siga.terminar_rodada(conn, r["rodada_id"], [{"codigo": "DEF456", "numero": None, "motivo": "Não abriu"}],
+                         agora + _min(1))
+    d = siga.painel(conn, agora + _min(1))
+    por_id = {p["id"]: p for p in d["processos"]}
+    assert (por_id[alfa]["situacao_tempo"], por_id[beta]["situacao_tempo"], por_id[gama]["situacao_tempo"]) == (
+        "feito", "critico", None)
+    assert por_id[beta]["dias_uteis"] == 16 and por_id[gama]["encerrado"] == "arquivado"
+    assert d["numeros"] == {"acompanhados": 2, "parados": 1, "andaram_hoje": 1, "nao_lidos": 1}
+    assert d["limites"] == {"dias_atencao": 5, "dias_critico": 10}
+    # o mesmo processo que a faixa conta leva o aviso na linha
+    assert [a["processo_id"] for a in d["robo"]["avisos"] if a["tipo"] == "nao_lido"] == [beta]
+
+
+def test_painel_sem_processo_tem_a_faixa_zerada(conn):
+    d = siga.painel(conn, _cuiaba(2026, 10, 28, 11))
+    assert d["numeros"] == {"acompanhados": 0, "parados": 0, "andaram_hoje": 0, "nao_lidos": 0}
+
+
+def test_painel_diz_o_contratante_da_obra_do_processo(conn):
+    _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+    conn.execute("INSERT INTO orgaos (chave, nome, familia, regras) VALUES ('sinfra-suef2', 'SINFRA - SUEF II', 'sinfra', '{}')")
+    conn.execute("UPDATE contratos SET orgao_id=(SELECT id FROM orgaos WHERE chave='sinfra-suef2') WHERE id=7")
+    conn.commit()
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura(numero="SINFRA-PRO-2026/00001"))
+    alfa, beta = siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"]
+    assert (alfa["obra"], alfa["contratante"], alfa["orgao_sub"]) == ("Obra Alfa", "SINFRA", "SUEF II")
+    assert (beta["obra"], beta["contratante"], beta["orgao_sub"]) == (None, None, None)   # sem obra, sem contratante
+
+
+def test_categoria_a_conferir_quando_o_nome_mostrado_indica_outra_que_a_escolhida():
+    # a pessoa escolheu Outros e escreveu o que e' outra categoria
+    assert siga.categoria_a_conferir("outros", True, False, "Aditivo de prazo") == "aditivos"
+    assert siga.categoria_a_conferir("outros", True, False, "7ª Medição - Obra Alfa") == "medicoes"
+    assert siga.categoria_a_conferir("aditivos", True, False, "Indenizatório 2025") == "indenizatorios"
+    # o nome nao indica outra: nada a conferir
+    assert siga.categoria_a_conferir("aditivos", True, False, "Aditivo de prazo") is None
+    assert siga.categoria_a_conferir("aditivos", True, False, "Aditivo da 7ª medição") is None
+    assert siga.categoria_a_conferir("outros", True, False, "Pedido de paralisação") is None
+    assert siga.categoria_a_conferir("outros", True, False, None) is None
+    # ligado a medicao (a categoria vem do vinculo) e ainda sem escolha de ninguem (vale a sugestao): nunca avisa
+    assert siga.categoria_a_conferir("medicoes", True, True, "Aditivo de prazo") is None
+    assert siga.categoria_a_conferir("aditivos", False, False, "Indenizatório") is None
+
+
+def test_painel_avisa_a_categoria_a_conferir_sem_gravar_nem_trocar_de_secao(conn):
+    """Outros so' com o que nao e' de nenhuma categoria (#805): a categoria que alguem escolheu nao muda sozinha; quando
+    o nome mostrado diz outra, a linha leva o aviso e a correcao e' de quem edita, no historico."""
+    _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+    outro = siga.acompanhar_avulso(conn, None, "AbCdEf1234", None, "outros", None, complemento="Aditivo de prazo")
+    com_obra = siga.acompanhar_avulso(conn, None, "XyZ9876543", None, "outros", 7, complemento="Reajuste de preços")
+    certo = siga.acompanhar_avulso(conn, None, "QwErTy4567", None, "outros", None, complemento="Pedido de paralisação")
+    antes = _categorias(conn)
+
+    def lidos():
+        por_id = {p["id"]: p for p in siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"]}
+        return [(por_id[i]["categoria"], por_id[i]["categoria_sugerida"], por_id[i]["categoria_a_conferir"])
+                for i in (outro, com_obra, certo)]
+    assert lidos() == [("outros", False, "aditivos"), ("outros", False, "medicoes"), ("outros", False, None)]
+    assert _categorias(conn) == antes                                   # a leitura nao grava
+    # quem edita corrige um a um: a categoria certa (ou o complemento) tira o aviso
+    siga.classificar(conn, None, outro, "aditivos", 7, None, "de prazo")
+    siga.classificar(conn, None, com_obra, "outros", 7, None, "Pedido de reequilíbrio")
+    assert lidos() == [("aditivos", False, None), ("outros", False, None), ("outros", False, None)]
+
+
+def test_link_colado_antes_das_categorias_nao_conta_como_categoria_escolhida(conn):
+    """O "Acompanhar processo" de antes da #663 gravava o registro `protocolo.siga` so' com o nome digitado. A migracao
+    pos esses processos em Outros sem ninguem escolher: eles seguem o nome, como o que o robo manda, ate' alguem
+    confirmar. O registro que traz a categoria (o formulario de hoje) continua valendo, mesmo sendo Outros."""
+    from app import auditoria
+    with db.mutacao(conn):
+        antigo = conn.execute("INSERT INTO siga_processos (codigo, nome) VALUES ('ANTIGO1234', 'Aditivo de prazo - Obra Alfa')"
+                              ).lastrowid
+        auditoria.registrar(conn, None, "protocolo.siga", "siga_processo", antigo, None,
+                            {"codigo": "ANTIGO1234", "numero": None, "nome": "Aditivo de prazo - Obra Alfa",
+                             "contrato_id": None})
+    novo = siga.acompanhar_avulso(conn, None, "NOVO123456", None, "outros", None, complemento="Aditivo de valor")
+    por_id = {p["id"]: p for p in siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"]}
+    assert (por_id[antigo]["categoria"], por_id[antigo]["categoria_sugerida"], por_id[antigo]["categoria_a_conferir"]) == (
+        "aditivos", True, None)
+    assert (por_id[novo]["categoria"], por_id[novo]["categoria_sugerida"], por_id[novo]["categoria_a_conferir"]) == (
+        "outros", False, "aditivos")
+    assert {c for _, c in _categorias(conn)} == {"outros"}              # nada gravado pela leitura
+
+
 # --- pedidos de leitura e rodadas do robo (issue #342) -------------------------------------------------------
 
 AGORA = _cuiaba(2026, 10, 28, 10)          # quarta-feira, 10h em Cuiaba

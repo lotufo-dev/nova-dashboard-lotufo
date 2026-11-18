@@ -562,10 +562,35 @@ def categoria_sugerida(nome: str | None) -> str | None:
 
 def _classificados_por_pessoa(conn) -> set[int]:
     """Os processos cuja categoria alguem ja' escolheu, ao acompanhar pela tela ou ao corrigir no historico (o
-    registro da auditoria). Neles a categoria gravada vale, mesmo sendo Outros: a sugestao nao volta."""
+    registro da auditoria que traz a categoria). Neles a categoria gravada vale, mesmo sendo Outros: a sugestao nao
+    volta. O link colado na tela antes das categorias (#339, ate' 11/11/2026) gravou o mesmo registro so' com o nome
+    digitado, sem categoria: ali ninguem escolheu, e o processo segue o nome como o que o robo mandou."""
     return {int(r[0]) for r in conn.execute(
         "SELECT DISTINCT entidade_id FROM audit_log WHERE entidade='siga_processo' "
-        "AND acao IN ('siga.classificacao', 'protocolo.siga')") if str(r[0]).isdigit()}
+        "AND acao IN ('siga.classificacao', 'protocolo.siga') "
+        "AND json_extract(depois, '$.categoria') IS NOT NULL") if str(r[0]).isdigit()}
+
+
+def categoria_a_conferir(categoria: str, escolhida: bool, ligado: bool, nome_mostrado: str | None) -> str | None:
+    """A categoria que o nome mostrado na tela indica, quando ela nao e' a que a pessoa escolheu (#805): "Outros" com
+    o complemento "Aditivo de prazo", por exemplo. So' leitura: a tela avisa "categoria a conferir" e quem edita
+    corrige no historico; nada e' gravado nem trocado de secao. None quando o nome nao indica outra, quando a
+    categoria veio do vinculo com a medicao (`ligado`) ou quando ninguem escolheu ainda (ai' vale a sugestao)."""
+    if ligado or not escolhida:
+        return None
+    indicada = categoria_sugerida(nome_mostrado)
+    return indicada if indicada and indicada != categoria else None
+
+
+def situacao_do_tempo(dias_uteis: int | None, hoje: int) -> str | None:
+    """A leitura do tempo no setor, na regua da familia "tempo parado" (docs/identidade-visual.md): andou hoje e'
+    `feito`; `critico` a partir de `DIAS_ACAO` dias uteis no setor; `breve` a partir de `DIAS_ATENCAO`; antes disso,
+    `andamento`. Sem a data de entrada no setor, None. A tela SIGA pinta a linha e conta os parados por aqui."""
+    if hoje > 0:
+        return "feito"
+    if dias_uteis is None:
+        return None
+    return "critico" if dias_uteis >= DIAS_ACAO else "breve" if dias_uteis >= DIAS_ATENCAO else "andamento"
 
 
 def _titulo_das_medicoes(conn, medicao_id: int | None, protocolo_id: int | None) -> str | None:
@@ -788,6 +813,7 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
     lido_em = conn.execute("SELECT MAX(lido_em) FROM siga_leituras").fetchone()[0]
     saida = []
     classificados = _classificados_por_pessoa(conn)
+    obras = medicoes._obras_com_contratante(conn)
     for p in conn.execute(
             "SELECT sp.*, c.nome_curto, c.numero_instrumento, m.numero AS m_numero, m.tipo AS m_tipo, "
             "m.estado AS m_estado "
@@ -815,21 +841,41 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
         categoria = sugerida or categoria
         medicao_titulo = medicoes.titulo({"numero": p["m_numero"], "tipo": p["m_tipo"]}) if p["medicao_id"] \
             else _titulo_das_medicoes(conn, None, p["protocolo_id"])
+        assunto = o_que_e(categoria, p["complemento"], medicao_titulo)
+        obra = obras.get(p["contrato_id"]) if p["contrato_id"] else None
         saida.append({
             "id": p["id"], "codigo": p["codigo"], "link": link_do_processo(p["codigo"]), "numero": p["numero"], "nome": p["nome"],
             "contrato_id": p["contrato_id"],
             "obra": (p["nome_curto"] or p["numero_instrumento"]) if p["contrato_id"] else None,
+            # o contratante da obra, como em Medicoes e em Obras ("SINFRA", "SUEF II"); processo sem obra nao tem
+            "contratante": obra["contratante"] if obra else None, "orgao_sub": obra["orgao_sub"] if obra else None,
             "medicao_id": p["medicao_id"], "medicao_titulo": medicao_titulo,
             "categoria": categoria, "categoria_sugerida": sugerida is not None, "complemento": p["complemento"],
-            "o_que_e": o_que_e(categoria, p["complemento"], medicao_titulo),
+            # o nome que a tela mostra diz outra categoria que a escolhida: aviso na linha, nada muda (#805)
+            "categoria_a_conferir": categoria_a_conferir(
+                categoria, sugerida is None, p["medicao_id"] is not None or p["protocolo_id"] is not None,
+                assunto if p["contrato_id"] else p["complemento"] or p["nome"]),
+            "o_que_e": assunto,
             "protocolo_id": p["protocolo_id"], "situacao": situacao, "encerrado": encerrado,
             **derivado,
+            # o encerrado (#657) nao esta' parado nem andando: sem leitura de tempo
+            "situacao_tempo": None if encerrado else situacao_do_tempo(derivado["dias_uteis"], derivado["hoje"]),
             "movimentacoes": movs,
         })
     fora = {p["id"]: p["encerrado"] for p in saida if p["encerrado"]}
+    robo = situacao_robo(conn, agora, fora)
+    vivos = [p for p in saida if not p["encerrado"]]
+    nao_lidos = {a["processo_id"] for a in robo["avisos"] if a["tipo"] == "nao_lido"}
     return {"lido_em": tempo.iso_utc(lido_em) if lido_em else None,
             "atrasado": atrasado(_leitura_dos_vivos(conn, fora), agora),
-            "processos": saida, "pode_atualizar": bool(tarefa_do_robo()), "robo": situacao_robo(conn, agora, fora)}
+            "processos": saida, "pode_atualizar": bool(tarefa_do_robo()), "robo": robo,
+            # a faixa de numeros da tela (#805): so' os vivos, pela mesma leitura que pinta a linha. "Parados" sao os
+            # criticos (`DIAS_ACAO` dias uteis ou mais, sem andar hoje); "nao lidos", os que levam o aviso na linha
+            "numeros": {"acompanhados": len(vivos),
+                        "parados": sum(p["situacao_tempo"] == "critico" for p in vivos),
+                        "andaram_hoje": sum(p["hoje"] > 0 for p in vivos),
+                        "nao_lidos": sum(p["id"] in nao_lidos for p in vivos)},
+            "limites": {"dias_atencao": DIAS_ATENCAO, "dias_critico": DIAS_ACAO}}
 
 
 # --- pedidos de leitura e rodadas do robo (issue #342) -----------------------------------------------------
