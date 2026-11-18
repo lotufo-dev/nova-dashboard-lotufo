@@ -1,144 +1,66 @@
 import { useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
-import { brl } from "./formato";
 import Contador from "./Contador";
+import { contar } from "./formato";
+import { porComQuem, type Anteriores, type FilaMedicoes, type Limites } from "./filaMedicoes";
 import IniciarMedicao from "./IniciarMedicao";
 import Janela from "./Janela";
 import LegendaCor from "./LegendaCor";
-import Selo, { Glifo } from "./Selo";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
-import { diaMes, PASSOS } from "./Passos";
-import { mesPorExtenso, somarMes, type LinhaAnterior, type LinhaQuadro, type ObraResumo, type PassoQuadro, type ResumoMedicoes, type SigaNoQuadro } from "./resumoMedicoes";
-import { situacaoDoAtraso, tempoNoSetor } from "./siga";
-import { fmtCompetencia, hojeLocal } from "./tempo";
+import MedicoesFila, { GruposDaFila, SemMedicaoNoMes } from "./MedicoesFila";
+import MedicoesQuadro from "./MedicoesQuadro";
+import { mesPorExtenso, somarMes, type ObraResumo } from "./resumoMedicoes";
+import { trocarBusca, type AbaMedicoes, type Busca } from "./rota";
+import { hojeLocal } from "./tempo";
 import "./medicoes.css";
 import Falha from "./Falha";
 
-// Medições (#643, decisão do dono na revisão página a página de 10/11/2026): o QUADRO DO MÊS no lugar de "Iniciar medição"
-// e "Em andamento". Uma linha por obra e uma coluna por passo do fluxo, na competência em trabalho (o mês anterior ao de
-// hoje; o seletor mostra outra). O passo feito mostra a data, o da vez é o link para o passo na página da medição e a obra sem
-// medição na competência tem o "Iniciar", que abre o formulário de sempre (a Nova planilha/carta, #653) já nessa competência. Abaixo, "Meses anteriores": as
-// medições abertas de outras competências. Tudo vem de GET /api/medicoes/resumo (`medicoes.resumo`); a tela só desenha.
+// Medições (#805, etapa 3a; decisão do dono de 18/11/2026): a tela de quem opera, em três vistas com endereço próprio.
+// A FILA DE TRABALHO (a padrão, "/medicoes") responde "o que eu preciso fazer agora?"; o QUADRO DO MÊS (#643,
+// "/medicoes/quadro") é a matriz obra × passo; os MESES ANTERIORES ("/medicoes/anteriores") ficam só com o que ainda
+// pede ação de quem opera. A competência é a em trabalho (o mês anterior ao de hoje) ou a escolhida nas setas, e fica
+// na URL (?mes=). Pedido e aprovado são o valor cheio da medição. Tudo vem de GET /api/medicoes/fila; a tela só desenha.
 
-const traco = <span className="medicoes__traco">—</span>;
+const MES = /^\d{4}-(0[1-9]|1[0-2])$/;
+const VISTAS: { id: AbaMedicoes; rotulo: string }[] = [
+  { id: "fila", rotulo: "Fila de trabalho" }, { id: "quadro", rotulo: "Quadro do mês" }, { id: "anteriores", rotulo: "Meses anteriores" },
+];
 
-// O tempo do processo no setor, na situação da fundação que o mostra (cor e forma): movimentou hoje = feito; parado além
-// do primeiro limiar de `nivelDias` = vence em breve; além do segundo = crítico. Dentro do prazo não tem situação.
-
-/** #664: onde está o processo do SIGA da medição que está neste passo: sigla do setor e tempo no setor, com o texto da
- *  tela SIGA (o `NoSetor` de SigaPagina: "hoje" quando houve movimentação hoje; senão `tempoNoSetor`) e a situação do
- *  atraso de `nivelDias`. Sem data de entrada no setor, só a sigla. */
-function PosicaoSiga({ siga }: { siga: SigaNoQuadro | null }) {
-  if (!siga) return null;
-  const situacao = situacaoDoAtraso(siga);
-  const tempo = siga.hoje > 0 ? "hoje" : siga.desde === null || siga.dias_uteis === null ? "—" : tempoNoSetor(siga, new Date());
+/** Meses anteriores: os mesmos painéis da fila, com a competência em cada linha, e o que só espera o pagamento (ou é
+ *  de antes do primeiro ano que as telas contam) numa linha de resumo que leva ao Fechamento. */
+function MesesAnteriores({ a, limites, opera }: { a: Anteriores; limites: Limites; opera: boolean }) {
+  const resto = [
+    a.esperam_pagamento > 0 ? (a.esperam_pagamento === 1 ? "1 medição espera pagamento" : `${a.esperam_pagamento.toLocaleString("pt-BR")} medições esperam pagamento`) : null,
+    a.antes_do_ano_inicial > 0 ? `${contar(a.antes_do_ano_inicial, "medição aberta", "medições abertas")} de antes de ${a.ano_inicial}` : null,
+  ].filter(Boolean);
   return (
-    <span className="quadro__siga">
-      <span className="sr-only">No SIGA: </span>
-      <span className="quadro__siga-setor">{siga.setor}</span>
-      {tempo !== "—" && <> <span className={`quadro__siga-tempo num${situacao ? ` quadro__siga-tempo--${situacao}` : ""}`}>{situacao && <Glifo situacao={situacao} />}{tempo}</span></>}
-    </span>
-  );
-}
-
-function CelulaPasso({ n, passo, linha }: { n: number; passo: PassoQuadro | undefined; linha: LinhaQuadro }) {
-  const nome = PASSOS[n - 1];
-  // o passo que a obra não tem fica vazio
-  if (!passo) return <td className="quadro__passo quadro__passo--sem" data-rotulo={nome} />;
-  if (passo.situacao === "feito") {
-    const data = diaMes(passo.data);
-    return (
-      <td className="quadro__passo quadro__passo--feito" data-rotulo={nome}>
-        <span className="quadro__feito">
-          <Glifo situacao="feito" />
-          {data ? <><span className="sr-only">Feito em </span><span className="num">{data}</span></> : "Feito"}
-        </span>
-      </td>
-    );
-  }
-  if (passo.situacao === "atual" && passo.medicao_id !== null) {
-    const medicao = linha.medicoes.find(m => m.id === passo.medicao_id);
-    return (
-      <td className="quadro__passo" data-rotulo={nome} aria-current="step">
-        <Link className="link-selo quadro__atual" para={{ tela: "medicao", obra: linha.contrato_id, id: passo.medicao_id }}
-          secao={`passo-${n}`}
-          aria-label={`Abrir ${medicao?.titulo ?? "a medição"} de ${linha.obra}: ${nome}`}><Selo situacao="andamento">Atual</Selo></Link>
-        <PosicaoSiga siga={passo.siga} />
-      </td>
-    );
-  }
-  return <td className="quadro__passo quadro__passo--futuro" data-rotulo={nome}>A fazer<PosicaoSiga siga={passo.siga} /></td>;
-}
-
-function Linha({ linha, podeIniciar, aoIniciar }: { linha: LinhaQuadro; podeIniciar: boolean; aoIniciar: () => void }) {
-  return (
-    <tr>
-      <th scope="row" className="quadro__obra">
-        <Link className="medicoes__obra" para={{ tela: "obra", id: linha.contrato_id, aba: "medicoes" }}>{linha.obra}</Link>
-        {linha.medicoes.map(m => (
-          <Link key={m.id} className="quadro__medicao" para={{ tela: "medicao", obra: linha.contrato_id, id: m.id }}>{m.titulo}</Link>
-        ))}
-      </th>
-      {linha.medicoes.length === 0 ? (
-        <td colSpan={PASSOS.length} className="quadro__iniciar" data-rotulo="Medição">
-          {linha.iniciar && podeIniciar
-            ? <button type="button" className="btn btn--pequeno" aria-label={`Iniciar a medição de ${linha.obra}`} onClick={aoIniciar}>Iniciar</button>
-            : traco}
-        </td>
-      ) : PASSOS.map((_, i) => <CelulaPasso key={i} n={i + 1} passo={linha.passos.find(p => p.numero === i + 1)} linha={linha} />)}
-      <td className="col-num dinheiro" data-rotulo="Pedido">{linha.pedido_centavos === null ? traco : brl(linha.pedido_centavos)}</td>
-      <td className="col-num dinheiro" data-rotulo="Aprovado">{linha.aprovado_centavos === null ? traco : brl(linha.aprovado_centavos)}</td>
-    </tr>
-  );
-}
-
-function Anteriores({ linhas }: { linhas: LinhaAnterior[] }) {
-  return (
-    <section className="cartao medicoes__painel" aria-labelledby="anteriores-titulo">
-      <div className="medicoes__painel-cab">
-        <h2 id="anteriores-titulo">Meses anteriores</h2>
-        {linhas.length > 0 && <Contador rotulo={linhas.length === 1 ? "1 medição" : `${linhas.length} medições`}>{linhas.length.toLocaleString("pt-BR")}</Contador>}
-      </div>
-      {linhas.length === 0 ? <p className="medicoes__vazio">Nenhuma medição aberta de meses anteriores.</p> : (
-        <table className="tabela quadro__anteriores" aria-labelledby="anteriores-titulo">
-          <thead>
-            <tr>
-              <th scope="col">Obra</th><th scope="col">Medição</th><th scope="col">Competência</th><th scope="col">Passo atual</th>
-              <th scope="col"><span className="sr-only">Ação</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {linhas.map(l => (
-              <tr key={l.medicao_id}>
-                <td className="quadro__anterior-obra"><Link className="medicoes__obra" para={{ tela: "obra", id: l.contrato_id, aba: "medicoes" }}>{l.obra}</Link></td>
-                <td data-rotulo="Medição">{l.titulo}</td>
-                <td data-rotulo="Competência" className="num">{fmtCompetencia(l.competencia)}</td>
-                <td data-rotulo="Passo atual"><Selo situacao="andamento">{l.passo.nome}</Selo></td>
-                <td className="quadro__acao">
-                  <Link className="btn btn--pequeno" para={{ tela: "medicao", obra: l.contrato_id, id: l.medicao_id }} secao={`passo-${l.passo.numero}`}
-                    aria-label={`Abrir ${l.titulo} de ${l.obra}`}>Abrir</Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <>
+      {a.linhas.length === 0
+        ? <p className="medicoes__vazio medicoes__vazio--pagina">Nenhuma medição de meses anteriores pede ação.</p>
+        : <GruposDaFila grupos={porComQuem(a.linhas)} limites={limites} opera={opera} comCompetencia />}
+      {resto.length > 0 && (
+        <p className="fila-resumo">
+          <span className="num">{resto.join(" · ")}</span>
+          <Link para={{ tela: "fechamento" }}>Ver no Fechamento</Link>
+        </p>
       )}
-    </section>
+    </>
   );
 }
 
-export default function MedicoesPagina({ usuario }: { usuario: Usuario }) {
-  const [dados, setDados] = useState<ResumoMedicoes | null>(null);
+export default function MedicoesPagina({ usuario, aba = "fila", busca = {} }: { usuario: Usuario; aba?: AbaMedicoes; busca?: Busca }) {
+  const [dados, setDados] = useState<FilaMedicoes | null>(null);
   const [erro, setErro] = useState("");
   // a competência em trabalho: o mês anterior ao de hoje
-  const [mes, setMes] = useState(() => somarMes(hojeLocal().slice(0, 7), -1));
+  const [emTrabalho] = useState(() => somarMes(hojeLocal().slice(0, 7), -1));
+  const [mes, setMes] = useState(() => (busca.mes && MES.test(busca.mes) ? busca.mes : emTrabalho));
   const [iniciando, setIniciando] = useState<ObraResumo | null>(null);
-  const podeIniciar = usuario.perfil !== "diretoria";
+  const opera = usuario.perfil !== "diretoria";
 
   useEffect(() => {
     let vivo = true;
-    api<ResumoMedicoes>(`/api/medicoes/resumo?mes=${mes}`)
+    api<FilaMedicoes>(`/api/medicoes/fila?mes=${mes}`)
       .then(d => { if (vivo) { setDados(d); setErro(""); } })
       .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
     return () => { vivo = false; };
@@ -149,15 +71,23 @@ export default function MedicoesPagina({ usuario }: { usuario: Usuario }) {
       ? <div className="pagina medicoes"><Falha>Não foi possível ler as medições: {erro} Recarregue a página para tentar de novo.</Falha></div>
       : <div className="pagina medicoes"><p className="medicoes__vazio medicoes__vazio--pagina" role="status">Carregando as medições…</p></div>;
   }
-  // enquanto o mês escolhido não chega, o quadro na tela ainda é o do mês anterior: nada de iniciar nele
+  // enquanto o mês escolhido não chega, o que está na tela ainda é do mês anterior: nada de iniciar nele
   const carregando = dados.mes !== mes;
-  const trocarMes = (n: number) => { setIniciando(null); setMes(somarMes(mes, n)); };
+  // a competência fica na URL (F5 e o link copiado abrem o mesmo mês); a em trabalho é a padrão e não entra nela
+  const trocarMes = (n: number) => {
+    const novo = somarMes(mes, n);
+    setIniciando(null); setMes(novo);
+    trocarBusca({ mes: novo === emTrabalho ? null : novo });
+  };
+  const daUrl = mes === emTrabalho ? undefined : { mes };
+  const aoIniciar = (contratoId: number) => setIniciando(dados.obras.find(o => o.contrato_id === contratoId) ?? null);
+  const podeIniciar = opera && !carregando;
 
   return (
-    <div className="pagina medicoes">
+    <div className="pagina medicoes" aria-busy={carregando || undefined}>
       <div className="medicoes__cab">
         <div>
-          <p className="medicoes__cab-rotulo">Competência</p>
+          <p className="medicoes__cab-rotulo">Competência · valor cheio</p>
           <div className="medicoes__troca">
             <h2 className="medicoes__mes" aria-live="polite">{mesPorExtenso(mes)}</h2>
             <div className="medicoes__botoes" role="group" aria-label="Trocar a competência">
@@ -168,38 +98,28 @@ export default function MedicoesPagina({ usuario }: { usuario: Usuario }) {
         </div>
         <LegendaCor />
       </div>
+      <nav className="abas medicoes__vistas" aria-label="Vistas de Medições">
+        {VISTAS.map(v => (
+          <Link key={v.id} className="aba" para={{ tela: "medicoes", aba: v.id }} busca={daUrl} aria-current={v.id === aba ? "page" : undefined}>
+            {v.rotulo}
+            {v.id === "anteriores" && dados.anteriores.linhas.length > 0 && (
+              <Contador rotulo={`, ${contar(dados.anteriores.linhas.length, "medição pede ação", "medições pedem ação")}`}>
+                {dados.anteriores.linhas.length.toLocaleString("pt-BR")}
+              </Contador>
+            )}
+          </Link>
+        ))}
+      </nav>
       {erro && <Falha>Não foi possível ler as medições: {erro}</Falha>}
 
-      <section className="cartao medicoes__painel" aria-labelledby="quadro-titulo">
-        <div className="medicoes__painel-cab">
-          <h2 id="quadro-titulo">Quadro do mês</h2>
-          {dados.quadro.length > 0 && (
-            <Contador rotulo={dados.quadro.length === 1 ? "1 obra" : `${dados.quadro.length} obras`}>{dados.quadro.length.toLocaleString("pt-BR")}</Contador>
-          )}
-        </div>
-        {dados.quadro.length === 0 ? <p className="medicoes__vazio">Nenhuma obra ativa.</p> : (
-          <table className="tabela quadro__tabela" aria-labelledby="quadro-titulo" aria-busy={carregando || undefined}>
-            <colgroup>
-              <col className="quadro__c-obra" />{PASSOS.map(p => <col key={p} className="quadro__c-passo" />)}
-              <col className="quadro__c-valor" /><col className="quadro__c-valor" />
-            </colgroup>
-            <thead>
-              <tr>
-                <th scope="col">Obra</th>{PASSOS.map(p => <th key={p} scope="col" className="quadro__th-passo">{p}</th>)}
-                <th scope="col" className="col-num">Pedido</th><th scope="col" className="col-num">Aprovado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dados.quadro.map(l => (
-                <Linha key={l.contrato_id} linha={l} podeIniciar={podeIniciar && !carregando}
-                  aoIniciar={() => setIniciando(dados.obras.find(o => o.contrato_id === l.contrato_id) ?? null)} />
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      <Anteriores linhas={dados.anteriores} />
+      {aba === "fila" && <MedicoesFila d={dados} opera={opera} podeIniciar={podeIniciar} aoIniciar={aoIniciar} />}
+      {aba === "quadro" && (
+        <>
+          <MedicoesQuadro grupos={dados.quadro} limites={dados.limites} carregando={carregando} />
+          {dados.sem_medicao.length > 0 && <SemMedicaoNoMes obras={dados.sem_medicao} mes={dados.mes} podeIniciar={podeIniciar} aoIniciar={aoIniciar} />}
+        </>
+      )}
+      {aba === "anteriores" && <MesesAnteriores a={dados.anteriores} limites={dados.limites} opera={opera} />}
 
       {iniciando && (
         <Janela titulo={`${iniciando.obra} · ${mesPorExtenso(mes)}`} aoFechar={() => setIniciando(null)}>

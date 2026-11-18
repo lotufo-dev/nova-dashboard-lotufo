@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
@@ -306,21 +306,38 @@ describe("App: o menu lateral no celular (375 px)", () => {
   });
 });
 
-describe("App: Medições é o quadro do mês (#643)", () => {
+describe("App: Medições abre na fila de trabalho, com as vistas no endereço (#643, #805)", () => {
+  const SEM = { quantidade: 0, criticas: 0, breves: 0, alem_do_prazo: 0 };
   beforeEach(() => {
     try { localStorage.removeItem("menu-lateral"); } catch { /* sem armazenamento */ }
     api.mockImplementation(async (caminho: string) => {
       if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa da Engenharia", email: "eng@lotufo.com", perfil: "engenharia", csrf: "x" };
-      if (caminho.startsWith("/api/medicoes/resumo")) return { hoje: "2026-11-07", mes: caminho.split("mes=")[1], obras: [], quadro: [], anteriores: [] };
+      if (caminho.startsWith("/api/medicoes/fila")) {
+        return { hoje: "2026-11-07", mes: caminho.split("mes=")[1], obras: [], limites: { dias_atencao: 5, dias_critico: 10, diferenca_critica_por_mil: 5 },
+          numeros: { com: { lotufo: SEM, faturamento: SEM, orgao: SEM }, concluidas: 0, sem_medicao: 0, pedido_centavos: null, aprovado_centavos: null,
+            aprovado_com_pedido_centavos: null, pedido_do_aprovado_centavos: null, abaixo_do_pedido_centavos: null },
+          grupos: [], concluidas: [], sem_medicao: [], quadro: [],
+          anteriores: { linhas: [], esperam_pagamento: 0, antes_do_ano_inicial: 0, ano_inicial: "2025" } };
+      }
       return [];
     });
   });
   afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
 
-  it.each(["/medicoes/em-andamento", "/medicoes/iniciar", "/notas"])("o endereço antigo %s leva ao quadro e o menu tem só o item Medições", async (antigo) => {
-    window.history.replaceState(null, "", antigo);
+  it("o endereço /medicoes/quadro abre o quadro do mês, e /medicoes/anteriores, os meses anteriores", async () => {
+    window.history.replaceState(null, "", "/medicoes/quadro");
     render(<App />);
     expect(await screen.findByRole("heading", { name: "Quadro do mês" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/medicoes/quadro");
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Vistas de Medições" })).getByRole("link", { name: "Meses anteriores" }));
+    expect(await screen.findByText("Nenhuma medição de meses anteriores pede ação.")).toBeTruthy();
+    expect(window.location.pathname).toBe("/medicoes/anteriores");
+  });
+
+  it.each(["/medicoes/em-andamento", "/medicoes/iniciar", "/notas"])("o endereço antigo %s leva à fila e o menu tem só o item Medições", async (antigo) => {
+    window.history.replaceState(null, "", antigo);
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Concluídas no mês" })).toBeTruthy();
     expect(window.location.pathname).toBe("/medicoes");
     const nav = within(screen.getByRole("navigation", { name: "Navegação principal" }));
     expect(nav.getByRole("link", { name: "Medições" }).getAttribute("aria-current")).toBe("page");

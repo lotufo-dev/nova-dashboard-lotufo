@@ -1,0 +1,17 @@
+/* BarraDePassos.tsx e TempoParado.tsx (#805): as duas pecas de linha da fila de trabalho de Medicoes, num arquivo
+   proprio para outra tela usar sem trazer o estilo da pagina. Cor, tamanho e espaco so' por variavel de tokens.css. */
+
+/* a barra: um segmento por passo da obra. Feito no tom do feito, o da vez no tom do em andamento, o que falta no
+   papel escuro. O nome do passo da vez e a posicao ("3 de 5") vao escritos embaixo: a cor nao diz nada sozinha. */
+.barra-passos { display: inline-grid; gap: var(--espaco-mini); min-width: 0; text-align: left; }
+.barra-passos__trilho { display: flex; gap: var(--espaco-grade); }
+.barra-passos__passo { flex: none; width: var(--espaco-m); height: var(--espaco-pp); background: var(--cor-papel-escuro); }
+.barra-passos__passo--feito { background: var(--situacao-feito-ponto); }
+.barra-passos__passo--atual { background: var(--situacao-andamento-ponto); }
+.barra-passos__nome { color: var(--cor-texto-secundario); font-size: var(--texto-mini); line-height: var(--entrelinha-titulo); }
+.barra-passos__posicao { white-space: nowrap; }
+
+/* o tempo parado: o selo da situacao e, no Pagamento, o prazo do orgao escrito embaixo */
+.tempo-parado { display: inline-grid; justify-items: start; gap: var(--espaco-traco); min-width: 0; }
+.tempo-parado--sem { color: var(--cor-texto-terciario); }
+.tempo-parado__prazo { color: var(--cor-texto-secundario); font-size: var(--texto-mini); line-height: var(--entrelinha-titulo); }
