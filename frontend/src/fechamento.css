@@ -1,6 +1,8 @@
-/* Fechamento (#748): a disposicao e os blocos proprios da pagina. A moldura do painel (.cartao), a tabela (.tabela),
-   o selo, o contador e a caixa de aviso sao pecas de base de tokens.css. Cor, familia, tamanho, espaco e borda so'
-   por variavel. */
+/* Fechamento (#748, em abas na #815): a disposicao e os blocos proprios da pagina. A moldura do painel (.cartao), a
+   tabela (.tabela), as abas (.abas), a escolha (.escolha), o selo e a caixa de aviso sao pecas de base de tokens.css.
+   Cor, familia, tamanho, espaco e borda so' por variavel.
+   Nenhuma aba passa de uma tela e meia a 1440 px com doze meses e um aviso: por isso o painel nao repete o nome da
+   aba como titulo, as linhas das tabelas de cinco numeros sao mais baixas e o link do em aberto fica ao lado do rotulo. */
 
 /* A pagina e' o container: os blocos mudam de forma pela largura que sobra para o conteudo (com o menu lateral aberto
    ou recolhido), e nao pela largura da janela. Tres faixas: larga, media (ate' 900 px: a 1024 com o menu aberto) e
@@ -31,24 +33,22 @@
   display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--espaco-m) var(--espaco-g);
   margin: 0;
 }
-.fch-numero { min-width: 0; }
-.fch-numero__rotulo { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+/* o rotulo em cima e o valor embaixo; o link do em aberto para a pagina A receber (#815) vai ao lado do rotulo */
+.fch-numero { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--espaco-pp); align-items: baseline; }
+.fch-numero__rotulo { grid-area: 1 / 1; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .fch-numero__valor {
-  margin: 0; white-space: nowrap;
+  grid-area: 2 / 1 / 3 / -1; margin: 0; white-space: nowrap;
   font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
   font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-valor-menor); line-height: var(--entrelinha-numero);
 }
-/* o link do em aberto para a pagina A receber (#815), sob o valor */
-.fch-numero__porta { margin: var(--espaco-mini) 0 0; font-size: var(--texto-meta); }
+.fch-numero__porta { grid-area: 1 / 2; margin: 0; font-size: var(--texto-meta); white-space: nowrap; }
 
-/* painel */
-.fch .fch-painel { min-width: 0; padding: var(--espaco-g) 0 var(--espaco-mini); }
+/* painel: sem titulo (o nome da aba ja' diz o que ele mostra); a comparacao abre com a escolha do numero */
+.fch .fch-painel { min-width: 0; padding: var(--espaco-m) 0 var(--espaco-mini); }
 .fch-painel__cab {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-pp) var(--espaco-p);
-  padding: 0 var(--espaco-g); margin-bottom: var(--titulo-margem-base);
+  padding: 0 var(--espaco-g); margin-bottom: var(--espaco-p);
 }
-.fch-painel__cab h2 { margin: 0; font-size: var(--texto-titulo-sub); }
-.fch-painel__cab .escolhas { margin-left: auto; }
 
 /* tabela: a da fundacao, com a primeira coluna presa a' esquerda quando a caixa rola */
 .fch .fch-tabela th, .fch .fch-tabela td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
@@ -71,6 +71,13 @@
 .fch .fch-tabela thead .marca-etapa { gap: var(--espaco-mini); }
 /* o total do ano tambem leva a etiqueta da diferenca: os valores da linha ficam no alto, como nas linhas dos meses */
 .fch .fch-tabela--cinco tfoot :is(th, td) { vertical-align: top; }
+/* a linha tem o valor e a etiqueta embaixo dele: com o respiro menor, doze meses e o total cabem numa tela e meia.
+   No celular a linha vira bloco e tem o respiro dela (la' embaixo). */
+@container fch-pagina (min-width: 561px) {
+  .fch .fch-tabela.fch-tabela--cinco :is(tbody, tfoot) > tr > :is(th, td) { padding-top: var(--espaco-pp); padding-bottom: var(--espaco-pp); }
+  /* o botao tem a altura minima de um alvo: a margem negativa deixa o nome na linha do valor */
+  .fch .fch-tabela--cinco .fch-abre { margin: calc((var(--espaco-pp) + var(--espaco-traco)) * -1) 0; }
+}
 /* por contratante (#815): a participacao no medido do ano, sob o valor, em texto de apoio (nao e' familia de valor:
    nao compara com referencia nem tem limite) */
 .fch-parte { color: var(--cor-texto-secundario); font-family: var(--fonte-texto); font-size: var(--texto-mini); font-weight: var(--peso-normal); white-space: nowrap; }
@@ -141,10 +148,9 @@
   /* os cinco numeros em lista: rotulo a' esquerda, valor a' direita; o link do em aberto, na linha de baixo */
   .fch-numeros { grid-template-columns: minmax(0, 1fr); gap: var(--espaco-pp); }
   .fch-numero { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--espaco-p); }
-  .fch-numero__porta { flex-basis: 100%; margin: 0; text-align: right; }
+  .fch-numero__porta { order: 1; flex-basis: 100%; text-align: right; }
   /* o painel com a margem de dentro menor: sobra largura para dois valores de centenas de milhoes lado a lado */
   .fch-painel__cab { padding: 0 var(--espaco-pp); }
-  .fch-painel__cab .escolhas { margin-left: 0; }
   .fch-vazio { padding: 0 var(--espaco-pp) var(--espaco-p); }
 
   /* A tabela do mes e a da comparacao viram blocos: cada linha e' uma grade com as mesmas tres colunas, entao os

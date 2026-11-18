@@ -142,8 +142,9 @@ function doAcumulado(f: RespostaFechamento, ano: string): Numeros | null {
 
 /* ------------------------------------------------------------------ numeros do ano */
 
-/** Os cinco numeros do ano. O em aberto leva o link para a pagina A receber (#815), que tem as notas uma a uma; com a
- *  trava do total a receber nao ha' valor a abrir, e o link nao aparece. */
+/** Os cinco numeros do ano. O em aberto leva o link para a pagina A receber (#815), que tem as notas uma a uma: fica
+ *  ao lado do rotulo ("Em aberto · nota a nota"), para o bloco nao ganhar uma linha. Com a trava do total a receber
+ *  nao ha' valor a abrir, e o link nao aparece. */
 function NumerosDoAno({ f, ano }: { f: RespostaFechamento; ano: string }) {
   const t = f.por_ano[ano];
   return (
@@ -154,8 +155,9 @@ function NumerosDoAno({ f, ano }: { f: RespostaFechamento; ano: string }) {
           <dd className="fch-numero__valor">{t ? valor(t[c.chave]) : "—"}</dd>
           {c.chave === "em_aberto_centavos" && f.total_a_receber_liberado && (
             <dd className="fch-numero__porta">
-              <a className="link" href={A_RECEBER} onClick={ev => { if (cliqueSimples(ev)) { ev.preventDefault(); irHref(A_RECEBER); } }}>
-                A receber, nota a nota
+              <a className="link" href={A_RECEBER} aria-label="Em aberto nota a nota, na página A receber"
+                onClick={ev => { if (cliqueSimples(ev)) { ev.preventDefault(); irHref(A_RECEBER); } }}>
+                nota a nota
               </a>
             </dd>
           )}
@@ -364,9 +366,8 @@ function Comparacao({ f }: { f: RespostaFechamento }) {
   const comparaveis = COMPARAVEIS.filter(c => f.total_a_receber_liberado || c.chave !== "recebido_centavos");
   const rotulo = comparaveis.find(c => c.chave === chave)?.rotulo ?? "";
   return (
-    <section className="cartao fch-painel" aria-labelledby="fch-comparacao">
+    <section className="cartao fch-painel" aria-label={`${b} × ${a}`}>
       <div className="fch-painel__cab">
-        <h2 id="fch-comparacao">{b} × {a}</h2>
         <div className="escolhas" role="group" aria-label="Número comparado">
           {comparaveis.map(c => (
             <button key={c.chave} type="button" className="escolha" aria-pressed={chave === c.chave} onClick={() => setChave(c.chave)}>{c.rotulo}</button>
@@ -540,6 +541,7 @@ export default function Fechamento({ ir }: { ir: Ir }) {
   // a aba leva o ano escolhido para a outra; o mes aberto e' so' da tabela do mes
   const doAno: Busca | undefined = atual === padrao ? undefined : { ano: atual };
   const [a, b] = f.anos;
+  // o nome da aba e' o titulo do painel dela: o painel nao repete o titulo, so' leva o nome para o leitor de tela
   const rotulos: Record<AbaFechamento, string> = { meses: "Mês a mês", comparacao: `${b} × ${a}`, contratantes: "Por contratante" };
   return (
     <div className="fch">
@@ -575,15 +577,13 @@ export default function Fechamento({ ir }: { ir: Ir }) {
         </>
       )}
       {aba === "meses" && (
-        <section className="cartao fch-painel" aria-labelledby="fch-meses">
-          <div className="fch-painel__cab"><h2 id="fch-meses">Por mês de competência</h2></div>
+        <section className="cartao fch-painel" aria-label={rotulos.meses}>
           <TabelaDoAno key={`${atual}:${mes ?? ""}`} f={f} ano={atual} ir={ir} mesAberto={mes} />
         </section>
       )}
       {aba === "comparacao" && <Comparacao f={f} />}
       {aba === "contratantes" && (
-        <section className="cartao fch-painel" aria-labelledby="fch-contratantes">
-          <div className="fch-painel__cab"><h2 id="fch-contratantes">Por contratante</h2></div>
+        <section className="cartao fch-painel" aria-label={rotulos.contratantes}>
           <PorContratante f={f} ano={atual} ir={ir} />
         </section>
       )}

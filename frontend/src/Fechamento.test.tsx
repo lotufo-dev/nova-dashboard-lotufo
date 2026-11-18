@@ -145,13 +145,14 @@ describe("Fechamento (#748)", () => {
     expect(valorDe("Em aberto")).toBe("R$ 6.000,01");
     const meses = screen.getByRole("table", { name: /por mês de competência de 2026/ });
     expect(texto(meses.querySelector("tfoot"))).toBe("Total de 2026R$ 17.000,01R$ 14.000,01R$ 14.000,01R$ 10.000,00R$ 6.000,01");
-    const porta = screen.getByRole("link", { name: "A receber, nota a nota" });
+    const porta = screen.getByRole("link", { name: "Em aberto nota a nota, na página A receber" });
     expect(porta.getAttribute("href")).toBe("/a-receber");
+    expect(porta.textContent?.trim()).toBe("nota a nota");            // ao lado do rótulo "Em aberto"
     expect(porta.closest(".fch-numero")?.querySelector("dt")?.textContent).toBe("Em aberto");
     // o total segue o ano escolhido, e o link continua lá
     fireEvent.click(screen.getByRole("button", { name: "2025" }));
     expect(valorDe("Em aberto")).toBe("R$ 300,03");
-    expect(screen.getByRole("link", { name: "A receber, nota a nota" }).getAttribute("href")).toBe("/a-receber");
+    expect(screen.getByRole("link", { name: /na página A receber/ }).getAttribute("href")).toBe("/a-receber");
   });
 
   it("nota paga em parte: o selo na linha da medição", async () => {
@@ -570,6 +571,9 @@ describe("Fechamento em abas (#815)", () => {
         ["Mês a mês", "/fechamento"], ["2026 × 2025", "/fechamento/comparacao"], ["Por contratante", "/fechamento/contratantes"]]);
       expect(abas().filter(a => a.getAttribute("aria-current") === "page").map(a => a.textContent)).toEqual([rotulo]);
       expect(tabelas()).toEqual([tabela]);
+      // o painel leva o nome da aba para o leitor de tela e não o repete como título
+      expect(screen.getByRole("region", { name: rotulo }).querySelector("table")?.classList.contains(tabela)).toBe(true);
+      expect(screen.getAllByRole("heading").map(h => h.textContent)).toEqual(["Cota da Lotufo"]);
       // o ano e os cinco números do ano só nas abas de um ano; a comparação mostra os dois
       expect(screen.queryByRole("group", { name: "Ano" }) !== null).toBe(doAno);
       expect(document.querySelector(".fch-numeros") !== null).toBe(doAno);
