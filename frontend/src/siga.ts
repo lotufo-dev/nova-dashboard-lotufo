@@ -22,7 +22,13 @@ export type ProcessoSiga = {
   categoria: Categoria; complemento: string | null; o_que_e: string;
   // a categoria veio do nome que o robo mandou (ninguem escolheu ainda): a tela oferece confirmar
   categoria_sugerida?: boolean;
+  // #805: o nome mostrado indica outra categoria que a escolhida por quem cadastrou (so' aviso; nada muda sozinho)
+  categoria_a_conferir: Categoria | null;
   contrato_id: number | null; obra: string | null; medicao_id: number | null; medicao_titulo: string | null;
+  // #805: o contratante da obra ("SINFRA", "SUEF II"); processo sem obra nao tem
+  contratante: string | null; orgao_sub: string | null;
+  // #805: a leitura do tempo no setor, do servidor (a regua do tempo parado); nula no encerrado e sem data de entrada
+  situacao_tempo: Situacao | null;
   protocolo_id: number | null; situacao: string | null; setor: string; caixa_entrada: boolean; com_quem: string;
   // #657: medicao recebida ou processo arquivado; derivado pelo servidor a cada leitura. null = vivo
   encerrado: "recebida" | "arquivado" | null;
@@ -41,8 +47,13 @@ export type Robo = {
   avisos: AvisoRobo[];
 };
 
+// #805: a faixa de numeros (so' os vivos; parados = os criticos) e os limites do tempo parado, do servidor
+export type NumerosSiga = { acompanhados: number; parados: number; andaram_hoje: number; nao_lidos: number };
+export type LimitesSiga = { dias_atencao: number; dias_critico: number };
+
 export type PainelSiga = {
   lido_em: string | null; atrasado: boolean; processos: ProcessoSiga[]; pode_atualizar: boolean; robo: Robo;
+  numeros: NumerosSiga; limites: LimitesSiga;
 };
 
 /** Ha' pedido que o robo ainda vai atender sozinho? O travado nao conta: a tela nao rele a cada 5 s por ele. */
@@ -75,12 +86,6 @@ export function situacaoDoAtraso(p: Pick<ProcessoSiga, "dias_uteis" | "hoje">): 
   return p.hoje > 0 ? "feito" : situacaoDoNivel(nivelDias(p.dias_uteis));
 }
 
-/** O tempo no setor como uma das quatro situacoes da fundacao (#767), para a tela SIGA: o atraso de `situacaoDoAtraso`
- *  e, dentro do prazo, em andamento (la' toda linha e' um processo em curso). Sem data de entrada no setor, nenhuma. */
-export function situacaoDoTempo(p: Pick<ProcessoSiga, "dias_uteis" | "hoje">): Situacao | undefined {
-  return situacaoDoAtraso(p) ?? (p.dias_uteis === null ? undefined : "andamento");
-}
-
 const instante = (iso: string | null, vazio: number): number => {
   const t = iso === null ? NaN : Date.parse(iso);
   return Number.isNaN(t) ? vazio : t;
@@ -100,6 +105,18 @@ export function porCategoria(processos: ProcessoSiga[]): { categoria: Categoria;
   return CATEGORIAS
     .map(c => ({ ...c, processos: ordenar(processos.filter(p => p.categoria === c.categoria)) }))
     .filter(s => s.processos.length > 0);
+}
+
+/** A categoria escolhida na URL (`?categoria=aditivos`); sem ela, ou com valor que nao e' categoria, todas (null). */
+export function categoriaDaBusca(busca: Record<string, string>): Categoria | null {
+  return CATEGORIAS.find(c => c.categoria === busca.categoria)?.categoria ?? null;
+}
+
+/** O "nao lido" do processo (#657): o aviso do robo para ele, sem as palavras que viram a etiqueta ("às 11:02: A
+ *  página não abriu"). Sem aviso, null. */
+export function naoLidoDe(robo: Robo, processoId: number): string | null {
+  const aviso = robo.avisos.find(a => a.tipo === "nao_lido" && a.processo_id === processoId);
+  return aviso ? aviso.texto.replace(/^não lido\s*/i, "") : null;
 }
 
 export const ROTULO_ENCERRADO = { recebida: "Medição recebida", arquivado: "Arquivado" } as const;

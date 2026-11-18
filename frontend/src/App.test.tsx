@@ -5,6 +5,9 @@ import App from "./App";
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
 
+// a faixa de numeros e os limites do tempo parado que GET /api/siga manda sempre (#805)
+const SIGA_SEM_PROCESSO = { numeros: { acompanhados: 0, parados: 0, andaram_hoje: 0, nao_lidos: 0 }, limites: { dias_atencao: 5, dias_critico: 10 } };
+
 const OBRA = { id: 7, orgao: "SINFRA - SUEF II", contratante: "SINFRA", numero_instrumento: "IC 7/2026", nome_curto: "Granito",
   estado: "ativo", entidade_id: 1, valor_vigente_centavos: 1000_00, medido_centavos: 250_00, saldo_centavos: 750_00,
   execucao_fim_vigente: "2027-03-31", vigencia_fim_vigente: "2027-06-30", dias_execucao: 100, dias_vigencia: 200 };
@@ -88,7 +91,7 @@ describe("App: a tela SIGA", () => {
   const entrar = (perfil: string) => api.mockImplementation(async (caminho: string) => {
     if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, csrf: "x" };
     if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
-      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] } };
+      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, ...SIGA_SEM_PROCESSO };
     // o Inicio (entrada da diretoria) le este painel: sem o corpo minimo ele quebra e derruba a casca
     if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
     return [];
@@ -194,7 +197,7 @@ describe("App: o menu lateral largo", () => {
   const entrar = () => api.mockImplementation(async (caminho: string) => {
     if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil: "admin", csrf: "x" };
     if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
-      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] } };
+      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, ...SIGA_SEM_PROCESSO };
     if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
     return [];
   });
@@ -246,7 +249,7 @@ describe("App: o menu lateral no celular (375 px)", () => {
     api.mockImplementation(async (caminho: string) => {
       if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil: "admin", csrf: "x" };
       if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
-        robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] } };
+        robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, ...SIGA_SEM_PROCESSO };
       if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
       return [];
     });
@@ -359,7 +362,7 @@ describe("App: aviso flutuante de resposta do órgão (issue #654)", () => {
     if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, csrf: "x" };
     if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
     if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
-      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] } };
+      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, ...SIGA_SEM_PROCESSO };
     if (caminho === "/api/correio/respostas/nao-vistas") return [NAO_VISTA];
     if (caminho === "/api/correio/respostas/ler") return { novas: [] };
     return [];
