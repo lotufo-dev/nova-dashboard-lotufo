@@ -170,27 +170,45 @@ def _falta_na_cota(falta: int, pct: int | None, teto: int) -> int:
     return min(contratos.cota(falta, pct) or 0, teto)
 
 
-def cota_pela_nota_da_empresa(conn) -> tuple[dict[int, int], set[int]]:
-    """Para o a receber do Inicio e da lista de Obras (`diretoria.a_receber_na_cota`, issue #756), a conta desta pagina
-    nas medicoes de consorcio que contam pela nota da PROPRIA empresa (`_notas_da_conta`, `pela_baixa`), para os dois
-    lugares nao terem cada um a sua definicao:
-    - medicao cobrada (`_cobrada`) -> o que esta' em aberto nas notas da empresa dela, ja' na cota (`_recebimento`: a
-      face menos o que foi baixado nos titulos delas; zero quando o repasse ja' foi baixado);
+def _pela_nota_da_empresa(conn) -> tuple[dict[int, int], set[int], set[int]]:
+    """A escolha de `_notas_da_conta` em todas as medicoes de consorcio COBRADAS (`_cobrada`) que contam pela nota da
+    PROPRIA empresa (`pela_baixa`), lida uma vez, para os lugares fora desta pagina nao terem cada um a sua definicao:
+    - medicao -> o que esta' em aberto nas notas da empresa dela, ja' na cota (`_recebimento`: a face menos o que foi
+      baixado nos titulos delas; zero quando o repasse ja' foi baixado);
+    - as notas da empresa que contam nessas medicoes;
     - as faturas do consorcio que ficaram fora da conta em toda medicao cobrada a que estao ligadas (as preteridas pela
       nota da empresa). A fatura que ainda conta em alguma medicao (o par misto) nao sai."""
     with db.leitura(conn):
         ms = _medicoes(conn)
         notas = _notas_por_medicao(conn, {m["id"] for m in ms})
         aberto: dict[int, int] = {}
-        contam_em_alguma, fora_em_alguma = set(), set()
+        contam_em_alguma, fora_em_alguma, da_empresa = set(), set(), set()
         for m in ms:
             contam, fora = _notas_da_conta(m, notas.get(m["id"], []))
             contam_em_alguma |= {x["nota_id"] for x in contam}
             if not _cobrada(m) or not any(x["pela_baixa"] for x in contam):
                 continue
             aberto[m["id"]] = sum(_recebimento(m, x, contratos.cota(x["valor"], x["pct"]) or 0)[1] for x in contam)
+            da_empresa |= {x["nota_id"] for x in contam}
             fora_em_alguma |= {x["nota_id"] for x in fora}
-        return aberto, fora_em_alguma - contam_em_alguma
+        return aberto, da_empresa, fora_em_alguma - contam_em_alguma
+
+
+def cota_pela_nota_da_empresa(conn) -> tuple[dict[int, int], set[int]]:
+    """Para o a receber do Inicio e da lista de Obras (`diretoria.a_receber_na_cota`, issue #756): por medicao de
+    consorcio que conta pela nota da propria empresa, o que esta' em aberto nelas; e as faturas do consorcio
+    preteridas (`_pela_nota_da_empresa`)."""
+    aberto, _, preteridas = _pela_nota_da_empresa(conn)
+    return aberto, preteridas
+
+
+def notas_do_recebido_em_consorcio(conn) -> tuple[set[int], set[int]]:
+    """Para o recebido do Inicio (`diretoria._pct_do_recebido`; decisao do dono de 17/11/2026, issue #756, levada ao
+    Inicio na mesma data): (as notas da propria empresa que contam em medicao de consorcio cobrada, cujas baixas sao o
+    recebido da cota, pela face; as faturas do consorcio preteridas por elas, cujas baixas nao entram). A mesma
+    escolha desta pagina (`_pela_nota_da_empresa`)."""
+    _, da_empresa, preteridas = _pela_nota_da_empresa(conn)
+    return da_empresa, preteridas
 
 
 def notas_da_cota_em_consorcio(conn, medicao_id: int) -> tuple[list[dict], list[dict]] | None:

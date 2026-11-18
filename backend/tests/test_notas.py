@@ -5,7 +5,7 @@ import pathlib
 
 import pytest
 
-from app import (auth, avisos, cadastro_aplicar, cadastro_arquivos, contratos, db, documentos, espelho,
+from app import (auditoria, auth, avisos, cadastro_aplicar, cadastro_arquivos, contratos, db, documentos, espelho,
                  espelhos, medicoes, notas, notas_envio)
 from tests import ficticios
 from tests.conftest import CADASTRO_EXEMPLO, _pdf_com_texto
@@ -659,6 +659,31 @@ def test_nota_maior_que_a_medicao_gera_aviso_na_medicao(conn, usuario, _texto):
     medicoes.definir_valor(conn, 1, mid, "atestado", 84678831, "manual")
     assert notas.acima_da_medicao(conn, mid) == []
     assert not [a for a in notas.avisos(conn, datetime.date(2026, 9, 22)) if a["tipo"] == "nota_acima_da_medicao"]
+
+
+def test_pdf_da_nota_na_medicao_recebida_liga_so_para_o_administrador(conn, usuario, _texto):
+    """Decisao de 17/11/2026 (docs/adr/0006): na medicao recebida, anexar o PDF da nota dava erro para todos. Passa a
+    ligar para quem administra, sem mudar o estado nem a data do recebimento, com o vinculo na auditoria; os outros
+    perfis continuam recusados, em portugues, e nada fica gravado (nem o documento)."""
+    cid = contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 098/2025", "objeto": "Obra",
+                                    "valor_original_centavos": 10_000_000_00})
+    mid = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": 5, "tipo": "execucao", "competencia": "2026-06"})
+    medicoes.definir_valor(conn, 1, mid, "protocolado", 84678831, "manual")       # centavo impar
+    medicoes.registrar_protocolo(conn, 1, mid, "2026-07-10", None, None, "manual")
+    medicoes.mudar_estado(conn, 1, mid, "recebida", "paga, conforme o extrato do banco", "2026-09-20", origem="manual")
+    _texto(_fixture("3102-integra-vg.txt"))
+    with pytest.raises(ValueError, match="só o administrador liga nota"):
+        notas.anexar_pdf(conn, {**usuario, "perfil": "engenharia"}, mid, PDF, "a.pdf")
+    assert conn.execute("SELECT COUNT(*) FROM medicao_documentos").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes").fetchone()[0] == 0
+    r = notas.anexar_pdf(conn, {**usuario, "perfil": "admin"}, mid, PDF, "a.pdf")
+    assert r["estado"] == "recebida" and r["conferencia"] == []
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-20")
+    assert [(n["numero"], n["regra"], n["origem"]) for n in m["notas"]] == [("3102", "pdf", "manual")]
+    ev = conn.execute("SELECT usuario_id, depois FROM audit_log WHERE acao='nf.alocar'").fetchall()
+    assert [(e["usuario_id"], json.loads(e["depois"])["estado_medicao"]) for e in ev] == [(1, "recebida")]
+    assert auditoria.verificar_cadeia(conn)
 
 
 def _desconsiderar(conn, nf):

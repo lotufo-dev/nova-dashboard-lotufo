@@ -255,6 +255,43 @@ def test_tipos_cobranca_extras_rm_do_contrato(tmp_path):
                          "nenhum"], ruim
 
 
+def test_centro_custo_empresa_rm_so_em_consorcio_e_sem_repetir(tmp_path):
+    """docs/adr/0005: o centro de custo da propria empresa no contrato de consorcio. Opcional; recusa o que nao e'
+    texto, o contrato que nao e' de consorcio, o centro repetido em dois contratos e o que ja' e' o centro de custo
+    (atual ou anterior) de uma obra propria: cada centro aponta uma obra so'."""
+    rivoli = {"chave": "rivoli", "nome": "Rivoli", "cnpj": "31.200.606/0001-02", "papel": "consorciada"}
+    gama = {"chave": "consorcio-gama", "nome": "Consórcio Gama", "cnpj": "31.200.404/0001-52", "papel": "consorcio",
+            "consorciadas": ["lotufo", "rivoli"], "coligada_rm": 90}
+    propria = {**CONTRATO, "centro_custo_rm": "9.001.001", "centros_custo_anteriores_rm": ["9.001.000"]}
+    def cons(nome, instrumento, centro):
+        return {**CONTRATO, "nome_curto": nome, "numero_instrumento": instrumento, "entidade": "consorcio-gama",
+                "percentual_lotufo": "50", "centro_custo_empresa_rm": centro}
+    def raiz(pasta, *contratos):
+        return _escrever(tmp_path / pasta, entidades=[ENTIDADE, rivoli, gama], contratos=list(contratos))
+    lidos = {c["nome_curto"]: c["centro_custo_empresa_rm"]
+             for c in ca.preparar(raiz("a", propria, cons("Gama", "IC 1", " 9.005.001 ")))["contratos"]}
+    assert lidos == {"MT-402": None, "Gama": "9.005.001"}
+    assert ca.preparar(raiz("b", propria, cons("Gama", "IC 1", None)))["contratos"][0]["centro_custo_empresa_rm"] is None
+    for i, ruim in enumerate(("", "   ", 9.005, ["9.005.001"])):
+        assert _erros(raiz(f"c{i}", cons("Gama", "IC 1", ruim))) == [
+            "contratos/gama.yaml: centro_custo_empresa_rm: use o código do centro de custo do RM entre aspas "
+            "(ex.: '9.005.001')"], ruim
+    assert _erros(raiz("d", {**propria, "centro_custo_empresa_rm": "9.005.001"})) == [
+        "contratos/mt-402.yaml: centro_custo_empresa_rm: só vale em contrato de consórcio (na obra própria, use "
+        "centro_custo_rm)"]
+    assert _erros(raiz("e", cons("Gama", "IC 1", "9.005.001"), cons("Delta", "IC 2", "9.005.001"))) == [
+        "contratos: centro_custo_empresa_rm 9.005.001 repetido em Delta, Gama: cada centro aponta uma obra só"]
+    for i, centro in enumerate(("9.001.001", "9.001.000")):
+        assert _erros(raiz(f"f{i}", propria, cons("Gama", "IC 1", centro))) == [
+            f"contratos/gama.yaml: centro_custo_empresa_rm: {centro} já é o centro de custo de MT-402"]
+
+
+def test_cadastro_de_exemplo_declara_o_centro_da_empresa_so_na_obra_de_consorcio():
+    from tests.conftest import CADASTRO_EXEMPLO
+    centros = {c["nome_curto"]: c["centro_custo_empresa_rm"] for c in ca.preparar(CADASTRO_EXEMPLO)["contratos"]}
+    assert centros == {"Obra Própria": None, "Obra Consórcio": "5.001.001"}
+
+
 def test_cadastro_de_exemplo_declara_um_tipo_extra_so_na_obra_de_consorcio():
     from tests.conftest import CADASTRO_EXEMPLO
     tipos = {c["nome_curto"]: c["tipos_cobranca_extras_rm"] for c in ca.preparar(CADASTRO_EXEMPLO)["contratos"]}

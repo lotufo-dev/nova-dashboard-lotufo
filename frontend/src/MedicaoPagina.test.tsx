@@ -29,8 +29,8 @@ vi.mock("./Frc", () => ({
   FrcConsorcio: ({ medicaoId }: { medicaoId: number }) => <div data-frc={medicaoId} />,
 }));
 vi.mock("./Notas", () => ({
-  Notas: ({ aoMudar, rotulo, medicao, podeDesfazer }: { aoMudar: () => void; rotulo?: string; medicao: { id: number }; podeDesfazer?: boolean }) =>
-    <div data-medicao={medicao.id} data-desfazer={String(!!podeDesfazer)}>{rotulo}<button type="button" onClick={aoMudar}>Anexar nota (teste)</button></div>,
+  Notas: ({ aoMudar, rotulo, medicao, podeDesfazer, podeEditar }: { aoMudar: () => void; rotulo?: string; medicao: { id: number }; podeDesfazer?: boolean; podeEditar?: boolean }) =>
+    <div data-medicao={medicao.id} data-desfazer={String(!!podeDesfazer)} data-editar={String(!!podeEditar)}>{rotulo}<button type="button" onClick={aoMudar}>Anexar nota (teste)</button></div>,
 }));
 vi.mock("./Protocolo", async () => {
   const real = await vi.importActual<typeof import("./Protocolo")>("./Protocolo");
@@ -302,6 +302,17 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(caixa.textContent).toContain("NF 102 de R$ 20,00 é maior que a medição (R$ 10,00)");
   });
 
+  it("as notas pagas que não cobrem a medição avisam como crítico e levam às notas", async () => {
+    responder({ "/api/inicio": { avisos: [pendencia("notas_pagas_nao_cobrem", "notas pagas somam R$ 9,99 e não cobrem a medição (R$ 10,00)",
+      { nivel: "critico" })] } });
+    pagina();
+    const link = await screen.findByRole("link", { name: "ver as notas" });
+    expect(link.getAttribute("href")).toBe("/obras/1/medicoes/5#passo-4");
+    const caixa = link.closest(".aviso")!;
+    expect(caixa.classList.contains("aviso--critico")).toBe(true);
+    expect(caixa.textContent).toBe("Crítico: Notas pagas somam R$ 9,99 e não cobrem a medição (R$ 10,00): ver as notas");
+  });
+
   const ACIMA = pendencia("nota_acima_da_medicao", "nota 102 de R$ 20,00 é maior que a medição (R$ 10,00)", { nivel: "critico" });
   const acimaDe = (medicaoId: number) => ({ medicao_id: medicaoId, nota_id: 7, numero: 102, alocado_centavos: 2000, medicao_centavos: 1000 });
   const caixasAcima = () => [...document.querySelectorAll(".aviso")].filter(x => /é maior que a medição/.test(x.textContent ?? ""));
@@ -408,14 +419,24 @@ describe("Página da medição: as etapas se atualizam entre si", () => {
   beforeEach(() => abrirEtapa(3));
   afterEach(() => { cleanup(); api.mockReset(); });
 
-  // issue #71 (revisor na PR #202): desfazer o vinculo da nota so' para o admin e so' em medicao aberta
-  it.each([["protocolada", "true"], ["recebida", "false"], ["cancelada", "false"], ["desistida", "false"]])(
-    "medição %s: desfazer vínculo da nota = %s", async (estado, esperado) => {
+  // issue #71 (revisor na PR #202): desfazer o vinculo da nota so' para o admin. docs/adr/0006 (17/11/2026): na
+  // medicao recebida o admin ainda desfaz o vinculo e anexa o PDF da nota; cancelada e desistida seguem fechadas
+  it.each([["protocolada", "true"], ["recebida", "true"], ["cancelada", "false"], ["desistida", "false"]])(
+    "medição %s: desfazer vínculo e anexar a nota, para o admin = %s", async (estado, esperado) => {
       responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado }] });
       const { container } = pagina();
       await waitFor(() => expect(container.querySelector("[data-medicao='5']")).not.toBeNull());
       expect(container.querySelector("[data-medicao='5']")!.getAttribute("data-desfazer")).toBe(esperado);
+      expect(container.querySelector("[data-medicao='5']")!.getAttribute("data-editar")).toBe(esperado);
     });
+
+  it("engenharia não anexa nota nem desfaz vínculo na medição recebida", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "recebida" }] });
+    const { container } = pagina("engenharia");
+    await waitFor(() => expect(container.querySelector("[data-medicao='5']")).not.toBeNull());
+    expect(container.querySelector("[data-medicao='5']")!.getAttribute("data-desfazer")).toBe("false");
+    expect(container.querySelector("[data-medicao='5']")!.getAttribute("data-editar")).toBe("false");
+  });
 
   it("engenharia não desfaz vínculo de nota", async () => {
     responder();

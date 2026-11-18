@@ -84,12 +84,12 @@ describe("administração", () => {
   it("recebidas à mão com título aberto no RM: rótulo, contagem e filtro pela obra", () => {
     const linha = (medicao_id: number, contrato_id: number) => ({ medicao_id, contrato_id, numero_instrumento: "161/2022", numero: 1,
       tipo: "execucao", competencia: "2026-08", recebida_em: "2026-09-20", nota_id: medicao_id, numero_nf: "100", serie: "1",
-      falta_centavos: 924_01 });
+      falta_centavos: 924_01, a_mao: true });
     const rec: Reconciliacao = { nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [],
       recebidas_sem_baixa: [linha(5, 7), linha(6, 8)],
       totais: { nfs_sem_medicao: 0, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
-    expect(contagemRec("recebidas", 1)).toBe("1 nota de recebimento à mão sem baixa no RM");
-    expect(contagemRec("recebidas", 2)).toBe("2 notas de recebimentos à mão sem baixa no RM");
+    expect(contagemRec("recebidas", 1)).toBe("1 nota de medição recebida sem baixa no RM");
+    expect(contagemRec("recebidas", 2)).toBe("2 notas de medições recebidas sem baixa no RM");
     expect(contaRec(rec, rec, "recebidas", false)).toEqual({ n: 2, piso: false, haMais: false });
     const daObra = reconciliacaoDaObra(rec, { id: 7, numero_instrumento: "161/2022" });
     expect(daObra.recebidas_sem_baixa.map(x => x.medicao_id)).toEqual([5]);

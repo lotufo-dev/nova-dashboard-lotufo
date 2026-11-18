@@ -765,13 +765,13 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
       )}
 
       {mostra("recebidas") && (
-        <Grupo id="recebidas" titulo="Notas de recebimentos à mão sem baixa no RM" conta={conta("recebidas")} carregadas={d.recebidas_sem_baixa.length}
+        <Grupo id="recebidas" titulo="Notas de medições recebidas sem baixa no RM" conta={conta("recebidas")} carregadas={d.recebidas_sem_baixa.length}
           mostrando={quantas(d.recebidas_sem_baixa.length)} verTodas={verTodas("recebidas")} mais={null}>
-          <Rolagem rotulo="Notas de recebimentos à mão sem baixa no RM">
+          <Rolagem rotulo="Notas de medições recebidas sem baixa no RM">
             <table className="tabela">
-              <caption className="sr-only">NFs de medições com recebimento registrado à mão cujo título ainda está aberto no RM, uma linha por NF</caption>
+              <caption className="sr-only">NFs de medições recebidas cujo título ainda está aberto no RM, uma linha por NF</caption>
               <thead><tr><th scope="col">Obra</th><th scope="col">Medição</th><th scope="col">Recebida em</th><th scope="col">NF</th>
-                <th scope="col" className="col-num">Em aberto no RM</th></tr></thead>
+                <th scope="col">No a receber</th><th scope="col" className="col-num">Em aberto no RM</th></tr></thead>
               <tbody>
                 {d.recebidas_sem_baixa.slice(0, quantas(d.recebidas_sem_baixa.length)).map((x, i) => (
                   <tr key={`${x.medicao_id}-${x.nota_id}`} className={`linha${i % 2 === 1 ? " par" : ""}`}>
@@ -779,6 +779,8 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
                     <td><Link para={{ tela: "medicao", obra: x.contrato_id, id: x.medicao_id }} secao="notas">{tituloMedicao(x)}</Link></td>
                     <td className="num">{x.recebida_em ? fmtDataPura(x.recebida_em) : "sem data"}</td>
                     <td className="num">{x.numero_nf}{x.serie ? `/${x.serie}` : ""}</td>
+                    {/* docs/adr/0006: so' o recebimento registrado a' mao tira a nota do a receber */}
+                    <td>{x.a_mao ? "não: recebimento à mão" : "sim"}</td>
                     <td className="col-num dinheiro num">{brl(x.falta_centavos)}</td>
                   </tr>
                 ))}

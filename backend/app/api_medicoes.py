@@ -79,8 +79,8 @@ class EstadoIn(BaseModel):
     # bloco 3. Ver o comentario de TRANSICOES em medicoes.py.
     estado: Literal["recebida", "cancelada", "desistida"]
     motivo: str | None = Field(default=None, max_length=1000)  # tambem vai ao audit_log
-    # Data do marco (emissao da NF / baixa), spec §6. Opcional: quem registra depois
-    # do fato pode nao ter a data a mao, e o painel diz "sem data" em vez de inventar.
+    # Data do marco (a baixa), spec §6. No recebimento a' mao e' obrigatoria (a rota recusa sem ela, decisao de
+    # 17/11/2026, docs/adr/0006); cancelada e desistida nao tem data de marco.
     data: datetime.date | None = None
 
 
@@ -315,6 +315,12 @@ def estado(medicao_id: ID, dados: EstadoIn,
         if len(motivo) < MOTIVO_RECEBIMENTO_MINIMO:
             raise HTTPException(422, f"Informe o motivo do recebimento à mão (ao menos {MOTIVO_RECEBIMENTO_MINIMO} "
                                      "caracteres): fica registrado na auditoria")
+        # Decisao de 17/11/2026 (docs/adr/0006): quem registra a' mao diz o dia em que o dinheiro entrou. Sem a data a
+        # medicao ficava recebida com `recebida_em` nulo, fora do recebido de qualquer mes e do prazo do orgao.
+        if dados.data is None:
+            raise HTTPException(422, "Informe a data do recebimento: sem ela a medição fica fora do recebido do mês")
+        if dados.data > tempo.hoje_local():
+            raise HTTPException(422, "A data do recebimento não pode ser depois de hoje")
     try:
         medicoes.mudar_estado(conn, usuario["id"], medicao_id, dados.estado, motivo,
                               dados.data.isoformat() if dados.data else None,

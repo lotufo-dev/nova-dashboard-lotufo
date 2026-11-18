@@ -10,6 +10,13 @@ lei: '14.133'
 cno: null
 numero_processo: null
 centro_custo_rm: null
+# Opcional, só em contrato de consórcio (docs/adr/0005): o centro de custo em que a própria empresa lança, no RM
+# dela, a nota que emite pela cota nesta obra. O contrato é do consórcio (outra coligada), então `centro_custo_rm`
+# não serve para ela. Com a chave, a nota da empresa nesse centro aponta esta obra e liga sozinha à medição: pela
+# saída do espelho ou, sem espelho, pelo valor da cota da medição, com as travas de data e de nota repetida. Sem a
+# chave, ela não liga sozinha (entra pelo PDF anexado). O `cadastro validar` recusa o mesmo centro em dois
+# contratos e o centro que já é o `centro_custo_rm` de uma obra própria.
+centro_custo_empresa_rm: '5.001.001'
 valor_original: 100.000.000,00
 percentual_lotufo: 50,00
 execucao_inicio: '2025-06-02'
@@ -36,8 +43,8 @@ copia_extras: []
 # - a fatura do próprio consórcio (a coligada da entidade do contrato) entra no a receber e no faturado do RM,
 #   liga-se sozinha à medição e deixa a medição ser recebida pela baixa;
 # - a nota da própria empresa (outra coligada) continua fora do a receber e do faturado, com ou sem a chave: para
-#   ela a chave vale no vínculo automático (pela saída do espelho), na nota repetida e, quando adotada, na página
-#   Fechamento.
+#   ela a chave vale no vínculo automático (pela saída do espelho, com `centro_custo_empresa_rm` declarado acima),
+#   na nota repetida e na página Fechamento.
 # Sem a chave ou com [], nenhum. Código entre aspas, no formato 2.2.NN; tipo que já está na lista geral é recusado
 # pelo `cadastro validar`. O `cadastro aplicar` recusa declarar o tipo enquanto houver nota em dobro na obra (o
 # movimento refeito no RM e o antigo, os dois ativos): o antigo que o RM deixou de devolver sai sozinho na

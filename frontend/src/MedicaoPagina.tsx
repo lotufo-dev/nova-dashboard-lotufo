@@ -53,8 +53,11 @@ const SECAO_PASSO: Record<string, number> = { espelho: 3, notas: 4, protocolo: 5
 
 // #712 (docs/adr/0008): a pendencia sem data da medicao que nenhum passo desta pagina mostra sozinho. Vem da fila de
 // avisos do servidor (a mesma da lateral da obra), que a agenda nao mostra por nao ter data. A nota maior que a
-// medicao tambem aparece no passo Envio da nota (antes do protocolo): la' a caixa daqui nao se repete.
-const SEM_DATA_DA_MEDICAO = ["nota_cancelada_rm", "nota_acima_da_medicao", "medicao_fora_de_ordem"];
+// medicao tambem aparece no passo Envio da nota (antes do protocolo): la' a caixa daqui nao se repete. As notas pagas
+// que nao cobrem a medicao (depois da #714, docs/adr/0006) sao o par dela: a medicao nao vira recebida sozinha.
+// A recebida a' mao com notas que nao cobrem o valor dela (docs/adr/0006) avisa aqui: a nota que falta entra pelo PDF.
+const SEM_DATA_DA_MEDICAO = ["nota_cancelada_rm", "nota_acima_da_medicao", "notas_pagas_nao_cobrem",
+  "recebida_notas_nao_cobrem", "medicao_fora_de_ordem"];
 
 export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }:
     { contratoId: number; medicaoId: number; usuario: Usuario; origem: Origem | null }) {
@@ -464,13 +467,16 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       )}
     </section>
   );
+  // docs/adr/0006 (decisao de 17/11/2026): na medicao recebida, quem administra ainda anexa o PDF da nota e desfaz
+  // o vinculo (o servidor recusa os outros perfis); cancelada e desistida continuam fechadas para todos
+  const notasAbertas = (mx: Medicao) => !FINAIS.includes(mx.estado) || (mx.estado === "recebida" && usuario.perfil === "admin");
   // #514: a nota de cada espelho a' esquerda (soltar os PDFs) e, em consorcio, a "Fatura do consórcio" a' direita
   const notasDe = (mx: Medicao, rotulo?: string) => (
     <div className="med-duas">
       <section className="cartao med-painel" aria-label={rotulo ? `Notas fiscais: ${rotulo}` : "Notas fiscais"}>
         <h3 className="med-painel__titulo">Notas fiscais</h3>
-        <Notas medicao={mx} rotulo={rotulo} podeEditar={podeEditar && !FINAIS.includes(mx.estado)}
-          podeDesfazer={usuario.perfil === "admin" && !FINAIS.includes(mx.estado)}
+        <Notas medicao={mx} rotulo={rotulo} podeEditar={podeEditar && notasAbertas(mx)}
+          podeDesfazer={usuario.perfil === "admin" && notasAbertas(mx)}
           aoMudar={() => { recarregar(); setVersaoFrc(v => v + 1); }} />
       </section>
       <FrcConsorcio medicaoId={mx.id} podeEditar={podeEditar && !FINAIS.includes(mx.estado)} versao={versaoFrc}

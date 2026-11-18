@@ -56,7 +56,7 @@ export type Desfeita = { id: number; medicao_id: number; desfeita_em: string; mo
 // e' o que o RM mostra em aberto, cheio. O recebimento manual vale; a linha e' o aviso de que o RM nao tem a baixa.
 export type RecebidaSemBaixa = { medicao_id: number; contrato_id: number; numero_instrumento: string; numero: number; tipo: string;
                                  competencia: string | null; recebida_em: string | null; nota_id: number; numero_nf: string;
-                                 serie: string | null; falta_centavos: number };
+                                 serie: string | null; falta_centavos: number; a_mao: boolean };
 // #22: as NFs sem medicao e as alocacoes desfeitas chegam em paginas; `totais` e' o numero exato de cada uma e
 // `ha_mais` diz se existe pagina seguinte
 type PorPaginado<T> = { nfs_sem_medicao: T; alocacoes_desfeitas: T };
@@ -72,7 +72,7 @@ export const CATEGORIAS_REC: { id: CategoriaRec; campo: Exclude<keyof Reconcilia
   { id: "medicoes", campo: "medicoes_sem_nf", titulo: "Medições sem NF do RM" },
   { id: "divergencias", campo: "divergencias", titulo: "Divergências de valor" },
   { id: "desfeitas", campo: "alocacoes_desfeitas", titulo: "Alocações desfeitas" },
-  { id: "recebidas", campo: "recebidas_sem_baixa", titulo: "Notas de recebimentos à mão sem baixa no RM" },
+  { id: "recebidas", campo: "recebidas_sem_baixa", titulo: "Notas de medições recebidas sem baixa no RM" },
 ];
 
 // #22: a API (`sincronizacao_rm.reconciliacao`) manda duas listas em paginas (200 NFs sem medicao, 50 alocacoes
@@ -139,7 +139,7 @@ export function rotuloRec(c: CategoriaRec, n: number): string {
     case "medicoes": return n === 1 ? "medição sem NF do RM" : "medições sem NF do RM";
     case "divergencias": return n === 1 ? "divergência de valor" : "divergências de valor";
     case "desfeitas": return n === 1 ? "alocação desfeita" : "alocações desfeitas";
-    case "recebidas": return n === 1 ? "nota de recebimento à mão sem baixa no RM" : "notas de recebimentos à mão sem baixa no RM";
+    case "recebidas": return n === 1 ? "nota de medição recebida sem baixa no RM" : "notas de medições recebidas sem baixa no RM";
   }
 }
 
