@@ -1689,22 +1689,85 @@ def test_diferenca_aprovado_x_pedido_so_das_medicoes_com_boletim_e_pedido(cenari
     medir(c, ids["propria"], 3, "2026-03", "nota_emitida", 300_003)                         # sem o valor do boletim: fora
     medir(c, ids["propria"], 4, "2026-03", "boletim_recebido", None, 70_001)                # boletim sem pedido: fora
     medir(c, ids["consorcio"], 1, "2026-03", "recebida", 200_001, 200_001)                  # igual: cota 100.001 nos dois
-    medir(c, ids["consorcio"], 2, "2026-03", "espelho_gerado", 333_333, 333_331)            # cotas 166.667 e 166.666
+    medir(c, ids["consorcio"], 2, "2026-03", "espelho_gerado", 333_333, 333_320)            # cotas 166.667 e 166.660
     f = fechamento.fechamento(c, datetime.date(2026, 11, 18))
     _confere_soma(f)
     mes = _mes(f, "2026-03")
     par = lambda x: (x["aprovado_com_pedido_centavos"], x["pedido_do_aprovado_centavos"])   # noqa: E731
     propria, consorcio = (next(o for o in mes["obras"] if o["contrato_id"] == ids[k]) for k in ("propria", "consorcio"))
     assert [par(md) for md in propria["medicoes"]] == [(990_001, 1_000_001), (0, 0), (0, 0), (0, 0)]
-    assert [par(md) for md in consorcio["medicoes"]] == [(100_001, 100_001), (166_666, 166_667)]
-    assert par(propria) == (990_001, 1_000_001) and par(consorcio) == (266_667, 266_668)
-    assert par(mes) == par(f["por_ano"]["2026"]) == par(f["acumulado"]["2026"]) == (1_256_668, 1_266_669)
+    assert [par(md) for md in consorcio["medicoes"]] == [(100_001, 100_001), (166_660, 166_667)]
+    assert par(propria) == (990_001, 1_000_001) and par(consorcio) == (266_661, 266_668)
+    assert par(mes) == par(f["por_ano"]["2026"]) == par(f["acumulado"]["2026"]) == (1_256_662, 1_266_669)
     assert par(f["por_ano"]["2025"]) == (0, 0)
+    # o corte: o que foi aprovado abaixo do pedido, medicao a medicao, somando como os outros numeros
+    corte = lambda x: x["abaixo_do_pedido_centavos"]                                        # noqa: E731
+    assert [corte(md) for md in propria["medicoes"]] == [10_000, 0, 0, 0]
+    assert [corte(md) for md in consorcio["medicoes"]] == [0, 7]
+    assert (corte(propria), corte(consorcio)) == (10_000, 7)
+    assert corte(mes) == corte(f["por_ano"]["2026"]) == corte(f["acumulado"]["2026"]) == 10_007
+    assert corte(f["por_ano"]["2025"]) == 0
+    assert all(md["acima_do_pedido_centavos"] == 0 for o in mes["obras"] for md in o["medicoes"])
     # nao e' "medido - aprovado": o medido leva a medicao em analise, que nao e' diferenca
     assert mes["medido_centavos"] - mes["aprovado_centavos"] == 500_000
-    assert mes["aprovado_centavos"] == 990_001 + 300_003 + 70_001 + 100_001 + 166_666
+    assert mes["aprovado_centavos"] == 990_001 + 300_003 + 70_001 + 100_001 + 166_660
     # o limite da diferenca critica e' o do aviso "aprovado abaixo do pedido" (#741): um numero so'
     assert f["diferenca_critica_por_mil"] == avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL == 5
+
+
+def test_aprovado_acima_do_pedido_nao_anula_o_corte_do_mes(cenario):
+    # revisao da PR #806 sobre a copia da producao: o aprovado MUITO acima do pedido e' pedido gravado errado, nao
+    # aprovacao a maior. Somado no mes, anulava o corte real de outra obra. O corte do mes, da obra e do ano soma so'
+    # o que ficou abaixo; o acima sai so' na linha da medicao, onde se confere o pedido (#807)
+    c, ids = cenario
+    medir(c, ids["propria"], 1, "2026-04", "boletim_recebido", 2_000_001, 1_900_001)        # corte de 100.000
+    medir(c, ids["propria"], 2, "2026-04", "boletim_recebido", 50_001, 600_001)             # pedido gravado errado
+    medir(c, ids["consorcio"], 1, "2026-04", "recebida", 400_003, 300_001)                  # corte, na cota de 50%
+    f = fechamento.fechamento(c, datetime.date(2026, 11, 18))
+    _confere_soma(f)
+    mes = _mes(f, "2026-04")
+    propria, consorcio = (next(o for o in mes["obras"] if o["contrato_id"] == ids[k]) for k in ("propria", "consorcio"))
+    assert [(md["abaixo_do_pedido_centavos"], md["acima_do_pedido_centavos"]) for md in propria["medicoes"]] == [
+        (100_000, 0), (0, 550_000)]
+    assert [(md["abaixo_do_pedido_centavos"], md["acima_do_pedido_centavos"]) for md in consorcio["medicoes"]] == [
+        (200_002 - 150_001, 0)]
+    # o corte do mes sao os dois cortes; os 550.000 acima nao entram nem descontam
+    assert (propria["abaixo_do_pedido_centavos"], consorcio["abaixo_do_pedido_centavos"]) == (100_000, 50_001)
+    assert mes["abaixo_do_pedido_centavos"] == f["por_ano"]["2026"]["abaixo_do_pedido_centavos"] == 150_001
+    # os dois totais continuam com todas as medicoes comparaveis: a base do percentual e' o pedido de todas
+    assert (mes["aprovado_com_pedido_centavos"], mes["pedido_do_aprovado_centavos"]) == (
+        1_900_001 + 600_001 + 150_001, 2_000_001 + 50_001 + 200_002)
+    # o acima e' so' da medicao: nao soma, nao sobe para a obra nem para o mes
+    assert "acima_do_pedido_centavos" not in fechamento.SOMAS
+    assert "acima_do_pedido_centavos" not in propria and "acima_do_pedido_centavos" not in mes
+
+
+def test_diferenca_de_ate_cinco_centavos_e_arredondamento_do_orgao(cenario):
+    # decisao do dono de 10/11/2026: ate' R$ 0,05 por medicao e' arredondamento do orgao. Conta como igual: nao
+    # entra no corte nem no acima. O limite e' incluido, e vale no valor cheio (o do orgao), nao na cota
+    c, ids = cenario
+    assert fechamento.TOLERANCIA_DO_PEDIDO_CENTAVOS == 5
+    medir(c, ids["propria"], 1, "2026-06", "boletim_recebido", 800_005, 800_000)            # 5 centavos abaixo: igual
+    medir(c, ids["propria"], 2, "2026-06", "boletim_recebido", 800_006, 800_000)            # 6 centavos abaixo: corte
+    medir(c, ids["propria"], 3, "2026-06", "boletim_recebido", 700_000, 700_005)            # 5 centavos acima: igual
+    medir(c, ids["propria"], 4, "2026-06", "boletim_recebido", 700_000, 700_006)            # 6 centavos acima
+    medir(c, ids["consorcio"], 1, "2026-06", "recebida", 200_005, 200_001)                  # 4 centavos no cheio: igual
+    medir(c, ids["consorcio"], 2, "2026-06", "recebida", 200_011, 200_001)                  # 10 no cheio, 5 na cota: corte
+    f = fechamento.fechamento(c, datetime.date(2026, 11, 18))
+    _confere_soma(f)
+    mes = _mes(f, "2026-06")
+    propria, consorcio = (next(o for o in mes["obras"] if o["contrato_id"] == ids[k]) for k in ("propria", "consorcio"))
+    assert [(md["abaixo_do_pedido_centavos"], md["acima_do_pedido_centavos"]) for md in propria["medicoes"]] == [
+        (0, 0), (6, 0), (0, 0), (0, 6)]
+    assert [(md["abaixo_do_pedido_centavos"], md["acima_do_pedido_centavos"]) for md in consorcio["medicoes"]] == [
+        (0, 0), (5, 0)]
+    assert mes["abaixo_do_pedido_centavos"] == 11
+    # a medicao dentro da tolerancia continua comparavel: os dois lados dela entram na base
+    assert propria["medicoes"][0]["aprovado_com_pedido_centavos"] == 800_000
+    assert propria["medicoes"][0]["pedido_do_aprovado_centavos"] == 800_005
+    # o mes so' com arredondamento nao tem corte: a tela diz "igual ao pedido"
+    medir(c, ids["propria"], 5, "2026-07", "boletim_recebido", 900_002, 900_000)
+    assert _mes(fechamento.fechamento(c, datetime.date(2026, 11, 18)), "2026-07")["abaixo_do_pedido_centavos"] == 0
 
 
 def test_diferenca_aprovado_x_pedido_nao_some_com_a_trava_do_a_receber(cenario):
@@ -1716,6 +1779,7 @@ def test_diferenca_aprovado_x_pedido_nao_some_com_a_trava_do_a_receber(cenario):
     mes = _mes(f, "2026-03")
     assert not f["total_a_receber_liberado"] and mes["em_aberto_centavos"] is None
     assert (mes["aprovado_com_pedido_centavos"], mes["pedido_do_aprovado_centavos"]) == (990_001, 1_000_001)
+    assert mes["abaixo_do_pedido_centavos"] == 10_000
 
 
 def test_medido_do_ano_anterior_so_em_competencia_encerrada(cenario):

@@ -36,20 +36,29 @@ export function variacao(atual: number | null | undefined, referencia: number | 
 // ---------------------------------------------------------------- diferenca
 
 export type TomDaDiferenca = "igual" | "leve" | "ruim";
+export type SentidoDaDiferenca = "igual" | "abaixo" | "acima";
 
-/** O tom e os dois numeros da diferenca; nulo quando nao ha' base (nula, zero ou negativa) ou valor. Critica e' a
- *  diferenca que passa de `limitePorMil` milesimos da base, o limite fora. O limite nao mora aqui: vem do servidor,
- *  que e' quem ja' o usa no aviso "aprovado abaixo do pedido" (#741), para a tela e o aviso nunca discordarem. O
- *  percentual tem uma casa; o que arredonda para zero sai como "< 0,1%", para a etiqueta nao dizer "0,0%" de uma
- *  diferenca que existe. */
-export function diferenca(valor: number | null | undefined, base: number | null | undefined, limitePorMil: number):
-    { tom: TomDaDiferenca; centavos: number; percentual: string } | null {
-  if (valor === null || valor === undefined || base === null || base === undefined || base <= 0) return null;
-  const centavos = valor - base;
-  if (centavos === 0) return { tom: "igual", centavos, percentual: "" };
-  const decimos = Math.round(Math.abs(centavos) * 1000 / base);
-  return { tom: Math.abs(centavos) * 1000 > base * limitePorMil ? "ruim" : "leve", centavos,
-    percentual: decimos === 0 ? "< 0,1%" : umaCasa(decimos) };
+/** A leitura da diferenca entre um valor e a base dele, a partir do que o servidor ja' somou: quanto ficou ABAIXO
+ *  da base (o corte) e, so' onde faz sentido mostrar, quanto ficou ACIMA. Nulo quando nao ha' base (nula, zero ou
+ *  negativa) ou o servidor nao mandou o corte.
+ *  - Abaixo: o tom sai do tamanho do corte sobre a base. Critico e' o corte que passa de `limitePorMil` milesimos
+ *    dela, o limite fora. O limite nao mora aqui: vem do servidor, que e' quem ja' o usa no aviso "aprovado abaixo do
+ *    pedido" (#741), para a tela e o aviso nunca discordarem. O percentual tem uma casa; o que arredonda para zero
+ *    sai como "< 0,1%", para a etiqueta nao dizer "0,0%" de um corte que existe.
+ *  - Acima: sempre o tom da atencao, nunca critico, e sem percentual. O valor acima da base quase sempre e' a base
+ *    gravada errada (revisao da PR #806), e "+900%" em vermelho acusaria o que nao houve.
+ *  - Sem um nem outro, igual. A tolerancia de arredondamento e' do servidor: o que ele nao conta como corte nem como
+ *    acima chega aqui como zero. */
+export function diferenca(abaixo: number | null | undefined, acima: number | null | undefined, base: number | null | undefined,
+    limitePorMil: number): { sentido: SentidoDaDiferenca; tom: TomDaDiferenca; centavos: number; percentual: string } | null {
+  if (abaixo === null || abaixo === undefined || base === null || base === undefined || base <= 0) return null;
+  if (abaixo > 0) {
+    const decimos = Math.round(abaixo * 1000 / base);
+    return { sentido: "abaixo", tom: abaixo * 1000 > base * limitePorMil ? "ruim" : "leve", centavos: abaixo,
+      percentual: decimos === 0 ? "< 0,1%" : umaCasa(decimos) };
+  }
+  if (acima !== null && acima !== undefined && acima > 0) return { sentido: "acima", tom: "leve", centavos: acima, percentual: "" };
+  return { sentido: "igual", tom: "igual", centavos: 0, percentual: "" };
 }
 
 // ---------------------------------------------------------------- andamento

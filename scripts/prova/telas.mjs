@@ -151,13 +151,16 @@ export const TELAS = [
   { rota: "fechamento", id: "fechamento", caminho: "/fechamento", perfis: TODOS, espera: ".fch-numeros" },
   { rota: "fechamento", id: "fechamento-2025", caminho: "/fechamento", perfis: TODOS, antes: ".fch-numeros", espera: ".fch-tabela--aberto",
     passos: [{ clicar: '.escolha:has-text("2025")' }] },
-  // as familias de valor (#805): a tabela do mes com dois anos (a variacao do medido), as tres leituras da diferenca
-  // entre o aprovado e o pedido e o em aberto; no segundo estado, o mes aberto ate' a medicao
+  // as familias de valor (#805): a tabela do mes com dois anos (a variacao do medido), a diferenca entre o aprovado e
+  // o pedido (so' o corte, no mes) e o em aberto; no segundo estado, tres meses abertos ate' a medicao: o corte
+  // critico, o corte ao lado de um arredondamento, e o aprovado acima do pedido, que so' aparece na linha da medicao
   { rota: "fechamento", id: "fechamento-valores", caminho: "/fechamento", perfis: ["diretoria"], espera: ".fch-tabela--meses .variacao",
     simular: [{ caminho: /^\/api\/fechamento$/, corpo: fechamentoComValores }] },
   { rota: "fechamento", id: "fechamento-valores-medicao", caminho: "/fechamento", perfis: ["diretoria"], antes: ".fch-tabela--meses .variacao",
     espera: ".fch-linha--medicao", simular: [{ caminho: /^\/api\/fechamento$/, corpo: fechamentoComValores }],
-    passos: [{ clicar: '.fch-abre[aria-label^="Julho de 2026"]' }, { clicar: '.fch-abre[aria-label^="Obra Exemplo"]' }] },
+    passos: ["Julho", "Agosto", "Setembro"].flatMap((mes, i) => [
+      { clicar: `.fch-abre[aria-label^="${mes} de 2026"]` },
+      { clicar: `.fch-abre[aria-label="Obra Exemplo, medições de 0${7 + i}/2026"]` }]) },
   { rota: "fechamento", id: "fechamento-erro", caminho: "/fechamento", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/fechamento$/) },
   { rota: "ancoras-docusign", id: "ancoras-docusign", caminho: "/ancoras-docusign", perfis: OPERA, espera: ".anc" },

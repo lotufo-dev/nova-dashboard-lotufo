@@ -230,36 +230,52 @@ export const inicioComVariacoes = painel => {
 };
 
 // As familias de valor no Fechamento (#805): dois anos, para o medido de cada mes ter o mesmo mes do ano anterior, e
-// as tres leituras da diferenca entre o aprovado e o pedido (critica, pequena e igual). Outubro tem uma medicao em
-// analise, que nao e' diferenca; novembro e' o mes em curso, sem variacao. Valores de centenas de milhoes, para a
-// tabela ser provada com o numero largo. Tudo inventado; a obra e a medicao dos links sao as da prova.
-const fchLinha = (aprovado, pedido, recebido, emAnalise = 0) => ({
-  medido_centavos: aprovado + emAnalise, aprovado_centavos: aprovado, protocolado_centavos: aprovado, recebido_centavos: recebido,
-  em_aberto_centavos: aprovado - recebido, em_aberto_notas_centavos: aprovado - recebido, em_aberto_repasse_centavos: 0,
-  sem_nota_centavos: 0, aprovado_com_pedido_centavos: aprovado, pedido_do_aprovado_centavos: pedido });
+// as leituras da diferenca entre o aprovado e o pedido. Julho: um corte critico. Agosto: um corte que, no mes, fica
+// pequeno, ao lado de uma medicao dentro da tolerancia de arredondamento (R$ 0,03). Setembro: uma medicao com o pedido
+// gravado dez vezes menor (aprovado acima do pedido: so' aparece na linha dela) e outra igual; o mes sai "igual ao
+// pedido". Outubro: so' arredondamento, mais uma medicao em analise, que nao e' diferenca. Novembro e' o mes em curso,
+// sem variacao. Valores de centenas de milhoes, para a tabela ser provada com o numero largo. Tudo inventado; a obra
+// e a primeira medicao de cada mes sao as da prova.
+const FCH_TOLERANCIA = 5;      // o que o servidor conta como arredondamento do orgao, em centavos
+const fchMedicao = (aprovado, pedido, recebido, emAnalise = 0) => {
+  const falta = pedido - aprovado;
+  return { medido_centavos: aprovado + emAnalise, aprovado_centavos: aprovado, protocolado_centavos: aprovado, recebido_centavos: recebido,
+    em_aberto_centavos: aprovado - recebido, em_aberto_notas_centavos: aprovado - recebido, em_aberto_repasse_centavos: 0,
+    sem_nota_centavos: 0, aprovado_com_pedido_centavos: aprovado, pedido_do_aprovado_centavos: pedido,
+    abaixo_do_pedido_centavos: falta > FCH_TOLERANCIA ? falta : 0, acima_do_pedido_centavos: -falta > FCH_TOLERANCIA ? -falta : 0 };
+};
+const igual = v => [fchMedicao(v, v, v)];
 const FCH_MESES = [
-  ["2025-07", fchLinha(3391300001, 3391300001, 3391300001)], ["2025-08", fchLinha(2644600003, 2644600003, 2644600003)],
-  ["2025-09", fchLinha(2341800005, 2341800005, 2341800005)], ["2025-10", fchLinha(2273400007, 2273400007, 2273400007)],
-  ["2026-07", fchLinha(2305000001, 2340000001, 2287000001)],                 // aprovado 1,5% abaixo do pedido
-  ["2026-08", fchLinha(3094000003, 3106400003, 3094000003)],                 // 0,4% abaixo
-  ["2026-09", fchLinha(2368000005, 2368000005, 1442000005)],                 // igual ao pedido
-  ["2026-10", fchLinha(1873000007, 1873000007, 1624000007, 555000000)],      // parte ainda em analise
-  ["2026-11", fchLinha(0, 0, 0, 310000009)],                                 // o mes em curso
+  ["2025-07", igual(3391300001)], ["2025-08", igual(2644600003)], ["2025-09", igual(2341800005)], ["2025-10", igual(2273400007)],
+  ["2026-07", [fchMedicao(2305000001, 2340000001, 2287000001)]],                                              // corte de 1,5%
+  ["2026-08", [fchMedicao(1894000003, 1906400003, 1894000003), fchMedicao(1200000000, 1200000003, 1200000000)]],   // corte e arredondamento
+  ["2026-09", [fchMedicao(1768000005, 1768000005, 842000005), fchMedicao(600000000, 60000000, 600000000)]],         // igual e acima
+  ["2026-10", [fchMedicao(1873000007, 1873000009, 1624000007), fchMedicao(0, 0, 0, 555000000)]],                    // arredondamento e analise
+  ["2026-11", [fchMedicao(0, 0, 0, 310000009)]],                                                              // o mes em curso
 ];
-const fchSoma = linhas => Object.fromEntries(Object.keys(fchLinha(0, 0, 0)).map(k => [k, linhas.reduce((t, x) => t + x[k], 0)]));
+// o acima do pedido e' so' da medicao: nao soma
+const FCH_SOMAVEIS = Object.keys(fchMedicao(0, 0, 0)).filter(k => k !== "acima_do_pedido_centavos");
+const fchSoma = linhas => Object.fromEntries(FCH_SOMAVEIS.map(k => [k, linhas.reduce((t, x) => t + x[k], 0)]));
 export const fechamentoComValores = reg => {
-  const medido = Object.fromEntries(FCH_MESES.map(([comp, x]) => [comp, x.medido_centavos]));
-  const meses = FCH_MESES.map(([comp, x], i) => {
-    const aberto = x.em_aberto_centavos > 0;
-    const medicao = { ...x, medicao_id: reg.medicao, contrato_id: reg.obra, obra: "Obra Exemplo", numero: i + 1, tipo: "execucao",
-      competencia: comp, protocolo_em: x.protocolado_centavos ? `${mesAntes(comp, -1)}-20` : null, notas_fora_da_conta: [], sem_nota: false,
-      notas: x.protocolado_centavos ? [{ nota_id: 9400 + i, numero: String(900 + i), valor_centavos: x.protocolado_centavos,
-        recebido_centavos: x.recebido_centavos, em_aberto_centavos: x.em_aberto_centavos, recebida: !aberto, paga_em_parte: aberto,
-        aguarda_repasse: false }] : [] };
-    const anterior = medido[mesAntes(comp, 12)];
-    return { competencia: comp, ...x, medido_ano_anterior_centavos: anterior && comp < "2026-11" ? anterior : null,
-      obras: [{ contrato_id: reg.obra, obra: "Obra Exemplo", ...x, medicoes: [medicao] }] };
+  let numero = 0;
+  const meses = FCH_MESES.map(([comp, linhas]) => {
+    const medicoes = linhas.map((x, j) => {
+      numero += 1;
+      const aberto = x.em_aberto_centavos > 0;
+      return { ...x, medicao_id: j === 0 ? reg.medicao : 9500 + numero, contrato_id: reg.obra, obra: "Obra Exemplo", numero, tipo: "execucao",
+        competencia: comp, protocolo_em: x.protocolado_centavos ? `${mesAntes(comp, -1)}-20` : null, notas_fora_da_conta: [], sem_nota: false,
+        notas: x.protocolado_centavos ? [{ nota_id: 9400 + numero, numero: String(900 + numero), valor_centavos: x.protocolado_centavos,
+          recebido_centavos: x.recebido_centavos, em_aberto_centavos: x.em_aberto_centavos, recebida: !aberto, paga_em_parte: aberto,
+          aguarda_repasse: false }] : [] };
+    });
+    const soma = fchSoma(medicoes);
+    return { competencia: comp, ...soma, obras: [{ contrato_id: reg.obra, obra: "Obra Exemplo", ...soma, medicoes }] };
   });
+  const medido = Object.fromEntries(meses.map(m => [m.competencia, m.medido_centavos]));
+  for (const m of meses) {
+    const anterior = medido[mesAntes(m.competencia, 12)];
+    m.medido_ano_anterior_centavos = anterior && m.competencia < "2026-11" ? anterior : null;
+  }
   const doAno = ano => meses.filter(m => m.competencia.startsWith(ano));
   const cobertura = ano => { const t = fchSoma(doAno(ano)); return { aprovado_centavos: t.aprovado_centavos,
     com_nota_centavos: t.aprovado_centavos, sem_nota_centavos: 0, medicoes_sem_nota: 0, percentual: 100 }; };
@@ -267,12 +283,10 @@ export const fechamentoComValores = reg => {
     anos: ["2025", "2026"], meses,
     por_ano: { 2025: { ...fchSoma(doAno("2025")), meses: 4 }, 2026: { ...fchSoma(doAno("2026")), meses: 5 } },
     acumulado: { ate_mes: "11", 2025: fchSoma(doAno("2025")), 2026: fchSoma(doAno("2026")) },
-    em_aberto: meses.filter(m => m.em_aberto_centavos > 0).map(m => {
-      const md = m.obras[0].medicoes[0];
-      return { tipo_aberto: "nota", nota_id: md.notas[0].nota_id, numero: md.notas[0].numero, contrato_id: reg.obra, obra: "Obra Exemplo",
-        medicao_id: reg.medicao, medicao_numero: md.numero, tipo: "execucao", competencia: m.competencia, protocolo_em: md.protocolo_em,
-        emitida_em: null, valor_centavos: m.em_aberto_centavos, paga_em_parte: true };
-    }),
+    em_aberto: meses.flatMap(m => m.obras[0].medicoes.filter(md => md.em_aberto_centavos > 0).map(md => (
+      { tipo_aberto: "nota", nota_id: md.notas[0].nota_id, numero: md.notas[0].numero, contrato_id: reg.obra, obra: "Obra Exemplo",
+        medicao_id: md.medicao_id, medicao_numero: md.numero, tipo: "execucao", competencia: m.competencia, protocolo_em: md.protocolo_em,
+        emitida_em: null, valor_centavos: md.em_aberto_centavos, paga_em_parte: true }))),
     em_aberto_anteriores: { quantidade: 0, valor_centavos: 0 },
     notas_sem_medicao: { em_aberto: [], em_aberto_centavos: 0, pagas: { quantidade: 0, valor_centavos: 0 } },
     cobertura: { 2025: cobertura("2025"), 2026: cobertura("2026") }, notas_diferem: [], pares_mistos: [],

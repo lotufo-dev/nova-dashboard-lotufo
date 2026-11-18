@@ -83,8 +83,16 @@ o aprovado e o pedido, e as duas referencias saem daqui, prontas:
   nela nao ha' diferenca, ha' etapa nao alcancada, e somar o pedido dela faria o mes parecer aprovado a menor. A
   medicao com nota emitida e sem o valor do boletim (o pedido conta como aprovado, `_aprovado`) tambem nao: nao ha'
   dois valores para comparar. Por isso a diferenca NAO e' medido - aprovado. Os dois numeros somam como os outros
-  (medicao, obra, mes, ano). O limite que separa a diferenca pequena da critica vai em `diferenca_critica_por_mil` e e' o
-  do aviso "aprovado abaixo do pedido" (`avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL`, issue #741): um numero so'.
+  (medicao, obra, mes, ano) e sao a base do percentual. O limite que separa a diferenca pequena da critica vai em
+  `diferenca_critica_por_mil` e e' o do aviso "aprovado abaixo do pedido" (`avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL`,
+  issue #741): um numero so'.
+  O que a tela mostra como diferenca do mes, da obra e do ano e' so' o CORTE: `abaixo_do_pedido_centavos`, a soma de
+  (pedido - aprovado), na cota, das medicoes com o aprovado ABAIXO do pedido; tambem soma como os outros. O aprovado
+  ACIMA do pedido nao entra nessa soma (revisao da PR #806 sobre a copia da producao): quase sempre e' pedido gravado
+  errado, e somado no mes anulava o corte real de outra obra. Ele sai so' na linha da medicao
+  (`acima_do_pedido_centavos`), onde se confere o pedido (issue #807).
+  Diferenca de ate' `TOLERANCIA_DO_PEDIDO_CENTAVOS` por medicao, no valor cheio, e' arredondamento do orgao (decisao
+  do dono de 10/11/2026) e conta como igual: nao entra no corte nem no acima.
 - Variacao do medido: `medido_ano_anterior_centavos`, em cada mes, e' o medido do mesmo mes do ano anterior. So' nos
   meses de competencia ja' encerrada (anteriores ao mes de hoje: o mes em curso ainda recebe medicao) e so' quando o
   ano anterior esta' na pagina e teve medido nesse mes; senao, nulo.
@@ -106,8 +114,12 @@ ESTADOS_EM_COBRANCA = ("protocolada", "nf_emitida")       # protocolada e ainda 
 NUMEROS = ("medido_centavos", "aprovado_centavos", "protocolado_centavos", "recebido_centavos", "em_aberto_centavos")
 # as tres partes que somam o em aberto: (a) `em_aberto_notas`, (a') `em_aberto_repasse` e (b) `sem_nota`
 PARTES_DO_ABERTO = ("em_aberto_notas_centavos", "em_aberto_repasse_centavos", "sem_nota_centavos")
-# issue #805: os dois lados da diferenca aprovado x pedido, so' das medicoes que tem os dois valores (ver o cabecalho)
-COMPARAVEIS = ("aprovado_com_pedido_centavos", "pedido_do_aprovado_centavos")
+# issue #805: os dois lados da diferenca aprovado x pedido, so' das medicoes que tem os dois valores, e o corte (a
+# soma do que o orgao aprovou abaixo do pedido); ver o cabecalho
+COMPARAVEIS = ("aprovado_com_pedido_centavos", "pedido_do_aprovado_centavos", "abaixo_do_pedido_centavos")
+# Decisao do dono de 10/11/2026: "ate' R$ 0,05 e' arredondamento do orgao". O aprovado que difere do pedido por ate'
+# cinco centavos, no valor cheio da medicao (o valor em que o orgao arredonda), conta como igual ao pedido.
+TOLERANCIA_DO_PEDIDO_CENTAVOS = 5
 SOMAS = NUMEROS + PARTES_DO_ABERTO + COMPARAVEIS
 ESCONDIDOS = ("recebido_centavos", "em_aberto_centavos") + PARTES_DO_ABERTO                               # pela trava
 PAR = ("execucao", "reajuste")                           # os tipos que a fatura unica do consorcio cobre juntos
@@ -406,9 +418,16 @@ def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
     n["aprovado_centavos"] = cota(aprovado) if aprovado is not None else 0
     # issue #805: a diferenca aprovado x pedido so' existe com o valor do boletim gravado e o pedido; a medicao em
     # analise e a de nota emitida sem o valor do boletim ficam fora dos dois lados
+    acima = 0
     if m["estado"] in ESTADOS_APROVADO and m["aprovado"] is not None and m["pedido"] is not None:
         n["aprovado_com_pedido_centavos"] = cota(m["aprovado"])
         n["pedido_do_aprovado_centavos"] = cota(m["pedido"])
+        # a tolerancia e' do valor cheio (o do orgao); o corte e o acima saem na cota, como os outros numeros
+        falta = m["pedido"] - m["aprovado"]
+        if falta > TOLERANCIA_DO_PEDIDO_CENTAVOS:
+            n["abaixo_do_pedido_centavos"] = max(0, n["pedido_do_aprovado_centavos"] - n["aprovado_com_pedido_centavos"])
+        elif -falta > TOLERANCIA_DO_PEDIDO_CENTAVOS:
+            acima = max(0, n["aprovado_com_pedido_centavos"] - n["pedido_do_aprovado_centavos"])
     ligadas, fora = _notas_da_conta(m, notas)
     saida, saida_fora = [], []
     if _cobrada(m):
@@ -433,6 +452,8 @@ def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
     return {"medicao_id": m["id"], "contrato_id": m["contrato_id"], "obra": m["obra"], "numero": m["numero"],
             "tipo": m["tipo"], "competencia": m["competencia"],
             "protocolo_em": (m["protocolo_em"] or "")[:10] or None, **n, "notas": saida,
+            # so' na medicao (nao soma): o aprovado acima do pedido, que e' pedido a conferir, e nao corte
+            "acima_do_pedido_centavos": acima,
             # so' para a linha do em aberto (`_fechamento`): de onde a espera conta na medicao sem protocolo
             "_emitida_em": ((m["nota_emitida_em"] or "")[:10] or None) if m["sem_protocolo"] else None,
             "notas_fora_da_conta": saida_fora, "sem_nota": sem_nota,

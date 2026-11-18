@@ -29,6 +29,10 @@ import Falha from "./Falha";
 // aprovado diz a diferenca contra o pedido, so' das medicoes que tem os dois valores; o em aberto sai no tom do "vence
 // em breve". Nao ha' diferenca entre o protocolado e o aprovado nem entre o recebido e o protocolado: falta de nota ou
 // de pagamento nao e' diferenca de valor. As referencias e o limite vem do servidor.
+// Revisao da PR #806 sobre a copia da producao: no mes, na obra e no total a diferenca e' so' o CORTE (o que o orgao
+// aprovou abaixo do pedido), sobre o pedido de todas as medicoes comparaveis. O aprovado acima do pedido quase sempre
+// e' pedido gravado errado, e somado anulava o corte de outra obra: aparece so' na linha da medicao, onde se confere
+// (#807). Ate' R$ 0,05 por medicao e' arredondamento do orgao e conta como igual; quem decide e' o servidor.
 
 // Com o total a receber ainda nao liberado no cadastro (a trava da lista de Obras e do Inicio), o recebido, o em
 // aberto e a marca de cada nota vem nulos e as listas do em aberto vem vazias: a tela diz a trava em uma frase.
@@ -36,8 +40,11 @@ type Numeros = {
   medido_centavos: number; aprovado_centavos: number; protocolado_centavos: number; recebido_centavos: number | null;
   em_aberto_centavos: number | null;
   /** #805: os dois lados da diferenca aprovado × pedido, so' das medicoes que tem o valor do boletim e o pedido (a
-   *  medicao em analise fica fora: nela nao ha' diferenca, ha' etapa nao alcancada) */
+   *  medicao em analise fica fora: nela nao ha' diferenca, ha' etapa nao alcancada). O pedido e' a base do percentual */
   aprovado_com_pedido_centavos?: number; pedido_do_aprovado_centavos?: number;
+  /** o corte: a soma do que foi aprovado abaixo do pedido, medicao a medicao, fora o arredondamento de ate' R$ 0,05;
+   *  o aprovado acima do pedido nao entra nem desconta */
+  abaixo_do_pedido_centavos?: number;
 };
 /** As tres partes que somam o em aberto do ano: (a) notas que o orgao nao pagou, (a') repasse sem baixa (o orgao ja'
  *  pagou o consorcio e a nota da empresa segue sem baixa) e (b) medicoes sem nota ligada. */
@@ -50,6 +57,8 @@ type NotaFora = { nota_id: number; numero: string };
 type MedicaoLinha = Numeros & {
   medicao_id: number; contrato_id: number; obra: string; numero: number; tipo: string;
   competencia: string; protocolo_em: string | null; notas: NotaLinha[]; notas_fora_da_conta?: NotaFora[]; sem_nota?: boolean;
+  /** so' a medicao tem: quanto o aprovado passou do pedido (quase sempre pedido gravado errado, a conferir) */
+  acima_do_pedido_centavos?: number;
 };
 type ObraLinha = Numeros & { contrato_id: number; obra: string; medicoes: MedicaoLinha[] };
 /** #805: `medido_ano_anterior_centavos` e' o medido do mesmo mes do ano anterior; nulo no mes ainda aberto e quando o
@@ -138,15 +147,16 @@ type Referencia = { competencia: string; centavos: number };
 
 /** As cinco celulas de valor de uma linha (mes, obra, medicao ou total). Familias de valor (#805): sob o medido, a
  *  variacao contra `referencia` (so' a linha do mes a tem); sob o aprovado, a diferenca contra o pedido, quando a
- *  linha tem os dois lados e a pagina tem o limite do servidor (`limite`); o em aberto, no tom do "vence em breve". */
-function Celulas({ x, limite, referencia }: { x: Numeros; limite?: number; referencia?: Referencia | null }) {
+ *  linha tem o corte e a base e a pagina tem o limite do servidor (`limite`); o em aberto, no tom do "vence em breve".
+ *  `acima` so' vem na linha da medicao: nas linhas que somam, a diferenca e' so' o corte. */
+function Celulas({ x, limite, referencia, acima }: { x: Numeros; limite?: number; referencia?: Referencia | null; acima?: number }) {
   return (
     <>
       {COLUNAS.map(c => {
         const v = x[c.chave];
         const comVariacao = c.chave === "medido_centavos" && !!referencia && variacao(v, referencia.centavos) !== null;
         const comDiferenca = c.chave === "aprovado_centavos" && limite !== undefined && !!v
-          && diferenca(x.aprovado_com_pedido_centavos, x.pedido_do_aprovado_centavos, limite) !== null;
+          && diferenca(x.abaixo_do_pedido_centavos, acima, x.pedido_do_aprovado_centavos, limite) !== null;
         const emAberto = c.chave === "em_aberto_centavos" && !!v;
         return (
           <td key={c.chave} className={`col-num dinheiro num${opcional(c)}${emAberto ? " fch-em-aberto" : ""}`}>
@@ -155,8 +165,8 @@ function Celulas({ x, limite, referencia }: { x: Numeros; limite?: number; refer
                 <span>{valor(v)}</span>
                 {comVariacao && referencia && <Variacao atual={v} referencia={referencia.centavos} rotulo={fmtMesCurto(referencia.competencia)}
                   porExtenso={`${fmtMesExtenso(referencia.competencia)} de ${referencia.competencia.slice(0, 4)}`} />}
-                {comDiferenca && limite !== undefined && <Diferenca valor={x.aprovado_com_pedido_centavos} base={x.pedido_do_aprovado_centavos}
-                  nomeBase="pedido" limitePorMil={limite} />}
+                {comDiferenca && limite !== undefined && <Diferenca abaixo={x.abaixo_do_pedido_centavos} acima={acima}
+                  base={x.pedido_do_aprovado_centavos} nomeBase="pedido" limitePorMil={limite} />}
               </span>
             ) : valor(v)}
           </td>
@@ -235,7 +245,7 @@ function LinhasDoMes({ m, ab, ir, limite }: { m: Mes; ab: Abertos; ir: Ir; limit
                   <Link className="link" para={{ tela: "medicao", obra: md.contrato_id, id: md.medicao_id }} ir={ir}>{tituloMedicao(md)}</Link>
                   <Notas m={md} />
                 </th>
-                <Celulas x={md} limite={limite} />
+                <Celulas x={md} limite={limite} acima={md.acima_do_pedido_centavos ?? 0} />
               </tr>
             ))}
           </Fragment>
