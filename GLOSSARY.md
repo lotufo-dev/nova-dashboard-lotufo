@@ -271,6 +271,21 @@ _Avoid_: pílula, chip, badge
 **Contador**:
 A quantidade ao lado de um título. Com situação, leva o glifo dela.
 
+**Variação**:
+O quanto um valor subiu ou caiu contra uma referência escrita ao lado: o mês anterior ou o mesmo mês do ano
+anterior. Até 2% para cima ou para baixo é estável.
+_Avoid_: diferença (é entre dois valores que deveriam ser iguais)
+
+**Diferença**:
+O quanto dois valores que deveriam ser iguais se afastam, em reais e em percentual: o aprovado e o pedido. Acima de
+0,5% da base é crítica.
+_Avoid_: variação
+
+**Andamento**:
+A leitura do ritmo contra o necessário para o prazo: Adiantada (100% ou mais), Atenção (de 70% a 99%) ou Devagar
+(abaixo de 70%).
+_Avoid_: em andamento (é uma situação)
+
 **Painel**:
 O bloco com moldura preta e sombra dura, com o título dentro. É peça de tela, não um tipo de tela.
 _Avoid_: cartão, card; painel como nome de tela (ver Tela de leitura)
