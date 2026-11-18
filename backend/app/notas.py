@@ -562,7 +562,7 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                                 f"a medição ({dinheiro.format_brl(x['valor_centavos'])}): a nota que falta não liga sozinha"})
     for r in conn.execute("""
         SELECT n.id AS nota_id, n.numero_int AS numero, a.medicao_id, m.contrato_id,
-               (SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') AS protocolado_em
+               (SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota' AND p.desfeita_em IS NULL) AS protocolado_em
         FROM notas_fiscais n JOIN nf_alocacoes a ON a.nota_id=n.id AND a.desfeita_em IS NULL
         JOIN medicoes m ON m.id=a.medicao_id
         WHERE n.confirmacao='aguardando_rm' AND m.estado='protocolada'"""):

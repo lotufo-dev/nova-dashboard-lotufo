@@ -189,6 +189,44 @@ test("Reconciliação: recebida à mão sem baixa no RM mostra a medição, a NF
   expect(within(linha("9ª Medição")).getByText("sem data")).toBeTruthy();
 });
 
+// docs/adr/0006: o título que o RM deu como baixado por valor menor não é dívida, mas a diferença fica à vista
+test("Reconciliação: título baixado no RM por valor menor mostra obra, medição, NF, os dois valores, a diferença e a data", async () => {
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/contratos") return [];
+    if (url === "/api/rm/reconciliacao") return {
+      nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [], recebidas_sem_baixa: [],
+      baixados_com_diferenca: [
+        { titulo_id: 1, nota_id: 31, contrato_id: 12, numero_instrumento: "IC 1/2025", medicao_id: 70, numero: 14, tipo: "execucao",
+          competencia: "2026-08", numero_nf: "100", serie: "1", valor_original_centavos: 83_000_009, valor_baixado_centavos: 82_800_008,
+          diferenca_centavos: 200_001, data_baixa: "2026-09-20" },
+        { titulo_id: 2, nota_id: 32, contrato_id: 12, numero_instrumento: "IC 1/2025", medicao_id: null, numero: null, tipo: null,
+          competencia: null, numero_nf: "101", serie: null, valor_original_centavos: 50_001, valor_baixado_centavos: 40_000,
+          diferenca_centavos: 10_001, data_baixa: null }],
+      totais: { nfs_sem_medicao: 0, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
+    throw new Error(`chamada inesperada: ${url}`);
+  });
+  render(<Admin aba="reconciliacao" busca={{ categoria: "baixados" }} />);
+  expect(await screen.findByRole("heading", { name: "Títulos baixados no RM por valor menor" })).toBeTruthy();
+  const texto = (tr: HTMLElement) => [...tr.querySelectorAll("td")].map(td => (td.textContent ?? "").replace(/ /g, " "));
+  const linha = screen.getByRole("link", { name: "14ª Medição" }).closest("tr")!;
+  expect(texto(linha).slice(2)).toEqual(["100/1", "20/09/2026", "R$ 830.000,09", "R$ 828.000,08", "R$ 2.000,01"]);
+  // a nota sem medição ligada e sem data de baixa: tracinho nas duas, os valores inteiros
+  const solta = screen.getByText("101").closest("tr")!;
+  expect(texto(solta).slice(1)).toEqual(["—", "101", "—", "R$ 500,01", "R$ 400,00", "R$ 100,01"]);
+});
+
+test("Reconciliação: resposta de servidor de antes do grupo novo não quebra a tela", async () => {
+  api.mockImplementation(async (url: string) => {
+    if (url === "/api/contratos") return [];
+    if (url === "/api/rm/reconciliacao") return {
+      nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [], recebidas_sem_baixa: [],
+      totais: { nfs_sem_medicao: 0, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
+    throw new Error(`chamada inesperada: ${url}`);
+  });
+  render(<Admin aba="reconciliacao" busca={{}} />);
+  expect(await screen.findByRole("heading", { name: "Títulos baixados no RM por valor menor" })).toBeTruthy();
+});
+
 // Issue #31: a Saúde mostra o último backup, quantos estão guardados e o último erro; atrasado acima de 2 h em destaque
 const BACKUP_EM_DIA = {
   ultimo_backup: "2026-10-13T07:30:00-04:00", tamanho_bytes: 3 * 1024 * 1024, guardados: 48, copia_externa_configurada: true,

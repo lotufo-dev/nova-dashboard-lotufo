@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
 import AvisosPagina from "./AvisosPagina";
+import EmAbertoAParte from "./EmAbertoAParte";
 import {
   ehDoContratante, escopoDaUrl, filtrarObras, gruposPorContratante, nomeDaObra, pctExecutado, pctPiso, posicaoDe, totaisDe,
   type ObraLista, type TotaisObras,
@@ -146,6 +147,12 @@ export default function Contratos({ ir, busca = {}, aba = "posicao" }: { ir: Ir;
               <div className="obras-numero"><dt>Medido em {painel.medido_ano.ano}</dt><dd>{brl(painel.medido_ano.valor_centavos)}</dd></div>
             )}
           </dl>
+        )}
+
+        {/* fora do total "A receber": o em aberto antigo e o que o RM deixou de informar, das obras que a lista mostra */}
+        {lista && totais.anoInicial && (
+          <EmAbertoAParte anoInicial={totais.anoInicial} anterior={totais.aReceberAnterior}
+            semAtualizacao={totais.aReceberSemAtualizacao} />
         )}
 
         {lista && (

@@ -753,7 +753,11 @@ def test_carregar_medicoes_grava_as_novas_com_pedido_aprovado_e_evento(tmp_path,
     assert codigo == 0, saida
     assert "GRAVADO: Obra Própria (obra-propria.csv), 4 medição(ões) criada(s)" in saida
     ms = {(m["numero"], m["tipo"]): m for m in conn.execute("SELECT * FROM medicoes WHERE contrato_id=?", (cid,))}
-    assert len(ms) == 4 and all(m["estado"] == "protocolada" and m["congelada"] == 1 for m in ms.values())
+    # docs/adr/0006: cada medicao nasce no estado que a linha prova (com nota ou protocolo da nota, protocolada; so' com
+    # o aprovado, boletim recebido; so' com o pedido, em analise) e so' a protocolada nasce congelada
+    assert {k: (m["estado"], m["congelada"]) for k, m in ms.items()} == {
+        (1, "execucao"): ("protocolada", 1), (2, "execucao"): ("protocolada", 1),
+        (3, "execucao"): ("planilha_enviada", 0), (1, "reajuste"): ("boletim_recebido", 0)}
     m2 = ms[(2, "execucao")]
     assert (m2["valor_protocolado_centavos"], m2["valor_atestado_centavos"], m2["atestado_em"]) == (53890010, 53000000,
                                                                                                     "2025-06-18")

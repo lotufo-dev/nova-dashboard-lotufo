@@ -22,7 +22,8 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   hoje: "2026-10-09",
   protocoladas: { obras_protocoladas: 2, obras_ativas: 18, ultima: "2026-09-30" },
   medido: { competencia: "2026-09", valor_centavos: 1_827_715_696, quantidade: 2, ultimo_lancamento: "2026-10-08" },
-  a_receber: { liberado: true, valor_centavos: 1_720_000_000, mais_60_centavos: 210_000_000 },
+  a_receber: { liberado: true, valor_centavos: 1_720_000_000, mais_60_centavos: 210_000_000,
+    a_parte: { ano_inicial: "2025", valor_centavos: 0, anterior_centavos: 0, sem_atualizacao_centavos: 0, sem_atualizacao_desde: null } },
   ciclo: [
     { etapa: "em_analise", valor_centavos: 300_100, quantidade: 2, mais_antigo_dias: 20 },
     { etapa: "boletim", valor_centavos: 1_200_300, quantidade: 3, mais_antigo_dias: 1 },
@@ -82,6 +83,30 @@ describe("Início", () => {
     expect(etapas.map(e => e.className.replace("ini-etapa ", ""))).toEqual(
       ["ini-etapa--em_analise", "ini-etapa--boletim", "ini-etapa--nota", "ini-etapa--protocolado", "ini-etapa--recebido_mes"]);
     expect(screen.getByRole("list", { name: "Legenda das cores" })).toBeTruthy();
+  });
+
+  it("o em aberto antigo e o sem atualização do RM aparecem numa linha própria, no painel do ciclo, fora das etapas", async () => {
+    api.mockResolvedValue(painel({ a_receber: { liberado: true, valor_centavos: 1_461_164_155, mais_60_centavos: 88_504_531,
+      a_parte: { ano_inicial: "2025", valor_centavos: 179_846_324, anterior_centavos: 159_906_581,
+        sem_atualizacao_centavos: 19_939_743, sem_atualizacao_desde: "2026-09-25" } } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const ciclo = await screen.findByRole("region", { name: "Ciclo da medição" });
+    const bloco = within(ciclo).getByLabelText("Em aberto fora do total");
+    expect((bloco.textContent ?? "").replace(/\u00a0/g, " ")).toContain("Em aberto de competências anteriores a 2025R$ 1.599.065,81");
+    expect((bloco.textContent ?? "").replace(/\u00a0/g, " ")).toContain("Sem atualização do RM desde 25/09/2026R$ 199.397,43");
+    // a etapa "Protocolado" continua com o valor que o servidor mandou: a linha à parte não entra nela
+    expect(ciclo.querySelector(".ini-etapa--protocolado .ini-etapa__valor")?.textContent?.replace(/\u00a0/g, " ")).toBe("R$ 15.866.779,04");
+  });
+
+  it("sem nada à parte, ou sem o total liberado, o painel do ciclo não ganha linha", async () => {
+    api.mockResolvedValue(painel());
+    const { unmount } = render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const ciclo = await screen.findByRole("region", { name: "Ciclo da medição" });
+    expect(within(ciclo).queryByLabelText("Em aberto fora do total")).toBeNull();
+    unmount();
+    api.mockResolvedValue(painel({ a_receber: { liberado: false, valor_centavos: null, mais_60_centavos: null, a_parte: null } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    expect(within(await screen.findByRole("region", { name: "Ciclo da medição" })).queryByLabelText("Em aberto fora do total")).toBeNull();
   });
 
   it("#721: a tela na ordem montada pelo dono, com a cota dita uma vez, no título do grupo", async () => {

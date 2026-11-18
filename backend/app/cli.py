@@ -218,6 +218,8 @@ def _relatorio_carga(rel: dict) -> None:
             rotulo += f" {li['competencia']}"
         print(f"  {rotulo}: {li['categoria']}" + (f" ({li['detalhe']})" if li["detalhe"] else "")
               + (f" -> {li['acao']}" if li.get("acao") else ""))
+        if li.get("entra_como"):
+            print(f"    entra como: {li['entra_como']}")
         for aviso in li.get("avisos", []):
             print(f"    AVISO: {aviso}")
     print("Total: " + ", ".join(f"{c} {n}" for c, n in rel["totais"].items()))

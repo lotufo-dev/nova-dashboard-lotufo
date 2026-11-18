@@ -3,6 +3,7 @@ import { destinoDoAviso, semEmpresa, semObra, type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
 import { daAgenda, diasAteOAviso, porSecao, semRSOrfao, type Secao } from "./avisos";
 import Contador from "./Contador";
+import EmAbertoAParte from "./EmAbertoAParte";
 import Falha from "./Falha";
 import { brl, contar } from "./formato";
 import LegendaCor from "./LegendaCor";
@@ -39,7 +40,11 @@ export type PainelInicio = {
   hoje: string;
   protocoladas: { obras_protocoladas: number; obras_ativas: number; ultima: string | null };
   medido: { competencia: string; valor_centavos: number; quantidade: number; ultimo_lancamento: string | null };
-  a_receber: { liberado: boolean; valor_centavos: number | null; mais_60_centavos: number | null };
+  // 17/11/2026 (docs/adr/0006): o total soma so' a competencia de `ano_inicial` em diante que o RM ainda informa; o
+  // resto vem em `a_parte` (nulo sem o total liberado) e a tela o mostra numa linha propria, fora do total
+  a_receber: { liberado: boolean; valor_centavos: number | null; mais_60_centavos: number | null;
+    a_parte: { ano_inicial: string; valor_centavos: number; anterior_centavos: number; sem_atualizacao_centavos: number;
+      sem_atualizacao_desde: string | null } | null };
   ciclo: EtapaCiclo[];
   recebido_12m: MesRecebido[];
   // #652: `depois` = data esperada alem do proximo mes
@@ -72,7 +77,7 @@ const quantos = (e: EtapaCiclo) => e.etapa === "recebido_mes" ? contar(e.quantid
  *  fracao da etapa de maior valor (`--ini-etapa-fracao`); etapa com valor nunca fica sem faixa (minimo de 1%) e etapa
  *  zerada nao tem faixa. A faixa e' desenho (o ::before da linha, em inicio.css); quem usa leitor de tela le a tabela
  *  equivalente. */
-function CicloMedicao({ etapas }: { etapas: EtapaCiclo[] }) {
+function CicloMedicao({ etapas, aParte }: { etapas: EtapaCiclo[]; aParte: PainelInicio["a_receber"]["a_parte"] }) {
   const maior = Math.max(0, ...etapas.map(e => e.valor_centavos));
   const fracao = (e: EtapaCiclo) => maior > 0 && e.valor_centavos > 0 ? Math.max(1, Math.round(100 * e.valor_centavos / maior)) : 0;
   return (
@@ -91,6 +96,9 @@ function CicloMedicao({ etapas }: { etapas: EtapaCiclo[] }) {
           </li>
         ))}
       </ol>
+      {/* fora da etapa "Protocolado" e de todo total: o em aberto antigo e o que o RM deixou de informar */}
+      {aParte && <EmAbertoAParte anoInicial={aParte.ano_inicial} anterior={aParte.anterior_centavos}
+        semAtualizacao={aParte.sem_atualizacao_centavos} desde={aParte.sem_atualizacao_desde} />}
       {/* `sr-only` no div, nao na <table>: tabela ignora largura e overflow e alargava a pagina no celular (PR #676) */}
       <div className="sr-only"><table>
         <caption>Ciclo da medição por etapa, na cota da Lotufo</caption>
@@ -373,7 +381,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
         </section>
         {/* a base dos valores, dita uma vez: vale para os tres paineis que vem a seguir */}
         <div className="ini-cota"><h2>Cota da Lotufo</h2></div>
-        <CicloMedicao etapas={p.ciclo} />
+        <CicloMedicao etapas={p.ciclo} aParte={p.a_receber.a_parte} />
         <PrevisaoEntrada previsao={p.previsao} />
         <Recebido12Meses meses={p.recebido_12m} />
         <CaixaAvisos avisos={avisos} ir={ir} />

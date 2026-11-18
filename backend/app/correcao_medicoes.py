@@ -22,21 +22,29 @@ from pathlib import Path
 
 import yaml
 
-from app import auditoria, db, dinheiro, medicoes
+from app import auditoria, db, dinheiro, medicoes, tempo
 from app.cadastro_arquivos import slug
 
 ORIGEM = "correção de cadastro"
 REGRA_NF = "correcao_cadastro"
 TIPOS = ("execucao", "projeto", "reajuste")
-OPERACOES_DE_NOTA = ("desconsiderar_nf", "reconsiderar_nf")      # issue #638: sem medicao, o alvo e' a nota
-OPERACOES = ("cancelar", "reabrir", "trocar_tipo", "desligar_nf", "ligar_nf", "protocolar", "estado", *OPERACOES_DE_NOTA)
+# issue #638 e docs/adr/0006 (residuo): sem medicao, o alvo e' a nota
+OPERACOES_DE_NOTA = ("desconsiderar_nf", "reconsiderar_nf", "encerrar_residuo_nf", "reabrir_residuo_nf")
+OPERACOES = ("cancelar", "reabrir", "trocar_tipo", "desligar_nf", "ligar_nf", "protocolar", "estado", "devolver",
+             "desfazer_recebimento",
+             *OPERACOES_DE_NOTA)
 ENCERRADAS = ("cancelada", "desistida")
+# `devolver` (docs/adr/0006, "Atos de correcao de cadastro"): os estados que o documento prova, antes da nota
+DESTINOS_DEVOLVER = ("em_analise", "boletim_recebido")
+CAMPOS_DEVOLVER = {"novo", "motivo", "data", "processo", "aprovado", "data_aprovacao", "meio"}
 # Campos que cada operacao aceita, alem de `operacao`, `fonte`, `medicao_id`, `obra`, `numero` e `tipo`
-CAMPOS = {"cancelar": {"duplicata_de", "motivo"}, "reabrir": set(), "trocar_tipo": {"novo_tipo", "novo_numero"},
+CAMPOS = {"cancelar": {"duplicata_de", "motivo"}, "reabrir": CAMPOS_DEVOLVER, "trocar_tipo": {"novo_tipo", "novo_numero"},
+          "devolver": CAMPOS_DEVOLVER, "desfazer_recebimento": {"motivo"},
           "desligar_nf": {"nf", "coligada"}, "ligar_nf": {"nfs", "coligada", "forcar_centro", "parcial"},
           "protocolar": {"data", "processo", "oficio"}, "estado": {"novo", "motivo", "data", "processo", "oficio"},
           "desconsiderar_nf": {"nf", "coligada", "motivo", "substituida_por"},
-          "reconsiderar_nf": {"nf", "coligada", "motivo"}}
+          "reconsiderar_nf": {"nf", "coligada", "motivo"},
+          "encerrar_residuo_nf": {"nf", "coligada", "motivo"}, "reabrir_residuo_nf": {"nf", "coligada", "motivo"}}
 CAMPOS_COMUNS = {"operacao", "fonte", "medicao_id", "obra", "numero", "tipo"}
 CAMPOS_COMUNS_DE_NOTA = {"operacao", "fonte"}
 
@@ -195,8 +203,12 @@ def _notas(conn, coligada: int, nf: str, so_ativas: bool) -> list:
 
 
 def _nfs_ativas(conn, mid: int) -> list[dict]:
-    return [dict(r) for r in conn.execute(
-        "SELECT a.id, a.nota_id, n.numero, n.coligada, n.serie, n.idmov, n.valor_centavos FROM nf_alocacoes a "
+    """As notas ligadas (vinculo vigente). `valor_vinculo`: o que a nota vale NESTA medicao, o valor atual dela ou, no
+    vinculo partilhado (docs/adr/0005, "Uma nota em mais de uma medicao"), o valor da parte."""
+    return [{**dict(r), "valor_vinculo": r["valor_alocado_centavos"] if r["partilhada"] else r["valor_centavos"]}
+            for r in conn.execute(
+        "SELECT a.id, a.nota_id, n.numero, n.coligada, n.serie, n.idmov, n.valor_centavos, a.valor_alocado_centavos, "
+        "a.partilhada FROM nf_alocacoes a "
         "JOIN notas_fiscais n ON n.id=a.nota_id WHERE a.medicao_id=? AND a.desfeita_em IS NULL ORDER BY a.id", (mid,))]
 
 
@@ -220,7 +232,7 @@ def _foto(conn, mid: int) -> dict:
             "nfs": [f"{n['numero']}/{n['coligada']}" for n in ativas],
             "notas": [_ident_nf(n) for n in ativas],
             "protocolos": [r[0] for r in conn.execute("SELECT data FROM medicao_protocolos WHERE medicao_id=? "
-                                                      "AND etapa='nota' ORDER BY data, id", (mid,))]}
+                                                      "AND etapa='nota' AND desfeita_em IS NULL ORDER BY data, id", (mid,))]}
 
 
 def _desfazer_vinculo(conn, usuario_id: int, mid: int, alocacao: dict, motivo: str) -> None:
@@ -312,7 +324,7 @@ def _cancelar(conn, uid, m, op, fonte):
         for col in dict.fromkeys(a["coligada"] for a in desligadas):
             da_col = [n for n in notas_v if n["coligada"] == col]
             alvo = contratos.cota(valor_v, pct) if col == lotufo else valor_v
-            if da_col and (alvo is None or sum(n["valor_centavos"] for n in da_col) >= alvo):
+            if da_col and (alvo is None or sum(n["valor_vinculo"] for n in da_col) >= alvo):
                 continue
             falta = (f"tem NF da coligada {col} que não cobre o valor dela" if da_col
                      else f"não tem NF ligada da coligada {col}")
@@ -333,9 +345,26 @@ def _cancelar(conn, uid, m, op, fonte):
 
 
 def _reabrir(conn, uid, m, op, fonte):
+    # docs/adr/0006: `novo` leva a reaberta direto ao estado que o documento prova (o do `devolver`), no mesmo ato.
+    # Sem ele a medicao volta a protocolada, como sempre, e o `devolver` vale em seguida
+    destino = _novo_devolver(op)
+    if destino is None and any(op.get(k) is not None for k in CAMPOS_DEVOLVER):
+        raise ValueError("motivo, data, processo e aprovado só valem com o estado de destino (novo: "
+                         f"{' ou '.join(DESTINOS_DEVOLVER)})")
+    if destino is not None and destino not in DESTINOS_DEVOLVER:
+        raise ValueError(f"novo desconhecido: {destino!r} (use {' ou '.join(DESTINOS_DEVOLVER)}; sem ele, a medição "
+                         "volta a protocolada)")
     if m["estado"] not in ENCERRADAS:
-        if m["estado"] in ("protocolada", "nf_emitida", "recebida"):
+        if destino is not None and _ja_no_destino(m, _estado_de_destino(conn, m, destino)):
+            raise _JaFeito(f"já {_rotulo_destino(m, m['estado'])}")
+        if destino is None and m["estado"] in ("protocolada", "nf_emitida", "recebida"):
             raise _JaFeito(f"já {medicoes.rotulo_estado(m['estado'])}")
+        if destino is None and m["estado"] in ("prevista", "planilha_enviada", "boletim_recebido") and conn.execute(
+                "SELECT 1 FROM audit_log WHERE entidade='medicao' AND entidade_id=? AND acao='medicao.estado' "
+                "AND json_extract(antes, '$.estado') IN ('cancelada','desistida') "
+                "AND json_extract(depois, '$.origem')=?", (str(m["id"]), ORIGEM)).fetchone():
+            # o arquivo que reabre e devolve em duas operacoes, rodado de novo: a reabertura ja' aconteceu
+            raise _JaFeito(f"já reaberta (está {medicoes.rotulo_estado(m['estado'])})")
         raise ValueError(f"só se reabre medição cancelada ou desistida (esta está "
                          f"{medicoes.rotulo_estado(m['estado'])})")
     motivo = f"Reaberta ({ORIGEM}): {fonte}"
@@ -345,8 +374,10 @@ def _reabrir(conn, uid, m, op, fonte):
     auditoria.registrar(conn, uid, "medicao.estado", "medicao", m["id"],
                         {"estado": m["estado"], "motivo": m["motivo_represamento"]},
                         {"estado": "protocolada", "motivo": motivo, "origem": ORIGEM, "fonte": fonte})
+    if destino is not None:
+        return _devolver(conn, uid, _medicao_por_id(conn, m["id"]), op, fonte)
     detalhes = []
-    if not conn.execute("SELECT 1 FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota'", (m["id"],)).fetchone():
+    if not conn.execute("SELECT 1 FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' AND desfeita_em IS NULL", (m["id"],)).fetchone():
         detalhes.append("AVISO: sem protocolo da nota registrado (use a operação protocolar)")
     if not _nfs_ativas(conn, m["id"]):
         detalhes.append("AVISO: sem NF ligada (use a operação ligar_nf)")
@@ -505,35 +536,57 @@ def _ligar_nf(conn, uid, m, op, fonte):
     mapa = diretoria._mapa_contratos(conn)
     novas, ja = [], []
     for ref in nfs:
+        # docs/adr/0005 ("Uma nota em mais de uma medicao"): `{idmov: N, valor: "1.234,56"}` liga so' essa PARTE da
+        # nota a esta medicao; o resto da nota vai para outra medicao, em outra operacao, com o valor dela
+        parte = None
+        if isinstance(ref, dict) and "valor" in ref:
+            parte = _valor(ref, "valor")
+            if parte is None or parte <= 0:
+                raise ValueError(f"nota {ref!r} inválida: o valor da parte precisa ser maior que zero")
+            ref = {k: v for k, v in ref.items() if k != "valor"}
         nota = _nota_da_referencia(conn, coligada, ref)
         nf = nota["numero"]
         if nota["id"] in ligadas:
             ja.append(nota)
             continue
-        if any(n["id"] == nota["id"] for n, _ in novas):
+        if any(n["id"] == nota["id"] for n, _, _ in novas):
             raise ValueError(f"NF {nf} repetida na operação")
-        outra = conn.execute("SELECT m.id, m.numero, m.tipo FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id "
-                             "WHERE a.nota_id=? AND a.desfeita_em IS NULL", (nota["id"],)).fetchone()
-        if outra is not None:
-            raise ValueError(f"NF {nf} já está na {medicoes.nome_medicao(outra['numero'], outra['tipo']).lower()} "
-                             f"(id {outra['id']}): desligue-a lá antes (desligar_nf)")
-        novas.append((nota, _conferir_centro(conn, m, nota, forcar, mapa)))
+        if parte is None:
+            outra = conn.execute("SELECT m.id, m.numero, m.tipo, a.partilhada FROM nf_alocacoes a JOIN medicoes m "
+                                 "ON m.id=a.medicao_id WHERE a.nota_id=? AND a.desfeita_em IS NULL", (nota["id"],)).fetchone()
+            if outra is not None:
+                raise ValueError(f"NF {nf} já está na {medicoes.nome_medicao(outra['numero'], outra['tipo']).lower()} "
+                                 f"(id {outra['id']}): desligue-a lá antes (desligar_nf)"
+                                 + ("; se a nota é das duas medições, diga o valor da parte desta ({idmov: N, valor: ...})"
+                                    if outra["partilhada"] else ""))
+        else:
+            _exigir_migracao(conn, "nf_alocacoes", "partilhada", "093")
+            if parte > nota["valor_centavos"]:
+                raise ValueError(f"a parte de {dinheiro.format_brl(parte)} é maior que a NF {nf} "
+                                 f"({dinheiro.format_brl(nota['valor_centavos'])})")
+        novas.append((nota, _conferir_centro(conn, m, nota, forcar, mapa), parte))
     if not novas:
         raise _JaFeito("NF " + ", ".join(n["numero"] for n in ja) + " já ligada")
     # Recebida sem a nota ligada (paga, mas o vinculo faltou) recebe a NF: o estado fica, so' o elo com o RM entra
     if m["estado"] in ENCERRADAS:
         raise ValueError(f"medição {medicoes.rotulo_estado(m['estado'])} não recebe NF")
     valor = m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"]
-    soma = sum(n["valor_centavos"] for n in _nfs_ativas(conn, m["id"]) if n["coligada"] == coligada) + sum(
-        n["valor_centavos"] for n, _ in novas)
+    soma = sum(n["valor_vinculo"] for n in _nfs_ativas(conn, m["id"]) if n["coligada"] == coligada) + sum(
+        n["valor_centavos"] if parte is None else parte for n, _, parte in novas)
     cobre = valor is None or soma >= valor
     if not cobre and not parcial:
         raise ValueError(f"as notas somam {dinheiro.format_brl(soma)} e a medição vale {dinheiro.format_brl(valor)} "
                          "(se a medição foi faturada em mais notas e só estas vêm agora, use parcial: true)")
     detalhes = []
-    for nota, problema in novas:
-        sincronizacao_rm.alocar(conn, uid, nota["id"], m["id"], "manual", None, REGRA_NF, aceita_recebida=True)
+    for nota, problema, parte in novas:
+        sincronizacao_rm.alocar(conn, uid, nota["id"], m["id"], "manual", None, REGRA_NF, aceita_recebida=True,
+                                valor_da_parte=parte)
         texto = f"{_fmt_nf(nota)} ligada"
+        if parte is not None:
+            ja_partes = conn.execute("SELECT COALESCE(SUM(valor_alocado_centavos), 0) FROM nf_alocacoes WHERE nota_id=? "
+                                     "AND desfeita_em IS NULL", (nota["id"],)).fetchone()[0]
+            texto += (f" pela parte de {dinheiro.format_brl(parte)}; da nota, "
+                      f"{dinheiro.format_brl(nota['valor_centavos'] - ja_partes)} seguem sem medição")
         if problema:
             texto += f" (centro de custo forçado: {problema})"
         detalhes.append(texto)
@@ -546,7 +599,7 @@ def _ligar_nf(conn, uid, m, op, fonte):
         detalhes.append(f"AVISO: parcial, as notas somam {dinheiro.format_brl(soma)} de {dinheiro.format_brl(valor)}; "
                         "fica protocolada até a nota que falta ser ligada e paga, ou o recebimento ser registrado à mão (a "
                         "sincronização com o RM não fecha medição com notas que não cobrem o valor)")
-    op["_forcado"] = [{"nf": n["numero"], "problema": p} for n, p in novas if p]
+    op["_forcado"] = [{"nf": n["numero"], "problema": p} for n, p, _ in novas if p]
     return detalhes
 
 
@@ -555,7 +608,7 @@ def _protocolar(conn, uid, m, op, fonte):
     if data is None:
         raise ValueError("diga a data do protocolo (AAAA-MM-DD)")
     processo, oficio = _texto(op, "processo"), _texto(op, "oficio")
-    if conn.execute("SELECT 1 FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' AND data=? "
+    if conn.execute("SELECT 1 FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' AND desfeita_em IS NULL AND data=? "
                     "AND numero_processo IS ?", (m["id"], data, processo)).fetchone():
         raise _JaFeito(f"protocolo de {data} já registrado")
     atual = m["estado"]
@@ -598,6 +651,233 @@ def _estado(conn, uid, m, op, fonte):
         raise ValueError(f"o estado {novo} não tem data")
     medicoes.mudar_estado(conn, uid, m["id"], novo, _texto(op, "motivo") or fonte, data=data, origem=ORIGEM)
     return []
+
+
+def _novo_devolver(op: dict) -> str | None:
+    """O destino do `devolver` (e do `reabrir` com destino): `em_analise` ou `boletim_recebido`. `planilha_enviada`, o
+    nome do estado no banco, vale como `em_analise`."""
+    novo = _texto(op, "novo")
+    return "em_analise" if novo == "planilha_enviada" else novo
+
+
+def _estado_de_destino(conn, m, novo: str) -> str:
+    """O estado em que a TELA guarda a medicao naquele ponto do fluxo: `medicoes.estado_no_fluxo` (o reajuste em
+    analise continua `prevista`, com o pedido congelado pelo marcador do envio)."""
+    return medicoes.estado_no_fluxo(conn, m["contrato_id"], m["tipo"], novo)
+
+
+def _ja_no_destino(m, estado_novo: str) -> bool:
+    """A medicao ja' esta' no estado de destino; na `prevista` (reajuste em analise), com o marcador do envio."""
+    return m["estado"] == estado_novo and (estado_novo != "prevista" or bool(m["planilha_enviada_em"]))
+
+
+def _rotulo_destino(m, estado: str) -> str:
+    if estado == "prevista":
+        return "em análise (reajuste previsto, com o pedido congelado pelo envio)"
+    return medicoes.rotulo_estado(estado)
+
+
+def _como_foi_recebida(conn, m) -> str:
+    """Por onde a medicao virou recebida, pela auditoria: "rm" (a baixa do RM: `sincronizacao_rm._recebimentos` grava
+    sem usuario), "mao" (o registro do administrador na tela, `conciliacao.recebidas_a_mao`) ou "lote" (o corte, a
+    correcao de cadastro e a carga do historico: recebimento sem prova de pagamento, docs/adr/0006)."""
+    from app import conciliacao   # import local: conciliacao importa sincronizacao_rm, que importa medicoes
+    ultimo = conn.execute("SELECT usuario_id FROM audit_log WHERE entidade='medicao' AND entidade_id=? "
+                          "AND acao='medicao.estado' AND json_extract(depois, '$.estado')='recebida' "
+                          "ORDER BY id DESC LIMIT 1", (str(m["id"]),)).fetchone()
+    if ultimo is None:
+        return "desconhecido"
+    if ultimo["usuario_id"] is None:
+        return "rm"
+    return "mao" if m["id"] in conciliacao.recebidas_a_mao(conn) else "lote"
+
+
+def _desfazer_recebimento(conn, uid, m, op, fonte):
+    """docs/adr/0006 ("Atos de correcao de cadastro"): o inverso do recebimento sem prova. A medicao que virou
+    recebida pelo corte, pela correcao de cadastro em lote ou pela carga do historico, sem pagamento provado no RM,
+    volta a protocolada e a esperar a baixa. Recusa a recebida pela baixa do RM (o RM e' a prova), a recebida a' mao
+    pelo administrador (afirmacao de pagamento de quem responde por ela; nao ha' caminho que a desfaca) e a que tem
+    nota com baixa no RM (o pagamento esta' provado, inteiro ou em parte: o que falta segue a receber pela nota)."""
+    from app import sincronizacao_rm   # import local: sincronizacao_rm importa medicoes
+    motivo = _texto(op, "motivo")
+    if motivo is None:
+        raise ValueError("diga o motivo (motivo: ...)")
+    if m["estado"] == "protocolada":
+        raise _JaFeito("já protocolada")
+    if m["estado"] != "recebida":
+        raise ValueError(f"só se desfaz o recebimento de medição recebida (esta está {medicoes.rotulo_estado(m['estado'])})")
+    medicoes._recusar_marco_proprio(conn, m)
+    if medicoes.absorvidas(conn, m["id"]):
+        raise ValueError("a execução absorveu um reajuste negativo, que foi recebido com ela: isso se resolve na tela")
+    como = _como_foi_recebida(conn, m)
+    if como == "rm":
+        raise ValueError("a medição foi recebida pela baixa do RM: o pagamento está provado e não se desfaz")
+    if como == "mao":
+        raise ValueError("a medição foi recebida à mão pelo administrador, com motivo: esse registro não se desfaz "
+                         "pela correção de cadastro (não há caminho que o desfaça)")
+    if como == "desconhecido":
+        raise ValueError("a auditoria não diz como a medição virou recebida: não há o que desfazer por aqui")
+    if medicoes.PASSO_ENVIO_NOTA not in medicoes.passos_das_medicoes(conn)(m):
+        raise ValueError("a obra não tem o passo \"Envio da nota\": nela a medição não fica protocolada")
+    ativas = _nfs_ativas(conn, m["id"])
+    marcas = ",".join("?" * len(sincronizacao_rm.STATUS_RECEBIDO))
+    for a in ativas:
+        if conn.execute(f"SELECT 1 FROM baixas WHERE nota_id=? AND status_lan<>2 AND excluida_rm_em IS NULL "
+                        f"AND (status_lan IN ({marcas}) OR COALESCE(valor_baixado_centavos, 0)>0)",
+                        (a["nota_id"], *sincronizacao_rm.STATUS_RECEBIDO)).fetchone():
+            raise ValueError(f"{_fmt_nf(a)} tem baixa no RM: o pagamento está provado, e o que falta do título já segue "
+                             "a receber pela nota")
+    texto = f"Recebimento desfeito ({ORIGEM}): {motivo}"
+    cur = conn.execute("UPDATE medicoes SET estado='protocolada', recebida_em=NULL, motivo_represamento=? "
+                       "WHERE id=? AND estado='recebida'", (texto, m["id"]))
+    db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+    auditoria.registrar(conn, uid, "medicao.estado", "medicao", m["id"],
+                        {"estado": "recebida", "motivo": m["motivo_represamento"], "recebida_em": m["recebida_em"]},
+                        {"estado": "protocolada", "motivo": texto, "recebida_em": None, "origem": ORIGEM, "fonte": fonte,
+                         "recebimento_desfeito": como})
+    detalhes = [f"volta a esperar o pagamento: {dinheiro.format_brl(m['valor_atestado_centavos'] if m['valor_atestado_centavos'] is not None else m['valor_protocolado_centavos'] or 0)} "
+                "no a receber (valor cheio da medição)"]
+    if not ativas:
+        detalhes.append("AVISO: sem NF ligada (use a operação ligar_nf)")
+    if not conn.execute("SELECT 1 FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' AND desfeita_em IS NULL",
+                        (m["id"],)).fetchone():
+        detalhes.append("AVISO: sem protocolo da nota registrado (use a operação protocolar)")
+    return detalhes
+
+
+def _valor(op: dict, campo: str) -> int | None:
+    v = op.get(campo)
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    if isinstance(v, (bool, float)):
+        raise ValueError(f"{campo} inválido: {v!r} (escreva entre aspas, como \"1.234,56\")")
+    try:
+        return dinheiro.parse_brl_com_sinal(str(v).strip())
+    except ValueError as e:
+        raise ValueError(f"{campo}: {v!r}: {e}") from None
+
+
+def _exigir_migracao(conn, tabela: str, coluna: str, numero: str) -> None:
+    """O ensaio nao migra (`cli._corrigir_medicoes`): na copia do banco de antes do deploy a coluna ainda nao existe."""
+    if not any(r[1] == coluna for r in conn.execute(f"PRAGMA table_info({tabela})")):
+        raise ValueError(f"este banco ainda não tem a migração {numero} e o ensaio não migra: rode num banco já migrado")
+
+
+def _devolver(conn, uid, m, op, fonte):
+    """docs/adr/0006 ("Atos de correcao de cadastro"): a medicao protocolada SEM nota volta ao estado que o documento
+    prova, o da planilha/carta enviada (em analise no orgao) ou o do boletim recebido, como a tela os grava: o pedido
+    fica (congelado pelo estado), `congelada` volta a zero (ela e' do protocolo da nota) e o protocolo de nota que a
+    carga ou a correcao gravou e' marcado como desfeito (`desfeita_em`), nunca apagado. Dali a medicao segue pelo
+    fluxo normal da tela (boletim, espelho, nota, protocolo)."""
+    _exigir_migracao(conn, "medicao_protocolos", "desfeita_em", "091")
+    novo, motivo = _novo_devolver(op), _texto(op, "motivo")
+    if novo not in DESTINOS_DEVOLVER:
+        raise ValueError(f"diga o estado que o documento prova (novo: {' ou '.join(DESTINOS_DEVOLVER)})")
+    if motivo is None:
+        raise ValueError("diga o motivo (motivo: ...)")
+    data, processo = _data(op), _texto(op, "processo")
+    aprovado, data_aprovacao, meio = _valor(op, "aprovado"), _data(op, "data_aprovacao"), _texto(op, "meio")
+    if novo == "em_analise" and (aprovado is not None or data_aprovacao or meio):
+        raise ValueError("aprovado, data_aprovacao e meio só valem com novo: boletim_recebido")
+    if meio is not None and meio not in medicoes.MEIOS_BOLETIM:
+        raise ValueError(f"meio desconhecido: {meio!r} (use {', '.join(medicoes.MEIOS_BOLETIM)})")
+    hoje = tempo.hoje_local().isoformat()
+    for rotulo, d in (("data", data), ("data_aprovacao", data_aprovacao)):
+        if d is not None and d > hoje:
+            raise ValueError(f"{rotulo} não pode ser futura ({d})")
+    estado_novo = _estado_de_destino(conn, m, novo)
+    if _ja_no_destino(m, estado_novo):
+        raise _JaFeito(f"já {_rotulo_destino(m, estado_novo)}")
+    if m["estado"] != "protocolada":
+        raise ValueError(f"só se devolve medição protocolada (esta está {medicoes.rotulo_estado(m['estado'])})"
+                         + ("; a cancelada volta pela operação reabrir, com o estado de destino (novo: ...)"
+                            if m["estado"] in ENCERRADAS else ""))
+    medicoes._recusar_marco_proprio(conn, m)
+    ativas = _nfs_ativas(conn, m["id"])
+    if ativas:
+        raise ValueError("tem nota ligada (" + ", ".join(_fmt_nf(a) for a in ativas) + "): com nota vigente a medição "
+                         "não volta para antes da nota (se a nota é de outra medição, desligue-a antes: desligar_nf)")
+    if conn.execute("SELECT 1 FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' AND desfeita_em IS NULL "
+                    "AND protocolo_id IS NOT NULL", (m["id"],)).fetchone() or conn.execute(
+            "SELECT 1 FROM protocolo_medicoes pm JOIN protocolos p ON p.id=pm.protocolo_id WHERE pm.medicao_id=? "
+            "AND p.situacao='enviado' AND p.etapa IN ('nota','unico')", (m["id"],)).fetchone():
+        raise ValueError("a nota desta medição foi enviada ao órgão pelo sistema: o protocolo dela é fato e não se desfaz")
+    if conn.execute("SELECT 1 FROM espelho_medicoes WHERE medicao_id=?", (m["id"],)).fetchone():
+        raise ValueError("a medição tem espelho: ela chegou a protocolada pelo fluxo da tela e não volta por aqui")
+    if m["valor_protocolado_centavos"] is None:
+        raise ValueError("a medição não tem valor pedido: sem ele não há pedido em análise")
+    enviada_em = data or m["planilha_enviada_em"]
+    if novo == "em_analise" and enviada_em is None:
+        raise ValueError("diga a data do envio da planilha/carta ao órgão (data: AAAA-MM-DD)")
+    if novo == "boletim_recebido":
+        if aprovado is None and m["valor_atestado_centavos"] is None:
+            raise ValueError("boletim recebido pede o valor aprovado: a medição não tem e a operação não trouxe "
+                             "(aprovado: \"1.234,56\", com data_aprovacao)")
+        if aprovado is not None and data_aprovacao is None:
+            raise ValueError("diga a data do boletim (data_aprovacao: AAAA-MM-DD)")
+        if aprovado is None and (data_aprovacao or meio):
+            raise ValueError("data_aprovacao e meio acompanham o aprovado (aprovado: ...)")
+        if aprovado is not None:
+            medicoes.conferir_sinal(m["tipo"], aprovado)
+    texto = f"Devolvida ({ORIGEM}): {motivo}"
+    detalhes = []
+    # o protocolo de nota que nao houve deixa de valer por marca: sai do "protocolado no dia" e do prazo do orgao
+    desfeitos = [dict(r) for r in conn.execute(
+        "SELECT id, data, numero_oficio, numero_processo, origem FROM medicao_protocolos WHERE medicao_id=? "
+        "AND etapa='nota' AND desfeita_em IS NULL ORDER BY id", (m["id"],))]
+    for p in desfeitos:
+        cur = conn.execute("UPDATE medicao_protocolos SET desfeita_em=datetime('now'), motivo_desfazer=? "
+                           "WHERE id=? AND desfeita_em IS NULL", (f"{texto}; {fonte}", p["id"]))
+        db.exigir_uma_linha(cur, "O protocolo da medição mudou concorrentemente; tente novamente")
+        auditoria.registrar(conn, uid, "medicao.protocolo_desfeito", "medicao", m["id"], p,
+                            {"motivo": motivo, "fonte": fonte, "origem": ORIGEM})
+        detalhes.append(f"protocolo da nota de {p['data']}"
+                        + (f", processo {p['numero_processo']}" if p["numero_processo"] else "")
+                        + " desfeito (fica na história da medição)")
+    origem_envio = m["planilha_envio_origem"] or ("externo" if enviada_em else None)
+    cur = conn.execute("UPDATE medicoes SET estado=?, congelada=0, planilha_enviada_em=?, planilha_envio_origem=?, "
+                       "motivo_represamento=? WHERE id=? AND estado='protocolada'",
+                       (estado_novo, enviada_em, origem_envio, texto, m["id"]))
+    db.exigir_uma_linha(cur, "Estado da medição mudou concorrentemente; tente novamente")
+    auditoria.registrar(conn, uid, "medicao.estado", "medicao", m["id"],
+                        {"estado": "protocolada", "motivo": m["motivo_represamento"], "congelada": m["congelada"],
+                         "planilha_enviada_em": m["planilha_enviada_em"],
+                         "planilha_envio_origem": m["planilha_envio_origem"]},
+                        {"estado": estado_novo, "motivo": texto, "congelada": 0, "planilha_enviada_em": enviada_em,
+                         "planilha_envio_origem": origem_envio, "origem": ORIGEM, "fonte": fonte,
+                         "protocolos_desfeitos": [p["id"] for p in desfeitos]})
+    if enviada_em:
+        detalhes.append(f"planilha/carta enviada ao órgão em {enviada_em}")
+    if estado_novo == "prevista":
+        detalhes.append("o reajuste fica previsto, com o pedido congelado pelo envio, como a tela o guarda em análise")
+    if processo:
+        # o nº do processo no orgao e' o da planilha/carta (etapa 'planilha'), na data do envio, como a tela grava
+        linha = conn.execute("SELECT id, numero_processo FROM medicao_protocolos WHERE medicao_id=? AND etapa='planilha'",
+                             (m["id"],)).fetchone()
+        if linha is None and enviada_em is None:
+            raise ValueError("o processo do órgão entra na data do envio da planilha/carta: diga a data")
+        if linha is None:
+            conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, numero_processo, origem, etapa) "
+                         "VALUES (?,?,?,'manual','planilha')", (m["id"], enviada_em, processo))
+            auditoria.registrar(conn, uid, "medicao.numero_siga", "medicao", m["id"], None,
+                                {"numero_processo": processo, "data": enviada_em, "origem": ORIGEM, "fonte": fonte})
+            detalhes.append(f"processo {processo} no órgão")
+        elif linha["numero_processo"] != processo:
+            detalhes.append(f"AVISO: a medição já tem o processo {linha['numero_processo']} na planilha/carta; "
+                            f"o {processo} não foi gravado")
+    if novo == "boletim_recebido" and aprovado is not None:
+        # o aprovado e' evento (039/042), como na carga do historico: o vigente e' o ultimo
+        conn.execute("UPDATE medicoes SET valor_atestado_centavos=?, valor_atestado_origem='manual', atestado_em=? "
+                     "WHERE id=?", (aprovado, data_aprovacao, m["id"]))
+        conn.execute("INSERT INTO medicao_atestos (medicao_id, valor_centavos, origem, atestado_em, usuario_id, meio, "
+                     "numero_orgao, observacao, pedido_centavos) VALUES (?,?,'manual',?,?,?,?,?,?)",
+                     (m["id"], aprovado, data_aprovacao, uid, meio, processo, fonte, m["valor_protocolado_centavos"]))
+        auditoria.registrar(conn, uid, "medicao.valor_atestado", "medicao", m["id"],
+                            {"valor_atestado_centavos": m["valor_atestado_centavos"], "atestado_em": m["atestado_em"]},
+                            {"valor_atestado_centavos": aprovado, "valor_atestado_origem": "manual",
+                             "atestado_em": data_aprovacao, "meio": meio, "fonte": fonte, "origem": ORIGEM})
+        detalhes.append(f"aprovado {dinheiro.format_brl(aprovado)} em {data_aprovacao}")
+    return detalhes
 
 
 # ------------------------------------------------------------------ operacoes de nota (issue #638)
@@ -702,7 +982,80 @@ def _reconsiderar_nf(conn, uid, nota, op, fonte):
     return ["AVISO: o RM cancelou a nota: ela continua cancelada"] if nova == "cancelada" else ["volta a contar"]
 
 
-EXECUTORES_DE_NOTA = {"desconsiderar_nf": _desconsiderar_nf, "reconsiderar_nf": _reconsiderar_nf}
+AVISO_RESIDUO_PCT = 1    # acima disto do valor dos titulos, o ensaio avisa: pode ser nota paga em parte, nao residuo
+
+
+def _conferir_nota_do_residuo(conn, nota, op) -> str:
+    _exigir_migracao(conn, "notas_fiscais", "residuo_encerrado_centavos", "092")
+    motivo = _texto(op, "motivo")
+    if motivo is None:
+        raise ValueError("diga o motivo (motivo: ...)")
+    if nota["desconsiderada_em"] is not None or _excluida_no_rm(nota) or nota["situacao"] != "ativa":
+        raise ValueError(f"NF {nota['numero']} está {_situacao_da_nota(nota)} e já não conta")
+    return motivo
+
+
+def _encerrar_residuo_nf(conn, uid, nota, op, fonte):
+    """docs/adr/0006 ("Titulo baixado no RM nao tem falta"): a nota ja' paga cujo titulo ficou com um resto que o RM
+    nunca vai baixar (baixa parcial antiga) deixa de aparecer como divida. Grava quanto do que falta foi dado por
+    encerrado; nada se apaga, e os titulos continuam como o RM os deu. So' para nota PAGA: todo titulo dela precisa de
+    baixa com valor (o titulo inteiro em aberto e' divida, nao residuo)."""
+    from app import sincronizacao_rm   # import local: sincronizacao_rm importa medicoes
+    motivo = _conferir_nota_do_residuo(conn, nota, op)
+    if nota["residuo_encerrado_em"]:
+        raise _JaFeito(f"resíduo de {dinheiro.format_brl(nota['residuo_encerrado_centavos'] or 0)} já encerrado")
+    falta = sincronizacao_rm._falta_por_titulo(conn, nota["id"])
+    if falta is None:
+        raise ValueError(f"NF {nota['numero']} tem título sem baixa no RM: isso é título em aberto, não resíduo de "
+                         "nota paga")
+    _, devido, _ = sincronizacao_rm._recebido_da_nota(conn, nota["id"])
+    if devido <= 0:
+        raise ValueError(f"NF {nota['numero']} não tem título no RM: não há resíduo a encerrar")
+    # o titulo que o RM deu como baixado com valor menor nao tem falta, mas a diferenca fica a' vista na reconciliacao
+    # (`sincronizacao_rm._baixados_com_diferenca`) ate' alguem a conferir: este ato tambem a encerra, com falta zero
+    diferenca = sincronizacao_rm.diferenca_da_baixa_total(conn, nota["id"])
+    if falta <= 0 and diferenca <= 0:
+        raise ValueError(f"NF {nota['numero']} não tem resíduo: os títulos dela não têm falta nem diferença na baixa")
+    cur = conn.execute("UPDATE notas_fiscais SET residuo_encerrado_centavos=?, residuo_encerrado_em=datetime('now') "
+                       "WHERE id=? AND residuo_encerrado_em IS NULL", (falta, nota["id"]))
+    db.exigir_uma_linha(cur, f"A NF {nota['numero']} mudou concorrentemente; tente novamente")
+    auditoria.registrar(conn, uid, "nota.residuo_encerrado", "nota_fiscal", nota["id"],
+                        {"residuo_encerrado_centavos": None},
+                        {**_registro_da_nota(nota), "residuo_encerrado_centavos": falta, "titulos_centavos": devido,
+                         "diferenca_da_baixa_total_centavos": diferenca,
+                         "motivo": motivo, "fonte": fonte, "origem": ORIGEM})
+    detalhes = []
+    if falta > 0:
+        detalhes.append(f"resíduo de {dinheiro.format_brl(falta)} encerrado: deixa de contar no a receber (valor cheio; "
+                        f"títulos de {dinheiro.format_brl(devido)})")
+    if diferenca > 0:
+        detalhes.append(f"diferença de {dinheiro.format_brl(diferenca)} na baixa total conferida: sai da lista da "
+                        "reconciliação")
+    if falta * 100 > devido * AVISO_RESIDUO_PCT:
+        detalhes.append(f"AVISO: o resíduo passa de {AVISO_RESIDUO_PCT}% do valor dos títulos; confira se não é "
+                        "nota paga em parte")
+    return detalhes
+
+
+def _reabrir_residuo_nf(conn, uid, nota, op, fonte):
+    """O inverso de `encerrar_residuo_nf`: o residuo volta a contar como falta da nota."""
+    motivo = _conferir_nota_do_residuo(conn, nota, op)
+    if not nota["residuo_encerrado_em"]:
+        raise _JaFeito("não tem resíduo encerrado")
+    cur = conn.execute("UPDATE notas_fiscais SET residuo_encerrado_centavos=NULL, residuo_encerrado_em=NULL "
+                       "WHERE id=? AND residuo_encerrado_em IS NOT NULL", (nota["id"],))
+    db.exigir_uma_linha(cur, f"A NF {nota['numero']} mudou concorrentemente; tente novamente")
+    auditoria.registrar(conn, uid, "nota.residuo_reaberto", "nota_fiscal", nota["id"],
+                        {"residuo_encerrado_centavos": nota["residuo_encerrado_centavos"],
+                         "residuo_encerrado_em": nota["residuo_encerrado_em"]},
+                        {**_registro_da_nota(nota), "residuo_encerrado_centavos": None, "motivo": motivo, "fonte": fonte,
+                         "origem": ORIGEM})
+    return [f"resíduo de {dinheiro.format_brl(nota['residuo_encerrado_centavos'] or 0)} volta a contar como falta da nota "
+            "(e a diferença da baixa total, se houver, volta à reconciliação)"]
+
+
+EXECUTORES_DE_NOTA = {"desconsiderar_nf": _desconsiderar_nf, "reconsiderar_nf": _reconsiderar_nf,
+                      "encerrar_residuo_nf": _encerrar_residuo_nf, "reabrir_residuo_nf": _reabrir_residuo_nf}
 
 
 def _aplicar_nota(conn, uid: int, op: dict, item: dict, nome: str, fonte: str) -> None:
@@ -719,7 +1072,8 @@ def _aplicar_nota(conn, uid: int, op: dict, item: dict, nome: str, fonte: str) -
 
 
 EXECUTORES = {"cancelar": _cancelar, "reabrir": _reabrir, "trocar_tipo": _trocar_tipo, "desligar_nf": _desligar_nf,
-              "ligar_nf": _ligar_nf, "protocolar": _protocolar, "estado": _estado}
+              "ligar_nf": _ligar_nf, "protocolar": _protocolar, "estado": _estado, "devolver": _devolver,
+              "desfazer_recebimento": _desfazer_recebimento}
 
 
 def _aplicar(conn, uid: int, op, item: dict) -> None:

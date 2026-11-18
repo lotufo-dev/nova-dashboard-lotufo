@@ -26,7 +26,8 @@
 //   destino  o caminho em que a tela termina, quando ela so' leva a outra (`/notas/envio/:id` abre a pagina da medicao)
 //
 // Todo item do menu de um perfil precisa de uma tela aqui para esse perfil: a prova reprova o item sem tela.
-import { cabecalhoCom, CUSTO_DA_OBRA, detalheDoEnvio, espelhoGerado, falha, medicaoComEspelhoGerado, medicaoComExcluidosNoRm,
+import { cabecalhoCom, CUSTO_DA_OBRA, detalheDoEnvio, espelhoGerado, falha, inicioComAParte, medicaoComEspelhoGerado,
+         medicaoComExcluidosNoRm, obrasComAParte, reconciliacaoComBaixados,
          medicaoComNotaDivergente, medicaoComNotaEmitida, medicaoDaMtpar, NOTAS_COM_DIVERGENCIA, notasAEnviar, notasComEnvioAberto,
          PDF_ILEGIVEL,
          prazosEmEncerramento, prazosParalisada, PREVIA_DO_ESPELHO, PROTOCOLO_ID, RESPOSTA_QUE_QUEBRA, RM_EXCLUSAO_RECUSADA,
@@ -75,6 +76,9 @@ export const TELAS = [
     simular: falha(/^\/api\/inicio\/painel$/) },
   { rota: "inicio", id: "inicio-avisos-erro", caminho: "/inicio", perfis: SO_ADMIN, espera: ".ini-avisos [role=alert]", erro: true,
     simular: falha(/^\/api\/inicio$/) },
+  // o a receber antigo e o sem atualizacao do RM, na linha a' parte do painel do ciclo (docs/adr/0006)
+  { rota: "inicio", id: "inicio-a-parte", caminho: "/inicio", perfis: ["diretoria"], espera: ".ini-ciclo .em-aberto-a-parte",
+    simular: [{ caminho: /^\/api\/inicio\/painel$/, ajustar: inicioComAParte }] },
   // a ultima rede: uma resposta que a tela nao sabe desenhar derruba o desenho e aparece "A tela parou de responder"
   { rota: "inicio", id: "tela-parou", caminho: "/inicio", perfis: TODOS, espera: ".falha", parou: true,
     simular: [{ caminho: /^\/api\/inicio\/painel$/, corpo: RESPOSTA_QUE_QUEBRA }] },
@@ -93,6 +97,8 @@ export const TELAS = [
   // ---- Obras: a lista (Posicao), o QDOP, a lista vazia e a falha
   { rota: "obras", id: "obras", caminho: "/obras", perfis: TODOS, espera: ".obras-numeros" },
   { rota: "obras", id: "obras-qdop", caminho: "/obras/qdop", perfis: TODOS, espera: "#conteudo .cartao" },
+  { rota: "obras", id: "obras-a-parte", caminho: "/obras", perfis: ["diretoria"], espera: ".em-aberto-a-parte",
+    simular: [{ caminho: /^\/api\/contratos$/, ajustar: obrasComAParte }] },
   { rota: "obras", id: "obras-vazia", caminho: "/obras", perfis: SO_ADMIN, espera: ".obras-painel .vazio",
     simular: [{ caminho: /^\/api\/contratos$/, corpo: [] }] },
   { rota: "obras", id: "obras-erro", caminho: "/obras", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
@@ -232,6 +238,9 @@ export const TELAS = [
   // ---- Administracao: as cinco abas, os formularios de Usuarios, a auditoria vazia e a falha
   { rota: "admin", id: "admin", caminho: "/admin", perfis: SO_ADMIN, espera: "#conteudo h2" },
   { rota: "admin", id: "admin-reconciliacao", caminho: "/admin/reconciliacao", perfis: SO_ADMIN, espera: "#conteudo h2" },
+  { rota: "admin", id: "admin-reconciliacao-baixados", caminho: "/admin/reconciliacao?categoria=baixados", perfis: SO_ADMIN,
+    espera: "#conteudo table",
+    simular: [{ caminho: /^\/api\/rm\/reconciliacao$/, ajustar: reconciliacaoComBaixados }] },
   { rota: "admin", id: "admin-usuarios", caminho: "/admin/usuarios", perfis: SO_ADMIN, espera: "#conteudo h2" },
   { rota: "admin", id: "admin-usuarios-redefinir", caminho: "/admin/usuarios", perfis: SO_ADMIN, antes: "#conteudo table",
     espera: "#conteudo table form", passos: [{ clicar: '#conteudo table button:has-text("Redefinir senha")' }] },

@@ -853,7 +853,7 @@ def test_medicao_da_carga_do_historico_aparece_com_pedido_e_aprovado(client_admi
         conn.close()
     lista = client_admin.get(f"/api/contratos/{cid}/medicoes").json()
     m = next(x for x in lista if x["numero"] == 1)
-    assert (m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"]) == ("protocolada", 100001, 99999)
+    assert (m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"]) == ("boletim_recebido", 100001, 99999)
     d = client_admin.get(f"/api/medicoes/{m['id']}").json()
     assert d["atestado_em"] == "2025-05-20"
 

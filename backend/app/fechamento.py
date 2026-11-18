@@ -80,7 +80,8 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from app import cobranca_orgao, contratos, db, diretoria, dinheiro, medicoes, notas as notas_fiscais, sincronizacao_rm
 
-ANOS = ("2025", "2026")
+# o primeiro ano e' `diretoria.ANO_INICIAL`: a UNICA definicao de "anterior", a mesma do a receber do Inicio (adr 0006)
+ANOS = (diretoria.ANO_INICIAL, "2026")
 ESTADOS_APROVADO = ("boletim_recebido", "espelho_gerado", "espelho_enviado", "nota_emitida", "protocolada",
                     "nf_emitida", "recebida")
 # a nota emitida e' a prova de que o orgao aprovou: sem o valor do boletim gravado, o pedido conta como aprovado daqui em diante
@@ -257,7 +258,7 @@ def _medicoes(conn) -> list[dict]:
                    m.valor_protocolado_centavos AS pedido, m.valor_atestado_centavos AS aprovado,
                    c.percentual_direito_bp AS pct, COALESCE(c.nome_curto, c.numero_instrumento) AS obra,
                    e.coligada_rm AS coligada, e.papel='consorcio' AS consorcio,
-                   (SELECT MIN(mp.data) FROM medicao_protocolos mp WHERE mp.medicao_id=m.id AND mp.etapa='nota') AS protocolo_em
+                   (SELECT MIN(mp.data) FROM medicao_protocolos mp WHERE mp.medicao_id=m.id AND mp.etapa='nota' AND mp.desfeita_em IS NULL) AS protocolo_em
             FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
             JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
             WHERE m.estado IN ({','.join('?' * len(estados))})
@@ -275,8 +276,8 @@ def _notas_por_medicao(conn, ids: set[int]) -> dict[int, list[dict]]:
     extras = cobranca_orgao.extras_por_contrato(conn)
     tipos = cobranca_orgao.tipos_buscados(extras)
     linhas = [dict(r) for r in conn.execute(
-        f"""SELECT a.medicao_id, a.valor_alocado_centavos, n.id AS nota_id, n.numero, n.valor_centavos, n.coligada,
-                   n.codtmv, m.contrato_id
+        f"""SELECT a.medicao_id, a.id AS alocacao_id, a.valor_alocado_centavos, a.partilhada, n.id AS nota_id, n.numero,
+                   n.valor_centavos, n.coligada, n.codtmv, m.contrato_id
             FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id JOIN medicoes m ON m.id=a.medicao_id
             WHERE a.desfeita_em IS NULL AND n.situacao='ativa' AND n.desconsiderada_em IS NULL
               AND n.excluida_rm_em IS NULL
@@ -289,15 +290,22 @@ def _notas_por_medicao(conn, ids: set[int]) -> dict[int, list[dict]]:
     out: dict[int, list[dict]] = {}
     por_nota: dict[int, list[dict]] = {}
     for x in linhas:
-        valor = x["valor_centavos"] if vinculos[x["nota_id"]] == 1 else x["valor_alocado_centavos"]
-        y = {**x, "valor": valor}
+        # o vinculo de PARTE da nota (`partilhada`, docs/adr/0005) vale o valor da parte, mesmo sendo o unico
+        inteira = vinculos[x["nota_id"]] == 1 and not x["partilhada"]
+        y = {**x, "valor": x["valor_centavos"] if inteira else x["valor_alocado_centavos"]}
         out.setdefault(x["medicao_id"], []).append(y)
         por_nota.setdefault(x["nota_id"], []).append(y)
     for nota_id, xs in por_nota.items():
         no_rm, falta = _no_rm(conn, nota_id)
-        # a falta e' da nota: ligada a mais de uma medicao, reparte-se na proporcao do valor de cada vinculo
-        pesos = [max(0, x["valor"] or 0) for x in xs]
-        partes = dinheiro.ratear_proporcional(falta, pesos) if len(xs) > 1 and sum(pesos) > 0 else [falta] * len(xs)
+        if any(x["partilhada"] for x in xs):
+            # nota partilhada: a falta dos titulos reparte-se entre as partes e o resto que nenhuma medicao levou
+            # (`sincronizacao_rm.partes_da_nota`, a mesma conta do a receber do Inicio)
+            da_parte = sincronizacao_rm.partes_da_nota(conn, nota_id, falta)
+            partes = [da_parte.get(x["alocacao_id"], 0) for x in xs]
+        else:
+            # a falta e' da nota: ligada a mais de uma medicao, reparte-se na proporcao do valor de cada vinculo
+            pesos = [max(0, x["valor"] or 0) for x in xs]
+            partes = dinheiro.ratear_proporcional(falta, pesos) if len(xs) > 1 and sum(pesos) > 0 else [falta] * len(xs)
         for x, parte in zip(xs, partes):
             x["no_rm"], x["falta"] = no_rm, parte
     return out

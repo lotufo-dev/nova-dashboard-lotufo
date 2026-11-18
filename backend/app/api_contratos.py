@@ -36,7 +36,11 @@ def listar(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
     # #645: a lista de Obras le `posicao`, na cota da Lotufo: vigente, medido e saldo pela conta do topo da pagina da
     # obra (`paineis.posicao_na_cota`) e o a receber cobranca a cobranca, como a tela A receber; sem o total
     # liberado, nulo (a tela mostra "—"). O a receber cheio saiu da lista (so' ela o lia).
-    a_receber = diretoria.a_receber_por_obra(conn, na_cota=True)
+    # 17/11/2026 (docs/adr/0006): o a receber soma so' a competencia de 2025 em diante que o RM ainda informa; o que
+    # fica a' parte (anterior, ou nota sem atualizacao do RM) sai em `a_receber_anterior_centavos` e
+    # `a_receber_sem_atualizacao_centavos`, fora do total
+    par = diretoria.a_receber_na_cota_por_obra(conn)
+    a_receber, a_parte = par if par is not None else (None, None)
     saida = []
     for c in contratos.listar(conn):
         o = orgaos[c["id"]]
@@ -45,7 +49,10 @@ def listar(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
         saida.append({**c, **prazos.resumo(conn, c["id"], hoje), "contratante": contratante, "orgao_sub": orgao_sub,
                       "medido_centavos": feito, "saldo_centavos": c["valor_vigente_execucao_centavos"] - feito,
                       "posicao": {**paineis.posicao_na_cota(c["valor_vigente_execucao_centavos"], feito, c["percentual_direito_bp"]),
-                                  "a_receber_centavos": None if a_receber is None else a_receber.get(c["id"], 0)}})
+                                  "a_receber_centavos": None if a_receber is None else a_receber.get(c["id"], 0),
+                                  "a_receber_ano_inicial": diretoria.ANO_INICIAL,
+                                  **{k: None if a_parte is None else a_parte.get(c["id"], {}).get(k.removeprefix("a_receber_"), 0)
+                                     for k in ("a_receber_anterior_centavos", "a_receber_sem_atualizacao_centavos")}}})
     return saida
 
 
