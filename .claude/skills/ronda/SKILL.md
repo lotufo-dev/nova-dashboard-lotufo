@@ -56,13 +56,40 @@ O que vale como prova, por ato:
 | Ato | Prova |
 |---|---|
 | Planilha ou carta enviada ao órgão | O e-mail de envio, com o anexo |
-| Boletim, valor aprovado | Documento do órgão (boletim, caderno, atesto). Nota e espelho não provam aprovação (`docs/adr/0013`) |
+| Boletim, valor aprovado | Documento do órgão (boletim, caderno, atesto). Sem ele, ver "Aprovado sem documento do órgão" abaixo (`docs/adr/0013`) |
 | Nota emitida | O PDF da nota, com a medição ou o contrato no texto. Nunca casar nota com medição pelo valor (`docs/adr/0005`) |
 | Protocolo | Número e data em documento ou e-mail do órgão, ou o recibo do sistema dele |
 | Recebimento | Não se lança: vem da baixa do RM (`docs/adr/0006`) |
 | Aditivo, apostilamento, ordem, endosso | O termo assinado ou publicado. Pedido sem resposta entra como pleito, se o tipo existir |
 
+### Aprovado sem documento do órgão
+
+Decisão do dono em 18/11/2026, no primeiro caso do piloto: quando a equipe já faturou a medição e o documento do
+órgão não chegou, o aprovado é a **soma das notas da medição**, desde que todas as notas esperadas (de todas as
+consorciadas, em todos os municípios) estejam em mãos, cada uma cite a medição e o contrato no texto, e o tomador
+seja o órgão. É a nota desempatando (`docs/adr/0013`). Faltou uma nota, ou uma delas não cita a medição: não lançar.
+
+O caminho, nesta ordem:
+
+1. **Aprovado pela carga** (`medicoes/<obra>.csv` no repositório privado, pelo rito): a tela recusa valor diferente
+   do pedido enquanto não há boletim, e o boletim exige o PDF e o número do órgão. Meio `outro`, data da emissão das
+   notas, e a `fonte` dizendo "sem documento do órgão", as notas somadas e a decisão. O pedido não muda.
+2. **Espelho pela tela**, com o aprovado e a justificativa de seguir sem boletim. Não enviar ao faturamento: o
+   espelho já foi feito por fora.
+3. **Notas pela tela**, todas, inclusive as das consorciadas.
+
+O que a dashboard acusar na conferência das notas (tributo, líquido, município) **não se justifica nem se corrige**:
+é o que a conferência existe para mostrar. Vai para o relato, com o valor do espelho e o da nota.
+
+Quando o documento do órgão chegar com outro valor, ele entra como boletim pela tela e passa a mandar.
+
 ## 4. Lançar
+
+- **Ensaiar antes numa cópia** do snapshot horário da produção, com o código que está no ar: o mesmo fluxo, os
+  totais antes e depois e os avisos que nascem. Só vai à produção o que o ensaio mostrou. Script de ensaio que
+  chama a leitura de PDF precisa do bloco `if __name__ == "__main__":` (a leitura abre um processo filho).
+- **A sessão da dashboard no Chrome tem de estar aberta** (usuário da ronda, ou o do dono no piloto). Tela de
+  entrada: parar e pedir o login; a sessão não digita senha. O que já foi gravado por arquivo fica dito no relato.
 
 - **Pela tela**, na página da medição, com o PDF anexado, pelos atos que ela já tem: envio registrado por fora,
   boletim, nota, protocolo feito por fora. Usuário: o próprio da ronda (perfil engenharia). Nas rodadas do piloto,
@@ -101,7 +128,8 @@ primeira linha, e a rodada seguinte cobre os dias que faltaram.
 - Gravar no RM, criar ou alterar conta de acesso, fazer deploy, mudar código.
 - Alterar ou desfazer o que uma pessoa lançou.
 - Perguntar a alguém da equipe, da TI ou do órgão.
-- Lançar valor aprovado sem documento do órgão.
+- Lançar valor aprovado sem documento do órgão, fora do caso "Aprovado sem documento do órgão".
+- Justificar ou fechar aviso de divergência que o próprio lançamento fez nascer.
 
 ## Quando acaba
 
