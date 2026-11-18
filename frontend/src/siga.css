@@ -161,6 +161,8 @@
   .sg__tabela td, .sg__tabela td:first-child, .sg__tabela td:last-child { padding: 0; border: 0; }
   .sg__tabela td + td { margin-top: var(--espaco-mini); }
   .sg__tabela td[data-rotulo]::before { content: attr(data-rotulo) " "; margin-right: var(--espaco-mini); color: var(--cor-texto-secundario); font-size: var(--texto-mini); font-family: var(--fonte-texto); font-weight: var(--peso-normal); }
+  /* a superintendencia segue o contratante na mesma linha do bloco */
+  .sg__tabela td[data-rotulo="Contratante"] .sg__fraco { display: inline; margin-left: var(--espaco-mini); }
   /* a cor do tempo parado passa da primeira celula para o bloco inteiro */
   .sg__linha[class*="sg__linha--"] { box-shadow: inset var(--espaco-mini) 0 0 var(--sg-tempo); }
   .sg__linha[class*="sg__linha--"] > td:first-child { box-shadow: none; }
