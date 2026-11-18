@@ -140,3 +140,6 @@
   .cartao:has(#dir-reajustes) .tabela .truncar--nome { max-width: none; white-space: normal; overflow: visible; }
   .cartao:has(#dir-reajustes) .tabela td.dinheiro { font-size: var(--texto-mini); }
 }
+
+/* o glifo do saldo negativo (medido acima do vigente) nao encosta no valor */
+.negativo > .glifo { margin-right: var(--espaco-mini); }
