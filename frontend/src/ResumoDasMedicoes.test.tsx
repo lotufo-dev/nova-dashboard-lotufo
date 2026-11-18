@@ -7,21 +7,25 @@ const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
 
 // Dados sinteticos, com os nomes do cadastro de exemplo. A etapa, as datas, os valores (na cota), as referencias das
-// variacoes, a diferenca e os dias na etapa vem prontos do servidor; a tela so' mostra.
+// variacoes, a diferenca e o tempo parado (o `parada` da fila de trabalho) vem prontos do servidor; a tela so' mostra.
 type Linha = RespostaResumo["grupos"][number]["linhas"][number];
 type EtapaDaLinha = Linha["etapas"][number];
 const e = (etapa: EtapaDaLinha["etapa"], situacao: EtapaDaLinha["situacao"], data: string | null = null): EtapaDaLinha => ({ etapa, situacao, data });
 const linha = (x: Partial<Linha> & Pick<Linha, "contrato_id" | "obra" | "medicao_id" | "titulo" | "etapa" | "etapas">): Linha => ({
   contratante: "Secretaria de Exemplo", medicao_ids: [x.medicao_id], numero: 1, tipo: "execucao", competencia: "2026-10",
-  valor_centavos: null, na_etapa_desde: null, dias_uteis_na_etapa: null, dias_da_nota_ao_recebimento: null,
+  valor_centavos: null, parada: null, recebida_em: null, dias_da_nota_ao_recebimento: null,
   pedido_do_aprovado_centavos: null, abaixo_do_pedido_centavos: null, acima_do_pedido_centavos: null, ...x,
 });
+type Parada = NonNullable<Linha["parada"]>;
+const parada = (desde: string | null, dias_uteis: number | null, situacao: Parada["situacao"], extra: Partial<Parada> = {}): Parada => ({
+  desde, dias_uteis, hoje: false, situacao, prazo_orgao_dias: null, esperada: null, alem_do_prazo: false, ...extra });
 const FUTURAS = [e("boletim", "futuro"), e("nota", "futuro"), e("protocolado", "futuro"), e("recebido", "futuro")];
 
-// protocolada ha' 4 dias uteis, com o aprovado 1,9% abaixo do pedido (acima do limite de 0,5%: critico)
+// protocolada ha' 4 dias uteis, dentro do prazo do orgao, com o aprovado 1,9% abaixo do pedido (acima do limite de
+// 0,5%: critico)
 const PROPRIA = linha({
   contrato_id: 7, obra: "Obra Própria", medicao_id: 71, titulo: "12ª Medição + Reajuste", medicao_ids: [71, 72], etapa: "protocolado",
-  valor_centavos: 10_100_001, na_etapa_desde: "2026-11-10", dias_uteis_na_etapa: 4,
+  valor_centavos: 10_100_001, parada: parada("2026-11-10", 4, "andamento", { prazo_orgao_dias: 30, esperada: "2026-12-10" }),
   pedido_do_aprovado_centavos: 10_300_000, abaixo_do_pedido_centavos: 199_999, acima_do_pedido_centavos: 0,
   etapas: [e("em_analise", "feito", "2026-11-03"), e("boletim", "feito"), e("nota", "feito", "2026-11-09"),
     e("protocolado", "atual", "2026-11-10"), e("recebido", "futuro")],
@@ -29,7 +33,7 @@ const PROPRIA = linha({
 // protocolada hoje, com o aprovado acima do pedido
 const SEXTA = linha({
   contrato_id: 13, obra: "Obra Sexta", medicao_id: 131, titulo: "2ª Medição", etapa: "protocolado", valor_centavos: 5_000_000,
-  na_etapa_desde: "2026-11-16", dias_uteis_na_etapa: 0,
+  parada: parada("2026-11-16", 0, "feito", { hoje: true }),
   pedido_do_aprovado_centavos: 4_990_000, abaixo_do_pedido_centavos: 0, acima_do_pedido_centavos: 10_000,
   etapas: [e("em_analise", "feito", "2026-11-03"), e("boletim", "feito", "2026-11-06"), e("nota", "feito", "2026-11-09"),
     e("protocolado", "atual", "2026-11-16"), e("recebido", "futuro")],
@@ -37,22 +41,23 @@ const SEXTA = linha({
 // em analise ha' 11 dias uteis: critico
 const QUARTA = linha({
   contrato_id: 11, obra: "Obra Quarta", medicao_id: 111, titulo: "4ª Medição", etapa: "em_analise", valor_centavos: 900_000,
-  na_etapa_desde: "2026-10-30", dias_uteis_na_etapa: 11, etapas: [e("em_analise", "atual", "2026-10-30"), ...FUTURAS],
+  parada: parada("2026-10-30", 11, "critico"), etapas: [e("em_analise", "atual", "2026-10-30"), ...FUTURAS],
 });
 // familia sem planilha/carta: a obra nao tem a etapa "em analise"; no boletim, sem a data do evento
 const CONSORCIO = linha({
   contrato_id: 8, obra: "Obra Consórcio", contratante: "Companhia de Exemplo", medicao_id: 81, titulo: "3ª Medição", etapa: "boletim",
-  valor_centavos: 333_300, etapas: [e("boletim", "atual"), e("nota", "futuro"), e("protocolado", "futuro"), e("recebido", "futuro")],
+  valor_centavos: 333_300, parada: parada(null, null, null),
+  etapas: [e("boletim", "atual"), e("nota", "futuro"), e("protocolado", "futuro"), e("recebido", "futuro")],
 });
 const REAJUSTE = linha({
   contrato_id: 8, obra: "Obra Consórcio", contratante: "Companhia de Exemplo", medicao_id: 82, titulo: "Reajuste da 3ª Medição", tipo: "reajuste",
-  etapa: "recebido", valor_centavos: 50_000, na_etapa_desde: "2026-11-12", dias_da_nota_ao_recebimento: 8,
+  etapa: "recebido", valor_centavos: 50_000, recebida_em: "2026-11-12", dias_da_nota_ao_recebimento: 8,
   pedido_do_aprovado_centavos: 50_000, abaixo_do_pedido_centavos: 0, acima_do_pedido_centavos: 0,
   etapas: [e("boletim", "feito", "2026-11-02"), e("nota", "feito", "2026-11-04"), e("protocolado", "feito", "2026-11-05"), e("recebido", "feito", "2026-11-12")],
 });
 const ANTIGA = linha({
   contrato_id: 7, obra: "Obra Própria", medicao_id: 61, titulo: "11ª Medição", competencia: "2025-12", etapa: "em_analise", valor_centavos: 0,
-  na_etapa_desde: "2026-01-08", dias_uteis_na_etapa: 214, etapas: [e("em_analise", "atual", "2026-01-08"), ...FUTURAS],
+  parada: parada("2026-01-08", 214, "critico"), etapas: [e("em_analise", "atual", "2026-01-08"), ...FUTURAS],
 });
 const RESUMO: RespostaResumo = {
   hoje: "2026-11-16", mes: "2026-10", em_trabalho: "2026-10",
@@ -165,7 +170,7 @@ describe("Resumo das medições em quadro por etapa (#749, #805)", () => {
     expect(texto(colunas[2])).toBe("Notanenhuma medição");
   });
 
-  it("o cartão diz a obra, o contratante, a medição, o valor, o tempo na etapa e a diferença para o pedido", async () => {
+  it("o cartão diz a obra, o contratante, a medição, o valor, há quanto tempo está parada e a diferença para o pedido", async () => {
     api.mockResolvedValue(RESUMO);
     abrir();
     const quadro = await screen.findByRole("group", { name: /uma coluna por etapa/ });
@@ -176,9 +181,9 @@ describe("Resumo das medições em quadro por etapa (#749, #805)", () => {
     expect(within(propria).getByRole("link", { name: "12ª Medição + Reajuste" }).getAttribute("href")).toBe("/obras/7/medicoes/71");
     expect(texto(propria.querySelector(".rdm-cartao__sub"))).toBe("Secretaria de Exemplo · 12ª Medição + Reajuste");
     expect(texto(propria.querySelector(".rdm-cartao__valor"))).toBe("R$ 101.000,01");
-    // ha' 4 dias uteis: em andamento, com a data do evento ao lado
+    // o tempo parado e' o da fila de trabalho: a situacao que o servidor leu, o prazo do orgao e a data do evento
     expect(propria.querySelector(".selo")?.className).toBe("selo selo--andamento");
-    expect(texto(propria.querySelector(".rdm-cartao__tempo"))).toBe("há 4 dias úteisdesde 10/11/26");
+    expect(texto(propria.querySelector(".rdm-cartao__tempo"))).toBe("há 4 dias úteisprazo do órgão: 10/12desde 10/11/26");
     // aprovado 1,9% abaixo do pedido: acima do limite de 0,5% que o servidor manda, critico
     expect(propria.querySelector(".diferenca")?.className).toBe("diferenca diferenca--ruim");
     expect(texto(propria.querySelector(".diferenca .sr-only"))).toBe("R$ 1.999,99 abaixo do pedido, 1,9%");
@@ -187,9 +192,10 @@ describe("Resumo das medições em quadro por etapa (#749, #805)", () => {
     expect(quarta.querySelector(".selo")?.className).toBe("selo selo--critico");
     expect(texto(quarta.querySelector(".selo"))).toBe("há 11 dias úteis");
     expect(quarta.querySelector(".diferenca")).toBeNull();
-    // chegou hoje; o aprovado acima do pedido sai escrito, no tom da atencao
+    // chegou hoje: so' o selo, sem repetir a data; o aprovado acima do pedido sai escrito, no tom da atencao
     const sexta = cartao("Obra Sexta", 3);
-    expect(texto(sexta.querySelector(".selo"))).toBe("desde hoje");
+    expect(texto(sexta.querySelector(".rdm-cartao__tempo"))).toBe("desde hoje");
+    expect(sexta.querySelector(".selo")?.className).toBe("selo selo--feito");
     expect(sexta.querySelector(".diferenca")?.className).toBe("diferenca diferenca--leve");
     expect(texto(sexta.querySelector(".diferenca"))).toBe("+ R$ 100,00acima do pedido");
     // sem a data do evento, nada e' contado; igual ao pedido nao vira etiqueta
@@ -218,12 +224,13 @@ describe("Resumo das medições em quadro por etapa (#749, #805)", () => {
   it("a planilha/carta ainda não enviada não tem coluna: fica num bloco próprio, e na tabela com o selo", async () => {
     // a medicao ainda nao enviada nao conta no medido: o servidor manda a linha sem valor e a etapa com zero
     const antes = linha({ contrato_id: 15, obra: "Obra Oitava", medicao_id: 151, titulo: "1ª Medição", etapa: "antes",
-      etapas: [e("em_analise", "futuro"), ...FUTURAS] });
+      parada: parada("2026-11-11", 3, "andamento"), etapas: [e("em_analise", "futuro"), ...FUTURAS] });
     api.mockResolvedValue({ ...RESUMO, etapas: RESUMO.etapas.map(x => (x.etapa === "antes" ? { ...x, medicoes: 1 } : x)),
       grupos: [{ contratante: "Secretaria de Exemplo", medicoes: 1, valor_centavos: 0, linhas: [antes] }] });
     abrir();
     const bloco = await screen.findByRole("region", { name: "Planilha/carta a enviar" });
-    expect(within(bloco).getAllByRole("listitem").map(texto)).toEqual(["Obra Oitava1ª Medição"]);
+    // com ha' quanto tempo a planilha/carta espera o envio
+    expect(within(bloco).getAllByRole("listitem").map(texto)).toEqual(["Obra Oitava1ª Mediçãohá 3 dias úteis"]);
     expect(within(screen.getByRole("group", { name: /uma coluna por etapa/ })).queryAllByRole("listitem")).toEqual([]);
     cleanup();
     abrir("/resumo-medicoes?vista=tabela");

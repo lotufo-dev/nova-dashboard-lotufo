@@ -4,7 +4,7 @@ import { linhasDaEtapa, mesDaUltima, nomeDaMesmaAltura, nomeDaReferencia, temDif
 const linha = (x: Partial<Linha>): Linha => ({
   contrato_id: 1, obra: "Obra Própria", contratante: "Secretaria de Exemplo", medicao_id: 1, medicao_ids: [1], titulo: "1ª Medição",
   numero: 1, tipo: "execucao", competencia: "2026-10", etapa: "nota", etapas: [], valor_centavos: null,
-  na_etapa_desde: null, dias_uteis_na_etapa: null, dias_da_nota_ao_recebimento: null,
+  parada: null, recebida_em: null, dias_da_nota_ao_recebimento: null,
   pedido_do_aprovado_centavos: null, abaixo_do_pedido_centavos: null, acima_do_pedido_centavos: null, ...x,
 });
 

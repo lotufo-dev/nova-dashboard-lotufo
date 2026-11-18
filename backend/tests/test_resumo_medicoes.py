@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from app import auditoria, auth, db, fechamento, medicoes, resumo_medicoes
+from app import auditoria, auth, db, fechamento, fila_medicoes, medicoes, resumo_medicoes
 from tests.conftest import novo_contrato
 
 HOJE = datetime.date(2026, 11, 16)
@@ -474,7 +474,7 @@ def test_atualizacao_e_o_ultimo_lancamento_de_uma_pessoa_e_a_ultima_leitura_do_r
         "ultimo_lancamento": "2026-11-14 18:40:00", "rm_lido_em": "2026-11-16 11:00:00"}
 
 
-# --- issue #805: o quadro por etapa (medido do mes, mesma altura, tempo na etapa, diferenca, filtro) -------------
+# --- issue #805: o quadro por etapa (medido do mes, mesma altura, parada ha, diferenca, filtro) -----------------
 
 def test_medido_do_mes_e_o_do_fechamento_e_fecha_com_a_soma_das_etapas(conn, cenario):
     """O medido do mes e' o numero do Fechamento, e as cinco etapas somam esse numero: a pagina pode mostrar as
@@ -567,18 +567,56 @@ def test_mesma_altura_sem_a_data_do_evento_nao_tem_referencia(conn, cenario):
         "competencia": "2026-09", "ate": "2026-10-16", "protocolado_centavos": None, "recebido_centavos": 5_000 + 99_990}
 
 
-def test_tempo_na_etapa_conta_da_data_do_evento_em_dias_uteis(conn, cenario):
+def _prazo_da_sinfra(c, ids):
+    """Cinco recebidas em doze meses, com 10, 20, 30, 30 e 40 dias do protocolo ao recebimento: prazo de 30 dias
+    (docs/adr/0007). Numa obra suspensa, que nao aparece em nenhuma lista da pagina."""
+    casos = [("2026-03-02", "2026-03-12"), ("2026-04-01", "2026-04-21"), ("2026-05-04", "2026-06-03"),
+             ("2026-06-01", "2026-07-01"), ("2026-07-01", "2026-08-10")]
+    for n, (protocolo, recebida) in enumerate(casos, start=1):
+        _medicao(c, ids["suspensa"], n, "recebida", 1_000, comp=f"2026-0{n + 1}", recebida_em=recebida, protocolo=(protocolo,))
+
+
+def test_parada_e_a_da_fila_de_trabalho_medicao_a_medicao(conn, cenario):
+    """#805: o tempo parado do cartao e' o `parada` da fila de trabalho da tela Medicoes (`fila_medicoes`), a mesma
+    leitura: os dias uteis do evento da situacao, os limites do SIGA e, no Pagamento, o prazo do orgao. A mesma
+    medicao nao sai critica numa tela e em andamento na outra."""
     c, ids = conn, cenario
+    _prazo_da_sinfra(c, ids)
+    # protocolada em 01/10: a data esperada (31/10) ja' passou
+    _medicao(c, ids["parada"], 9, "protocolada", 30_000, nota_emitida_em="2026-09-28", protocolo=("2026-10-01",))
+    c.commit()
     r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
-    # protocolada em 10/11 (terca); hoje e' segunda, 16/11: 10, 11, 12 e 13 (o dia do evento conta, hoje nao)
+    linhas = [x for g in r["grupos"] for x in g["linhas"]]
+    da_fila = {i: x["parada"] for g in fila_medicoes.fila(conn, HOJE, mes=MES)["grupos"] for x in g["linhas"]
+               for i in x["medicao_ids"]}
+    assert len(linhas) == 5 and all(x["parada"] == da_fila[x["medicao_id"]] for x in linhas)
+    # no Pagamento conta do ULTIMO protocolo (13/11, sexta; hoje e' segunda, 16/11) e o tom sai do prazo do orgao: o
+    # primeiro protocolo (10/11) + 30 dias ainda nao passou. A data da etapa continua a do primeiro
     p = _linha(r, "Obra Própria")
-    assert (p["na_etapa_desde"], p["dias_uteis_na_etapa"], p["dias_da_nota_ao_recebimento"]) == ("2026-11-10", 4, None)
-    k = _linha(r, "Obra Consórcio")
-    assert (k["na_etapa_desde"], k["dias_uteis_na_etapa"]) == ("2026-11-05", 7)
-    # a etapa da vez sem a data do evento: nada e' contado da competencia
-    comp = _linha(r, "Obra da Companhia")
-    assert (comp["na_etapa_desde"], comp["dias_uteis_na_etapa"], comp["dias_da_nota_ao_recebimento"]) == (None, None, None)
-    # a recebida nao esta' parada: a data e os dias corridos da emissao da nota (09/11) ao recebimento
+    assert p["parada"] == {"desde": "2026-11-13", "dias_uteis": 1, "hoje": False, "situacao": "andamento",
+                           "prazo_orgao_dias": 30, "esperada": "2026-12-10", "alem_do_prazo": False}
+    assert _etapas(p)[3] == ("protocolado", "atual", "2026-11-10")
+    assert (p["recebida_em"], p["dias_da_nota_ao_recebimento"]) == (None, None)
+    # alem do prazo do orgao: critico, com a data esperada
+    a = _linha(r, "Obra Parada")["parada"]
+    assert (a["desde"], a["situacao"], a["esperada"], a["alem_do_prazo"]) == ("2026-10-01", "critico", "2026-10-31", True)
+    # em analise desde 05/11: 7 dias uteis, pelos limites do SIGA (5 ou mais, vence em breve), sem prazo do orgao
+    k = _linha(r, "Obra Consórcio")["parada"]
+    assert (k["desde"], k["dias_uteis"], k["situacao"], k["prazo_orgao_dias"]) == ("2026-11-05", 7, "breve", None)
+    # a nota emitida da obra sem o passo "Envio da nota" espera o pagamento: 5 dias uteis nao sao alerta, e sem
+    # protocolo nao ha' data esperada
+    s = _linha(r, "Obra Sem Envio")["parada"]
+    assert (s["desde"], s["dias_uteis"], s["situacao"], s["esperada"]) == ("2026-11-08", 5, "andamento", None)
+    # sem a data do evento, nada e' contado da competencia
+    comp = _linha(r, "Obra da Companhia")["parada"]
+    assert (comp["desde"], comp["dias_uteis"], comp["situacao"]) == (None, None, None)
+    # os meses anteriores levam a mesma leitura: a 5ª da Obra Parada, protocolada em 20/10, espera ate' 19/11
+    [x5] = [x for g in r["anteriores"] for x in g["linhas"] if x["medicao_id"] == ids["x5"]]
+    assert (x5["parada"]["situacao"], x5["parada"]["esperada"]) == ("andamento", "2026-11-19")
+
+
+def test_recebida_nao_esta_parada_leva_a_data_e_os_dias_da_nota_ao_recebimento(conn, cenario):
+    c, ids = conn, cenario
     c.execute("UPDATE medicoes SET estado='recebida', recebida_em='2026-11-14' WHERE id=?", (ids["p12"],))
     # a par dela, com a nota de 11/11: a linha conjunta conta da ultima das duas
     _medicao(c, ids["propria"], 12, "recebida", 1_001, tipo="reajuste", atestado_em="2026-11-06", valor_atestado_centavos=1_001,
@@ -586,12 +624,32 @@ def test_tempo_na_etapa_conta_da_data_do_evento_em_dias_uteis(conn, cenario):
     c.commit()
     p = _linha(resumo_medicoes.resumo(conn, HOJE, mes=MES), "Obra Própria")
     assert p["titulo"] == "12ª Medição + Reajuste"
-    assert (p["na_etapa_desde"], p["dias_uteis_na_etapa"], p["dias_da_nota_ao_recebimento"]) == ("2026-11-14", None, 3)
+    assert (p["parada"], p["recebida_em"], p["dias_da_nota_ao_recebimento"]) == (None, "2026-11-14", 3)
     # recebida sem a emissao da nota registrada: so' a data
     c.execute("UPDATE medicoes SET nota_emitida_em=NULL WHERE contrato_id=? AND numero=12", (ids["propria"],))
     c.commit()
     p = _linha(resumo_medicoes.resumo(conn, HOJE, mes=MES), "Obra Própria")
-    assert (p["na_etapa_desde"], p["dias_da_nota_ao_recebimento"]) == ("2026-11-14", None)
+    assert (p["recebida_em"], p["dias_da_nota_ao_recebimento"]) == ("2026-11-14", None)
+
+
+def test_linha_que_a_fila_nao_junta_leva_a_parada_da_mais_parada(conn, cenario):
+    """A pagina junta execucao e reajuste pela etapa; a fila, pela situacao. Com o boletim da execucao recebido e o
+    espelho do reajuste ja' gerado, as duas estao na etapa do boletim (uma linha aqui) e em situacoes diferentes na
+    fila (duas linhas la'): o cartao leva a leitura da mais parada."""
+    c, ids = conn, cenario
+    # o boletim das duas em 03/11 (terca): 9 dias uteis ate' 16/11; o espelho do reajuste nao tem data registrada
+    c.execute("UPDATE medicoes SET estado='boletim_recebido', atestado_em='2026-11-03', valor_atestado_centavos=1_000_001 "
+              "WHERE id=?", (ids["k7"],))
+    r7 = _medicao(c, ids["consorcio"], 7, "espelho_gerado", 30_000, tipo="reajuste", atestado_em="2026-11-03",
+                  valor_atestado_centavos=30_000)
+    c.commit()
+    k = _linha(resumo_medicoes.resumo(conn, HOJE, mes=MES), "Obra Consórcio")
+    assert (k["titulo"], k["medicao_ids"], k["etapa"]) == ("7ª Medição + Reajuste", [ids["k7"], r7], "boletim")
+    da_fila = {i: x["parada"] for g in fila_medicoes.fila(conn, HOJE, mes=MES)["grupos"] for x in g["linhas"]
+               for i in x["medicao_ids"]}
+    assert da_fila[ids["k7"]] != da_fila[r7] and da_fila[r7]["dias_uteis"] is None
+    assert k["parada"] == da_fila[ids["k7"]]
+    assert (k["parada"]["desde"], k["parada"]["dias_uteis"], k["parada"]["situacao"]) == ("2026-11-03", 9, "breve")
 
 
 def test_diferenca_entre_o_aprovado_e_o_pedido_e_a_conta_do_fechamento(conn, cenario):

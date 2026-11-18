@@ -1,8 +1,9 @@
+import type { Parada } from "./parada";
 import { fmtMesCurto, fmtMesExtenso } from "./tempo";
 
 // Resumo das medicoes (#749, #805): o que GET /api/resumo-medicoes devolve (`app/resumo_medicoes.py`) e as funcoes
 // puras de apresentacao da pagina. A etapa de cada medicao, os valores (na cota), as referencias das variacoes, os
-// dois lados da diferenca e os dias na etapa vem prontos do servidor; aqui so' se escolhe o rotulo e a ordem.
+// dois lados da diferenca e o tempo parado vem prontos do servidor; aqui so' se escolhe o rotulo e a ordem.
 
 export type Etapa = "em_analise" | "boletim" | "nota" | "protocolado" | "recebido";
 /** `antes`: a planilha/carta foi gerada e ainda nao foi enviada ao orgao (a medicao existe, o ciclo nao comecou). */
@@ -12,10 +13,11 @@ export type EtapaDaLinha = { etapa: Etapa; situacao: "feito" | "sem_registro" | 
 export type Linha = {
   contrato_id: number; obra: string; contratante: string | null; medicao_id: number; medicao_ids: number[]; titulo: string;
   numero: number; tipo: string; competencia: string; etapa: EtapaDaVez; etapas: EtapaDaLinha[]; valor_centavos: number | null;
-  /** A data do evento que pos a medicao na etapa da vez e os dias uteis dela ate' hoje; nulos sem a data. */
-  na_etapa_desde: string | null; dias_uteis_na_etapa: number | null;
-  /** So' na recebida com a emissao da nota registrada: os dias corridos da nota ao recebimento. */
-  dias_da_nota_ao_recebimento: number | null;
+  /** Ha' quanto tempo a medicao esta' parada: o mesmo `parada` da fila de trabalho da tela Medicoes (parada.ts).
+   *  Nulo na recebida, que nao esta' parada. */
+  parada: Parada | null;
+  /** So' na recebida: a data do recebimento e, com a emissao da nota registrada, os dias corridos da nota ate' ele. */
+  recebida_em: string | null; dias_da_nota_ao_recebimento: number | null;
   /** A diferenca entre o aprovado e o pedido (a conta do Fechamento); nulos sem os dois valores. */
   pedido_do_aprovado_centavos: number | null; abaixo_do_pedido_centavos: number | null; acima_do_pedido_centavos: number | null;
 };

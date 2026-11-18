@@ -42,6 +42,7 @@ ROTAS = (
     "/api/inicio/painel",
     "/api/medicoes/andamento",
     "/api/medicoes/resumo",
+    "/api/medicoes/fila",
     "/api/contratos",
     "/api/contratos/{contrato}",
     "/api/contratos/{contrato}/cabecalho",

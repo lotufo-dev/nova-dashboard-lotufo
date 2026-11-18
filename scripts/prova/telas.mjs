@@ -34,7 +34,7 @@ import { avisosEmVolume, semAvisos, cabecalhoCom, cabecalhoEmDia, CUSTO_DA_OBRA,
          prazosEmEncerramento, prazosParalisada, PREVIA_DO_ESPELHO, PROTOCOLO_ID, RESPOSTA_QUE_QUEBRA, resumoEmQuadro, RM_EXCLUSAO_RECUSADA,
          SIGA_COM_PROCESSOS } from "./simulados.mjs";
 
-import { carteiraSimulada, painelDaCarteira } from "./simulados.mjs";
+import { carteiraSimulada, filaSimulada, painelDaCarteira } from "./simulados.mjs";
 
 export const PERFIS = ["admin", "engenharia", "diretoria"];
 export const LARGURAS = [1440, 1024, 390];
@@ -53,6 +53,8 @@ const comCarteira = [
   { caminho: /^\/api\/contratos$/, corpo: carteiraSimulada },
   { caminho: /^\/api\/diretoria$/, ajustar: painelDaCarteira },
 ];
+// issue #805: o mes de Medicoes com medicao em cada grupo da fila (ver simulados.mjs)
+const comFila = [{ caminho: /^\/api\/medicoes\/fila$/, ajustar: filaSimulada }];
 const maisAcoes = item => [{ clicar: '#conteudo button:has-text("Mais ações")' }, { clicar: `#conteudo button:has-text("${item}")` }];
 const passo = nome => [{ clicar: `nav.passos button:has-text("${nome}")` }];
 // a medicao com a nota emitida e o envio ao orgao por fazer (ver simulados.mjs)
@@ -115,13 +117,22 @@ export const TELAS = [
   { rota: "inicio", id: "tela-parou", caminho: "/inicio", perfis: TODOS, espera: ".falha", parou: true,
     simular: [{ caminho: /^\/api\/inicio\/painel$/, corpo: RESPOSTA_QUE_QUEBRA }] },
 
-  // ---- Medicoes: o quadro do mes, a janela de iniciar, o quadro vazio e a falha de leitura
-  // a diretoria nao tem Medicoes no menu, mas o link abre o quadro para leitura
-  { rota: "medicoes", id: "medicoes", caminho: "/medicoes", perfis: TODOS, espera: ".quadro__tabela" },
-  { rota: "medicoes", id: "medicoes-iniciar", caminho: "/medicoes", perfis: OPERA, antes: ".quadro__tabela", espera: JANELA,
-    passos: [{ clicar: '.quadro__tabela button:has-text("Iniciar")' }] },
+  // ---- Medicoes (#805): a fila de trabalho (a entrada), o quadro do mes e os meses anteriores; a janela de iniciar e
+  // a falha de leitura. As telas `-cheia` trocam o cadastro de exemplo (sem medicao no mes) por um mes com medicao em
+  // cada grupo, parada ha' pouco e ha' muito, com o aprovado abaixo, acima e igual ao pedido (ver simulados.mjs).
+  // A diretoria nao tem Medicoes no menu, mas o link abre a tela para leitura, sem botao de escrita
+  { rota: "medicoes", id: "medicoes", caminho: "/medicoes", perfis: TODOS, espera: ".fila-numeros" },
+  { rota: "medicoes", id: "medicoes-cheia", caminho: "/medicoes", perfis: TODOS, espera: ".fila-grupo .fila__tabela", simular: comFila },
+  { rota: "medicoes", id: "medicoes-quadro", caminho: "/medicoes/quadro", perfis: TODOS, espera: ".medicoes__painel" },
+  { rota: "medicoes", id: "medicoes-quadro-cheio", caminho: "/medicoes/quadro", perfis: TODOS, espera: ".quadro__tabela .quadro__grupo",
+    simular: comFila },
+  { rota: "medicoes", id: "medicoes-anteriores", caminho: "/medicoes/anteriores", perfis: TODOS, espera: ".medicoes__vistas" },
+  { rota: "medicoes", id: "medicoes-anteriores-cheia", caminho: "/medicoes/anteriores", perfis: TODOS, espera: ".fila-resumo",
+    simular: comFila },
+  { rota: "medicoes", id: "medicoes-iniciar", caminho: "/medicoes", perfis: OPERA, antes: ".fila-bloco", espera: JANELA,
+    passos: [{ clicar: '.fila-bloco button:has-text("Iniciar")' }] },
   { rota: "medicoes", id: "medicoes-erro", caminho: "/medicoes", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
-    simular: falha(/^\/api\/medicoes\/resumo$/) },
+    simular: falha(/^\/api\/medicoes\/fila$/) },
   // ---- Resumo das medicoes em quadro por etapa (#805): o cadastro de exemplo, e o mes simulado (ver simulados.mjs)
   // com medicao em cada etapa, as diferencas para o pedido, as obras sem medicao e os meses anteriores, nas duas
   // vistas, na aba dos meses anteriores, com o filtro por contratante (etapas vazias) e no mes sem medicao

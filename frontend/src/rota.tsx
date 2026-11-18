@@ -26,8 +26,11 @@ export type AbaObras = "contratantes" | "todas" | "andamento" | "qdop";
 // Abas da Administracao (NAVEGACAO.md › Administracao). A Saude e' a padrao e nao entra na URL.
 export type AbaAdmin = "saude" | "reconciliacao" | "usuarios" | "auditoria" | "pendencias";
 // Resumo das medicoes (#749): "/resumo-medicoes", com a competencia na busca (?mes=2026-09).
-// Medicoes (#643): uma tela so', o quadro do mes ("/medicoes"). Os enderecos de antes ("/medicoes/iniciar",
-// "/medicoes/em-andamento", as oito abas antigas e as telas Notas "/notas", "/notas/aguardando") abrem o quadro.
+// Medicoes (#805): tres vistas. A fila de trabalho e' a padrao e nao entra na URL ("/medicoes"); "/medicoes/quadro" (o
+// quadro do mes, #643) e "/medicoes/anteriores" (os meses anteriores que pedem acao). A competencia vai na busca
+// (?mes=2026-09). Os enderecos de antes ("/medicoes/iniciar", "/medicoes/em-andamento", as oito abas antigas e as telas
+// Notas "/notas", "/notas/aguardando") abrem a fila.
+export type AbaMedicoes = "fila" | "quadro" | "anteriores";
 
 // Abas da pagina da empresa em Documentos (#161). As Certidoes sao a padrao e nao entram na URL.
 export type AbaDocumentos = "certidoes" | "regularidade" | "garantia";
@@ -35,7 +38,7 @@ export type AbaDocumentos = "certidoes" | "regularidade" | "garantia";
 export type Rota =
   | { tela: "raiz" }
   | { tela: "inicio" }
-  | { tela: "medicoes" }
+  | { tela: "medicoes"; aba?: AbaMedicoes }
   | { tela: "resumo-medicoes" }
   | { tela: "avisos" }
   | { tela: "siga" }
@@ -66,7 +69,8 @@ const ABAS_OBRAS: readonly AbaObras[] = ["contratantes", "todas", "andamento", "
 // As vistas de antes da #805: a Posicao era a tabela de todas as obras; o Resumo, os totais por contratante.
 const ABAS_OBRAS_ANTIGAS: Record<string, AbaObras> = { posicao: "todas", resumo: "contratantes" };
 const ABAS_ADMIN: readonly AbaAdmin[] = ["saude", "reconciliacao", "usuarios", "auditoria", "pendencias"];
-// Os enderecos de Medicoes de antes do quadro (#643): o link guardado em e-mail ou favorito abre o quadro.
+const ABAS_MEDICOES: readonly AbaMedicoes[] = ["fila", "quadro", "anteriores"];
+// Os enderecos de Medicoes de antes do quadro (#643): o link guardado em e-mail ou favorito abre a tela.
 const ABAS_MEDICOES_ANTIGAS: readonly string[] = ["iniciar", "em-andamento", "resumo", "sem-medicao", "planilha-gerada", "planilha-enviada", "boletim-recebido",
   "faturamento", "aguardando-nota", "enviar-nota", "aguardando-pagamento"];
 // Links antigos (e-mails, favoritos) continuam abrindo a secao que absorveu a aba.
@@ -157,6 +161,10 @@ export function parseRota(pathname: string): Rota {
   if (a === "notas" && partes.length === 1) return { tela: "medicoes" };
   if (a === "notas" && partes.length === 2 && b === "aguardando") return { tela: "medicoes" };
   if (a === "notas" && partes.length === 3 && b === "envio" && ehId(c)) return { tela: "notas-envio", id: Number(c) };
+  // As vistas de Medicoes (#805): "/medicoes/quadro" e "/medicoes/anteriores"; a fila e' "/medicoes".
+  if (a === "medicoes" && partes.length === 2 && (ABAS_MEDICOES as readonly string[]).includes(b)) {
+    return b === "fila" ? { tela: "medicoes" } : { tela: "medicoes", aba: b as AbaMedicoes };
+  }
   if (a === "medicoes" && partes.length === 2 && ABAS_MEDICOES_ANTIGAS.includes(b)) return { tela: "medicoes" };
   // A empresa em Documentos (#161): "/documentos/3" e as outras abas; a padrao vira a forma canonica.
   if (a === "documentos" && b !== undefined && ehId(b) && partes.length <= 3) {
@@ -178,6 +186,7 @@ export function caminhoDe(r: Rota): string {
     case "nova-medicao": return `/obras/${r.obra}/medicoes/nova`;
     case "documentos-empresa": return r.aba && r.aba !== "certidoes" ? `/documentos/${r.id}/${r.aba}` : `/documentos/${r.id}`;
     case "obras": return r.aba && r.aba !== "contratantes" ? `/obras/${r.aba}` : "/obras";
+    case "medicoes": return r.aba && r.aba !== "fila" ? `/medicoes/${r.aba}` : "/medicoes";
     case "contratante": return `/obras/contratante/${encodeURIComponent(r.chave)}`;
     case "admin": return r.aba && r.aba !== "saude" ? `/admin/${r.aba}` : "/admin";
     case "notas-envio": return `/notas/envio/${r.id}`;

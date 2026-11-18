@@ -299,6 +299,26 @@ A leitura do ritmo contra o necessário para o prazo: Adiantada (100% ou mais), 
 (abaixo de 70%).
 _Avoid_: em andamento (é uma situação)
 
+**Fila de trabalho**:
+A entrada da tela Medições: as medições abertas da competência, agrupadas por com quem estão e, em cada grupo, da
+mais parada para a menos.
+_Avoid_: lista de pendências (pendência é outra coisa), em andamento como nome de tela
+
+**Com quem está**:
+Quem tem de agir na medição, pelo passo da vez: a Lotufo (planilha e carta, espelhos, envio da nota), o faturamento
+(emissão da nota) ou o órgão (análise e pagamento). Na MT-PAR, o passo do boletim fica com a Lotufo enquanto nada foi
+ao órgão.
+_Avoid_: responsável (é uma pessoa; aqui é a Lotufo, o faturamento ou o órgão)
+
+**Parada há**:
+Os dias úteis desde o evento que abriu o passo da vez da medição (o envio, o boletim, o espelho, a nota, o
+protocolo). Nunca conta da competência nem do lançamento. É a mesma leitura na fila de trabalho e no cartão de
+medição do Resumo das medições.
+
+**Barra de passos**:
+Os passos do fluxo da medição de uma obra, em ordem: os feitos, o da vez e os que faltam. Na página da medição é a
+faixa de abas; na fila de trabalho, a miniatura na linha, do tamanho do fluxo da obra.
+
 **Painel**:
 O bloco com moldura preta e sombra dura, com o título dentro. É peça de tela, não um tipo de tela.
 _Avoid_: cartão, card; painel como nome de tela (ver Tela de leitura)
@@ -309,8 +329,8 @@ ela está.
 _Avoid_: kanban; quadro do mês (é a matriz de obra por passo da tela Medições)
 
 **Cartão de medição**:
-A caixa de uma medição numa coluna do quadro por etapa: obra, contratante, medição, valor, tempo na etapa e, quando
-o aprovado difere do pedido, a diferença.
+A caixa de uma medição numa coluna do quadro por etapa: obra, contratante, medição, valor, parada há e, quando o
+aprovado difere do pedido, a diferença.
 _Avoid_: painel (o painel tem título e moldura grossa); cartão para outro bloco
 
 **Tela de leitura**:

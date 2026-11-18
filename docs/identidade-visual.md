@@ -134,8 +134,11 @@ do rótulo, na etiqueta sob o valor ou na barra.
   A contagem de obras por leitura ("3 devagar", "2 em atenção") vai numa etiqueta do tom da leitura, sem glifo:
   é valor, não situação (#805).
 - **Tempo parado:** os dias numa etapa ou num setor, com o selo da situação e os limites do SIGA (seção "Quando
-  usar cada uma" das situações). Na etapa do ciclo conta da data do evento (envio, boletim, emissão, protocolo), em
-  dias úteis; sem a data, nada aparece. A recebida não está parada: leva o selo do feito com a data.
+  usar cada uma" das situações). Na medição, são os dias úteis desde o evento que abriu o passo da vez. No passo
+  Pagamento a régua é o prazo do órgão (`docs/adr/0007`): crítico só depois da data esperada do recebimento; antes
+  dela, ou sem prazo, em andamento. Motivo: o órgão leva semanas para pagar, e dez dias úteis de espera não são
+  atraso (#805). A leitura é uma só, do servidor: a mesma medição tem o mesmo selo na fila de trabalho e no cartão
+  do Resumo das medições. A recebida não está parada: leva o selo do feito com a data.
 - **Fica em tinta:** valor de contrato, data, número de documento e o próprio número ao lado da marca ou da
   etiqueta.
 
@@ -160,8 +163,13 @@ do rótulo, na etiqueta sob o valor ou na barra.
   seção:** linha preta de 1 px sob o cabeçalho da tabela, acima de subtítulo dentro de painel e na base de gráfico.
   Linhas de uma tabela se separam por um fio cinza, sem zebra.
 - **Cabeçalho de grupo forte:** faixa de tinta cheia com a letra clara, que abre um grupo de linhas de tabela ou um
-  bloco (o contratante, em Obras), com o subtotal do grupo nas colunas. Motivo: na linha cinza o contratante sumia
+  bloco (o contratante, em Obras e no quadro do mês; quem tem de agir, na fila de trabalho), com o subtotal do grupo
+  nas colunas. Motivo: na linha cinza o contratante sumia
   entre as obras, e a página parecia uma lista só (decisão do dono de 18/11/2026, #805).
+- **Barra de passos:** o fluxo da medição de uma obra em miniatura, na linha da tabela: um segmento por passo que
+  a obra tem, os feitos no tom do feito, o da vez no tom do em andamento e os que faltam no papel escuro, com o nome
+  do passo da vez e a posição escritos ("Espelhos · 3 de 5"). Motivo: na fila de trabalho a linha diz onde a
+  medição está sem abrir a matriz (decisão do dono de 18/11/2026, #805).
 - **Painel:** moldura preta de 2 px e sombra dura (deslocada 8 px, sem desfoque), com o título dentro e sem régua
   embaixo dele. A janela de diálogo é um painel por cima de um véu; menu suspenso, lista de sugestões e a janela do
   e-mail levam a mesma sombra, e não há sombra com desfoque. Motivo: a moldura separa o painel do papel sem
@@ -171,7 +179,7 @@ do rótulo, na etiqueta sob o valor ou na barra.
   forma do Resumo das medições, que responde "onde está o dinheiro do mês"; a tabela continua como segunda vista,
   para comparar valores entre linhas (decisão do dono de 18/11/2026, #805).
 - **Cartão de medição:** moldura fina com a borda esquerda no tom da etapa; dentro, a obra, o contratante com a
-  medição, o valor em tinta e as etiquetas das famílias de valor (o tempo na etapa e a diferença). Menor que o
+  medição, o valor em tinta e as etiquetas das famílias de valor (o tempo parado e a diferença). Menor que o
   painel: sem título, sem sombra e sem a moldura grossa. Só no quadro por etapa.
 - **Abas ficam direto na página, sem caixa em volta dos painéis da aba.** Motivo: caixa dentro de caixa perdia
   40 px de largura e cortava as tabelas da página da obra (PR #776).

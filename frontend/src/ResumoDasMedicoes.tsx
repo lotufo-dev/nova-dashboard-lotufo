@@ -15,6 +15,7 @@ import ResumoQuadro from "./ResumoQuadro";
 import ResumoTabela from "./ResumoTabela";
 import { trocarBusca, type Busca, type Ir, type Rota } from "./rota";
 import { fmtDataHora, fmtMesExtenso } from "./tempo";
+import TempoParado from "./TempoParado";
 import Variacao from "./Variacao";
 import "./resumoDasMedicoes.css";
 
@@ -99,7 +100,7 @@ function FaixaDasEtapas({ etapas, rotulo, mes, medido, mesmaAltura }: {
 /* ------------------------------------------------------------------ os blocos curtos sob o quadro */
 
 /** A medicao com a planilha/carta gerada e ainda nao enviada ao orgao: existe, mas o ciclo nao comecou e ela nao tem
- *  coluna no quadro. Fica dita aqui, com o link dela. */
+ *  coluna no quadro. Fica dita aqui, com o link dela e ha' quanto tempo a planilha/carta espera o envio. */
 function PlanilhaAEnviar({ d, ir }: { d: RespostaResumo; ir: Ir }) {
   const linhas = linhasDaEtapa(d.grupos.flatMap(g => g.linhas), "antes");
   if (linhas.length === 0) return null;
@@ -114,6 +115,7 @@ function PlanilhaAEnviar({ d, ir }: { d: RespostaResumo; ir: Ir }) {
           <li key={l.medicao_id}>
             <span className="rdm-itens__obra">{l.obra}</span>
             <Link className="link" para={{ tela: "medicao", obra: l.contrato_id, id: l.medicao_id }} ir={ir}>{l.titulo}</Link>
+            {l.parada && <TempoParado parada={l.parada} frase />}
           </li>
         ))}
       </ul>
@@ -275,7 +277,7 @@ export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: 
         {linhasDoMes.length === 0 ? (
           <p className="rdm-vazio">Nenhuma medição em {nomeMes}{contratante ? ` de ${contratante}` : ""}.{contratante && <> {semNada}</>}</p>
         ) : vista === "quadro" ? (
-          <ResumoQuadro linhas={linhasDoMes} etapas={d.etapas} hoje={d.hoje} limitePorMil={d.diferenca_critica_por_mil} ir={ir}
+          <ResumoQuadro linhas={linhasDoMes} etapas={d.etapas} limitePorMil={d.diferenca_critica_por_mil} ir={ir}
             rotulo={`Medições de ${nomeMes}, uma coluna por etapa`} />
         ) : (
           <section className="cartao rdm-painel" aria-label={`Medições de ${nomeMes} por obra`}>

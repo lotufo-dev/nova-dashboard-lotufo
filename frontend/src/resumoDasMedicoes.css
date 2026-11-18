@@ -83,7 +83,7 @@
 .rdm-coluna__vazia { margin: 0; padding: 0 var(--espaco-p); color: var(--cor-texto-terciario); font-size: var(--texto-meta); }
 .rdm-cartoes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-pp); }
 /* O CARTAO DE MEDICAO: moldura fina, a borda esquerda no tom da etapa, e dentro a obra, o contratante com a medicao,
-   o valor e as etiquetas (o tempo na etapa e a diferenca) */
+   o valor e as etiquetas (o tempo parado e a diferenca) */
 .rdm-cartao {
   min-width: 0; display: grid; justify-items: start; align-content: start; row-gap: var(--espaco-traco); padding: var(--espaco-pp) var(--espaco-p);
   border: var(--borda-campo); border-left: var(--espaco-mini) solid var(--rdm-cor); background: var(--cor-superficie);
@@ -94,7 +94,8 @@
 .rdm-cartao__obra:hover { text-decoration: underline; text-underline-offset: var(--afastamento-sublinhado); }
 .rdm-cartao__sub { color: var(--cor-texto-secundario); font-size: var(--texto-mini); overflow-wrap: anywhere; }
 .rdm-cartao__valor { font-size: var(--texto-corpo); font-weight: var(--peso-numero); line-height: var(--entrelinha-numero); }
-.rdm-cartao__tempo { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-traco) var(--espaco-pp); margin-top: var(--espaco-traco); }
+/* o tempo parado e' a peca da fila de trabalho (TempoParado: o selo e, no protocolado, o prazo do orgao embaixo) */
+.rdm-cartao__tempo { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-traco) var(--espaco-pp); margin-top: var(--espaco-traco); }
 .rdm-cartao__desde { color: var(--cor-texto-terciario); font-size: var(--texto-mini); white-space: nowrap; }
 .rdm-cartao .diferenca { justify-content: flex-start; margin-top: var(--espaco-traco); text-align: left; }
 

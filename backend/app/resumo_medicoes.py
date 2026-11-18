@@ -69,13 +69,19 @@ O QUE A #805 ACRESCENTOU (todo numero na cota, em centavos inteiros):
   sem a data do recebimento; protocolada, ou recebida depois de `ate`, sem a data do protocolo na obra que tem a
   etapa), a referencia daquela etapa vem nula e a tela nao mostra a variacao. Competencia anterior a `ANO_INICIAL` nao
   serve de referencia: `mesma_altura` vem nulo.
-- TEMPO NA ETAPA (`na_etapa_desde`, `dias_uteis_na_etapa`): a data do evento que pos a medicao na etapa da vez e os
-  dias uteis dela ate' hoje (`feriados.dias_uteis_entre`: o dia do evento conta, hoje nao). Sem a data, nulos: nada e'
-  contado da competencia. A recebida nao esta' parada: leva a data e, com a emissao da nota registrada, os dias
-  corridos da nota ao recebimento (`dias_da_nota_ao_recebimento`).
+- PARADA HA' (`parada`): ha' quanto tempo a medicao esta' parada e a leitura disso. E' o MESMO `parada` da fila de
+  trabalho da tela Medicoes (`fila_medicoes.paradas`, a unica leitura do tempo parado): os dias uteis desde o evento
+  que abriu a situacao atual da medicao, com os limites do SIGA; no passo Pagamento, critico so' depois da data
+  esperada do recebimento pelo prazo do orgao (docs/adr/0007). A mesma medicao tem o mesmo tom nas duas telas. O
+  evento e' o da situacao, que pode ser mais novo que o da etapa: na etapa do boletim, o espelho gerado ou o e-mail
+  ao faturamento; no protocolado, o ultimo protocolo. A data de cada etapa continua em `etapas`. Na linha que junta
+  execucao e reajuste e a fila nao junta, vale o `parada` da mais parada das duas. Nulo na recebida, que nao esta'
+  parada: ela leva `recebida_em` e, com a emissao da nota registrada, os dias corridos da nota ao recebimento
+  (`dias_da_nota_ao_recebimento`).
 - DIFERENCA ENTRE O APROVADO E O PEDIDO (`pedido_do_aprovado_centavos`, `abaixo_do_pedido_centavos`,
-  `acima_do_pedido_centavos`): a conta do Fechamento, medicao a medicao (`fechamento.diferenca_do_pedido`: a
-  tolerancia de R$ 0,05 no valor cheio, tudo na cota); nulos sem os dois valores. O limite que separa a diferenca
+  `acima_do_pedido_centavos`): a conta do Fechamento, medicao a medicao (`fechamento.aprovado_contra_o_pedido`, a
+  unica: a tolerancia de R$ 0,05 no valor cheio; aqui na cota, como no Fechamento; a tela Medicoes usa a mesma
+  funcao no valor cheio); nulos sem os dois valores. A linha que junta execucao e reajuste soma as duas. O limite que separa a diferenca
   pequena da critica vai em `diferenca_critica_por_mil` (`avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL`, #741).
 - FILTRO POR CONTRATANTE (`contratante`): recorta tudo (linhas, etapas, medido, referencias, obras sem medicao e meses
   anteriores) para as obras daquele contratante. `contratantes` lista, sem recorte, quem tem medicao na competencia
@@ -87,7 +93,7 @@ O QUE A #805 ACRESCENTOU (todo numero na cota, em centavos inteiros):
 import calendar
 import datetime
 
-from app import avisos_medicao, contratos, db, diretoria, fechamento, feriados, medicoes, tempo
+from app import avisos_medicao, contratos, db, diretoria, fechamento, fila_medicoes, medicoes, tempo
 
 ETAPAS = ("em_analise", "boletim", "nota", "protocolado", "recebido")
 ROTULO = {"antes": "Planilha/carta a enviar", "em_analise": "Em análise", "boletim": "Boletim", "nota": "Nota",
@@ -165,33 +171,40 @@ def _medicao(conn, m: dict, passos_de) -> dict | None:
             "competencia": m["competencia"], "titulo": medicoes.titulo(m), "etapa": da_vez, "etapas": etapas,
             "valor_centavos": _cota(m),
             # #805: os dois lados da diferenca aprovado x pedido, a conta do Fechamento; nulo sem os dois valores
-            "diferenca": fechamento.diferenca_do_pedido(m["estado"], m["valor_atestado_centavos"],
-                                                        m["valor_protocolado_centavos"], m["pct"])}
+            "diferenca": fechamento.aprovado_contra_o_pedido(m["estado"], m["valor_protocolado_centavos"],
+                                                             m["valor_atestado_centavos"], m["pct"])}
 
 
 def _dia(iso: str | None) -> datetime.date | None:
     return datetime.date.fromisoformat(iso) if iso else None
 
 
-def _tempo_na_etapa(etapa: str, datas: dict, hoje: datetime.date) -> dict:
-    """#805: desde quando a linha esta' na etapa da vez (a data do evento) e ha' quantos dias uteis; na recebida, os
-    dias corridos da emissao da nota ao recebimento. Sem a data do evento, nulo: nada conta da competencia."""
-    desde = _dia(datas.get(etapa))
-    parada = desde is not None and etapa != "recebido"
+def _parada_da_linha(juntas: list[dict], paradas: dict[int, dict]) -> dict | None:
+    """#805: o `parada` da linha, o da fila de trabalho (`fila_medicoes.paradas`). A fila junta execucao e reajuste
+    pela situacao e esta pagina pela etapa: quando as duas medicoes da linha tem leituras diferentes, vale a da mais
+    parada (alem do prazo do orgao primeiro; depois, mais dias uteis). Nulo quando nenhuma esta' aberta (a recebida)."""
+    das_partes = [paradas[p["id"]] for p in juntas if p["id"] in paradas]
+    if not das_partes:
+        return None
+    return max(das_partes, key=lambda x: (x["alem_do_prazo"], x["dias_uteis"] if x["dias_uteis"] is not None else -1))
+
+
+def _recebimento(etapa: str, datas: dict) -> dict:
+    """#805: na linha recebida, a data do recebimento e os dias corridos da emissao da nota ate' ele; nulos nas outras
+    e sem a data do evento (nada conta da competencia)."""
     nota, recebido = _dia(datas.get("nota")), _dia(datas.get("recebido"))
-    da_nota = (recebido - nota).days if etapa == "recebido" and nota and recebido and recebido >= nota else None
-    return {"na_etapa_desde": desde.isoformat() if desde else None,
-            "dias_uteis_na_etapa": feriados.dias_uteis_entre(desde, hoje) if parada else None,
-            "dias_da_nota_ao_recebimento": da_nota}
+    recebida = etapa == "recebido"
+    return {"recebida_em": recebido.isoformat() if recebida and recebido else None,
+            "dias_da_nota_ao_recebimento": (recebido - nota).days if recebida and nota and recebido and recebido >= nota else None}
 
 
-def _linhas(partes: list[dict], obras: dict[int, dict], hoje: datetime.date) -> list[dict]:
+def _linhas(partes: list[dict], obras: dict[int, dict], paradas: dict[int, dict]) -> list[dict]:
     """Uma linha por medicao. A execucao e o reajuste de mesmo numero, na mesma competencia e na mesma etapa, viram
     uma linha so' ("24ª Medição + Reajuste", como em `medicoes.linhas_em_andamento`): o valor e' a soma das duas cotas
     e cada etapa leva a data da ultima das duas a chegar nela. So' se juntam quando as duas dizem o mesmo de cada
     etapa que tem em comum (uma com o registro do boletim e a outra sem ficam em duas linhas): a linha conjunta nao
     afirma de uma o que so' a outra tem. A diferenca entre o aprovado e o pedido da linha conjunta soma a das duas
-    (cada uma com a propria tolerancia), e o tempo na etapa conta da data da ultima a chegar nela."""
+    (cada uma com a propria tolerancia). `paradas` e' o de `fila_medicoes.paradas` (`_parada_da_linha`)."""
     grupos: dict[tuple, list[dict]] = {}
     for p in partes:
         grupos.setdefault((p["contrato_id"], p["competencia"], p["numero"], p["etapa"]), []).append(p)
@@ -221,7 +234,8 @@ def _linhas(partes: list[dict], obras: dict[int, dict], hoje: datetime.date) -> 
                 "numero": principal["numero"], "tipo": principal["tipo"], "competencia": principal["competencia"],
                 "etapa": principal["etapa"], "etapas": etapas,
                 "valor_centavos": sum(valores) if valores else None,
-                **_tempo_na_etapa(principal["etapa"], {e["etapa"]: e["data"] for e in etapas}, hoje), **da_diferenca})
+                "parada": _parada_da_linha(juntas, paradas),
+                **_recebimento(principal["etapa"], {e["etapa"]: e["data"] for e in etapas}), **da_diferenca})
     linhas.sort(key=lambda x: (medicoes._chave_nome(x["obra"]), x["contrato_id"], _ORDEM_TIPO.index(x["tipo"]),
                                x["numero"], x["medicao_id"]))
     return linhas
@@ -357,7 +371,9 @@ def _resumo(conn, hoje: datetime.date | None, mes: str | None, contratante: str 
         do_mes, anteriores, da_anterior = ([p for p in ps if p["contrato_id"] in do_recorte]
                                            for ps in (do_mes, anteriores, da_anterior))
 
-    linhas = _linhas(do_mes, obras, hoje)
+    # #805: o tempo parado de cada medicao aberta, o mesmo da fila de trabalho da tela Medicoes
+    paradas = fila_medicoes.paradas(conn, hoje, obras)
+    linhas = _linhas(do_mes, obras, paradas)
     grupos: dict[str, list[dict]] = {}
     for x in linhas:
         grupos.setdefault(x["contratante"] or "sem contratante", []).append(x)
@@ -380,7 +396,7 @@ def _resumo(conn, hoje: datetime.date | None, mes: str | None, contratante: str 
                    and not o["encerramento_iniciado_em"] and (do_recorte is None or o["id"] in do_recorte)]
 
     por_competencia: dict[str, list[dict]] = {}
-    for x in _linhas(anteriores, obras, hoje):
+    for x in _linhas(anteriores, obras, paradas):
         por_competencia.setdefault(x["competencia"], []).append(x)
     return {"hoje": hoje.isoformat(), "mes": mes, "em_trabalho": em_trabalho, "atualizacao": _atualizacao(conn),
             "contratante": contratante, "contratantes": contratantes,
