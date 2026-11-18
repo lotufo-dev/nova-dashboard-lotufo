@@ -23,7 +23,7 @@
 //
 // Grava em `<saida>/capturas/`: `<perfil>/<tela>-<largura>.png` (pagina inteira), `login-<largura>.png` e o
 // `relato.json` com o que foi visto em cada tela. A saida de uma copia do banco tem dado real: mora fora do
-// repositorio (ver `comum.py`).
+// repositorio (ver `comum.py`). Os estados do login (`ESTADOS_DO_LOGIN`) saem em `login-<estado>-<largura>.png`.
 //
 // Navegador: o Chromium do Playwright quando esta' instalado (`npx playwright install chromium`, o que a CI faz);
 // senao, o Chrome da maquina. DASH_PROVA_CANAL=chrome|msedge escolhe na mao.
@@ -33,6 +33,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { auditar, REPROVA } from "./auditoria.mjs";
 import { LARGURAS, LOGIN, MENU, PERFIS, RESPOSTAS_ESPERADAS, ROTAS_FORA, TELAS, telasDoPerfil } from "./telas.mjs";
+import { ESTADOS_DO_LOGIN } from "./telas.mjs";
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ESPERA = 15000;          // ms para o conteudo principal aparecer
@@ -313,6 +314,49 @@ async function entrar(contexto, perfil, largura) {
   return entrou;
 }
 
+// Os estados da tela de login (`ESTADOS_DO_LOGIN`, em telas.mjs; #821): a recusa, o limite de tentativas e a
+// espera. Antes de entrar, uma vez por largura (o primeiro perfil que chega abre), com e-mail e senha de mentira e
+// a resposta do servidor simulada: nenhuma tentativa errada chega ao servidor de prova.
+const estadosDoLoginVistos = new Set();
+
+async function abrirEstadosDoLogin(contexto, perfil, largura) {
+  if (estadosDoLoginVistos.has(largura)) return;
+  estadosDoLoginVistos.add(largura);
+  for (const estado of ESTADOS_DO_LOGIN) {
+    const pagina = await contexto.newPage();
+    const problemas = vigiar(pagina, "login", estado.simular), avisos = [], t0 = Date.now();
+    let captura = null, achados = [];
+    try {
+      for (const s of estado.simular) {
+        await pagina.route(u => s.caminho.test(u.pathname), (rota, pedido) => {
+          if (pedido.method() !== (s.metodo ?? "GET")) return rota.fallback();
+          if (s.pendurar) return undefined;      // sem resposta: o pedido fica aberto ate' a aba fechar
+          return rota.fulfill({ status: s.status ?? 200, contentType: "application/json", body: JSON.stringify(s.corpo ?? {}) });
+        });
+      }
+      await pagina.goto(BASE + LOGIN.caminho, { waitUntil: "load" });
+      await pagina.locator(LOGIN.espera).waitFor({ state: "visible", timeout: ESPERA });
+      await pagina.locator('input[name="email"]').fill("ninguem@exemplo.com.br");
+      await pagina.locator('input[name="senha"]').fill("senha-de-mentira");
+      await pagina.locator('form.entrar__form button[type="submit"]').click();
+      await pagina.locator(estado.espera).first().waitFor({ state: "visible", timeout: ESPERA });
+      await pagina.evaluate(() => document.fonts.ready).catch(() => {});
+      const [pagina_, janela] = await pagina.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
+      if (pagina_ > janela + 1) problemas.push(`rola de lado: página com ${pagina_} px numa janela de ${janela} px`);
+      achados = await conferirVisual(pagina, problemas, avisos);
+    } catch (e) {
+      problemas.push(`o login não chegou ao estado "${estado.id}": ${String(e.message ?? e).split("\n")[0]}`);
+    }
+    if (querFoto(problemas)) {
+      captura = path.join(SAIDA, `login-${estado.id}-${largura}.png`);
+      await fotografar(pagina, captura, largura).catch(e => { avisos.push(`sem captura: ${e.message}`); captura = null; });
+    }
+    await pagina.close();
+    registrar({ perfil, largura, tela: `${LOGIN.id}-${estado.id}`, doLogin: true, caminho: LOGIN.caminho, ms: Date.now() - t0,
+      problemas, avisos, captura, achados });
+  }
+}
+
 // Os registros que entram nos caminhos com `:obra`, `:medicao` e `:empresa`: lidos da API, com a sessao do perfil.
 async function registros(contexto) {
   const ler = async caminho => {
@@ -399,6 +443,7 @@ async function percorrer(navegador, perfil) {
       timezoneId: "America/Cuiaba", reducedMotion: "reduce", colorScheme: "light",
     });
     try {
+      await abrirEstadosDoLogin(contexto, perfil, largura);
       if (!(await entrar(contexto, perfil, largura))) continue;
       const reg = await registros(contexto);
       for (const tela of telas) await abrirTela(contexto, perfil, largura, tela, reg);
@@ -446,7 +491,7 @@ if (porAchado.size) {
   }
 } else console.log("\nauditoria visual: nada achado");
 // conferencia que nao abriu tela nenhuma (fora o login) nao conferiu nada: reprova, em vez de passar vazia
-const semTela = !relato.some(i => i.tela !== LOGIN.id);
+const semTela = !relato.some(i => i.tela !== LOGIN.id && !i.doLogin);
 if (conferir && semTela) {
   console.log("  FALHA nenhuma tela foi aberta: --perfis ou --telas ficou vazio, ou nenhum perfil pedido tem as telas pedidas");
 }
