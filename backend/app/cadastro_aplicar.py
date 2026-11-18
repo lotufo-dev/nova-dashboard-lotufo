@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from app import arquivos, auditoria, cobranca_orgao, contratos, cronograma, db, dinheiro, oficios, reajuste, tempo
-from app.cadastro_arquivos import (NATUREZAS, TIPOS_ADITIVO, TIPOS_COM_NATUREZA, _corretor_de_valor,
+from app.cadastro_arquivos import (NATUREZAS, STATUS_FINAIS, TIPOS_ADITIVO, TIPOS_COM_NATUREZA, _corretor_de_valor,
                                    _reajuste_com_valor, competencias_do_apostilamento)
 
 
@@ -203,9 +203,12 @@ def _data_br(iso: str | None) -> str:
 
 # status do cadastro -> contratos.estado. "em_encerramento" nao e' estado do banco: e'
 # 'ativo' com encerramento_iniciado_em preenchido (migracao 018).
-_ESTADO = {"ativo": "ativo", "suspenso": "suspenso", "em_encerramento": "ativo", "encerrado": "encerrado"}
+_ESTADO = {"ativo": "ativo", "suspenso": "suspenso", "em_encerramento": "ativo", "encerrado": "encerrado",
+           "rescindido": "rescindido"}
 _EVENTO = {("ativo", "suspenso"): "suspensao", ("suspenso", "ativo"): "retomada",
-           ("ativo", "encerrado"): "encerramento", ("suspenso", "encerrado"): "encerramento"}
+           ("ativo", "encerrado"): "encerramento", ("suspenso", "encerrado"): "encerramento",
+           ("ativo", "rescindido"): "rescisao", ("suspenso", "rescindido"): "rescisao"}
+_ORIGEM_EVENTO = "Cadastro versionado"
 _CAMPOS_CONTRATO = ("nome_curto", "orgao", "orgao_id", "entidade_id", "objeto", "municipio", "lei", "cno",
                     "numero_processo", "centro_custo_rm", "valor_original_centavos",
                     "percentual_direito_bp", "execucao_inicio", "execucao_fim", "vigencia_inicio",
@@ -280,6 +283,26 @@ def _indice_das_bases(bases: list[dict]) -> str | None:
                      for d in sorted(bases, key=lambda d: d["mes"]))
 
 
+def _data_do_fim(conn, usuario_id, cid: int, c: dict) -> bool:
+    """A data do encerramento (ou da rescisao) declarada em `status_desde` vira o evento que a pagina da obra le em
+    "encerrada desde" (`contratos._status_desde`), inclusive na obra que ja' entra encerrada, que nao passa por
+    transicao de estado. Evento gravado nao muda: a data igual a' do evento que vale nao grava nada (reaplicar nao
+    duplica); a data diferente entra como evento novo, que diz a que corrige e passa a valer. Sem a data, nada."""
+    if c["status"] not in STATUS_FINAIS or not c["status_desde"]:
+        return False
+    tipo = contratos.EVENTO_POR_ESTADO[c["status"]]
+    antes = contratos.data_do_evento_de_estado(conn, cid, tipo)
+    if antes == c["status_desde"]:
+        return False
+    obs = _ORIGEM_EVENTO if antes is None else f"{_ORIGEM_EVENTO}: corrige a data anterior ({antes})"
+    conn.execute("INSERT INTO contrato_eventos (contrato_id, tipo, data, observacao) VALUES (?,?,?,?)",
+                 (cid, tipo, c["status_desde"], obs))
+    auditoria.registrar(conn, usuario_id, "cadastro.contrato_evento", "contrato", cid,
+                        None if antes is None else {"tipo": tipo, "data": antes},
+                        {"tipo": tipo, "data": c["status_desde"]})
+    return True
+
+
 def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
     nome_orgao = conn.execute("SELECT nome FROM orgaos WHERE id=?", (ids_orgao[c["orgao"]],)).fetchone()[0]
     ja = conn.execute("SELECT * FROM contratos WHERE numero_instrumento=?",
@@ -289,7 +312,7 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
         "SELECT 1 FROM medicoes WHERE contrato_id=? AND final=1 LIMIT 1", (ja["id"],)).fetchone() is not None
     if c["status"] == "em_encerramento":
         enc = c["status_desde"]
-    elif ja is not None and (c["status"] == "encerrado" or tem_final):
+    elif ja is not None and (c["status"] in STATUS_FINAIS or tem_final):
         enc = ja["encerramento_iniciado_em"]
         if tem_final and c["status"] == "ativo":
             rel["avisos"].append(f"{c['nome_curto']}: medição final marcada na operação; atualize o YAML "
@@ -372,9 +395,11 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
                 conn.execute("INSERT INTO contrato_eventos (contrato_id, tipo, data, observacao) "
                              "VALUES (?,?,?,?)",
                              (cid, tipo, c["status_desde"] or tempo.hoje_local().isoformat(),
-                              "Cadastro versionado"))
+                              _ORIGEM_EVENTO))
             mudou = True
             auditoria.registrar(conn, usuario_id, "cadastro.contrato", "contrato", cid, antes, depois)
+    if _data_do_fim(conn, usuario_id, cid, c):
+        mudou = True
 
     # Datas-base: o cadastro e' a verdade (configuracao, nao historico financeiro).
     atuais = {r["mes"]: {"indice": r["indice"], "aplica_a": r["aplica_a"]} for r in conn.execute(

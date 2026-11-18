@@ -2358,7 +2358,7 @@ def _nota_da_empresa_no_centro_declarado(idmov, emissao="2026-08-10", valor=2000
 
 def test_cadastro_de_exemplo_declara_o_centro_da_empresa_na_obra_consorcio(conn, espelho_consorcio):
     assert [tuple(r) for r in conn.execute("SELECT nome_curto, centro_custo_empresa_rm FROM contratos ORDER BY nome_curto")] == [
-        ("Obra Consórcio", CENTRO_DA_EMPRESA), ("Obra Própria", None)]
+        ("Obra Consórcio", CENTRO_DA_EMPRESA), ("Obra Encerrada", None), ("Obra Própria", None)]
 
 
 def test_nota_da_empresa_no_centro_declarado_liga_pela_saida_do_espelho_com_as_travas(conn, tmp_path, espelho_consorcio):

@@ -484,3 +484,17 @@ def test_ficha_vencimentos_sem_certidao_da_empresa(client_admin, monkeypatch):
         conn.close()
     venc = client_admin.get(f"/api/contratos/{cid}/ficha").json()["vencimentos"]
     assert [x["chave"] for x in venc] == ["execucao"]
+
+
+def test_cabecalho_da_obra_encerrada_pelo_cadastro_traz_a_data_do_encerramento(client_admin):
+    """A obra que entra no cadastro ja' encerrada, com `status_desde`, chega a' pagina com a data ("encerrada desde"):
+    o `cadastro-exemplo/` inteiro aplicado, lido pela API do cabecalho."""
+    from app import cadastro_aplicar, cadastro_arquivos, db
+    from tests.conftest import CADASTRO_EXEMPLO
+    conn = db.get_conn()
+    cadastro_aplicar.aplicar(conn, 1, cadastro_arquivos.preparar(CADASTRO_EXEMPLO))
+    ids = {r["nome_curto"]: r["id"] for r in conn.execute("SELECT id, nome_curto FROM contratos")}
+    conn.close()
+    cab = client_admin.get(f"/api/contratos/{ids['Obra Encerrada']}/cabecalho").json()
+    assert (cab["status"], cab["status_desde"]) == ("encerrado", "2023-11-17")
+    assert client_admin.get(f"/api/contratos/{ids['Obra Própria']}/cabecalho").json()["status_desde"] is None

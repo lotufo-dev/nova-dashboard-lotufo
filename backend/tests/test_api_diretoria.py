@@ -218,7 +218,8 @@ def test_tipo_extra_do_cadastro_muda_o_a_receber_e_o_faturado_so_da_obra_que_o_d
 
     def retrato():
         soltas = client.get("/api/fechamento").json()["notas_sem_medicao"]
-        obras = {o["id"]: o["posicao"]["a_receber_centavos"] for o in client.get("/api/contratos").json()}
+        obras = {o["id"]: o["posicao"]["a_receber_centavos"] for o in client.get("/api/contratos").json()
+                 if o["id"] in (propria, consorcio)}          # a Obra Encerrada do exemplo nao entra nesta conta
         cheio = {cid: client.get(f"/api/contratos/{cid}/cabecalho").json()["a_receber_centavos"] for cid in (propria, consorcio)}
         return {"total": client.get("/api/inicio/painel").json()["a_receber"]["valor_centavos"],
                 "sem_medicao": {x["contrato_id"]: x["valor_centavos"] for x in soltas["em_aberto"]},

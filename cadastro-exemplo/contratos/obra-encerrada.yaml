@@ -1,0 +1,31 @@
+# Obra Encerrada: contrato que já entra no cadastro encerrado. Todos os dados são fictícios.
+nome_curto: Obra Encerrada
+numero_instrumento: 003/2022/00/00-EXEMPLO
+orgao: secretaria-exemplo
+entidade: lotufo
+objeto: Obra Encerrada
+municipio: Rondonópolis
+lei: '14.133'
+cno: null
+numero_processo: null
+centro_custo_rm: 9.001.003
+valor_original: 2.345.678,91
+percentual_lotufo: 100,00
+execucao_inicio: '2022-04-04'
+execucao_fim: '2023-10-31'
+vigencia_inicio: '2022-04-04'
+vigencia_fim: '2024-01-29'
+# `status_desde` é a data em que a obra entrou no status: obrigatória em `em_encerramento` (a medição final) e
+# opcional em `encerrado` e `rescindido` (a data do encerramento ou da rescisão, nunca futura nem anterior a
+# `execucao_inicio`). Com ela, a página da obra diz "encerrada desde"; sem ela, só "encerrada". A fonte da data vai
+# no comentário ao lado.
+status: encerrado
+status_desde: '2023-11-17'   # fonte: termo de recebimento definitivo de exemplo
+sem_reajuste: true
+datas_base: []
+fiscais: []
+destinatarios_extras: []
+copia_extras: []
+# [] = o fluxo da medição desta obra não é feito pelo sistema (issue #660)
+passos_medicao: []
+instrumentos: []
