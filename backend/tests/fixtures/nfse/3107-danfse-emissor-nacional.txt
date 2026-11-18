@@ -1,0 +1,158 @@
+DATA CIENTIFICAÇÃO: IDENTIFICAÇÃO E ASSINATURA N° NFS-e / CHAVE NFS-e
+3107 / 51034031231200101000130000000000310726088651522124
+DANFSe v2.0
+Documento Auxiliar da NFS-e
+Município: Cuiabá - MT
+Ambiente Gerador: 2
+Tipo de Ambiente: 1
+CHAVE DE ACESSO DA NFS-e
+51034031231200101000130000000000310726088651522124
+A autenticidade desta NFS-e pode ser verificada
+pela leitura deste código QR ou pela consulta da
+chave de acesso no portal nacional da NFS-e
+NÚMERO DA NFS-e
+3107
+COMPETÊNCIA DA NFS-e
+26/08/2026
+DATA E HORA DA EMISSÃO DA NFS-e
+26/08/2026 10:42:07
+NÚMERO DA DPS
+905
+SÉRIE DA DPS
+70000
+DATA E HORA DA EMISSÃO DA DPS
+26/08/2026 10:42:06
+EMITENTE DA NFS-e
+Prestador
+SITUAÇÃO DA NFS-e
+NFS-e Gerada
+FINALIDADE
+NFS-e regular
+PRESTADOR / FORNECEDOR CNPJ / CPF / NIF
+31.200.101/0001-30
+Indicador Municipal (Inscrição)
+-
+Telefone
+(65) 3000-0000
+Nome / Nome Empresarial
+CONSTRUTORA ALFA LTDA
+Município / Sigla UF
+Cuiabá / MT
+Código IBGE / CEP
+51.03403 / 78.000-000
+Endereço
+RUA DAS PALMEIRAS, 100, JARDIM EXEMPLO
+E-mail
+contabilidade@exemplo.com.br
+Simples Nacional na Data de Competência
+Não optante
+Regime de Apuração Tributária pelo SN
+-
+TOMADOR / ADQUIRENTE CNPJ / CPF / NIF
+31.300.101/0001-01
+Indicador Municipal (Inscrição)
+-
+Telefone
+-
+Nome / Nome Empresarial
+SECRETARIA DE EXEMPLO
+Município / Sigla UF
+Cuiabá / MT
+Código IBGE / CEP
+51.03403 / 78.000-100
+Endereço
+AVENIDA EXEMPLO, 200, CENTRO
+E-mail
+-
+DESTINATÁRIO DA OPERAÇÃO NÃO IDENTIFICADO NA NFS-e
+INTERMEDIÁRIO DA OPERAÇÃO NÃO IDENTIFICADO NA NFS-e
+SERVIÇO PRESTADO Código de Tributação Nacional/Municipal
+07.02.02 / -
+Código da NBS
+1.0105.90.00
+Local da Prestação / Sigla UF / País
+Cuiabá / MT / -
+Execução, por empreitada ou subempreitada, de obras de construção civil, hidráulica ou elétrica e de outras obras semelhantes, inclusive sondagem, perfuração de poços,...
+Descrição do Serviço
+VALOR REFERENTE A 14ª MEDIÇÃO DA EXECUÇÃO DAS OBRAS DA PRAÇA DE EXEMPLO, CONFORME
+CONTRATO Nº 001/2025/EXEMPLO - CNO 90.000.00007/07, PERÍODO DE 01/07/2026 A 31/07/2026. SERVIÇOS REALIZADOS COM
+FORNECIMENTO DE MATERIAIS, MÃO DE OBRA E EQUIPAMENTOS NO MUNICÍPIO DE CUIABÁ-MT. VALOR TOTAL DA 14ª MEDIÇÃO: R$ 987.654,33 (NOVECENTOS E
+OITENTA E SETE MIL, SEISCENTOS E CINQUENTA E QUATRO REAIS E TRINTA E TRÊS CENTAVOS) MÃO DE OBRA 40%: R$ 395.061,73 / MATERIAIS 60%: R$ 592.592,60
+RETENÇÃO INSS (11%) SOBRE VALOR DA MÃO DE OBRA R$ 43.456,79 VALOR ISSQN (5%) SOBRE 40% DO VALOR DA NF R$ 19.753,09 VALOR IRRF (1,50%) SOBRE O
+VALOR TOTAL DA NF R$ 14.814,81 CONTA PARA DEPOSITO BANCO DO BRASIL (001) AG: 4321 CONTA: 12.3456 CONSTRUTORA ALFA LTDA
+TRIBUTAÇÃO MUNICIPAL (ISSQN) Tipo de Tributação do ISSQN
+Operação Tributável
+Município / Sigla UF / País de Incidência do ISSQN
+Cuiabá / MT / -
+Benefício Municipal
+Redução por valor percentual
+Cálculo do BM
+R$ 592.592,60
+Total Deduções/Reduções
+-
+Desconto Incondicionado
+-
+BC ISSQN
+R$ 395.061,73
+Alíquota Aplicada
+5,00 %
+Retenção do ISSQN
+Retido pelo Tomador
+ISSQN Apurado
+R$ 19.753,09
+TRIBUTAÇÃO FEDERAL (EXCETO CBS) IRRF
+R$ 14.814,81
+Contribuição Previdenciária - Retida
+R$ 43.456,79
+Contribuições Sociais - Retidas
+-
+PIS - Débito Apuração Própria
+-
+COFINS - Débito Apuração Própria
+-
+Descrição Contrib. Sociais - Retidas
+0 - PIS/COFINS/CSLL Não Retidos
+TRIBUTAÇÃO IBS/CBS CST / cClassTrib
+000 / 000001
+Indicador de Operação / Código IBGE Incidência / Município Incidência / Sigla UF
+020201 / 5103403 / Cuiabá / MT
+Exclusões e Reduções da Base de Cálculo
+R$ 19.753,09
+Base de Cálculo Após Exclusões e Reduções
+R$ 967.901,24
+Red. Alíquota IBS / Red. Alíquota CBS
+- / - / -
+Alíquota - IBS UF / IBS Mun
+0,10 % / 0,00 %
+Alíq. Efetiva Municipal - IBS
+0,00 %
+Valor Apurado Municipal - IBS
+R$ 0,00
+Alíq. Efetiva Estadual - IBS
+0,10 %
+Valor Apurado Estadual - IBS
+R$ 967,90
+Valor Total Apurado - IBS
+R$ 967,90
+Alíquota - CBS
+0,90 %
+Alíquota Efetiva - CBS
+0,90 %
+Valor Total Apurado - CBS
+R$ 8.711,11
+VALOR TOTAL DA NFS-e VALOR DA OPERAÇÃO / SERVIÇO
+R$ 987.654,33
+Desconto Incondicionado
+-
+Desconto Condicionado
+-
+Total das Retenções (ISSQN / Federais)
+R$ 78.024,69
+VALOR LÍQUIDO DA NFS-e
+R$ 909.629,64
+Total do IBS/CBS
+R$ 9.679,01
+VALOR LÍQUIDO DA NFS-e + IBS/CBS
+R$ 909.629,64
+INFORMAÇÕES COMPLEMENTARES
+Totais aproximados dos Tributos cfe. Lei n° 12.741/2012: Federais: R$ 58.271,60; Estaduais: R$ 0,00; Municipais: R$ 19.753,09;
