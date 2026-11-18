@@ -116,7 +116,9 @@ do rótulo, na etiqueta sob o valor ou na barra.
 - **Variação:** só contra uma referência escrita ao lado ("× set", "× out/25"). A seta diz a direção e a cor diz
   se é bom: no em aberto, cair é bom. Até 2% para cima ou para baixo é estável. O mês em curso compara com o mês
   anterior até o mesmo dia, e o rótulo diz ("× out até o dia 18"). Motivo: mês pela metade contra mês inteiro diria
-  sempre "caiu". Período sem valor, ou anterior ao primeiro ano que as telas da diretoria contam, não serve de
+  sempre "caiu". O valor de uma etapa do ciclo (o protocolado, o recebido de uma competência) compara com a mesma
+  altura do mês anterior: o que a competência anterior tinha na etapa no mesmo dia, um mês antes ("× set até
+  18/10"). Sai das datas dos eventos; faltando a data de algum, a variação não aparece. Período sem valor, ou anterior ao primeiro ano que as telas da diretoria contam, não serve de
   referência.
 - **Diferença:** entre dois valores que deveriam ser iguais (o aprovado e o pedido). Igual leva o sinal de igual.
   Diferente mostra os reais e o percentual: até 0,5% da base, no tom de "vence em breve"; acima, no tom do crítico.
@@ -132,7 +134,8 @@ do rótulo, na etiqueta sob o valor ou na barra.
   A contagem de obras por leitura ("3 devagar", "2 em atenção") vai numa etiqueta do tom da leitura, sem glifo:
   é valor, não situação (#805).
 - **Tempo parado:** os dias numa etapa ou num setor, com o selo da situação e os limites do SIGA (seção "Quando
-  usar cada uma" das situações).
+  usar cada uma" das situações). Na etapa do ciclo conta da data do evento (envio, boletim, emissão, protocolo), em
+  dias úteis; sem a data, nada aparece. A recebida não está parada: leva o selo do feito com a data.
 - **Fica em tinta:** valor de contrato, data, número de documento e o próprio número ao lado da marca ou da
   etiqueta.
 
@@ -163,6 +166,13 @@ do rótulo, na etiqueta sob o valor ou na barra.
   embaixo dele. A janela de diálogo é um painel por cima de um véu; menu suspenso, lista de sugestões e a janela do
   e-mail levam a mesma sombra, e não há sombra com desfoque. Motivo: a moldura separa o painel do papel sem
   mudar a cor do fundo (decisão 6 da Início; PRs #725, #772).
+- **Quadro por etapa:** uma coluna por etapa do ciclo, com a barra no tom dela, a marca, a quantidade e o valor no
+  cabeçalho, e um cartão por medição embaixo, o de maior valor primeiro. Coluna vazia diz "nenhuma medição". É a
+  forma do Resumo das medições, que responde "onde está o dinheiro do mês"; a tabela continua como segunda vista,
+  para comparar valores entre linhas (decisão do dono de 18/11/2026, #805).
+- **Cartão de medição:** moldura fina com a borda esquerda no tom da etapa; dentro, a obra, o contratante com a
+  medição, o valor em tinta e as etiquetas das famílias de valor (o tempo na etapa e a diferença). Menor que o
+  painel: sem título, sem sombra e sem a moldura grossa. Só no quadro por etapa.
 - **Abas ficam direto na página, sem caixa em volta dos painéis da aba.** Motivo: caixa dentro de caixa perdia
   40 px de largura e cortava as tabelas da página da obra (PR #776).
 - **Selo:** fundo claro da situação, glifo e palavra, com maiúscula inicial. **Contador:** a quantidade ao lado de
@@ -195,7 +205,8 @@ A casca é o que fica igual em toda tela: o menu à esquerda e o topo (decisões
 
 - **1440 px:** a disposição cheia. Na página da medição, a Linha do tempo fica ao lado do passo.
 - **1024 px:** menu aberto e 792 px de conteúdo. A página não rola de lado. Colunas ao lado descem para baixo;
-  tabela que não cabe rola dentro da própria caixa.
+  tabela que não cabe rola dentro da própria caixa. O quadro por etapa vira uma etapa embaixo da outra, com os
+  cartões lado a lado; no celular, um cartão embaixo do outro.
 - **390 px (celular):** o menu nasce recolhido (64 px), abre por cima da tela e fecha ao navegar; no topo fica só o
   avatar. As telas de leitura da diretoria (Início, Obras, página da obra, Fechamento, Resumo das medições) são
   desenhadas para essa largura: uma coluna, e a tabela vira um bloco por linha. As telas de operação são de

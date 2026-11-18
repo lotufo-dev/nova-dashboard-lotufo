@@ -280,9 +280,13 @@ _Avoid_: pílula, chip, badge
 A quantidade ao lado de um título. Com situação, leva o glifo dela.
 
 **Variação**:
-O quanto um valor subiu ou caiu contra uma referência escrita ao lado: o mês anterior ou o mesmo mês do ano
-anterior. Até 2% para cima ou para baixo é estável.
+O quanto um valor subiu ou caiu contra uma referência escrita ao lado: o mês anterior, o mesmo mês do ano anterior
+ou a mesma altura do mês anterior. Até 2% para cima ou para baixo é estável.
 _Avoid_: diferença (é entre dois valores que deveriam ser iguais)
+
+**Mesma altura do mês anterior**:
+A referência da variação do protocolado e do recebido no Resumo das medições: o que as medições da competência
+anterior tinham na etapa no mesmo dia de hoje, um mês antes, pelas datas dos eventos.
 
 **Diferença**:
 O quanto dois valores que deveriam ser iguais se afastam: o aprovado e o pedido. No mês, na obra e no ano é só o
@@ -298,6 +302,16 @@ _Avoid_: em andamento (é uma situação)
 **Painel**:
 O bloco com moldura preta e sombra dura, com o título dentro. É peça de tela, não um tipo de tela.
 _Avoid_: cartão, card; painel como nome de tela (ver Tela de leitura)
+
+**Quadro por etapa**:
+A vista do Resumo das medições com uma coluna por etapa do ciclo e um cartão por medição na coluna da etapa em que
+ela está.
+_Avoid_: kanban; quadro do mês (é a matriz de obra por passo da tela Medições)
+
+**Cartão de medição**:
+A caixa de uma medição numa coluna do quadro por etapa: obra, contratante, medição, valor, tempo na etapa e, quando
+o aprovado difere do pedido, a diferença.
+_Avoid_: painel (o painel tem título e moldura grossa); cartão para outro bloco
 
 **Tela de leitura**:
 A tela de números que a diretoria abre para ler, sem operar: Início, Obras, página da obra, Fechamento e Resumo das
