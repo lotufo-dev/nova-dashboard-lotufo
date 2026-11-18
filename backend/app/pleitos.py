@@ -12,7 +12,7 @@ import re
 from html import escape
 
 from app import (arquivos, assinatura, auditoria, carta, correio, db, dinheiro, envio_reserva, espelhos,
-                 leitura_planilha_reajuste, medicoes, oficios, paineis, pdfs, prazos, reajuste, tempo)
+                 leitura_planilha_reajuste, medicoes, oficios, paineis, pdfs, prazos, reajuste, tempo, texto)
 from app import html_email
 
 TIPOS = ("reajuste", "prazo", "conclusao")
@@ -649,7 +649,7 @@ def _carta(conn, p: dict, corpo: str, hoje: datetime.date) -> carta.Carta:
     campos = _campos(conn, p, c, hoje)
     f = carta.fiscal_vigente(conn, c["id"], hoje.isoformat())
     ac = []
-    if f:
+    if f and (f["nome"] or f["email"]):      # o e-mail e' opcional (migracao 094): sem ele, o nome e' obrigatorio
         ac.append(f"A/C: {f['nome'] or f['email']}")
         ac += [x for x in (f.get("cargo"), f.get("portaria")) if x]
     vocativo = {"Senhor": "Prezado Senhor,", "Senhora": "Prezada Senhora,"}.get((f or {}).get("tratamento"),
@@ -884,7 +884,7 @@ def enviar(conn, usuario: dict, pleito_id: int, para: list[str], copia: list[str
         raise ValueError(MEMORIA_DIVERGENTE)
     justificativa = (justificativa or "").strip() or None
     if pv["pendencias"] and len(justificativa or "") < MIN_JUSTIFICATIVA:
-        raise ValueError(f"{len(pv['pendencias'])} pendência(s) na prévia: informe a justificativa "
+        raise ValueError(f"{texto.contar(len(pv['pendencias']), 'pendência', 'pendências')} na prévia: informe a justificativa "
                          f"(ao menos {MIN_JUSTIFICATIVA} caracteres) para enviar assim")
     # Reserva atomica antes do e-mail (10/10/2026): dois cliques simultaneos nao mandam duas cartas ao orgao.
     envio_reserva.reservar(conn, "pleitos", pleito_id, usuario["id"], p["envio_id"])

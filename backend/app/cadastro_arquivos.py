@@ -21,7 +21,10 @@ from app.medicoes import CHAVES_PASSO
 
 FAMILIAS = ("mtpar", "sinfra", "ses", "prefeitura")
 LEIS = ("8.666", "14.133", "13.303")
-STATUS = ("ativo", "suspenso", "em_encerramento", "encerrado")
+STATUS = ("ativo", "suspenso", "em_encerramento", "encerrado", "rescindido")
+# status que acabam o contrato: `status_desde` e' a data do fato (o encerramento ou a rescisao) e vira o evento que a
+# pagina da obra le em "encerrada desde"
+STATUS_FINAIS = ("encerrado", "rescindido")
 PAPEIS = ("lotufo", "consorcio", "consorciada")
 # tipo do cadastro -> tipo da tabela `aditivos` (o que altera valor e prazo)
 TIPOS_ADITIVO = {"aditivo_valor": "valor", "aditivo_prazo": "prazo", "aditivo_misto": "misto",
@@ -768,6 +771,14 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
             falha(campo, str(e))
     if c["status"] == "em_encerramento" and not c["status_desde"]:
         falha("status_desde", "obrigatório quando status é em_encerramento (data da medição final)")
+    if c["status"] in STATUS_FINAIS and c["status_desde"]:
+        # opcional: sem a data, a obra entra so' com o estado, como antes. Com ela, e' a data do fato
+        fato = "da rescisão" if c["status"] == "rescindido" else "do encerramento"
+        if c["status_desde"] > tempo.hoje_local().isoformat():
+            falha("status_desde", f"a data {fato} ({c['status_desde']}) está no futuro")
+        elif c["execucao_inicio"] and c["status_desde"] < c["execucao_inicio"]:
+            falha("status_desde", f"a data {fato} ({c['status_desde']}) é anterior ao início da execução "
+                                  f"({c['execucao_inicio']})")
     if c["execucao_fim"] and c["vigencia_fim"] and c["vigencia_fim"] < c["execucao_fim"]:
         avisos.append(f"{onde}: vigência ({c['vigencia_fim']}) termina antes da execução "
                       f"({c['execucao_fim']})")
@@ -799,14 +810,25 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
         except ValueError as e:
             falha(f"fiscais[{i}].desde", str(e))
             continue
-        if not (f or {}).get("email") or not desde:
-            falha(f"fiscais[{i}]", "email e desde são obrigatórios")
+        if not isinstance(f, dict) or not desde:
+            falha(f"fiscais[{i}]", "desde é obrigatório")
+            continue
+        # O e-mail e' opcional: so' entra o endereco que aparece em documento ou mensagem do proprio orgao. Sem ele o
+        # fiscal vale como A/C da carta (nome, cargo, portaria) e nao e' destinatario; ai' e' o nome que o identifica.
+        email = str(f.get("email") or "").strip().lower() or None
+        nome = str(f.get("nome") or "").strip()
+        if email is None and not nome:
+            falha(f"fiscais[{i}]", "sem email, o nome é obrigatório")
             continue
         if f.get("tratamento") is not None and f["tratamento"] not in TRATAMENTOS:
             falha(f"fiscais[{i}].tratamento", f"use {' ou '.join(TRATAMENTOS)}")
-        if not str(f.get("nome") or "").strip():
-            avisos.append(f"Contrato {c['nome_curto']}: fiscal {str(f['email']).strip().lower()} sem nome")
-        c["fiscais"].append({"nome": str(f.get("nome") or ""), "email": str(f["email"]).strip().lower(),
+        if not nome:
+            avisos.append(f"Contrato {c['nome_curto']}: fiscal {email} sem nome")
+        if email is None and any(x["email"] is None and x["nome"].strip() == nome and x["desde"] == desde
+                                 for x in c["fiscais"]):
+            falha(f"fiscais[{i}]", f"fiscal {nome} sem email repetido na mesma data")
+            continue
+        c["fiscais"].append({"nome": str(f.get("nome") or ""), "email": email,
                              "desde": desde, "cargo": f.get("cargo"), "tratamento": f.get("tratamento"),
                              "portaria": f.get("portaria")})
 
@@ -879,8 +901,46 @@ def _contrato(bruto: dict, arquivo: Path, raiz: Path, orgaos: set, ents: set,
             c["pecas_no_oficio"] = list(pno)
     c["passos_medicao"] = _passos_medicao(bruto.get("passos_medicao"), falha)
     c["tipos_cobranca_extras_rm"] = _tipos_cobranca_extras(bruto.get("tipos_cobranca_extras_rm"), falha)
+    # docs/adr/0005: o centro de custo que a propria empresa usa, no RM dela, para este contrato de consorcio. Que a
+    # entidade e' consorcio e que o centro nao se repete entre contratos, `preparar` confere (`_centros_da_empresa`).
+    c["centro_custo_empresa_rm"] = None
+    cce = bruto.get("centro_custo_empresa_rm")
+    if cce is not None:
+        if not isinstance(cce, str) or not cce.strip():
+            falha("centro_custo_empresa_rm", "use o código do centro de custo do RM entre aspas (ex.: '9.005.001')")
+        else:
+            c["centro_custo_empresa_rm"] = cce.strip()
     c["custo"] = _custo(bruto.get("custo"), falha)
     return c
+
+
+def _centros_da_empresa(contratos: list[dict], ents: list[dict], erros: list[str]) -> None:
+    """docs/adr/0005: `centro_custo_empresa_rm` so' vale em contrato de consorcio (na obra propria o centro da empresa
+    e' o `centro_custo_rm`), e o centro declarado tem de apontar UMA obra: nao pode se repetir em outro contrato, nem
+    ser o `centro_custo_rm` (atual ou anterior) de um contrato da propria empresa. Repetido, a nota daquele centro
+    nao teria como dizer de qual obra e'."""
+    papel = {e["chave"]: e["papel"] for e in ents}
+    da_empresa: dict[str, list[str]] = {}
+    for c in contratos:
+        if papel.get(c["entidade"]) == "lotufo":
+            for cc in [c.get("centro_custo_rm"), *(c.get("centros_custo_anteriores_rm") or [])]:
+                if cc and str(cc).strip():
+                    da_empresa.setdefault(str(cc).strip(), []).append(c["nome_curto"])
+    declarados: dict[str, list[str]] = {}
+    for c in contratos:
+        cc = c.get("centro_custo_empresa_rm")
+        if not cc:
+            continue
+        onde = f"contratos/{slug(c['nome_curto'])}.yaml: centro_custo_empresa_rm"
+        if papel.get(c["entidade"]) != "consorcio":
+            erros.append(f"{onde}: só vale em contrato de consórcio (na obra própria, use centro_custo_rm)")
+        if cc in da_empresa:
+            erros.append(f"{onde}: {cc} já é o centro de custo de {', '.join(da_empresa[cc])}")
+        declarados.setdefault(cc, []).append(c["nome_curto"])
+    for cc, nomes in declarados.items():
+        if len(nomes) > 1:
+            erros.append(f"contratos: centro_custo_empresa_rm {cc} repetido em {', '.join(sorted(nomes))}: "
+                         "cada centro aponta uma obra só")
 
 
 def _tipos_cobranca_extras(bruto, falha) -> list[str]:
@@ -1174,6 +1234,7 @@ def preparar(raiz: Path) -> dict:
         valores = [c[campo] for c in contratos if c[campo]]
         if len(set(valores)) != len(valores):
             erros.append(f"contratos: {campo} repetido")
+    _centros_da_empresa(contratos, ents, erros)
 
     geral = _geral(raiz, erros)
     cartas = _cartas(raiz, chaves_ent, erros)

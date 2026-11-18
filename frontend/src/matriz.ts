@@ -1,5 +1,7 @@
 // Regras de APRESENTACAO da matriz de Documentos (NAVEGACAO.md › Documentos): funcoes puras sobre /api/documentos.
 // A situacao de cada certidao (em dia, vencendo, vencida, faltando) e' do servidor; aqui so' se conta, filtra e ordena.
+import { contar } from "./formato";
+import { situacaoDoNivel } from "./situacao";
 
 export type CertidaoDoc = { id: number; emissao: string; validade: string; natureza: string | null;
   leitura?: string | null };    // "manual" = digitada (A-19, 10/10/2026)
@@ -140,7 +142,7 @@ export function resumoEmpresa(e: EmpresaDoc, obras: ObraDoc[] = []): { texto: st
   if (vencidas) partes.push(vencidas === 1 ? "1 vencida" : `${vencidas} vencidas`);
   if (faltas) partes.push(faltas === 1 ? "1 falta" : `${faltas} faltam`);
   if (vencendo.length === 1) partes.push(`1 ${venceEm(vencendo[0].dias ?? 0)}`);
-  else if (vencendo.length > 1) partes.push(`${vencendo.length} vencem em até ${Math.max(...vencendo.map(l => l.dias ?? 0))} dias`);
+  else if (vencendo.length > 1) partes.push(`${vencendo.length} vencem em até ${contar(Math.max(...vencendo.map(l => l.dias ?? 0)), "dia", "dias")}`);
   if (regFora) partes.push(`regularidade ${e.regularidade!.situacao === "faltando" ? "não anexada" : "atrasada"}`);
   const o = pendenciasDeObras(e, obras);
   if (o.garantiasVencidas) partes.push(o.garantiasVencidas === 1 ? "garantia vencida" : `${o.garantiasVencidas} garantias vencidas`);
@@ -151,19 +153,15 @@ export function resumoEmpresa(e: EmpresaDoc, obras: ObraDoc[] = []): { texto: st
     nivel: vencidas || faltas || o.garantiasVencidas ? "acao" : partes.length ? "atencao" : "ok", pendencias: pendenciasDa(e, obras) };
 }
 
-/** A pendencia mais urgente da tabela da empresa: a unica que leva o botao principal ("Emitir"). Sem dias (vencida
- *  ou faltando) vem antes de quem ainda vigora. */
-export function pendenciaMaisUrgente(e: EmpresaDoc): LinhaCertidao | null {
-  return certidoesOrdenadas(e).filter(certidaoPendente).sort((a, b) => (a.dias ?? -999) - (b.dias ?? -999))[0] ?? null;
-}
-
-/** A garantia de uma obra como a tela a diz (texto do selo, nota embaixo e nivel). `ate` ja' vem em dd/mm/aaaa. */
-export function situacaoGarantia(g: Garantia | null, ate: string): { texto: string; nota: string; nivel: Nivel; forte?: boolean } {
+/** A garantia de uma obra como a tela a diz (texto do selo, nota embaixo e nivel). `ate` ja' vem em dd/mm/aaaa.
+ *  Como na certidao, a forma segue o tempo: a vencida e' "acao" (critico) e a que ainda vai vencer e' "atencao"
+ *  (vence em breve), em qualquer prazo: as duas nao dividem a mesma forma (#779). */
+export function situacaoGarantia(g: Garantia | null, ate: string): { texto: string; nota: string; nivel: Nivel } {
   if (!g) return { texto: "sem vigência no cadastro", nota: "", nivel: "neutro" };
   const nota = `${g.dias < 0 ? `venceu em ${ate}` : `até ${ate}`}${g.origem === "endosso" ? " (endosso)" : ""}${g.apolice ? ` · apólice ${g.apolice}` : ""}`;
   if (g.situacao === "baixada") return { texto: "baixada", nota, nivel: "neutro" };
-  if (g.situacao === "vencida") return { texto: "vencida", nota, nivel: "acao", forte: true };
-  if (g.situacao === "vencendo") return { texto: venceEm(g.dias), nota, nivel: g.dias <= 15 ? "acao" : "atencao" };
+  if (g.situacao === "vencida") return { texto: "vencida", nota, nivel: "acao" };
+  if (g.situacao === "vencendo") return { texto: venceEm(g.dias), nota, nivel: "atencao" };
   return { texto: "em dia", nota, nivel: "ok" };
 }
 
@@ -266,7 +264,7 @@ export function chipValidadeGarantia(g: Garantia | null, ate: string): { cor: Co
   if (!g) return { cor: "critico", valor: "sem registro" };
   if (g.situacao === "vencida") return { cor: "neutro", valor: `Último registro: ${ate}` };
   const nivel = situacaoGarantia(g, ate).nivel;
-  return { cor: nivel === "acao" ? "critico" : nivel === "atencao" ? "breve" : nivel === "ok" ? "feito" : "neutro", valor: ate };
+  return { cor: situacaoDoNivel(nivel) ?? "neutro", valor: ate };
 }
 
 /** As obras por orgao, o maior grupo primeiro (empate: ordem alfabetica do orgao). Contratante privado (#651) tem

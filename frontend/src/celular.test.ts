@@ -29,41 +29,90 @@ describe("celular", () => {
     expect(bloco).toMatch(/\.ini-numero__valor\s*\{[^}]*font-size:\s*clamp\(/);
   });
 
-  it("Início (#642, #659): na faixa do ciclo o valor inteiro cabe no próprio trecho de 1024 a 1920 px; em painel estreito, lista vertical", () => {
-    // #659: a 1440 px o trecho de maior valor espremia os outros e o valor em reais vazava para o trecho vizinho. A
-    // regra: o minimo de cada trecho e' o conteudo dele (o valor nao quebra), e a fonte do valor sai da largura do
-    // painel de modo que cinco valores de 11 digitos caibam lado a lado. O jsdom nao mede layout: aqui a conta, com a
-    // largura de "R$ 100.000.000,00" em Lexend 700 medida no Chrome.
-    const EM_MEDIDO = 9.81;
-    const em = Number(/--ini-faixa-valor-em:\s*([\d.]+)/.exec(inicioCss)?.[1]);
-    expect(em).toBeGreaterThanOrEqual(EM_MEDIDO);
-    const vao = Number(/\.ini-faixa\s*\{[^}]*gap:\s*(\d+)px/.exec(inicioCss)?.[1]);
-    const respiro = Number(/\.ini-faixa__etapa\s*\{[^}]*padding:\s*\d+px (\d+)px/.exec(inicioCss)?.[1]);
-    const fonte = /\.ini-faixa__valor\s*\{[^}]*font-size:\s*clamp\((\d+)px, calc\(\(100cqi - (\d+)px\) \/ \(5 \* var\(--ini-faixa-valor-em\)\)\), (\d+)px\)/.exec(inicioCss);
-    const [minima, folga, maxima] = [Number(fonte?.[1]), Number(fonte?.[2]), Number(fonte?.[3])];
-    expect(folga).toBe(5 * 2 * respiro + 4 * vao);            // o que nao e' valor: respiros dos cinco trechos e vaos
-    expect(inicioCss).toMatch(/\.ini-faixa__valor\s*\{[^}]*white-space:\s*nowrap/);
-    expect(ler("Inicio.tsx")).toContain("minmax(min-content, ");
-    // com o menu lateral aberto (240), o respiro da pagina (2 x 32) e o do painel (2 x 16)
-    const painel = (largura: number) => largura - Number(/--trilho-largo:\s*(\d+)px/.exec(tokensCss)?.[1]) - 2 * 32 - 2 * 16;
-    const cinco = (f: number) => 5 * (em * f + 2 * respiro) + 4 * vao;
-    for (const largura of [1024, 1280, 1440, 1920]) {
-      const f = Math.min(maxima, Math.max(minima, (painel(largura) - folga) / (5 * em)));
-      expect(cinco(f), `${largura} px`).toBeLessThanOrEqual(painel(largura));     // cabe: sem corte, sem vazar, sem rolagem
+  // #659: a 1440 px o valor em reais vazava para o trecho vizinho da faixa do ciclo. #721: o ciclo e a previsao viraram
+  // linhas de rotulo a' esquerda e valor a' direita, em painel de meia largura (ou da largura toda, no celular). A
+  // regra agora: o valor nunca quebra nem sai do painel, e ate' dezenas de milhoes (10 digitos) cabe ao lado do rotulo
+  // mais largo sem empurra-lo para a segunda linha (a 390 px "No próximo mês" quebrava). A letra do valor sai da
+  // largura do painel. O jsdom nao mede layout: aqui a conta, com as larguras medidas no Chrome em Archivo (largura
+  // 92%, peso 620, algarismos tabulares).
+  const EM_10 = 7.68, EM_11 = 8.23;              // "R$ 12.480.615,32" e "R$ 800.000.000,00", em vezes a letra
+  const token = (nome: string) => /^([\d.]+)(rem|px)$/.exec(new RegExp(`${nome}:\\s*([\\d.]+(?:rem|px))`).exec(tokensCss)?.[1] ?? "");
+  // variavel de tokens.css em px (1rem = 16 px)
+  const px = (nome?: string) => { const m = token(nome ?? ""); return m ? Number(m[1]) * (m[2] === "rem" ? 16 : 1) : NaN; };
+  /** A largura por dentro do painel do ciclo e da previsao numa janela: tira o menu (recolhido no celular), as margens
+   *  da pagina, a segunda coluna (de 680 px de pagina em diante) e o respiro e a borda do painel. */
+  function porDentro(janela: number): number {
+    const menu = janela < 768 ? px("--largura-menu-recolhido") : px("--largura-menu");
+    const pagina = Math.min(px("--pagina-largura-max"), janela - menu) - 2 * (janela <= 900 ? 16 : 32);
+    const painel = pagina >= 680 ? (pagina - px("--espaco-entre-colunas")) / 2 : pagina;
+    return painel - 2 * (janela <= 640 ? px("--espaco-m") : px("--espaco-g")) - 2 * px("--borda-grossa");
+  }
+  const limitar = (min: number, v: number, max: number) => Math.min(max, Math.max(min, v));
+
+  it("Início (#642, #659, #721): no ciclo o valor inteiro cabe ao lado do rótulo, de 375 a 1920 px, sem quebrar nem vazar", () => {
+    const ROTULO = 128.05;                       // "Recebido no mês", o rotulo mais largo, a 16 px no peso forte
+    const em = Number(/--ini-etapa-valor-em:\s*([\d.]+)/.exec(inicioCss)?.[1]);
+    const rotulo = 16 * Number(/--ini-etapa-rotulo:\s*([\d.]+)rem/.exec(inicioCss)?.[1]);
+    expect(em).toBeGreaterThanOrEqual(EM_10);
+    expect(rotulo).toBeGreaterThanOrEqual(ROTULO);
+    // as pontas do clamp sao passos da escala de tokens.css (#719)
+    const fonte = /\.ini-etapa__valor\s*\{[^}]*font-size:\s*clamp\(var\((--[\w-]+)\), calc\(\(100cqi - var\(--ini-etapa-rotulo\) - var\((--[\w-]+)\)\) \/ var\(--ini-etapa-valor-em\)\), var\((--[\w-]+)\)\)/.exec(inicioCss);
+    const [minima, vao, maxima] = [px(fonte?.[1]), px(fonte?.[2]), px(fonte?.[3])];
+    expect([minima, vao, maxima].every(Number.isFinite)).toBe(true);
+    expect(inicioCss).toMatch(/\.ini-etapa__valor\s*\{[^}]*white-space:\s*nowrap/);
+    // o rotulo cede (minmax(0, 1fr)); o valor fica do tamanho dele (auto), com o mesmo vao da conta entre os dois
+    expect(inicioCss).toMatch(/\.ini-etapa\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto;[^}]*gap:\s*var\(--espaco-mini\) var\(--espaco-m\)/);
+    expect(fonte?.[2]).toBe("--espaco-m");
+    // o painel e' o container da conta (100cqi e' a largura por dentro dele)
+    expect(inicioCss).toMatch(/\.ini-painel\s*\{[^}]*container-type:\s*inline-size/);
+    for (const janela of [375, 390, 1024, 1280, 1440, 1920]) {
+      const w = porDentro(janela), f = limitar(minima, (w - rotulo - vao) / em, maxima);
+      expect(ROTULO + vao + EM_10 * f, `${janela} px, 10 dígitos`).toBeLessThanOrEqual(w);     // rotulo e valor numa linha
+      expect(EM_11 * f, `${janela} px, 11 dígitos`).toBeLessThanOrEqual(w);                    // o valor nunca sai do painel
     }
-    // abaixo do que os cinco trechos pedem na fonte minima, uma coluna so'; a 1024 px a faixa continua deitada
-    const corte = Number(/@container \(max-width:\s*(\d+)px\)/.exec(inicioCss)?.[1]);
-    expect(corte).toBe(cinco(minima) - 1);
-    expect(painel(1024)).toBeGreaterThan(corte);
-    expect(inicioCss).toMatch(/\.ini-ciclo\s*\{[^}]*container-type:\s*inline-size[^}]*padding:\s*16px/);
-    const bloco = inicioCss.slice(inicioCss.indexOf("@container"));
-    expect(bloco).toMatch(/\.ini-faixa\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+    // de 1024 px em diante a letra do valor e' a da tela aprovada (o passo "valor menor" da escala)
+    for (const janela of [1024, 1440]) expect(limitar(minima, (porDentro(janela) - rotulo - vao) / em, maxima)).toBe(px("--texto-valor-menor"));
+    // uma etapa por linha em qualquer largura: nao ha' mais a faixa deitada de cinco trechos
+    expect(inicioCss).toMatch(/\.ini-etapas\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+    expect(inicioCss).not.toContain("ini-faixa");
+  });
+
+  it("Início (#721): na previsão \"No próximo mês\" não quebra a 390 px e o valor cabe ao lado dele até 1920 px", () => {
+    const ROTULO = 117.61;                       // "No próximo mês", o rotulo mais largo, a 16 px no peso medio
+    const em = Number(/--ini-previsao-valor-em:\s*([\d.]+)/.exec(inicioCss)?.[1]);
+    const rotulo = 16 * Number(/--ini-previsao-rotulo:\s*([\d.]+)rem/.exec(inicioCss)?.[1]);
+    expect(em).toBeGreaterThanOrEqual(EM_10);
+    expect(rotulo).toBeGreaterThanOrEqual(ROTULO);
+    const fonte = /\.ini-previsao__valor\s*\{[^}]*font-size:\s*clamp\(var\((--[\w-]+)\), calc\(\(100cqi - var\((--[\w-]+)\) - var\(--ini-previsao-rotulo\) - 3 \* var\((--[\w-]+)\)\) \/ var\(--ini-previsao-valor-em\)\), var\((--[\w-]+)\)\)/.exec(inicioCss);
+    const [minima, chave, vao, maxima] = [px(fonte?.[1]), px(fonte?.[2]), px(fonte?.[3]), px(fonte?.[4])];
+    expect([minima, chave, vao, maxima].every(Number.isFinite)).toBe(true);
+    expect(inicioCss).toMatch(/\.ini-previsao__valor\s*\{[^}]*white-space:\s*nowrap/);
+    // chave, rotulo (que cede) e valor; os tres vaos da conta: dois entre as colunas e o respiro a' esquerda do valor
+    expect(inicioCss).toMatch(/\.ini-previsao__linha\s*\{[^}]*grid-template-columns:\s*auto minmax\(0, 1fr\) auto;[^}]*column-gap:\s*var\(--espaco-pp\)/);
+    expect(inicioCss).toMatch(/\.ini-previsao__valor\s*\{[^}]*padding-left:\s*var\(--espaco-pp\)/);
+    expect([fonte?.[2], fonte?.[3]]).toEqual(["--tamanho-chave", "--espaco-pp"]);
+    for (const janela of [390, 1024, 1280, 1440, 1920]) {
+      const w = porDentro(janela), f = limitar(minima, (w - chave - rotulo - 3 * vao) / em, maxima);
+      expect(chave + ROTULO + 3 * vao + EM_10 * f, `${janela} px, 10 dígitos`).toBeLessThanOrEqual(w);
+      expect(EM_11 * f, `${janela} px, 11 dígitos`).toBeLessThanOrEqual(w);
+    }
+    // a 1440 px a letra do valor e' a da tela aprovada (o passo "valor" da escala)
+    expect(limitar(minima, (porDentro(1440) - chave - rotulo - 3 * vao) / em, maxima)).toBe(px("--texto-valor"));
+  });
+
+  it("Início (#721): recebido em 12 meses deita as barras em painel estreito e a célula atrasada da matriz leva a marca", () => {
+    const bloco = inicioCss.slice(inicioCss.indexOf(".ini-rec__rotulo"));
+    expect(bloco).toMatch(/@container \(max-width:\s*\d+px\)\s*\{\s*\.ini-rec\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+    expect(inicioCss).toMatch(/\.ini-rec__coluna\s*\{[^}]*background:\s*var\(--cor-barra-recebido\)/);          // barras de tinta
+    expect(inicioCss).toMatch(/\.ini-matriz__celula--atrasado::after\s*\{[^}]*content:\s*var\(--etapa-atrasado-marca\)/);
+    expect(tokensCss).toMatch(/--etapa-atrasado-marca:\s*"!"/);
   });
 
   it("Início (#659): a matriz cabe na largura do painel e, em painel estreito, o nome da obra sobe para a própria linha", () => {
-    // 12 colunas que encolhem (minmax(0, 1fr)) ao lado do nome: nenhuma largura fixa empurra a pagina
-    expect(inicioCss).toMatch(/\.ini-matriz\s*\{[^}]*container-type:\s*inline-size/);
-    expect(inicioCss).toMatch(/\.ini-matriz__linha\s*\{[^}]*grid-template-columns:\s*minmax\(0, \d+px\) repeat\(12, minmax\(0, 1fr\)\)/);
+    // 12 colunas que encolhem (minmax(0, 1fr)) ao lado do nome, que tambem encolhe: nenhuma largura fixa empurra a
+    // pagina. #721: o container e' o painel, e a largura do nome vem de tokens.css
+    expect(inicioCss).toMatch(/\.ini-painel\s*\{[^}]*container-type:\s*inline-size/);
+    expect(inicioCss).toMatch(/\.ini-matriz__linha\s*\{[^}]*grid-template-columns:\s*minmax\(0, var\(--largura-nome-obra\)\) repeat\(12, minmax\(0, 1fr\)\)/);
     expect(inicioCss).toMatch(/\.ini-matriz__obra\s*\{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere/);
     const bloco = inicioCss.slice(inicioCss.indexOf(".ini-matriz__cor--atrasado"));
     expect(bloco).toMatch(/@container \(max-width:\s*\d+px\)\s*\{\s*\.ini-matriz__linha\s*\{\s*grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\)/);
@@ -83,12 +132,11 @@ describe("celular", () => {
     expect(tokensCss).toMatch(/\.topbar__linha > \.topbar__meta\s*\{[^}]*min-width:\s*12ch;[^}]*white-space:\s*nowrap;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis/);
     expect(tokensCss).toMatch(/\.topbar__trilha, \.topbar__linha\s*\{[^}]*min-width:\s*0/);
     expect(tokensCss).toMatch(/\.topbar__titulo\s*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis/);
-    expect(tokensCss).toMatch(/\.topbar__resumo\s*\{[^}]*min-width:\s*0/);
     expect(tokensCss).toMatch(/\.topbar\s*\{[^}]*width:\s*100%/);
     // listas (Medições, Documentos, Obras): o topo é a barra de seção, cujo título cede com reticências
-    expect(tokensCss).toMatch(/\.barra__titulo\s*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/);
+    expect(tokensCss).toMatch(/\.topo__titulo\s*\{[^}]*min-width:\s*0[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/);
     expect(blocoMedia(tokensCss, 767)).toMatch(/\.abas\s*\{[^}]*overflow-x:\s*auto/);
-    expect(blocoMedia(tokensCss, 767)).toMatch(/\.barra\s*\{[^}]*padding:\s*0 8px 0 16px/);
+    expect(blocoMedia(tokensCss, 767)).toMatch(/\.topo\s*\{[^}]*padding:\s*0 var\(--espaco-pp\) 0 var\(--espaco-m\)/);
     // no celular o respiro lateral encolhe para 16 px
     expect(blocoMedia(tokensCss, 900)).toMatch(/\.topbar, \.pagina\s*\{[^}]*padding-left:\s*16px/);
   });

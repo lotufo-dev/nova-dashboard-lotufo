@@ -156,16 +156,43 @@ def _dias_ate(iso: str | None, hoje: datetime.date) -> int | None:
         return None
 
 
+def _status_desde(conn, contrato_id: int, status: str, v: dict, prazo: dict) -> str | None:
+    """A data em que a obra entrou no status de hoje, quando o sistema a tem: a ordem de paralisacao sem reinicio
+    (suspensa), o inicio do encerramento, ou o evento de encerramento/rescisao. A obra ativa nao tem; o evento
+    gravado pela carga inicial leva a data da carga, nao a do fato, e fica de fora. Nada e' inferido."""
+    if status == "em_encerramento":
+        return v["encerramento_iniciado_em"][:10]
+    if status == "suspenso":
+        return prazo["paralisacao"]["desde"][:10] if prazo["paralisacao"] else None
+    tipo = EVENTO_POR_ESTADO.get(status)
+    if status == "ativo" or tipo is None:
+        return None
+    return data_do_evento_de_estado(conn, contrato_id, tipo)
+
+
+def data_do_evento_de_estado(conn, contrato_id: int, tipo: str) -> str | None:
+    """A data do evento de estado que vale para o contrato: o ultimo gravado daquele tipo. Evento nao se edita; a
+    correcao da data e' um evento novo (o `cadastro aplicar` grava um quando `status_desde` muda), por isso vale a
+    ordem de gravacao e nao a maior data. O evento da carga inicial leva a data da carga, nao a do fato: fica de fora."""
+    r = conn.execute("SELECT data FROM contrato_eventos WHERE contrato_id=? AND tipo=? "
+                     "AND COALESCE(observacao, '') NOT LIKE 'Carga inicial%' ORDER BY id DESC LIMIT 1",
+                     (contrato_id, tipo)).fetchone()
+    return r["data"][:10] if r and r["data"] else None
+
+
 def cabecalho(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | None = None) -> dict:
     """Orgao, instrumento, valor vigente e cota, prazos com os dias que faltam e o status da obra."""
     hoje = hoje or tempo.hoje_local()
     v = vigente(conn, contrato_id)
     o = conn.execute("SELECT nome FROM orgaos WHERE id=?", (v["orgao_id"],)).fetchone() if v.get("orgao_id") else None
     status = "em_encerramento" if v["estado"] == "ativo" and v.get("encerramento_iniciado_em") else v["estado"]
-    from app import medicoes, prazos  # import tardio: os dois importam este modulo ou sao importados por quem importa
+    from app import medicoes, prazos  # import tardio: importam este modulo ou sao importados por quem importa
     # #662: execucao registrada vencida e aditivo posterior so' de vigencia: a data fica, sem dias (nada de "vencido")
-    sem_prazo = prazos.execucao_sem_prazo(conn, contrato_id, hoje) is not None
+    prazo = prazos.situacao(conn, contrato_id, hoje)
+    sem_prazo = prazo["execucao_sem_prazo"] is not None
     sem_fluxo = contrato_id in medicoes.sem_fluxo(conn)
+    dias_execucao = None if sem_prazo else _dias_ate(v["execucao_fim_vigente"], hoje)
+    dias_vigencia = _dias_ate(v["vigencia_fim_vigente"], hoje)
     return {"id": contrato_id, "obra": v.get("nome_curto") or v["numero_instrumento"],
             "orgao": o["nome"] if o else v["orgao"], "instrumento": v["numero_instrumento"],
             "valor_vigente_centavos": v["valor_vigente_centavos"], "cota_vigente_centavos": v["cota_vigente_centavos"],
@@ -173,9 +200,16 @@ def cabecalho(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | 
             # os inicios (so' leitura) alimentam as linhas do tempo da pagina da obra; nulos quando o cadastro nao os tem
             "execucao_inicio": v.get("execucao_inicio"), "vigencia_inicio": v.get("vigencia_inicio"),
             "execucao_fim": v["execucao_fim_vigente"], "execucao_sem_prazo": sem_prazo,
-            "dias_execucao": None if sem_prazo else _dias_ate(v["execucao_fim_vigente"], hoje),
-            "vigencia_fim": v["vigencia_fim_vigente"], "dias_vigencia": _dias_ate(v["vigencia_fim_vigente"], hoje),
+            "dias_execucao": dias_execucao,
+            "vigencia_fim": v["vigencia_fim_vigente"], "dias_vigencia": dias_vigencia,
             "status": status,
+            # desde quando a obra esta' assim, para o painel "Prazo" dizer o estado no lugar de contar dias de um
+            # prazo que nao corre mais: a ordem de paralisacao, o inicio do encerramento, o evento do encerramento
+            "status_desde": _status_desde(conn, contrato_id, status, v, prazo),
+            "paralisada_desde": prazo["paralisacao"]["desde"][:10] if prazo["paralisacao"] else None,
+            # o nivel de cada prazo, decidido num lugar so' (`prazos.situacao`, a regra dos avisos e da aba Prazos): o
+            # numero dos dias e o selo das linhas do tempo da pagina da obra mostram o mesmo
+            "nivel_execucao": prazo["nivel_execucao"], "nivel_vigencia": prazo["nivel_vigencia"],
             # issue #660: os passos da medicao que a obra inicia (familia do orgao e `passos_medicao` do cadastro); a
             # lista vazia do cadastro e' a obra sem fluxo de medicao, que nao oferece "Iniciar"
             "sem_fluxo_medicao": sem_fluxo,

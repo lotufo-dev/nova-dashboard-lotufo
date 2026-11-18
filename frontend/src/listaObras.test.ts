@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Aviso } from "./Alertas";
-import { avisoPrincipal, contratantesDe, escopoDaUrl, filtrarObras, gruposPorContratante, pctExecutado, posicaoDe, prazoDaObra, resumoContratante, totaisDe, type ObraLista } from "./listaObras";
+import { avisoPrincipal, contratantesDe, escopoDaUrl, filtrarObras, gruposPorContratante, pctExecutado, pctPiso, posicaoDe, prazoDaObra, totaisDe, type ObraLista } from "./listaObras";
 
 const o = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => ({
   id, orgao: "SINFRA", numero_instrumento: `${id}/2026`, nome_curto: nome, estado: "ativo", ...extra });
@@ -60,36 +60,25 @@ describe("contratantes (entrada de Obras, #159)", () => {
     expect(pctExecutado(lista[0])).toBe(25);
     expect(pctExecutado(cheia(9, "X", 0, 0))).toBeNull();
     expect(pctExecutado(o(9, "Sem valor"))).toBeNull();
+    // por piso: 99,6% e' 99%; so' quem concluiu mostra 100%
+    expect(pctExecutado(cheia(9, "X", 1000_00, 996_00))).toBe(99);
+    expect(pctExecutado(cheia(9, "X", 1000_00, 1000_00))).toBe(100);
+    expect(pctPiso(2_66, 4_00)).toBe(66);
+    expect(pctPiso(1, 0)).toBeNull();
   });
 
   it("com aditivo de reajuste, % e saldo usam o vigente de execução, como a página da obra (#262)", () => {
     const ses = cheia(7, "SES", 1200_00, 400_00, { valor_vigente_execucao_centavos: 1000_00 });
     expect(pctExecutado(ses)).toBe(40);
-    expect(resumoContratante([ses])).toMatchObject({ vigente: 1000_00, saldo: 600_00, pct: 40 });
   });
 
-  it("o resumo conta só as obras em andamento; as encerradas só são contadas", () => {
-    const r = resumoContratante(lista.filter(x => x.orgao === "MTPAR"));
-    expect(r).toMatchObject({ obras: 1, encerradas: 1, vigente: 2000_00, medido: 1000_00, saldo: 1000_00, pct: 50 });
-    // a rescindida também fica fora dos números e entra na contagem das encerradas
-    expect(resumoContratante([...lista, cheia(5, "MTPAR", 100_00, 0, { estado: "rescindido" })].filter(x => x.orgao === "MTPAR")))
-      .toMatchObject({ obras: 1, encerradas: 2, vigente: 2000_00 });
-  });
-
-  it("'Todas as obras' é a soma das linhas dos contratantes (obras e saldo)", () => {
-    const todas = resumoContratante(lista);
-    const partes = contratantesDe(lista).map(c => resumoContratante(lista.filter(x => x.orgao === c)));
-    expect(partes.reduce((a, r) => a + r.obras, 0)).toBe(todas.obras);
-    expect(partes.reduce((a, r) => a + r.saldo, 0)).toBe(todas.saldo);
-    expect(todas.saldo).toBe((1000_00 - 250_00) + (3000_00 - 750_00) + (2000_00 - 1000_00));
+  it("os contratantes da lista, em ordem alfabética", () => {
     expect(contratantesDe(lista)).toEqual(["MTPAR", "SINFRA"]);
   });
 
-  it("avisos do contratante: obras com aviso, críticos e o nível mais grave", () => {
+  it("o aviso principal da obra é o mais grave", () => {
     const av = (nivel: string, contrato_id: number) => ({ tipo: "x", nivel, contrato_id, mensagem: "m" }) as unknown as Aviso;
     const mapa = new Map<number, Aviso[]>([[1, [av("atencao", 1), av("critico", 1)]], [2, [av("acao", 2)]]]);
-    expect(resumoContratante(lista.filter(x => x.orgao === "SINFRA"), mapa)).toMatchObject({ comAviso: 2, criticos: 1, nivelMax: "critico" });
-    expect(resumoContratante(lista.filter(x => x.orgao === "MTPAR"), mapa)).toMatchObject({ comAviso: 0, criticos: 0, nivelMax: null });
     expect(avisoPrincipal(mapa.get(1)!)?.nivel).toBe("critico");
   });
 
@@ -122,21 +111,27 @@ describe("lista de Obras na cota da Lotufo, por contratante (#645)", () => {
   ];
 
   it("os totais somam as linhas na cota, sem arredondar de novo; a receber nulo fica sem valor", () => {
-    expect(totaisDe(lista)).toEqual({ contratado: 6000_01, medido: 2000_33, saldo: 3999_68, aReceber: 150_01, temReceber: true });
+    expect(totaisDe(lista)).toEqual({ contratado: 6000_01, medido: 2000_33, saldo: 3999_68, aReceber: 150_01, temReceber: true,
+      aReceberAnterior: 0, aReceberSemAtualizacao: 0, anoInicial: null });
+    // docs/adr/0006: o a receber que fica fora do total soma 'a parte, obra a obra, sem entrar em `aReceber`
+    const comAntigo = lista.map((o, i) => ({ ...o, posicao: { ...posicaoDe(o), a_receber_ano_inicial: "2025",
+      a_receber_anterior_centavos: i === 0 ? 70_003 : 0, a_receber_sem_atualizacao_centavos: i === 1 ? 40_001 : 0 } }));
+    expect(totaisDe(comAntigo)).toMatchObject({ aReceber: 150_01, aReceberAnterior: 70_003, aReceberSemAtualizacao: 40_001, anoInicial: "2025" });
     const semLiberar = lista.map(x => ({ ...x, posicao: { ...x.posicao!, a_receber_centavos: null } }));
     expect(totaisDe(semLiberar)).toMatchObject({ aReceber: 0, temReceber: false });
   });
 
   it("obra sem `posicao` conta zero e o % executado sai da posição", () => {
     expect(posicaoDe(o(9, "Sem posição", { valor_vigente_centavos: 500_00 }))).toEqual({ vigente_centavos: 0, medido_centavos: 0, saldo_centavos: 0, a_receber_centavos: null });
-    expect(pctExecutado(lista[0])).toBe(25);
+    // por piso: a cota arredonda os centavos e a razao fica um fio abaixo de 25%
+    expect(pctExecutado(lista[0])).toBe(24);
   });
 
   it("agrupa por contratante na ordem do nome, as obras na ordem do nome, com o subtotal do grupo", () => {
     const grupos = gruposPorContratante(lista);
     expect(grupos.map(g => g.contratante)).toEqual(["MTPAR", "SINFRA"]);
     expect(grupos[1].obras.map(x => x.nome_curto)).toEqual(["Avenida", "Ponte"]);
-    expect(grupos[1].subtotal).toEqual({ contratado: 4000_01, medido: 1000_33, saldo: 2999_68, aReceber: 100_01, temReceber: true });
+    expect(grupos[1].subtotal).toMatchObject({ contratado: 4000_01, medido: 1000_33, saldo: 2999_68, aReceber: 100_01, temReceber: true });
     // a soma dos subtotais é o total do topo
     const t = totaisDe(lista);
     for (const k of ["contratado", "medido", "saldo", "aReceber"] as const) expect(grupos.reduce((a, g) => a + g.subtotal[k], 0)).toBe(t[k]);

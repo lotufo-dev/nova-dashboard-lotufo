@@ -33,6 +33,13 @@ export function IconeBaixar(p: Props) {
   </Svg>;
 }
 
+/** Proibido (circulo cortado): o sinal da trava, no aviso em bloco cheio (CaixaAviso.tsx). */
+export function IconeProibido(p: Props) {
+  return <Svg {...p}>
+    <circle cx="12" cy="12" r="8" /><path d="M6.5 6.5l11 11" />
+  </Svg>;
+}
+
 export function IconeAlerta(p: Props) {
   return <Svg {...p}>
     <path d="M10.3 3.9 2.6 17.4A2 2 0 0 0 4.3 20.4h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />

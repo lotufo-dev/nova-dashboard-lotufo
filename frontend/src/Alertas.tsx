@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { IconeAlerta, IconeSeta, IconeSino } from "./icones";
+import { IconeSeta, IconeSino } from "./icones";
 import Selo from "./Selo";
 import { semRSOrfao } from "./avisos";
 import { brl } from "./Medicoes";
 import { type AbaObra, type Busca, type Ir, type Rota } from "./rota";
 import { Link } from "./Link";
+import { situacaoDoNivel } from "./situacao";
+import Falha from "./Falha";
 
 // Cartao de avisos (spec §11). Bloco 6: o servidor manda o aviso PRONTO (`app/avisos.py`): nivel,
 // mensagem de uma linha, obra, dias, valor e destino do clique. Esta tela so' desenha — nao ha mais
@@ -78,14 +80,11 @@ export function avisosDaObra(avisos: Aviso[], contratoId: number): Aviso[] {
   return porAtraso(avisos.filter(a => a.contrato_id === contratoId)).map(semObra);
 }
 
-// O nivel vira palavra no selo: estado nunca e' so' cor. D2 (DESIGN.md › Colors): vermelho so' no
-// Critico, como o farol da Diretoria; Acao e Atencao dividem o ambar e se separam pela FORMA — Acao
-// com contorno cheio e o icone de proximo passo, Atencao com o ponto.
-export const SELO: Record<Nivel, { rotulo: string; classe: string; forte?: boolean }> = {
-  critico: { rotulo: "Crítico", classe: "selo--acao" },
-  acao: { rotulo: "Ação", classe: "selo--atencao", forte: true },
-  atencao: { rotulo: "Atenção", classe: "selo--atencao" },
-};
+// O nivel vira palavra E forma no selo, por um criterio so' (#779): a forma diz se o aviso ja' pede acao. Critico e
+// Acao (os que o servidor trata como imediatos) levam o octogono; Atencao (o que se acompanha) leva o triangulo de
+// "vence em breve". A palavra separa o Critico da Acao. Vale tambem para o farol da obra (ObrasCarteira.tsx).
+// A forma sai de `situacaoDoNivel` (situacao.ts), o unico mapa de nivel para situacao; aqui fica so' a palavra.
+export const ROTULO_DO_NIVEL: Record<Nivel, string> = { critico: "Crítico", acao: "Ação", atencao: "Atenção" };
 
 // Quantos avisos cabem antes de a lista virar "mostrar os outros": a tela inicial e' lida em
 // segundos. O resto continua a um clique, nunca escondido de vez.
@@ -114,10 +113,7 @@ export default function Alertas({ itens, ir, titulo = "Avisos", limite = LIMITE,
 
       {itens === undefined ? null : itens === null ? (
         <div className="cartao__corpo">
-          <p className="erro" role="alert">
-            <IconeAlerta className="icone icone--p" />
-            Não foi possível verificar os avisos. Recarregue a página para tentar de novo.
-          </p>
+          <Falha>Não foi possível verificar os avisos. Recarregue a página para tentar de novo.</Falha>
         </div>
       ) : itens.length === 0 ? (
         <div className="vazio vazio--curto">
@@ -126,12 +122,13 @@ export default function Alertas({ itens, ir, titulo = "Avisos", limite = LIMITE,
       ) : (
         <ul className={lateral ? "alertas alertas--lateral" : "alertas"}>
           {visiveis.map((a, i) => {
-            const selo = SELO[a.nivel] ?? SELO.atencao;
+            // nivel que o servidor inventar conta como Atencao
+            const rotulo = ROTULO_DO_NIVEL[a.nivel] ?? ROTULO_DO_NIVEL.atencao;
             const destino = destinoDoAviso(a);
             // F-96: a linha inteira e' o link; o chevron no fim diz isso.
             const conteudo = (
               <>
-                <Selo classe={selo.classe} forte={selo.forte}>{selo.rotulo}</Selo>
+                <Selo situacao={situacaoDoNivel(a.nivel) ?? "breve"}>{rotulo}</Selo>
                 <span className="alerta__msg">{semRSOrfao(a.mensagem)}</span>
                 {/* valor em coluna propria, alinhado a' direita: da' para varrer os valores da lista */}
                 <span className="alerta__valor num">{a.valor_centavos !== null ? brl(a.valor_centavos) : ""}</span>

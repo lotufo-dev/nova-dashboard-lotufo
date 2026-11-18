@@ -26,9 +26,8 @@ export default class ErrorBoundary extends Component<{ children: ReactNode }, Es
     return (
       <div className="falha" role="alert">
         <h1 className="falha__titulo">A tela parou de responder</h1>
-        <p>Algo inesperado aconteceu ao desenhar esta página. O que já foi gravado no
-          servidor está salvo — recarregue para continuar de onde estava.</p>
-        <p className="falha__detalhe num">{this.state.erro.message}</p>
+        {/* a mensagem da excecao fica so' no console (componentDidCatch): na tela, palavras da pessoa */}
+        <p>O que já foi gravado está salvo. Recarregue a página para continuar.</p>
         <button type="button" className="btn btn--primario" onClick={() => location.reload()}>
           Recarregar a página
         </button>

@@ -18,7 +18,7 @@ pouco e confere; regra, cadastro e instrumento são do dono, em arquivo versiona
 - Regras por tema: `.claude/rules/`, que carregam sozinhas quando a sessão mexe nos arquivos do tema.
 - `docs/superpowers/specs/`: histórico, para saber de onde veio uma decisão antiga (`docs/adr/0001`).
 - Decisões e dívidas que não viraram issue: `docs/backlog.md` (uma linha por item; fechou, apaga a linha).
-- Identidade visual: `docs/identidade-visual.md` (em redesenho).
+- Identidade visual: `docs/identidade-visual.md`. O que seguir ao mexer em tela: `.claude/rules/frontend.md`.
 
 ## Regras que valem em qualquer arquivo
 

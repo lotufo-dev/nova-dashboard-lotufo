@@ -1,167 +1,201 @@
-import { brl, fmtDias, fmtPercentual } from "./formato";
+import { LinhasDoTempo, type Nivel, type StatusDaObra } from "./ExecucaoContrato";
+import { brl, fmtDias } from "./formato";
+import { pctPiso } from "./listaObras";
 import { Link } from "./Link";
-import Selo from "./Selo";
+import Selo, { Glifo } from "./Selo";
 import { fmtDataPura } from "./tempo";
-import "./ficha.css";
+import "./obra.css";
+import Falha from "./Falha";
 
-// Ficha executiva da obra (#510, aprovada em 06/11/2026): seis cartoes. Desde a #646 ela e' o resumo no
-// alto da pagina unica da obra (`ContratoPagina`), que le os dados e os passa para ca'. Desde a #655, no lugar da curva S, o cartao "Ritmo e prazo".
-// A cor e' so' da informacao (docs/identidade-visual.md): feito verde, em andamento azul, vence em breve ambar,
-// critico vermelho, o resto preto. Quem decide o nivel de prazo e' o servidor (`ficha_obra`).
+// O alto da pagina da obra (#646), redesenhado na #774: a pagina responde "como esta' esta obra hoje": quanto falta
+// executar, se cabe no prazo, onde esta' a medicao e o que pede acao. Tres pecas, na ordem da pergunta:
+//  - `FichaObra`: a faixa de numeros (valor vigente, medido, saldo, reajuste contratado) e a barra do executado;
+//  - `PrazoDaObra`: um painel so' para o prazo (os dias da execucao, as duas linhas do tempo e o ritmo), no lugar
+//    dos cartoes "Prazo", "Proximos vencimentos", "Ritmo e prazo" e "Execucao do contrato", que repetiam as datas;
+//  - `MedicoesAgora`: a medicao em andamento e a ultima recebida, na coluna do lado.
+// Quem decide o nivel de prazo e' o servidor (`prazos.situacao` no servidor), para o numero dos dias e para o selo das
+// linhas do tempo.
 
-type Nivel = "critico" | "atencao" | "normal";
-type Vencimento = { chave: "execucao" | "vigencia"; rotulo: string; data: string | null; dias: number | null; nivel: Nivel };
+type Vencimento = { chave: "execucao"; rotulo: string; data: string | null; dias: number | null; nivel: Nivel };
 type Medicao = { id: number; titulo: string; rotulo: string; competencia: string; valor_centavos: number | null };
 export type Ficha = {
   // #646: base de execucao (sem o aditivo de reajuste) e cota da Lotufo; vigente − medido = saldo
   topo: { vigente_centavos: number; medido_centavos: number; saldo_centavos: number; reajuste_centavos: number };
   contrato: { original_centavos: number; original_igual: boolean; tas: number; data_base: string | null };
   // #655: a conta de `prazos.ritmo_e_prazo`, na mesma base do topo; `situacao` nula quando a conta nao fecha
-  ritmo: { ritmo_centavos: number | null; saldo_centavos: number; conclusao: string | null; execucao_fim: string | null;
+  ritmo: { ritmo_centavos: number | null; conclusao: string | null;
     situacao: "no_prazo" | "atrasa" | null; dias_alem: number | null };
   ultima_medicao: (Medicao & { recebida_em: string | null; dias_apos_nota: number | null }) | null;
-  em_andamento: (Medicao & { etapa: string; desde: string | null; outras: number }) | null;
+  em_andamento: (Medicao & { etapa: string; desde: string | null }) | null;
   vencimentos: Vencimento[];
 };
 
 const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
-/** "2026-09" -> "set/2026" (a ficha escreve o mes por extenso curto, como na imagem aprovada). */
+/** "2026-09" -> "set/2026" (a ficha escreve o mes por extenso curto). */
 export function mesAno(c: string): string {
   const m = /^(\d{4})-(\d{2})/.exec(c);
   return m && MESES[Number(m[2]) - 1] ? `${MESES[Number(m[2]) - 1]}/${m[1]}` : c;
 }
 const diaMes = (iso: string) => { const m = /^\d{4}-(\d{2})-(\d{2})/.exec(iso); return m ? `${m[2]}/${m[1]}` : iso; };
 const data = (iso: string | null) => (iso ? fmtDataPura(iso.slice(0, 10)) : "—");
-const INFO: Record<Nivel, string> = { critico: "info--critico", atencao: "info--breve", normal: "" };
-const PONTO: Record<Nivel, string> = { critico: "ponto--critico", atencao: "ponto--breve", normal: "ponto--normal" };
-const INDISPONIVEL = <p className="erro" role="alert">indisponível agora</p>;
-const CARREGANDO = <p className="ficha__nota">Carregando…</p>;
+const INDISPONIVEL = <Falha>indisponível agora</Falha>;
+const CARREGANDO = <p className="obra-nota">Carregando…</p>;
 
-function Cartao({ titulo, children, classe = "", lado }: { titulo: string; children: React.ReactNode; classe?: string; lado?: React.ReactNode }) {
+/** A faixa de numeros da obra, na base de execucao (sem o aditivo de reajuste) e na cota da Lotufo: os numeros vem do
+ *  `topo` do servidor. O percentual e a barra sao numero, nao situacao: vao em tinta, sem glifo. */
+export default function FichaObra({ ficha }: { ficha: Ficha | null | undefined }) {
+  const topo = ficha?.topo;
+  // o mesmo percentual da lista de Obras, por piso (#779): 99,96% e' 99%, e so' mostra 100% quem mediu tudo
+  const pctExec = topo ? pctPiso(topo.medido_centavos, topo.vigente_centavos) : null;
   return (
-    <section className={`cartao ficha__cartao ${classe}`.trim()} aria-label={titulo}>
-      <div className="ficha__cabeca"><h2 className="ficha__titulo">{titulo}</h2>{lado}</div>
-      {children}
+    <section className="obra-resumo" id="resumo" aria-label="Resumo da obra">
+      {ficha === undefined ? CARREGANDO : ficha === null || !topo ? INDISPONIVEL : (
+        <>
+          <dl className="obra-numeros">
+            <div className="obra-numero">
+              <dt>Valor vigente</dt>
+              <dd>{brl(topo.vigente_centavos)}</dd>
+            </div>
+            <div className="obra-numero">
+              <dt>Medido</dt>
+              <dd>{brl(topo.medido_centavos)}</dd>
+            </div>
+            <div className="obra-numero">
+              <dt>Saldo a executar</dt>
+              <dd className={topo.saldo_centavos < 0 ? "obra-numero--critico" : undefined}>
+                {topo.saldo_centavos < 0 && <Glifo situacao="critico" />}{brl(topo.saldo_centavos)}
+              </dd>
+            </div>
+            {topo.reajuste_centavos !== 0 && (
+              <div className="obra-numero">
+                <dt>Reajuste contratado</dt>
+                <dd>{brl(topo.reajuste_centavos)}</dd>
+              </div>
+            )}
+          </dl>
+          <div className="obra-executado">
+            <div className="obra-executado__barra" role="progressbar" aria-label="Execução do contrato" aria-valuemin={0} aria-valuemax={100}
+              aria-valuenow={pctExec === null ? undefined : Math.max(0, Math.min(100, pctExec))}>
+              <span style={{ width: `${Math.min(100, Math.max(0, pctExec ?? 0))}%` }} />
+            </div>
+            <span className="obra-executado__pct">{pctExec === null ? "—" : `${pctExec}% executado`}</span>
+          </div>
+          <p className="obra-nota">
+            {[ficha.contrato.original_igual ? "original igual" : `original ${brl(ficha.contrato.original_centavos)}`,
+              `${ficha.contrato.tas} ${ficha.contrato.tas === 1 ? "TA" : "TAs"}`,
+              ficha.contrato.data_base ? `data-base ${mesAno(ficha.contrato.data_base)}` : null].filter(Boolean).join(" · ")}
+          </p>
+        </>
+      )}
     </section>
   );
 }
 
-/** O cartao "Ritmo e prazo" (#655): no ritmo das 6 ultimas competencias fechadas, a obra termina ate' o fim da
- *  execucao? O selo e' a situacao (verde no prazo, vermelho com os dias alem dele); sem conta, "—" e nenhum selo. */
-export function RitmoEPrazo({ ficha }: { ficha: Ficha | null | undefined }) {
+type PrazosDaObra = {
+  execucao_inicio?: string | null; vigencia_inicio?: string | null; execucao_fim: string | null; vigencia_fim: string | null;
+  status: StatusDaObra; execucao_sem_prazo?: boolean; nivel_execucao?: Nivel; nivel_vigencia?: Nivel;
+  // desde quando a obra esta' no status de hoje (ordem de paralisacao, inicio do encerramento, encerramento), se o
+  // sistema tem a data; e a ordem de paralisacao sem reinicio
+  status_desde?: string | null; paralisada_desde?: string | null;
+};
+
+/** A obra que nao esta' em execucao nao tem prazo correndo: o painel diz o estado e desde quando, no lugar de contar
+ *  os dias de um prazo que nao se cobra mais ("vencido ha' 453 dias" numa obra encerrada). Obra ativa: null. */
+export function estadoSemPrazo(p: PrazosDaObra): { texto: string; paralisada: boolean } | null {
+  const desde = (d: string | null | undefined) => d ? ` desde ${fmtDataPura(d)}` : "";
+  if (p.status === "suspenso" || p.paralisada_desde) return { texto: `paralisada${desde(p.paralisada_desde ?? p.status_desde)}`, paralisada: true };
+  if (p.status === "em_encerramento") return { texto: `em encerramento${desde(p.status_desde)}`, paralisada: false };
+  if (p.status === "encerrado") return { texto: `encerrada${desde(p.status_desde)}`, paralisada: false };
+  if (p.status === "rescindido") return { texto: `rescindida${desde(p.status_desde)}`, paralisada: false };
+  return null;
+}
+
+/** O prazo da obra num painel so': quantos dias faltam para o fim da execucao (o nivel e' do servidor, com o glifo
+ *  alem da cor), as linhas do tempo da execucao e da vigencia e, embaixo, a conta do ritmo (#655): no ritmo das 6
+ *  ultimas competencias fechadas, a obra termina ate' o fim da execucao? Sem conta, "—" e nenhum selo. */
+export function PrazoDaObra({ ficha, prazos }: { ficha: Ficha | null | undefined; prazos: PrazosDaObra }) {
   const r = ficha?.ritmo;
+  const exec = ficha?.vencimentos.find(v => v.chave === "execucao") ?? null;
+  const parada = estadoSemPrazo(prazos);
   return (
-    <section className="cartao ficha__ritmo" aria-label="Ritmo e prazo">
-      <div className="ficha__cabeca">
-        <h2 className="ficha__titulo">Ritmo e prazo</h2>
-        {r?.situacao === "no_prazo" && <Selo classe="selo--ok">No prazo</Selo>}
-        {r?.situacao === "atrasa" && r.dias_alem !== null && <Selo classe="selo--acao">{fmtDias(r.dias_alem)} além do prazo</Selo>}
+    <section className="cartao obra-prazo" id="prazo" aria-labelledby="titulo-prazo">
+      <div className="cartao__cabeca obra-prazo__cabeca">
+        <h2 className="cartao__titulo" id="titulo-prazo">Prazo</h2>
       </div>
-      {ficha === undefined ? CARREGANDO : !r ? INDISPONIVEL : (
-        <dl className="ficha__ritmo-dados">
+      <div className="obra-prazo__corpo">
+        <div className="obra-prazo__dias">
+          <span className="obra-rotulo">{parada ? "Execução" : "Fim da execução"}</span>
+          {ficha === undefined ? CARREGANDO : ficha === null || !exec ? INDISPONIVEL : parada ? (
+            <p className={`obra-prazo__numero obra-prazo__numero--estado${parada.paralisada ? " obra-prazo__numero--breve" : ""}`}>
+              {parada.paralisada && <Glifo situacao="breve" />}{parada.texto}
+            </p>
+          ) : (
+            <p className={`obra-prazo__numero${exec.nivel === "critico" ? " obra-prazo__numero--critico" : exec.nivel === "atencao" ? " obra-prazo__numero--breve" : ""}`}>
+              {exec.nivel !== "normal" && <Glifo situacao={exec.nivel === "critico" ? "critico" : "breve"} />}
+              {exec.dias === null ? "—" : exec.dias < 0 ? `vencido há ${fmtDias(-exec.dias)}` : exec.dias === 0 ? "vence hoje" : `em ${fmtDias(exec.dias)}`}
+            </p>
+          )}
+        </div>
+        <LinhasDoTempo execucaoInicio={prazos.execucao_inicio ?? null} execucaoFim={prazos.execucao_fim}
+          vigenciaInicio={prazos.vigencia_inicio ?? null} vigenciaFim={prazos.vigencia_fim} status={prazos.status}
+          execucaoSemPrazo={prazos.execucao_sem_prazo} nivelExecucao={prazos.nivel_execucao} nivelVigencia={prazos.nivel_vigencia}
+          paralisadaDesde={prazos.paralisada_desde ?? (prazos.status === "suspenso" ? prazos.status_desde : null) ?? null} />
+      </div>
+      {/* o ritmo e' de obra em execucao; o selo fica na linha da conclusao estimada, que e' o que ele compara com o
+          fim da execucao (no alto do painel, ao lado de "vencido ha' N dias", lia-se como a mesma conta) */}
+      {ficha !== undefined && r && !parada && (
+        <dl className="obra-ritmo" aria-label="Ritmo e prazo">
           <div><dt>Ritmo mensal</dt><dd>{r.ritmo_centavos === null ? "—" : brl(r.ritmo_centavos)}</dd></div>
-          <div><dt>Saldo</dt><dd>{brl(r.saldo_centavos)}</dd></div>
-          <div><dt>Conclusão estimada</dt><dd>{data(r.conclusao)}</dd></div>
-          <div><dt>Fim da execução</dt><dd>{data(r.execucao_fim)}</dd></div>
+          <div>
+            <dt>Conclusão estimada</dt>
+            <dd className="obra-ritmo__conclusao">
+              <span>{data(r.conclusao)}</span>
+              {r.situacao === "no_prazo" && <Selo situacao="feito">até o fim da execução</Selo>}
+              {r.situacao === "atrasa" && r.dias_alem !== null && <Selo situacao="critico">{fmtDias(r.dias_alem)} depois do fim da execução</Selo>}
+            </dd>
+          </div>
         </dl>
       )}
     </section>
   );
 }
 
-/** Os seis cartoes do resumo da obra, no alto da pagina unica (#646). Valor vigente, medido e saldo vem do `topo` do
- *  servidor: base de execucao (sem o aditivo de reajuste) e cota da Lotufo; o reajuste contratado vai a parte. */
-export default function FichaObra({ contratoId, prazos, ficha }:
-    { contratoId: number; prazos: { execucao_fim: string | null; vigencia_fim: string | null }; ficha: Ficha | null | undefined }) {
-  const venc = (chave: Vencimento["chave"]) => ficha?.vencimentos.find(v => v.chave === chave) ?? null;
-  const prazo = venc("execucao");
-  const topo = ficha?.topo;
-  const pctExec = topo && topo.vigente_centavos > 0 ? topo.medido_centavos / topo.vigente_centavos : null;
-
+/** As medicoes de agora, na coluna do lado: a em andamento (com o passo da vez) e a ultima recebida. */
+export function MedicoesAgora({ contratoId, ficha }: { contratoId: number; ficha: Ficha | null | undefined }) {
   return (
-    <div className="ficha__grade" id="resumo">
-      <Cartao titulo="Contrato">
-        <p className="ficha__rotulo">Valor vigente</p>
-        {ficha === undefined ? CARREGANDO : ficha === null ? INDISPONIVEL : (
-          <>
-            <p className="ficha__grande ficha__valor">{brl(ficha.topo.vigente_centavos)}</p>
-            {ficha.topo.reajuste_centavos !== 0 && (
-              <dl className="ficha__linhas"><div><dt>Reajuste</dt><dd>{brl(ficha.topo.reajuste_centavos)}</dd></div></dl>
+    <section className="cartao obra-agora" aria-labelledby="titulo-agora">
+      <div className="cartao__cabeca"><h2 className="cartao__titulo" id="titulo-agora">Medições</h2></div>
+      {ficha === undefined ? <div className="cartao__corpo">{CARREGANDO}</div> : ficha === null ? <div className="cartao__corpo">{INDISPONIVEL}</div> : (
+        <dl className="obra-agora__lista">
+          <div>
+            <dt className="obra-rotulo">Em andamento</dt>
+            {!ficha.em_andamento ? <dd>—</dd> : (
+              <dd>
+                <Link className="obra-agora__medicao" para={{ tela: "medicao", obra: contratoId, id: ficha.em_andamento.id }}>
+                  {ficha.em_andamento.rotulo} · {mesAno(ficha.em_andamento.competencia)}</Link>
+                <span className="obra-agora__valor">{brl(ficha.em_andamento.valor_centavos)}</span>
+                <Selo situacao="andamento">
+                  {ficha.em_andamento.etapa}{ficha.em_andamento.desde && ` desde ${diaMes(ficha.em_andamento.desde)}`}</Selo>
+              </dd>
             )}
-            <p className="ficha__rodape">
-              {[ficha.contrato.original_igual ? "original igual" : `original ${brl(ficha.contrato.original_centavos)}`,
-                `${ficha.contrato.tas} ${ficha.contrato.tas === 1 ? "TA" : "TAs"}`,
-                ficha.contrato.data_base ? `data-base ${mesAno(ficha.contrato.data_base)}` : null].filter(Boolean).join(" · ")}
-            </p>
-          </>
-        )}
-      </Cartao>
-
-      <Cartao titulo="Execução" lado={topo ? <span className="ficha__pct info--feito">{pctExec === null ? "—" : fmtPercentual(pctExec, 0)}</span> : undefined}>
-        {ficha === undefined ? CARREGANDO : ficha === null ? INDISPONIVEL : (
-          <>
-            <div className="ficha__barra" role="progressbar" aria-label="Execução do contrato" aria-valuemin={0} aria-valuemax={100}
-              aria-valuenow={pctExec === null ? undefined : Math.round(Math.min(1, pctExec) * 100)}>
-              <span style={{ width: `${Math.min(100, Math.max(0, (pctExec ?? 0) * 100))}%` }} />
-            </div>
-            <dl className="ficha__linhas">
-              <div><dt>Medido</dt><dd>{brl(ficha.topo.medido_centavos)}</dd></div>
-              <div><dt>Saldo</dt><dd className={ficha.topo.saldo_centavos < 0 ? "info--critico" : ""}>{brl(ficha.topo.saldo_centavos)}</dd></div>
-            </dl>
-          </>
-        )}
-      </Cartao>
-
-      <Cartao titulo="Prazo">
-        {ficha === undefined ? CARREGANDO : ficha === null || !prazo ? INDISPONIVEL : (
-          <p className={`ficha__grande ficha__dias ${INFO[prazo.nivel]}`}>
-            {prazo.dias === null ? "—" : prazo.dias < 0 ? `vencido há ${fmtDias(-prazo.dias)}` : fmtDias(prazo.dias)}</p>
-        )}
-        <p className="ficha__rodape">execução até {data(prazos.execucao_fim)} · vigência até {data(prazos.vigencia_fim)}</p>
-      </Cartao>
-
-      <Cartao titulo="Última medição">
-        {ficha === undefined ? CARREGANDO : ficha === null ? INDISPONIVEL : !ficha.ultima_medicao
-          ? <p className="ficha__nota">—</p> : (
-            <>
-              <p className="ficha__medicao">
-                <Link para={{ tela: "medicao", obra: contratoId, id: ficha.ultima_medicao.id }}>
-                  {ficha.ultima_medicao.rotulo} · {mesAno(ficha.ultima_medicao.competencia)} · {brl(ficha.ultima_medicao.valor_centavos)}</Link></p>
-              <p className="ficha__rodape info--feito">
-                {ficha.ultima_medicao.recebida_em ? `recebida em ${data(ficha.ultima_medicao.recebida_em)}` : "recebida"}
-                {ficha.ultima_medicao.dias_apos_nota !== null && `, ${fmtDias(ficha.ultima_medicao.dias_apos_nota)} após a nota`}</p>
-            </>
-          )}
-      </Cartao>
-
-      <Cartao titulo="Medição em andamento">
-        {ficha === undefined ? CARREGANDO : ficha === null ? INDISPONIVEL : !ficha.em_andamento
-          ? <p className="ficha__nota">—</p> : (
-            <>
-              <p className="ficha__medicao">
-                <Link para={{ tela: "medicao", obra: contratoId, id: ficha.em_andamento.id }}>
-                  {ficha.em_andamento.rotulo} · {mesAno(ficha.em_andamento.competencia)} · {brl(ficha.em_andamento.valor_centavos)}</Link></p>
-              <p className="ficha__rodape">
-                <span className="pilula-info pilula-info--andamento">
-                  {ficha.em_andamento.etapa}{ficha.em_andamento.desde && ` desde ${diaMes(ficha.em_andamento.desde)}`}</span>
-              </p>
-            </>
-          )}
-      </Cartao>
-
-      <Cartao titulo="Próximos vencimentos">
-        {ficha === undefined ? CARREGANDO : ficha === null ? INDISPONIVEL : (
-          <ul className="ficha__venc">
-            {ficha.vencimentos.map(v => (
-              <li key={v.chave}>
-                <span className={`ponto ${PONTO[v.nivel]}`} aria-hidden="true" />
-                <span className="ficha__venc-rotulo">{v.rotulo}</span>
-                <span className={`ficha__venc-data ${INFO[v.nivel]}`}>{data(v.data)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Cartao>
-    </div>
+          </div>
+          <div>
+            <dt className="obra-rotulo">Última recebida</dt>
+            {!ficha.ultima_medicao ? <dd>—</dd> : (
+              <dd>
+                <Link className="obra-agora__medicao" para={{ tela: "medicao", obra: contratoId, id: ficha.ultima_medicao.id }}>
+                  {ficha.ultima_medicao.rotulo} · {mesAno(ficha.ultima_medicao.competencia)}</Link>
+                <span className="obra-agora__valor">{brl(ficha.ultima_medicao.valor_centavos)}</span>
+                <Selo situacao="feito">
+                  {ficha.ultima_medicao.recebida_em ? `recebida em ${data(ficha.ultima_medicao.recebida_em)}` : "recebida"}</Selo>
+                {ficha.ultima_medicao.dias_apos_nota !== null && (
+                  <span className="obra-nota">{fmtDias(ficha.ultima_medicao.dias_apos_nota)} após a nota</span>
+                )}
+              </dd>
+            )}
+          </div>
+        </dl>
+      )}
+    </section>
   );
 }

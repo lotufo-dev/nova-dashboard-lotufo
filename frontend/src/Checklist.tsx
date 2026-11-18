@@ -19,8 +19,8 @@ export type ItemChecklist = {
 };
 
 function SeloSituacao({ situacao }: { situacao: ItemChecklist["situacao"] }) {
-  return situacao === "anexada" ? <Selo classe="selo--ok">Anexada</Selo>
-    : situacao === "falta" ? <Selo classe="selo--atencao">Falta</Selo>
+  return situacao === "anexada" ? <Selo situacao="feito">Anexada</Selo>
+    : situacao === "falta" ? <Selo situacao="breve">Falta</Selo>
     : situacao === "no_oficio" ? <Selo>No ofício assinado</Selo>
     : <Selo>Opcional</Selo>;
 }

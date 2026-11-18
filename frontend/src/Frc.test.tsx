@@ -29,6 +29,10 @@ describe("FRC do consórcio (etapa 3)", () => {
     const lista = await screen.findByRole("list", { name: "Notas esperadas da medição" });
     const [guaxe, encomind] = within(lista).getAllByRole("listitem");
     expect(within(guaxe).getByText("Anexada")).toBeTruthy();
+    // #722: a marca e' o sinal da situacao, como nos outros itens (feito na anexada, vence em breve na que falta)
+    expect(guaxe.querySelector(".nota-estado .glifo--feito")).not.toBeNull();
+    expect(encomind.querySelector(".nota-estado .glifo--breve")).not.toBeNull();
+    expect(encomind.querySelector(".nota-estado")!.textContent).toBe("Falta");
     expect(guaxe.textContent).toContain("NF nº 2026204");
     expect(guaxe.textContent).not.toContain("anexada ·");
     expect(within(encomind).getByText("Falta")).toBeTruthy();
@@ -46,7 +50,7 @@ describe("FRC do consórcio (etapa 3)", () => {
   it("FRC assinada no envio ganha o selo", async () => {
     api.mockResolvedValue({ ...gerada(false), assinada: true });
     render(<FrcConsorcio medicaoId={7} podeEditar versao={0} aoMudar={() => {}} />);
-    expect((await screen.findByText("Assinada")).closest(".selo")?.className).toContain("selo--ok");
+    expect((await screen.findByText("Assinada")).closest(".selo")?.className).toContain("selo--feito");
   });
 
   const gerada = (desatualizada: boolean) => ({

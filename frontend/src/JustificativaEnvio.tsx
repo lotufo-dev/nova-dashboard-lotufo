@@ -1,3 +1,4 @@
+import { CaixaJustificativa } from "./CaixaAviso";
 import ErroCampo from "./ErroCampo";
 
 // Issue #278: o reajuste sem apostilamento que cubra a competencia so' sai com justificativa escrita (o servidor recusa
@@ -27,7 +28,7 @@ export default function JustificativaEnvio({ id, valor, aoMudar, erro, notaDiver
   notaDivergente?: boolean;
 }) {
   return (
-    <div className="campo ol-pendencias">
+    <CaixaJustificativa>
       <label className="campo__rotulo" htmlFor={id}>
         {notaDivergente ? "Motivo do envio com a nota divergente (obrigatório)" : "Justificativa (obrigatória para enviar sem apostilamento)"}
       </label>
@@ -35,6 +36,6 @@ export default function JustificativaEnvio({ id, valor, aoMudar, erro, notaDiver
         aria-invalid={erro ? true : undefined} aria-describedby={erro ? `${id}-erro` : undefined}
         onChange={e => aoMudar(e.target.value)} />
       <ErroCampo id={`${id}-erro`} erro={erro} />
-    </div>
+    </CaixaJustificativa>
   );
 }

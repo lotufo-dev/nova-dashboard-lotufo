@@ -22,7 +22,8 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   hoje: "2026-10-09",
   protocoladas: { obras_protocoladas: 2, obras_ativas: 18, ultima: "2026-09-30" },
   medido: { competencia: "2026-09", valor_centavos: 1_827_715_696, quantidade: 2, ultimo_lancamento: "2026-10-08" },
-  a_receber: { liberado: true, valor_centavos: 1_720_000_000, mais_60_centavos: 210_000_000 },
+  a_receber: { liberado: true, valor_centavos: 1_720_000_000, mais_60_centavos: 210_000_000,
+    a_parte: { ano_inicial: "2025", valor_centavos: 0, anterior_centavos: 0, sem_atualizacao_centavos: 0, sem_atualizacao_desde: null } },
   ciclo: [
     { etapa: "em_analise", valor_centavos: 300_100, quantidade: 2, mais_antigo_dias: 20 },
     { etapa: "boletim", valor_centavos: 1_200_300, quantidade: 3, mais_antigo_dias: 1 },
@@ -55,18 +56,21 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
 /** O texto do elemento com espaco simples no lugar do espaco inseparavel do valor em reais. */
 const limpo = (el: Element | null | undefined) => (el?.textContent ?? "").replace(/\s/g, " ");
 
-const CICLO = "Ciclo da medição (cota da Lotufo)";
+// #721: a base ("cota da Lotufo") saiu do titulo de cada painel e e' dita uma vez, no titulo do grupo
+const CICLO = "Ciclo da medição";
+const REGIAO_RECEBIDO = "Recebido em 12 meses";
+const REGIAO_PREVISAO = "Previsão de entrada";
 
 describe("Início", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
-  it("faixa do ciclo: cinco etapas na ordem, cada uma com valor, quantidade e idade do mais antigo", async () => {
+  it("ciclo da medição: cinco etapas na ordem, cada uma com valor, quantidade e idade do mais antigo", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     expect(api).toHaveBeenCalledWith("/api/inicio/painel");
     expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/, Admin$/);
     const regiao = await screen.findByRole("region", { name: CICLO });
-    const etapas = [...regiao.querySelectorAll(".ini-faixa__etapa")];
+    const etapas = [...regiao.querySelectorAll(".ini-etapa")];
     expect(etapas.map(e => [...e.children].map(limpo))).toEqual([
       ["Em análise", "R$ 3.001,00", "2 medições", "mais antiga há 20 dias"],
       ["Boletim", "R$ 12.003,00", "3 medições", "mais antiga há 1 dia"],
@@ -74,13 +78,56 @@ describe("Início", () => {
       ["Protocolado", "R$ 15.866.779,04", "6 medições", "mais antiga há 100 dias"],
       ["Recebido no mês", "R$ 120.002,00", "2 notas"],          // sem idade
     ]);
-    // cor da informacao: as quatro etapas abertas em andamento (azul); o recebido, feito (verde)
-    expect(etapas.map(e => e.className.replace("ini-faixa__etapa ", ""))).toEqual(
-      [...Array<string>(4).fill("ini-faixa__etapa--andamento"), "ini-faixa__etapa--feito"]);
+    // #721: cada etapa tem a cor dela (as quatro abertas, do azul claro ao escuro; o recebido, verde): a classe e' a
+    // chave da etapa
+    expect(etapas.map(e => e.className.replace("ini-etapa ", ""))).toEqual(
+      ["ini-etapa--em_analise", "ini-etapa--boletim", "ini-etapa--nota", "ini-etapa--protocolado", "ini-etapa--recebido_mes"]);
     expect(screen.getByRole("list", { name: "Legenda das cores" })).toBeTruthy();
   });
 
-  it("faixa do ciclo: tabela equivalente para leitor de tela", async () => {
+  it("o em aberto antigo e o sem atualização do RM aparecem numa linha própria, no painel do ciclo, fora das etapas", async () => {
+    api.mockResolvedValue(painel({ a_receber: { liberado: true, valor_centavos: 1_461_164_155, mais_60_centavos: 88_504_531,
+      a_parte: { ano_inicial: "2025", valor_centavos: 179_846_324, anterior_centavos: 159_906_581,
+        sem_atualizacao_centavos: 19_939_743, sem_atualizacao_desde: "2026-09-25" } } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const ciclo = await screen.findByRole("region", { name: "Ciclo da medição" });
+    const bloco = within(ciclo).getByLabelText("Em aberto fora do total");
+    expect((bloco.textContent ?? "").replace(/\u00a0/g, " ")).toContain("Em aberto de competências anteriores a 2025R$ 1.599.065,81");
+    expect((bloco.textContent ?? "").replace(/\u00a0/g, " ")).toContain("Sem atualização do RM desde 25/09/2026R$ 199.397,43");
+    // a etapa "Protocolado" continua com o valor que o servidor mandou: a linha à parte não entra nela
+    expect(ciclo.querySelector(".ini-etapa--protocolado .ini-etapa__valor")?.textContent?.replace(/\u00a0/g, " ")).toBe("R$ 15.866.779,04");
+  });
+
+  it("sem nada à parte, ou sem o total liberado, o painel do ciclo não ganha linha", async () => {
+    api.mockResolvedValue(painel());
+    const { unmount } = render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const ciclo = await screen.findByRole("region", { name: "Ciclo da medição" });
+    expect(within(ciclo).queryByLabelText("Em aberto fora do total")).toBeNull();
+    unmount();
+    api.mockResolvedValue(painel({ a_receber: { liberado: false, valor_centavos: null, mais_60_centavos: null, a_parte: null } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    expect(within(await screen.findByRole("region", { name: "Ciclo da medição" })).queryByLabelText("Em aberto fora do total")).toBeNull();
+  });
+
+  it("#721: a tela na ordem montada pelo dono, com a cota dita uma vez, no título do grupo", async () => {
+    servir();
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    await screen.findByRole("region", { name: CICLO });
+    expect(screen.getAllByRole("heading", { level: 2 }).map(limpo)).toEqual(
+      ["Cota da Lotufo", "Ciclo da medição", "Previsão de entrada", "Recebido em 12 meses", "Avisos importantes", "Medições por obra e competência"]);
+    // a saudacao com a legenda e os dois numeros do mes vem antes de tudo
+    const grade = document.querySelector(".ini-grade")!;
+    expect([...grade.children].map(b => b.className)).toEqual(["ini-saudacao", "ini-numeros", "ini-cota", "cartao ini-painel ini-ciclo",
+      "cartao ini-painel ini-previsao", "cartao ini-painel ini-recebido", "cartao ini-painel ini-avisos", "cartao ini-painel ini-matriz"]);
+    expect(grade.firstElementChild!.querySelector("h1")).not.toBeNull();
+    expect(grade.firstElementChild!.querySelector(".legenda-cor")).not.toBeNull();
+    // fora do que e' so' de leitor de tela (as legendas das tabelas equivalentes), "cota" aparece uma vez
+    const visivel = document.body.cloneNode(true) as HTMLElement;
+    visivel.querySelectorAll(".sr-only").forEach(e => e.remove());
+    expect((visivel.textContent ?? "").match(/cota/gi)).toEqual(["Cota"]);
+  });
+
+  it("ciclo da medição: tabela equivalente para leitor de tela", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const regiao = await screen.findByRole("region", { name: CICLO });
@@ -91,7 +138,7 @@ describe("Início", () => {
     expect(tabela.parentElement?.tagName).toBe("DIV");
     expect(tabela.parentElement?.className).toBe("sr-only");
     expect(regiao.querySelector("table.sr-only")).toBeNull();
-    expect(regiao.querySelector(".ini-faixa")?.getAttribute("aria-hidden")).toBe("true");
+    expect(regiao.querySelector(".ini-etapas")?.getAttribute("aria-hidden")).toBe("true");
     const linhas = within(tabela).getAllByRole("row").map(l => [...l.children].map(limpo));
     expect(linhas).toEqual([
       ["Etapa", "Valor", "Quantidade", "Mais antiga"],
@@ -103,7 +150,12 @@ describe("Início", () => {
     ]);
   });
 
-  it("faixa do ciclo: largura de cada trecho proporcional ao valor, com mínimo; etapa vazia não mostra idade", async () => {
+  // #721: a faixa deixou de ser a largura do trecho (fracao do total, com o conteudo como minimo) e passou a ser uma
+  // barra por etapa, com o comprimento na fracao da etapa de MAIOR valor
+  const fracoes = (regiao: HTMLElement) =>
+    [...regiao.querySelectorAll<HTMLElement>(".ini-etapa")].map(e => e.style.getPropertyValue("--ini-etapa-fracao"));
+
+  it("ciclo da medição: a faixa de cada etapa é proporcional ao valor da maior; etapa vazia não tem faixa nem idade", async () => {
     api.mockResolvedValue(painel({ ciclo: [
       { etapa: "em_analise", valor_centavos: 0, quantidade: 0, mais_antigo_dias: null },
       { etapa: "boletim", valor_centavos: 100, quantidade: 1, mais_antigo_dias: 3 },
@@ -113,25 +165,29 @@ describe("Início", () => {
     ] }));
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const regiao = await screen.findByRole("region", { name: CICLO });
-    const faixa = regiao.querySelector<HTMLElement>(".ini-faixa");
-    // o minimo de cada trecho e' o proprio valor numa linha (`min-content`); a proporcao vale para o que sobra
-    const m = "minmax(min-content, ";
-    expect(faixa?.style.getPropertyValue("--ini-faixa-colunas")).toBe(`${m}0fr) ${m}25fr) ${m}0fr) ${m}75fr) ${m}0fr)`);
-    expect([...(regiao.querySelector(".ini-faixa__etapa")?.children ?? [])].map(limpo)).toEqual(["Em análise", "R$ 0,00", "0 medições"]);
+    expect(fracoes(regiao)).toEqual(["0%", "33%", "0%", "100%", "0%"]);
+    expect([...(regiao.querySelector(".ini-etapa")?.children ?? [])].map(limpo)).toEqual(["Em análise", "R$ 0,00", "0 medições"]);
   });
 
-  it("faixa do ciclo sem nenhum valor: os cinco trechos com a mesma largura", async () => {
+  it("ciclo da medição com os dados do painel: a maior etapa tem a faixa inteira e a etapa com valor pequeno não some", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: CICLO });
+    // em analise, boletim e nota nao chegam a 0,1% do protocolado cada uma: o minimo de 1% mantem a faixa na tela
+    expect(fracoes(regiao)).toEqual(["1%", "1%", "1%", "100%", "1%"]);
+  });
+
+  it("ciclo da medição sem nenhum valor: nenhuma faixa, sem dividir por zero", async () => {
     api.mockResolvedValue(painel({ ciclo: painel().ciclo.map(e => ({ ...e, valor_centavos: 0, quantidade: 0, mais_antigo_dias: null })) }));
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const regiao = await screen.findByRole("region", { name: CICLO });
-    expect(regiao.querySelector<HTMLElement>(".ini-faixa")?.style.getPropertyValue("--ini-faixa-colunas"))
-      .toBe(Array<string>(5).fill("minmax(min-content, 1fr)").join(" "));
+    expect(fracoes(regiao)).toEqual(Array<string>(5).fill("0%"));
   });
 
   it("#652: recebido em 12 meses, uma barra por mês até o mês corrente, com a altura proporcional ao maior", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const regiao = await screen.findByRole("region", { name: "Recebido em 12 meses (cota da Lotufo)" });
+    const regiao = await screen.findByRole("region", { name: REGIAO_RECEBIDO });
     const meses = [...regiao.querySelectorAll<HTMLElement>(".ini-rec__mes")];
     expect(meses.map(m => limpo(m.querySelector(".ini-rec__rotulo")))).toEqual(
       ["nov/25", "dez/25", "jan/26", "fev/26", "mar/26", "abr/26", "mai/26", "jun/26", "jul/26", "ago/26", "set/26", "out/26"]);
@@ -145,7 +201,7 @@ describe("Início", () => {
   it("#652: recebido em 12 meses tem a tabela equivalente, dentro de um div sr-only", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const regiao = await screen.findByRole("region", { name: "Recebido em 12 meses (cota da Lotufo)" });
+    const regiao = await screen.findByRole("region", { name: REGIAO_RECEBIDO });
     const tabela = within(regiao).getByRole("table", { name: "Recebido por mês, na cota da Lotufo" });
     expect(tabela.className).toBe("");
     expect(tabela.parentElement?.tagName).toBe("DIV");
@@ -161,7 +217,7 @@ describe("Início", () => {
   it("#652: recebido em 12 meses sem nenhuma baixa não divide por zero", async () => {
     api.mockResolvedValue(painel({ recebido_12m: MESES_12.map(mes => ({ mes, valor_centavos: 0 })) }));
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const regiao = await screen.findByRole("region", { name: "Recebido em 12 meses (cota da Lotufo)" });
+    const regiao = await screen.findByRole("region", { name: REGIAO_RECEBIDO });
     expect([...regiao.querySelectorAll<HTMLElement>(".ini-rec__mes")].map(m => m.style.getPropertyValue("--ini-rec-tamanho")))
       .toEqual(Array<string>(12).fill("0%"));
   });
@@ -169,7 +225,7 @@ describe("Início", () => {
   it("#652: previsão de entrada com as cinco linhas, valor e quantidade; só o atrasado com valor fica vermelho", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const regiao = await screen.findByRole("region", { name: "Previsão de entrada (cota da Lotufo)" });
+    const regiao = await screen.findByRole("region", { name: REGIAO_PREVISAO });
     const linhas = within(regiao).getAllByRole("listitem");
     expect(linhas.map(l => [...l.children].map(limpo))).toEqual([
       ["Neste mês", "R$ 5.000,00", "2 medições"],
@@ -179,17 +235,39 @@ describe("Início", () => {
       ["Sem previsão", "R$ 0,00", "0 medições"],
     ]);
     expect(linhas.map(l => l.className.includes("--critico"))).toEqual([false, false, false, true, false]);
+    // #721: o critico tem cor E forma: o simbolo da situacao antes do rotulo, so' na linha atrasada
+    expect(linhas.map(l => l.querySelector(".glifo")?.className ?? null)).toEqual([null, null, null, "glifo glifo--critico", null]);
+    // cada linha leva a chave de cor dela (a mesma do trecho da faixa)
+    expect(linhas.map(l => l.className.split(" ")[1])).toEqual(["ini-previsao__linha--neste_mes", "ini-previsao__linha--proximo_mes",
+      "ini-previsao__linha--depois", "ini-previsao__linha--atrasado", "ini-previsao__linha--sem_previsao"]);
   });
 
-  it("#652: as cinco linhas da previsão fecham com a etapa Protocolado da faixa do ciclo, em quantidade e valor", async () => {
+  it("#721: previsão de entrada com a faixa proporcional, um trecho por linha que tem valor, na ordem das linhas", async () => {
+    api.mockResolvedValue(painel({ previsao: {
+      neste_mes: { valor_centavos: 250, quantidade: 1 }, proximo_mes: { valor_centavos: 500, quantidade: 1 },
+      depois: { valor_centavos: 0, quantidade: 0 }, atrasado: { valor_centavos: 150, quantidade: 1 },
+      sem_previsao: { valor_centavos: 100, quantidade: 1 } } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: REGIAO_PREVISAO });
+    const faixa = regiao.querySelector(".ini-previsao__faixa")!;
+    expect(faixa.getAttribute("aria-hidden")).toBe("true");        // desenho: os numeros estao nas linhas
+    // a linha zerada ("Depois") nao tem trecho; os outros, a fracao do total
+    expect([...faixa.children].map(s => [s.className.replace("ini-previsao__seg ", ""), s.getAttribute("title"), (s as HTMLElement).style.flexGrow])).toEqual([
+      ["ini-previsao__seg--neste_mes", "Neste mês", "0.25"], ["ini-previsao__seg--proximo_mes", "No próximo mês", "0.5"],
+      ["ini-previsao__seg--atrasado", "Atrasado", "0.15"], ["ini-previsao__seg--sem_previsao", "Sem previsão", "0.1"]]);
+    expect(within(regiao).getAllByRole("listitem")).toHaveLength(5);
+  });
+
+  it("#652: as cinco linhas da previsão fecham com a etapa Protocolado do ciclo, em quantidade e valor", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const regiao = await screen.findByRole("region", { name: "Previsão de entrada (cota da Lotufo)" });
+    const regiao = await screen.findByRole("region", { name: REGIAO_PREVISAO });
     const centavos = (t: string) => Number(t.replace(/\D/g, ""));
     const linhas = within(regiao).getAllByRole("listitem").map(l => [...l.children].map(limpo));
     expect(linhas).toHaveLength(5);
-    const protocolado = [...document.querySelectorAll(".ini-faixa__etapa")].map(e => [...e.children].map(limpo))
+    const protocolado = [...document.querySelectorAll(".ini-etapa")].map(e => [...e.children].map(limpo))
       .find(e => e[0] === "Protocolado");
+    expect(protocolado).toEqual(["Protocolado", "R$ 15.866.779,04", "6 medições", "mais antiga há 100 dias"]);
     expect(linhas.reduce((s, l) => s + parseInt(l[2] ?? "", 10), 0)).toBe(parseInt(protocolado?.[2] ?? "", 10));
     expect(linhas.reduce((s, l) => s + centavos(l[1] ?? ""), 0)).toBe(centavos(protocolado?.[1] ?? ""));
   });
@@ -198,16 +276,21 @@ describe("Início", () => {
     const zero = { valor_centavos: 0, quantidade: 0 };
     api.mockResolvedValue(painel({ previsao: { neste_mes: zero, proximo_mes: zero, atrasado: zero, sem_previsao: zero, depois: zero } }));
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const regiao = await screen.findByRole("region", { name: "Previsão de entrada (cota da Lotufo)" });
+    const regiao = await screen.findByRole("region", { name: REGIAO_PREVISAO });
     expect(within(regiao).getAllByRole("listitem").map(l => [...l.children].map(limpo))).toEqual(
       ["Neste mês", "No próximo mês", "Depois", "Atrasado", "Sem previsão"].map(r => [r, "R$ 0,00", "0 medições"]));
+    // #721: sem nenhum valor nao ha' o que a faixa proporcional desenhar
+    expect(regiao.querySelector(".ini-previsao__faixa")).toBeNull();
   });
 
   it("#652: sem medição atrasada a linha Atrasado fica na cor padrão", async () => {
     api.mockResolvedValue(painel({ previsao: { ...painel().previsao, atrasado: { valor_centavos: 0, quantidade: 0 } } }));
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const regiao = await screen.findByRole("region", { name: "Previsão de entrada (cota da Lotufo)" });
+    const regiao = await screen.findByRole("region", { name: REGIAO_PREVISAO });
     expect(regiao.querySelector("[class*='--critico']")).toBeNull();
+    // #721: sem valor atrasado a faixa tambem nao tem o trecho vermelho
+    expect(regiao.querySelector(".ini-previsao__faixa")).not.toBeNull();
+    expect(regiao.querySelector(".ini-previsao__seg--atrasado")).toBeNull();
   });
 
   const MATRIZ = "Medições por obra e competência";
@@ -276,14 +359,19 @@ describe("Início", () => {
     expect(regiao.querySelector(".ini-matriz__grade, table")).toBeNull();
   });
 
-  it("dois cartões só com rótulo e valor: notas protocoladas e medido do mês (#652: o recebido no ano virou as barras)", async () => {
+  it("dois números só com rótulo e valor: notas protocoladas e medido do mês (#652: o recebido no ano virou as barras)", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const regiao = await screen.findByRole("region", { name: "Números do mês" });
-    expect([...regiao.children].map(c => [...c.children].map(limpo))).toEqual([
+    // #721: os dois numeros sairam dos cartoes e subiram para o alto, numa lista de rotulo e valor (dl)
+    const numeros = [...regiao.querySelectorAll(".ini-numero")];
+    expect(numeros.map(c => [...c.children].map(limpo))).toEqual([
       ["Notas fiscais protocoladas em outubro", "R$ 15.222.956,18"],
       ["Medido em setembro", "R$ 18.277.156,96"],
     ]);
+    expect(numeros.map(c => [...c.children].map(e => e.tagName))).toEqual([["DT", "DD"], ["DT", "DD"]]);
+    expect(numeros.every(c => c.parentElement?.tagName === "DL" && c.parentElement.parentElement === regiao)).toBe(true);
+    expect(limpo(regiao)).toBe("Notas fiscais protocoladas em outubroR$ 15.222.956,18Medido em setembroR$ 18.277.156,96");
     expect(document.body.textContent).not.toContain("Recebido em 2026");
   });
 
@@ -334,7 +422,13 @@ describe("Início", () => {
     if (fila instanceof Error) throw fila;
     return { avisos: fila, resumo: {} };
   });
+  // cada item e' um link com dois filhos: o nome (obra, " · " so' de leitor de tela, mensagem) e o selo de dias
   const linhasDe = (secao: HTMLElement) => within(secao).queryAllByRole("link").map(l => [...l.children].map(limpo));
+  // #721: as contagens sao a peca Contador. A da caixa (ao lado do titulo) tem o numero desenhado, fora da leitura, e o
+  // rotulo so' de leitor de tela; a de cada secao e' o numero ao lado do titulo dela
+  const contadorDaCaixa = () => document.querySelector(".ini-avisos > .ini-painel__cab .contador");
+  const totalDaCaixa = () => limpo(contadorDaCaixa()?.querySelector("[aria-hidden='true']"));
+  const contadorDe = (secao: Element) => secao.querySelector(".ini-aviso__topo .contador");
 
   it("#666: avisos em três seções pelo tempo (Vencido, Esta semana, Este mês), com a contagem, os itens e o selo de dias", async () => {
     servir();
@@ -346,16 +440,45 @@ describe("Início", () => {
     const vencido = caixa.getByRole("region", { name: "Vencido" });
     // o mais antigo primeiro; o fato parado "desde" 12 dias é passado
     expect(linhasDe(vencido)).toEqual([["Obra B · execução vencida", "há 450 dias"], ["Obra C · nota sem envio", "há 12 dias"]]);
-    expect(within(vencido).getByText("há 450 dias").className).toContain("ini-pilula--acao");
+    // #721: o selo de dias e' a peca Selo, na situacao da secao: vencido = critico (era a pilula "acao", vermelha)
+    expect(within(vencido).getByText("há 450 dias").closest(".selo")!.className).toBe("selo selo--critico");
     const semana = caixa.getByRole("region", { name: "Esta semana" });
     expect(linhasDe(semana)).toEqual([["Empresa X · FGTS vence", "hoje"], ["Obra A · vigência termina", "em 5 dias"]]);
-    expect(within(semana).getByText("em 5 dias").className).toContain("ini-pilula--atencao");
+    // o que vence na semana ou no mes = vence em breve (era a pilula "atencao", ambar)
+    expect(within(semana).getByText("em 5 dias").closest(".selo")!.className).toBe("selo selo--breve");
     const mes = caixa.getByRole("region", { name: "Este mês" });
     expect(linhasDe(mes)).toEqual([["Obra A · execução termina", "em 20 dias"]]);
-    expect([vencido, semana, mes].map(s => limpo(s.querySelector(".ini-aviso__conta")))).toEqual(["2", "2", "1"]);
+    expect(within(mes).getByText("em 20 dias").closest(".selo")!.className).toBe("selo selo--breve");
+    expect([vencido, semana, mes].map(s => limpo(contadorDe(s)))).toEqual(["2", "2", "1"]);
     // cada item leva ao lugar do aviso, como na tela Avisos
     expect(within(vencido).getAllByRole("link").map(l => l.getAttribute("href"))).toEqual(["/obras/8/prazos", "/obras/9/medicoes/31#notas"]);
     expect(within(semana).getAllByRole("link")[0]?.getAttribute("href")).toBe("/documentos/4");
+  });
+
+  it("#721: contadores e selos dos avisos são as peças da fundação, com cor e forma; o sentido de cada seção não muda", async () => {
+    servir();
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const caixa = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
+    const secoes = ["Vencido", "Esta semana", "Este mês"].map(n => caixa.getByRole("region", { name: n }));
+    // o contador de cada secao: critico no vencido, vence em breve nas outras, cada um com o simbolo da situacao
+    expect(secoes.map(s => contadorDe(s)?.className)).toEqual(["contador contador--critico", "contador contador--breve", "contador contador--breve"]);
+    expect(secoes.map(s => contadorDe(s)?.querySelector(".glifo")?.className)).toEqual(["glifo glifo--critico", "glifo glifo--breve", "glifo glifo--breve"]);
+    // todo selo de uma secao tem a situacao dela, com o simbolo antes do texto; o `nivel` do aviso nao muda a cor
+    expect(secoes.map(s => [...new Set([...s.querySelectorAll(".selo")].map(e => e.className))])).toEqual(
+      [["selo selo--critico"], ["selo selo--breve"], ["selo selo--breve"]]);
+    expect([...document.querySelectorAll(".ini-avisos .selo")].every(e => e.firstElementChild?.classList.contains("glifo"))).toBe(true);
+    // o contador da caixa e' neutro (sem simbolo): o numero desenhado e o rotulo so' de leitor de tela, sem aria-label
+    const total = contadorDaCaixa()!;
+    expect(total.className).toBe("contador");
+    expect(total.querySelector(".glifo")).toBeNull();
+    expect(total.getAttribute("aria-label")).toBeNull();
+    expect([...total.children].map(c => [c.className, c.getAttribute("aria-hidden"), c.textContent])).toEqual([["", "true", "5"], ["sr-only", null, "5 avisos"]]);
+    // a obra em destaque e a mensagem em elementos separados; o " · " entre as duas so' para o leitor de tela
+    const item = within(secoes[0]).getAllByRole("link")[0];
+    expect([...item.querySelector(".ini-aviso__nome")!.children].map(c => [c.className, c.textContent])).toEqual(
+      [["ini-aviso__obra", "Obra B"], ["sr-only", " · "], ["ini-aviso__msg", "execução vencida"]]);
+    // as classes proprias do vocabulario antigo de tres niveis sairam
+    expect(document.querySelector("[class*='ini-pilula'], [class*='ini-aviso--'], .ini-aviso__conta, .ini-avisos__total")).toBeNull();
   });
 
   it("#666: a contagem da caixa é a soma de Vencido, Esta semana e Este mês da tela Avisos, com a mesma fila", async () => {
@@ -363,11 +486,13 @@ describe("Início", () => {
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const caixa = await screen.findByRole("complementary", { name: "Avisos importantes" });
     await within(caixa).findByRole("region", { name: "Vencido" });
-    const total = limpo(caixa.querySelector(".ini-avisos__total"));
+    const total = totalDaCaixa();
     cleanup();
     render(<AvisosPagina busca={{}} avisos={FILA} nome="Todas as obras" onFechar={() => {}} />);
-    const naTela = screen.getAllByRole("heading", { level: 3 }).map(limpo);
-    expect(naTela).toEqual(["VENCIDO · 2", "ESTA SEMANA · 2", "ESTE MÊS · 1", "DEPOIS · 1"]);
+    // na tela Avisos a contagem fica ao lado do título da seção (o número desenhado do Contador)
+    const naTela = screen.getAllByRole("heading", { level: 3 })
+      .map(h => `${limpo(h)} · ${h.closest("section")!.querySelector(".contador [aria-hidden]:not(.glifo)")!.textContent}`);
+    expect(naTela).toEqual(["Vencido · 2", "Esta semana · 2", "Este mês · 1", "Depois · 1"]);
     expect(total).toBe(String(2 + 2 + 1));
   });
 
@@ -386,11 +511,13 @@ describe("Início", () => {
     const caixa = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
     const vencido = await caixa.findByRole("region", { name: "Vencido" });
     expect(linhasDe(vencido).map(l => l[0])).toEqual(["Obra 5 · execução vencida", "Obra 4 · execução vencida", "Obra 3 · execução vencida"]);
-    expect(limpo(vencido.querySelector(".ini-aviso__conta"))).toBe("5");
-    expect(limpo(document.querySelector(".ini-avisos__total"))).toBe("5");
-    // seção sem aviso: a contagem zero, sem lista
+    expect(limpo(contadorDe(vencido))).toBe("5");
+    expect(totalDaCaixa()).toBe("5");
+    // seção sem aviso: a contagem zero, neutra (sem situação nem símbolo), sem lista
     const semana = caixa.getByRole("region", { name: "Esta semana" });
-    expect(limpo(semana.querySelector(".ini-aviso__conta"))).toBe("0");
+    expect(limpo(contadorDe(semana))).toBe("0");
+    expect(contadorDe(semana)?.className).toBe("contador");
+    expect(contadorDe(semana)?.querySelector(".glifo")).toBeNull();
     expect(semana.querySelector("ul")).toBeNull();
   });
 
@@ -408,7 +535,8 @@ describe("Início", () => {
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const caixa = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
     expect(await caixa.findByText("Nenhum aviso.")).toBeTruthy();
-    expect(limpo(document.querySelector(".ini-avisos__total"))).toBe("0");
+    expect(totalDaCaixa()).toBe("0");
+    expect(limpo(contadorDaCaixa()?.querySelector(".sr-only"))).toBe("0 avisos");
     expect(caixa.queryByRole("region")).toBeNull();
     cleanup();
     servir(new Error("falhou"));

@@ -1,0 +1,32 @@
+/* Minha conta (#768): a organizacao aprovada na #165 (uma coluna, na ordem Sua conta, Trocar senha, Conta Microsoft,
+   Assinatura) sobre a fundacao do redesenho. So' o que e' proprio da tela: a coluna encostada a' esquerda, como as
+   outras paginas; "Sua conta" como grupo sob a regua, sem moldura; e o motivo do botao desligado na forma de trava.
+   O painel, o campo, o botao, o selo e a caixa de aviso sao as pecas de base de tokens.css. */
+.conta { margin: 0; max-width: calc(var(--largura-menu) * 3); gap: var(--espaco-entre-blocos); font-size: var(--texto-corpo); line-height: var(--entrelinha); }
+
+/* quem sou: rotulo em cima, valor embaixo, como os numeros do mes da Inicio */
+.conta-eu { border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro); }
+.conta-eu__titulo { margin: 0 0 var(--titulo-margem-base); font-size: var(--texto-titulo-bloco); }
+.conta-eu__dados { display: flex; flex-wrap: wrap; gap: var(--espaco-p) var(--espaco-xg); }
+.conta-dado { margin: 0; min-width: 0; display: flex; flex-direction: column; overflow-wrap: anywhere; }
+.conta-dado__rotulo { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.conta-dado strong { font-size: var(--texto-valor-menor); font-weight: var(--peso-forte); line-height: var(--entrelinha-valor); }
+.conta-eu .detalhes { margin-top: var(--espaco-m); }
+.conta-eu .detalhes > summary { font-size: var(--texto-corpo); }
+
+/* os paineis: o titulo e o selo da situacao na mesma linha, o corpo com o respiro da fundacao */
+.conta .cartao__cabeca { padding: var(--espaco-g) var(--espaco-g) 0; }
+.conta .cartao__corpo { padding: var(--titulo-margem-base) var(--espaco-g) var(--espaco-g); }
+.conta .campo__rotulo { font-size: var(--texto-corpo); }
+.conta .senha input { height: var(--alvo-minimo); font-size: var(--texto-corpo); }
+.conta .olho { top: var(--espaco-mini); right: var(--espaco-mini); width: var(--alvo-menor); height: var(--alvo-menor); }
+.conta .aviso { margin: 0 0 var(--espaco-p); }
+.conta .par-botoes + .conta-trava { margin: var(--espaco-p) 0 0; }
+.conta .feito-caixa { align-items: center; font-size: var(--texto-corpo); font-weight: var(--peso-forte); }
+.conta .feito-caixa .glifo { width: var(--tamanho-icone); height: var(--tamanho-icone); }
+
+/* area de colar ou arrastar a assinatura: tracejada, de canto reto */
+.conta .assinatura-alvo { border: var(--borda-tracejada); border-radius: var(--raio-controle); }
+.conta .assinatura-alvo.arrastando { border-color: var(--cor-tinta); }
+.conta .assinatura-alvo__dica { font-size: var(--texto-meta); }
+.conta .codigo__valor { font-weight: var(--peso-numero); }

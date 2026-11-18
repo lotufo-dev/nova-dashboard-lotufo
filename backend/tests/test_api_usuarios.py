@@ -68,6 +68,26 @@ def test_com_outro_admin_ativo_desativar_admin_continua_valendo(client_admin):
     uid = client_admin.post("/api/admin/usuarios", json={**NOVO, "perfil": "admin"}).json()["id"]
     assert client_admin.put(f"/api/admin/usuarios/{uid}", json={"ativo": False}).status_code == 200
 
+def test_pessoa_inativa_nao_muda_de_perfil_sem_ser_reativada(client_admin):
+    uid = client_admin.post("/api/admin/usuarios", json=NOVO).json()["id"]
+    perfil = lambda: next(u for u in client_admin.get("/api/admin/usuarios").json() if u["id"] == uid)["perfil"]
+    assert client_admin.put(f"/api/admin/usuarios/{uid}", json={"ativo": False}).status_code == 200
+    r = client_admin.put(f"/api/admin/usuarios/{uid}", json={"perfil": "diretoria"})
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "Pessoa inativa não muda de perfil. Reative a conta antes."
+    assert perfil() == "engenharia"
+    # desativar e trocar o perfil no mesmo pedido tambem nao passa, e nada e' gravado
+    assert client_admin.put(f"/api/admin/usuarios/{uid}", json={"ativo": True}).status_code == 200
+    assert client_admin.put(f"/api/admin/usuarios/{uid}", json={"ativo": False, "perfil": "diretoria"}).status_code == 409
+    u = next(u for u in client_admin.get("/api/admin/usuarios").json() if u["id"] == uid)
+    assert (u["ativo"], u["perfil"]) == (1, "engenharia")
+    # reativar e trocar no mesmo pedido vale; repetir o perfil que a inativa ja' tem nao e' mudanca
+    assert client_admin.put(f"/api/admin/usuarios/{uid}", json={"ativo": False}).status_code == 200
+    assert client_admin.put(f"/api/admin/usuarios/{uid}", json={"perfil": "engenharia"}).status_code == 200
+    assert client_admin.put(f"/api/admin/usuarios/{uid}", json={"ativo": True, "perfil": "diretoria"}).status_code == 200
+    assert perfil() == "diretoria"
+
+
 def test_put_usuario_inexistente_404(client_admin):
     r = client_admin.put("/api/admin/usuarios/99999", json={"perfil": "diretoria"})
     assert r.status_code == 404, r.text

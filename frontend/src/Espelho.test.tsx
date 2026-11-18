@@ -67,7 +67,7 @@ describe("Espelho", () => {
     confirmar.mockRestore();
   });
 
-  it("conferir manda número, competência e valores e renderiza uma linha por nota", async () => {
+  it("conferir manda número, competência e valores e renderiza o extrato, com uma coluna por nota", async () => {
     api.mockResolvedValueOnce({ regra: REGRA, espelhos: [] });
     api.mockResolvedValueOnce(PREVIA);
     render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} />);
@@ -81,7 +81,14 @@ describe("Espelho", () => {
     expect(api).toHaveBeenLastCalledWith("/api/contratos/1/espelho/previa", expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ numero: 10, competencia: "2026-05", entradas: { medicao: "634.529,58", reajuste: "38.655,83" } }) }));
-    expect(screen.getAllByRole("row")).toHaveLength(5);      // cabecalho + 4 notas
+    // #722: a conferencia e' um extrato -- uma coluna por nota e uma linha por valor, com o liquido no rodape
+    expect(screen.getAllByRole("columnheader")).toHaveLength(1 + PREVIA.saidas.length);      // "Saída" + as notas
+    expect(screen.getAllByRole("rowheader").map(x => x.textContent)).toEqual(["Valor", "Mão de obra", "Material", "INSS", "ISS", "IRRF", "Líquido"]);
+    const liquido = screen.getByRole("rowheader", { name: "Líquido" }).closest("tr")!;
+    expect(within(liquido).getAllByRole("cell")).toHaveLength(PREVIA.saidas.length);
+    expect(liquido.closest("tfoot")).not.toBeNull();
+    // as retencoes ficam recuadas sob o valor
+    expect(["INSS", "ISS", "IRRF"].map(r => screen.getByRole("rowheader", { name: r }).closest("tr")!.className)).toEqual(Array(3).fill("extrato__retencao"));
     expect(screen.getByRole("button", { name: "Gerar" })).toBeTruthy();
   });
 
@@ -320,6 +327,8 @@ describe("Espelho", () => {
     fireEvent.click(screen.getByRole("button", { name: "Gerar" }));
     expect(await screen.findByText(/Informe a justificativa/)).toBeTruthy();
     expect(api).toHaveBeenCalledTimes(2);                          // nada foi ao servidor
+    // #722: a justificativa obrigatoria fica na caixa propria (CaixaJustificativa)
+    expect(screen.getByLabelText("Justificativa para seguir sem boletim").closest(".justificativa")).not.toBeNull();
     fireEvent.change(screen.getByLabelText("Justificativa para seguir sem boletim"),
                      { target: { value: "NF vai junto com o ofício" } });
     api.mockResolvedValueOnce({ espelho_id: 7 });

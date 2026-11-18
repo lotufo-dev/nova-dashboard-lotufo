@@ -321,7 +321,8 @@ describe("MinhaConta › redesenho", () => {
     render(<MinhaConta usuario={ENG} />);
     await screen.findByText("Não conectada");
     expect((screen.getByRole("button", { name: "Enviar e-mail de teste" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText("Conecte a sua conta Microsoft para enviar o teste.")).toBeTruthy();
+    // #768: o motivo do botao desligado vai na forma de trava
+    expect(screen.getByText("Conecte a sua conta Microsoft para enviar o teste.").closest(".aviso--trava")).not.toBeNull();
   });
 
   it("conectada: 'Conectar de novo' e o teste habilitado, sem o motivo", async () => {

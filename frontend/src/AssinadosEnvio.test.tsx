@@ -90,6 +90,8 @@ describe("Enviar documentos assinados", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
     expect(screen.getByText("Escreva o motivo do reenvio, com pelo menos 10 caracteres.")).toBeTruthy();
     expect(agir).not.toHaveBeenCalled();
+    // #722: a justificativa obrigatoria fica na caixa propria (CaixaJustificativa)
+    expect(screen.getByLabelText("Motivo do reenvio").closest(".justificativa")).not.toBeNull();
     fireEvent.change(screen.getByLabelText("Motivo do reenvio"), { target: { value: "faltou o cronograma do pacote" } });
     fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
     await vi.waitFor(() => expect(agir).toHaveBeenCalled());

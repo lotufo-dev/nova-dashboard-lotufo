@@ -5,7 +5,7 @@ import pathlib
 
 import pytest
 
-from app import (auth, avisos, cadastro_aplicar, cadastro_arquivos, contratos, db, documentos, espelho,
+from app import (auditoria, auth, avisos, cadastro_aplicar, cadastro_arquivos, contratos, db, documentos, espelho,
                  espelhos, medicoes, notas, notas_envio)
 from tests import ficticios
 from tests.conftest import CADASTRO_EXEMPLO, _pdf_com_texto
@@ -661,6 +661,31 @@ def test_nota_maior_que_a_medicao_gera_aviso_na_medicao(conn, usuario, _texto):
     assert not [a for a in notas.avisos(conn, datetime.date(2026, 9, 22)) if a["tipo"] == "nota_acima_da_medicao"]
 
 
+def test_pdf_da_nota_na_medicao_recebida_liga_so_para_o_administrador(conn, usuario, _texto):
+    """Decisao de 17/11/2026 (docs/adr/0006): na medicao recebida, anexar o PDF da nota dava erro para todos. Passa a
+    ligar para quem administra, sem mudar o estado nem a data do recebimento, com o vinculo na auditoria; os outros
+    perfis continuam recusados, em portugues, e nada fica gravado (nem o documento)."""
+    cid = contratos.criar(conn, 1, {"orgao": "SINFRA", "numero_instrumento": "IC 098/2025", "objeto": "Obra",
+                                    "valor_original_centavos": 10_000_000_00})
+    mid = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": 5, "tipo": "execucao", "competencia": "2026-06"})
+    medicoes.definir_valor(conn, 1, mid, "protocolado", 84678831, "manual")       # centavo impar
+    medicoes.registrar_protocolo(conn, 1, mid, "2026-07-10", None, None, "manual")
+    medicoes.mudar_estado(conn, 1, mid, "recebida", "paga, conforme o extrato do banco", "2026-09-20", origem="manual")
+    _texto(_fixture("3102-integra-vg.txt"))
+    with pytest.raises(ValueError, match="só o administrador liga nota"):
+        notas.anexar_pdf(conn, {**usuario, "perfil": "engenharia"}, mid, PDF, "a.pdf")
+    assert conn.execute("SELECT COUNT(*) FROM medicao_documentos").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes").fetchone()[0] == 0
+    r = notas.anexar_pdf(conn, {**usuario, "perfil": "admin"}, mid, PDF, "a.pdf")
+    assert r["estado"] == "recebida" and r["conferencia"] == []
+    m = medicoes.detalhe(conn, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2026-09-20")
+    assert [(n["numero"], n["regra"], n["origem"]) for n in m["notas"]] == [("3102", "pdf", "manual")]
+    ev = conn.execute("SELECT usuario_id, depois FROM audit_log WHERE acao='nf.alocar'").fetchall()
+    assert [(e["usuario_id"], json.loads(e["depois"])["estado_medicao"]) for e in ev] == [(1, "recebida")]
+    assert auditoria.verificar_cadeia(conn)
+
+
 def _desconsiderar(conn, nf):
     from app import correcao_medicoes
     correcao_medicoes.executar(conn, 1, [{"operacao": "desconsiderar_nf", "nf": nf, "motivo": "cancelada na prefeitura",
@@ -705,3 +730,60 @@ def test_tela_de_vincular_nota_recusa_a_nota_desconsiderada(conn, usuario, integ
     assert conn.execute("SELECT COUNT(*) FROM notas_fiscais").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM nf_alocacoes").fetchone()[0] == 0
     assert medicoes.detalhe(conn, mid)["notas"] == []
+
+
+def test_notas_reler_cria_a_nota_do_anexo_que_o_leitor_nao_lia(conn, usuario, integra, _texto, capsys):
+    """O PDF anexado quando o leitor ainda nao reconhecia o leiaute: `notas reler` (com ensaio antes) faz o mesmo que
+    arrastar o PDF de novo, com `nota.releitura` na auditoria. O que continua sem leitura e o documento que ja' tem
+    nota digitada a mao ficam como estao."""
+    from app import cli
+    _, mid, saidas = integra
+    vg = next(s for s in saidas if s["municipio"] == "Várzea Grande")
+    _texto("leiaute que o leitor ainda nao conhece")
+    falho = notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto("nota de VG"), "NFS VG.pdf")
+    assert falho["nota_id"] is None and falho["leitura"]["motivo"] == "leiaute-desconhecido"
+    a_mao = notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto("nota digitada"), "NFS digitada.pdf")
+    notas.registrar_manual(conn, usuario, mid, a_mao["documento_id"], 77, "2026-07-10", 12345)
+
+    def estado():
+        return (conn.execute("SELECT COUNT(*) FROM notas_fiscais").fetchone()[0],
+                conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0],
+                conn.execute("SELECT leitura FROM medicao_documentos WHERE id=?", (falho["documento_id"],)).fetchone()[0])
+    antes = estado()
+
+    # o leitor continua sem ler: nada muda, e o motivo aparece
+    assert cli.main(["notas", "reler", "--usuario", "u@l.com"]) == 0
+    saida = capsys.readouterr().out
+    assert "anexos de nota com leitura falha: 2; lidos agora: 0" in saida
+    assert "continua sem leitura (leiaute-desconhecido" in saida and "já tem nota informada à mão" in saida
+    assert estado() == antes
+
+    _texto(_nota_como(vg, 3102))      # o leitor passou a ler
+    assert cli.main(["notas", "reler", "--usuario", "ninguem@l.com", "--ensaio"]) == 1
+    capsys.readouterr()
+    assert cli.main(["notas", "reler", "--usuario", "u@l.com", "--ensaio"]) == 0
+    saida = capsys.readouterr().out
+    assert "ENSAIO (nada foi gravado)" in saida and "lidos agora: 1" in saida
+    assert (f"documento {falho['documento_id']} (medição {mid}, NFS VG.pdf): nota 3102 de 2026-07-15, "
+            "R$ 2.000.000,02, tomador é o órgão do contrato; a nota nasce e é ligada à medição") in saida
+    assert estado() == antes
+
+    assert cli.main(["notas", "reler", "--usuario", "u@l.com"]) == 0
+    saida = capsys.readouterr().out
+    assert "APLICADO" in saida and "lidos agora: 1" in saida and "ligada à medição" in saida
+    nf = conn.execute("SELECT * FROM notas_fiscais WHERE numero_int=3102").fetchone()
+    assert (nf["origem"], nf["valor_centavos"], nf["documento_id"], nf["leitura"]) == (
+        "pdf", vg["valor"], falho["documento_id"], "cuiaba")
+    assert conn.execute("SELECT medicao_id FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL",
+                        (nf["id"],)).fetchone()[0] == mid
+    assert json.loads(estado()[2])["ok"] is True
+    aud = conn.execute("SELECT usuario_id, depois FROM audit_log WHERE acao='nota.releitura'").fetchall()
+    assert len(aud) == 1 and aud[0]["usuario_id"] == 1
+    assert json.loads(aud[0]["depois"]) == {"documento_id": falho["documento_id"], "leiaute": "cuiaba", "numero": 3102,
+                                            "valor_centavos": vg["valor"], "nota_id": nf["id"]}
+
+    # rodar de novo nao acha mais o que reler (so' o documento da nota digitada, que fica como esta')
+    depois = estado()
+    assert cli.main(["notas", "reler", "--usuario", "u@l.com"]) == 0
+    assert "anexos de nota com leitura falha: 1; lidos agora: 0" in capsys.readouterr().out
+    assert estado() == depois

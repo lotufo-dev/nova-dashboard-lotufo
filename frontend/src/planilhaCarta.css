@@ -14,11 +14,11 @@
   gap: 8px;
   min-height: 44px;
   padding: 6px 8px 6px 12px;
-  border: 1px dashed var(--linha-forte);
-  border-radius: var(--raio-ctrl);
-  background: var(--superficie-2);
+  border: 1px dashed var(--cor-borda-controle);
+  border-radius: var(--raio-controle);
+  background: var(--cor-papel-sombreado);
 }
-.planilha__soltar--sobre { border-color: var(--acento); background: var(--acento-fundo); }
+.planilha__soltar--sobre { border-color: var(--cor-tinta); background: var(--cor-papel-sombreado); }
 
 .planilha__arquivo {
   min-width: 0;
@@ -26,7 +26,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.planilha__arquivo--vazio { color: var(--texto-2); }
+.planilha__arquivo--vazio { color: var(--cor-texto-secundario); }
 
 .planilha__saldo {
   display: flex;
@@ -34,6 +34,6 @@
   gap: 8px 32px;
   margin: 0;
 }
-.planilha__saldo dt { color: var(--texto-2); font-size: 13px; }
+.planilha__saldo dt { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .planilha__saldo dd { margin: 2px 0 0; font-weight: 600; white-space: nowrap; }
-.planilha__negativo { color: var(--acao); }
+.planilha__negativo { color: var(--situacao-critico-texto); }

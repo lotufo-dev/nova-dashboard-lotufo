@@ -1,4 +1,5 @@
-"""Custo lancado no RM por grupo da planilha, medicao a medicao (issue #491, aba Custo da Carteira; piloto MT-388).
+"""Custo lancado no RM por grupo da planilha, medicao a medicao (issue #491; desde a #748, a coluna "Custo lançado no RM"
+da aba Medicoes da obra; piloto MT-388).
 
 Decisao do dono de 06/11/2026: a tela mostra "custo lançado no RM", nunca margem nem lucro (a razao custo por receita
 so' existe com fechamento mensal, que o RM ainda nao tem). Tudo no valor cheio. So' entram as obras com cadastro de
@@ -52,12 +53,6 @@ class CentroDisputado(ValueError):
 _OBRA = """FROM contratos c JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
            WHERE e.papel <> 'consorcio' AND c.projeto_rm IS NOT NULL
              AND EXISTS (SELECT 1 FROM custo_grupos g WHERE g.contrato_id=c.id)"""
-
-
-def obras(conn) -> list[dict]:
-    """As obras do seletor: com cadastro de custo e fora de consorcio."""
-    return [dict(r) for r in conn.execute(
-        f"SELECT c.id AS contrato_id, COALESCE(c.nome_curto, c.numero_instrumento) AS obra {_OBRA} ORDER BY obra, c.id")]
 
 
 def _natureza_fora(natureza, nao_e_custo: list[str]) -> bool:

@@ -25,7 +25,10 @@ QDOP e logo da FRC). Os modelos `.docx` e `.xlsx` são neutros, sem logotipo; o 
 - Obra Consórcio: contrato do Consórcio Exemplo (empresa própria 50% e Engenharia Beta 50%), em dois
   municípios, com espelho de medição que rateia entre as duas empresas e os dois municípios. Declara
   `tipos_cobranca_extras_rm: ['2.2.03']`: nela, e só nela, a nota do RM desse tipo de movimento também é cobrança
-  ao órgão (`docs/adr/0015`).
+  ao órgão (`docs/adr/0015`). Declara também `centro_custo_empresa_rm`: o centro de custo em que a empresa lança
+  a nota da cota dela nesta obra, para essa nota ligar sozinha à medição (`docs/adr/0005`).
+- Obra Encerrada: contrato que já entra no cadastro encerrado, com a data do encerramento em `status_desde`
+  (a página da obra diz "encerrada desde"). Sem espelho e sem fluxo de medição (`passos_medicao: []`).
 
 `medicoes/obra-propria.csv` é o histórico de medições de exemplo da Obra Própria, no formato de
 `cadastro carregar-medicoes <obra>.csv --ensaio` (o nome do arquivo é o slug da obra, como em `contratos/`).

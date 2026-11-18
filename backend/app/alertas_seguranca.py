@@ -36,7 +36,7 @@ import time
 from html import escape
 
 from app import (auditoria, backup, cobranca_certidoes, copia_dono, copia_dono_envio, correio, db, graph,
-                 instalacao, integridade, seguranca, sentinela, tempo)
+                 instalacao, integridade, seguranca, sentinela, tempo, texto)
 
 log = logging.getLogger("app.alertas_seguranca")
 
@@ -347,7 +347,7 @@ def _dias_sem_resumo(conn, dia: datetime.date) -> str | None:
     if not faltam:
         return None
     if len(faltam) > DIAS_SEM_RESUMO_MAX:
-        return f"Sem resumo desde {faltam[0]:%d/%m/%Y} ({len(faltam)} dias)"
+        return f"Sem resumo desde {faltam[0]:%d/%m/%Y} ({texto.dias(len(faltam))})"
     return "Sem resumo em: " + ", ".join(f"{d:%d/%m/%Y}" for d in faltam)
 
 

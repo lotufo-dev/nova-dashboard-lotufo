@@ -70,10 +70,10 @@ def test_listar_e_estado(client_admin):
     assert client_admin.post(f"/api/medicoes/{mid}/estado",
         json={"estado": "nf_emitida"}).status_code == 422
     assert client_admin.post(f"/api/medicoes/{mid}/estado",
-        json={"estado": "recebida", "motivo": MOTIVO_RM}).status_code == 200
+        json={"estado": "recebida", "motivo": MOTIVO_RM, "data": "2026-09-30"}).status_code == 200
     # repetir o estado atual e transicao invalida -> 422 (nao 500)
     assert client_admin.post(f"/api/medicoes/{mid}/estado",
-        json={"estado": "recebida", "motivo": MOTIVO_RM}).status_code == 422
+        json={"estado": "recebida", "motivo": MOTIVO_RM, "data": "2026-09-30"}).status_code == 422
     itens = client_admin.get(f"/api/contratos/{cid}/medicoes").json()
     assert [i["estado"] for i in itens] == ["recebida"]
 
@@ -474,7 +474,7 @@ def test_recebimento_manual_e_so_do_admin(client_admin):
     auth.criar_usuario(conn, "Eng", "eng@lotufo.com", "senha-forte-123", "engenharia")
     conn.close()
     _entrar(client_admin, "eng@lotufo.com")
-    r = client_admin.post(f"/api/medicoes/{mid}/estado", json={"estado": "recebida", "motivo": MOTIVO_RM})
+    r = client_admin.post(f"/api/medicoes/{mid}/estado", json={"estado": "recebida", "motivo": MOTIVO_RM, "data": "2026-09-30"})
     assert r.status_code == 403 and "administrador" in r.json()["detail"]
     assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "protocolada"
     # os outros atos da rota seguem com a engenharia
@@ -488,6 +488,22 @@ def test_recebimento_manual_exige_motivo(client_admin, motivo):
     r = client_admin.post(f"/api/medicoes/{mid}/estado", json=corpo)
     assert r.status_code == 422 and "motivo" in r.json()["detail"]
     assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "protocolada"
+
+
+def test_recebimento_manual_exige_a_data(client_admin):
+    """Decisao de 17/11/2026 (docs/adr/0006): sem a data a medicao ficava recebida com `recebida_em` nulo, fora do
+    recebido do mes. A rota recusa em portugues e nao muda o estado; data depois de hoje tambem nao entra."""
+    import datetime
+    mid = _protocolada(client_admin)
+    r = client_admin.post(f"/api/medicoes/{mid}/estado", json={"estado": "recebida", "motivo": MOTIVO_RM})
+    assert r.status_code == 422 and "Informe a data do recebimento" in r.json()["detail"]
+    amanha = (datetime.date.today() + datetime.timedelta(days=2)).isoformat()
+    r = client_admin.post(f"/api/medicoes/{mid}/estado", json={"estado": "recebida", "motivo": MOTIVO_RM, "data": amanha})
+    assert r.status_code == 422 and "depois de hoje" in r.json()["detail"]
+    d = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert (d["estado"], d["recebida_em"]) == ("protocolada", None)
+    # cancelar e desistir continuam sem data
+    assert client_admin.post(f"/api/medicoes/{mid}/estado", json={"estado": "cancelada"}).status_code == 200
 
 
 def test_recebimento_manual_audita_o_motivo(client_admin):
@@ -514,7 +530,7 @@ def test_recebimento_pela_rota_e_manual_mesmo_com_motivo_que_imita_o_corte(clien
     from app import conciliacao, db
     mid = _protocolada(client_admin)
     assert client_admin.post(f"/api/medicoes/{mid}/estado",
-        json={"estado": "recebida", "motivo": "corte de 22/09/2026: baixa conferida no extrato"}).status_code == 200
+        json={"estado": "recebida", "motivo": "corte de 22/09/2026: baixa conferida no extrato", "data": "2026-09-30"}).status_code == 200
     conn = db.get_conn()
     try:
         assert mid in conciliacao.recebidas_a_mao(conn)
@@ -837,7 +853,7 @@ def test_medicao_da_carga_do_historico_aparece_com_pedido_e_aprovado(client_admi
         conn.close()
     lista = client_admin.get(f"/api/contratos/{cid}/medicoes").json()
     m = next(x for x in lista if x["numero"] == 1)
-    assert (m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"]) == ("protocolada", 100001, 99999)
+    assert (m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"]) == ("boletim_recebido", 100001, 99999)
     d = client_admin.get(f"/api/medicoes/{m['id']}").json()
     assert d["atestado_em"] == "2025-05-20"
 
@@ -2825,7 +2841,7 @@ def test_recebimento_manual_da_nota_emitida_continua_recusado_com_envio_da_nota(
     cid, mid = _nota_emitida_com_passos(client_admin, passos)
     [item] = client_admin.get(f"/api/contratos/{cid}/medicoes").json()
     assert item["recebe_sem_protocolo"] is False
-    r = client_admin.post(f"/api/medicoes/{mid}/estado", json={"estado": "recebida", "motivo": MOTIVO_RM})
+    r = client_admin.post(f"/api/medicoes/{mid}/estado", json={"estado": "recebida", "motivo": MOTIVO_RM, "data": "2026-09-30"})
     assert r.status_code == 422 and "Transição inválida" in r.json()["detail"]
     assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "nota_emitida"
 
@@ -2837,7 +2853,7 @@ def test_recebimento_manual_sem_envio_da_nota_continua_so_do_admin(client_admin)
     auth.criar_usuario(conn, "Eng", "eng@lotufo.com", "senha-forte-123", "engenharia")
     conn.close()
     _entrar(client_admin, "eng@lotufo.com")
-    r = client_admin.post(f"/api/medicoes/{mid}/estado", json={"estado": "recebida", "motivo": MOTIVO_RM})
+    r = client_admin.post(f"/api/medicoes/{mid}/estado", json={"estado": "recebida", "motivo": MOTIVO_RM, "data": "2026-09-30"})
     assert r.status_code == 403
     assert client_admin.get(f"/api/medicoes/{mid}").json()["estado"] == "nota_emitida"
 

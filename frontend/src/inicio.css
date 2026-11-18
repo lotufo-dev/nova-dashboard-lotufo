@@ -1,179 +1,263 @@
-/* Inicio do redesenho de 11/2026; faixa do ciclo na issue #642. Cores pelos tokens de tokens.css. */
+/* Tela Inicio (#721, redesenho etapa 2a): a tela como o dono a montou em 15/11/2026. Aqui ficam a disposicao e os
+   blocos proprios da tela; a moldura do painel (.cartao), o selo, o contador, o simbolo de situacao e a legenda sao as
+   pecas de base de tokens.css. Cor, familia e tamanho de letra so' por variavel de tokens.css. */
 
+/* ================================================================ PAGINA E DISPOSICAO
+   A largura da tela vira o container `ini-pagina`: a disposicao muda pela largura que a tela tem de fato (com o menu
+   aberto ou recolhido), nao pela largura da janela. Uma coluna; de 680px, ciclo e previsao lado a lado; de 900px, a
+   saudacao e os numeros do mes dividem a primeira linha. */
 .ini {
-  display: flex; flex-direction: column; gap: 20px; min-width: 0;
-  color: var(--texto); font-family: var(--fonte); font-size: 14px; line-height: 20px;
+  min-width: 0; container: ini-pagina / inline-size;
+  color: var(--cor-tinta); font-family: var(--fonte-texto); font-size: var(--texto-corpo); line-height: var(--entrelinha);
 }
-.ini-topo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
-.ini-titulo { margin: 0; font-size: 24px; line-height: 32px; font-weight: 600; }
-.ini-carregando, .ini-vazio { margin: 0; color: var(--texto-2); }
-.ini-vazio { padding: 4px 4px 8px; }
+.ini-titulo { margin: 0; font-size: var(--texto-titulo-pagina); text-wrap: balance; }
+.ini-carregando, .ini-vazio { margin: 0; color: var(--cor-texto-secundario); }
+.ini > .ini-carregando, .ini > .aviso--falha { margin-top: var(--espaco-m); }
 
-.ini-numero, .ini-painel {
-  background: var(--superficie); border-radius: var(--raio); box-shadow: var(--sombra);
+.ini-grade {
+  display: grid; grid-template-columns: minmax(0, 1fr); row-gap: var(--espaco-entre-blocos);
+  grid-template-areas: "saud" "numeros" "cota" "ciclo" "previsao" "recebido" "avisos" "matriz";
 }
-.ini-painel { min-width: 0; display: flex; flex-direction: column; padding: 20px; gap: 14px; }
-.ini-painel h2 { margin: 0; font-size: 20px; line-height: 28px; font-weight: 700; }
-
-/* faixa do ciclo (#642): um trecho por etapa (as colunas vem da tela, em --ini-faixa-colunas). #659: o minimo de cada
-   trecho e' o proprio conteudo (`min-content`: o valor inteiro, que nao quebra), e a proporcao pelo valor vale para o
-   que sobra; antes o trecho de maior valor espremia os outros e o valor vazava para o vizinho. A fonte do valor sai da
-   largura do painel para cinco valores de 11 digitos caberem lado a lado: um valor desses mede --ini-faixa-valor-em
-   vezes a fonte no maximo (no navegador, "R$ 800.000.000,00" mede 9,81: o zero e' o algarismo mais largo), e 76px
-   sao os respiros (5 x 2 x 6) mais os vaos (4 x 4). A 1024px, com o menu lateral aberto (240px), o painel tem 688px
-   por dentro e a fonte fica em 12px; em painel onde nem a 12px os cinco cabem (5 x (10 x 12 + 12) + 4 x 4 = 676), a
-   faixa vira lista vertical, sem rolagem. */
-.ini-ciclo { container-type: inline-size; padding: 16px; position: relative; }
-.ini-faixa {
-  --ini-faixa-valor-em: 10;
-  list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; grid-template-columns: var(--ini-faixa-colunas);
-}
-.ini-faixa__etapa {
-  min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 6px 12px;
-  background: var(--andamento-fundo); border-top: 4px solid var(--andamento-ponto); border-radius: var(--raio);
-}
-.ini-faixa__etapa--feito { background: var(--ok-fundo); border-top-color: var(--ok-ponto); }
-.ini-faixa__rotulo { font-size: 13px; line-height: 20px; font-weight: 600; color: var(--andamento); }
-.ini-faixa__etapa--feito .ini-faixa__rotulo { color: var(--ok); }
-.ini-faixa__valor {
-  font-size: clamp(12px, calc((100cqi - 76px) / (5 * var(--ini-faixa-valor-em))), 20px);
-  line-height: 28px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
-}
-.ini-faixa__conta { font-size: 13px; line-height: 18px; color: var(--texto-2); }
-@container (max-width: 675px) {
-  .ini-faixa { grid-template-columns: minmax(0, 1fr); }
-  .ini-faixa__etapa {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: baseline;
-    border-top: 0; border-left: 4px solid var(--andamento-ponto);
+.ini-saudacao { grid-area: saud; min-width: 0; }
+.ini-numeros { grid-area: numeros; min-width: 0; }
+.ini-cota { grid-area: cota; }
+.ini-ciclo { grid-area: ciclo; }
+.ini-previsao { grid-area: previsao; }
+.ini-recebido { grid-area: recebido; }
+.ini-avisos { grid-area: avisos; }
+.ini-matriz { grid-area: matriz; }
+.ini-avisos, .ini-matriz { margin-top: calc(var(--espaco-entre-blocos) * 0.2); }
+@container ini-pagina (min-width: 680px) {
+  .ini-grade {
+    grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--espaco-entre-colunas);
+    grid-template-areas: "saud saud" "numeros numeros" "cota cota" "ciclo previsao" "recebido recebido" "avisos avisos" "matriz matriz";
   }
-  .ini-faixa__etapa--feito { border-left-color: var(--ok-ponto); }
-  /* #659: no celular (painel de 262px a 390px de tela) o valor de 11 digitos a 16px nao deixava lugar para o rotulo */
-  .ini-faixa__valor { grid-column: 2; grid-row: 1; font-size: clamp(13px, 5.2cqi, 16px); line-height: 24px; }
-  .ini-faixa__conta { grid-column: 1 / -1; }
+  .ini-numeros { justify-self: start; }
+}
+@container ini-pagina (min-width: 900px) {
+  .ini-grade { grid-template-areas: "saud numeros" "cota cota" "ciclo previsao" "recebido recebido" "avisos avisos" "matriz matriz"; }
+  .ini-saudacao { align-self: end; }
+  .ini-numeros { align-self: end; justify-self: end; }
 }
 
-/* recebido em 12 meses (#652): uma coluna verde (recebido = feito) por mes, com o valor curto em cima e o mes embaixo.
-   Em painel estreito (celular) as barras deitam, um mes por linha, sem rolagem. */
-.ini-recebido, .ini-previsao { container-type: inline-size; padding: 16px; position: relative; }
-.ini-rec { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; }
-.ini-rec__mes { min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 4px; text-align: center; }
-.ini-rec__valor { font-size: 12px; line-height: 16px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ini-rec__trilho { height: 120px; display: flex; align-items: flex-end; border-bottom: 1px solid var(--linha); }
-.ini-rec__coluna { width: 100%; height: var(--ini-rec-tamanho); background: var(--ok-ponto); border-radius: 3px 3px 0 0; }
-.ini-rec__rotulo { font-size: 11px; line-height: 16px; color: var(--texto-2); white-space: nowrap; }
-@container (max-width: 559px) {
-  .ini-rec { grid-template-columns: minmax(0, 1fr); gap: 4px; }
-  .ini-rec__mes { display: grid; grid-template-columns: 44px minmax(0, 1fr) 60px; align-items: center; column-gap: 8px; text-align: left; }
-  .ini-rec__rotulo { grid-column: 1; grid-row: 1; }
-  .ini-rec__trilho { grid-column: 2; grid-row: 1; height: 12px; align-items: stretch; border-bottom: 0; border-left: 1px solid var(--linha); }
-  .ini-rec__coluna { width: var(--ini-rec-tamanho); height: auto; border-radius: 0 3px 3px 0; }
-  .ini-rec__valor { grid-column: 3; grid-row: 1; text-align: right; }
-}
+/* a legenda das situacoes fica sob a saudacao, a' esquerda (a peca alinha a' direita por padrao) */
+.ini-saudacao .legenda-cor { justify-content: flex-start; margin-top: var(--espaco-pp); }
 
-/* previsao de entrada (#652): cinco linhas com rotulo, valor e quantidade; so' o atrasado ganha cor (critico). A
-   1024px com o menu aberto o painel tem 688px por dentro e cinco colunas nao comportam o valor numa linha: abaixo de
-   900px de painel as linhas empilham (rotulo a' esquerda, valor a' direita) */
-.ini-previsao__linhas { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+/* titulo do grupo "Cota da Lotufo": regua grossa de tinta em cima; a base dos valores e' dita so' aqui */
+.ini-cota {
+  border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro);
+  margin-top: calc(var(--espaco-topo-grupo) - var(--espaco-entre-blocos));
+  margin-bottom: calc(var(--titulo-margem-base) - var(--espaco-entre-blocos));
+}
+.ini-cota h2 { margin: 0; font-size: var(--texto-titulo-bloco); }
+
+/* PAINEL: a moldura (borda de tinta e sombra dura) e' a peca .cartao; aqui o respiro e o container, para o conteudo
+   mudar de forma pela largura do proprio painel. Os tres paineis do grupo da cota tem titulo um passo menor. */
+.ini .ini-painel { position: relative; min-width: 0; container-type: inline-size; padding: var(--espaco-g); }
+.ini-painel__cab { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-pp) var(--espaco-p); margin-bottom: var(--titulo-margem-base); }
+.ini-painel__cab h2 { margin: 0; font-size: var(--texto-titulo-bloco); }
+.ini-painel__cab .contador { align-self: center; }
+:is(.ini-ciclo, .ini-previsao, .ini-recebido) .ini-painel__cab h2 { font-size: var(--texto-titulo-sub); }
+
+/* ================================================================ NUMEROS DO MES
+   So' rotulo e valor, sem moldura. O valor nao quebra; em tela muito estreita a letra dele acompanha a largura. */
+.ini-numeros__lista { display: flex; flex-wrap: wrap; gap: var(--espaco-p) var(--espaco-xg); margin: 0; }
+.ini-numero { min-width: 0; }
+.ini-numero__rotulo { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.ini-numero__valor {
+  margin: 0; white-space: nowrap;
+  font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
+  font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-numero); line-height: var(--entrelinha-numero);
+}
+@media (max-width: 760px) { .ini-numeros__lista { flex-direction: column; } }
+
+/* ================================================================ CICLO DA MEDICAO
+   Uma etapa por linha: a faixa na cor da etapa (o ::before, com o comprimento em --ini-etapa-fracao, que vem da tela),
+   o rotulo e o valor, a quantidade e a idade da mais antiga. O valor nunca quebra, e ate' dezenas de milhoes (10
+   digitos) cabe ao lado do rotulo mais largo sem empurra-lo para a segunda linha: a letra do valor sai da largura do
+   painel (100cqi), descontados o rotulo "Recebido no mês" (--ini-etapa-rotulo; mede 128,05px no navegador) e o vao, e
+   dividida pela largura de um valor de 10 digitos em vezes a letra (--ini-etapa-valor-em; "R$ 12.480.615,32" mede
+   7,68). Com 11 digitos (8,23) o valor continua inteiro e quem cede e' o rotulo, que quebra. */
+.ini-etapas {
+  --ini-etapa-rotulo: 8.02rem; --ini-etapa-valor-em: 7.68;
+  list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr);
+}
+.ini-etapa {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "barra barra" "rotulo valor" "qtd idade";
+  gap: var(--espaco-mini) var(--espaco-m); padding-block: var(--espaco-p); border-top: var(--borda-linha);
+}
+.ini-etapa:first-child { border-top: 0; padding-top: 0; }
+.ini-etapa::before {
+  content: ""; grid-area: barra; width: var(--ini-etapa-fracao); height: var(--altura-barra-etapa); border-radius: var(--raio-canto);
+}
+.ini-etapa--em_analise::before { background: var(--etapa-analise); box-shadow: inset 0 0 0 var(--etapa-borda-largura) var(--etapa-analise-borda); }
+.ini-etapa--boletim::before { background: var(--etapa-boletim); }
+.ini-etapa--nota::before { background: var(--etapa-nota); }
+.ini-etapa--protocolado::before { background: var(--etapa-protocolado); }
+.ini-etapa--recebido_mes::before { background: var(--etapa-recebido); }
+.ini-etapa__rotulo { grid-area: rotulo; font-size: var(--texto-rotulo); font-weight: var(--peso-forte); }
+.ini-etapa__valor {
+  grid-area: valor; text-align: right; white-space: nowrap;
+  font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-size: clamp(var(--texto-mini), calc((100cqi - var(--ini-etapa-rotulo) - var(--espaco-m)) / var(--ini-etapa-valor-em)), var(--texto-valor-menor));
+}
+.ini-etapa__qtd { grid-area: qtd; font-size: var(--texto-meta); color: var(--cor-texto-terciario); }
+.ini-etapa__idade { grid-area: idade; font-size: var(--texto-meta); color: var(--cor-texto-terciario); text-align: right; }
+
+/* ================================================================ PREVISAO DE ENTRADA
+   A faixa proporcional e o extrato: a chave de cor (o ::before da linha) e o rotulo a' esquerda, com a quantidade
+   embaixo; o valor colado a' direita. A mesma conta do ciclo: o valor nunca quebra, e ate' 10 digitos cabe ao lado do
+   rotulo mais largo ("No próximo mês", 117,6px no navegador) sem empurra-lo para a segunda linha, que era o que
+   acontecia a 390px. A letra do valor sai da largura do painel, descontados a chave, o rotulo e os tres vaos. */
+.ini-previsao__faixa { display: flex; gap: var(--espaco-traco); height: var(--altura-faixa); margin-bottom: var(--espaco-pp); }
+.ini-previsao__seg { min-width: var(--largura-min-segmento); flex-basis: 0; border-radius: var(--raio-canto); }
+.ini-previsao__linhas {
+  --ini-previsao-rotulo: 7.36rem; --ini-previsao-valor-em: 7.68;
+  list-style: none; margin: 0; padding: 0;
+}
 .ini-previsao__linha {
-  min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px 12px;
-  border: 1px solid var(--linha); border-radius: var(--raio);
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "chave rotulo valor" ". conta valor";
+  column-gap: var(--espaco-pp); align-items: center; padding: var(--espaco-pp) 0; border-bottom: var(--borda-linha);
 }
-.ini-previsao__rotulo { font-size: 13px; line-height: 20px; font-weight: 600; }
+.ini-previsao__linha::before {
+  content: ""; grid-area: chave; width: var(--tamanho-chave); height: var(--tamanho-chave); border-radius: var(--raio-canto);
+}
+.ini-previsao__linha--neste_mes::before, .ini-previsao__seg--neste_mes { background: var(--previsao-neste-mes); }
+.ini-previsao__linha--proximo_mes::before, .ini-previsao__seg--proximo_mes { background: var(--previsao-proximo-mes); }
+.ini-previsao__linha--depois::before, .ini-previsao__seg--depois { background: var(--previsao-depois); }
+.ini-previsao__linha--atrasado::before, .ini-previsao__seg--atrasado { background: var(--previsao-atrasado); }
+.ini-previsao__linha--sem_previsao::before, .ini-previsao__seg--sem_previsao { background: var(--previsao-sem); }
+.ini-previsao__rotulo {
+  grid-area: rotulo; display: inline-flex; align-items: center; gap: var(--espaco-mini);
+  font-size: var(--texto-rotulo); font-weight: var(--peso-medio);
+}
+.ini-previsao__conta { grid-area: conta; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .ini-previsao__valor {
-  font-size: clamp(14px, 1.6cqi, 20px); line-height: 28px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
+  grid-area: valor; align-self: start; padding-left: var(--espaco-pp); text-align: right; white-space: nowrap;
+  font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
+  font-variant-numeric: tabular-nums lining-nums; line-height: var(--entrelinha-valor);
+  font-size: clamp(var(--texto-mini), calc((100cqi - var(--tamanho-chave) - var(--ini-previsao-rotulo) - 3 * var(--espaco-pp)) / var(--ini-previsao-valor-em)), var(--texto-valor));
 }
-.ini-previsao__conta { font-size: 13px; line-height: 18px; color: var(--texto-2); }
-.ini-previsao__linha--critico { border-color: var(--acao-linha); background: var(--acao-fundo); }
-.ini-previsao__linha--critico .ini-previsao__rotulo, .ini-previsao__linha--critico .ini-previsao__valor { color: var(--acao); }
-@container (max-width: 899px) {
-  .ini-previsao__linhas { grid-template-columns: minmax(0, 1fr); }
-  .ini-previsao__linha { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: baseline; }
-  .ini-previsao__valor { grid-column: 2; grid-row: 1; font-size: 16px; line-height: 24px; }
-  .ini-previsao__conta { grid-column: 1 / -1; }
+.ini-previsao__linha--critico .ini-previsao__rotulo, .ini-previsao__linha--critico .ini-previsao__valor { color: var(--situacao-critico-texto); }
+
+/* ================================================================ RECEBIDO EM 12 MESES
+   Uma coluna de tinta por mes, com o valor curto logo acima e o mes embaixo, sobre uma regua de tinta. A coluna mais
+   alta ocupa 86% do trilho: o resto e' o lugar do valor dela. Em painel estreito (celular) as barras deitam, um mes
+   por linha, sem rolagem. */
+.ini-rec { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--espaco-mini); align-items: end; }
+.ini-rec__mes { display: grid; grid-template-rows: var(--altura-grafico) auto; justify-items: center; gap: var(--espaco-mini); min-width: 0; }
+.ini-rec__trilho {
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: var(--espaco-mini);
+  width: 100%; height: 100%; border-bottom: var(--regua-secao);
+}
+.ini-rec__valor { font-variant-numeric: tabular-nums; font-size: var(--texto-mini); color: var(--cor-texto-secundario); white-space: nowrap; }
+.ini-rec__coluna {
+  display: block; width: min(var(--largura-max-coluna), 100%); height: calc(var(--ini-rec-tamanho) * 0.86);
+  background: var(--cor-barra-recebido); border-radius: var(--raio-canto) var(--raio-canto) 0 0;
+}
+.ini-rec__rotulo { font-size: var(--texto-mini); color: var(--cor-texto-terciario); white-space: nowrap; }
+@container (max-width: 520px) {
+  .ini-rec { grid-template-columns: minmax(0, 1fr); }
+  .ini-rec__mes {
+    grid-template-columns: 3.5em minmax(0, 1fr) 4em; grid-template-rows: auto; grid-template-areas: "mes trilho valor";
+    align-items: center; justify-items: stretch; gap: var(--espaco-p);
+  }
+  .ini-rec__rotulo { grid-area: mes; }
+  .ini-rec__valor { grid-area: valor; text-align: right; }
+  .ini-rec__trilho { display: contents; }
+  .ini-rec__coluna { grid-area: trilho; justify-self: start; width: var(--ini-rec-tamanho); height: var(--altura-faixa); border-radius: 0 var(--raio-canto) var(--raio-canto) 0; }
 }
 
-/* matriz obra por competencia (#659): uma linha por obra e uma celula por competencia, so' com a cor da etapa. Os
-   quatro azuis vao do mais claro (em analise) ao mais escuro (protocolado); recebida e' verde e protocolada alem do
-   prazo, vermelha. Cada linha e' uma grade com as mesmas colunas, entao as celulas alinham entre as linhas. Em painel
-   estreito (celular) o nome da obra sobe para uma linha propria e as 12 celulas ocupam a largura toda. */
-.ini-matriz { container-type: inline-size; padding: 16px; position: relative; }
-.ini-matriz__topo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+/* ================================================================ AVISOS IMPORTANTES (#666)
+   Tres secoes pelo tempo, lado a lado em painel largo, cada uma com regua fina de tinta, o contador (peca Contador) e
+   os primeiros itens. O item inteiro e' o link: a obra em destaque, a mensagem e o selo de dias (peca Selo). */
+.ini-ver-todos { margin-left: auto; font-size: var(--texto-corpo); font-weight: var(--peso-medio); }
+.ini-avisos__secoes { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-g) var(--espaco-gg); }
+@container (min-width: 640px) { .ini-avisos__secoes { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.ini-aviso { min-width: 0; }
+.ini-aviso__topo {
+  display: flex; align-items: center; gap: var(--espaco-pp);
+  border-top: var(--regua-secao); padding-top: var(--regua-secao-respiro); margin-bottom: var(--espaco-mini);
+}
+.ini-aviso__topo h3 { margin: 0; font-size: var(--texto-titulo-sub); }
+.ini-aviso__lista { list-style: none; margin: 0; padding: 0; }
+.ini-aviso__lista li { border-bottom: var(--borda-linha); }
+.ini-aviso__linha {
+  display: grid; gap: var(--espaco-mini); justify-items: start;
+  padding: var(--espaco-p) var(--espaco-pp); margin: 0 calc(-1 * var(--espaco-pp));
+  border-radius: var(--raio-canto); text-decoration: none; color: var(--cor-tinta);
+}
+a.ini-aviso__linha:hover { background: var(--cor-papel-sombreado); }
+.ini-aviso__nome { display: grid; gap: var(--espaco-mini); min-width: 0; }
+.ini-aviso__obra { font-weight: var(--peso-forte); overflow-wrap: anywhere; }
+.ini-aviso__msg { color: var(--cor-texto-secundario); text-wrap: pretty; overflow-wrap: anywhere; }
+.ini-aviso__linha .selo { margin-top: var(--espaco-mini); }
+/* o selo de dias e' uma frase de tempo ("há 64 dias", "hoje"), nao um rotulo de estado: fica como esta' escrita */
+.ini-aviso__linha .selo__texto::first-letter { text-transform: none; }
+
+/* ================================================================ MEDICOES POR OBRA E COMPETENCIA (#659)
+   Uma linha por obra, agrupada por contratante, e uma celula por competencia na cor da etapa; a celula atrasada leva
+   tambem a marca "!". Cada linha e' uma grade com as mesmas colunas, que encolhem: nenhuma largura fixa empurra a
+   pagina. Em painel estreito (celular) o nome da obra sobe para uma linha propria e as 12 celulas ocupam a largura. */
 .ini-matriz__legenda {
-  display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 0; list-style: none;
-  font-size: 12px; line-height: 16px; color: var(--texto-2);
+  display: flex; flex-wrap: wrap; gap: var(--espaco-mini) var(--espaco-m); margin: 0 0 0 auto; padding: 0; list-style: none;
+  font-size: var(--texto-meta); color: var(--cor-texto-secundario);
 }
-.ini-matriz__legenda li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.ini-matriz__cor { flex: none; width: 12px; height: 12px; border-radius: var(--raio-micro); }
-.ini-matriz__grade { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ini-matriz__legenda li { display: inline-flex; align-items: center; gap: var(--espaco-pp); white-space: nowrap; }
+.ini-matriz__cor { flex: none; width: var(--tamanho-chave); height: var(--tamanho-chave); border-radius: var(--raio-canto); }
+.ini-matriz__grade { min-width: 0; }
 .ini-matriz__linha {
-  display: grid; grid-template-columns: minmax(0, 220px) repeat(12, minmax(0, 1fr)); gap: 3px; align-items: center; min-width: 0;
+  display: grid; grid-template-columns: minmax(0, var(--largura-nome-obra)) repeat(12, minmax(0, 1fr)); column-gap: var(--espaco-grade);
+  align-items: center; min-width: 0;
 }
-.ini-matriz__linha--meses { align-items: start; }
+.ini-matriz__linha--meses { padding-bottom: var(--espaco-mini); }
 .ini-matriz__linha--meses > :first-child { grid-column-start: 2; }
+.ini-matriz__linha--obra { padding: var(--espaco-grade) 0; }
 .ini-matriz__mes {
-  min-width: 0; display: flex; flex-direction: column; align-items: center; font-size: 11px; line-height: 14px; color: var(--texto-2);
+  min-width: 0; display: flex; flex-direction: column; align-items: center;
+  font-size: var(--texto-mini); line-height: var(--entrelinha-titulo); color: var(--cor-texto-secundario);
 }
-.ini-matriz__grupo { margin: 8px 0 0; font-size: 13px; line-height: 20px; font-weight: 600; color: var(--texto-2); overflow-wrap: anywhere; }
-.ini-matriz__obra { min-width: 0; padding-right: 8px; font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
-.ini-matriz__celula { display: block; min-width: 0; height: 22px; border-radius: var(--raio-micro); background: var(--linha-suave); }
-a.ini-matriz__celula:hover { outline: 2px solid var(--linha-hover); outline-offset: 1px; }
-a.ini-matriz__celula:focus-visible { outline: 2px solid var(--foco); outline-offset: 1px; }
-.ini-matriz__cor--em_analise, .ini-matriz__celula--em_analise { background: var(--andamento-linha); }
-.ini-matriz__cor--boletim, .ini-matriz__celula--boletim { background: color-mix(in srgb, var(--andamento-linha), var(--andamento-ponto)); }
-.ini-matriz__cor--nota, .ini-matriz__celula--nota { background: var(--andamento-ponto); }
-.ini-matriz__cor--protocolado, .ini-matriz__celula--protocolado { background: var(--andamento); }
-.ini-matriz__cor--recebida, .ini-matriz__celula--recebida { background: var(--ok-ponto); }
-.ini-matriz__cor--atrasado, .ini-matriz__celula--atrasado { background: var(--acao-ponto); }
-@container (max-width: 559px) {
+.ini-matriz__ano { color: var(--cor-texto-terciario); }
+.ini-matriz__grupo {
+  margin: var(--espaco-p) 0 0; border-top: var(--regua-secao); padding: var(--espaco-mini) 0;
+  font-size: var(--texto-mini); overflow-wrap: anywhere;
+}
+.ini-matriz__obra { min-width: 0; padding-right: var(--espaco-p); overflow-wrap: anywhere; }
+.ini-matriz__celula {
+  display: grid; place-items: center; min-width: 0; height: var(--altura-celula); border-radius: var(--raio-canto);
+  background: var(--etapa-vazia); text-decoration: none;
+}
+a.ini-matriz__celula:hover { outline: var(--borda-grossa) solid var(--cor-tinta); outline-offset: var(--espaco-fio); }
+.ini-matriz__celula--atrasado::after {
+  content: var(--etapa-atrasado-marca); font-size: var(--texto-meta); font-weight: var(--peso-sinal);
+  line-height: var(--entrelinha-justa); color: var(--cor-sobre-ponto);
+}
+.ini-matriz__cor--em_analise, .ini-matriz__celula--em_analise { background: var(--etapa-analise); box-shadow: inset 0 0 0 var(--etapa-borda-largura) var(--etapa-analise-borda); }
+.ini-matriz__cor--boletim, .ini-matriz__celula--boletim { background: var(--etapa-boletim); }
+.ini-matriz__cor--nota, .ini-matriz__celula--nota { background: var(--etapa-nota); }
+.ini-matriz__cor--protocolado, .ini-matriz__celula--protocolado { background: var(--etapa-protocolado); }
+.ini-matriz__cor--recebida, .ini-matriz__celula--recebida { background: var(--etapa-recebido); }
+.ini-matriz__cor--atrasado, .ini-matriz__celula--atrasado { background: var(--etapa-atrasado); }
+@container (max-width: 520px) {
   .ini-matriz__linha { grid-template-columns: repeat(12, minmax(0, 1fr)); }
   .ini-matriz__linha--meses > :first-child { grid-column-start: 1; }
-  .ini-matriz__obra { grid-column: 1 / -1; padding-right: 0; }
-  .ini-matriz__mes { font-size: 10px; }
+  .ini-matriz__linha--obra { padding: 0 0 var(--espaco-mini); }
+  .ini-matriz__obra { grid-column: 1 / -1; padding: var(--espaco-pp) 0 var(--espaco-mini); }
+  .ini-matriz__legenda { margin-left: 0; flex-basis: 100%; }
 }
 
-/* dois cartoes: so' rotulo e valor (#652: o recebido no ano virou as barras de 12 meses) */
-.ini-numeros { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-@media (max-width: 700px) { .ini-numeros { grid-template-columns: minmax(0, 1fr); } }
-.ini-numero { padding: 16px 20px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.ini-numero__rotulo { font-size: 14px; line-height: 20px; font-weight: 600; }
-.ini-numero__valor {
-  font-size: clamp(18px, 1.7vw, 26px); line-height: 32px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
+/* ================================================================ CELULAR
+   Em tela estreita o painel perde a sombra e aperta o respiro, os blocos ficam mais proximos e o titulo desce um
+   passo. */
+@media (max-width: 640px) {
+  .ini-titulo { font-size: var(--texto-titulo-pagina-estreito); }
+  .ini-grade { row-gap: var(--espaco-m); }
+  .ini .ini-painel { padding: var(--espaco-m); box-shadow: none; }
+  .ini-cota { margin-top: calc(var(--espaco-topo-grupo) - var(--espaco-m)); margin-bottom: calc(var(--titulo-margem-base) - var(--espaco-m)); }
+  .ini-avisos, .ini-matriz { margin-top: calc(var(--espaco-m) * 0.2); }
 }
-
-/* avisos importantes (#666): tres secoes pelo tempo, lado a lado; a 900px ou menos, empilham */
-.ini-avisos { gap: 12px; }
-.ini-avisos__topo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
-.ini-avisos__secoes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
-@media (max-width: 900px) { .ini-avisos__secoes { grid-template-columns: minmax(0, 1fr); } }
-.ini-aviso { border: 1px solid var(--linha); border-radius: var(--raio); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.ini-aviso__topo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
-.ini-aviso__topo h3 { margin: 0; font-size: 17px; line-height: 24px; font-weight: 700; }
-.ini-aviso__conta {
-  min-width: 28px; text-align: center; padding: 0 10px; border-radius: var(--raio-pilula); font-weight: 700;
-  background: var(--neutro-fundo); color: var(--texto);
-}
-.ini-aviso--acao .ini-aviso__conta { background: var(--acao-fundo); color: var(--acao); }
-.ini-aviso--atencao .ini-aviso__conta { background: var(--atencao-fundo); color: var(--atencao); }
-.ini-ver-todos { margin-left: auto; font-size: 14px; text-decoration: none; color: var(--acento); }
-.ini-ver-todos:hover { color: var(--acento-forte); text-decoration: underline; }
-.ini-aviso__lista { list-style: none; margin: 0; padding: 0; }
-.ini-aviso__linha {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; min-height: 40px; padding: 4px 4px;
-  color: var(--texto); text-decoration: none; border-top: 1px solid var(--linha-suave);
-}
-.ini-aviso__lista li:first-child .ini-aviso__linha { border-top: 0; }
-.ini-aviso__linha:hover { background: var(--hover); }
-.ini-aviso__nome { min-width: 0; overflow-wrap: anywhere; }
-.ini-pilula {
-  flex: none; padding: 2px 10px; border-radius: var(--raio-pilula); font-size: 13px; line-height: 20px; white-space: nowrap; font-weight: 500;
-}
-.ini-pilula--acao { background: var(--acao-fundo); color: var(--acao-forte); border: 1px solid var(--acao-linha); }
-.ini-pilula--atencao { background: var(--atencao-fundo); color: var(--atencao); border: 1px solid var(--atencao-linha); }
-
-@media (max-width: 560px) {
-  .ini-numero__valor { font-size: clamp(16px, 5.8vw, 22px); }
-}
-/* no celular o valor grande fica numa linha so, com a fonte acompanhando a largura (22px a 375px, 18px a 320px) */
+/* no celular o valor grande fica numa linha so', com a letra acompanhando a largura da tela (11% da largura util) */
 @media (max-width: 420px) {
-  .ini-numero__valor { white-space: nowrap; font-size: clamp(16px, 5.8vw, 22px); }
+  .ini-numero__valor { white-space: nowrap; font-size: clamp(var(--texto-corpo), 11cqi, var(--texto-numero)); }
 }

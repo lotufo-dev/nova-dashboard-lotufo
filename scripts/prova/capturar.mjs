@@ -7,13 +7,19 @@
 //
 // Opcoes: --perfis a,b   --telas id,id   --larguras 1440,390   --escala 2 (pontos por pixel; padrao 1)
 //         --capturas todas|falha|nenhuma (padrao todas)   --conferir (sai com 1 se alguma tela tiver problema ou se
-//         nenhuma tela for aberta)
+//         nenhuma tela for aberta)   --estrito (os achados da auditoria visual tambem reprovam)
+//         --obra N   --medicao N   --empresa N   o registro que entra nos caminhos com `:obra`, `:medicao` e `:empresa`,
+//         no lugar do primeiro do banco (para ver outra obra numa copia do banco; --medicao pede --obra)
+//         --rotulo nome   as capturas e o relato saem em `<saida>/capturas/<nome>/`, sem apagar os da rodada de antes
 //
 // Para cada perfil e largura: abre a tela de login, entra com o usuario de teste (digitando, como uma pessoa) e
 // abre cada tela de `telas.mjs` numa aba nova. Uma tela tem PROBLEMA quando: da' erro de script ou de console;
 // alguma resposta volta 4xx ou 5xx (fora as de RESPOSTAS_ESPERADAS); o conteudo principal nao aparece; fica em
 // "Carregando…"; mostra a tela de erro ("A tela parou de responder") ou um aviso de erro; cai no login ou em
-// outra tela; ou fica em branco. Rolagem lateral vira aviso, nao problema.
+// outra tela; fica em branco; ou a pagina rola de lado. (A tela com `erro` ou `parou` e' a que DEVE mostrar isso.) Uma tela de `telas.mjs` pode trazer `passos` (cliques que
+// abrem uma janela ou um formulario) e `simular` (respostas da API trocadas, para ver a tela vazia ou a de erro).
+// A auditoria visual (`auditoria.mjs`: texto cortado, fora da vista ou sobreposto, letra e canto fora da fundacao)
+// roda em cada tela e largura e sai como aviso; o resumo do fim junta os achados por tipo.
 //
 // Grava em `<saida>/capturas/`: `<perfil>/<tela>-<largura>.png` (pagina inteira), `login-<largura>.png` e o
 // `relato.json` com o que foi visto em cada tela. A saida de uma copia do banco tem dado real: mora fora do
@@ -25,7 +31,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { LARGURAS, LOGIN, PERFIS, RESPOSTAS_ESPERADAS, TELAS, telasDoPerfil } from "./telas.mjs";
+import { auditar, REPROVA } from "./auditoria.mjs";
+import { LARGURAS, LOGIN, MENU, PERFIS, RESPOSTAS_ESPERADAS, ROTAS_FORA, TELAS, telasDoPerfil } from "./telas.mjs";
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ESPERA = 15000;          // ms para o conteudo principal aparecer
@@ -41,8 +48,8 @@ function recusar(mensagem) {
 // --- opcoes -----------------------------------------------------------------------------------------------------
 
 const args = process.argv.slice(2);
-const COM_VALOR = ["--perfis", "--telas", "--larguras", "--capturas", "--escala"];
-const SEM_VALOR = ["--conferir"];
+const COM_VALOR = ["--perfis", "--telas", "--larguras", "--capturas", "--escala", "--obra", "--medicao", "--empresa", "--rotulo"];
+const SEM_VALOR = ["--conferir", "--estrito"];
 for (let i = 0; i < args.length; i++) {
   if (COM_VALOR.includes(args[i])) i++;
   else if (!SEM_VALOR.includes(args[i])) recusar(`opção desconhecida: ${args[i]} (veja o cabeçalho de scripts/prova/capturar.mjs)`);
@@ -64,7 +71,32 @@ const capturas = opcao("--capturas") ?? "todas";
 if (!["todas", "falha", "nenhuma"].includes(capturas)) recusar("--capturas aceita todas, falha ou nenhuma");
 const escala = Number(opcao("--escala") ?? 1);
 if (![1, 2, 3].includes(escala)) recusar("--escala aceita 1, 2 ou 3");
+const inteiro = nome => {
+  const v = opcao(nome);
+  if (v === undefined) return null;
+  if (!/^[1-9]\d*$/.test(v)) recusar(`${nome} pede o número do registro`);
+  return Number(v);
+};
+const pedidos = { obra: inteiro("--obra"), medicao: inteiro("--medicao"), empresa: inteiro("--empresa") };
+if (pedidos.medicao !== null && pedidos.obra === null) recusar("--medicao pede --obra (a medição é de uma obra)");
+const rotulo = opcao("--rotulo") ?? "";
+if (rotulo && !/^[\w-]+$/.test(rotulo)) recusar("--rotulo aceita letras, números, hífen e sublinhado");
 const conferir = args.includes("--conferir");
+const estrito = args.includes("--estrito");
+
+// Toda tela do roteador (`frontend/src/rota.tsx`) tem de estar em TELAS ou em ROTAS_FORA, com o motivo: a tela aberta
+// por link ou por aba, que o menu nao cobra, nao sai da prova em silencio.
+{
+  const fonte = fs.readFileSync(path.join(RAIZ, "frontend", "src", "rota.tsx"), "utf8");
+  const tipo = fonte.match(/export type Rota =([\s\S]*?);\r?\n/)?.[1] ?? "";
+  const rotas = [...tipo.matchAll(/tela: "([a-z-]+)"/g)].map(m => m[1]);
+  if (!rotas.length) recusar("não achei as telas de frontend/src/rota.tsx (mudou o tipo Rota?)");
+  const cobertas = new Set([...TELAS.map(t => t.rota), ...Object.keys(ROTAS_FORA)]);
+  const semTela = rotas.filter(r => !cobertas.has(r));
+  if (semTela.length) {
+    recusar(`rota sem tela na prova: ${semTela.join(", ")}. Ponha em TELAS ou em ROTAS_FORA (scripts/prova/telas.mjs).`);
+  }
+}
 
 // --- servidor de prova ------------------------------------------------------------------------------------------
 
@@ -79,7 +111,7 @@ const servidor = JSON.parse(fs.readFileSync(arquivoServidor, "utf8"));
 if (!servidor.frontend) recusar("O servidor de prova subiu com --sem-frontend: não há tela para abrir.");
 const BASE = servidor.base;
 const SENHA = fs.readFileSync(servidor.senha, "utf8").trim();
-const SAIDA = path.join(servidor.saida, "capturas");
+const SAIDA = path.join(servidor.saida, "capturas", rotulo);
 
 let chromium;
 try {
@@ -111,11 +143,13 @@ async function abrirNavegador() {
 
 // --- o que reprova uma tela ---------------------------------------------------------------------------------------
 
-function vigiar(pagina, onde) {
+function vigiar(pagina, onde, simuladas = [], parou = false) {
   const problemas = [];
-  pagina.on("pageerror", e => problemas.push(`erro de script: ${e.message}`));
+  const simulada = (metodo, caminho) => simuladas.some(s => (s.metodo ?? "GET") === metodo && s.caminho.test(caminho));
+  // na tela que cai de proposito (`parou`), o erro de script e o do console sao a propria queda
+  pagina.on("pageerror", e => { if (!parou) problemas.push(`erro de script: ${e.message}`); });
   pagina.on("console", m => {
-    if (m.type() !== "error") return;
+    if (m.type() !== "error" || parou) return;
     // a resposta 4xx/5xx ja' e' julgada abaixo, com a lista de esperadas; esta linha do console e' a mesma coisa
     if (m.text().startsWith("Failed to load resource: the server responded with a status of")) return;
     problemas.push(`erro no console: ${m.text().slice(0, 300)}`);
@@ -123,6 +157,7 @@ function vigiar(pagina, onde) {
   pagina.on("response", r => {
     if (r.status() < 400) return;
     const caminho = new URL(r.url()).pathname, metodo = r.request().method();
+    if (simulada(metodo, caminho)) return;      // a resposta de erro que a propria tela da prova pediu
     const esperada = RESPOSTAS_ESPERADAS.some(e => e.metodo === metodo && e.status === r.status()
       && e.caminho.test(caminho) && (!e.so || e.so === onde));
     if (!esperada) problemas.push(`resposta ${r.status()} em ${metodo} ${caminho}`);
@@ -162,25 +197,55 @@ async function estadoDaTela(pagina) {
       caminho: location.pathname,
       login: !!document.querySelector("form.entrar__form"),
       falha: falha ? limpo(falha) : null,
-      avisosDeErro: [...document.querySelectorAll("#conteudo .erro[role=alert]")].filter(visivel).map(limpo),
+      // a falha de leitura ou de acao e' a peca Falha (.aviso--falha); o aviso critico de estado nao e' erro
+      avisosDeErro: [...document.querySelectorAll("#conteudo .aviso--falha [role=alert], dialog[open] .aviso--falha [role=alert]")].filter(visivel).map(limpo),
       texto: (conteudo?.innerText ?? "").trim().length,
       larguraDaPagina: document.documentElement.scrollWidth,
       larguraDaJanela: window.innerWidth,
+      // no celular a casca deixa o conteudo rolar dentro do <main> em vez de alargar a pagina: e' rolagem lateral igual
+      sobraNoConteudo: (() => { const m = document.querySelector("main"); return m ? m.scrollWidth - m.clientWidth : 0; })(),
     };
   });
 }
 
-function julgar(estado, caminhoEsperado, problemas, avisos) {
-  if (estado.falha) problemas.push(`tela de erro: ${estado.falha}`);
+function julgar(estado, caminhoEsperado, problemas, erroEsperado = false, parou = false) {
+  if (parou) {
+    if (!estado.falha) problemas.push("a queda simulada não mostrou a tela \"A tela parou de responder\"");
+  } else if (estado.falha) problemas.push(`tela de erro: ${estado.falha}`);
   else if (estado.login) problemas.push("caiu na tela de login");
   else {
     const esperado = new URL(caminhoEsperado, BASE).pathname;
     if (estado.caminho !== esperado) problemas.push(`abriu ${estado.caminho} no lugar de ${esperado}`);
     if (estado.texto < TEXTO_MINIMO) problemas.push("tela em branco (sem texto no conteúdo)");
   }
-  for (const a of estado.avisosDeErro) problemas.push(`aviso de erro na tela: ${a}`);
+  if (erroEsperado && !estado.avisosDeErro.length) problemas.push("a falha simulada não apareceu na tela como aviso de erro");
+  if (!erroEsperado) for (const a of estado.avisosDeErro) problemas.push(`aviso de erro na tela: ${a}`);
   if (estado.larguraDaPagina > estado.larguraDaJanela + 1) {
-    avisos.push(`rola de lado: página com ${estado.larguraDaPagina} px numa janela de ${estado.larguraDaJanela} px`);
+    problemas.push(`rola de lado: página com ${estado.larguraDaPagina} px numa janela de ${estado.larguraDaJanela} px`);
+  }
+  if (estado.sobraNoConteudo > 1) problemas.push(`rola de lado: o conteúdo passa ${estado.sobraNoConteudo} px da largura da tela`);
+}
+
+// Os achados da auditoria visual entram como aviso; com --estrito, os de REPROVA viram problema.
+async function conferirVisual(pagina, problemas, avisos) {
+  const achados = await auditar(pagina).catch(e => { avisos.push(`sem auditoria visual: ${e.message}`); return []; });
+  for (const a of achados) {
+    const frase = `${a.tipo}: ${a.onde}${a.texto ? ` "${a.texto}"` : ""}${a.detalhe ? ` (${a.detalhe})` : ""}`;
+    (estrito && REPROVA.includes(a.tipo) ? problemas : avisos).push(frase);
+  }
+  return achados;
+}
+
+// Os passos de uma tela: cliques e preenchimentos que abrem a janela ou o formulario a conferir.
+async function darPassos(pagina, passos) {
+  for (const passo of passos) {
+    if (passo.clicar) await pagina.locator(passo.clicar).first().click({ timeout: ESPERA });
+    else if (passo.preencher) await pagina.locator(passo.preencher[0]).first().fill(passo.preencher[1], { timeout: ESPERA });
+    else if (passo.arquivo) {
+      await pagina.locator(passo.arquivo[0]).first().setInputFiles(
+        { name: passo.arquivo[1], mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n% arquivo de prova, sem conteudo\n") },
+        { timeout: ESPERA });
+    }
   }
 }
 
@@ -217,6 +282,8 @@ async function entrar(contexto, perfil, largura) {
   try {
     await pagina.goto(BASE + LOGIN.caminho, { waitUntil: "load" });
     await pagina.locator(LOGIN.espera).waitFor({ state: "visible", timeout: ESPERA });
+    await pagina.evaluate(() => document.fonts.ready).catch(() => {});
+    await conferirVisual(pagina, problemas, avisos);
     if (capturas === "todas" && !fotosDoLogin.has(largura)) {
       fotosDoLogin.add(largura);
       captura = path.join(SAIDA, `login-${largura}.png`);
@@ -228,12 +295,12 @@ async function entrar(contexto, perfil, largura) {
     await pagina.locator("#conteudo").waitFor({ state: "visible", timeout: ESPERA });
     entrou = true;
     // item do menu sem tela na lista reprova: e' o que mantem `telas.mjs` em dia quando o menu muda
-    const menu = await pagina.locator("nav.trilho a.trilho__item").evaluateAll(as => as.map(a => new URL(a.href).pathname));
+    const menu = await pagina.locator(MENU).evaluateAll(as => as.map(a => new URL(a.href).pathname));
     const cobertos = telasDoPerfil(perfil).map(t => t.menu ?? t.caminho);
     for (const item of menu.filter(m => !cobertos.includes(m))) {
       problemas.push(`o menu de ${perfil} tem ${item} e scripts/prova/telas.mjs não tem tela para ele`);
     }
-    if (menu.length === 0) problemas.push("o menu não tem nenhum item (mudou o seletor nav.trilho a.trilho__item?)");
+    if (menu.length === 0) problemas.push(`o menu não tem nenhum item (mudou o seletor ${MENU}, em telas.mjs?)`);
   } catch (e) {
     problemas.push(`não entrou como ${perfil}: ${String(e.message ?? e).split("\n")[0]}`);
     if (capturas !== "nenhuma") {
@@ -259,8 +326,20 @@ async function registros(contexto) {
     if (medicoes.length) { obra = c.id; medicao = medicoes[0].id; break; }
   }
   obra ??= contratos[0]?.id ?? null;
-  const empresas = await ler("/api/entidades");
-  return { obra, medicao, empresa: empresas[0]?.id ?? null };
+  // --obra e --medicao: outra obra da copia do banco, no lugar da primeira
+  if (pedidos.obra !== null) {
+    obra = contratos.some(c => c.id === pedidos.obra) ? pedidos.obra : null;
+    const medicoes = obra === null ? [] : await ler(`/api/contratos/${obra}/medicoes`);
+    medicao = pedidos.medicao === null ? medicoes[0]?.id ?? null : medicoes.find(m => m.id === pedidos.medicao)?.id ?? null;
+  }
+  // a empresa da pagina de Documentos: a primeira com certidao exigida (a que nao tem nenhuma abre uma pagina sem
+  // o que conferir, e numa copia do banco a primeira de `/api/entidades` costuma ser assim)
+  const documentos = await ler("/api/documentos");
+  const empresas = documentos.empresas ?? [];
+  const empresa = empresas.find(e => (e.certidoes ?? []).some(c => c.exigida)) ?? empresas[0];
+  const daEmpresa = pedidos.empresa === null ? empresa?.entidade_id ?? null
+    : empresas.find(e => e.entidade_id === pedidos.empresa)?.entidade_id ?? null;
+  return { obra, medicao, empresa: daEmpresa };
 }
 
 async function abrirTela(contexto, perfil, largura, tela, reg) {
@@ -272,14 +351,34 @@ async function abrirTela(contexto, perfil, largura, tela, reg) {
       problemas: conferir ? [frase] : [], avisos: conferir ? [] : [frase] });
     return;
   }
-  const caminho = tela.caminho.replace(/:(\w+)/g, (_, n) => String(reg[n]));
+  const preencher = c => c.replace(/:(\w+)/g, (_, n) => String(reg[n]));
+  const caminho = preencher(tela.caminho);
   const pagina = await contexto.newPage();
-  const problemas = vigiar(pagina, tela.id), avisos = [], t0 = Date.now();
-  let captura = null;
+  const simuladas = tela.simular ?? [];
+  const problemas = vigiar(pagina, tela.id, simuladas, tela.parou === true), avisos = [], t0 = Date.now();
+  let captura = null, achados = [];
   try {
+    for (const s of simuladas) {
+      await pagina.route(u => u.pathname.startsWith("/api/") && s.caminho.test(u.pathname), (rota, pedido) => {
+        if (pedido.method() !== (s.metodo ?? "GET")) return rota.fallback();
+        // `ajustar` muda a resposta verdadeira (um campo, um estado); `corpo` a troca inteira. Os dois podem ser
+        // funcao dos registros da prova (obra, medicao, empresa).
+        if (s.ajustar) {
+          return rota.fetch().then(async r => rota.fulfill({ response: r, json: s.ajustar(await r.json(), reg) }));
+        }
+        const corpo = typeof s.corpo === "function" ? s.corpo(reg) : s.corpo ?? {};
+        return rota.fulfill({ status: s.status ?? 200, contentType: "application/json", body: JSON.stringify(corpo) });
+      });
+    }
     await pagina.goto(BASE + caminho, { waitUntil: "load" });
-    await assentar(pagina, tela.espera, problemas);
-    julgar(await estadoDaTela(pagina), caminho, problemas, avisos);
+    await assentar(pagina, tela.passos ? (tela.antes ?? "#conteudo") : tela.espera, problemas);
+    if (tela.passos) {
+      await darPassos(pagina, tela.passos);
+      await assentar(pagina, tela.espera, problemas);
+    }
+    // `destino`: a tela que so' leva a outra (o endereco antigo do envio da nota abre a pagina da medicao)
+    julgar(await estadoDaTela(pagina), preencher(tela.destino ?? tela.caminho).split("?")[0], problemas, tela.erro === true, tela.parou === true);
+    achados = await conferirVisual(pagina, problemas, avisos);
   } catch (e) {
     problemas.push(`não abriu: ${String(e.message ?? e).split("\n")[0]}`);
   }
@@ -289,7 +388,7 @@ async function abrirTela(contexto, perfil, largura, tela, reg) {
     await fotografar(pagina, captura, largura).catch(e => { avisos.push(`sem captura: ${e.message}`); captura = null; });
   }
   await pagina.close();
-  registrar({ perfil, largura, tela: tela.id, caminho, ms, problemas, avisos, captura });
+  registrar({ perfil, largura, tela: tela.id, caminho, ms, problemas, avisos, captura, achados });
 }
 
 async function percorrer(navegador, perfil) {
@@ -330,6 +429,22 @@ fs.writeFileSync(path.join(SAIDA, "relato.json"), JSON.stringify({
 console.log(`\n${relato.length} tela(s) abertas em ${Math.round((Date.now() - inicio) / 1000)} s; `
   + `${comProblema.length} com problema. Relato: ${path.join(SAIDA, "relato.json")}`);
 for (const i of comProblema) console.log(`  FALHA ${i.perfil} ${i.largura} ${i.tela}: ${i.problemas[0]}`);
+// resumo da auditoria visual: cada achado uma vez, com as telas e larguras em que apareceu
+const porAchado = new Map();
+for (const i of relato) {
+  for (const a of i.achados ?? []) {
+    const chave = `${a.tipo}: ${a.onde}${a.detalhe ? ` (${a.detalhe})` : ""}`;
+    if (!porAchado.has(chave)) porAchado.set(chave, { texto: a.texto, onde: new Set() });
+    porAchado.get(chave).onde.add(`${i.tela}@${i.largura}`);
+  }
+}
+if (porAchado.size) {
+  console.log(`\nauditoria visual: ${porAchado.size} achado(s)`);
+  for (const [chave, v] of [...porAchado].sort()) {
+    const onde = [...v.onde];
+    console.log(`  ${chave}${v.texto ? ` "${v.texto}"` : ""}\n      em ${onde.slice(0, 6).join(", ")}${onde.length > 6 ? ` e mais ${onde.length - 6}` : ""}`);
+  }
+} else console.log("\nauditoria visual: nada achado");
 // conferencia que nao abriu tela nenhuma (fora o login) nao conferiu nada: reprova, em vez de passar vazia
 const semTela = !relato.some(i => i.tela !== LOGIN.id);
 if (conferir && semTela) {

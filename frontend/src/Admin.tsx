@@ -5,22 +5,23 @@ import { rotuloPerfil } from "./navegacao";
 import CaixaAviso from "./CaixaAviso";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import {
-  ABAS_ADMIN, type PendenciasCadastro, campoDoErroDeUsuario, CATEGORIAS_REC, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, pessoaDoEvento,
+  ABAS_ADMIN, type PendenciasCadastro, campoDoErroDeUsuario, CATEGORIAS_REC, completarRec, contagemRec, contaRec, filtrarEventos, juntarPaginaRec, nfsPorEmissao, objetoDaCorrecaoDeNota, pendenciasAgrupadas, pessoaDoEvento,
   quantidadeRec,
   reconciliacaoDaObra, rotaDoObjeto, rotuloAcao, rotuloObjeto, rotuloRec, urlPaginaRec,
   type CategoriaRec, type Evento, type Reconciliacao,
 } from "./administracao";
 import { api, mensagemDeErro } from "./api";
-import { IconeAlerta } from "./icones";
+import Falha from "./Falha";
 import { nomeDaObra, type ObraLista } from "./listaObras";
 import { tituloMedicao } from "./medicao";
-import { brl, ROTULO_ESTADO } from "./Medicoes";
+import { brl, SeloDoEstado } from "./Medicoes";
 import { trocarBusca, type AbaAdmin, type Busca } from "./rota";
 import { Link } from "./Link";
 import { fmtCompetencia, fmtDataHora, fmtDataPura, fmtDuracao, fmtHora } from "./tempo";
 import "./admin.css";
 import Rolagem from "./Rolagem";
-import Selo from "./Selo";
+import Selo, { Glifo } from "./Selo";
+import type { Situacao } from "./situacao";
 import { Abas } from "./Topo";
 
 // Administracao (NAVEGACAO.md › Administracao), em abas na URL: Saude (a padrao: o RM, a reconciliacao em contagens e
@@ -98,39 +99,34 @@ function falhaDeCarga(e: unknown): string {
 
 
 function Erro({ texto, id }: { texto: string; id?: string }) {
-  return <div className="cartao__corpo"><p className="erro" role="alert" id={id}><IconeAlerta className="icone icone--p" />{texto}</p></div>;
+  return <div className="cartao__corpo"><Falha id={id}>{texto}</Falha></div>;
 }
 
 // F-65: o resultado de uma rodada ou de um servico no vocabulario unico OK / Falhou / Rodando (cabeca do cartao e tabela)
 function SeloRodada({ estado }: { estado: string }) {
   return (
-    <Selo classe={estado === "success" ? "selo--ok" : estado === "failed" ? "selo--acao" : ""}>
+    <Selo situacao={estado === "success" ? "feito" : estado === "failed" ? "critico" : estado === "running" ? "andamento" : undefined}>
       {ROTULO_ESTADO_RODADA[estado] ?? estado}
     </Selo>
   );
 }
 
-// F-87: o estado da medicao em ponto + palavra (a mesma gramatica do `Estado` da medicao, sem o final e o cadeado)
-function EstadoMedicao({ estado }: { estado: string }) {
-  return (
-    <span className={`estado estado--${estado}`}>
-      <span className="estado__ponto" aria-hidden="true" />{ROTULO_ESTADO[estado] ?? estado}
-    </span>
-  );
-}
 
 /* ------------------------------------------------------------------- saude */
 
-type Situacao = "ok" | "atencao" | "acao" | "neutra";
-type Cartao = [titulo: string, valor: string, nota: string, situacao: Situacao];
+// #768: as quatro situacoes da fundacao (feito, andamento, breve, critico), cada uma com o selo dela (glifo + palavra);
+// "neutra" e' o que nao tem situacao a afirmar (carregando, nao configurado, sem leitura): fica sem selo.
+type SituacaoSaude = Situacao | "neutra";
+type Cartao = [titulo: string, valor: string, nota: string, situacao: SituacaoSaude, palavra?: string];
+const PALAVRA_SITUACAO: Record<Situacao, string> = { feito: "Em dia", andamento: "Em andamento", breve: "Atenção", critico: "Falhou" };
 
-/** Um cartao de situacao: ponto colorido + titulo + o valor (a hora) + a nota, so' quando ha' falha ou atraso. */
-function CartaoSituacao({ titulo, valor, nota, situacao }: { titulo: string; valor: string; nota: string; situacao: Situacao }) {
+/** Um item de situacao: titulo, o valor (a hora), o selo da situacao e a nota, so' quando ha' falha ou atraso. */
+function CartaoSituacao({ titulo, valor, nota, situacao, palavra }: { titulo: string; valor: string; nota: string; situacao: SituacaoSaude; palavra?: string }) {
   return (
-    <li className={`cartao situacao situacao--${situacao}`}>
-      <span className="situacao__ponto" aria-hidden="true" />
+    <li className={`situacao situacao--${situacao}`}>
       <h2 className="situacao__titulo">{titulo}</h2>
-      <span className="situacao__valor">{valor}</span>
+      <span className="situacao__valor num">{valor}</span>
+      {situacao !== "neutra" && <Selo situacao={situacao}>{palavra ?? PALAVRA_SITUACAO[situacao]}</Selo>}
       {nota && <span className="situacao__nota">{nota}</span>}
     </li>
   );
@@ -143,6 +139,20 @@ function backupFalhou(b: Backup | null | undefined): boolean {
     || !!b.ultima_copia_dono_erro || !!b.copia_dono_atrasada || !!b.ultimo_envio_copia_dono_erro);
 }
 
+// O item "Ultimo backup" diz o que falhou ou atrasou. Falha do backup em si (snapshot e copias) e' critica; a copia do
+// dono atrasada ou com erro, que tem o bloco dela no cartao Backup, so' pede atencao: o backup do banco esta' em dia.
+function situacaoDoBackup(b: Backup): [nota: string, situacao: Situacao, palavra?: string] {
+  if (b.atrasado) return ["atrasado: sem snapshot recente", "critico", "Atrasado"];
+  if (b.ultimo_snapshot_erro) return ["o último snapshot falhou", "critico"];
+  if (b.ultima_copia_externa_erro) return ["a cópia externa falhou", "critico"];
+  if (b.ultima_copia_arquivos_erro) return ["a cópia dos arquivos falhou", "critico"];
+  if (b.ultima_copia_externa_arquivos_erro) return ["a cópia externa dos arquivos falhou", "critico"];
+  if (b.ultima_copia_dono_erro) return ["a cópia do dono falhou", "breve"];
+  if (b.copia_dono_atrasada) return ["cópia do dono atrasada", "breve"];
+  if (b.ultimo_envio_copia_dono_erro) return ["o envio da cópia do dono falhou", "breve"];
+  return ["", "feito"];
+}
+
 function Situacoes({ status, erroCarga, rodando, b, siga }: {
   status: StatusRm | null; erroCarga: string; rodando: boolean; b: Backup | null | undefined; siga: SaudeSiga | null | undefined;
 }) {
@@ -152,43 +162,40 @@ function Situacoes({ status, erroCarga, rodando, b, siga }: {
   // 1. ultimo backup
   const backup: Cartao = b === undefined ? neutro(T_BACKUP, "carregando…", "")
     : b === null ? neutro(T_BACKUP, "não foi possível ler", NAO_LEU)
-    : [
-      T_BACKUP, b.ultimo_backup ? fmtDataHora(b.ultimo_backup) : "—",
-      b.atrasado ? "atrasado: sem snapshot recente" : backupFalhou(b) ? "uma das cópias falhou" : "",
-      backupFalhou(b) ? "acao" : "ok",
-    ];
+    : [T_BACKUP, b.ultimo_backup ? fmtDataHora(b.ultimo_backup) : "—", ...situacaoDoBackup(b)];
   // 2. ultima copia externa dos arquivos (so' existe com pasta externa)
   const externa: Cartao = b === undefined ? neutro(T_EXTERNA, "carregando…", "")
     : b === null ? neutro(T_EXTERNA, "não foi possível ler", NAO_LEU)
     : b.ultima_copia_externa_arquivos_erro
-      ? [T_EXTERNA, b.ultima_copia_externa_arquivos ? fmtDataHora(b.ultima_copia_externa_arquivos) : "—", "a última tentativa falhou", "acao"]
+      ? [T_EXTERNA, b.ultima_copia_externa_arquivos ? fmtDataHora(b.ultima_copia_externa_arquivos) : "—", "a última tentativa falhou", "critico"]
     : !b.copia_externa_configurada ? neutro(T_EXTERNA, "—", "")
     : b.ultima_copia_externa_arquivos
-      ? [T_EXTERNA, fmtDataHora(b.ultima_copia_externa_arquivos), "", "ok"]
-    : [T_EXTERNA, "nenhuma", "", "atencao"];
+      ? [T_EXTERNA, fmtDataHora(b.ultima_copia_externa_arquivos), "", "feito"]
+    : [T_EXTERNA, "nenhuma", "", "breve"];
   // 3. sincronizacao com o RM
   const rodadas = status?.rodadas ?? [];
   const ultima = rodadas[0] ?? null;
   const rm: Cartao = status === null ? neutro(T_RM, erroCarga ? "não foi possível ler" : "carregando…", erroCarga ? NAO_LEU : "")
     : !status.configurado ? neutro(T_RM, "não configurado", "")
-    : rodando || status.em_andamento || ultima?.estado === "running" ? neutro(T_RM, "rodando", "")
+    : rodando || status.em_andamento || ultima?.estado === "running" ? [T_RM, "rodando", "", "andamento"]
     : ultima === null ? neutro(T_RM, "—", "")
     : ultima.estado === "failed"
-      ? [T_RM, `falhou em ${fmtDataHora(ultima.iniciado_em)}`, "", "acao"]
+      ? [T_RM, `falhou em ${fmtDataHora(ultima.iniciado_em)}`, "", "critico"]
+    // #755: a rodada terminou, mas recusou uma exclusao em massa; o aviso inteiro esta' no cartao das rodadas
     : status.exclusao_aviso
-      ? [T_RM, fmtDataHora(ultima.terminado_em ?? ultima.iniciado_em), "exclusão em massa recusada", "atencao"]
-    : [T_RM, fmtDataHora(ultima.terminado_em ?? ultima.iniciado_em), "", "ok"];
+      ? [T_RM, fmtDataHora(ultima.terminado_em ?? ultima.iniciado_em), "exclusão em massa recusada", "breve"]
+    : [T_RM, fmtDataHora(ultima.terminado_em ?? ultima.iniciado_em), "", "feito"];
   // 4. monitor do SIGA (issue #330): a hora da ultima leitura e quantos processos ele acompanha
   const monitor: Cartao = siga === undefined ? neutro(T_SIGA, "carregando…", "")
     : siga === null ? neutro(T_SIGA, "não foi possível ler", NAO_LEU)
     : siga.ultima_leitura === null ? neutro(T_SIGA, "—", "")
     : [T_SIGA, fmtDataHora(siga.ultima_leitura),
       `${siga.processos} ${siga.processos === 1 ? "processo" : "processos"}${siga.atrasado ? ", sem leitura recente" : ""}`,
-      siga.atrasado ? "acao" : "ok"];
+      siga.atrasado ? "critico" : "feito", siga.atrasado ? "Atrasado" : undefined];
   return (
     <ul className="situacoes" aria-label="Situação do servidor">
-      {[backup, externa, rm, monitor].map(([titulo, valor, nota, situacao]) => (
-        <CartaoSituacao key={titulo} titulo={titulo} valor={valor} nota={nota} situacao={situacao} />
+      {[backup, externa, rm, monitor].map(([titulo, valor, nota, situacao, palavra]) => (
+        <CartaoSituacao key={titulo} titulo={titulo} valor={valor} nota={nota} situacao={situacao} palavra={palavra} />
       ))}
     </ul>
   );
@@ -196,6 +203,8 @@ function Situacoes({ status, erroCarga, rodando, b, siga }: {
 
 function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: string }) {
   const ultima = status?.rodadas[0] ?? null;
+  // #768: sem RM configurado e sem rodada, o painel seria so' o titulo; o motivo ja' esta' ao lado do botao
+  if (status && !status.configurado && status.rodadas.length === 0 && !erroCarga && !status.custo_aviso) return null;
   return (
     <section className="cartao" aria-labelledby="titulo-rm">
       <div className="cartao__cabeca cartao__cabeca--quebra">
@@ -203,14 +212,14 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
       </div>
       {erroCarga && <Erro texto={erroCarga} />}
 
-      {status?.custo_aviso && <p className="campo__nota situacao__erro" role="status">{status.custo_aviso}</p>}
-      {status?.exclusao_aviso && <p className="campo__nota situacao__erro" role="status">{status.exclusao_aviso}</p>}
+      {status?.custo_aviso && <div className="cartao__corpo"><CaixaAviso nivel="atencao" role="status">{status.custo_aviso}</CaixaAviso></div>}
+      {status?.exclusao_aviso && <div className="cartao__corpo"><CaixaAviso nivel="atencao" role="status">{status.exclusao_aviso}</CaixaAviso></div>}
 
       {status?.configurado && ultima === null && <div className="vazio vazio--curto"><p>Nenhuma rodada.</p></div>}
 
       {status && status.rodadas.length > 0 && (
         <Rolagem rotulo="Rodadas de sincronização com o RM">
-          <table className="tabela">
+          <table className="tabela tabela--densa adm-rodadas">
             <caption className="sr-only">Últimas rodadas de sincronização com o RM</caption>
             <thead>
               <tr>
@@ -228,7 +237,8 @@ function Rodadas({ status, erroCarga }: { status: StatusRm | null; erroCarga: st
                   <td>{r.disparo}</td>
                   <td className="num">{r.terminado_em ? fmtDuracao(r.iniciado_em, r.terminado_em) : "—"}</td>
                   <td>
-                    <SeloRodada estado={r.estado} />
+                    {/* a rodada que deu certo e' o estado comum: so' a palavra; o selo fica para a que falhou ou roda */}
+                    {r.estado === "success" ? ROTULO_ESTADO_RODADA.success : <SeloRodada estado={r.estado} />}
                     {r.erro && <div className="campo__nota situacao__erro">{r.erro}</div>}
                     {r.custo_erro && <div className="campo__nota situacao__erro">Custos e estoque não atualizados.</div>}
                   </td>
@@ -254,7 +264,7 @@ function ReconciliacaoResumo({ versao }: { versao: number }) {
   const [rec, setRec] = useState<Reconciliacao | null>(null);
   const [erro, setErro] = useState("");
   useEffect(() => {
-    api<Reconciliacao>("/api/rm/reconciliacao").then(r => { setRec(r); setErro(""); }).catch(e => setErro(falhaDeCarga(e)));
+    api<Reconciliacao>("/api/rm/reconciliacao").then(r => { setRec(completarRec(r)); setErro(""); }).catch(e => setErro(falhaDeCarga(e)));
   }, [versao]);
   return (
     <section className="cartao" aria-labelledby="titulo-rec-resumo">
@@ -270,7 +280,7 @@ function ReconciliacaoResumo({ versao }: { versao: number }) {
             const dado = (
               <>
                 <span className="dado__valor num">{quantidadeRec(n)}</span>{" "}
-                <span className="campo__nota">{rotuloRec(c.id, n)}</span>
+                <span className="contagem__rotulo">{rotuloRec(c.id, n)}</span>
               </>
             );
             return (
@@ -341,9 +351,10 @@ function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
   const liberar = presa ?? (b.copia_dono_presa ? { id: b.copia_dono_presa.id, reserva: b.copia_dono_presa } : null);
   return (
     <div className="cartao__corpo pilha pilha--curta">
-      <p>
+      <p className="saude-dado">
         {!b.copia_dono_configurada ? "Cópia do dono não configurada"
-          : `Cópia do dono: ${b.ultima_copia_dono ? fmtDataHora(b.ultima_copia_dono) : "—"}`}
+          : <><span className="saude-dado__rotulo">Cópia do dono<span className="sr-only">: </span></span>
+              <span className="saude-dado__valor num">{b.ultima_copia_dono ? fmtDataHora(b.ultima_copia_dono) : "—"}</span></>}
       </p>
       {b.copia_dono_configurada && b.copia_dono_atrasada && (
         <CaixaAviso nivel="critico">
@@ -355,13 +366,13 @@ function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
         erroEm={b.ultima_copia_dono_erro_em ?? null} />
       <LinhaBackup rotulo="Envio da cópia do dono" em={b.ultimo_envio_copia_dono ?? null}
         erro={b.ultimo_envio_copia_dono_erro ?? null} erroEm={b.ultimo_envio_copia_dono_erro_em ?? null} />
-      {erro && <Erro texto={erro} />}
+      {erro && <Falha>{erro}</Falha>}
       {liberar && (
         <LiberarEnvio key={liberar.id} tabela="copia_dono_envios" id={liberar.id} reserva={liberar.reserva}
           textoLiberado={LIBERADA}
           aoLiberar={() => { setErro(""); setPresa(null); setEnviada(LIBERADA); aoGerar(); }} />
       )}
-      <div role="status">{enviada && !erro && <p className="campo__nota">{enviada}</p>}</div>
+      <div role="status">{enviada && !erro && <p className="adm-feito"><Glifo situacao="feito" />{enviada}</p>}</div>
       <div className="acoes-saude">
         <button type="button" className="btn btn--pequeno" onClick={gerar} disabled={gerando || reenviando}>
           {gerando ? "Gerando…" : "Gerar cópia do dono agora"}
@@ -379,6 +390,9 @@ function CopiaDono({ b, aoGerar }: { b: Backup; aoGerar: () => void }) {
 // b: undefined = carregando; null = nao deu para ler
 function Backup({ b, aoGerar }: { b: Backup | null | undefined; aoGerar: () => void }) {
   const falhou = backupFalhou(b);
+  // as falhas deste bloco; a copia do dono atrasada ou com erro aparece no bloco dela, logo abaixo
+  const temLinha = !!b && (b.atrasado || !!b.ultimo_snapshot_erro || !!b.ultima_copia_externa_erro
+    || !!b.ultima_copia_arquivos_erro || !!b.ultima_copia_externa_arquivos_erro);
   return (
     <section className="cartao" aria-labelledby="titulo-backup">
       <div className="cartao__cabeca cartao__cabeca--quebra">
@@ -386,10 +400,10 @@ function Backup({ b, aoGerar }: { b: Backup | null | undefined; aoGerar: () => v
         {/* o resultado de relance: Falhou se esta atrasado ou uma das tentativas falhou; OK com backup em dia */}
         {b && (falhou ? <SeloRodada estado="failed" /> : b.ultimo_backup ? <SeloRodada estado="success" /> : null)}
       </div>
-      {(b === undefined || b === null || falhou) && (
+      {(b === undefined || b === null || temLinha) && (
         <div className="cartao__corpo pilha pilha--curta">
           {b === undefined ? <p>Carregando…</p>
-            : b === null ? <p className="campo__nota">Não foi possível ler o estado do backup; recarregue a página para tentar de novo.</p>
+            : b === null ? <Falha>Não foi possível ler o estado do backup; recarregue a página para tentar de novo.</Falha>
             : <>
                 {b.atrasado && (
                   <CaixaAviso nivel="critico" role="alert">
@@ -415,30 +429,41 @@ function Backup({ b, aoGerar }: { b: Backup | null | undefined; aoGerar: () => v
 // itens: undefined = carregando; null = nao deu para ler. Sem item, so' o selo na cabeca, como o Backup em dia; o selo
 // diz "nenhum alerta" e nao "OK" (gate Sol S1): o bloco confere os alertas que conhece, nao a seguranca inteira.
 // `fora`: quantos itens mais antigos a API deixou fora da lista (ela devolve no maximo 20, gate Sol S3).
+/** O mesmo alerta repetido (a conferencia roda todo dia e grava de novo o que continua errado) vira uma caixa so', com
+ *  a data da ultima vez, quantas vezes veio e desde quando. A ordem e' a do primeiro de cada grupo (o mais novo). */
+function alertasAgrupados(itens: ItemSeguranca[]): { nivel: string; mensagem: string; ultima: string; primeira: string; vezes: number }[] {
+  const grupos = new Map<string, { nivel: string; mensagem: string; ultima: string; primeira: string; vezes: number }>();
+  for (const i of itens) {
+    const chave = `${i.nivel}|${i.mensagem}`;
+    const g = grupos.get(chave);
+    if (!g) grupos.set(chave, { nivel: i.nivel, mensagem: i.mensagem, ultima: i.data, primeira: i.data, vezes: 1 });
+    else { g.vezes += 1; if (i.data > g.ultima) g.ultima = i.data; if (i.data < g.primeira) g.primeira = i.data; }
+  }
+  return [...grupos.values()];
+}
+
 function Seguranca({ itens, fora, aviso, alertas }: { itens: ItemSeguranca[] | null | undefined; fora: number; aviso?: string | null; alertas?: AlertasEmail | null }) {
   return (
     <section className="cartao" aria-labelledby="titulo-seguranca">
       <div className="cartao__cabeca cartao__cabeca--quebra">
         <h2 className="cartao__titulo" id="titulo-seguranca">Segurança</h2>
-        {itens?.length === 0 && <Selo classe="selo--ok">nenhum alerta</Selo>}
+        {itens?.length === 0 && <Selo situacao="feito">nenhum alerta</Selo>}
       </div>
-      {aviso && <p className="campo__nota">{aviso}</p>}
-      {/* issue #424: por que os alertas por e-mail ao dono nao saem */}
-      {alertas?.erro && (
-        <div className="cartao__corpo">
-          <CaixaAviso nivel="atencao">
-            Alertas de segurança por e-mail: {alertas.erro}.{alertas.conectar && <> <Link para={{ tela: "conta" }}>Minha conta</Link></>}
-          </CaixaAviso>
-        </div>
-      )}
-      {(itens === undefined || itens === null || itens.length > 0) && (
+      {(aviso || alertas?.erro || itens === undefined || itens === null || itens.length > 0) && (
         <div className="cartao__corpo pilha pilha--curta">
+          {aviso && <CaixaAviso nivel="atencao">{aviso}</CaixaAviso>}
+          {/* issue #424: por que os alertas por e-mail ao dono nao saem */}
+          {alertas?.erro && (
+            <CaixaAviso nivel="atencao">
+              Alertas de segurança por e-mail: {alertas.erro}.{alertas.conectar && <> <Link para={{ tela: "conta" }}>Minha conta</Link></>}
+            </CaixaAviso>
+          )}
           {itens === undefined ? <p>Carregando…</p>
-            : itens === null ? <p className="campo__nota">Não foi possível ler a segurança; recarregue a página para tentar de novo.</p>
-            : <>
-                {itens.map(i => (
-                  <CaixaAviso key={`${i.data}-${i.mensagem}`} nivel={i.nivel === "atencao" ? "atencao" : "critico"}>
-                    {i.mensagem}, em {fmtDataHora(i.data)}.
+            : itens === null ? <Falha>Não foi possível ler a segurança; recarregue a página para tentar de novo.</Falha>
+            : itens.length === 0 ? null : <>
+                {alertasAgrupados(itens).map(g => (
+                  <CaixaAviso key={`${g.nivel}-${g.mensagem}`} nivel={g.nivel === "atencao" ? "atencao" : "critico"}>
+                    {g.mensagem}, em {fmtDataHora(g.ultima)}.{g.vezes > 1 && ` ${g.vezes} vezes desde ${fmtDataHora(g.primeira)}.`}
                   </CaixaAviso>
                 ))}
                 {fora > 0 && <p>Mais {contar(fora, "alerta anterior", "alertas anteriores")}.</p>}
@@ -511,11 +536,11 @@ function Saude() {
           {rodando ? "Sincronizando…" : "Sincronizar agora"}
         </button>
         {/* so' o motivo do bloqueio do botao, quando ha' */}
-        {status && !status.configurado && <p>O RM não está configurado neste servidor.</p>}
-        {status?.configurado && !rodando && (status.em_andamento || ultima?.estado === "running") && <p>Uma rodada está em andamento.</p>}
+        {status && !status.configurado && <CaixaAviso nivel="trava" como="span">O RM não está configurado neste servidor.</CaixaAviso>}
+        {status?.configurado && !rodando && (status.em_andamento || ultima?.estado === "running") && <Selo situacao="andamento">Uma rodada está em andamento.</Selo>}
       </div>
-      {erro && <section className="cartao"><Erro texto={erro} /></section>}
-      <div role="status">{concluida && !erro && <p className="campo__nota">{concluida}</p>}</div>
+      {erro && <Falha>{erro}</Falha>}
+      <div role="status">{concluida && !erro && <p className="adm-feito"><Glifo situacao="feito" />{concluida}</p>}</div>
 
       <Rodadas status={status} erroCarga={erroCarga} />
 
@@ -538,12 +563,12 @@ function Grupo({ id, titulo, conta, carregadas, mostrando, verTodas, mais, child
 }) {
   const { piso, haMais } = conta;
   return (
-    <section className="cartao" aria-labelledby={`titulo-rec-${id}`}>
+    <section className={`cartao adm-grupo${carregadas === 0 ? " adm-grupo--vazio" : ""}`} aria-labelledby={`titulo-rec-${id}`}>
       <div className="cartao__cabeca">
         <h2 className="cartao__titulo" id={`titulo-rec-${id}`}>{titulo}</h2>
       </div>
       {/* com `piso` ainda ha' linhas por carregar: o grupo nao esta' vazio, so' a pagina carregada */}
-      {carregadas === 0 ? <div className="vazio vazio--curto"><p>{piso ? "Nenhuma linha entre as carregadas." : "Nenhuma linha."}</p></div> : children}
+      {carregadas === 0 ? <p className="adm-grupo__vazio">{piso ? "Nenhuma linha entre as carregadas." : "Nenhuma linha."}</p> : children}
       {mostrando < carregadas && <div className="cartao__corpo">{verTodas}</div>}
       {mostrando === carregadas && haMais && <div className="cartao__corpo">{mais}</div>}
     </section>
@@ -559,7 +584,7 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
   const [carregando, setCarregando] = useState<CategoriaRec | null>(null);
   const [erroMais, setErroMais] = useState<{ c: CategoriaRec; texto: string } | null>(null);
   useEffect(() => {
-    api<Reconciliacao>("/api/rm/reconciliacao").then(setRec).catch(e => setErro(falhaDeCarga(e)));
+    api<Reconciliacao>("/api/rm/reconciliacao").then(r => setRec(completarRec(r))).catch(e => setErro(falhaDeCarga(e)));
     api<ObraLista[]>("/api/contratos").then(setObras).catch(() => setObras(null));
   }, []);
 
@@ -599,7 +624,7 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
   };
   const mais = (c: CategoriaRec) => (
     <>
-      {erroMais?.c === c && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroMais.texto}</p>}
+      {erroMais?.c === c && <Falha>{erroMais.texto}</Falha>}
       <button type="button" className="btn btn--pequeno" onClick={() => carregarMais(c)} disabled={carregando !== null}>
         {carregando === c ? "Carregando…" : "Carregar mais"}
       </button>
@@ -618,12 +643,12 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
         <div className="cartao__cabeca">
           <h2 className="cartao__titulo" id="titulo-rec-filtros">Reconciliação RM × dashboard</h2>
         </div>
-        <div className="cartao__corpo filtros-avisos__linhas">
-          <p className="filtros-avisos__linha">
-            <span className="resumo__rotulo">Grupo</span>
-            <Link para={aqui} busca={com({ categoria: null })} aria-current={categoria === null ? "true" : undefined}>todos</Link>
+        <div className="cartao__corpo adm-filtros">
+          <p className="escolhas adm-filtros__grupos">
+            <span className="adm-filtros__rotulo">Grupo</span>
+            <Link className="escolha" para={aqui} busca={com({ categoria: null })} aria-current={categoria === null ? "true" : undefined}>todos</Link>
             {CATEGORIAS_REC.map(c => (
-              <Link key={c.id} para={aqui} busca={com({ categoria: c.id })} aria-current={categoria === c.id ? "true" : undefined}>{c.titulo}</Link>
+              <Link key={c.id} className="escolha" para={aqui} busca={com({ categoria: c.id })} aria-current={categoria === c.id ? "true" : undefined}>{c.titulo}</Link>
             ))}
           </p>
           <div className="form-inline">
@@ -638,7 +663,7 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
           </div>
           {/* so' a contagem do recorte na regiao viva: trocar o grupo ou a obra refaz as tabelas */}
           <span className="sr-only" role="status">{linhas === 1 ? "1 linha" : `${linhas.toLocaleString("pt-BR")} linhas`}</span>
-          {obras === null && <p className="campo__nota">Não foi possível ler as obras: o filtro por obra fica desligado e as alocações desfeitas ficam sem link. Recarregue a página para tentar de novo.</p>}
+          {obras === null && <Falha>Não foi possível ler as obras: o filtro por obra fica desligado e as alocações desfeitas ficam sem link. Recarregue a página para tentar de novo.</Falha>}
         </div>
       </section>
 
@@ -678,7 +703,7 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
                     <td>{nomeObra(m.contrato_id, m.numero_instrumento)}</td>
                     <td><Link para={{ tela: "medicao", obra: m.contrato_id, id: m.medicao_id }} secao="notas">{tituloMedicao(m)}</Link></td>
                     <td className="num">{fmtCompetencia(m.competencia)}</td>
-                    <td><EstadoMedicao estado={m.estado} /></td>
+                    <td><SeloDoEstado estado={m.estado} /></td>
                     <td className="col-num dinheiro num">{m.valor_centavos === null ? "—" : brl(m.valor_centavos)}</td>
                   </tr>
                 ))}
@@ -715,7 +740,7 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
         <Grupo id="desfeitas" titulo="Alocações desfeitas" conta={conta("desfeitas")} carregadas={d.alocacoes_desfeitas.length}
           mostrando={quantas(d.alocacoes_desfeitas.length)} verTodas={verTodas("desfeitas")} mais={mais("desfeitas")}>
           <Rolagem rotulo="Alocações desfeitas">
-            <table className="tabela">
+            <table className="tabela adm-desfeitas">
               <caption className="sr-only">NFs cuja alocação a uma medição foi desfeita, da mais recente à mais antiga</caption>
               <thead><tr><th scope="col">Obra</th><th scope="col">Medição</th><th scope="col">NF</th><th scope="col">Desfeita em</th>
                 <th scope="col">Motivo</th><th scope="col">Situação da medição</th></tr></thead>
@@ -729,7 +754,7 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
                       <td className="num">{x.numero}{x.serie ? `/${x.serie}` : ""}</td>
                       <td className="num">{fmtDataHora(x.desfeita_em)}</td>
                       <td>{x.motivo_desfazer}</td>
-                      <td><EstadoMedicao estado={x.estado} /></td>
+                      <td><SeloDoEstado estado={x.estado} /></td>
                     </tr>
                   );
                 })}
@@ -740,13 +765,13 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
       )}
 
       {mostra("recebidas") && (
-        <Grupo id="recebidas" titulo="Notas de recebimentos à mão sem baixa no RM" conta={conta("recebidas")} carregadas={d.recebidas_sem_baixa.length}
+        <Grupo id="recebidas" titulo="Notas de medições recebidas sem baixa no RM" conta={conta("recebidas")} carregadas={d.recebidas_sem_baixa.length}
           mostrando={quantas(d.recebidas_sem_baixa.length)} verTodas={verTodas("recebidas")} mais={null}>
-          <Rolagem rotulo="Notas de recebimentos à mão sem baixa no RM">
+          <Rolagem rotulo="Notas de medições recebidas sem baixa no RM">
             <table className="tabela">
-              <caption className="sr-only">NFs de medições com recebimento registrado à mão cujo título ainda está aberto no RM, uma linha por NF</caption>
+              <caption className="sr-only">NFs de medições recebidas cujo título ainda está aberto no RM, uma linha por NF</caption>
               <thead><tr><th scope="col">Obra</th><th scope="col">Medição</th><th scope="col">Recebida em</th><th scope="col">NF</th>
-                <th scope="col" className="col-num">Em aberto no RM</th></tr></thead>
+                <th scope="col">No a receber</th><th scope="col" className="col-num">Em aberto no RM</th></tr></thead>
               <tbody>
                 {d.recebidas_sem_baixa.slice(0, quantas(d.recebidas_sem_baixa.length)).map((x, i) => (
                   <tr key={`${x.medicao_id}-${x.nota_id}`} className={`linha${i % 2 === 1 ? " par" : ""}`}>
@@ -754,7 +779,39 @@ function ReconciliacaoAba({ busca }: { busca: Busca }) {
                     <td><Link para={{ tela: "medicao", obra: x.contrato_id, id: x.medicao_id }} secao="notas">{tituloMedicao(x)}</Link></td>
                     <td className="num">{x.recebida_em ? fmtDataPura(x.recebida_em) : "sem data"}</td>
                     <td className="num">{x.numero_nf}{x.serie ? `/${x.serie}` : ""}</td>
+                    {/* docs/adr/0006: so' o recebimento registrado a' mao tira a nota do a receber */}
+                    <td>{x.a_mao ? "não: recebimento à mão" : "sim"}</td>
                     <td className="col-num dinheiro num">{brl(x.falta_centavos)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Rolagem>
+        </Grupo>
+      )}
+
+      {/* docs/adr/0006: o titulo baixado no RM nao tem falta; a diferenca acima de R$ 1,00 fica a' vista aqui */}
+      {mostra("baixados") && (
+        <Grupo id="baixados" titulo="Títulos baixados no RM por valor menor" conta={conta("baixados")} carregadas={d.baixados_com_diferenca.length}
+          mostrando={quantas(d.baixados_com_diferenca.length)} verTodas={verTodas("baixados")} mais={null}>
+          <Rolagem rotulo="Títulos baixados no RM por valor menor">
+            <table className="tabela">
+              <caption className="sr-only">Títulos que o RM deu como baixados com valor baixado menor que o original, um por linha</caption>
+              <thead><tr><th scope="col">Obra</th><th scope="col">Medição</th><th scope="col">NF</th><th scope="col">Baixa em</th>
+                <th scope="col" className="col-num">Valor do título</th><th scope="col" className="col-num">Valor baixado</th>
+                <th scope="col" className="col-num">Diferença</th></tr></thead>
+              <tbody>
+                {d.baixados_com_diferenca.slice(0, quantas(d.baixados_com_diferenca.length)).map((x, i) => (
+                  <tr key={x.titulo_id} className={`linha${i % 2 === 1 ? " par" : ""}`}>
+                    <td>{nomeObra(x.contrato_id, x.numero_instrumento)}</td>
+                    <td>{x.medicao_id !== null && x.numero !== null && x.tipo !== null
+                      ? <Link para={{ tela: "medicao", obra: x.contrato_id, id: x.medicao_id }} secao="notas">{tituloMedicao({ numero: x.numero, tipo: x.tipo })}</Link>
+                      : "—"}</td>
+                    <td className="num">{x.numero_nf}{x.serie ? `/${x.serie}` : ""}</td>
+                    <td className="num">{x.data_baixa ? fmtDataPura(x.data_baixa) : "—"}</td>
+                    <td className="col-num dinheiro num">{brl(x.valor_original_centavos)}</td>
+                    <td className="col-num dinheiro num">{brl(x.valor_baixado_centavos)}</td>
+                    <td className="col-num dinheiro num">{brl(x.diferenca_centavos)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -851,8 +908,7 @@ function Usuarios({ eu }: { eu?: number }) {
               <caption className="sr-only">Usuários, com o perfil, a situação e a conta Microsoft usada para enviar e-mail</caption>
               <thead>
                 <tr>
-                  <th scope="col">Nome</th><th scope="col">E-mail</th><th scope="col">Perfil</th><th scope="col">Situação</th>
-                  <th scope="col">Bloqueio</th>
+                  <th scope="col">Nome e e-mail</th><th scope="col">Perfil</th><th scope="col">Situação</th>
                   <th scope="col">Conta Microsoft</th><th scope="col"><span className="sr-only">Últimos acessos, senha, ativar ou desativar</span></th>
                 </tr>
               </thead>
@@ -863,9 +919,10 @@ function Usuarios({ eu }: { eu?: number }) {
                   return (
                     <Fragment key={u.id}>
                     <tr className={`linha${i % 2 === 1 ? " par" : ""}`}>
-                      <td>{u.nome}</td>
-                      <td>{u.email}</td>
-                      <td>{u.id === eu ? rotuloPerfil(u.perfil) : (
+                      {/* #768: o nome e o e-mail numa celula so', para a linha caber a 1024 px com as acoes a' vista */}
+                      <td className="adm-pessoa"><span className="adm-pessoa__nome">{u.nome}</span><span className="adm-pessoa__email">{u.email}</span></td>
+                      {/* a inativa nao muda de perfil sem ser reativada (o servidor recusa): so' o texto */}
+                      <td>{u.id === eu || !u.ativo ? rotuloPerfil(u.perfil) : (
                         <select aria-label={`Perfil de ${u.nome}`} value={u.perfil}
                                 onChange={e => agir(`/api/admin/usuarios/${u.id}`, { method: "PUT", body: JSON.stringify({ perfil: e.target.value }) },
                                                     `Perfil de ${u.nome} alterado.`)}>
@@ -874,37 +931,35 @@ function Usuarios({ eu }: { eu?: number }) {
                           <option value="admin">Administrador</option>
                         </select>
                       )}</td>
-                      {/* o comum (ativo) em ponto e palavra; a excecao (inativo) no selo, para destacar da coluna (D15) */}
-                      <td>{u.ativo ? <span className="estado"><span className="estado__ponto" aria-hidden="true" />Ativo</span>
-                        : <Selo>inativo</Selo>}</td>
-                      <td>{u.bloqueado_ate ? (
-                        <span className="form-inline">
-                          <span className="num">até {fmtHora(u.bloqueado_ate)}</span>
-                          <button type="button" className="btn btn--pequeno"
-                                  onClick={() => agir(`/api/admin/usuarios/${u.id}/desbloquear`, { method: "POST" }, `${u.nome} desbloqueado.`)}>
-                            Desbloquear<span className="sr-only"> {u.nome}</span>
-                          </button>
-                        </span>
-                      ) : "—"}</td>
+                      {/* o comum (ativo) so' a palavra, em tinta; a excecao no selo, para destacar da coluna (D15): inativo, neutro;
+                          bloqueado por tentativas (#768, na mesma coluna), "vence em breve" com a hora em que o bloqueio cai */}
+                      <td><span className="adm-situacao">
+                        {!u.ativo ? <Selo>inativo</Selo>
+                          : !u.bloqueado_ate && "Ativo"}
+                        {u.bloqueado_ate && (
+                          <>
+                            <Selo situacao="breve">Bloqueado</Selo>
+                            <span className="num">até {fmtHora(u.bloqueado_ate)}</span>
+                            <button type="button" className="btn btn--pequeno"
+                                    onClick={() => agir(`/api/admin/usuarios/${u.id}/desbloquear`, { method: "POST" }, `${u.nome} desbloqueado.`)}>
+                              Desbloquear<span className="sr-only"> {u.nome}</span>
+                            </button>
+                          </>
+                        )}
+                      </span></td>
                       <td>{!u.ativo || contas === null ? "—" : c?.conectada ? (
-                        <Selo classe="selo--ok">conectada</Selo>
-                      ) : contas === undefined ? "…" : <Selo classe="">não conectada</Selo>}</td>
-                      <td><div className="form-inline">
+                        <Selo situacao="feito">conectada</Selo>
+                      ) : contas === undefined ? "…" : <Selo>não conectada</Selo>}</td>
+                      <td><div className="form-inline adm-acoes">
                         <button type="button" className="btn btn--pequeno" aria-expanded={aberto}
                                 aria-controls={aberto ? `acessos-${u.id}` : undefined}
                                 onClick={() => setAcessosDe(aberto ? null : u.id)}>
                           Últimos acessos<span className="sr-only"> de {u.nome}</span>
                         </button>
-                        {u.id === eu ? null
-                          : redefinir === u.id ? (
-                            <form className="form-inline" onSubmit={e => confirmarSenha(e, u)}>
-                              <label className="sr-only" htmlFor={`senha-${u.id}`}>Senha nova de {u.nome} (mínimo de 10 caracteres)</label>
-                              <input id={`senha-${u.id}`} type="password" required minLength={10} autoComplete="new-password" autoFocus
-                                     placeholder="Senha nova (mín. 10)…" value={senhaNova} onChange={e => setSenhaNova(e.target.value)} />
-                              <button type="submit" className="btn btn--pequeno btn--primario">Confirmar a senha nova</button>
-                              <button type="button" className="btn btn--pequeno" onClick={() => { setRedefinir(null); setSenhaNova(""); }}>Cancelar</button>
-                            </form>
-                          ) : !u.ativo ? (
+                        {/* a redefinicao abre numa linha propria, abaixo da pessoa (#779): dentro da celula das acoes ela
+                            alargava a tabela e fazia a caixa rolar de lado a 1024 px */}
+                        {u.id === eu || redefinir === u.id ? null
+                          : !u.ativo ? (
                             <button type="button" className="btn btn--pequeno" onClick={() => alternar(u)}>
                               Reativar<span className="sr-only"> {u.nome}</span>
                             </button>
@@ -927,9 +982,24 @@ function Usuarios({ eu }: { eu?: number }) {
                           )}
                       </div></td>
                     </tr>
+                    {redefinir === u.id && u.id !== eu && (
+                      <tr className="linha adm-acessos">
+                        <td colSpan={5}>
+                          <form className="form-inline adm-redefinir" onSubmit={e => confirmarSenha(e, u)}>
+                            <div className="campo">
+                              <label className="campo__rotulo" htmlFor={`senha-${u.id}`}>Senha nova de {u.nome} (mínimo de 10 caracteres)</label>
+                              <input id={`senha-${u.id}`} type="password" required minLength={10} autoComplete="new-password" autoFocus
+                                     value={senhaNova} onChange={e => setSenhaNova(e.target.value)} />
+                            </div>
+                            <button type="submit" className="btn btn--primario">Confirmar a senha nova</button>
+                            <button type="button" className="btn" onClick={() => { setRedefinir(null); setSenhaNova(""); }}>Cancelar</button>
+                          </form>
+                        </td>
+                      </tr>
+                    )}
                     {aberto && (
-                      <tr className="linha">
-                        <td colSpan={7} id={`acessos-${u.id}`}>
+                      <tr className="linha adm-acessos">
+                        <td colSpan={5} id={`acessos-${u.id}`}>
                           <UltimosAcessos url={`/api/admin/usuarios/${u.id}/acessos`} rotulo={`Últimos acessos de ${u.nome}`} />
                         </td>
                       </tr>
@@ -941,14 +1011,14 @@ function Usuarios({ eu }: { eu?: number }) {
             </table>
           </Rolagem>
         )}
-        {contas === null && <div className="cartao__corpo"><p className="campo__nota">Não foi possível ler as contas Microsoft; recarregue a página para tentar de novo.</p></div>}
+        {contas === null && <div className="cartao__corpo"><Falha>Não foi possível ler as contas Microsoft; recarregue a página para tentar de novo.</Falha></div>}
         <p className="sr-only" role="status">{aviso}</p>
-        {aviso && <div className="cartao__corpo"><p className="campo__nota">{aviso}</p></div>}
+        {aviso && <div className="cartao__corpo"><p className="adm-feito"><Glifo situacao="feito" />{aviso}</p></div>}
       </section>
 
       <section className="cartao" aria-labelledby="titulo-novo-usuario">
         <div className="cartao__cabeca"><h2 className="cartao__titulo" id="titulo-novo-usuario">Novo usuário</h2></div>
-        <form className="cartao__corpo form-inline" onSubmit={criar}>
+        <form className="cartao__corpo form-inline adm-novo" onSubmit={criar}>
           <div className="campo">
             <label className="campo__rotulo" htmlFor="novo-nome">Nome</label>
             <input id="novo-nome" required autoComplete="off" value={novo.nome} onChange={e => setNovo({ ...novo, nome: e.target.value })}
@@ -976,7 +1046,7 @@ function Usuarios({ eu }: { eu?: number }) {
         </form>
         {erroNovo && <Erro texto={erroNovo} id="erro-novo-usuario" />}
         <p className="sr-only" role="status">{criado}</p>
-        {criado && <div className="cartao__corpo"><p className="campo__nota">{criado}</p></div>}
+        {criado && <div className="cartao__corpo"><p className="adm-feito"><Glifo situacao="feito" />{criado}</p></div>}
       </section>
     </>
   );
@@ -1030,7 +1100,7 @@ function Auditoria({ busca }: { busca: Busca }) {
     <section className="cartao" aria-labelledby="titulo-auditoria">
       <div className="cartao__cabeca">
         <h2 className="cartao__titulo" id="titulo-auditoria">Auditoria</h2>
-        {audit && <Selo classe={audit.cadeia_integra ? "selo--ok" : "selo--acao"}>{audit.cadeia_integra ? "cadeia íntegra" : "cadeia violada"}</Selo>}
+        {audit && <Selo situacao={audit.cadeia_integra ? "feito" : "critico"}>{audit.cadeia_integra ? "cadeia íntegra" : "cadeia violada"}</Selo>}
       </div>
       {erro && <Erro texto={erro} />}
       {!audit && !erro && <div className="vazio"><p>Carregando…</p></div>}
@@ -1061,7 +1131,7 @@ function Auditoria({ busca }: { busca: Busca }) {
           {/* so' a contagem do recorte na regiao viva: trocar os filtros refaz a tabela */}
           <span className="sr-only" role="status">{contar(eventos.length, "evento", "eventos")}</span>
           {nomes === null && (
-            <p className="cartao__corpo campo__nota">Não foi possível ler os nomes: a coluna Quem mostra o número de cada usuário. Recarregue a página para tentar de novo.</p>
+            <div className="cartao__corpo"><Falha>Não foi possível ler os nomes: a coluna Quem mostra o número de cada usuário. Recarregue a página para tentar de novo.</Falha></div>
           )}
           {audit.eventos.length === 0 ? (
             <div className="vazio vazio--curto"><p className="vazio__titulo">Nenhum evento registrado.</p></div>
@@ -1095,7 +1165,7 @@ function Auditoria({ busca }: { busca: Busca }) {
           )}
           {haMais && (
             <div className="cartao__corpo">
-              {erroMais && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroMais}</p>}
+              {erroMais && <Falha>{erroMais}</Falha>}
               <button type="button" className="btn btn--pequeno" onClick={carregarMais} disabled={carregandoMais}>
                 {carregandoMais ? "Carregando…" : "Carregar mais"}
               </button>
@@ -1118,7 +1188,7 @@ function PendenciasCadastro() {
     api<PendenciasCadastro>("/api/admin/pendencias-cadastro").then(setDados).catch(e => setErro(falhaDeCarga(e)));
   }, []);
   // `desde` e' o dia (garantia) ou a competencia (termo de apostilamento)
-  const lista = dados?.documentos, semData = dados?.sem_data ?? [];
+  const lista = dados ? pendenciasAgrupadas(dados.documentos) : undefined, semData = dados?.sem_data ?? [];
   const desde = (d: string | null) => (!d ? "—" : d.length === 7 ? fmtCompetencia(d) : fmtDataPura(d));
   return (
     <section className="cartao" aria-labelledby="titulo-pendencias">
@@ -1151,7 +1221,7 @@ function PendenciasCadastro() {
       )}
       {semData.length > 0 && (
         <>
-          <div className="cartao__cabeca"><h3 className="cartao__titulo" id="titulo-sem-data">Sem data</h3></div>
+          <div className="cartao__cabeca adm-subtitulo"><h3 className="cartao__titulo" id="titulo-sem-data">Sem data</h3></div>
           <Rolagem rotulo="Avisos sem data" alta>
             <table className="tabela">
               <caption className="sr-only">Avisos sem data, por obra</caption>
@@ -1177,7 +1247,7 @@ function PendenciasCadastro() {
 
 export default function Admin({ aba = "saude", busca = {}, eu }: { aba?: AbaAdmin; busca?: Busca; eu?: number }) {
   return (
-    <div className="pilha">
+    <div className="pilha adm">
       <Abas rotulo="Seções da Administração" atual={aba}
         itens={ABAS_ADMIN.map(a => ({ ...a, para: { tela: "admin" as const, aba: a.id } }))} />
       {aba === "saude" && <Saude />}

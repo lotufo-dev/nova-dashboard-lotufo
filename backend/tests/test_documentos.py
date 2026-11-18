@@ -333,6 +333,25 @@ def test_proximo_protocolo_previsto_nos_tres_casos(conn):
         com_protocolo: D(2026, 10, 10), com_nota: hoje, sem_nada: None, atrasada: hoje}
 
 
+def test_nota_emitida_de_obra_sem_envio_da_nota_nao_espera_protocolo(conn):
+    """#743: na obra cujo cadastro nao tem o passo "Envio da nota", a nota emitida ja' espera o pagamento
+    (`medicoes.recebe_sem_protocolo`, a decisao do dinheiro): nao ha' protocolo pela frente, e a certidao nao vira
+    "a renovar agora" por causa dela."""
+    hoje = D(2026, 9, 23)
+    oid = _orgao(conn, ["fgts"], [])
+    sem_envio, sem_envio_com_anterior, com_envio = (
+        _contrato(conn, oid, documentos_json=json.dumps({"n": i})) for i in range(3))
+    sem_passo = json.dumps(["notas", "pagamento"])
+    conn.execute("UPDATE contratos SET passos_medicao=? WHERE id IN (?, ?)", (sem_passo, sem_envio, sem_envio_com_anterior))
+    conn.execute("UPDATE contratos SET passos_medicao=? WHERE id=?", (json.dumps(["notas", "envio_nota", "pagamento"]), com_envio))
+    _medicao(conn, sem_envio, 1, "nota_emitida")
+    _medicao(conn, sem_envio_com_anterior, 1, "protocolada", [("2026-09-15", "nota")])
+    _medicao(conn, sem_envio_com_anterior, 2, "nota_emitida")
+    _medicao(conn, com_envio, 1, "nota_emitida")
+    assert documentos.proximos_protocolos(conn, hoje) == {
+        sem_envio: None, sem_envio_com_anterior: D(2026, 10, 15), com_envio: hoje}
+
+
 def test_um_mes_depois_do_dia_31_cai_no_fim_do_mes_seguinte(conn):
     cid = _contrato(conn, _orgao(conn, ["fgts"], []))
     _medicao(conn, cid, 1, "protocolada", [("2027-01-31", "nota")])

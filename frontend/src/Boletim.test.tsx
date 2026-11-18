@@ -145,6 +145,8 @@ describe("AceiteDiferenca (issue #288)", () => {
     const agir = agirReal();
     render(<AceiteDiferenca m={COM_BOLETIM} podeEditar salvando={false} agir={agir} />);
     fireEvent.click(screen.getByRole("button", { name: "Aceitar a diferença" }));
+    // #722: a justificativa obrigatoria fica na caixa propria (CaixaJustificativa)
+    expect(screen.getByLabelText("Justificativa").closest(".justificativa")).not.toBeNull();
     fireEvent.change(screen.getByLabelText("Justificativa"), { target: { value: "curta" } });
     fireEvent.click(screen.getByRole("button", { name: "Aceitar a diferença" }));
     expect(screen.getByText("Informe a justificativa (ao menos 10 caracteres).")).toBeTruthy();
@@ -387,10 +389,13 @@ describe("boletim da MT-PAR (issue #753)", () => {
     const doReajuste = screen.getByRole("region", { name: "Boletim · Reajuste da 7ª Medição" });
     expect(doReajuste.textContent).toContain("Não anexado");
     expect(doReajuste.querySelector("form[aria-label='Registrar boletim']")).not.toBeNull();
+    // o título do formulário diz de quem é o boletim: no cartão do reajuste, do reajuste
+    expect(doReajuste.querySelector("form .painel__titulo")!.textContent).toBe("Registrar o boletim do reajuste da 7ª medição");
     expect(daMedicao.querySelector("form")).toBeNull();
     // um formulário por vez: abrir o da medição (boletim novo) fecha o do reajuste
     fireEvent.click(screen.getByRole("button", { name: "Registrar boletim novo" }));
     expect(daMedicao.querySelector("form[aria-label='Registrar boletim']")).not.toBeNull();
+    expect(daMedicao.querySelector("form .painel__titulo")!.textContent).toBe("Registrar o boletim da 7ª medição");
     expect(doReajuste.querySelector("form")).toBeNull();
     expect(screen.getByRole("button", { name: "Anexar o boletim" })).toBeTruthy();
   });

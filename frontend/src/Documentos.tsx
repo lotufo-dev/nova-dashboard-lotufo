@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { IconeAlerta, IconeCheck, IconeClipe, IconeEnviarNuvem, IconeLinkExterno, IconeRelogio, IconeTraco } from "./icones";
+import Contador from "./Contador";
+import { contar } from "./formato";
+import { IconeClipe, IconeEnviarNuvem, IconeLinkExterno } from "./icones";
+import LegendaCor, { type ItemLegenda } from "./LegendaCor";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import {
@@ -7,12 +10,14 @@ import {
   estadosRegularidade, garantiasAConferir, obrasPorOrgao, regularidadesFaltando, type CorChip, type EmpresaDoc, type ObraDoc, type RenovarDoc,
 } from "./matriz";
 import { substituir, trocarBusca, type Busca } from "./rota";
+import { Glifo } from "./Selo";
 import { fmtCompetencia, fmtDataPura, fmtMesCurto, fmtMesExtenso } from "./tempo";
 import { AnexarCertidoes, type AnexarRef } from "./documentosComum";
 import { usePainel } from "./documentosDados";
+import Falha from "./Falha";
 
-/* Documentos (#513, redesenho aprovado em 07/11/2026): tres abas com contador, uma linha por empresa (ou por obra)
- * e chips coloridos. Certidoes (dias que faltam), Regularidade mensal (os seis ultimos meses do DP) e Garantias
+/* Documentos (#513; fundacao do redesenho na #767): a tela responde "o que renovar ou anexar para o proximo protocolo
+ * sair". Tres abas com contador, uma linha por empresa (ou por obra) e a situacao de cada documento com o glifo dela. Certidoes (dias que faltam), Regularidade mensal (os seis ultimos meses do DP) e Garantias
  * (por orgao). O "Anexar PDF" do topo recebe qualquer PDF; o servidor decide pelo conteudo se e' certidao ou
  * regularidade (`/api/documentos/anexar`). A regra (o que e' exigido, a situacao) e' do servidor
  * (`documentos.painel`); a tela so' mostra. Aba na URL: ?aba=regularidade|garantias.
@@ -66,7 +71,7 @@ function JanelaZip({ empresas, hoje, aoFechar }: { empresas: EmpresaDoc[]; hoje:
   };
 
   return (
-    <dialog ref={janela} className="doc-janela" aria-labelledby="titulo-zip" onClose={aoFechar}
+    <dialog ref={janela} className="doc-janela cartao" aria-labelledby="titulo-zip" onClose={aoFechar}
       // clique no fundo (fora da caixa) fecha, como numa janela comum
       onClick={ev => { if (ev.target === ev.currentTarget) janela.current?.close(); }}>
       <div className="doc-janela__cabeca"><h2 id="titulo-zip">ZIP das certidões vigentes</h2></div>
@@ -105,7 +110,6 @@ const ABAS = [
 ] as const;
 type IdAba = (typeof ABAS)[number]["id"];
 
-const ICONE_ESTADO = { anexada: IconeCheck, faltando: IconeTraco, aguardando: IconeRelogio } as const;
 const COR_ESTADO = { anexada: "feito", faltando: "breve", aguardando: "andamento", sem: "neutro" } as const;
 const TEXTO_ESTADO = { anexada: "anexada", faltando: "faltando", aguardando: "aguardando o DP", sem: "sem registro" } as const;
 
@@ -115,7 +119,11 @@ function Chip({ cor, rotulo, valor, data, href, titulo, semRotulo }: {
   const corpo = (
     <>
       <span className={semRotulo ? "sr-only" : "doc-chip__rotulo"}>{rotulo}</span>
-      <span className="doc-chip__valor"><b>{valor}</b>{data ? <small>{data}</small> : null}</span>
+      <span className="doc-chip__valor">
+        {/* a forma da situacao ao lado do valor: a cor nunca vai sozinha */}
+        {cor !== "neutro" && <Glifo situacao={cor} />}
+        <b>{valor}</b>{data ? <small>{data}</small> : null}
+      </span>
     </>
   );
   const classe = `doc-chip doc-chip--${cor}${semRotulo ? " doc-chip--linha" : ""}`;
@@ -130,7 +138,9 @@ function AbaCertidoes({ empresas, podeBaixar, aoZip }: {
   empresas: EmpresaDoc[]; podeBaixar: boolean; aoZip: (e: EmpresaDoc) => void;
 }) {
   return (
-    <ul className="doc-linhas" aria-label="Certidões por empresa">
+    <section className="cartao doc-bloco" aria-labelledby="titulo-por-empresa">
+      <h2 id="titulo-por-empresa" className="doc-bloco__titulo">Por empresa</h2>
+      <ul className="doc-linhas" aria-label="Certidões por empresa">
       {empresas.map(e => (
         <li key={e.entidade_id} className="doc-linha">
           <div className="doc-linha__nome">
@@ -161,7 +171,8 @@ function AbaCertidoes({ empresas, podeBaixar, aoZip }: {
           </div>
         </li>
       ))}
-    </ul>
+      </ul>
+    </section>
   );
 }
 
@@ -173,8 +184,8 @@ const NOME_CHIP: Record<string, string> = { federal: "Federal", fgts: "FGTS", tr
 function RenovarAgora({ itens, podeEditar, aoAnexar }: { itens: RenovarDoc[]; podeEditar: boolean; aoAnexar: (chave: string) => void }) {
   if (itens.length === 0) return null;
   return (
-    <section className="doc-renovar" aria-labelledby="titulo-renovar">
-      <h2 id="titulo-renovar" className="doc-renovar__titulo">Renovar agora</h2>
+    <section className="cartao doc-bloco doc-renovar" aria-labelledby="titulo-renovar">
+      <h2 id="titulo-renovar" className="doc-bloco__titulo">Renovar agora</h2>
       <ul className="doc-linhas">
         {itens.map(x => {
           const nome = NOME_CHIP[x.chave] ?? (x.chave === "falencia" ? "Falência" : x.tipo);
@@ -189,7 +200,7 @@ function RenovarAgora({ itens, podeEditar, aoAnexar }: { itens: RenovarDoc[]; po
               {podeEditar && (
                 <div className="doc-renovar__acoes">
                   {x.link_emissao && (
-                    <a href={x.link_emissao} target="_blank" rel="noreferrer" className="btn btn--pequeno"
+                    <a href={x.link_emissao} target="_blank" rel="noreferrer" className="btn btn--pequeno btn--primario"
                       aria-label={`Emitir ${nome} de ${x.entidade} (abre o site do órgão)`}>
                       <IconeLinkExterno className="icone" />Emitir
                     </a>
@@ -216,6 +227,8 @@ function AbaRegularidade({ empresas, hoje }: { empresas: EmpresaDoc[]; hoje: str
   const seguinte = `${ultimoMes.slice(5, 7) === "12" ? String(Number(ultimoMes.slice(0, 4)) + 1) : ultimoMes.slice(0, 4)}-${String(Number(ultimoMes.slice(5, 7)) % 12 + 1).padStart(2, "0")}`;
   return (
     <>
+      <section className="cartao doc-bloco" aria-labelledby="titulo-regularidade">
+      <h2 id="titulo-regularidade" className="doc-bloco__titulo">Últimos seis meses</h2>
       <ul className="doc-linhas" aria-label="Regularidade mensal por empresa">
         {comFolha.map(e => {
           const ultima = (e.regularidades_anexadas ?? [])[0];
@@ -228,13 +241,12 @@ function AbaRegularidade({ empresas, hoje }: { empresas: EmpresaDoc[]; hoje: str
               <div className="doc-chips doc-chips--6">
                 {estadosRegularidade(e, hoje).map(x => {
                   const nome = `${fmtCompetencia(x.competencia)}: ${TEXTO_ESTADO[x.estado]}`;
-                  const Icone = x.estado === "sem" ? null : ICONE_ESTADO[x.estado];
                   const interior = (
                     <>
                       <span className="doc-chip__rotulo">{fmtMesCurto(x.competencia)}</span>
                       {/* #651: mes que ninguem cobra (antes do primeiro PDF da empresa) e' so' "—" */}
-                      {Icone ? <Icone className="icone doc-chip__icone" titulo={nome} />
-                        : <b className="doc-chip__icone" role="img" aria-label={nome}>—</b>}
+                      {x.estado === "sem" ? <b className="doc-chip__icone" role="img" aria-label={nome}>—</b>
+                        : <span className="doc-chip__icone" role="img" aria-label={nome}><Glifo situacao={COR_ESTADO[x.estado]} /></span>}
                     </>
                   );
                   return x.id !== undefined
@@ -250,6 +262,7 @@ function AbaRegularidade({ empresas, hoje }: { empresas: EmpresaDoc[]; hoje: str
           );
         })}
       </ul>
+      </section>
       {semFolha.length > 0 && <p className="doc-nota">Não exigida: {semFolha.map(e => e.entidade).join(", ")}</p>}
       <p className="doc-nota">{(() => { const m = fmtMesExtenso(ultimoMes); return m.charAt(0).toUpperCase() + m.slice(1); })()} esperada a partir de 10/{seguinte.slice(5, 7)}.</p>
     </>
@@ -262,9 +275,9 @@ function GrupoGarantias({ orgao, obras }: { orgao: string; obras: ObraDoc[] }) {
   const [tudo, setTudo] = useState(false);
   const vistas = tudo ? obras : obras.slice(0, OBRAS_POR_GRUPO);
   return (
-    <section className="doc-grupo" aria-label={`Garantias de ${orgao}`}>
+    <section className="cartao doc-bloco doc-grupo" aria-label={`Garantias de ${orgao}`}>
       <div className="doc-linha doc-linha--cabeca">
-        <h2 className="doc-grupo__cabeca">{orgao} <span>· {obras.length} {obras.length === 1 ? "obra" : "obras"}</span></h2>
+        <h2 className="doc-grupo__cabeca">{orgao} <Contador>{obras.length === 1 ? "1 obra" : `${obras.length} obras`}</Contador></h2>
         <div className="doc-chips doc-chips--4" aria-hidden="true">
           {["Apólice", "Válida até", "Cobre a execução", "CNO"].map(r => <span key={r}>{r}</span>)}
         </div>
@@ -291,25 +304,21 @@ function GrupoGarantias({ orgao, obras }: { orgao: string; obras: ObraDoc[] }) {
       </ul>
       {obras.length > OBRAS_POR_GRUPO && (
         <button type="button" className="doc-grupo__mais" onClick={() => setTudo(t => !t)}>
-          {tudo ? "mostrar menos" : `+${obras.length - OBRAS_POR_GRUPO} obras`}
+          {tudo ? "mostrar menos" : `+${contar(obras.length - OBRAS_POR_GRUPO, "obra", "obras")}`}
         </button>
       )}
     </section>
   );
 }
 
-const LEGENDAS: Record<IdAba, { classe: string; texto: string }[]> = {
-  certidoes: [{ classe: "feito", texto: "em dia" }, { classe: "breve", texto: "vence antes do próximo protocolo" }, { classe: "critico", texto: "vencida" }],
-  regularidade: [{ classe: "feito", texto: "anexada" }, { classe: "andamento", texto: "aguardando o DP" }, { classe: "breve", texto: "faltando" }],
-  garantias: [{ classe: "feito", texto: "em dia" }, { classe: "breve", texto: "não cobre" }, { classe: "critico", texto: "sem registro" }],
+const LEGENDAS: Record<IdAba, ItemLegenda[]> = {
+  certidoes: [{ situacao: "feito", texto: "em dia" }, { situacao: "breve", texto: "vence antes do próximo protocolo" }, { situacao: "critico", texto: "vencida" }],
+  regularidade: [{ situacao: "feito", texto: "anexada" }, { situacao: "andamento", texto: "aguardando o DP" }, { situacao: "breve", texto: "faltando" }],
+  garantias: [{ situacao: "feito", texto: "em dia" }, { situacao: "breve", texto: "não cobre" }, { situacao: "critico", texto: "sem registro" }],
 };
 
 function LegendaAba({ aba }: { aba: IdAba }) {
-  return (
-    <ul className="legenda-cor" aria-label="Legenda das cores">
-      {LEGENDAS[aba].map(i => <li key={i.texto}><span className={`pilula-info__ponto ponto--${i.classe}`} />{i.texto}</li>)}
-    </ul>
-  );
+  return <LegendaCor itens={LEGENDAS[aba]} />;
 }
 
 export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; busca?: Busca }) {
@@ -339,12 +348,23 @@ export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; 
   } : { certidoes: 0, regularidade: 0, garantias: 0 };
 
   return (
-    <div className="pagina">
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+    <div className="pagina doc">
+      {erro && <Falha>{erro}</Falha>}
       <p className="sr-only" role="status">{anuncio}</p>
 
+      {/* o alto da pagina: a regua grossa, as abas com o contador do que pede acao e o Anexar */}
       <div className="doc-topo">
-        <LegendaAba aba={aba} />
+        {painel && (
+          <div className="escolhas doc-abas" role="tablist" aria-label="Documentos">
+            {ABAS.map(a => (
+              <button key={a.id} type="button" role="tab" id={`aba-${a.id}`} aria-selected={aba === a.id}
+                aria-controls="painel-documentos" className="escolha doc-aba"
+                onClick={() => trocarBusca({ aba: a.id === "certidoes" ? null : a.id })}>
+                {a.rotulo}{contadores[a.id] > 0 && <> <Contador situacao={a.cor}>{a.sufixo(contadores[a.id])}</Contador></>}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="doc-topo__acoes">
           {podeEditar && (
             <button type="button" className="btn btn--primario" disabled={!painel} onClick={() => anexar.current?.escolher()}>
@@ -353,18 +373,7 @@ export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; 
           )}
         </div>
       </div>
-
-      {painel && (
-        <div className="doc-abas" role="tablist" aria-label="Documentos">
-          {ABAS.map(a => (
-            <button key={a.id} type="button" role="tab" id={`aba-${a.id}`} aria-selected={aba === a.id}
-              aria-controls="painel-documentos" className="doc-aba"
-              onClick={() => trocarBusca({ aba: a.id === "certidoes" ? null : a.id })}>
-              {a.rotulo}{contadores[a.id] > 0 && <> · <span className={`info--${a.cor}`}>{a.sufixo(contadores[a.id])}</span></>}
-            </button>
-          ))}
-        </div>
-      )}
+      <LegendaAba aba={aba} />
 
       {!painel && !erro && <p className="campo__nota">Carregando…</p>}
       {painel && (aba === "certidoes" ? comCertidao : empresas).length === 0 && aba !== "garantias" && (

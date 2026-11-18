@@ -8,7 +8,7 @@ Nada aqui muda estado para tras.
 import datetime
 import json
 
-from app import arquivos, auditoria, db, dinheiro, espelho, frc, leitura_nfse, leitura_pdf, medicoes, tempo
+from app import arquivos, auditoria, db, dinheiro, espelho, frc, leitura_nfse, leitura_pdf, medicoes, permissoes, tempo, texto
 
 EMISSOR_LOTUFO = "lotufo"
 CAMPOS_CONFERIDOS = ("valor", "iss", "inss", "irrf", "ibs", "cbs", "liquido")   # liquido por ultimo: tolera os tributos
@@ -298,7 +298,13 @@ def _vincular(conn, usuario, m: dict, nota_id: int, lida: dict) -> list[dict]:
     from app import sincronizacao_rm   # import local: sincronizacao_rm importa notas
     ja = conn.execute("SELECT medicao_id FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL", (nota_id,)).fetchone()
     if ja is None:
-        sincronizacao_rm.alocar(conn, usuario["id"], nota_id, m["id"], "manual", None, "pdf")
+        # Decisao de 17/11/2026 (docs/adr/0006): na medicao ja' RECEBIDA, a nota do PDF liga para quem administra, sem
+        # mudar o estado nem a data do recebimento; o vinculo fica na auditoria com quem fez e `estado_medicao`. Antes
+        # so' a correcao de cadastro ligava (a tela devolvia erro).
+        recebida = m["estado"] == "recebida"
+        if recebida and not permissoes.tem(usuario.get("perfil") or "", "administrar"):
+            raise ValueError("Medição recebida: só o administrador liga nota a ela")
+        sincronizacao_rm.alocar(conn, usuario["id"], nota_id, m["id"], "manual", None, "pdf", aceita_recebida=recebida)
     elif ja["medicao_id"] != m["id"]:
         raise ValueError(f"A nota {lida['numero']} já está vinculada a outra medição")
     esp = esperadas(conn, m["id"])
@@ -378,6 +384,75 @@ def anexar_pdf(conn, usuario: dict, medicao_id: int, pdf: bytes, nome: str, tipo
             "frc_gerada": gerada["numero"] if gerada else None}
 
 
+def reler_falhas(conn, usuario: dict, ensaio: bool = False) -> dict:
+    """Rele os PDFs de nota ja' anexados cuja leitura guardada FALHOU (leiaute que o leitor passou a reconhecer
+    depois do anexo). Para cada um que agora e' lido, faz o mesmo que arrastar o PDF de novo na medicao
+    (`anexar_pdf`): guarda a leitura, cria a nota, vincula e confere; e grava `nota.releitura` na auditoria.
+    Fica de fora o documento que ja' tem nota (digitada a mao) e a medicao cancelada ou desistida. O que continua
+    sem leitura fica como esta', com o motivo. `ensaio` so' le e relata: nao grava nada.
+    Devolve {ensaio, documentos, lidos, linhas}."""
+    rel = {"ensaio": ensaio, "documentos": 0, "lidos": 0, "linhas": []}
+    docs = conn.execute("""
+        SELECT d.id, d.medicao_id, d.nome, d.arquivo, d.leitura, m.estado, m.contrato_id,
+               (SELECT 1 FROM notas_fiscais n WHERE n.documento_id=d.id) AS tem_nota
+        FROM medicao_documentos d JOIN medicoes m ON m.id=d.medicao_id
+        WHERE d.tipo_doc='nfs' AND d.arquivo IS NOT NULL AND d.leitura IS NOT NULL ORDER BY d.id""").fetchall()
+    for d in docs:
+        anterior = json.loads(d["leitura"])
+        if anterior.get("ok"):
+            continue
+        rel["documentos"] += 1
+        rotulo = f"documento {d['id']} (medição {d['medicao_id']}, {d['nome']})"
+        if d["tem_nota"]:
+            rel["linhas"].append(f"{rotulo}: já tem nota informada à mão; fica como está")
+            continue
+        if d["estado"] in ("cancelada", "desistida"):
+            rel["linhas"].append(f"{rotulo}: medição {d['estado']}; fica como está")
+            continue
+        caminho = arquivos.caminho_seguro(d["arquivo"])
+        if not caminho.is_file():
+            rel["linhas"].append(f"{rotulo}: arquivo não está no disco; fica como está")
+            continue
+        pdf = caminho.read_bytes()
+        try:
+            lida = leitura_nfse.ler(leitura_pdf.texto_de_pdf_com_limite(pdf))
+        except ValueError as e:
+            rel["linhas"].append(f"{rotulo}: o PDF não pôde ser lido ({e}); fica como está")
+            continue
+        if not lida["ok"]:
+            rel["linhas"].append(f"{rotulo}: continua sem leitura ({lida['motivo']}; antes, {anterior.get('motivo')})")
+            continue
+        ent = _entidade_por_cnpj(conn, lida.get("prestador_cnpj"))
+        orgao = _cnpj_do_orgao(conn, d["contrato_id"])
+        descricao = (f"nota {lida['numero']} de {lida['emissao']}, {dinheiro.format_brl(lida['valor_centavos'])}, "
+                     + ("tomador é o órgão do contrato" if orgao and lida.get("tomador_cnpj") == orgao
+                        else "tomador NÃO é o órgão do contrato" if orgao else "contrato sem CNPJ do órgão"))
+        nasce = bool(ent and ent["coligada_rm"] is not None)
+        destino = ("a nota nasce e é ligada à medição" if nasce
+                   else "prestador sem coligada no cadastro: a leitura fica no documento (conta para a FRC), sem nota")
+        if ensaio:
+            rel["lidos"] += 1
+            rel["linhas"].append(f"{rotulo}: {descricao}; {destino}")
+            continue
+        try:
+            with db.mutacao(conn):
+                r = anexar_pdf(conn, usuario, d["medicao_id"], pdf, d["nome"])
+                auditoria.registrar(conn, usuario["id"], "nota.releitura", "medicao", d["medicao_id"],
+                                    {"documento_id": d["id"], "motivo": anterior.get("motivo")},
+                                    {"documento_id": d["id"], "leiaute": lida["leiaute"], "numero": lida["numero"],
+                                     "valor_centavos": lida["valor_centavos"], "nota_id": r["nota_id"]})
+        except ValueError as e:
+            rel["linhas"].append(f"{rotulo}: {descricao}; recusada ({e}); fica como está")
+            continue
+        rel["lidos"] += 1
+        divergencias = ", ".join(NOME_CAMPO.get(x["campo"], x["campo"]) for x in r["conferencia"]
+                                 if x.get("grau") == "divergente")
+        rel["linhas"].append(f"{rotulo}: {descricao}; " + (f"nota {r['nota_id']} ligada à medição" if r["nota_id"]
+                                                           else "leitura guardada no documento, sem nota")
+                             + (f"; diverge do espelho em: {divergencias}" if divergencias else ""))
+    return rel
+
+
 def registrar_manual(conn, usuario: dict, medicao_id: int, documento_id: int, numero: int, emissao: str,
                      valor_centavos: int) -> dict:
     """PDF sem texto ou leiaute desconhecido: a pessoa digita numero, data e valor (spec §7.1)."""
@@ -439,8 +514,9 @@ def justificar(conn, usuario: dict, nota_id: int, texto: str) -> None:
 # ------------------------------------------------------------------ avisos
 
 def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
-    """Tres avisos (spec §11 e revisao adversarial): nota divergente do espelho (grau `divergente`, sem
-    justificativa), nota protocolada ausente do RM ha' 5 dias, e nota cancelada no RM em medicao ainda aberta."""
+    """Os avisos de nota (spec §11 e revisao adversarial): nota divergente do espelho (grau `divergente`, sem
+    justificativa), nota maior que a medicao (#562), notas pagas que nao cobrem a medicao (depois da #714), nota
+    protocolada ausente do RM ha' 5 dias, e nota cancelada no RM em medicao ainda aberta."""
     hoje = hoje or tempo.hoje_local()
     out = []
     for r in conn.execute("""
@@ -469,9 +545,24 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                         "medicao_id": r["medicao_id"], "contrato_id": r["contrato_id"], "dias": None,
                         "mensagem": f"nota {x['numero']} de {dinheiro.format_brl(x['alocado_centavos'])} é maior que "
                                     f"a medição ({dinheiro.format_brl(x['medicao_centavos'])})"})
+    # depois da issue #714 (docs/adr/0006): o par do aviso acima. As notas ligadas estao pagas no RM e nao cobrem o
+    # valor da medicao; ela nao vira recebida sozinha e, sem o aviso, ficava protocolada sem ninguem saber por que
+    from app import sincronizacao_rm     # import local: sincronizacao_rm importa este modulo
+    for x in sincronizacao_rm.pagas_sem_cobrir(conn):
+        out.append({"tipo": "notas_pagas_nao_cobrem", "nota_id": None, "numero": None, "medicao_id": x["medicao_id"],
+                    "contrato_id": x["contrato_id"], "dias": None,
+                    "mensagem": f"notas pagas somam {dinheiro.format_brl(x['notas_centavos'])} e não cobrem a medição "
+                                f"({dinheiro.format_brl(x['valor_centavos'])})"})
+    # decisao de 17/11/2026 (docs/adr/0006): a recebida a' mao com nota ligada que nao cobre o valor dela nao recebe
+    # a nota que falta sozinha; avisa na medicao, onde o administrador anexa o PDF da outra nota
+    for x in sincronizacao_rm.recebidas_a_mao_sem_cobrir(conn):
+        out.append({"tipo": "recebida_notas_nao_cobrem", "nota_id": None, "numero": None, "medicao_id": x["medicao_id"],
+                    "contrato_id": x["contrato_id"], "dias": None,
+                    "mensagem": f"recebida à mão com notas de {dinheiro.format_brl(x['notas_centavos'])}, que não cobrem "
+                                f"a medição ({dinheiro.format_brl(x['valor_centavos'])}): a nota que falta não liga sozinha"})
     for r in conn.execute("""
         SELECT n.id AS nota_id, n.numero_int AS numero, a.medicao_id, m.contrato_id,
-               (SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota') AS protocolado_em
+               (SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota' AND p.desfeita_em IS NULL) AS protocolado_em
         FROM notas_fiscais n JOIN nf_alocacoes a ON a.nota_id=n.id AND a.desfeita_em IS NULL
         JOIN medicoes m ON m.id=a.medicao_id
         WHERE n.confirmacao='aguardando_rm' AND m.estado='protocolada'"""):
@@ -481,7 +572,7 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
         if dias >= DIAS_AUSENTE_RM:
             out.append({"tipo": "nota_ausente_rm", "nota_id": r["nota_id"], "numero": r["numero"],
                         "medicao_id": r["medicao_id"], "contrato_id": r["contrato_id"], "dias": dias,
-                        "mensagem": f"nota {r['numero']} protocolada há {dias} dias e ainda não apareceu no RM"})
+                        "mensagem": f"nota {r['numero']} protocolada há {texto.dias(dias)} e ainda não apareceu no RM"})
     for r in conn.execute("""
         SELECT DISTINCT a.medicao_id, m.contrato_id, n.numero_int AS numero, n.id AS nota_id, a.motivo_desfazer
         FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id JOIN medicoes m ON m.id=a.medicao_id

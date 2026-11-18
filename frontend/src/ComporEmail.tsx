@@ -22,7 +22,7 @@ type Contato = { nome: string | null; email: string };
 type Campo = "para" | "copia" | "cco";
 const ROTULO: Record<Campo, string> = { para: "Para", copia: "Cc", cco: "Cco" };
 const EMAIL = /^[^\s@;,]+@[^\s@;,]+\.[^\s@;,]{2,}$/;
-const CORES = ["#e8d7f7", "#d6ebd8", "#fde2c8", "#d3e6f5", "#f6d5d8", "#e6e1c6"];
+const CORES = ["var(--cor-papel-escuro)"];   // o avatar da fundacao e' um so' tom neutro (#719)
 
 function iniciais(c: Contato): string {
   const base = (c.nome || c.email.split("@")[0]).replace(/[^A-Za-zÀ-ÿ ]/g, " ").trim();
@@ -313,9 +313,15 @@ export default function ComporEmail({ inicial, anexos, ocupado, bloqueado, antes
       {campo("copia")}
       {comCco && campo("cco")}
       <div className="ol-assunto">
-        <input id={`${base}-assunto`} value={m.assunto} maxLength={300} placeholder="Adicionar um assunto…" aria-label="Assunto"
+        {/* o nome do campo a' vista so' na pagina da medicao (#722); o campo ja' se chama "Assunto" para o leitor de tela */}
+        <span className="ol-assunto__rotulo" aria-hidden="true">Assunto</span>
+        {/* area de texto de uma linha que cresce com o texto (#779): o assunto longo quebra em duas linhas em vez de
+            esconder o fim, onde fica o numero do oficio. O assunto continua sendo uma linha so': quebra digitada ou
+            colada vira espaco. */}
+        <textarea id={`${base}-assunto`} rows={1} value={m.assunto} maxLength={300} placeholder="Adicionar um assunto…" aria-label="Assunto"
           aria-invalid={erroAssunto ? true : undefined} aria-describedby={erroAssunto ? `${base}-assunto-erro` : undefined}
-          onChange={e => setM({ ...m, assunto: e.target.value })} />
+          onKeyDown={e => { if (e.key === "Enter") e.preventDefault(); }}
+          onChange={e => setM({ ...m, assunto: e.target.value.replace(/[\r\n]+/g, " ") })} />
         <ErroCampo id={`${base}-assunto-erro`} erro={erroAssunto} />
       </div>
       {anexos.length > 0 && (

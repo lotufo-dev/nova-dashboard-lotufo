@@ -2,13 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import CaixaAviso from "./CaixaAviso";
 import { api, apiForm, baixarArquivo, mensagemDeErro } from "./api";
 import { brl } from "./formato";
-import { IconeAlerta } from "./icones";
 import { trocarBusca, type Busca } from "./rota";
 import { Link } from "./Link";
-import Selo from "./Selo";
+import Selo, { Glifo } from "./Selo";
 import { fmtDataPura } from "./tempo";
 import "./notas.css";
 import "./enviarNota.css";
+import { situacaoDoNivel } from "./situacao";
+import Falha from "./Falha";
 
 // Notas a enviar (2026-10-09; plano docs/superpowers/plans/2026-10-09-notas-envio.md): as notas emitidas que
 // ainda nao foram ao contratante, por grupo de orgao, e o painel do envio escolhido. As regras (o que vai junto,
@@ -18,8 +19,17 @@ export type ItemEnvio = {
   chave: string; rotulo: string; detalhe?: string | null; estado: "ok" | "aviso" | "falta" | "vencida";
   acao?: string | null; entidade_id?: number | null; competencia?: string | null; medicao_id?: number | null;
   frc_gerada?: number | null;   // issue #148: numero da FRC gerada (sem assinatura) vigente, no item da FRC
+  bloqueia?: boolean;           // o item trava o envio sem ser certidao vencida (FRC assinada recusada, notas_envio._itens)
+  // no item "notas": as notas das medicoes do envio que ainda nao tem o PDF anexado (as ja' ligadas a' medicao, com o
+  // numero; sem nota ligada, uma linha sem numero)
+  sem_pdf?: { numero: string | null; natureza: string; medicao_id: number; valor_centavos: number | null }[];
 };
-export type NotaEnvio = { numero: string; natureza: string; municipio?: string | null; arquivo?: string | null; valor_centavos: number };
+// `numero` nulo: o PDF anexado que a leitura nao entendeu e que nao esta' ligado a nenhuma nota; vale o nome do arquivo
+export type NotaEnvio = { numero: string | null; natureza: string; municipio?: string | null; arquivo?: string | null; valor_centavos: number | null };
+
+/** Como a nota aparece numa linha: "NF 2322"; sem o numero, o nome do arquivo anexado (nunca "NF" sozinho). */
+export const rotuloDaNota = (n: { numero: string | null; arquivo?: string | null }) =>
+  n.numero ? `NF ${n.numero}` : n.arquivo || "Nota sem número";
 export type Envio = {
   chave: string; contrato_id: number; obra: string; orgao: string; orgao_sub?: string | null; familia: string;
   grupo: string; a_pedido: boolean; medicao_ids: number[]; descricao: string; notas: NotaEnvio[];
@@ -49,7 +59,8 @@ export function mensagem(e: unknown): string {
 
 /** "NF 2322" / "NF 2322, 2323" (vazio sem nota) */
 export function notasDe(e: Envio): string {
-  return e.notas.length ? `NF ${e.notas.map(n => n.numero).join(", ")}` : "";
+  const [com, sem] = [e.notas.filter(n => n.numero), e.notas.filter(n => !n.numero)];
+  return [com.length ? `NF ${com.map(n => n.numero).join(", ")}` : "", ...sem.map(rotuloDaNota)].filter(Boolean).join(", ");
 }
 
 /** Orgaos que levam carta com numero de oficio (MTPAR, SES e prefeituras); a SINFRA (etapa nota) nao. */
@@ -75,12 +86,13 @@ export function IconeCheck() {
   );
 }
 
-/** Estado do item: a forma (check verde, "!" ambar ou vermelho) e a palavra (leitor de tela e title). */
+/** Estado do item: o sinal da situacao (feito no pronto, vence em breve na atencao e na falta, critico na vencida)
+ *  e a palavra (leitor de tela e title). */
 function EstadoItem({ estado }: { estado: ItemEnvio["estado"] }) {
   const e = ESTADO_ITEM[estado] ? estado : "aviso";
   return (
     <span className={`nota-estado nota-estado--${e}`} title={ESTADO_ITEM[e]}>
-      {e === "ok" ? <IconeCheck /> : <span aria-hidden="true">!</span>}
+      <Glifo situacao={e === "ok" ? "feito" : e === "vencida" ? "critico" : "breve"} />
       <span className="sr-only">{ESTADO_ITEM[e]}</span>
     </span>
   );
@@ -181,7 +193,7 @@ export function ItensEnvio({ itens, aoMudar, podeEditar = true }: { itens: ItemE
           );
         })}
       </ul>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
     </>
   );
 }
@@ -196,7 +208,9 @@ export function avisoPorFora(juntas: Irma[], qtdEnvio: number): string {
 /* ------------------------------------------------------ certidoes, com a validade de cada uma */
 
 export type ItemCertidao = { entidade_id: number; entidade: string | null; tipo: string; chave?: string | null; situacao: string;
-  validade: string | null; dias: number | null; competencia?: string | null };
+  validade: string | null; dias: number | null; competencia?: string | null;
+  /** `pendente` porque nunca foi cadastrada (falta, nao trava o envio), e nao porque venceu (checklist.py) */
+  nunca_cadastrada?: boolean };
 
 /** A natureza que decide quais documentos o orgao exige deste envio: reajuste so' quando o envio e' so' de reajuste. */
 export const naturezaDoEnvio = (e: Envio) => (e.notas.length > 0 && e.notas.every(n => n.natureza === "reajuste") ? "reajuste" : "execucao");
@@ -216,17 +230,27 @@ export function useCertidoes(contratoId: number, natureza: string): ItemCertidao
   return itens;
 }
 
+/** A certidao que nunca foi cadastrada: falta, e nao trava o envio. A vencida trava (docs/adr/0002). */
+const faltaCadastrar = (i: ItemCertidao) => i.situacao === "pendente" && i.nunca_cadastrada === true;
+const estaVencida = (i: ItemCertidao) => i.situacao === "pendente" && !i.nunca_cadastrada;
+
 function textoCertidao(i: ItemCertidao): string | null {
+  if (faltaCadastrar(i)) return "não cadastrada";
   if (i.situacao === "pendente") return "sem validade hoje";
   // em dia, o ponto verde basta: a data so' aparece quando esta' para vencer
   return i.situacao === "vencendo" && i.validade ? `vence em ${fmtDataPura(i.validade.slice(0, 10))}` : null;
 }
 
-/** Uma linha por certidao: o ponto (verde, ambar, vermelho) e a validade so' da que vence, por empresa quando ha mais de uma. O
- *  caminho para emitir a nova so' aparece com certidao vencida. */
-export function ListaCertidoes({ itens, semTitulo = false }: { itens: ItemCertidao[]; semTitulo?: boolean }) {
+/** Uma linha por certidao: o ponto (verde, ambar, vermelho) e a validade so' da que vence, por empresa quando ha mais de uma. A
+ *  vencida sai no critico e a nunca cadastrada, em atencao; cada uma com a frase dela e o caminho para Documentos. */
+export function ListaCertidoes({ itens, semTitulo = false, semNota = false }: {
+  itens: ItemCertidao[]; semTitulo?: boolean;
+  /** quem chama ja' diz, na trava do alto, "Certidão vencida: emita a nova em Documentos." */
+  semNota?: boolean;
+}) {
   const empresas = [...new Map(itens.map(i => [i.entidade_id, i.entidade] as const)).entries()];
-  const vencida = itens.some(i => i.situacao === "pendente");
+  const vencida = itens.some(estaVencida);
+  const semCadastro = itens.some(faltaCadastrar);
   return (
     <div className="certidoes-bloco">
       {!semTitulo && <p className="med-sub">Certidões</p>}
@@ -236,14 +260,17 @@ export function ListaCertidoes({ itens, semTitulo = false }: { itens: ItemCertid
           <ul className="certidoes">
             {itens.filter(i => i.entidade_id === eid).map(i => (
               <li key={`${i.entidade_id}-${i.tipo}`}>
-                <span className={`ponto${i.situacao === "pendente" ? " ponto--acao" : i.situacao === "vencendo" ? " ponto--atencao" : ""}`} aria-hidden="true" />
-                <span>{i.tipo}</span>{textoCertidao(i) && <> <small>· {textoCertidao(i)}</small></>}
+                <Glifo situacao={estaVencida(i) ? "critico" : i.situacao === "vencendo" || faltaCadastrar(i) ? "breve" : "feito"} />
+                <span>{i.tipo}</span>
+                {textoCertidao(i) && <small className={estaVencida(i) ? "info--critico" : undefined}>{textoCertidao(i)}</small>}
               </li>
             ))}
           </ul>
         </div>
       ))}
-      {vencida && <p className="campo__nota certidoes__nota">Certidão vencida: emita a nova em{" "}
+      {vencida && !semNota && <p className="campo__nota certidoes__nota">Certidão vencida: emita a nova em{" "}
+        <Link para={{ tela: "documentos" }}>Documentos</Link>.</p>}
+      {semCadastro && <p className="campo__nota certidoes__nota">Certidão não cadastrada: anexe em{" "}
         <Link para={{ tela: "documentos" }}>Documentos</Link>.</p>}
     </div>
   );
@@ -260,7 +287,7 @@ const FILTROS: { id: FiltroId; rotulo: string }[] = [
   { id: "todas", rotulo: "Todas" }, { id: "prontas", rotulo: "Prontas" }, { id: "pendencia", rotulo: "Com pendência" },
 ];
 
-type Resumo = { situacao: Situacao; selo: string; nivel: "" | "selo--ok" | "selo--atencao" | "selo--acao";
+type Resumo = { situacao: Situacao; selo: string; nivel: "" | "andamento" | "breve" | "critico";
   motivo: string; tom: "neutro" | "atencao" | "bloqueio" };
 
 /** O selo do cartao e a frase do rodape. So' o bloqueio apaga o botao; a frase (`motivo`) so' existe quando o envio
@@ -268,24 +295,25 @@ type Resumo = { situacao: Situacao; selo: string; nivel: "" | "selo--ok" | "selo
 export function resumoDe(e: Envio): Resumo {
   if (e.situacao === "bloqueado") {
     const venc = e.itens.find(i => i.estado === "vencida");
-    return { situacao: "pendencia", selo: venc ? "Certidão vencida" : "Bloqueado", nivel: "selo--acao",
+    return { situacao: "pendencia", selo: venc ? "Certidão vencida" : "Bloqueado", nivel: "critico",
       motivo: e.aviso ? (/^bloque/i.test(e.aviso) ? e.aviso : `Envio bloqueado: ${e.aviso}`) : "Envio bloqueado.", tom: "bloqueio" };
   }
   if (e.situacao === "esperando") {
     const qual = e.espera?.tipo === "execucao" ? "a medição" : "o reajuste";
-    return { situacao: "pendencia", selo: `Esperando ${qual}`, nivel: "selo--atencao",
+    return { situacao: "pendencia", selo: `Esperando ${qual}`, nivel: "breve",
       motivo: `Esperando as notas d${qual}.`, tom: "atencao" };
   }
   // certidao a menos de 15 dias do vencimento so' avisa: o envio segue pronto, com o aviso ao lado
   const aviso = e.itens.find(i => i.estado === "aviso");
   const falta = e.itens.find(i => i.estado === "falta");
-  if (!falta && aviso) return { situacao: "pronto", selo: "Pronto", nivel: "selo--ok", motivo: "", tom: "atencao" };
+  // #722: pronto para enviar ainda nao e' feito: o envio esta' por fazer, em andamento
+  if (!falta && aviso) return { situacao: "pronto", selo: "Pronto", nivel: "andamento", motivo: "", tom: "atencao" };
   if (falta) {
     const rotulo = /^[A-ZÀ-Ý]{2}/.test(falta.rotulo) ? falta.rotulo : falta.rotulo.charAt(0).toLowerCase() + falta.rotulo.slice(1);
-    return { situacao: "pendencia", selo: falta.estado === "falta" ? `Falta ${rotulo}` : falta.rotulo, nivel: "selo--atencao",
+    return { situacao: "pendencia", selo: falta.estado === "falta" ? `Falta ${rotulo}` : falta.rotulo, nivel: "breve",
       motivo: "", tom: "atencao" };
   }
-  return { situacao: "pronto", selo: "Pronto", nivel: "selo--ok", motivo: "", tom: "neutro" };
+  return { situacao: "pronto", selo: "Pronto", nivel: "andamento", motivo: "", tom: "neutro" };
 }
 
 /** O que vai junto, so' para ler: cada item com o estado e, onde falta algo, o link para resolver. */
@@ -323,7 +351,7 @@ function ItensLeitura({ e, certidoes }: { e: Envio; certidoes: ItemCertidao[] | 
           </span>
         </li>
       ))}
-      {erroBaixar && <li><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroBaixar}</p></li>}
+      {erroBaixar && <li><Falha>{erroBaixar}</Falha></li>}
     </ul>
   );
 }
@@ -396,7 +424,7 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
 
   if (!dados) {
     return erro
-      ? <div className="form-inline"><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler as notas a enviar: {erro}</p>
+      ? <div className="form-inline"><Falha>Não foi possível ler as notas a enviar: {erro}</Falha>
           <button type="button" className="btn btn--pequeno" onClick={() => void carregar()}>Tentar de novo</button></div>
       : <p className="campo__nota">Carregando as notas…</p>;
   }
@@ -466,7 +494,7 @@ export default function NotasAEnviar({ busca, podeEditar }: { busca: Busca; pode
                         </span>
                         <span className="en-direita">
                           <span className={`nota-cartao__valor nota-mono${e.a_pedido ? " nota-cartao__valor--espera" : ""}`}>{brl(e.valor_centavos)}</span>
-                          <Selo classe={r.nivel}>{r.selo}</Selo>
+                          <Selo situacao={situacaoDoNivel(r.nivel)}>{r.selo}</Selo>
                         </span>
                       </button>
                     );

@@ -27,7 +27,10 @@ describe("Login: recusas", () => {
   it("401 continua com a mensagem de credencial recusada", async () => {
     api.mockRejectedValue(new ApiErro(401, "E-mail ou senha inválidos, ou usuário bloqueado"));
     tentar();
-    expect((await screen.findByRole("alert")).textContent).toContain("Confira os dois e tente de novo.");
+    const alerta = await screen.findByRole("alert");
+    expect(alerta.textContent).toContain("Confira os dois e tente de novo.");
+    // #768: a recusa vai na caixa de critico da fundacao (o octogono)
+    expect(alerta.closest(".aviso--critico")?.querySelector(".glifo--critico")).toBeTruthy();
   });
 });
 
@@ -37,6 +40,8 @@ describe("Login: só o que se usa para entrar", () => {
   it("sem frase de apoio, subtítulo da marca, ajuda, placeholder de e-mail nem rodapé", () => {
     const { container } = render(<Login aoEntrar={() => {}} />);
     expect(screen.getByRole("heading", { name: "Entrar" })).toBeTruthy();
+    // #768: a marca e' o L em vetor, como no menu
+    expect(container.querySelector("svg.entrar__simbolo")).not.toBeNull();
     expect(container.textContent).not.toMatch(/Medições, protocolos|Plataforma de Obras|cadastrados pelo administrador|rede interna|©/);
     expect(screen.getByLabelText("E-mail").getAttribute("placeholder")).toBeNull();
   });

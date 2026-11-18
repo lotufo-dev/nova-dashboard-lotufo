@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import { CartaoPleito, NovoPleito, type Pleito, type Reemissao } from "./FluxoOficio";
-import { IconeAlerta } from "./icones";
 import { focarPorId } from "./foco";
 import { cicloDoApostilamento, reajustePorDataBase, termosCorrigidos, type BaseDoTermo, type CicloApi,
   type InstrumentoCadastro } from "./obra";
@@ -11,6 +10,8 @@ import { brl, fmtPercentualDoCadastro } from "./formato";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import { LinhaPleito, partesDoEnvio, pleitoEmLinha, type DesfechoPleito } from "./Prazos";
+import { situacaoDoNivel } from "./situacao";
+import Falha from "./Falha";
 
 // Aba Reajuste da obra (bloco 7; spec §7.2; NAVEGACAO.md › Obra): um grupo por data-base, com ancora
 // (`#db-2023-01`): o cartao do ciclo corrente (situacao, pleito e apostilamento, a tabela por competencia e a
@@ -148,7 +149,7 @@ function FormResposta({ pleito, anulavel, aoGravar, aoCancelar }: { pleito: Plei
         <button type="submit" className="btn btn--pequeno btn--primario" disabled={gravando}>Registrar resposta</button>
         <button type="button" className="btn btn--pequeno" onClick={aoCancelar}>Cancelar</button>
       </div>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
     </form>
   );
 }
@@ -307,13 +308,13 @@ type LinhaDoTempoApi = { data_base_mes: string; ciclo: number; termo: Instrument
 
 // Pleito nao enviado e' a vez da engenharia: nivel "Acao" do D2 (ambar com contorno cheio), o
 // mesmo com que o fato aparece nos avisos. Vermelho fica para o critico.
-const SITUACAO: Record<Ciclo["situacao"], { rotulo: string; classe: string; forte?: boolean }> = {
+const SITUACAO: Record<Ciclo["situacao"], { rotulo: string; classe: string }> = {
   futuro: { rotulo: "ainda não abriu", classe: "" },
-  pleito_pendente: { rotulo: "pleito não enviado", classe: "selo--atencao", forte: true },
-  apostilamento_pendente: { rotulo: "apostilamento pendente", classe: "selo--atencao" },
+  pleito_pendente: { rotulo: "pleito não enviado", classe: "breve" },
+  apostilamento_pendente: { rotulo: "apostilamento pendente", classe: "breve" },
   // issue #273: aditivo de prazo ou valor assinado depois do ultimo pleito enviado; a vez e' da engenharia
-  reemitir: { rotulo: "cronograma de reajuste a reemitir", classe: "selo--atencao", forte: true },
-  apostilado: { rotulo: "apostilado", classe: "selo--ok" },
+  reemitir: { rotulo: "cronograma de reajuste a reemitir", classe: "breve" },
+  apostilado: { rotulo: "apostilado", classe: "feito" },
   // issue #586: o orgao indeferiu o pleito vigente; o ciclo fecha sem termo
   indeferido: { rotulo: "indeferido", classe: "" },
 };
@@ -349,7 +350,7 @@ function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: 
   // (na SES, o termo aditivo de valor de reajuste, issue #390: `apostilamentos` traz tambem os aditivos)
   const termo = p.situacao === "enviado" && p.instrumento_chave
     ? apostilamentos.find(i => i.chave === p.instrumento_chave) : undefined;
-  if (termo) return { classe: "selo--ok", texto: `atendido pelo ${nomeDoTermo(termo).toLowerCase()} ${termo.numero ?? "s/n"}`, partes: envio };
+  if (termo) return { classe: "feito", texto: `atendido pelo ${nomeDoTermo(termo).toLowerCase()} ${termo.numero ?? "s/n"}`, partes: envio };
   // so' o pleito vigente do ciclo (o enviado mais recente) leva o desfecho; os anteriores (reiterados ou
   // reemitidos) ficam com o envio e a cadeia, sem repetir a espera do ciclo (issue #277)
   if (!c || p.situacao !== "enviado" || (c.pleito && c.pleito.id !== p.id)) return neutro;
@@ -357,7 +358,7 @@ function desfechoDoPleito(p: Pleito, apostilamentos: InstrumentoCadastro[], c?: 
     return { classe: "", texto: `indeferido em ${fmtDataPura(c.resposta.data)}`, partes: envio };
   }
   if (c.situacao === "apostilamento_pendente" || c.situacao === "reemitir") {
-    return { classe: "selo--atencao", partes: envio,
+    return { classe: "breve", partes: envio,
       texto: c.dias !== null && c.dias >= 0 ? `sem apostilamento há ${dias(c.dias)}` : "sem apostilamento ainda" };
   }
   // atendido so' pelo termo ligado ao pleito (acima): sem a ligacao, o ciclo apostilado nao diz que foi este
@@ -392,7 +393,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
   // o pleito criado so' existe depois que a lista recarrega: tenta de novo a cada leitura
   useEffect(() => { if (foco && focarPorId(foco)) setFoco(null); }, [foco, dados]);
 
-  if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>;
+  if (erro) return <Falha>{erro}</Falha>;
   if (!dados) return <section className="cartao"><div className="vazio"><p>Carregando…</p></div></section>;
   const grupos = dados.competencias_por_ciclo ?? [];
   if (dados.ciclos.length === 0 && dados.pleitos.length === 0 && apostilamentos.length === 0 && grupos.length === 0) {
@@ -445,7 +446,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
               return (
                 <li key={db.data_base_mes}>
                   <Link para={aqui} secao={`db-${db.data_base_mes}`}>{rotuloDataBase(db.data_base_mes, db.atual)}</Link>
-                  <Selo classe={s.classe} forte={s.forte}>{s.rotulo}</Selo>
+                  <Selo situacao={situacaoDoNivel(s.classe)}>{s.rotulo}</Selo>
                 </li>
               );
             })}
@@ -504,7 +505,7 @@ export default function Reajuste({ contratoId, podeEditar }: { contratoId: numbe
           <section className="cartao" id={`db-${db.data_base_mes}`} key={db.data_base_mes} aria-labelledby={titulo}>
             <div className="cartao__cabeca">
               <h2 className="cartao__titulo" id={titulo}>Data-base {rotuloDataBase(db.data_base_mes, c)}</h2>
-              <Selo classe={s.classe} forte={s.forte}>{s.rotulo}</Selo>
+              <Selo situacao={situacaoDoNivel(s.classe)}>{s.rotulo}</Selo>
               {/* com um pleito em aberto no ciclo, o caminho e' continuar nele, nao abrir outro oficio */}
               {podeEditar && aberto && (
                 <div className="cartao__acoes">

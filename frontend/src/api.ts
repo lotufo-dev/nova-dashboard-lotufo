@@ -129,3 +129,10 @@ export function mensagemDeErro(e: unknown): string {
   console.error(e);
   return "Algo deu errado. Tente de novo.";
 }
+
+/** A mensagem com ponto final, para a frase que continua depois dela: o `detail` do servidor costuma vir sem
+ *  pontuacao ("Contrato não encontrado") e emendaria na frase seguinte. */
+export function comPontoFinal(texto: string): string {
+  const t = texto.trim();
+  return t === "" || /[.!?…]$/.test(t) ? t : `${t}.`;
+}

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { CaixaJustificativa } from "./CaixaAviso";
 import { brl } from "./formato";
 import { api, apiForm, mensagemDeErro } from "./api";
 import CampoValor from "./CampoValor";
@@ -8,6 +9,7 @@ import type { Medicao } from "./Medicoes";
 import { fmtDataPura } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
+import Falha from "./Falha";
 
 // Notas da medicao (bloco 3, spec §3 passo 3 e §7.1): a pessoa arrasta os PDFs que o faturamento
 // devolveu; o sistema le a nota da Lotufo, confere contra a saida do espelho e fecha "nota emitida"
@@ -263,17 +265,17 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
         {rotulo ?? tituloMedicao(medicao)}
         {/* #514: quantas notas esperadas ja' chegaram ("4 de 6") */}
         {dados && dados.esperadas.length > 0 && (
-          <>{" "}<Selo classe={dados.esperadas.some(e => e.nota_id === null) ? "selo--atencao" : "selo--ok"}>
+          <>{" "}<Selo situacao={dados.esperadas.some(e => e.nota_id === null) ? "breve" : "feito"}>
             {`${dados.esperadas.filter(e => e.nota_id !== null).length} de ${dados.esperadas.length}`}</Selo></>
         )}
       </p>
 
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
       {!dados && !erro && <p className="campo__nota">Carregando…</p>}
 
       {dados && dados.esperadas.length > 0 && (
         <Rolagem rotulo="Notas esperadas da medição">
-          <table className="tabela tabela--densa notas__tabela" aria-label={rotulo ? `Notas esperadas: ${rotulo}` : undefined}>
+          <table className={`tabela tabela--densa notas__tabela${mostraImpostos ? " notas__tabela--impostos" : ""}`} aria-label={rotulo ? `Notas esperadas: ${rotulo}` : undefined}>
             <thead>
               <tr>
                 <th scope="col">Empresa</th><th scope="col">Município</th><th scope="col" className="col-num num">Valor</th>
@@ -305,8 +307,12 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
                   );
                 };
                 const empresa = variasNaturezas ? `${naturezaNome(e.natureza, e.rotulo)} · ${emissorNome(e.emissor)}` : emissorNome(e.emissor);
+                // a divergencia vai numa linha propria, na largura da tabela: dentro da celula da nota ela quebrava em
+                // cinco linhas e empurrava os impostos para fora da caixa
+                const diferenca = n ? conferencia(n) : null;
                 return (
-                  <tr key={e.chave}>
+                  <Fragment key={e.chave}>
+                  <tr className={diferenca ? "notas__linha--diverge" : undefined}>
                     <td>{empresa}</td>
                     <td>{diverge("municipio", e.municipio)
                       ? <span className="notas__celula--diverge" title={`Na nota: ${lidos.get("municipio") ?? "não lido"}`}>
@@ -314,9 +320,9 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
                         </span>
                       : e.municipio}</td>
                     {celula("valor", e.valor)}
-                    <td>{n ? <>{situacaoNota(n)}{conferencia(n)}{botaoDesfazer(n)}</> : (
+                    <td>{n ? <>{situacaoNota(n)}{botaoDesfazer(n)}</> : (
                       <span className="notas__falta">
-                        <Selo classe="selo--atencao">aguardando</Selo>
+                        <Selo situacao="breve">aguardando</Selo>
                         {podeEditar && (
                           <label className="btn btn--pequeno espelho__anexar">
                             Anexar
@@ -332,6 +338,12 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
                       {celula("liquido", e.liquido)}
                     </>}
                   </tr>
+                  {diferenca && (
+                    <tr className="notas__diferenca">
+                      <td colSpan={4 + (mostraImpostos ? 4 + (temIbsCbs ? 2 : 0) : 0)}>{diferenca}</td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -351,11 +363,11 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
 
       {justificar && (
         <form className="form-inline" onSubmit={enviarJustificativa}>
-          <div className="campo">
+          <CaixaJustificativa>
             <label className="campo__rotulo" htmlFor={`nota-justificativa-${medicao.id}`}>Justificativa da divergência</label>
             <input id={`nota-justificativa-${medicao.id}`} name="justificativa" autoComplete="off" className="entrada--larga" required maxLength={1000} autoFocus
               value={justificar.texto} onChange={ev => setJustificar({ ...justificar, texto: ev.target.value })} />
-          </div>
+          </CaixaJustificativa>
           <button type="submit" className="btn btn--primario" disabled={ocupado}>{acao === "justificar" ? "Gravando…" : "Gravar justificativa"}</button>
           <button type="button" className="btn" onClick={() => setJustificar(null)}>Voltar</button>
         </form>
@@ -363,13 +375,13 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
 
       {desfazer && (
         <form className="form-inline" onSubmit={enviarDesfazer}>
-          <div className="campo">
+          <CaixaJustificativa>
             <label className="campo__rotulo" htmlFor={`nota-desfazer-${medicao.id}`}>
               Motivo para desfazer o vínculo da nota {Number(desfazer.numero) || desfazer.numero}
             </label>
             <input id={`nota-desfazer-${medicao.id}`} name="motivo" autoComplete="off" className="entrada--larga" required maxLength={1000} autoFocus
               value={desfazer.motivo} onChange={ev => setDesfazer({ ...desfazer, motivo: ev.target.value })} />
-          </div>
+          </CaixaJustificativa>
           <button type="submit" className="btn btn--primario" disabled={ocupado}>{acao === "desfazer" ? "Desfazendo…" : "Desfazer o vínculo"}</button>
           <button type="button" className="btn" onClick={() => setDesfazer(null)}>Voltar</button>
         </form>
@@ -440,11 +452,11 @@ export function Notas({ medicao, podeEditar, podeDesfazer = false, aoMudar, aoFe
 
       {podeEditar && dados && dados.pode_declarar && dados.faltam > 0 && dados.notas.length > 0 && (
         <form className="form-inline" onSubmit={enviarDeclaracao}>
-          <div className="campo">
+          <CaixaJustificativa>
             <label className="campo__rotulo" htmlFor={`nota-declarar-${medicao.id}`}>Declarar as notas completas — justificativa</label>
             <input id={`nota-declarar-${medicao.id}`} name="declaracao" autoComplete="off" className="entrada--larga" required maxLength={1000}
               value={declarar} onChange={ev => setDeclarar(ev.target.value)} />
-          </div>
+          </CaixaJustificativa>
           <button type="submit" className="btn btn--pequeno" disabled={ocupado}>{acao === "declarar" ? "Gravando…" : "Declarar completas"}</button>
         </form>
       )}

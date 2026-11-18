@@ -218,6 +218,8 @@ def _relatorio_carga(rel: dict) -> None:
             rotulo += f" {li['competencia']}"
         print(f"  {rotulo}: {li['categoria']}" + (f" ({li['detalhe']})" if li["detalhe"] else "")
               + (f" -> {li['acao']}" if li.get("acao") else ""))
+        if li.get("entra_como"):
+            print(f"    entra como: {li['entra_como']}")
         for aviso in li.get("avisos", []):
             print(f"    AVISO: {aviso}")
     print("Total: " + ", ".join(f"{c} {n}" for c, n in rel["totais"].items()))
@@ -497,6 +499,27 @@ def _liberar_exclusao(args) -> int:
     return 0
 
 
+def _notas(args) -> int:
+    """`notas reler --usuario <e-mail> [--ensaio]`: rele os PDFs de nota anexados cuja leitura falhou (leiaute que o
+    leitor passou a reconhecer depois) e faz, para cada um que agora e' lido, o mesmo que arrastar o PDF de novo."""
+    from app import notas
+    conn = db.get_conn()
+    try:
+        db.migrate(conn)
+        u = conn.execute("SELECT id, email FROM usuarios WHERE email=? AND ativo=1", (args.usuario,)).fetchone()
+        if u is None:
+            print(f"Usuário não encontrado ou inativo: {args.usuario}")
+            return 1
+        rel = notas.reler_falhas(conn, dict(u), ensaio=args.ensaio)
+    finally:
+        conn.close()
+    print("ENSAIO (nada foi gravado)" if rel["ensaio"] else "APLICADO")
+    print(f"  anexos de nota com leitura falha: {rel['documentos']}; lidos agora: {rel['lidos']}")
+    for linha in rel["linhas"]:
+        print(f"    {linha}")
+    return 0
+
+
 def _instalacao(args) -> int:
     """`instalacao gerar-chave --saida <pasta>` e `instalacao assinar --chave <privada> --maquina <nome> --saida
     <arquivo>` (issue #417): rodam no Mac do dono. A chave privada nunca vai ao servidor nem ao repositório; o servidor
@@ -685,6 +708,10 @@ def main(argv: list[str] | None = None) -> int:
     rmp.add_argument("acao", choices=["vinculos-fora-da-cobranca", "liberar-exclusao"])
     rmp.add_argument("--usuario", help="e-mail de quem libera (só em `liberar-exclusao`)")
     rmp.add_argument("--ensaio", action="store_true", help="mostra o que seria marcado e desfaz (`liberar-exclusao`)")
+    nts = sub.add_parser("notas", help="relê os PDFs de nota anexados cuja leitura falhou")
+    nts.add_argument("acao", choices=["reler"])
+    nts.add_argument("--usuario", required=True, help="e-mail de quem aplica")
+    nts.add_argument("--ensaio", action="store_true", help="mostra o que seria lido e não grava")
     ins = sub.add_parser("instalacao", help="chave do dono e arquivo assinado da instalação (no Mac do dono)")
     ins.add_argument("acao", choices=["gerar-chave", "assinar", "verificar"])
     ins.add_argument("--saida", help="pasta das chaves (gerar-chave) ou arquivo assinado (assinar)")
@@ -750,6 +777,8 @@ def main(argv: list[str] | None = None) -> int:
         return _conciliacao(args)
     if args.cmd == "rm":
         return _rm(args)
+    if args.cmd == "notas":
+        return _notas(args)
     senha = getpass.getpass("Senha do administrador: ")
     conn = db.get_conn()
     try:

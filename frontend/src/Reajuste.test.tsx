@@ -123,7 +123,7 @@ describe("Reajuste", () => {
       [["apostilada", "selo"]], [["apostilada", "selo"]]]);
     for (const texto of ["fora da previsão", "sem apostilamento", "nota antes do apostilamento"])
       expect(within(tabela).queryByText(texto)).toBeNull();
-    expect(tabela.querySelector(".selo--atencao, .selo--acao")).toBeNull();
+    expect(tabela.querySelector(".selo--breve, .selo--critico")).toBeNull();
     // sem a marca, nada a justificar na linha
     expect(within(tabela).queryByRole("button", { name: /^Justificar/ })).toBeNull();
     // nenhum valor some: previsto, pedido, aprovado e nota continuam na linha

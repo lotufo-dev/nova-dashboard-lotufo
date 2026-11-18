@@ -87,6 +87,27 @@ def test_em_encerramento_exige_status_desde(tmp_path):
     assert any("status_desde" in e for e in erros)
 
 
+def test_encerrado_ou_rescindido_aceita_a_data_do_fato_em_status_desde(tmp_path):
+    """`status_desde` e' opcional na obra encerrada ou rescindida; com ela, e' a data do encerramento (ou da
+    rescisao): valida, nao futura e nao anterior ao inicio da execucao."""
+    def obra(**troca):
+        return _escrever(tmp_path, contratos=[{**CONTRATO, "execucao_inicio": "2024-03-11", **troca}])
+    for status in ("encerrado", "rescindido"):
+        assert ca.preparar(obra(status=status))["contratos"][0]["status_desde"] is None      # sem a data, como antes
+        c = ca.preparar(obra(status=status, status_desde="2026-09-30"))["contratos"][0]
+        assert (c["status"], c["status_desde"]) == (status, "2026-09-30")
+    assert any("status_desde" in e for e in _erros(obra(status="encerrado", status_desde="30/09/2026")))
+    erros = _erros(obra(status="encerrado", status_desde="2999-01-01"))
+    assert any("status_desde" in e and "encerramento" in e and "futuro" in e for e in erros)
+    erros = _erros(obra(status="rescindido", status_desde="2999-01-01"))
+    assert any("status_desde" in e and "rescisão" in e and "futuro" in e for e in erros)
+    erros = _erros(obra(status="encerrado", status_desde="2024-03-10"))
+    assert any("status_desde" in e and "anterior ao início da execução (2024-03-11)" in e for e in erros)
+    # no proprio dia do inicio, e sem inicio de execucao cadastrado, nao ha' o que recusar
+    assert ca.preparar(obra(status="encerrado", status_desde="2024-03-11"))
+    assert ca.preparar(obra(status="encerrado", status_desde="2020-01-01", execucao_inicio=None))
+
+
 # --- bloco 2: geral.yaml, espelho/<slug>.yaml, modelos e emails_faturamento ---------------
 
 import hashlib
@@ -255,10 +276,47 @@ def test_tipos_cobranca_extras_rm_do_contrato(tmp_path):
                          "nenhum"], ruim
 
 
+def test_centro_custo_empresa_rm_so_em_consorcio_e_sem_repetir(tmp_path):
+    """docs/adr/0005: o centro de custo da propria empresa no contrato de consorcio. Opcional; recusa o que nao e'
+    texto, o contrato que nao e' de consorcio, o centro repetido em dois contratos e o que ja' e' o centro de custo
+    (atual ou anterior) de uma obra propria: cada centro aponta uma obra so'."""
+    rivoli = {"chave": "rivoli", "nome": "Rivoli", "cnpj": "31.200.606/0001-02", "papel": "consorciada"}
+    gama = {"chave": "consorcio-gama", "nome": "Consórcio Gama", "cnpj": "31.200.404/0001-52", "papel": "consorcio",
+            "consorciadas": ["lotufo", "rivoli"], "coligada_rm": 90}
+    propria = {**CONTRATO, "centro_custo_rm": "9.001.001", "centros_custo_anteriores_rm": ["9.001.000"]}
+    def cons(nome, instrumento, centro):
+        return {**CONTRATO, "nome_curto": nome, "numero_instrumento": instrumento, "entidade": "consorcio-gama",
+                "percentual_lotufo": "50", "centro_custo_empresa_rm": centro}
+    def raiz(pasta, *contratos):
+        return _escrever(tmp_path / pasta, entidades=[ENTIDADE, rivoli, gama], contratos=list(contratos))
+    lidos = {c["nome_curto"]: c["centro_custo_empresa_rm"]
+             for c in ca.preparar(raiz("a", propria, cons("Gama", "IC 1", " 9.005.001 ")))["contratos"]}
+    assert lidos == {"MT-402": None, "Gama": "9.005.001"}
+    assert ca.preparar(raiz("b", propria, cons("Gama", "IC 1", None)))["contratos"][0]["centro_custo_empresa_rm"] is None
+    for i, ruim in enumerate(("", "   ", 9.005, ["9.005.001"])):
+        assert _erros(raiz(f"c{i}", cons("Gama", "IC 1", ruim))) == [
+            "contratos/gama.yaml: centro_custo_empresa_rm: use o código do centro de custo do RM entre aspas "
+            "(ex.: '9.005.001')"], ruim
+    assert _erros(raiz("d", {**propria, "centro_custo_empresa_rm": "9.005.001"})) == [
+        "contratos/mt-402.yaml: centro_custo_empresa_rm: só vale em contrato de consórcio (na obra própria, use "
+        "centro_custo_rm)"]
+    assert _erros(raiz("e", cons("Gama", "IC 1", "9.005.001"), cons("Delta", "IC 2", "9.005.001"))) == [
+        "contratos: centro_custo_empresa_rm 9.005.001 repetido em Delta, Gama: cada centro aponta uma obra só"]
+    for i, centro in enumerate(("9.001.001", "9.001.000")):
+        assert _erros(raiz(f"f{i}", propria, cons("Gama", "IC 1", centro))) == [
+            f"contratos/gama.yaml: centro_custo_empresa_rm: {centro} já é o centro de custo de MT-402"]
+
+
+def test_cadastro_de_exemplo_declara_o_centro_da_empresa_so_na_obra_de_consorcio():
+    from tests.conftest import CADASTRO_EXEMPLO
+    centros = {c["nome_curto"]: c["centro_custo_empresa_rm"] for c in ca.preparar(CADASTRO_EXEMPLO)["contratos"]}
+    assert centros == {"Obra Própria": None, "Obra Consórcio": "5.001.001", "Obra Encerrada": None}
+
+
 def test_cadastro_de_exemplo_declara_um_tipo_extra_so_na_obra_de_consorcio():
     from tests.conftest import CADASTRO_EXEMPLO
     tipos = {c["nome_curto"]: c["tipos_cobranca_extras_rm"] for c in ca.preparar(CADASTRO_EXEMPLO)["contratos"]}
-    assert tipos == {"Obra Própria": [], "Obra Consórcio": ["2.2.03"]}
+    assert tipos == {"Obra Própria": [], "Obra Consórcio": ["2.2.03"], "Obra Encerrada": []}
 
 
 def test_orgao_com_cnpj_valido_normaliza_e_invalido_e_erro(tmp_path):
@@ -1309,3 +1367,39 @@ def test_cadastro_exemplo_traz_o_pacote_assinado_na_familia_sinfra():
     orgao = next(o for o in ca.preparar(CADASTRO_EXEMPLO)["orgaos"] if o["familia"] == "sinfra")
     assert "Relatório de Cronograma Físico-Financeiro de Evolução Mensal" in orgao["regras"]["pacote_assinado"]["medicao"]
     assert "Relatório de Cálculo de Medição Reajustada" in orgao["regras"]["pacote_assinado"]["reajuste"]
+
+
+# --- fiscal sem e-mail (migracao 094): o e-mail so' entra quando um documento do orgao o prova ----------------------
+
+def test_fiscal_sem_email_e_aceito_com_nome_e_sai_com_email_nulo(tmp_path):
+    c = {**CONTRATO, "fiscais": [
+        {"nome": "Ana", "desde": "2026-01-01", "cargo": "Fiscal do Contrato", "portaria": "Portaria n.º 1/2026"},
+        {"nome": "Bia", "email": "  ", "desde": "2026-02-01"},
+        {"nome": "Caio", "email": " Caio@Orgao-A.exemplo.com.br ", "desde": "2026-03-01"}]}
+    cad = ca.preparar(_escrever(tmp_path, contratos=[c]))
+    fiscais = cad["contratos"][0]["fiscais"]
+    assert [(f["nome"], f["email"]) for f in fiscais] == [
+        ("Ana", None), ("Bia", None), ("Caio", "caio@orgao-a.exemplo.com.br")]
+    assert fiscais[0]["cargo"] == "Fiscal do Contrato" and fiscais[0]["portaria"] == "Portaria n.º 1/2026"
+    assert cad["avisos"] == []
+
+
+def test_fiscal_sem_email_e_sem_nome_e_erro_e_sem_desde_tambem(tmp_path):
+    c = {**CONTRATO, "fiscais": [{"desde": "2026-01-01", "cargo": "Fiscal"}, {"nome": "Ana"},
+                                 {"nome": "Bia", "email": "bia@orgao-a.exemplo.com.br"}]}
+    erros = _erros(_escrever(tmp_path, contratos=[c]))
+    assert any("fiscais[0]" in e and "nome é obrigatório" in e for e in erros)
+    assert any("fiscais[1]" in e and "desde é obrigatório" in e for e in erros)
+    assert any("fiscais[2]" in e and "desde é obrigatório" in e for e in erros)
+
+
+def test_fiscal_sem_email_repetido_na_mesma_data_e_erro(tmp_path):
+    c = {**CONTRATO, "fiscais": [{"nome": "Ana", "desde": "2026-01-01"}, {"nome": "Ana", "desde": "2026-01-01"}]}
+    assert any("fiscais[1]" in e and "repetido" in e for e in _erros(_escrever(tmp_path, contratos=[c])))
+
+
+def test_cadastro_de_exemplo_tem_fiscal_sem_email():
+    import pathlib
+    cad = ca.preparar(pathlib.Path(__file__).parents[2] / "cadastro-exemplo")
+    fiscais = [f for c in cad["contratos"] for f in c["fiscais"]]
+    assert any(f["email"] is None and f["nome"] for f in fiscais) and any(f["email"] for f in fiscais)

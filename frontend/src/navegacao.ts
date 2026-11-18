@@ -9,23 +9,26 @@ import type { Rota } from "./rota";
 // para "Obras" com os Avisos abertos.
 
 export type Perfil = "engenharia" | "diretoria" | "admin";
-export type ItemMenu = "inicio" | "medicoes" | "obras" | "avisos" | "siga" | "documentos" | "a-receber" | "carteira" | "ancoras-docusign" | "admin";
+export type ItemMenu = "inicio" | "medicoes" | "resumo-medicoes" | "obras" | "avisos" | "siga" | "documentos" | "fechamento" | "ancoras-docusign" | "admin";
 
 export const ROTULO: Record<ItemMenu, string> = {
-  inicio: "Início", medicoes: "Medições", obras: "Obras", avisos: "Avisos", siga: "SIGA", documentos: "Documentos", "a-receber": "A receber",
-  carteira: "Carteira", "ancoras-docusign": "Âncoras DocuSign", admin: "Administração",
+  inicio: "Início", medicoes: "Medições", "resumo-medicoes": "Resumo das medições", obras: "Obras", avisos: "Avisos", siga: "SIGA", documentos: "Documentos",
+  fechamento: "Fechamento", "ancoras-docusign": "Âncoras DocuSign", admin: "Administração",
 };
 
 // Ordem do trilho.
-const ORDEM: readonly ItemMenu[] = ["inicio", "medicoes", "obras", "avisos", "siga", "documentos", "a-receber", "carteira", "ancoras-docusign", "admin"];
+const ORDEM: readonly ItemMenu[] = ["inicio", "medicoes", "resumo-medicoes", "obras", "avisos", "siga", "documentos", "fechamento", "ancoras-docusign", "admin"];
 
 // Medicoes (#643): um item so' no menu, que abre o quadro do mes.
-// Decisao 3 do mapa: a diretoria sem Medicoes no menu (a rota continua abrindo), e a engenharia com A receber.
+// Decisao 3 do mapa: a diretoria sem Medicoes no menu (a rota continua abrindo). #748: o Fechamento no lugar de A receber
+// e da Carteira, para todos os perfis.
+// #749: o Resumo das medicoes (so' leitura: a etapa da medicao de cada obra na competencia) para todos os perfis; a
+// diretoria continua sem o item Medicoes, que e' a tela de quem opera.
 // O Inicio voltou (decisao do dono, 08/10/2026): e' a entrada de todos os perfis, no alto do menu.
 const DO_PERFIL: Record<Perfil, readonly ItemMenu[]> = {
-  engenharia: ["inicio", "medicoes", "avisos", "siga", "documentos", "obras", "a-receber", "ancoras-docusign"],
-  diretoria: ["inicio", "carteira", "avisos", "documentos", "obras", "a-receber"],
-  admin: ["inicio", "medicoes", "avisos", "siga", "documentos", "obras", "a-receber", "carteira", "ancoras-docusign", "admin"],
+  engenharia: ["inicio", "medicoes", "resumo-medicoes", "avisos", "siga", "documentos", "obras", "fechamento", "ancoras-docusign"],
+  diretoria: ["inicio", "resumo-medicoes", "avisos", "documentos", "obras", "fechamento"],
+  admin: ["inicio", "medicoes", "resumo-medicoes", "avisos", "siga", "documentos", "obras", "fechamento", "ancoras-docusign", "admin"],
 };
 
 function perfilDe(p: string): Perfil {

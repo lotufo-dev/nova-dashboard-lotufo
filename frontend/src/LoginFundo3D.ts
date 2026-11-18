@@ -211,7 +211,9 @@ const OBRAS = [
   { f: hospital, elev: .4, az0: .6, zoom: .6, alvo: [6, 5, 8] },
 ];
 
-const ESTILO = [{ cor: "#E0E7FF", w: 1.8, op: 1 }, { cor: "#8B93F5", w: 1.1, op: 1 }, { cor: "#5753C9", w: .8, op: .9 }];
+// As cores do desenho sao as variaveis da fundacao (tokens.css), lidas do proprio canvas: o traco forte no texto do
+// menu, o medio e o fino nos tons de apoio, a neblina na cor do menu. Nenhum tom fora da marca (laranja, preto, branco).
+const ESTILO = [{ cor: "--cor-menu-texto", w: 1.8, op: 1 }, { cor: "--cor-menu-texto-secundario", w: 1.1, op: 1 }, { cor: "--cor-texto-terciario", w: .8, op: .9 }];
 // sem arranco: senoide em vez de cubica (pico de velocidade ~pela metade)
 const DES = 16, PARA = 4, SAI = 2, CICLO = DES + PARA + SAI;
 const ease = (t: number) => (1 - Math.cos(Math.PI * t)) / 2;
@@ -225,7 +227,10 @@ export function iniciarFundo(canvas: HTMLCanvasElement, parado: boolean, aoFalha
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   const scene = new THREE.Scene();
-  const fog = new THREE.Fog("#151245", 200, 600);
+  const css = getComputedStyle(canvas);
+  // sem a variavel (folha ainda nao aplicada), o traco fica na cor do texto do canvas
+  const tom = (nome: string) => css.getPropertyValue(nome).trim() || css.color;
+  const fog = new THREE.Fog(tom("--cor-menu"), 200, 600);
   scene.fog = fog;
   const camera = new THREE.PerspectiveCamera(36, 1, .5, 3000);
   const mats: LineMaterial[] = [];
@@ -248,11 +253,11 @@ export function iniciarFundo(canvas: HTMLCanvasElement, parado: boolean, aoFalha
     const camadas = porTipo.map((arr, k) => {
       if (!arr.length) return null;
       const g = new LineSegmentsGeometry(); g.setPositions(arr); geos.push(g);
-      const st = ESTILO[k], mat = novoMat(st.cor, st.w, st.op, false), ln = new LineSegments2(g, mat); ln.frustumCulled = false; grupo.add(ln);
+      const st = ESTILO[k], mat = novoMat(tom(st.cor), st.w, st.op, false), ln = new LineSegments2(g, mat); ln.frustumCulled = false; grupo.add(ln);
       return { g, mat, op: st.op };
     });
     const gc = new LineSegmentsGeometry(); gc.setPositions(new Float32Array(CAUDA * 6)); geos.push(gc);
-    const mc = novoMat("#FFFFFF", 2.2, 1, true), cab = new LineSegments2(gc, mc); cab.frustumCulled = false; grupo.add(cab);
+    const mc = novoMat(tom("--cor-sobre-ponto"), 2.2, 1, true), cab = new LineSegments2(gc, mc); cab.frustumCulled = false; grupo.add(cab);
     grupo.visible = false; scene.add(grupo);
     return { ...o, n, acum, todas, camadas, gc, mc, grupo, raio: bb.getBoundingSphere(new THREE.Sphere()).radius };
   });

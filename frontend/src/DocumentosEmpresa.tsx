@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { apiForm, mensagemDeErro } from "./api";
 import CampoCompetencia from "./CampoCompetencia";
-import { IconeAlerta, IconeArquivo, IconeBaixar, IconeClipe, IconeLinkExterno } from "./icones";
+import Contador from "./Contador";
+import { IconeArquivo, IconeBaixar, IconeClipe, IconeLinkExterno } from "./icones";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import {
-  certidaoPendente, certidoesOrdenadas, NOME_CURTO, pendenciaMaisUrgente, resumoEmpresa, situacaoCertidao,
+  certidaoPendente, certidoesOrdenadas, NOME_CURTO, resumoEmpresa, situacaoCertidao,
   situacaoGarantia, type EmpresaDoc,
 } from "./matriz";
 import { type AbaDocumentos, type Origem } from "./rota";
@@ -14,6 +15,7 @@ import { fmtCompetencia as mesBR, fmtDataPura } from "./tempo";
 import { Migalhas, VoltarOrigem } from "./Topo";
 import { AnexarCertidoes, CnpjCopiar, EmDia, Pilula, Ponto, SituacaoSelo, type AnexarRef } from "./documentosComum";
 import { cnpjBR, competenciaDoNome, ROTULO_TIPO, useCopiarCnpj, usePainel } from "./documentosDados";
+import Falha from "./Falha";
 
 /* A pagina de UMA empresa em Documentos (#161): cabecalho com nome, CNPJ e situacao; tres abas, cada uma com
  * endereco (Certidoes, Regularidade do mes, Garantia por obra). A tabela de certidoes traz Emitir, Anexar e Ver
@@ -126,7 +128,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
       </header>
 
       <div className="pagina">
-        {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+        {erro && <Falha>{erro}</Falha>}
         {/* sempre montada: o Copiar e a fila anunciam aqui */}
         <p className="sr-only" role="status">{anuncio}</p>
 
@@ -145,14 +147,12 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                 <Link key={a.id} className="aba" para={{ tela: "documentos-empresa", id, aba: a.id }}
                   aria-current={a.id === aba ? "page" : undefined}>
                   {a.rotulo}
-                  {contas[a.id] > 0 && <span className="aba__conta" aria-label={contas[a.id] === 1 ? "1 com pendência" : `${contas[a.id]} com pendência`}>{contas[a.id]}</span>}
+                  {contas[a.id] > 0 && <Contador situacao="critico" rotulo={contas[a.id] === 1 ? "1 com pendência" : `${contas[a.id]} com pendência`}>{contas[a.id]}</Contador>}
                 </Link>
               ))}
             </nav>
 
-            {aba === "certidoes" && (() => {
-              const urgente = pendenciaMaisUrgente(e);
-              return (
+            {aba === "certidoes" && (
                 <div className="doc-painel">
                   <div className="tabela-wrap">
                     <table className="tabela tabela--empilha">
@@ -176,7 +176,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                               <td className="doc-data" data-rotulo="Válida até">
                                 {l.certidao ? fmtDataPura(l.certidao.validade) : "—"}
                                 {/* A-19 (10/10/2026): a data digitada a mao nao veio do documento; o selo diz isso a quem confere */}
-                                {l.certidao?.leitura === "manual" && <> <Selo classe="">digitada</Selo></>}
+                                {l.certidao?.leitura === "manual" && <> <Selo>digitada</Selo></>}
                               </td>
                               <td className="doc-sit col-largo" data-rotulo="Situação">
                                 <SituacaoSelo nivel={s.nivel} texto={s.texto} />
@@ -184,9 +184,10 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                               </td>
                               <td className="col-largo">
                                 <div className="doc-acoes">
+                                  {/* decisao D6 do dono: o Emitir so' tem destaque na certidao que pede acao */}
                                   {l.exigida && aplica && l.link_emissao && (
                                     <a href={l.link_emissao} target="_blank" rel="noreferrer"
-                                      className={`btn btn--pequeno${l === urgente ? " btn--primario" : ""}`}
+                                      className={`btn btn--pequeno${certidaoPendente(l) ? " btn--primario" : ""}`}
                                       aria-label={`Emitir ${curto} de ${e.entidade} (abre o site do órgão)`}>
                                       <IconeLinkExterno className="icone" />Emitir
                                     </a>
@@ -220,7 +221,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                   {/* consorcio: a habilitacao e' por CNPJ (o consorcio e cada consorciada); a situacao de cada uma */}
                   {e.papel === "consorcio" && (e.consorciadas ?? []).length > 0 && (
                     <div className="pilha doc-consorciadas-bloco">
-                      <h2 className="doc-secao-titulo">Consorciadas</h2>
+                      <h2 className="doc-bloco__titulo doc-secao-titulo">Consorciadas</h2>
                       <ul className="doc-consorciadas">
                         {e.consorciadas!.map(x => {
                           const o = porId.get(x);
@@ -245,8 +246,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                     <AnexarCertidoes ref={anexar} empresas={painel.empresas} empresaPadrao={e} aoGravar={carregar} anunciar={setAnuncio} />
                   )}
                 </div>
-              );
-            })()}
+            )}
 
             {aba === "regularidade" && (
               <div className="doc-painel">
@@ -263,7 +263,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                         <h3>Situação</h3>
                         {/* fora do dia, a regularidade e' de acao (como o aviso dela) */}
                         {e.regularidade.situacao === "ok" ? <EmDia texto={REG_TEXTO.ok} />
-                          : <Selo classe="selo--atencao" forte>{REG_TEXTO[e.regularidade.situacao]}</Selo>}
+                          : <Selo situacao="breve">{REG_TEXTO[e.regularidade.situacao]}</Selo>}
                         <dl className="doc-pares">
                           <dt>Competência anexada</dt><dd className="num">{mesBR(e.regularidade.competencia)}</dd>
                           <dt>Competência esperada</dt><dd className="num">{mesBR(e.regularidade.esperada)}</dd>
@@ -272,7 +272,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                       {podeEditar && (
                         <form className="doc-reg__bloco" aria-label={`Regularidade de ${e.entidade}`} onSubmit={ev => void enviarRegularidade(ev, e)}>
                           <h3>Anexar regularidade</h3>
-                          {erroReg && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroReg}</p>}
+                          {erroReg && <Falha>{erroReg}</Falha>}
                           <div className="form-inline">
                             <label className="btn btn--pequeno espelho__anexar">
                               <span className="arquivo-nome" title={arquivoReg?.name}>{arquivoReg ? arquivoReg.name : "Escolher PDF"}</span>
@@ -347,7 +347,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                                   <Link para={{ tela: "obra", id: k.contrato_id, aba: "documentos" }}>{k.obra}</Link>
                                 </th>
                                 <td data-rotulo="Garantia">
-                                  <SituacaoSelo nivel={g.nivel} texto={g.texto} forte={g.forte} />
+                                  <SituacaoSelo nivel={g.nivel} texto={g.texto} />
                                   {g.nota && <div className="campo__nota num">{g.nota}</div>}
                                 </td>
                               </tr>

@@ -18,7 +18,7 @@ async function analisado() {
   fireEvent.change(screen.getByLabelText("Escolher PDFs", { selector: "input" }), { target: { files: [pdf("a.pdf"), pdf("b.pdf")] } });
   fireEvent.change(screen.getByLabelText("Fiscal do órgão"), { target: { value: "Ana Souza" } });
   fireEvent.click(screen.getByRole("button", { name: "Ver as páginas com âncora" }));
-  await screen.findByText("Páginas com âncora (2)");
+  await screen.findByText("2 com âncora");
 }
 
 describe("AncorasDocusign", () => {
@@ -44,7 +44,9 @@ describe("AncorasDocusign", () => {
     expect(within(linhas[1]).getByText("Nome impresso")).toBeTruthy();
     expect(within(linhas[1]).getByText("Fiscal, Supervisor")).toBeTruthy();
     expect(within(linhas[2]).getByText("Diário de Obra (rodapé)")).toBeTruthy();
-    expect(screen.getByText("Páginas sem âncora (1)")).toBeTruthy();
+    // a pagina sem ancora fica na mesma tabela, em ordem, com traco no lugar do motivo
+    expect(screen.getByText("1 sem âncora")).toBeTruthy();
+    expect(within(linhas[3]).getAllByText("—")).toHaveLength(2);
     expect(screen.getByLabelText("Pôr âncoras no rodapé da página 3")).toBeTruthy();
   });
 
@@ -52,7 +54,7 @@ describe("AncorasDocusign", () => {
     await analisado();
     fireEvent.click(screen.getByLabelText("Manter a âncora da página 1"));
     fireEvent.click(screen.getByLabelText("Pôr âncoras no rodapé da página 3"));
-    expect(screen.getByText("Páginas com âncora (2)")).toBeTruthy();       // sai a 1, entra a 3
+    expect(screen.getByText("2 com âncora")).toBeTruthy();       // sai a 1, entra a 3
     expect(screen.getByText("Rodapé (marcada por você)")).toBeTruthy();
     expect(screen.getByLabelText("Restaurar a âncora da página 1")).toBeTruthy();
     fireEvent.click(screen.getByLabelText(/Mostrar âncoras/));

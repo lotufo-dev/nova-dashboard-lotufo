@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiErro, setCsrf } from "./api";
-import { IconeAlerta } from "./icones";
+import Simbolo from "./Simbolo";
 import "./login.css";
+import Falha from "./Falha";
 
 export interface Usuario { id: number; nome: string; perfil: string; email: string; }   // /api/auth/eu
 
@@ -60,11 +61,10 @@ export default function Login({ aoEntrar }: { aoEntrar: (u: Usuario) => void }) 
       </div>
       <aside className="entrar__painel">
         <div className="entrar__topo">
+          {/* a marca como no menu: o L em vetor e o nome em dois pesos */}
           <div className="entrar__marca">
-            <div className="entrar__simbolo" aria-hidden="true"><i /><i className="v" /><i /><i className="v" /><i /><i /></div>
-            <div className="entrar__nome">
-              <span className="entrar__marca-nome">grupolotufo</span>
-            </div>
+            <Simbolo className="entrar__simbolo" />
+            <span className="entrar__nome"><span className="entrar__nome-apoio">grupo</span>lotufo</span>
           </div>
           <div className="entrar__bloco">
             <div className="entrar__cabeca">
@@ -82,8 +82,9 @@ export default function Login({ aoEntrar }: { aoEntrar: (u: Usuario) => void }) 
                        placeholder="••••••••"
                        value={senha} onChange={e => setSenha(e.target.value)} />
               </label>
-              {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
-              <button type="submit" className="entrar__botao" disabled={enviando}>{enviando ? "Entrando…" : "Entrar"}</button>
+              {/* o papel de alerta fica no texto: a caixa acrescenta a palavra do nivel para o leitor de tela */}
+              {erro && <Falha>{erro}</Falha>}
+              <button type="submit" className="btn btn--primario entrar__botao" disabled={enviando}>{enviando ? "Entrando…" : "Entrar"}</button>
             </form>
           </div>
         </div>

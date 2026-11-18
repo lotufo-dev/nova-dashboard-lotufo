@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import UltimosAcessos from "./Acessos";
 import { api, apiForm, mensagemDeErro } from "./api";
 import ConfirmarRemocao from "./ConfirmarRemocao";
-import { IconeAlerta, IconeOlho, IconeOlhoFechado } from "./icones";
+import Falha from "./Falha";
+import { IconeOlho, IconeOlhoFechado } from "./icones";
 import type { Usuario } from "./Login";
 import { rotuloPerfil } from "./navegacao";
-import Selo from "./Selo";
+import Selo, { Glifo } from "./Selo";
+import CaixaAviso from "./CaixaAviso";
+import "./minhaConta.css";
 
 type Login = { estado: string; user_code: string | null; verification_uri: string | null; erro?: string };
 type Status = { configurado: boolean; conectado: boolean; login: Login; assinatura: boolean };
@@ -153,13 +156,15 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
   );
 
   return (
-    <div className="coluna-conta">
-      {/* gate Sol S6 (10/10/2026): sem e-mail, sem a linha */}
-      <section className="cartao" aria-labelledby="t-sua">
-        <header className="cartao__cabeca"><h2 className="cartao__titulo" id="t-sua">Sua conta</h2></header>
-        <div className="cartao__corpo">
-          {usuario.email && <p>E-mail: <strong>{usuario.email}</strong></p>}
-          <p>Perfil: <strong>{rotuloPerfil(usuario.perfil)}</strong></p>
+    <div className="coluna-conta conta">
+      {/* Quem sou: grupo sob a regua, sem moldura (#768). gate Sol S6 (10/10/2026): sem e-mail, sem a linha */}
+      <section className="conta-eu" aria-labelledby="t-sua">
+        <h2 className="conta-eu__titulo" id="t-sua">Sua conta</h2>
+        <div className="conta-eu__corpo">
+          <div className="conta-eu__dados">
+            {usuario.email && <p className="conta-dado"><span className="conta-dado__rotulo">E-mail<span className="sr-only">: </span></span><strong>{usuario.email}</strong></p>}
+            <p className="conta-dado"><span className="conta-dado__rotulo">Perfil<span className="sr-only">: </span></span><strong>{rotuloPerfil(usuario.perfil)}</strong></p>
+          </div>
           {/* #418: os proprios ultimos acessos, lidos so' quando a pessoa abre */}
           <details className="detalhes" onToggle={e => setVerAcessos(e.currentTarget.open)}>
             <summary>Últimos acessos</summary>
@@ -173,23 +178,22 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
           {campoSenha("atual", "senha-atual", "Senha atual", "current-password", "a senha atual")}
           {campoSenha("nova", "senha-nova", "Senha nova (mínimo de 10 caracteres)", "new-password", "a senha nova")}
           {campoSenha("confirmar", "senha-confirmar", "Confirmar a senha nova", "new-password", "a confirmação")}
-          {erroSenha && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroSenha}</p>}
+          {erroSenha && <Falha>{erroSenha}</Falha>}
           <button type="submit" className="btn btn--primario botao-largo" disabled={ocupado}>
             {trocandoSenha ? "Trocando…" : "Trocar senha"}
           </button>
-          <p className={senhaTrocada ? "feito-caixa" : "sr-only"} role="status">{senhaTrocada}</p>
+          <p className={senhaTrocada ? "feito-caixa" : "sr-only"} role="status">{senhaTrocada && <Glifo situacao="feito" />}{senhaTrocada}</p>
         </form>
       </section>
       {st && <>
         <section className="cartao" aria-labelledby="t-ms">
           <header className="cartao__cabeca">
             <h2 className="cartao__titulo" id="t-ms">Conta Microsoft</h2>
-            {st.conectado ? <Selo classe="selo--ok">Conectada</Selo> : <Selo classe="selo--atencao">Não conectada</Selo>}
+            {st.conectado ? <Selo situacao="feito">Conectada</Selo> : <Selo situacao="breve">Não conectada</Selo>}
           </header>
           <div className="cartao__corpo">
             {!st.configurado && (
-              <p className="aviso" role="alert"><span className="aviso__ponto" aria-hidden="true" />
-                <span>O Microsoft 365 ainda não foi configurado neste servidor.</span></p>
+              <CaixaAviso nivel="trava" role="alert">O Microsoft 365 ainda não foi configurado neste servidor.</CaixaAviso>
             )}
             {st.login.estado === "aguardando" && st.login.user_code && (
               <div className="codigo">
@@ -201,15 +205,15 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
               </div>
             )}
             {st.login.estado === "expirado" && (
-              <p className="aviso" role="alert"><span className="aviso__ponto" aria-hidden="true" /><span>O código expirou. Peça outro.</span></p>
+              <CaixaAviso nivel="atencao" role="alert">O código expirou. Peça outro.</CaixaAviso>
             )}
             {st.login.estado === "recusado" && (
-              <p className="aviso aviso--critico" role="alert"><IconeAlerta className="icone icone--p" /><span>A Microsoft recusou o acesso. Tente de novo.</span></p>
+              <CaixaAviso nivel="critico" role="alert">A Microsoft recusou o acesso. Tente de novo.</CaixaAviso>
             )}
             {st.login.estado === "erro" && (
-              <p className="aviso aviso--critico" role="alert"><IconeAlerta className="icone icone--p" /><span>{st.login.erro}</span></p>
+              <CaixaAviso nivel="critico" role="alert">{st.login.erro}</CaixaAviso>
             )}
-            {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+            {erro && <Falha>{erro}</Falha>}
             <button type="button" className={`btn botao-largo${st.conectado ? "" : " btn--primario"}`}
                     disabled={ocupado || !st.configurado} onClick={conectar}>
               {st.conectado ? "Conectar de novo"
@@ -220,7 +224,7 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
         <section className="cartao" aria-labelledby="t-ass">
           <header className="cartao__cabeca">
             <h2 className="cartao__titulo" id="t-ass">Assinatura de e-mail</h2>
-            {st.assinatura ? <Selo classe="selo--ok">Cadastrada</Selo> : <Selo>Não cadastrada</Selo>}
+            {st.assinatura ? <Selo situacao="feito">Cadastrada</Selo> : <Selo>Não cadastrada</Selo>}
           </header>
           <div className="cartao__corpo">
             <div className={`assinatura-alvo${arrastando ? " arrastando" : ""}`} tabIndex={0} role="button"
@@ -235,7 +239,7 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
               {st.assinatura && <img src={`/api/correio/assinatura?v=${versao}`} alt="Sua assinatura" />}
               <span className="assinatura-alvo__dica" id="alvo-dica">Cole (Ctrl+V) ou arraste a imagem</span>
             </div>
-            {erroAss && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroAss}</p>}
+            {erroAss && <Falha>{erroAss}</Falha>}
             <details className="detalhes">
               <summary>Onde achar a imagem</summary>
               <p className="campo__nota"><code className="caminho">%APPDATA%\Microsoft\Signatures</code>, na pasta que termina
@@ -250,8 +254,9 @@ export default function MinhaConta({ usuario }: { usuario: Usuario }) {
               <button type="button" className="btn" disabled={ocupado || !st.conectado} onClick={enviarTeste}
                       aria-describedby={st.conectado ? undefined : "teste-motivo"}>Enviar e-mail de teste</button>
             </div>
-            {!st.conectado && <p className="campo__nota" id="teste-motivo">Conecte a sua conta Microsoft para enviar o teste.</p>}
-            <p className={teste ? "feito-caixa" : "sr-only"} role="status">{teste}</p>
+            {/* o botao do teste esta' desligado: o motivo vai na forma de trava */}
+            {!st.conectado && <CaixaAviso nivel="trava" className="conta-trava"><span id="teste-motivo">Conecte a sua conta Microsoft para enviar o teste.</span></CaixaAviso>}
+            <p className={teste ? "feito-caixa" : "sr-only"} role="status">{teste && <Glifo situacao="feito" />}{teste}</p>
             {st.assinatura && (
               <div className="acoes acoes--inicio">
                 <ConfirmarRemocao alvo="a assinatura" classe="btn" ocupado={ocupado} aoConfirmar={() => void removerAssinatura()} />

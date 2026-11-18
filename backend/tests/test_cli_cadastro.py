@@ -50,6 +50,14 @@ def test_aplicar_grava_e_ensaio_nao(tmp_path, monkeypatch, capsys):
     assert "ENSAIO" in capsys.readouterr().out
 
 
+def test_validar_recusa_o_centro_da_empresa_fora_de_consorcio(tmp_path, capsys):
+    """docs/adr/0005: `cadastro validar` recusa `centro_custo_empresa_rm` em contrato que nao e' de consorcio."""
+    raiz = _cadastro(tmp_path / "a", {**CONTRATO, "centro_custo_empresa_rm": "9.005.001"})
+    assert cli.main(["cadastro", "validar", "--raiz", str(raiz)]) == 1
+    assert "centro_custo_empresa_rm: só vale em contrato de consórcio" in capsys.readouterr().out
+    assert cli.main(["cadastro", "validar", "--raiz", str(_cadastro(tmp_path / "b", dict(CONTRATO)))]) == 0
+
+
 def test_validar_recusa_tipo_de_cobranca_malformado_e_o_da_lista_geral(tmp_path, capsys):
     """docs/adr/0015: `cadastro validar` recusa `tipos_cobranca_extras_rm` malformado e o tipo que ja' e' geral."""
     raiz = _cadastro(tmp_path / "a", {**CONTRATO, "tipos_cobranca_extras_rm": ["2.2.3"]})
@@ -174,10 +182,12 @@ def test_cadastro_exemplo_valida_e_aplica_em_banco_vazio(tmp_path, monkeypatch, 
     monkeypatch.delenv("DASH_CADASTRO_DIR", raising=False)
     conn = _banco(tmp_path, monkeypatch)
     assert cli.main(["cadastro", "validar"]) == 0
-    assert "2 contratos" in capsys.readouterr().out
+    assert "3 contratos" in capsys.readouterr().out
     assert cli.main(["cadastro", "aplicar", "--usuario", "leo@l.com"]) == 0
     assert [r[0] for r in conn.execute("SELECT nome_curto FROM contratos ORDER BY nome_curto")] == [
-        "Obra Consórcio", "Obra Própria"]
+        "Obra Consórcio", "Obra Encerrada", "Obra Própria"]
+    # a obra que entra encerrada leva a data do encerramento do YAML como evento do contrato
+    assert [tuple(r) for r in conn.execute("SELECT tipo, data FROM contrato_eventos")] == [("encerramento", "2023-11-17")]
     assert conn.execute("SELECT COUNT(*) FROM espelho_regras").fetchone()[0] == 2
     # issue #256: a obra de exemplo traz duas versoes de cronograma, cada uma com a data do documento
     assert [tuple(r) for r in conn.execute("SELECT chave, data_documento FROM cronograma_versoes_cadastro "
@@ -745,7 +755,11 @@ def test_carregar_medicoes_grava_as_novas_com_pedido_aprovado_e_evento(tmp_path,
     assert codigo == 0, saida
     assert "GRAVADO: Obra Própria (obra-propria.csv), 4 medição(ões) criada(s)" in saida
     ms = {(m["numero"], m["tipo"]): m for m in conn.execute("SELECT * FROM medicoes WHERE contrato_id=?", (cid,))}
-    assert len(ms) == 4 and all(m["estado"] == "protocolada" and m["congelada"] == 1 for m in ms.values())
+    # docs/adr/0006: cada medicao nasce no estado que a linha prova (com nota ou protocolo da nota, protocolada; so' com
+    # o aprovado, boletim recebido; so' com o pedido, em analise) e so' a protocolada nasce congelada
+    assert {k: (m["estado"], m["congelada"]) for k, m in ms.items()} == {
+        (1, "execucao"): ("protocolada", 1), (2, "execucao"): ("protocolada", 1),
+        (3, "execucao"): ("planilha_enviada", 0), (1, "reajuste"): ("boletim_recebido", 0)}
     m2 = ms[(2, "execucao")]
     assert (m2["valor_protocolado_centavos"], m2["valor_atestado_centavos"], m2["atestado_em"]) == (53890010, 53000000,
                                                                                                     "2025-06-18")

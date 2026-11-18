@@ -16,6 +16,27 @@ function escrever(corpo: HTMLElement, html: string) {
 describe("ComporEmail", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
+  it("#722: o assunto leva o nome do campo à vista sem mudar o nome que o leitor de tela lê nem o que é enviado", async () => {
+    api.mockResolvedValue({ remetente: "eu@lotufo.com" });
+    const aoEnviar = vi.fn();
+    render(<ComporEmail ocupado={false} anexos={[]} aoEnviar={aoEnviar} aoDescartar={() => {}}
+      inicial={{ para: ["orgao@exemplo.com.br"], copia: [], cco: [], assunto: "Contrato 018/2026 · 5ª Medição", corpo: "Prezados," }} />);
+    // #779: area de texto de uma linha, que cresce: o assunto longo quebra em duas linhas em vez de esconder o fim
+    const assunto = screen.getByLabelText("Assunto") as HTMLTextAreaElement;
+    expect(assunto.tagName).toBe("TEXTAREA");
+    expect(assunto.rows).toBe(1);
+    const rotulo = assunto.parentElement!.querySelector(".ol-assunto__rotulo")!;
+    expect(rotulo.textContent).toBe("Assunto");
+    expect(rotulo.getAttribute("aria-hidden")).toBe("true");
+    // o assunto continua uma linha so': a quebra colada vira espaco e o Enter nao entra no texto
+    fireEvent.change(assunto, { target: { value: "Contrato 018/2026 · 5ª Medição\nOfício 061/2026" } });
+    expect(assunto.value).toBe("Contrato 018/2026 · 5ª Medição Ofício 061/2026");
+    expect(fireEvent.keyDown(assunto, { key: "Enter" })).toBe(false);
+    fireEvent.change(assunto, { target: { value: "Contrato 018/2026 · 5ª Medição" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+    expect(aoEnviar).toHaveBeenCalledWith({ para: ["orgao@exemplo.com.br"], copia: [], cco: [], assunto: "Contrato 018/2026 · 5ª Medição", corpo: "Prezados," });
+  });
+
   it("sem a imagem da assinatura: uma frase com o link para Minha conta, só quando falta", async () => {
     api.mockResolvedValue({ remetente: "eu@lotufo.com" });
     render(<ComporEmail ocupado={false} anexos={[]} aoEnviar={() => {}} aoDescartar={() => {}}

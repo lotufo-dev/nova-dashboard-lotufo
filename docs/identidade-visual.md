@@ -1,61 +1,146 @@
-# Identidade visual — Lotufo · Plataforma de Obras
+# Identidade visual
 
-**Em redesenho desde 15/11/2026.** O dono pediu uma refatoração geral de cores, logo e design, porque o sistema
-não parece da empresa e a execução ficou inconsistente entre as telas. A marca da empresa (laranja, preto e branco)
-passa a ser a inspiração, o símbolo passa a ser o L dela, e a direção nova é escolhida por teste comparativo. Até a
-direção ser aplicada, este arquivo descreve o que está no ar. O que já está decidido para a direção nova: as quatro
-situações mantêm o significado; a cor da marca nunca indica situação; tabela e número ficam em primeiro plano.
+O que o sistema é visualmente e por quê. As instruções para quem mexe em tela estão em `.claude/rules/frontend.md`;
+os valores estão em `frontend/src/tokens.css`, e este arquivo não os repete. Os termos (situação, selo, casca,
+painel) estão no `GLOSSARY.md`.
 
-O que está no ar foi decidido em 06/10/2026 a partir do painel de marca "opção 2" (claro, índigo, dados em primeiro
-plano).
+A fundação foi escolhida pelo dono em 15/11/2026, componente a componente, na tela Início; a organização da página
+da medição, em 16/11/2026, bloco a bloco (#717). Essas duas telas são a referência: onde outra tela divergir delas,
+valem elas.
 
 ## Ideia
-Metáfora: o livro-razão — cada valor na sua linha e coluna.
-Frase: "Cada valor no seu lugar."
-Símbolo: letra L formada por quatro quadrados arredondados numa grade 2×3 (coluna esquerda cheia + célula inferior direita); as duas células restantes ficam vazias.
 
-## Cores
-| Papel | Cor | Uso |
-|---|---|---|
-| Primária | `#4F46E5` índigo | botões principais, links, símbolo, barras de progresso |
-| Tinta clara | `#EEF0FF` lavanda | fundo de destaque suave, hover, selecionado |
-| Texto | `#0F172A` ardósia | títulos e valores |
-| Texto secundário | `#64748B` cinza frio | legendas, rótulos de coluna |
-| Fundo da página | `#F6F8FB` | fundo geral |
-| Superfície | `#FFFFFF` | cartões e tabelas |
-| Feito / recebido | `#10B981` verde (texto `#047857`) | informação, ver "Regra de cor da informação" |
-| Em andamento | `#3B82F6` azul (texto `#1D4ED8`) | informação, idem |
-| Vence em breve / faltando | `#F59E0B` âmbar (texto `#B45309`) | informação, idem |
-| Crítico / vencido / sem registro | `#EF4444` vermelho (texto `#B91C1C`) | informação, idem |
+- **O sistema parece da empresa.** A marca (laranja, preto e branco) é a inspiração e o símbolo é o L dela. Motivo:
+  antes o sistema tinha cores próprias e cada tela uma execução diferente (decisão do dono, #717).
+- **Papel, tinta e régua.** Fundo claro e quente (o papel), texto quase preto (a tinta), linhas pretas que separam
+  os grupos, cantos retos. Lembra um formulário de obra impresso, e deixa a cor livre para dizer situação.
+- **Tabela e número em primeiro plano.** A pessoa abre a tela para comparar valores; o desenho não disputa com eles.
+- **Um modo só, claro.** Não há tema escuro.
 
-A marca não usa verde, azul, âmbar nem vermelho.
+## Cor
 
-## Regra de cor da informação
-Decidida pelo dono em 06/11/2026 e válida para a dashboard inteira. A cor é da **informação**, não do desenho da
-página (menu índigo, fundo cinza-claro e cartões brancos não mudam).
-- Número e data são pretos por padrão.
-- **Verde** = feito ou recebido. **Azul** = em andamento. **Âmbar** = vence em breve ou faltando.
-  **Vermelho** = crítico, vencido ou sem registro.
-- O que não é urgente fica preto (por exemplo, o fim de uma vigência distante).
-- Telas que usam a regra mostram no topo direito a legenda pequena "feito · em andamento · vence em breve · crítico"
-  (componente `LegendaCor`).
-- Em `frontend/src/tokens.css`: tokens `--ok`, `--andamento`, `--atencao`, `--acao` (texto) e os pares `-fundo`,
-  `-linha`, `-ponto`. Classes: `.info--feito|andamento|breve|critico` pintam o texto; `.pilula-info--*` é a pílula
-  (fundo tingido, texto escuro, `.pilula-info__ponto` opcional). Quem não tem situação não leva classe.
-- A aplicação em cada tela é feita na issue da tela (Início, Obras, Avisos, SIGA, Documentos e Medições).
+- **A cor da marca nunca indica situação nem ação.** O laranja aparece em três lugares: o bloco do símbolo L, o
+  ícone do item ativo do menu e o contorno de foco dentro do menu. Motivo: laranja fica entre o amarelo de "vence em
+  breve" e o vermelho de "crítico"; se pintasse botão ou aviso, seria lido como alerta (decisão do dono, #717;
+  PR #723). Um teste confere que `--cor-marca` não aparece em nenhuma outra regra (`pecasBase.test.tsx`).
+- **Ação é tinta.** O botão principal é preto cheio; o secundário tem a borda grossa preta. Link tem a cor do texto
+  em volta e é sublinhado. Motivo: sobra uma cor só para o que pede atenção, a da situação (PR #725).
+- **Número e data são tinta por padrão.** Só leva cor o que tem situação. Percentual executado é número, não
+  situação: 14% executado não é "feito", e fica em tinta (PR #776).
+- **Superfície igual ao papel.** O painel tem o mesmo fundo da página e se separa pela moldura e pela sombra.
+- **Etapas do ciclo e previsão têm tons próprios**, que não são situação: do azul claro (em análise) ao azul escuro
+  (protocolado), verde no recebido; a previsão vai da tinta (neste mês) ao cinza claro (sem previsão). O atrasado é
+  sempre o tom do crítico, com a marca "!" (decisão 3 da Início; PR #729). Os tons claros têm pouco contraste com o
+  papel, por isso cada célula e cada faixa tem rótulo escrito ou nome para leitor de tela.
 
-## Tipografia
-- Uma fonte só, **Lexend** (400, 500, 600, 700), sem serifa, geométrica, larga e arredondada; servida pelo próprio
-  app em `frontend/public/fonts/` (licença OFL ao lado), sem CDN. Títulos e valores em negrito (700).
-- Valores em reais na mesma fonte do texto (não há fonte monoespaçada), alinhados à direita nas tabelas, com
-  algarismos tabulares (`font-variant-numeric: tabular-nums`, já aplicado a `td` e `th`).
+## As quatro situações
 
-## Menu lateral
-Largo por padrão (240 px), com ícone e nome em cada item e o item ativo em pílula branca; recolhível para só ícones
-(64 px) por um botão no pé, e a escolha fica guardada no navegador. No celular (< 768 px) nasce recolhido, abre por
-cima da tela e fecha ao navegar. Componente `Trilho` em `frontend/src/Casca.tsx`.
+| Situação | Cor | Forma (o glifo) | Quer dizer |
+|---|---|---|---|
+| Feito | verde | círculo cheio com visto | aconteceu e não pede mais nada: recebida, anexada, em dia |
+| Em andamento | azul | círculo meio cheio | está em curso e dentro do esperado |
+| Vence em breve | amarelo | triângulo com exclamação | ainda não venceu, falta sem travar, ou se acompanha |
+| Crítico | vermelho | octógono com exclamação | venceu, diverge, falhou, trava ou pede ação agora |
 
-## Forma
-- Raio, sombra e espaçamento: os de `frontend/src/tokens.css`.
-- Tabela é o elemento principal onde há lista de valores: cabeçalho em cinza frio 12 px, linhas de 44 px, um ponto colorido por situação.
-- Pílulas de situação: fundo tingido claro + ponto colorido + texto em ardósia.
+- **Toda situação aparece com cor e forma.** Motivo: quem não distingue as cores, ou lê numa impressão em preto e
+  branco, ainda sabe a situação; e o amarelo sozinho quase não se vê sobre o papel (decisão do dono, #717; decisão 2
+  da Início; PR #725).
+- **A forma sai da situação, nunca da tela.** A mesma situação tem a mesma cara em qualquer lugar: selo, contador,
+  legenda, célula e aviso usam o mesmo glifo.
+- **O que não tem situação fica em tinta, sem marca.** Estado comum ("Ativo", "Entrou") é só a palavra; a exceção é
+  que leva selo. Obra em dia não leva selo na lista. Motivo: marca em tudo deixa de chamar atenção (PRs #776, #781).
+- **Cancelada e desistida** ficam neutras e riscadas, sem glifo.
+
+### Quando usar cada uma
+
+- **Pela data:** vencido é crítico; o que ainda vai vencer é vence em breve, em qualquer prazo. Vale para certidão,
+  garantia e aviso da agenda. Garantia vencida leva o octógono; garantia a vencer leva o triângulo, falte um dia ou
+  sessenta. Motivo: é a mesma leitura das certidões na mesma tela, e antes a garantia a 15 dias dividia a forma com
+  a vencida (PR #781). O que vence depois de 30 dias na agenda fica neutro: ainda não pede nada (PR #772).
+- **Pelo nível do aviso (Crítico × Ação × Atenção):** a forma diz se o aviso já pede ação. Crítico e Ação levam o
+  octógono; Atenção, que se acompanha, leva o triângulo. A palavra separa o Crítico da Ação. Vale para os avisos da
+  obra e para o farol da lista de Obras e do QDOP. Motivo: o servidor já trata Crítico e Ação como os níveis
+  imediatos, e antes a forma não separava "agir agora" de "acompanhar" (PR #781).
+- **Em curso é em andamento, não feito nem alerta.** "Recebido em parte", "Aguardando o órgão", "em aberto", "paga
+  em parte", "Pronto" e "Completo" antes do envio, aditivo em andamento, medição provisória: todos em andamento.
+  Motivo: pronto para enviar ainda não é enviado, e esperar o órgão dentro do prazo não é alerta (PRs #739, #776).
+- **Falta que trava é crítico; falta que não trava é vence em breve.** Certidão vencida ou item que o servidor
+  marca como bloqueio é crítico; documento que falta sem impedir o envio é o triângulo (PR #739).
+- **Tempo parado** (SIGA): andou hoje é feito; menos de 5 dias úteis, em andamento; 5 ou mais, vence em breve; 10 ou
+  mais, crítico (PR #771).
+
+### Aviso, trava, falha e justificativa
+
+Quatro caixas que se distinguem de relance (decisões 4, 10 e 17 da página da medição; PRs #725, #739):
+
+- **Trava:** bloco vermelho cheio, texto claro, sinal de proibido. A ação está impedida e o botão dela fica
+  desligado. O motivo escrito de um botão desligado também aparece assim (PR #773).
+- **Crítico que não trava:** faixa vermelha clara com o octógono (nota que diverge, certidão vencida).
+- **Atenção ou confirmação:** faixa amarela com o triângulo. A ação segue e o botão continua ativo.
+- **Justificativa:** caixa de moldura grossa preta com o campo obrigatório dentro, junto do botão que a exige.
+- **Falha** (de leitura ou de ação) é sempre a faixa de crítico com o octógono. Motivo: o triângulo é a forma de
+  "vence em breve", e uma falha com triângulo se confundiria com aviso de prazo (PRs #773, #781).
+
+## Letras e tamanhos
+
+- **Uma família, Archivo**, no texto, nos números e nos títulos, mudando só a largura: texto na largura normal,
+  valores em reais um pouco estreitos, títulos condensados. Barlow só no nome da marca ao lado do símbolo. Servidas
+  pelo próprio sistema, sem serviço externo (decisões 4 e 5 da Início; PR #723).
+- **Títulos condensados e pesados.** Os de bloco e de painel em caixa-alta; o da página, não.
+- **Corpo em 16 px; célula de tabela em 14 px.** Motivo do 14: tabela de 7 a 9 colunas tem de caber em 792 px, que é
+  o que sobra a 1024 com o menu aberto. Rótulo de apoio, selo, contador e legenda também em 14; mês, ano e nome de
+  grupo na grade em 12 (PR #781).
+- **A escala é fechada:** 12, 14, 16, 19,2, 23, 27,6 e 33,2 px (mais os 22 do nome da marca). Tamanho fora dela não
+  existe; só os valores grandes da Início e do Pagamento variam com a largura do painel, entre dois passos da escala
+  (PRs #724, #729).
+- **Valor e data com algarismos de mesma largura**, alinhados à direita nas tabelas, para a coluna não dançar.
+
+## Formas
+
+- **Cantos retos em tudo.** A única forma redonda é o avatar (decisão 6 da Início; PRs #723, #781).
+- **Régua de grupo:** linha preta de 2 px acima do título de um grupo de blocos e no alto da página. **Régua de
+  seção:** linha preta de 1 px sob o cabeçalho da tabela, acima de subtítulo dentro de painel e na base de gráfico.
+  Linhas de uma tabela se separam por um fio cinza, sem zebra.
+- **Painel:** moldura preta de 2 px e sombra dura (deslocada 8 px, sem desfoque), com o título dentro e sem régua
+  embaixo dele. A janela de diálogo é um painel por cima de um véu; menu suspenso, lista de sugestões e a janela do
+  e-mail levam a mesma sombra, e não há sombra com desfoque. Motivo: a moldura separa o painel do papel sem
+  mudar a cor do fundo (decisão 6 da Início; PRs #725, #772).
+- **Abas ficam direto na página, sem caixa em volta dos painéis da aba.** Motivo: caixa dentro de caixa perdia
+  40 px de largura e cortava as tabelas da página da obra (PR #776).
+- **Selo:** fundo claro da situação, glifo e palavra, com maiúscula inicial. **Contador:** a quantidade ao lado de
+  um título; neutro sem glifo, com situação leva o glifo dela.
+
+## Botões e campos
+
+- **Duas alturas:** 40 px com a letra do corpo, e 32 px com a letra de apoio para botão dentro de linha de tabela.
+  Motivo: havia oito combinações de altura e letra (PR #781). Exceção: o botão de enviar ao órgão, na página da
+  medição, tem 52 px, como o dono montou.
+- **Desligado:** fundo de papel escuro e texto apagado, também no principal e no de apagar. Motivo: tinta ou
+  vermelho cheio com letra apagada continuaria dizendo "clique".
+- **De apagar ou revogar:** vermelho cheio do crítico.
+- **Campo:** borda fina cinza, cantos retos, 40 px. Com erro de validação, moldura grossa no tom do crítico.
+- **Foco:** contorno preto de 2 px no conteúdo; laranja dentro do menu escuro.
+- **Escolha entre opções** (filtro, vista, ano): fileira de botões de 40 px com moldura fina, a escolhida em tinta
+  cheia. Uma forma só no Fechamento, no QDOP, no SIGA, em Documentos e na Reconciliação (PRs #771, #772).
+
+## Casca e menu
+
+A casca é o que fica igual em toda tela: o menu à esquerda e o topo (decisões 8, 9 e 10 da Início; PR #725).
+
+- **Menu lateral escuro**, de 232 px, com o símbolo L e o nome da marca em dois pesos, um item por tela e o botão de
+  recolher no pé. O item da tela atual tem fundo realçado, texto claro e forte e o ícone em laranja.
+- **Recolhido** fica só a coluna dos ícones (64 px). A escolha é guardada no navegador.
+- **Topo** de 56 px sobre o papel, com o título da tela e a conta (avatar redondo com as iniciais).
+- **Página** com largura máxima de 1320 px e margem lateral de 32 px.
+
+## Larguras
+
+- **1440 px:** a disposição cheia. Na página da medição, a Linha do tempo fica ao lado do passo.
+- **1024 px:** menu aberto e 792 px de conteúdo. A página não rola de lado. Colunas ao lado descem para baixo;
+  tabela que não cabe rola dentro da própria caixa.
+- **390 px (celular):** o menu nasce recolhido (64 px), abre por cima da tela e fecha ao navegar; no topo fica só o
+  avatar. As telas de leitura da diretoria (Início, Obras, página da obra, Fechamento, Resumo das medições) são
+  desenhadas para essa largura: uma coluna, e a tabela vira um bloco por linha. As telas de operação são de
+  computador; no celular nada se sobrepõe, e o que não cabe rola dentro da área da tela.
+- **Na Início e na página da medição, o bloco que muda de disposição mede o próprio painel**, não a janela, porque
+  a largura útil depende de o menu estar aberto ou recolhido (PR #729).

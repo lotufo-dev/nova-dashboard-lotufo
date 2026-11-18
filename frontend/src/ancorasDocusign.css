@@ -1,10 +1,36 @@
-.ancoras { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
-.ancoras__titulo { margin: 0; }
-.ancoras__soltar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 20px; border: 1px dashed var(--linha); border-radius: var(--raio); }
-.ancoras__soltar--sobre { border-color: var(--acento); }
-.ancoras__arquivos { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
-.ancoras__arquivos .btn { margin-left: 8px; }
-.ancoras__nomes { display: grid; gap: 12px; border: 0; padding: 0; margin: 0; }
-.ancoras__nomes legend { padding: 0; margin-bottom: 8px; font-weight: 500; }
-.ancoras__acoes { display: flex; flex-wrap: wrap; gap: 8px; }
-.ancoras__paginas h2 { font-size: 16px; margin: 16px 0 8px; }
+/* Ancoras DocuSign (#768): a' esquerda o que a pessoa entrega (o pacote e quem assina), a' direita a resposta (as
+   paginas em ordem, com a ancora de cada uma) e o PDF. A pagina e' o container: as duas colunas so' aparecem quando ha'
+   largura para as duas. O painel, a tabela, o selo, o campo e o botao sao pecas de base de tokens.css. */
+.anc { container: anc-pagina / inline-size; min-width: 0; }
+.anc__grade, .anc__entrada { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-entre-blocos); align-content: start; }
+@container anc-pagina (min-width: 960px) {
+  .anc__grade { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: var(--espaco-g); align-items: start; }
+}
+
+.anc .cartao__cabeca { padding: var(--espaco-g) var(--espaco-g) var(--espaco-p); flex-wrap: wrap; }
+.anc .cartao__corpo { padding: var(--espaco-p) var(--espaco-g) var(--espaco-g); }
+.anc__corpo { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-m); }
+
+/* area de soltar os PDFs: tracejada, de canto reto; a borda vira tinta com o arquivo em cima */
+.anc__soltar { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: var(--espaco-p);
+  min-height: calc(var(--alvo-minimo) * 2.4); padding: var(--espaco-m); border: var(--borda-tracejada); background: var(--cor-papel-sombreado); }
+.anc__soltar--sobre { border-color: var(--cor-tinta); }
+
+/* os PDFs na ordem em que serao juntados: o numero da ordem, o nome e o botao de tirar */
+.anc__arquivos { list-style: none; margin: 0; padding: 0; border-top: var(--regua-secao); }
+.anc__arquivos li { display: flex; align-items: center; gap: var(--espaco-p); min-height: var(--alvo-minimo); padding: var(--espaco-mini) 0; border-bottom: var(--borda-linha); }
+.anc__ordem { flex: none; min-width: var(--espaco-g); color: var(--cor-texto-terciario); font-weight: var(--peso-numero); }
+.anc__arquivo { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+.anc__nomes { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-m); border: 0; margin: 0; min-width: 0; }
+.anc__legenda { padding: 0; margin-bottom: var(--espaco-m); color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.anc__nomes input { width: 100%; }
+
+.anc__acoes { display: flex; flex-wrap: wrap; gap: var(--espaco-pp); }
+.anc__mostrar { cursor: pointer; }
+.anc__vazio { margin: 0; padding: 0 var(--espaco-g) var(--espaco-g); color: var(--cor-texto-secundario); }
+
+/* a tabela das paginas encosta na moldura; a pagina sem ancora fica em tom de apoio */
+.anc .anc__tabela th:first-child, .anc .anc__tabela td:first-child { padding-left: var(--espaco-g); }
+.anc .anc__tabela th:last-child, .anc .anc__tabela td:last-child { padding-right: var(--espaco-g); }
+.anc .anc__tabela tr.anc__sem td { color: var(--cor-texto-terciario); }

@@ -1,96 +1,145 @@
-/* Obras (redesenho #509): a tabela de posicao financeira por contratante (#645), a busca e os totais; e os Avisos
-   que ainda abrem dentro da pagina. So' o que tokens.css nao tem; cores so' dos tokens. */
+/* Obras (lista), redesenho da #774: os numeros da lista, a tabela de posicao por contratante, a curva, os reajustes e
+   o QDOP; e os Avisos que ainda abrem dentro da pagina para os links de antes. So' a disposicao e os blocos proprios
+   da tela: painel, tabela, selo e botao sao pecas de base de tokens.css. Cor, letra, espaco e borda so' por variavel. */
 
-.topbar__titulo--grande { font-size: 28px; line-height: 36px; }
-.progresso { height: 6px; border-radius: var(--raio-pilula); background: var(--neutro-fundo); overflow: hidden; }
-.progresso__barra { display: block; height: 100%; border-radius: var(--raio-pilula); background: var(--marca); }
-.progresso--feito .progresso__barra { background: var(--ok-ponto); }
+.topbar__titulo--grande { font-size: var(--texto-numero); line-height: var(--entrelinha-titulo); overflow: visible; white-space: normal; }
 
-.obras-topo { flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; }
-.obras-topo__sub { font-size: 18px; font-weight: 400; color: var(--texto-2); letter-spacing: 0; margin-left: 6px; }
-.topbar__titulo--grande { overflow: visible; white-space: normal; }
-.obras-busca { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; font-size: 14px; }
-.obras-busca__campo { width: 280px; max-width: 100%; height: 40px; padding: 0 12px; box-sizing: border-box; border: 1px solid var(--linha-forte); border-radius: var(--raio); background: var(--superficie); font-size: 14px; }
-.obras-busca__campo:focus-visible { outline: 2px solid var(--foco); outline-offset: 1px; }
+/* A pagina e' o container: os blocos mudam pela largura que sobra para o conteudo (menu aberto ou recolhido). Tres
+   faixas, como no Fechamento: larga, media (ate' 900 px: a 1024 com o menu aberto) e estreita (ate' 620 px: celular). */
+.obras { container: obras-pagina / inline-size; }
+.obras > * { min-width: 0; }
 
-.obras-totais { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 4px 0 0; font-size: 15px; color: var(--texto-2); }
-.obras-totais strong { color: var(--texto); font-weight: 600; }
-.obras-totais span + span::before { content: "·"; margin-right: 20px; color: var(--texto-fraco); }
+.obras-topo { flex-wrap: wrap; justify-content: space-between; gap: var(--espaco-p) var(--espaco-g); }
+.obras-topo__sub { margin-left: var(--espaco-pp); color: var(--cor-texto-secundario); font-size: var(--texto-titulo-bloco); font-weight: var(--peso-normal); letter-spacing: 0; }
+.obras-busca { display: flex; align-items: center; flex-wrap: wrap; gap: var(--espaco-pp) var(--espaco-m); font-size: var(--texto-meta); }
+.obras-busca__campo { width: calc(var(--alvo-minimo) * 7); max-width: 100%; }
+.obras-busca__filtro { font-weight: var(--peso-forte); }
 
-.obras-posicao { table-layout: auto; }
-.obras-posicao thead th { font-weight: 600; }
-.obras-posicao tbody td { vertical-align: middle; padding-top: 12px; padding-bottom: 12px; }
-.linha--obra { cursor: pointer; }
-.obras-posicao__nome { font-weight: 600; color: var(--texto); font-size: 15px; }
-.obras-posicao__sub { font-size: 13px; color: var(--texto-2); }
-/* o contratante: a linha que abre o grupo, com o subtotal nas colunas */
-.obras-posicao .obras-grupo th, .obras-posicao .obras-grupo td { background: var(--superficie-2); font-weight: 600; padding-top: 10px; padding-bottom: 10px; }
-.obras-posicao .obras-grupo th { text-align: left; font-size: 14px; color: var(--texto); }
-.obras-exec { display: flex; align-items: center; gap: 12px; min-width: 170px; }
-.obras-exec .progresso { flex: 1; }
-.obras-exec__pct { flex: none; min-width: 44px; justify-content: center; font-size: 13px; font-weight: 600; }
-.obras-rodape { display: flex; justify-content: space-between; gap: 12px; padding: 16px 20px; font-size: 14px; color: var(--texto-2); }
-
-@media (max-width: 1100px) { .obras-totais span + span::before { content: none; } }
-@media (max-width: 700px) {
-  .obras-totais { flex-direction: column; gap: 2px; }
-  /* a 375 px a tabela vira um cartao por obra, com os mesmos numeros */
-  .obras-posicao, .obras-posicao tbody, .obras-posicao tr, .obras-posicao td { display: block; width: 100%; }
-  .obras-posicao thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .obras-posicao tbody tr { padding: 14px 16px; border-bottom: 1px solid var(--linha); }
-  .obras-posicao tbody tr:last-child { border-bottom: 0; }
-  .obras-posicao tbody td { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 3px 0; border: 0; text-align: right; }
-  .obras-posicao tbody td:first-child { display: block; text-align: left; padding: 0 0 6px; }
-  .obras-posicao tbody td:not(:first-child)::before { content: attr(data-rotulo); color: var(--texto-2); font-size: 13px; text-align: left; }
-  .obras-exec { min-width: 0; width: 60%; }
-  .obras-busca, .obras-busca__campo { width: 100%; }
-  .obras-posicao .obras-grupo th { display: block; padding: 0 0 6px; }
-  .obras-posicao .obras-grupo td { padding: 3px 0; }
-  .obras-posicao .obras-grupo td:first-of-type { display: flex; text-align: right; }
-  .obras-posicao .obras-grupo td:first-of-type::before { content: attr(data-rotulo); color: var(--texto-2); font-size: 13px; font-weight: 400; text-align: left; }
-  .obras-posicao .obras-grupo td::before { font-weight: 400; }
-  .obras-posicao .obras-grupo .obras-grupo__vazio { display: none; }
-  .obras-posicao tbody tr.obras-grupo { background: var(--superficie-2); }
+/* os numeros da lista: rotulo e valor sob a regua de grupo, sem moldura (como os do Fechamento e os do mes no Inicio) */
+.obras-numeros {
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+  gap: var(--espaco-m) var(--espaco-g); margin: 0; border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro);
+}
+.obras-numero { min-width: 0; }
+.obras-numero dt { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.obras-numero dd {
+  margin: 0; white-space: nowrap;
+  font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
+  font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-valor-menor); line-height: var(--entrelinha-numero);
 }
 
-/* ------------------------------------------------------------ os Avisos, dentro de Obras */
-.avisos-area__corpo { display: grid; gap: 16px; }
-.avisos-area__grupos { display: grid; gap: 16px; }
+/* a tabela de posicao */
+.obras-painel { padding-top: var(--espaco-pp); }
+.obras-posicao { table-layout: auto; }
+.obras-posicao th, .obras-posicao td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
+.obras-posicao th:first-child, .obras-posicao td:first-child { padding-left: var(--espaco-g); }
+.obras-posicao th:last-child, .obras-posicao td:last-child { padding-right: var(--espaco-g); }
+.obras-posicao tbody td { vertical-align: middle; padding-top: var(--espaco-p); padding-bottom: var(--espaco-p); }
+.linha--obra { cursor: pointer; }
+.obras-posicao__nome { font-size: var(--texto-corpo); font-weight: var(--peso-forte); }
+.obras-posicao__sub { color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
+.obras-posicao__farol { margin-top: var(--espaco-mini); }
+/* o contratante: a linha que abre o grupo, com o subtotal nas colunas */
+.obras-posicao .obras-grupo th, .obras-posicao .obras-grupo td {
+  background: var(--cor-papel-sombreado); font-weight: var(--peso-forte);
+  padding-top: var(--espaco-pp); padding-bottom: var(--espaco-pp); border-bottom: var(--borda-linha);
+}
+.obras-posicao .obras-grupo th { text-align: left; color: var(--cor-tinta); }
+.obras-posicao tbody + tbody .obras-grupo th, .obras-posicao tbody + tbody .obras-grupo td { border-top: var(--regua-secao); }
+/* o executado: a barra em tinta (numero, nao situacao: 0% nao e' "feito") e o percentual ao lado */
+.obras-exec { display: flex; align-items: center; gap: var(--espaco-p); min-width: calc(var(--alvo-minimo) * 3); }
+.obras-exec__trilho { flex: 1; height: var(--altura-barra-etapa); background: var(--cor-contador-neutro); overflow: hidden; }
+.obras-exec__barra { display: block; height: 100%; background: var(--cor-barra-recebido); }
+.obras-exec__pct { flex: none; min-width: var(--alvo-minimo); text-align: right; font-weight: var(--peso-numero); }
+.obras-rodape {
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--espaco-pp) var(--espaco-m);
+  padding: var(--espaco-m) var(--espaco-g); border-top: var(--borda-linha);
+  color: var(--cor-texto-secundario); font-size: var(--texto-meta);
+}
+
+/* ------------------------------------------------------------ QDOP: um painel, com o filtro e o rodape */
+.qdop-painel__cabeca { flex-wrap: wrap; }
+.qdop-filtros { padding: 0 var(--espaco-g) var(--espaco-m); }
+.qdop-tabela th, .qdop-tabela td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
+.qdop-tabela th:first-child, .qdop-tabela td:first-child { padding-left: var(--espaco-g); }
+.qdop-tabela th:last-child, .qdop-tabela td:last-child { padding-right: var(--espaco-g); }
+.qdop-tabela thead th { white-space: normal; vertical-align: bottom; }
+.qdop-tabela tbody td { vertical-align: top; padding-top: var(--espaco-p); padding-bottom: var(--espaco-p); }
+.qdop-tabela__nome { font-size: var(--texto-corpo); font-weight: var(--peso-forte); }
+.qdop-tabela__sub { color: var(--cor-texto-secundario); font-size: var(--texto-mini); white-space: nowrap; }
+.qdop-tabela__motivos { list-style: none; display: grid; gap: var(--espaco-traco); margin: var(--espaco-mini) 0 0; padding: 0; min-width: calc(var(--alvo-minimo) * 5); }
+.qdop-tabela__motivo { margin-top: var(--espaco-mini); }
+.qdop-rodape { padding: var(--espaco-m) var(--espaco-g); border-top: var(--borda-linha); font-size: var(--texto-meta); }
+.qdop-rodape__lista { list-style: none; display: flex; flex-wrap: wrap; gap: var(--espaco-pp) var(--espaco-g); margin: 0; padding: 0; }
+
+/* ---------------------------------------------------------------- faixa media (a 1024 com o menu aberto) */
+@container obras-pagina (max-width: 900px) {
+  /* os numeros em 3 + 2 */
+  .obras-numeros { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* as seis colunas cabem na caixa: letra de apoio nos valores e colunas mais juntas */
+  .obras-posicao td.dinheiro, .qdop-tabela td.dinheiro { font-size: var(--texto-mini); }
+  .obras-posicao th, .obras-posicao td, .qdop-tabela th, .qdop-tabela td { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
+  .obras-posicao th:first-child, .obras-posicao td:first-child, .qdop-tabela th:first-child, .qdop-tabela td:first-child { padding-left: var(--espaco-p); }
+  .obras-posicao th:last-child, .obras-posicao td:last-child, .qdop-tabela th:last-child, .qdop-tabela td:last-child { padding-right: var(--espaco-p); }
+  .obras-exec { min-width: calc(var(--alvo-minimo) * 2); gap: var(--espaco-pp); }
+  .qdop-filtros { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
+  /* o QDOP cabe na caixa: o que identifica a obra e os motivos quebram linha */
+  .qdop-tabela__sub { white-space: normal; }
+  .qdop-tabela__motivos { min-width: 0; }
+}
+
+/* ---------------------------------------------------------------- faixa estreita (celular) */
+@container obras-pagina (max-width: 620px) {
+  /* os numeros viram lista: rotulo a' esquerda, valor a' direita */
+  .obras-numeros { grid-template-columns: minmax(0, 1fr); gap: var(--espaco-mini); }
+  .obras-numero { display: flex; align-items: baseline; justify-content: space-between; gap: var(--espaco-m); }
+  .obras-numero dd { font-size: var(--texto-corpo); }
+
+  /* a tabela vira um bloco por obra, com os mesmos numeros: o rotulo da coluna vai ao lado do valor */
+  :is(.obras-posicao, .qdop-tabela), :is(.obras-posicao, .qdop-tabela) :is(tbody, tfoot, tr, td, th) { display: block; width: 100%; }
+  :is(.obras-posicao, .qdop-tabela) thead { display: none; }
+  .obras-painel { padding-top: 0; }
+  .obras-posicao td.dinheiro, .qdop-tabela td.dinheiro { font-size: var(--texto-meta); }
+  .qdop-tabela tbody td[data-rotulo="Término"] { flex-wrap: wrap; }
+  .qdop-tabela td[data-rotulo="Término"] .qdop-tabela__sub { flex-basis: 100%; text-align: right; }
+  :is(.obras-posicao, .qdop-tabela) :is(tbody, tfoot) tr { padding: var(--espaco-p) var(--espaco-m); border-bottom: var(--borda-linha); }
+  :is(.obras-posicao, .qdop-tabela) :is(tbody, tfoot) :is(td, th) {
+    display: flex; justify-content: space-between; align-items: baseline; gap: var(--espaco-p);
+    padding: var(--espaco-traco) 0; border: 0; background: none; text-align: right; font-size: var(--texto-meta);
+  }
+  :is(.obras-posicao, .qdop-tabela) :is(tbody, tfoot) :is(td, th):first-child { display: block; padding: 0 0 var(--espaco-mini); text-align: left; }
+  :is(.obras-posicao, .qdop-tabela) :is(tbody, tfoot) td:not(:first-child)::before {
+    content: attr(data-rotulo); flex: 0 1 auto; min-width: 0; max-width: 55%; color: var(--cor-texto-secundario); font-weight: var(--peso-normal); text-align: left; white-space: normal;
+  }
+  .obras-posicao tbody tr.obras-grupo { background: var(--cor-papel-sombreado); border-top: var(--regua-secao); }
+  .obras-posicao .obras-grupo th, .obras-posicao .obras-grupo td { border: 0; }
+  .obras-exec { min-width: 0; width: 55%; }
+  .obras-busca, .obras-busca__campo { width: 100%; }
+  .obras-rodape, .qdop-rodape { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
+  /* QDOP: os motivos ganham a largura do bloco, sob o selo */
+  .qdop-tabela tbody td[data-rotulo="Farol"] { display: block; text-align: left; }
+  .qdop-tabela tbody td[data-rotulo="Farol"]::before { display: block; max-width: none; margin-bottom: var(--espaco-mini); }
+  .qdop-tabela__motivos { min-width: 0; }
+  .qdop-tabela td.qdop-tabela__vazio { display: none; }
+  .qdop-tabela tfoot tr { border-bottom: 0; border-top: var(--regua-secao); }
+  .qdop-tabela__sub { white-space: normal; }
+  .qdop-filtros { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
+}
+
 /* #511: secoes pelo tempo, com faixa de cabecalho e uma linha por aviso */
-.avisos-area__titulos { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; min-width: 0; }
-.avisos-area__sub { color: var(--texto-fraco); font-size: 16px; }
-.aviso-secao { border: 1px solid var(--linha); border-radius: 12px; overflow: hidden; }
-.aviso-secao__cabeca { margin: 0; padding: 8px 16px; font-size: 16px; font-weight: 700; letter-spacing: .02em; }
-.aviso-secao__cabeca--vencido { background: var(--acao-fundo); }
-.aviso-secao__cabeca--vencido .aviso-secao__n { color: var(--acao); }
-.aviso-secao__cabeca--semana { background: #FFEDD5; }
-.aviso-secao__cabeca--mes { background: #FEF9C3; }
-.aviso-secao__cabeca--semana .aviso-secao__n, .aviso-secao__cabeca--mes .aviso-secao__n { color: var(--atencao); }
-.aviso-secao__cabeca--depois { background: var(--neutro-fundo); }
-.aviso-secao__cabeca--depois .aviso-secao__n { color: var(--texto-fraco); }
-.aviso-secao__lista { list-style: none; margin: 0; padding: 0 16px; }
-.aviso-linha { position: relative; display: grid; grid-template-columns: 110px minmax(120px, 220px) minmax(0, 1fr) auto; gap: 4px 16px;
-  align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--linha); }
-.aviso-linha:last-child { border-bottom: 0; }
-.aviso-linha__obra { font-weight: 600; overflow-wrap: anywhere; }
-.aviso-linha__link { color: inherit; text-decoration: none; }
-.aviso-linha__link::after { content: ""; position: absolute; inset: 0; }
-.aviso-linha__link:hover { text-decoration: underline; }
-.aviso-linha__dias { font-weight: 600; text-align: right; white-space: nowrap; }
-.aviso-linha__dias--vencido { color: var(--acao); }
-.aviso-linha__dias--semana, .aviso-linha__dias--mes { color: var(--atencao); }
-.avisos-area__corpo > *, .avisos-area__grupos > * { min-width: 0; }
 .avisos-area .form-inline select { max-width: 100%; }
 @media (max-width: 700px) {
   /* as colunas fixas (112 + 150 + 72 px) nao cabem no celular: a tabela ganha largura minima e a Rolagem rola,
      em vez de a coluna "Aviso" ficar sem espaco e o texto se sobrepor */
-  .aviso-linha { grid-template-columns: minmax(0, 1fr) auto; }
-  .aviso-linha__data { grid-row: 1; grid-column: 1; }
-  .aviso-linha__dias { grid-row: 1; grid-column: 2; }
-  .aviso-linha__obra { grid-row: 2; grid-column: 1 / -1; }
-  .aviso-linha__fato { grid-row: 3; grid-column: 1 / -1; }
-  .avisos-area .cartao__acoes { flex-wrap: wrap; }
+            .avisos-area .cartao__acoes { flex-wrap: wrap; }
   .avisos-area .form-inline { flex-wrap: wrap; }
   .avisos-area .form-inline .campo { min-width: 0; flex: 1 1 140px; }
   .avisos-area .cartao__cabeca { flex-wrap: wrap; }
+  /* Reajustes esperando apostilamento: tres colunas em 290 px; o nome quebra em vez de cortar e o valor vai na letra de apoio */
+  .cartao:has(#dir-reajustes) .tabela :is(th, td) { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
+  .cartao:has(#dir-reajustes) .tabela .truncar--nome { max-width: none; white-space: normal; overflow: visible; }
+  .cartao:has(#dir-reajustes) .tabela td.dinheiro { font-size: var(--texto-mini); }
 }
+
+/* o glifo do saldo negativo (medido acima do vigente) nao encosta no valor */
+.negativo > .glifo { margin-right: var(--espaco-mini); }

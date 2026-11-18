@@ -1,17 +1,3 @@
-/* O seletor de mês do quadro do mês (#643). O formulário de iniciar é o da planilha/carta (#653), com o estilo dele.
-   Cores só dos tokens (tokens.css). */
-
-/* seletor de mês */
-.iniciar-med__mes { display: flex; align-items: center; gap: 8px; }
-.iniciar-med__mes-nome {
-  min-width: 180px; padding: 0 12px; display: flex; align-items: center; justify-content: center; height: 40px;
-  border: 1px solid var(--linha-campo); border-radius: var(--raio-ctrl); background: var(--superficie); font-weight: 600;
-}
-.iniciar-med__mes-seta {
-  width: 40px; height: 40px; flex: none; border: 0; border-radius: var(--raio-ctrl); background: none; color: var(--texto-menu);
-  font-size: 22px; line-height: 1; cursor: pointer;
-}
-.iniciar-med__mes-seta:hover { background: var(--hover); }
-
-/* enquanto a regra da obra não chega */
-.iniciar-med__carregando { margin: 0; color: var(--texto-2); }
+/* O formulario de iniciar a medicao pelo quadro do mes (IniciarMedicao.tsx): e' o da planilha/carta (#653), com o
+   estilo dele. Aqui so' a espera pela regra da obra. */
+.iniciar-med__carregando { margin: 0; color: var(--cor-texto-secundario); }

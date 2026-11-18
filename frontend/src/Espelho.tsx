@@ -1,6 +1,6 @@
 import { useRascunho } from "./rascunho";
 import { useEffect, useRef, useState } from "react";
-import CaixaAviso from "./CaixaAviso";
+import CaixaAviso, { CaixaJustificativa } from "./CaixaAviso";
 import CampoCompetencia from "./CampoCompetencia";
 import CampoValor from "./CampoValor";
 import ErroCampo from "./ErroCampo";
@@ -15,6 +15,7 @@ import { fmtCompetencia as competenciaBR, fmtDataHora as dataHoraBR, fmtDataPura
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
+import Falha from "./Falha";
 
 // Espelho de NF (bloco 2, spec §3 passos 1-2): a medicao nasce aqui. A pessoa digita numero,
 // competencia e os valores da regra da obra; o sistema calcula uma linha por nota, gera os
@@ -159,7 +160,7 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
     if (parte) {
       return (
         <section className="espelho-etapa pilha" id={idSecao}>
-          {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}{falhou ? " Recarregue a página para tentar de novo." : ""}</p>}
+          {erro && <Falha>{erro}{falhou ? " Recarregue a página para tentar de novo." : ""}</Falha>}
           {!falhou && (medicao ? <div className="vazio"><p>Nenhum espelho.</p></div> : semRegra)}
         </section>
       );
@@ -169,8 +170,7 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
         <div className="cartao__cabeca">
           <h2 className="cartao__titulo" id="titulo-espelho">{titulo}</h2>
         </div>
-        {erro && <div className="cartao__corpo"><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />
-          {erro}{falhou ? " Recarregue a página para tentar de novo." : ""}</p></div>}
+        {erro && <div className="cartao__corpo"><Falha>{erro}{falhou ? " Recarregue a página para tentar de novo." : ""}</Falha></div>}
         {!falhou && (medicao ? <div className="vazio"><p>Nenhum espelho.</p></div> : semRegra)}
       </section>
     );
@@ -316,6 +316,42 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
     </Rolagem>
   );
 
+  // #722: a conferencia como extrato -- uma coluna por nota (a saida) e uma linha por valor; as retencoes ficam
+  // recuadas sob o valor e o liquido fecha a conta no rodape. Com muitas notas, a tabela rola dentro da caixa.
+  const nomeSaida = (s: Saida) => `${s.rotulo} · ${s.emissor.charAt(0).toUpperCase() + s.emissor.slice(1)} · ${s.municipio}`;
+  const extratoNotas = (saidas: Saida[]) => {
+    const linhas: { rotulo: string; valor: (s: Saida) => string; classe?: string }[] = [
+      { rotulo: "Valor", valor: s => brl(s.valor), classe: "extrato__forte" },
+      { rotulo: "Mão de obra", valor: s => col(s.mo) },
+      { rotulo: "Material", valor: s => col(s.material) },
+      { rotulo: "INSS", valor: s => col(s.inss), classe: "extrato__retencao" },
+      { rotulo: "ISS", valor: s => col(s.iss), classe: "extrato__retencao" },
+      { rotulo: "IRRF", valor: s => col(s.irrf), classe: "extrato__retencao" },
+      ...(temIbsCbs(saidas) ? [{ rotulo: "IBS", valor: (s: Saida) => col(s.ibs), classe: "extrato__retencao" },
+        { rotulo: "CBS", valor: (s: Saida) => col(s.cbs), classe: "extrato__retencao" }] : []),
+    ];
+    return (
+      <Rolagem rotulo="Notas do espelho">
+        <table className="tabela espelho__notas extrato">
+          <thead>
+            <tr><th scope="col">Saída</th>{saidas.map(s => <th key={s.chave} scope="col" className="col-num">{nomeSaida(s)}</th>)}</tr>
+          </thead>
+          <tbody>
+            {linhas.map(l => (
+              <tr key={l.rotulo} className={l.classe}>
+                <th scope="row">{l.rotulo}</th>
+                {saidas.map(s => <td key={s.chave} className="col-num dinheiro num">{l.valor(s)}</td>)}
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr><th scope="row">Líquido</th>{saidas.map(s => <td key={s.chave} className="col-num dinheiro num">{brl(s.liquido)}</td>)}</tr>
+          </tfoot>
+        </table>
+      </Rolagem>
+    );
+  };
+
   // #514, passo Espelhos: uma linha por nota (natureza e empresa, municipio, valor, o arquivo do espelho) e o total
   // conferido com o aprovado das medicoes do espelho (o pedido, quando ainda nao ha' aprovado)
   const soltos = (esp: EspelhoDetalhe) => esp.arquivos.filter(a => !esp.saidas.some(x => x.chave === a.saida));
@@ -348,8 +384,8 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
                   <td>{x.municipio}</td>
                   <td className="col-num dinheiro num">{brl(x.valor)}</td>
                   <td>{arq
-                    ? <a className="selo selo--ok espelho__gerado" href={`/api/espelhos/${esp.id}/arquivos/${arq.documento_id}`}
-                        aria-label={`Baixar o espelho ${arq.nome}`}><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">gerado</span></a>
+                    ? <a className="selo selo--feito espelho__gerado" href={`/api/espelhos/${esp.id}/arquivos/${arq.documento_id}`}
+                        aria-label={`Baixar o espelho ${arq.nome}`}><span className="glifo glifo--feito" aria-hidden="true" /><span className="selo__texto">gerado</span></a>
                     : "—"}</td>
                 </tr>
               );
@@ -399,7 +435,7 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
       {parte && !medicao && podeEditar && passo.tipo === "lista" && (
         <div><button type="button" className="btn btn--primario" onClick={() => abrirForm()}><IconeMais className="icone icone--p" /> Gerar espelho</button></div>
       )}
-      {erro && <div className="cartao__corpo"><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p></div>}
+      {erro && <div className="cartao__corpo"><Falha>{erro}</Falha></div>}
       {passo.tipo === "envio" && reservado?.id === passo.espelho.id && (
         <div className="cartao__corpo"><LiberarEnvio tabela="espelhos" id={reservado.id} reserva={reservado.reserva}
           aoLiberar={() => { setErro(""); void carregar(); }} /></div>
@@ -466,34 +502,38 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
       )}
 
       {passo.tipo === "previa" && so("espelho") && (
-        <div className="cartao__corpo">
+        <div className="cartao__corpo espelho-previa">
           <p className="painel__titulo">Conferir antes de gerar</p>
-          <p className="campo__nota">Período no espelho: <span className="num">{passo.previa.periodo}</span></p>
-          {tabelaNotas(passo.previa.saidas)}
-          <ul className="lista-simples espelho__medicoes">
+          <dl className="espelho-periodo">
+            <div><dt>Período no espelho</dt><dd className="num">{passo.previa.periodo}</dd></div>
+          </dl>
+          {extratoNotas(passo.previa.saidas)}
+          <dl className="espelho__medicoes">
             {passo.previa.medicoes.map(m => {
               // #284: o valor que veio da medicao (aprovado do boletim, senao pedido) nao se digita
               const trav = passo.previa.travados?.find(t => t.tipo === m.tipo);
               return (
-                <li key={m.tipo}>Medição {form.numero} de {TIPO[m.tipo] ?? m.tipo}
-                  {trav ? ` (${ORIGEM_TRAVADO[trav.fonte] ?? "pedido"})` : ""}: {brl(m.valor_centavos)}
-                  {m.existente && ESTADOS_ESPELHO.includes(m.existente) && <> <Selo classe="selo--atencao">Versão nova</Selo></>}</li>
+                <div key={m.tipo}>
+                  <dt><span>Medição {form.numero} de {TIPO[m.tipo] ?? m.tipo}{trav ? ` (${ORIGEM_TRAVADO[trav.fonte] ?? "pedido"})` : ""}</span>
+                    {m.existente && ESTADOS_ESPELHO.includes(m.existente) && <> <Selo situacao="breve">Versão nova</Selo></>}</dt>
+                  <dd className="num">{brl(m.valor_centavos)}</dd>
+                </div>
               );
             })}
-          </ul>
+          </dl>
           {passo.previa.avisos.map(a => <CaixaAviso nivel="atencao" key={a}>{a}</CaixaAviso>)}
           {passo.previa.medicoes.some(m => m.sem_boletim) && (
             <>
               <CaixaAviso nivel="atencao">Sem o boletim do órgão: {passo.previa.medicoes.filter(m => m.sem_boletim)
                 .map(m => `Medição ${form.numero} de ${TIPO[m.tipo] ?? m.tipo}`).join(" e ")}.</CaixaAviso>
-              <div className="campo">
+              <CaixaJustificativa>
                 <label className="campo__rotulo" htmlFor="esp-sem-boletim">Justificativa para seguir sem boletim</label>
                 <input id="esp-sem-boletim" name="justificativa_sem_boletim" autoComplete="off" className="entrada--larga"
                   maxLength={500} value={justificativa}
                   {...(erroJustificativa ? { "aria-invalid": true as const, "aria-describedby": "esp-sem-boletim-erro" } : {})}
                   onChange={e => { setJustificativa(e.target.value); setErroJustificativa(undefined); }} />
                 <ErroCampo id="esp-sem-boletim-erro" erro={erroJustificativa} />
-              </div>
+              </CaixaJustificativa>
             </>
           )}
           {passo.previa.medicoes.some(m => m.existente && ESTADOS_ESPELHO.includes(m.existente)) && (
@@ -555,20 +595,20 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
             <strong>Nº {esp.numero} · {competenciaBR(esp.competencia)}</strong>
             {/* o estado do envio e' SELO (nao texto de apoio): e' o que diz se falta um passo */}
             {esp.envio
-              ? <Selo classe="selo--ok">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
-              : <Selo classe="selo--atencao" forte>Não enviado ao faturamento</Selo>}
+              ? <Selo situacao="feito">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
+              : <Selo situacao="breve">Não enviado ao faturamento</Selo>}
           </div>
           )}
           {parte === "faturamento" && (
             <p>{esp.envio
-              ? <Selo classe="selo--ok">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
-              : <Selo classe="selo--atencao" forte>Não enviado ao faturamento</Selo>}</p>
+              ? <Selo situacao="feito">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
+              : <Selo situacao="breve">Não enviado ao faturamento</Selo>}</p>
           )}
           {parte === "espelho" && tabelaResumo(esp)}
           {parte === "espelho" && (
             <details className="detalhes">
               <summary>Impostos e líquido de cada nota</summary>
-              <div className="med-caixa">{tabelaNotas(esp.saidas)}</div>
+              {extratoNotas(esp.saidas)}
             </details>
           )}
           {!parte && tabelaNotas(esp.saidas)}

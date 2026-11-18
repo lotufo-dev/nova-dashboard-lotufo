@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, apiForm, mensagemDeErro } from "./api";
 import { AceiteDiferenca, FormBoletim } from "./Boletim";
 import { brl } from "./formato";
-import { IconeAlerta, IconeLinkExterno } from "./icones";
+import { IconeLinkExterno } from "./icones";
 import type { Agir } from "./MedicaoAtos";
 import type { Medicao } from "./Medicoes";
 import { IconeCheck } from "./NotasAEnviar";
@@ -12,6 +12,7 @@ import { EVENTO_RESPOSTAS_LIDAS, type RespostaOrgao } from "./respostasOrgao";
 import { quemDaMovimentacao, sigla, tituloDoEvento, type PainelSiga, type ProcessoSiga } from "./siga";
 import { fmtDataPura, fmtHora } from "./tempo";
 import "./passos.css";
+import Falha from "./Falha";
 
 // Issue #508, passo 2 da pagina da obra (aprovado em 06/11/2026): "com o orgao ha N dias uteis", a data do envio, o
 // processo SIGA, "onde esta' o processo" (setor atual e ultimas movimentacoes, da tela SIGA) e a resposta do orgao:
@@ -68,7 +69,7 @@ function LinkSiga({ medicaoId, aoGravar }: { medicaoId: number; aoGravar: () => 
         <button type="submit" className="btn" disabled={ocupado || !link.trim()}>{ocupado ? "Gravando…" : "Gravar"}</button>
         <button type="button" className="btn" onClick={() => { setAberto(false); setLink(""); setErro(""); }}>Voltar</button>
       </form>
-      {erro && <p className="erro" role="alert" id={idErro}><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha id={idErro}>{erro}</Falha>}
     </div>
   );
 }
@@ -131,7 +132,7 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
         </dl>
       </section>
 
-      <div className="med-duas med-duas--iguais">
+      <div className="med-duas">
         <section className="cartao med-painel" aria-labelledby="orgao-onde">
           <h3 className="med-painel__titulo" id="orgao-onde">Onde está o processo</h3>
           {proc ? (
@@ -229,7 +230,7 @@ export default function PassoAnalise({ m, planilha, podeEditar, salvando, agir, 
                   </p>
                   {r.siga_processo_id ? (
                     <p className="orgao-emails__siga">
-                      <span className="selo selo--ok"><span className="selo__ponto" aria-hidden="true" /><span className="selo__texto">Protocolo do SIGA</span></span>
+                      <span className="selo selo--feito"><span className="glifo glifo--feito" aria-hidden="true" /><span className="selo__texto">Protocolo do SIGA</span></span>
                       {protocolo && <span>{[`Processo ${protocolo.numero ?? protocolo.codigo ?? ""}`.trim(), protocolo.setor].filter(Boolean).join(" · ")}</span>}
                       {protocolo?.link && (
                         <a className="link" href={protocolo.link} target="_blank" rel="noreferrer">

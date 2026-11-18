@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import Cronograma from "./Cronograma";
-import { IconeAlerta } from "./icones";
 import Instrumentos from "./Instrumentos";
 import type { InstrumentoCadastro } from "./obra";
 import { Link } from "./Link";
@@ -9,6 +8,7 @@ import { Link } from "./Link";
 // traduziria para Cuiaba (UTC-4), deslocando um dia, exatamente na tela que diz se da' para protocolar hoje.
 import { fmtCompetencia as mesBR, fmtDataPura } from "./tempo";
 import Selo from "./Selo";
+import Falha from "./Falha";
 
 // Abas da pagina da obra (bloco 6; spec §10.3; NAVEGACAO.md › Obra): Documentos (o veredito do protocolo) e Contrato, so' leitura
 // (o cadastro e' versionado em `cadastro/*.yaml`). As notas moram na pagina de cada medicao. Reajuste e Prazos,
@@ -30,7 +30,7 @@ function useDados<T>(url: string): { dados: T | null; erro: string } {
 
 function Estado({ erro }: { erro: string }) {
   return erro
-    ? <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>
+    ? <Falha>{erro}</Falha>
     : <section className="cartao"><div className="vazio"><p>Carregando…</p></div></section>;
 }
 
@@ -93,13 +93,13 @@ function QuadroExigidos({ contratoId, natureza }: { contratoId: number; natureza
         <h2 className="cartao__titulo" id={id}>{NATUREZA[natureza]}</h2>
         {/* veredito nunca e' so' cor: o chip carrega a palavra */}
         {temVeredito && (
-          <Selo classe={dados.pronto ? "selo--ok" : "selo--acao"}>
+          <Selo situacao={dados.pronto ? "feito" : "critico"}>
             {dados.pronto ? "Pronto para protocolar" : "Falta documento para protocolar"}
           </Selo>
         )}
       </div>
 
-      {erro && <div className="cartao__corpo"><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p></div>}
+      {erro && <div className="cartao__corpo"><Falha>{erro}</Falha></div>}
       {!dados && !erro && <div className="vazio"><p>Verificando os documentos das empresas…</p></div>}
       {dados && itens.length === 0 && (
         <div className="vazio">
@@ -172,14 +172,15 @@ export function ContratoObra({ contratoId }: { contratoId: number }) {
             <dd>{!cad.dados ? (cad.erro ? "—" : "carregando…") : fiscais.length === 0 ? "—" : (
               <ul className="lista-simples">
                 {fiscais.map(f => (
-                  <li key={`${f.email}-${f.desde}`}>{f.nome || f.email || "—"}
-                    {f.cargo ? `, ${f.cargo}` : ""}{f.portaria ? `, ${f.portaria}` : ""}</li>
+                  <li key={`${f.email ?? f.nome}-${f.desde}`}>{f.nome || f.email || "—"}
+                    {f.cargo ? `, ${f.cargo}` : ""}{f.portaria ? `, ${f.portaria}` : ""}
+                    {f.email ? (f.nome ? `, ${f.email}` : "") : ", sem e-mail cadastrado"}</li>
                 ))}
               </ul>
             )}</dd>
           </div>
         </dl>
-        {cad.erro && <div className="cartao__corpo"><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{cad.erro}</p></div>}
+        {cad.erro && <div className="cartao__corpo"><Falha>{cad.erro}</Falha></div>}
       </Cartao>
       <Instrumentos contratoId={contratoId} cadastro={cad.dados?.instrumentos ?? null} erroCadastro={cad.erro} />
       <Cronograma contratoId={contratoId} podeEditar={false} />

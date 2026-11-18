@@ -593,6 +593,35 @@ def test_processo_que_o_robo_liga_a_medicao_entra_em_medicoes_e_os_demais_em_out
     alfa, beta = siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"]
     assert (alfa["categoria"], alfa["o_que_e"], alfa["obra"]) == ("medicoes", "3ª Medição", "Obra Alfa")
     assert (beta["categoria"], beta["o_que_e"], beta["obra"], beta["nome"]) == ("outros", "Outro", None, "Processo Beta")
+    assert (alfa["categoria_sugerida"], beta["categoria_sugerida"]) == (False, False)
+
+
+def test_categoria_sugerida_pelo_nome_que_o_robo_manda():
+    assert siga.categoria_sugerida("7ª Medição/Reajuste - Obra Alfa (ORGAO-PRO-2026/00001)") == "medicoes"
+    assert siga.categoria_sugerida("CT-902 - Reajuste da 3ª Medição - Obra Beta") == "medicoes"
+    assert siga.categoria_sugerida("CT-901 - Aditivo de prazo - Obra Alfa") == "aditivos"
+    assert siga.categoria_sugerida("ADITIVO DE REAJUSTE - Obra Alfa") == "aditivos"
+    assert siga.categoria_sugerida("Indenizatório Obra Delta") == "indenizatorios"
+    assert siga.categoria_sugerida("Obra Beta - IC 044/2026") is None and siga.categoria_sugerida(None) is None
+
+
+def test_processo_do_robo_sem_classificacao_aparece_na_categoria_que_o_nome_diz_ate_alguem_escolher(conn):
+    """Visto na tela SIGA sobre o volume real: todos os processos em "Outros", embora os nomes dissessem medição,
+    aditivo e indenizatório. O robô manda só o nome; a seção da tela segue o nome até alguém classificar. Nada é
+    gravado pela sugestão, e a escolha da pessoa vale, mesmo sendo Outros."""
+    nomes = ["7ª Medição - Obra Alfa", "Aditivo de prazo - Obra Alfa", "Indenizatório Obra Alfa", "Obra Alfa - IC 1/2026"]
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), [
+        {"codigo": None, "numero": f"ORGAO-PRO-2026/0002{i}", "nome": nome, "situacao": None, "movimentacoes": []}
+        for i, nome in enumerate(nomes)])
+    assert {c for _, c in _categorias(conn)} == {"outros"}
+
+    def lidos():
+        return [(p["categoria"], p["categoria_sugerida"]) for p in siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"]]
+    assert lidos() == [("medicoes", True), ("aditivos", True), ("indenizatorios", True), ("outros", False)]
+    assert {c for _, c in _categorias(conn)} == {"outros"}            # a leitura nao grava
+    ids = [r[0] for r in conn.execute("SELECT id FROM siga_processos ORDER BY id")]
+    siga.classificar(conn, None, ids[0], "outros", None, None, None)  # a pessoa diz que e' Outros: a sugestao nao volta
+    assert lidos() == [("outros", False), ("aditivos", True), ("indenizatorios", True), ("outros", False)]
 
 
 def test_protocolo_com_medicao_e_reajuste_e_medicoes_com_os_dois_titulos(conn):
@@ -970,7 +999,7 @@ def test_resumo_dos_nao_lidos_conta_cada_processo_da_rodada_uma_vez(conn, robo):
         {"tipo": "nao_lido", "processo_id": robo.ids[0], "texto": "não lido às 10:03: A página do processo não abriu"},
         {"tipo": "nao_lido", "processo_id": None,
          "texto": "processo XYZ999 não lido às 10:03: Processo da lista do robô"},
-        {"tipo": "nao_lidos", "processo_id": None, "texto": "1 de 1 processos não foram lidos"}]
+        {"tipo": "nao_lidos", "processo_id": None, "texto": "1 de 1 processo não foi lido"}]
 
 
 def test_rodada_sem_fim_ha_mais_de_12_minutos_avisa_ate_outra_terminar(conn, robo):
@@ -1113,7 +1142,7 @@ def test_processo_vivo_sem_leitura_ha_mais_de_2_horas_uteis_mostra_nao_lido(conn
     agora = _cuiaba(2026, 10, 28, 11)
     assert _nao_lido_do_beta(conn, robo, _cuiaba(2026, 10, 28, 8, 30), agora) == [
         {"tipo": "nao_lido", "processo_id": robo.ids[1], "texto": "não lido às 11:00: Não abriu"},
-        {"tipo": "nao_lidos", "processo_id": None, "texto": "1 de 3 processos não foram lidos"}]
+        {"tipo": "nao_lidos", "processo_id": None, "texto": "1 de 3 processos não foi lido"}]
 
 
 def test_nao_lido_conta_das_8h_quando_a_ultima_leitura_e_de_ontem(conn, robo):

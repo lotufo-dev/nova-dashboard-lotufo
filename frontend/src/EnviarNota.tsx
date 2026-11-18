@@ -5,12 +5,14 @@ import ConfirmarFaltas from "./ConfirmarFaltas";
 import ConfirmarRemocao from "./ConfirmarRemocao";
 import { api, apiForm, ApiErro } from "./api";
 import { brl } from "./formato";
-import { IconeAlerta } from "./icones";
-import { IconeCheck, iniciarEnvio, ItensEnvio, mensagem, notasDe, type Envio, type ListaEnvios } from "./NotasAEnviar";
+import { IconeArquivo } from "./icones";
+import { iniciarEnvio, ItensEnvio, mensagem, notasDe, type Envio, type ListaEnvios } from "./NotasAEnviar";
+import { Glifo } from "./Selo";
 import JustificativaEnvio, { conferirJustificativa, erroDaJustificativa, pedeJustificativa } from "./JustificativaEnvio";
 import "./notas.css";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import { fmtHora } from "./tempo";
+import Falha from "./Falha";
 
 // Enviar a nota (2026-10-09): o protocolo da etapa `nota` (SINFRA) ou `unico` (demais) de um envio. Sem carta
 // (SINFRA, prefeituras): o que vai no e-mail e para quem vai. Com carta (MTPAR, SES): oficio, assinar e enviar
@@ -92,6 +94,7 @@ function Complementares({ protocoloId, extras, links, ocupado, agir, aoMudar, em
         <ul className="nota-complementares__lista">
           {extras.map(x => (
             <li key={x.id}>
+              <IconeArquivo className="icone" />
               <span className="nota-complementares__nome" title={x.nome}>{x.nome}</span>
               <ConfirmarRemocao alvo={x.nome} ocupado={ocupado} aviso={aviso}
                 aoConfirmar={() => void agir(async () => {
@@ -149,18 +152,20 @@ type Conferencia = { ok: boolean; avisos: { codigo: string; mensagem: string }[]
 
 type Passo = "atual" | "feito" | "futuro";
 
-// Passo numerado: indigo no passo da vez, verde com check quando concluido, cinza quando vem depois.
-function Secao({ n, titulo, passo, acoes, children }: {
-  n: number; titulo: string; passo: Passo; acoes?: React.ReactNode; children: React.ReactNode;
+// Etapa numerada do envio (#722): o numero em tinta na etapa da vez, o sinal de feito quando concluida, o numero
+// apagado quando vem depois. `lado`: o dado da etapa a' direita do titulo (o numero do oficio).
+function Secao({ n, titulo, passo, acoes, lado, children }: {
+  n: number; titulo: string; passo: Passo; acoes?: React.ReactNode; lado?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
     <section className={`nota-secao nota-secao--${passo}`} aria-labelledby={`secao-${n}`}>
-      <span className={`nota-passo nota-passo--${passo}`} aria-hidden="true">{passo === "feito" ? <IconeCheck /> : n}</span>
+      <div className="nota-secao__cabeca">
+        <span className={`nota-passo nota-passo--${passo}`} aria-hidden="true">{passo === "feito" ? <Glifo situacao="feito" /> : n}</span>
+        <h2 className="nota-secao__titulo" id={`secao-${n}`}>{titulo}</h2>
+        {lado && <span className="nota-secao__lado">{lado}</span>}
+        {acoes && <span className="nota-secao__acoes">{acoes}</span>}
+      </div>
       <div className="nota-secao__corpo">
-        <div className="nota-secao__cabeca">
-          <h2 className="nota-secao__titulo" id={`secao-${n}`}>{titulo}</h2>
-          {acoes && <span className="nota-secao__acoes">{acoes}</span>}
-        </div>
         {children}
       </div>
     </section>
@@ -222,7 +227,7 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
       <div className="pagina">
         {erro ? (
           <div className="form-inline">
-            <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível abrir o envio: {erro}</p>
+            <Falha>Não foi possível abrir o envio: {erro}</Falha>
             <button type="button" className="btn btn--pequeno" onClick={() => void carregar()}>Tentar de novo</button>
           </div>
         ) : <p className="campo__nota">Carregando o envio…</p>}
@@ -329,8 +334,8 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
   const faltamBloco = faltam.length > 0 && (
     <div className="campo nota-justificativa">
       <span className="campo__rotulo">O que falta</span>
-      <ul className="lista-simples">
-        {faltam.map((p, i) => <li key={i} className="notas__diverge">{p}</li>)}
+      <ul className="lista-simples envio-falta">
+        {faltam.map((p, i) => <li key={i} className="notas__diverge"><Glifo situacao="critico" /><span>{p}</span></li>)}
       </ul>
     </div>
   );
@@ -362,7 +367,7 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
   if (!podeEditar) {
     return (
       <div className={classe}>
-        {det.bloqueio && <CaixaAviso nivel="critico" role="alert">Envio bloqueado: {det.bloqueio}</CaixaAviso>}
+        {det.bloqueio && <CaixaAviso nivel="trava" role="alert">Envio bloqueado: {det.bloqueio}</CaixaAviso>}
         <Secao n={1} titulo="O que vai no e-mail" passo="atual">
           <ItensEnvio itens={e.itens} aoMudar={() => void carregar()} podeEditar={false} />
         </Secao>
@@ -373,8 +378,8 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
   return (
     <>
       <div className={classe}>
-        {det.bloqueio && <CaixaAviso nivel="critico" role="alert">Envio bloqueado: {det.bloqueio}</CaixaAviso>}
-        {erroAcao && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erroAcao}</p>}
+        {det.bloqueio && <CaixaAviso nivel="trava" role="alert">Envio bloqueado: {det.bloqueio}</CaixaAviso>}
+        {erroAcao && <Falha>{erroAcao}</Falha>}
         {confirmar && <ConfirmarFaltas itens={confirmar.itens} mudou={confirmar.mudou} aoCancelar={() => setConfirmar(null)}
           aoContinuar={() => void enviarConfirmado(confirmar.m, confirmar.itens)} />}
         {reserva && <LiberarEnvio tabela="protocolos" id={protocoloId} reserva={reserva}
@@ -418,10 +423,13 @@ export default function EnviarNota({ protocoloId, embutido, podeEditar, versao =
           </>
         ) : (
           <>
-            <Secao n={1} titulo="Ofício" passo={passoOficio}>
-              {det.carta?.oficio && <p>Ofício <span className="nota-mono">{det.carta.oficio}</span></p>}
-              {paginas.length > 0 && <ol className="lista-simples nota-paginas">{paginas.map((p, i) => <li key={i}>{p}</li>)}</ol>}
-              <ItensEnvio itens={e.itens} aoMudar={itemMudou} />
+            <Secao n={1} titulo="Ofício" passo={passoOficio}
+              lado={det.carta?.oficio && <>Ofício <span className="nota-mono">{det.carta.oficio}</span></>}>
+              {/* o pacote: as paginas da carta de um lado e o que vai junto do outro */}
+              <div className="envio-pacote">
+                {paginas.length > 0 && <ol className="lista-simples nota-paginas">{paginas.map((p, i) => <li key={i}>{p}</li>)}</ol>}
+                <ItensEnvio itens={e.itens} aoMudar={itemMudou} />
+              </div>
               {complementares}
               {faltamBloco}
               {/* issue #278: o termo de apostilamento mudou depois da montagem; o bloqueio diz o motivo e o Montar volta */}

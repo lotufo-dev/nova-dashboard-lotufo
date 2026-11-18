@@ -26,7 +26,7 @@ test("três abas com contador: certidões a renovar, regularidade faltando e gar
   render(<Documentos usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   const abas = screen.getAllByRole("tab").map(t => t.textContent);
-  expect(abas).toEqual(["Certidões · 2 a renovar", "Regularidade mensal · 1 faltando", "Garantias · 1 a conferir"]);
+  expect(abas).toEqual(["Certidões 2 a renovar", "Regularidade mensal 1 faltando", "Garantias 1 a conferir"]);
   expect(screen.getByRole("button", { name: /Anexar PDF/ })).toBeTruthy();
 });
 
@@ -45,6 +45,10 @@ test("aba Certidões: uma linha por empresa, chips com os dias e a cor pela situ
   expect(chip("Municipal").textContent).toContain("vencida");
   expect(chip("Municipal").className).toContain("doc-chip--critico");
   expect(chip("CNDT").className).toContain("doc-chip--neutro");     // nao cadastrada nesta empresa
+  // #767: a situacao tem forma alem da cor (o glifo dela); o que nao tem situacao fica sem glifo
+  expect(["FGTS", "Federal", "Municipal"].map(c => chip(c).querySelector(".glifo")?.className)).toEqual(
+    ["glifo glifo--breve", "glifo glifo--feito", "glifo glifo--critico"]);
+  expect(chip("CNDT").querySelector(".glifo")).toBeNull();
   expect(l.queryByText("Falência")).toBeNull();
   // o chip abre o PDF; a empresa abre a pagina dela
   expect(chip("FGTS").getAttribute("href")).toBe("/api/certidoes/7/arquivo");
@@ -92,6 +96,7 @@ test("aba Regularidade: só quem tem folha, seis meses com o estado de cada um",
   expect(chips[0].textContent).toBe("—");
   expect(chips[0].closest(".doc-chip")!.className).toContain("doc-chip--neutro");
   expect(chips[4].closest(".doc-chip")!.className).toContain("doc-chip--breve");
+  expect([chips[3], chips[4]].map(c => c.querySelector(".glifo")?.className)).toEqual(["glifo glifo--feito", "glifo glifo--breve"]);
   l.getByText("última: junho, 08/07");
   screen.getByText(/Não exigida: .*Beta Ltda/);
   screen.getByText("Agosto esperada a partir de 10/09.");
@@ -110,7 +115,7 @@ test("aba Garantias: por órgão, com a contagem, e os quatro chips por obra (se
   render(<Documentos usuario={usuario} busca={{ aba: "garantias" }} />);
   await screen.findByText("Obra Alfa");
   expect(screen.getAllByRole("heading", { level: 2 }).map(h => h.textContent)).toEqual([
-    "SINFRA · 2 obras", "MTPAR · 1 obra", "Prefeituras · 1 obra",
+    "SINFRA 2 obras", "MTPAR 1 obra", "Prefeituras 1 obra",
   ]);
   const alfa = within(screen.getByText("Obra Alfa").closest("li")!);
   alfa.getByText("AP-9"); alfa.getByText("05/10/2026"); alfa.getByText("sim"); alfa.getByText("registrado");
@@ -133,7 +138,7 @@ test("contrato de contratante privado aparece no grupo Privados (#651)", async (
   render(<Documentos usuario={usuario} busca={{ aba: "garantias" }} />);
   await screen.findByText("Obra Gama");
   expect(screen.getAllByRole("heading", { level: 2 }).map(h => h.textContent)).toEqual([
-    "SINFRA · 2 obras", "MTPAR · 1 obra", "Privados · 1 obra",
+    "SINFRA 2 obras", "MTPAR 1 obra", "Privados 1 obra",
   ]);
   within(screen.getByRole("region", { name: "Garantias de Privados" })).getByText("Obra Gama");
 });
@@ -285,6 +290,9 @@ test("Renovar agora: uma linha por certidão, com a validade, Emitir e Anexar", 
   expect(linhas[1].textContent).toContain("27/09/2026");
   expect(linhas[1].querySelector(".doc-linha__nome")!.textContent).toBe("Lotufo");
   expect(within(linhas[1]).getByRole("link", { name: /Emitir FGTS de Lotufo/ }).getAttribute("href")).toBe("https://emissao.exemplo.com.br/fgts");
+  // decisao D6 do dono (#767): aqui toda linha pede acao, entao o Emitir e' o botao de destaque
+  expect(within(linhas[1]).getByRole("link", { name: /Emitir FGTS de Lotufo/ }).className).toContain("btn--primario");
+  expect(linhas.map(x => x.querySelector(".doc-chip .glifo")?.className)).toEqual(["glifo glifo--critico", "glifo glifo--breve"]);
   within(linhas[1]).getByRole("button", { name: "Anexar FGTS de Lotufo" });
   // o bloco e' da aba Certidoes
   cleanup();

@@ -204,6 +204,11 @@ def _pecas(conn, protocolo_id: int) -> list[dict]:
         "SELECT * FROM protocolo_pecas WHERE protocolo_id=? AND removida_em IS NULL ORDER BY id", (protocolo_id,))]
 
 
+# O anexo gravado no banco que nao esta' mais na pasta de dados: a previa e o envio recusam com esta frase (409), em
+# vez de 500. No envio, a leitura dos anexos vem antes da reserva e, de novo, antes do e-mail: nada sai nem e' gravado.
+ARQUIVO_AUSENTE = "Um arquivo deste envio não está mais disponível no servidor."
+
+
 def _bytes(rel: str) -> bytes:
     return arquivos.caminho_seguro(rel).read_bytes()
 
@@ -1221,7 +1226,7 @@ def _destinatarios(conn, regras: dict, e: Etapa, c: dict, hoje: datetime.date) -
     if chave == "protocolo_assinados_para":     # nota da SINFRA (SUEF I/II, SUPU): so' o protocolo, sem fiscal
         return para, [x for x in copia if x not in para]
     f = carta.fiscal_vigente(conn, c["id"], hoje.isoformat())
-    if f and f["email"] not in para:
+    if f and f["email"] and f["email"] not in para:      # fiscal sem e-mail cadastrado e' so' A/C da carta
         para.append(f["email"])
     para += [x for x in json.loads(c.get("destinatarios_extras") or "[]") if x not in para]
     return para, [x for x in copia if x not in para]

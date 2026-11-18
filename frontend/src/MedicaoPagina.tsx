@@ -10,7 +10,6 @@ import { diaMes, FaixaPasso, PassoCartao, passoDe as passoDoEstado, passoInicial
 import PassoAnalise from "./PassoAnalise";
 import PassoPagamento from "./PassoPagamento";
 import { FrcConsorcio } from "./Frc";
-import { IconeAlerta } from "./icones";
 import Janela from "./Janela";
 import LiberarEnvio from "./LiberarEnvio";
 import type { Usuario } from "./Login";
@@ -20,10 +19,10 @@ import { DA_PLANILHA, eventosDaMedicao, EXCECOES, FINAIS, metadeQueEspera, passo
 import { AceiteDiferenca, FormBoletim, PassoBoletim } from "./Boletim";
 import { FormAssinadosPorFora, FormEnviarAssinados, type SituacaoAssinados, type SoReajuste } from "./AssinadosEnvio";
 import { FormAssinatura, FormDesmarcarFinal, FormEstado, FormFinal, FormProtocoloManual, FormRecebimento, FormSemAOutra, FormValor, valorEditavel, type Agir } from "./MedicaoAtos";
-import { brl, type Medicao } from "./Medicoes";
+import type { Medicao } from "./Medicoes";
 import { Notas } from "./Notas";
 import { ProtocolosDaMedicao, useProtocolos } from "./Protocolo";
-import { LinhaDoTempo, ResumoMedicao, type PassoResumo } from "./ResumoLateral";
+import { LinhaDoTempo, ResumoMedicao, ValorDaPagina, type PassoResumo } from "./ResumoLateral";
 import { ir, type Origem, type Rota, useRota } from "./rota";
 import { Link } from "./Link";
 import Selo from "./Selo";
@@ -31,6 +30,7 @@ import { fmtDataHora, fmtDataPura, fmtMesExtenso } from "./tempo";
 import { Migalhas, VoltarOrigem } from "./Topo";
 import "./etapas.css";
 import "./passos.css";
+import Falha from "./Falha";
 
 // Pagina da obra em medicao (issue #508, aprovada em 06/11/2026): "Nª Medição + Reajuste" numa pagina so', com o
 // cabecalho (obra, medicao, mes e o valor grande), a BARRA DE PASSOS -- Planilha e carta, Analise do orgao,
@@ -39,6 +39,8 @@ import "./passos.css";
 // abrem no lugar dele, com a faixa para voltar). Resumo e Linha do tempo ficam abaixo. Cada acao se faz num lugar
 // so', no passo onde acontece; as listas de Medicoes, o Inicio e a obra so' levam ate' aqui (#passo-N abre o passo;
 // as ancoras antigas #etapa-N continuam valendo).
+// #722 (montada pelo dono em 16/11/2026): a identificacao com o valor no alto e o Resumo em faixa logo abaixo; os
+// passos em abas ligadas ao painel do passo aberto; a Linha do tempo na coluna ao lado (embaixo na tela estreita).
 
 type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number };
 type LinhaAndamento = { id: number; proximo_passo: string; desde: string };
@@ -51,8 +53,11 @@ const SECAO_PASSO: Record<string, number> = { espelho: 3, notas: 4, protocolo: 5
 
 // #712 (docs/adr/0008): a pendencia sem data da medicao que nenhum passo desta pagina mostra sozinho. Vem da fila de
 // avisos do servidor (a mesma da lateral da obra), que a agenda nao mostra por nao ter data. A nota maior que a
-// medicao tambem aparece no passo Envio da nota (antes do protocolo): la' a caixa daqui nao se repete.
-const SEM_DATA_DA_MEDICAO = ["nota_cancelada_rm", "nota_acima_da_medicao", "medicao_fora_de_ordem"];
+// medicao tambem aparece no passo Envio da nota (antes do protocolo): la' a caixa daqui nao se repete. As notas pagas
+// que nao cobrem a medicao (depois da #714, docs/adr/0006) sao o par dela: a medicao nao vira recebida sozinha.
+// A recebida a' mao com notas que nao cobrem o valor dela (docs/adr/0006) avisa aqui: a nota que falta entra pelo PDF.
+const SEM_DATA_DA_MEDICAO = ["nota_cancelada_rm", "nota_acima_da_medicao", "notas_pagas_nao_cobrem",
+  "recebida_notas_nao_cobrem", "medicao_fora_de_ordem"];
 
 export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }:
     { contratoId: number; medicaoId: number; usuario: Usuario; origem: Origem | null }) {
@@ -269,7 +274,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   }, [m, atual, atualFirme]);
 
   const cabeca = (
-    <header className="topbar topbar--detalhe">
+    <header className="topbar topbar--detalhe med-trilha">
       <div className="topbar__trilha">
         <VoltarOrigem origem={origem} alemDe={["obras", "medicoes"]} />
         <Migalhas origem={origem} itens={[{ rotulo: "Medições", para: { tela: "medicoes" } },
@@ -282,7 +287,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     return (
       <>{cabeca}<div className="pagina">
         <div className="form-inline">
-          <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível abrir a medição: {erro}</p>
+          <Falha>Não foi possível abrir a medição: {erro}</Falha>
           <button type="button" className="btn" onClick={() => { setErro(""); void carregar().catch(e => setErro(mensagemDeErro(e))); }}>Tentar de novo</button>
         </div>
       </div></>
@@ -386,8 +391,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
         aoRevisaoPendente={p => setRevisaoDe({ chave: chaveRevisao, valor: p === null ? "falhou" : p ? "pendente" : "livre" })}
         aoEnvioReservado={r => setReservaDe({ chave: chaveRevisao, reservado: r })} />}
       {comPlanilha && (enviada || gerada) && revisao === "falhou" && (
-        <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
-          <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
+        <Falha>Não foi possível conferir a planilha/carta.
+          <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></Falha>
       )}
       {/* #753: na MT-PAR nao ha' envio da planilha/carta a registrar */}
       {gerada && !espelhoEspera && !passoBoletim && <CaixaAviso nivel="atencao">Envio da planilha/carta não registrado.</CaixaAviso>}
@@ -396,7 +401,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // passo 1: a planilha/carta; a so' gerada sem o envio registrado segue para o espelho daqui mesmo (#460)
   const corpoPasso1 = (
     <section className="med-passo" id="passo-1" aria-labelledby="passo-1-titulo">
-      <h2 className="sr-only" id="passo-1-titulo">Planilha e carta</h2>
+      <div className="med-quadro__cab"><h2 className="med-quadro__titulo" id="passo-1-titulo">Planilha e carta</h2></div>
       {blocoPlanilha}
       {(gerada || (m.estado === "prevista" && !novaPlanilha)) && !espelhoEspera && formEspelho}
     </section>
@@ -406,7 +411,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // o espelho so' a pedido, como nos outros orgaos
   const corpoPasso2 = passoBoletim ? (
     <section className="med-passo" id="passo-2" aria-labelledby="passo-2-titulo">
-      <h2 className="sr-only" id="passo-2-titulo">Análise do órgão</h2>
+      <div className="med-quadro__cab"><h2 className="med-quadro__titulo" id="passo-2-titulo">Análise do órgão</h2></div>
       {blocoPlanilha}
       <PassoBoletim key={grupo.map(x => x.id).join("-")} ms={grupo} podeEditar={podeEditar} salvando={salvando} agir={agir} />
       {podeEditar && ["prevista", "planilha_gerada", "planilha_enviada"].includes(m.estado) && !novaPlanilha && !espelhoEspera && !espVigente && (
@@ -416,13 +421,13 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     </section>
   ) : (
     <section className="med-passo" id="passo-2" aria-labelledby="passo-2-titulo">
-      <h2 className="sr-only" id="passo-2-titulo">Análise do órgão</h2>
+      <div className="med-quadro__cab"><h2 className="med-quadro__titulo" id="passo-2-titulo">Análise do órgão</h2></div>
       <PassoAnalise m={m} planilha={planilha} podeEditar={podeEditar} salvando={salvando} agir={agir}
         aoMudarSiga={() => { setFeito("Número gravado."); recarregar(); }}
         aoRevisar={() => { setRevisaoDe(null); setPlanilhaDe(null); }} />
       {comPlanilha && enviada && revisao === "falhou" && (
-        <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
-          <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
+        <Falha>Não foi possível conferir a planilha/carta.
+          <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></Falha>
       )}
       {podeEditar && m.estado === "planilha_enviada" && !espelhoEspera && !espVigente && (
         semBoletim ? formEspelho
@@ -435,19 +440,21 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   // #514: a tabela dos espelhos com o total conferido a' esquerda; "Enviar ao faturamento" a' direita
   const corpoPasso3 = (
     <section className="med-passo" id="passo-3" aria-labelledby="passo-3-titulo">
-      <h2 className="sr-only" id="passo-3-titulo">Espelhos</h2>
+      <div className="med-quadro__cab">
+        <h2 className="med-quadro__titulo" id="passo-3-titulo">Espelhos</h2>
+        {/* a data do espelho vigente (a versao mais nova desta medicao) */}
+        {!novaPlanilha && !espelhoEspera && (espVigente || m.espelho_em) && <Selo situacao="feito">Gerado em {fmtDataHora(espVigente?.criado_em ?? m.espelho_em!)}</Selo>}
+      </div>
       {!temPassosPlanilha && !passoBoletim && blocoPlanilha}
       {/* depois do boletim o cartao mora no passo 1: a falha da conferencia avisa aqui, onde o espelho esperaria */}
       {temPassosPlanilha && comPlanilha && enviada && revisao === "falhou" && (
-        <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível conferir a planilha/carta.
-          <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></p>
+        <Falha>Não foi possível conferir a planilha/carta.
+          <button type="button" className="btn btn--pequeno" onClick={() => { setRevisaoDe(null); setTentativa(t => t + 1); }}>Tentar de novo</button></Falha>
       )}
       {!novaPlanilha && !espelhoEspera && (
         <div className={antesDoEspelho ? undefined : "med-duas"}>
           <section className="cartao med-painel" aria-labelledby="espelhos-titulo">
-            <h3 className="med-painel__titulo" id="espelhos-titulo">Espelhos
-              {/* a data do espelho vigente (a versao mais nova desta medicao) */}
-              {(espVigente || m.espelho_em) && <Selo classe="selo--ok">Gerado em {fmtDataHora(espVigente?.criado_em ?? m.espelho_em!)}</Selo>}</h3>
+            <h3 className="sr-only" id="espelhos-titulo">Espelhos</h3>
             {formEspelho}
           </section>
           {!antesDoEspelho && (
@@ -460,13 +467,16 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
       )}
     </section>
   );
+  // docs/adr/0006 (decisao de 17/11/2026): na medicao recebida, quem administra ainda anexa o PDF da nota e desfaz
+  // o vinculo (o servidor recusa os outros perfis); cancelada e desistida continuam fechadas para todos
+  const notasAbertas = (mx: Medicao) => !FINAIS.includes(mx.estado) || (mx.estado === "recebida" && usuario.perfil === "admin");
   // #514: a nota de cada espelho a' esquerda (soltar os PDFs) e, em consorcio, a "Fatura do consórcio" a' direita
   const notasDe = (mx: Medicao, rotulo?: string) => (
     <div className="med-duas">
       <section className="cartao med-painel" aria-label={rotulo ? `Notas fiscais: ${rotulo}` : "Notas fiscais"}>
         <h3 className="med-painel__titulo">Notas fiscais</h3>
-        <Notas medicao={mx} rotulo={rotulo} podeEditar={podeEditar && !FINAIS.includes(mx.estado)}
-          podeDesfazer={usuario.perfil === "admin" && !FINAIS.includes(mx.estado)}
+        <Notas medicao={mx} rotulo={rotulo} podeEditar={podeEditar && notasAbertas(mx)}
+          podeDesfazer={usuario.perfil === "admin" && notasAbertas(mx)}
           aoMudar={() => { recarregar(); setVersaoFrc(v => v + 1); }} />
       </section>
       <FrcConsorcio medicaoId={mx.id} podeEditar={podeEditar && !FINAIS.includes(mx.estado)} versao={versaoFrc}
@@ -475,7 +485,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   );
   const corpoPasso4 = (
     <section className="med-passo" id="passo-4" aria-labelledby="passo-4-titulo">
-      <h2 className="sr-only" id="passo-4-titulo">Notas</h2>
+      <div className="med-quadro__cab"><h2 className="med-quadro__titulo" id="passo-4-titulo">Notas</h2></div>
       <div id="notas">
         {/* issue #188: a execucao e o reajuste da mesma competencia, um bloco para cada; a nota anexada num bloco vai
             para a medicao daquele bloco, e a FRC e' da medicao do bloco */}
@@ -498,7 +508,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
   );
   const corpoPasso5 = sit(5) === "feito" ? (
     <section className="med-passo" id="passo-5" aria-labelledby="passo-5-titulo">
-      <h2 className="sr-only" id="passo-5-titulo">Envio da nota</h2>
+      <div className="med-quadro__cab"><h2 className="med-quadro__titulo" id="passo-5-titulo">Envio da nota</h2></div>
       <div className="cartao med-painel">
       {/* o historico dos envios so' depois de enviada: o nº do protocolo no orgao se registra aqui, com o comprovante */}
       <ProtocolosDaMedicao semCartao contratoId={contratoId} medicaoId={m.id} dados={protocolos.dados} erro={protocolos.erro}
@@ -522,7 +532,7 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     </section>
   ) : (
     <section className="med-passo" id="passo-5" aria-labelledby="passo-5-titulo">
-      <h2 className="sr-only" id="passo-5-titulo">Envio da nota</h2>
+      <div className="med-quadro__cab"><h2 className="med-quadro__titulo" id="passo-5-titulo">Envio da nota</h2></div>
       <EtapaEnvio medicaoId={m.id} envios={envios.envios} erro={envios.erro} recarregarEnvios={envios.carregar} podeEditar={podeEditar}
         versaoDocs={versaoNotas + versaoFrc} aoAnexarItem={() => setVersaoFrc(v => v + 1)}
         aoMudar={aviso => { setErro(""); setFeito(aviso ?? ""); recarregar(); }}
@@ -575,13 +585,15 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
             </p>
           </div>
           <div className="med-topo__dir">
-            <p className="med-valor" aria-label={`Valor: ${brl(valor)}`}>{brl(valor)}</p>
+            <ValorDaPagina m={m} doPar={doPar} valor={valor} podeEditar={podeEditar} salvando={salvando} aoEditarValor={() => abrir("protocolado")} />
             <MaisAcoes itens={acoes} desabilitado={salvando} aoEscolher={id => abrir(id as Painel)} />
           </div>
         </div>
+        <ResumoMedicao m={m} execucao={execucao} reajuste={reajuste} outras={outras} passo={passo} aqui={aqui}
+          contratoId={contratoId} aoAcao={a => abrir(a as Painel)} podeEditar={podeEditar} salvando={salvando} aoEditarValor={() => abrir("protocolado")} />
 
         {/* com uma janela aberta, o erro aparece dentro dela, perto de onde se agiu */}
-        {erro && painel === null && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+        {erro && painel === null && <Falha>{erro}</Falha>}
         {/* regiao viva sempre montada: o leitor de tela so' anuncia o texto que CHEGA numa regiao ja' existente */}
         <p className={feito ? "notas__ok" : "sr-only"} role="status">{feito}</p>
         {desatualizadas.map(x => {
@@ -629,20 +641,24 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
           </CaixaAviso>
         ))}
 
-        <Passos passos={passos} atual={atual} vendo={aberta} datas={datas} espera={!!esperaAqui}
-          aoIr={n => setVendo(n === atual && atual !== 0 ? null : n)} />
-        <FaixaPasso vendo={aberta} atual={atual} passos={passos} aoVoltar={() => setVendo(null)} />
-        {proprio ? <div key={aberta}>{corpo(aberta)}</div> : (
-          <PassoCartao key={aberta} n={aberta} atual={atual} passos={passos}>
-            {corpo(aberta)}
-          </PassoCartao>
-        )}
-
-        <aside className="med-lateral med-lateral--baixo" aria-label="Resumo e linha do tempo">
-          <ResumoMedicao m={m} execucao={execucao} reajuste={reajuste} outras={outras} passo={passo} aqui={aqui}
-            contratoId={contratoId} podeEditar={podeEditar} salvando={salvando} aoEditarValor={() => abrir("protocolado")} aoAcao={a => abrir(a as Painel)} />
-          <LinhaDoTempo eventos={eventos} />
-        </aside>
+        <div className="med-corpo">
+          <div className="med-passo-col">
+            <Passos passos={passos} atual={atual} vendo={aberta} datas={datas} espera={!!esperaAqui}
+              aoIr={n => setVendo(n === atual && atual !== 0 ? null : n)} />
+            {/* o painel do passo aberto, ligado a' aba dele */}
+            <div className="med-quadro">
+              <FaixaPasso vendo={aberta} atual={atual} passos={passos} aoVoltar={() => setVendo(null)} />
+              {proprio ? <div key={aberta} className="med-quadro__corpo">{corpo(aberta)}</div> : (
+                <PassoCartao key={aberta} n={aberta} atual={atual} passos={passos}>
+                  {corpo(aberta)}
+                </PassoCartao>
+              )}
+            </div>
+          </div>
+          <aside className="med-lateral">
+            <LinhaDoTempo eventos={eventos} />
+          </aside>
+        </div>
       </div>
 
       {(painel === "protocolado" || painel === "atestado") && (
@@ -727,6 +743,9 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
  *  junta medicao e reajuste (SINFRA, Pref. VG) o registro cobriu as duas e o numero e' um so'; onde separa (MTPAR,
  *  SES) cada medicao tem o SIGA dela, um campo por envio registrado por fora. */
 function NumeroDoOrgaoFora({ ms, junta, podeEditar, aoMudar }: { ms: Medicao[]; junta: boolean; podeEditar: boolean; aoMudar: () => void }) {
+  // sem medicao que ainda aceite o numero (as do grupo ja' recebidas ou canceladas), nao ha' campo: com `junta` a
+  // lista vazia virava uma unidade vazia e a pagina caia ao abrir o passo
+  if (ms.length === 0) return null;
   const unidades = junta ? [ms] : ms.map(x => [x]);
   return (
     <div className="pilha">

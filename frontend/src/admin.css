@@ -1,27 +1,90 @@
-/* Administracao > Saude (#164, opcao A aprovada em 16/10/2026): cartoes de situacao, a linha de acao e o par
-   Reconciliacao + Backup. So' o que falta na base (tokens.css), sempre com os tokens. */
-.situacoes { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); list-style: none; margin: 0; padding: 0; }
-.situacao { padding: 18px 20px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; align-items: baseline; }
-.situacao__ponto { width: 10px; height: 10px; border-radius: var(--raio-pilula); background: var(--ok-ponto); align-self: center; }
-.situacao--atencao .situacao__ponto { background: var(--atencao-ponto); }
-.situacao--acao .situacao__ponto { background: var(--acao-ponto); }
-.situacao--neutra .situacao__ponto { background: var(--texto-2); }
-.situacao__titulo { margin: 0; font-size: 15px; font-weight: 600; }
-.situacao__valor { grid-column: 2; font-family: var(--fonte-num); font-size: 16px; color: var(--texto-2); }
-.situacao__nota { grid-column: 2; font-size: 12.5px; color: var(--texto-2); }
-.situacao--acao .situacao__valor { color: var(--acao); }
-.situacao--atencao .situacao__valor { color: var(--atencao); }
+/* Administracao (#768): a disposicao e os blocos proprios das cinco abas sobre a fundacao do redesenho. O painel
+   (.cartao), a tabela, o selo, o glifo, o botao e a caixa de aviso sao pecas de base de tokens.css. Cor, familia,
+   tamanho, espaco e borda so' por variavel. */
+.adm { gap: var(--espaco-entre-blocos); }
+/* as abas numa linha so': em tela estreita a faixa rola dentro dela, sem cortar o rotulo */
+.adm > .abas { overflow-x: auto; }
+.adm > .abas .aba { flex: none; white-space: nowrap; }
+.adm .cartao__cabeca { padding: var(--espaco-g) var(--espaco-g) var(--espaco-p); flex-wrap: wrap; }
+.adm .cartao__corpo { padding: var(--espaco-p) var(--espaco-g) var(--espaco-g); }
+.adm .cartao__corpo + .cartao__corpo { padding-top: 0; }
+.adm .tabela th:first-child, .adm .tabela td:first-child { padding-left: var(--espaco-g); }
+.adm .tabela th:last-child, .adm .tabela td:last-child { padding-right: var(--espaco-g); }
+.adm .vazio--curto { padding: 0 var(--espaco-g) var(--espaco-g); }
+
+/* confirmacao de uma acao (sincronizou, criou, redefiniu): o visto de feito e a frase */
+.adm-feito { display: flex; align-items: center; gap: var(--espaco-pp); margin: 0; max-width: none;
+  color: var(--situacao-feito-texto); font-weight: var(--peso-forte); }
+
+/* ------------------------------------------------------------------- Saude */
+.saude { gap: var(--espaco-entre-blocos); }
+
+/* Situacao do servidor: quatro itens sob a regua de grupo, sem moldura, como os numeros do mes da Inicio. Cada um diz
+   a situacao pelo selo (glifo + palavra): feito, em andamento, vence em breve ou critico; sem situacao, sem selo. */
+.situacoes { display: grid; gap: var(--espaco-g); grid-template-columns: repeat(auto-fit, minmax(min(calc(var(--largura-menu) * 0.86), 100%), 1fr)); list-style: none; margin: 0; padding: 0; }
+.situacao { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--espaco-mini);
+  border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro); }
+.situacao__titulo { margin: 0; font-size: var(--texto-titulo-sub); }
+.situacao__valor { font-size: var(--texto-valor-menor); font-weight: var(--peso-numero); line-height: var(--entrelinha-valor); color: var(--cor-tinta); overflow-wrap: anywhere; }
+.situacao--neutra .situacao__valor { color: var(--cor-texto-secundario); font-weight: var(--peso-normal); }
+.situacao--critico .situacao__valor { color: var(--situacao-critico-texto); }
+.situacao__nota { font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
+/* a mensagem de erro de uma rodada, embaixo do selo dela */
 .situacao__erro { white-space: normal; min-width: 32ch; }
 
-.acoes-saude { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
-.acoes-saude .btn--primario { height: 40px; padding: 0 20px; font-size: 14px; }
-.acoes-saude p { margin: 0; color: var(--texto-2); font-size: 13px; }
+.acoes-saude { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-p) var(--espaco-m); }
+.acoes-saude .aviso { font-size: var(--texto-meta); padding: var(--espaco-pp) var(--espaco-p); }
 
-.saude-lado { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); align-items: start; }
-.pilha--curta { gap: 8px; }
+.saude-lado { display: grid; gap: var(--espaco-entre-blocos) var(--espaco-g); grid-template-columns: repeat(auto-fit, minmax(min(calc(var(--largura-menu) * 1.4), 100%), 1fr)); align-items: start; }
+.pilha--curta { gap: var(--espaco-pp); }
 .pilha--curta p { margin: 0; }
+
+/* contagens da reconciliacao: o numero em cima, o rotulo embaixo; a que tem linha e' link para o grupo */
+.saude .contagens { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--espaco-m) var(--espaco-g); }
+.saude .contagens.cartao__corpo { padding: var(--espaco-p) var(--espaco-g) var(--espaco-g); }
+.saude .contagens .dado__valor { font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-size: var(--texto-valor-menor); font-weight: var(--peso-numero); line-height: var(--entrelinha-numero); }
+.contagem__rotulo { font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
+.saude a.contagem .dado__valor { text-decoration: underline; text-underline-offset: var(--afastamento-sublinhado); }
+
+.saude-dado { display: flex; flex-direction: column; }
+.saude-dado__rotulo { font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
+.saude-dado__valor { font-size: var(--texto-corpo); font-weight: var(--peso-forte); color: var(--cor-tinta); }
+
+/* as rodadas do RM tem onze colunas: o cabecalho de duas palavras quebra, para a tabela caber sem rolar a 1440 */
+.adm-rodadas th { white-space: normal; }
+
+/* ----------------------------------------------------------- Reconciliacao */
+/* alocacoes desfeitas: o motivo e' longo e e' ele que quebra; o nome da obra e o da medicao ficam inteiros */
+.adm-desfeitas td:nth-child(-n+2) { white-space: nowrap; }
+.adm-desfeitas td:nth-child(5) { min-width: calc(var(--alvo-minimo) * 6); }
+.adm-filtros { display: grid; gap: var(--espaco-m); }
+.adm-filtros__grupos { margin: 0; max-width: none; }
+.adm-filtros__rotulo { margin-right: var(--espaco-pp); font-size: var(--texto-meta); font-weight: var(--peso-medio); color: var(--cor-tinta); }
+
+/* grupo sem linha: o titulo e a linha curta lado a lado, sem gastar a altura de um painel */
+.adm-grupo--vazio { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--espaco-m); box-shadow: none; border: var(--borda-campo); }
+.adm .adm-grupo--vazio .cartao__cabeca { padding: var(--espaco-p) var(--espaco-g); }
+.adm-grupo--vazio .cartao__titulo { font-size: var(--texto-titulo-sub); color: var(--cor-texto-secundario); }
+.adm-grupo__vazio { margin: 0; padding: var(--espaco-p) var(--espaco-g); color: var(--cor-texto-secundario); }
+
+/* ---------------------------------------------------------------- Usuarios */
+.adm-pessoa__nome, .adm-pessoa__email { display: block; overflow-wrap: anywhere; }
+.adm-pessoa__nome { color: var(--cor-tinta); font-weight: var(--peso-forte); }
+.adm-pessoa__email { color: var(--cor-texto-secundario); }
+.adm .tabela td.adm-pessoa { min-width: calc(var(--largura-menu) * 0.6); }
+.adm-situacao { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-pp); }
+/* as acoes da linha a' direita, numa fileira quando cabe; em tela estreita quebram dentro da celula */
+.adm-acoes, .adm-acoes .form-inline { justify-content: flex-end; gap: var(--espaco-pp); }
+.adm .tabela tr.adm-acessos > td { padding: var(--espaco-p) var(--espaco-g) var(--espaco-m); background: var(--cor-papel-sombreado); }
+.adm-acessos .tabela { background: var(--cor-superficie); }
+.adm-novo, .adm-redefinir { align-items: flex-end; }
+.adm-redefinir .campo { flex: 0 1 calc(var(--largura-menu) * 1.5); }
+.adm-redefinir input { width: 100%; }
+
+/* ---------------------------------------------------- Pendencias de cadastro */
+.adm .adm-subtitulo { margin: var(--espaco-p) var(--espaco-g) 0; padding: var(--regua-secao-respiro) 0 var(--espaco-pp); border-top: var(--regua-secao); }
+.adm-subtitulo .cartao__titulo { font-size: var(--texto-titulo-sub); }
 
 @media (max-width: 767px) {
   .acoes-saude .btn--primario { width: 100%; justify-content: center; }
-  .saude .contagens { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
 }

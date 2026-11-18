@@ -1,20 +1,11 @@
 """Ficha executiva da obra (#510): o que a pagina da obra mostra alem do cabecalho e da curva. So' leitura.
 
-A cor da informacao (semaforo, decidido em 06/11/2026) e' decidida AQUI, num lugar so': `critico` (vermelho),
-`atencao` (ambar), `normal` (preto)."""
+A cor da informacao (semaforo, decidido em 06/11/2026): `critico` (vermelho), `atencao` (ambar), `normal` (preto).
+O nivel do prazo vem de `prazos.situacao` (`prazos.nivel_do_prazo`), a mesma regra dos avisos e da aba Prazos."""
 import datetime
 import sqlite3
 
 from app import contratos, medicoes, paineis, prazos, tempo
-
-CRITICO_DIAS = 30      # prazo de execucao/vigencia a ate' 30 dias (ou ja' vencido): vermelho
-ATENCAO_DIAS = 90      # ate' 90 dias: ambar
-
-
-def nivel_do_prazo(dias: int | None) -> str:
-    if dias is None:
-        return "normal"
-    return "critico" if dias <= CRITICO_DIAS else "atencao" if dias <= ATENCAO_DIAS else "normal"
 
 
 def _d(iso: str | None) -> datetime.date | None:
@@ -46,7 +37,7 @@ def _em_andamento(conn, contrato_id: int) -> dict | None:
     m = max(lista, key=lambda x: (x["competencia"], x["numero"], x["id"]))
     return {"id": m["id"], "titulo": m["titulo"], "rotulo": _rotulo(m), "numero": m["numero"], "competencia": m["competencia"],
             "valor_centavos": m["valor_centavos"], "etapa": m["proximo_passo"],     # #699: o nome do passo da vez
-            "desde": m["desde"] or None, "outras": len(lista) - 1}
+            "desde": m["desde"] or None}
 
 
 def da_obra(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | None = None) -> dict:
@@ -61,12 +52,11 @@ def da_obra(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | No
         (contrato_id,)).fetchone()[0]
     base = (v.get("data_base") or "")[:7]
     cab = contratos.cabecalho(conn, contrato_id, hoje)
-    # #661: so' o que e' da obra; a certidao e' da empresa e se resolve em Documentos.
-    venc = []
-    venc.append({"chave": "execucao", "rotulo": "Fim da execução", "data": cab["execucao_fim"],
-                 "dias": cab["dias_execucao"], "nivel": nivel_do_prazo(cab["dias_execucao"])})
-    venc.append({"chave": "vigencia", "rotulo": "Fim da vigência", "data": cab["vigencia_fim"],
-                 "dias": cab["dias_vigencia"], "nivel": nivel_do_prazo(cab["dias_vigencia"])})
+    # #661: so' o que e' da obra; a certidao e' da empresa e se resolve em Documentos. O painel "Prazo" so' le o fim
+    # da execucao (os dias e o nivel); o item da vigencia saiu com o cartao "Proximos vencimentos" (a data da
+    # vigencia esta' na linha do tempo, pelo cabecalho da obra).
+    venc = [{"chave": "execucao", "rotulo": "Fim da execução", "data": cab["execucao_fim"],
+             "dias": cab["dias_execucao"], "nivel": cab["nivel_execucao"]}]
     # #646: o topo numa base so'. Valor vigente, medido e saldo na base de execucao (a precos iniciais, sem o aditivo
     # de reajuste: a mesma de `paineis.saldo`) e na cota da Lotufo. Vigente e medido arredondam uma vez cada e o saldo
     # e' a diferenca dos dois, para a conta da tela fechar ao centavo. O reajuste contratado vai a parte. O medido soma
@@ -74,12 +64,11 @@ def da_obra(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | No
     bp = v["percentual_direito_bp"]
     s = paineis.saldo(conn, contrato_id)
     posicao = paineis.posicao_na_cota(s["vigente_execucao_centavos"], s["medido_centavos"], bp)   # a da lista (#645)
-    # #655: o cartao "Ritmo e prazo" na mesma base do topo: o ritmo vai na cota e o saldo e' o do topo (o mesmo
-    # numero do cartao Execucao). As datas e a situacao nao mudam com a cota (saldo e ritmo na mesma proporcao).
+    # #655: o ritmo do painel "Prazo" na mesma base do topo: vai na cota. A conclusao e a situacao nao mudam com a
+    # cota (saldo e ritmo na mesma proporcao).
     ritmo = prazos.ritmo_e_prazo(conn, contrato_id, hoje)
     if ritmo["ritmo_centavos"] is not None:
         ritmo["ritmo_centavos"] = contratos.cota(ritmo["ritmo_centavos"], bp)
-    ritmo["saldo_centavos"] = posicao["saldo_centavos"]
     return {"topo": {**posicao,
                      "reajuste_centavos": contratos.cota(s["reajuste_contratado_centavos"], bp)},
             "ritmo": ritmo,

@@ -2,13 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import { CartaoPleito, NovoPleito, cadeiaDoPleito, type Pleito, type SugestaoDias, type TipoPleito } from "./FluxoOficio";
 import CaixaAviso from "./CaixaAviso";
-import { IconeAlerta } from "./icones";
 import { focarPorId } from "./foco";
 import { desfechoDoPedido, seloDoPrazo, type InstrumentoPrazo } from "./obra";
 import { Link } from "./Link";
 import { fmtDataPura } from "./tempo";
 import { brl } from "./formato";
 import Selo from "./Selo";
+import { situacaoDoNivel } from "./situacao";
+import Falha from "./Falha";
 
 // Aba Prazos da obra (bloco 7; spec §7.3 e §7.4; NAVEGACAO.md › Obra): a situacao do prazo (execucao, vigencia,
 // folga, endosso e o pedido de prorrogacao em curso, com as linhas que levam aos instrumentos em Contrato), os
@@ -18,6 +19,8 @@ import Selo from "./Selo";
 type Instrumento = InstrumentoPrazo & { nova_execucao_fim: string | null; nova_vigencia_fim: string | null };
 type Situacao = {
   execucao_fim: string | null; dias_execucao: number | null; vigencia_fim: string | null; dias_vigencia: number | null;
+  /** o nivel de cada prazo, decidido no servidor (`prazos.situacao`): `normal` onde nao ha' prazo a cobrar */
+  nivel_execucao?: string; nivel_vigencia?: string;
   vigencia_automatica: boolean; folga: { exigida: number | null; real: number | null; quebrada: boolean };
   paralisacao: { desde: string; numero: string | null } | null;
   // o pedido de prorrogacao enviado que nenhum instrumento atendeu ainda (o servidor decide)
@@ -46,15 +49,15 @@ function data(iso: string | null | undefined): string {
 function dias(n: number): string {
   return `${n}\u00a0${n === 1 ? "dia" : "dias"}`;
 }
-// prazo perto do fim ou vencido pede acao: vira selo so' quando acontece (seloDoPrazo)
-function SeloPrazo({ d }: { d: number | null }) {
-  const selo = seloDoPrazo(d);
-  return selo ? <Selo classe={selo.classe}>{selo.texto}</Selo> : null;
+// prazo perto do fim ou vencido pede acao: vira selo so' quando acontece; quem decide e' o servidor (o nivel)
+function SeloPrazo({ nivel, d }: { nivel: string | undefined; d: number | null }) {
+  const selo = d === null ? null : seloDoPrazo(nivel, d);
+  return selo ? <Selo situacao={situacaoDoNivel(selo.classe)}>{selo.texto}</Selo> : null;
 }
 
 /** O desfecho de um ofício enviado (F-71): o selo diz o que aconteceu (atendido ou sem instrumento); a data do
  *  envio e o resto vão para o texto de apoio. */
-export type DesfechoPleito = { classe: string; texto: string; forte?: boolean; partes: string[] };
+export type DesfechoPleito = { classe: string; texto: string; partes: string[] };
 
 /** Ofício que vira linha dentro do cartão (F-74): o que já foi enviado e o que veio do cadastro. O que ainda se
  *  trabalha (ou foi descartado, com a carta) segue no CartaoPleito, que traz o formulário. */
@@ -76,7 +79,7 @@ export function LinhaPleito({ p, desfecho, contexto }: { p: Pleito; desfecho: De
         <h3 className="cartao__titulo" id={`pleito-${p.id}`}>
           {p.rotulo}{contexto ? ` (${contexto})` : ""}{p.numero_oficio ? ` · ${p.numero_oficio}` : ""}
         </h3>
-        <Selo classe={desfecho.classe} forte={desfecho.forte}>{desfecho.texto}</Selo>
+        <Selo situacao={situacaoDoNivel(desfecho.classe)}>{desfecho.texto}</Selo>
       </div>
       {desfecho.partes.length > 0 && <p className="campo__nota">{desfecho.partes.join(" · ")}</p>}
       {/* issue #277: a cadeia do pleito de reajuste (o que ele reitera e quem o reiterou) */}
@@ -99,8 +102,8 @@ export function LinhaPedidoValor({ p }: { p: PedidoValor }) {
         {/* a virgula fica fora do selo: a linha le "..., R$ X, sem resposta" */}
         <span className="sr-only">, </span>
         {p.atendido_por
-          ? <Selo classe="selo--ok">atendido pelo {p.atendido_por.rotulo}</Selo>
-          : <Selo classe="selo--atencao">sem resposta</Selo>}
+          ? <Selo situacao="feito">atendido pelo {p.atendido_por.rotulo}</Selo>
+          : <Selo situacao="breve">sem resposta</Selo>}
       </div>
     </section>
   );
@@ -130,7 +133,7 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
   // o oficio criado so' existe depois que a lista recarrega: tenta de novo a cada leitura
   useEffect(() => { if (foco && focarPorId(foco)) setFoco(null); }, [foco, dados]);
 
-  if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>;
+  if (erro) return <Falha>{erro}</Falha>;
   if (!dados) return <section className="cartao"><div className="vazio"><p>Carregando…</p></div></section>;
   const s = dados.situacao;
   const contrato = { tela: "obra" as const, id: contratoId, aba: "contrato" as const };
@@ -144,11 +147,11 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
     const inst = desfechoDoPedido(p.enviado_em, s.instrumentos);
     if (!inst) {
       return s.pedido?.id === p.id
-        ? { classe: "selo--atencao", texto: semInstrumento, partes: envio }
+        ? { classe: "breve", texto: semInstrumento, partes: envio }
         : { classe: "", texto: "sem instrumento ainda", partes: envio };
     }
     const nome = inst.numero ?? (inst.forma === "apostilamento" ? "apostilamento" : "termo aditivo");
-    return { classe: "selo--ok", texto: `atendido pelo ${nome}`, partes: envio };
+    return { classe: "feito", texto: `atendido pelo ${nome}`, partes: envio };
   };
   const pedidosValor = dados.pedidos_valor ?? [];
   const oficios = dados.pleitos.length + pedidosValor.length;
@@ -164,26 +167,26 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
           <div className="dado">
             <span className="resumo__rotulo">Execução até</span>
             <span className="dado__valor num">{data(s.execucao_fim)}</span>
-            {/* os mesmos casos em que o servidor nao avisa (prazos.py): obra em encerramento e, na execucao,
+            {/* o nivel vem do servidor, que cala onde nao avisa (prazos.py): obra em encerramento e, na execucao,
                 obra paralisada (D16); na vigencia, a que o orgao prorroga junto */}
-            {s.execucao_fim && !s.paralisacao && !s.encerramento && <SeloPrazo d={s.dias_execucao} />}
-            {s.paralisacao && <Selo classe="selo--atencao">paralisada desde {data(s.paralisacao.desde)}</Selo>}
+            {s.execucao_fim && <SeloPrazo nivel={s.nivel_execucao} d={s.dias_execucao} />}
+            {s.paralisacao && <Selo situacao="breve">paralisada desde {data(s.paralisacao.desde)}</Selo>}
           </div>
           <div className="dado">
             <span className="resumo__rotulo">Vigência até</span>
             <span className="dado__valor num">{data(s.vigencia_fim)}</span>
-            {s.vigencia_fim && !s.vigencia_automatica && !s.encerramento && <SeloPrazo d={s.dias_vigencia} />}
+            {s.vigencia_fim && <SeloPrazo nivel={s.nivel_vigencia} d={s.dias_vigencia} />}
           </div>
           <div className="dado">
             <span className="resumo__rotulo">Folga entre execução e vigência</span>
             <span className="dado__valor num">{s.folga.real === null ? "—" : dias(s.folga.real)}</span>
-            {s.folga.quebrada && <Selo classe="selo--acao">folga quebrada</Selo>}
+            {s.folga.quebrada && <Selo situacao="critico">folga quebrada</Selo>}
           </div>
           {s.endosso && (
             <div className="dado">
               <span className="resumo__rotulo">Endosso do seguro-garantia</span>
               <span className="dado__valor">{s.endosso.instrumento ?? "último instrumento"}</span>
-              <Selo classe={s.endosso.entregue ? "selo--ok" : "selo--atencao"}>
+              <Selo situacao={s.endosso.entregue ? "feito" : "breve"}>
                 {s.endosso.entregue ? "endosso registrado" : "endosso não registrado"}
               </Selo>
             </div>
@@ -194,7 +197,7 @@ export default function Prazos({ contratoId, podeEditar }: { contratoId: number;
               <>
                 <span className="dado__valor"><Link para={{ tela: "obra", id: contratoId, aba: "prazos" }} secao={`oficio-${s.pedido.id}`}>
                   {s.pedido.numero_oficio ?? "Ofício"}</Link></span>
-                <Selo classe="selo--atencao">{semInstrumento}</Selo>
+                <Selo situacao="breve">{semInstrumento}</Selo>
               </>
             ) : <span className="dado__valor">—</span>}
           </div>

@@ -1,6 +1,8 @@
 // Tela SIGA (issue #329): o que o servidor devolve em GET /api/siga e as contas da tela (ordem, tempo no setor,
 // nivel de atraso, textos da linha). Funcoes puras; o SigaPagina so' desenha o que sai daqui.
 
+import { situacaoDoNivel, type Situacao } from "./situacao";
+
 export type TipoMovimentacao = "transferencia" | "recebimento" | "juntada" | "marcacao" | "outras";
 
 export type Movimentacao = {
@@ -18,6 +20,8 @@ export type ProcessoSiga = {
   id: number; codigo: string | null; link: string | null; numero: string | null; nome: string | null;
   // o_que_e: a segunda parte do nome montado pelo servidor ("7ª Medição", "Aditivo de prazo")
   categoria: Categoria; complemento: string | null; o_que_e: string;
+  // a categoria veio do nome que o robo mandou (ninguem escolheu ainda): a tela oferece confirmar
+  categoria_sugerida?: boolean;
   contrato_id: number | null; obra: string | null; medicao_id: number | null; medicao_titulo: string | null;
   protocolo_id: number | null; situacao: string | null; setor: string; caixa_entrada: boolean; com_quem: string;
   // #657: medicao recebida ou processo arquivado; derivado pelo servidor a cada leitura. null = vivo
@@ -62,6 +66,19 @@ export const DIAS_ACAO = 10;
 export function nivelDias(dias: number | null): "atencao" | "acao" | null {
   if (dias === null) return null;
   return dias >= DIAS_ACAO ? "acao" : dias >= DIAS_ATENCAO ? "atencao" : null;
+}
+
+/** O atraso do processo no setor como situacao: andou hoje = feito; parado ha' 10 dias uteis ou mais = critico; ha' 5
+ *  ou mais = breve (o nivel de `nivelDias`, pelo mapa unico de `situacao.ts`). Dentro do prazo, nenhuma: e' o que o
+ *  quadro de Medicoes mostra, onde so' o atraso leva marca. */
+export function situacaoDoAtraso(p: Pick<ProcessoSiga, "dias_uteis" | "hoje">): Situacao | undefined {
+  return p.hoje > 0 ? "feito" : situacaoDoNivel(nivelDias(p.dias_uteis));
+}
+
+/** O tempo no setor como uma das quatro situacoes da fundacao (#767), para a tela SIGA: o atraso de `situacaoDoAtraso`
+ *  e, dentro do prazo, em andamento (la' toda linha e' um processo em curso). Sem data de entrada no setor, nenhuma. */
+export function situacaoDoTempo(p: Pick<ProcessoSiga, "dias_uteis" | "hoje">): Situacao | undefined {
+  return situacaoDoAtraso(p) ?? (p.dias_uteis === null ? undefined : "andamento");
 }
 
 const instante = (iso: string | null, vazio: number): number => {

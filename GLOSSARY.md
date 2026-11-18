@@ -69,6 +69,10 @@ O que foi executado num contrato numa competência, com número próprio. Tipos:
 O mês a que a medição se refere.
 _Avoid_: período, mês de referência
 
+**Competência em trabalho**:
+O mês anterior ao de hoje, cuja medição está sendo feita agora. É a competência que a tela Medições e o Resumo das
+medições abrem.
+
 **Em análise**:
 Etapa em que a planilha/carta foi enviada ao órgão e ele ainda não aprovou.
 
@@ -84,6 +88,8 @@ _Avoid_: NF na tela (vale em nome de arquivo e no número do documento)
 
 **Protocolado**:
 A nota e o pacote foram enviados formalmente ao órgão. A data do protocolo começa a contar o prazo de pagamento.
+Na obra sem o passo "Envio da nota", a medição com nota emitida conta como protocolada nas somas (protocolado, em
+aberto, a receber), com a data da emissão da nota (`docs/adr/0006`).
 _Avoid_: protocolada para a planilha enviada (isso é "em análise")
 
 **Recebido**:
@@ -91,13 +97,21 @@ O órgão pagou: há baixa no RM, ou registro do administrador com motivo. Parte
 "Envio da nota", parte da nota emitida, sem protocolo, e a espera conta da emissão da nota.
 _Avoid_: pago, quitado
 
+**Paga em parte**:
+A nota com alguma baixa com valor no RM e falta acima da tolerância de R$ 1,00. O em aberto dela é o que falta nos
+títulos do RM, limitado ao valor da nota; o resto do valor bruto conta como recebido. Título baixado sem valor não é
+recebimento. O título que o RM dá como baixado (baixa total) com valor não tem falta, mesmo com o valor baixado
+menor que o original (`docs/adr/0006`).
+
 **Pedido**:
 O valor que a planilha/carta pede ao órgão.
 _Avoid_: valor protocolado
 
 **Aprovado**:
 O valor que o órgão fixa no boletim. Na MT-PAR, o "Valor Total da Nª Medição" da página do "Visto" do boletim
-assinado e, no reajuste, o "TOTAL REAJUSTE" do boletim dele.
+assinado e, no reajuste, o "TOTAL REAJUSTE" do boletim dele. Sem o valor do boletim gravado, a medição só conta como
+aprovada depois da nota emitida (a nota prova que o órgão aprovou), pelo valor do pedido; antes disso fica só no
+medido.
 _Avoid_: valor atestado
 
 **Faturado**:
@@ -118,6 +132,10 @@ andando. A conclusão estimada é o saldo a executar nesse ritmo (`docs/adr/0012
 
 **Medição final**:
 A última medição do contrato, marcada pela engenharia; põe o contrato em encerramento.
+
+**Data do encerramento**:
+O dia em que o contrato acabou, pelo encerramento ou pela rescisão. Vem do cadastro (`status_desde` do contrato
+encerrado ou rescindido) e é o que a página da obra mostra em "encerrada desde". Sem ela, a página diz só o estado.
 
 ### Documentos do ciclo
 
@@ -153,6 +171,21 @@ com elas.
 **Vínculo**:
 A ligação entre uma nota e a medição que ela fatura.
 _Avoid_: casamento, alocação (são nomes internos)
+
+**Fatura do consórcio**:
+A nota que o consórcio cobra do órgão por uma medição, lançada na coligada do consórcio no RM. Entra nas contas pelo
+valor cheio vezes a cota.
+_Avoid_: FRC (é a página que soma as notas das consorciadas)
+
+**Nota da empresa ao consórcio**:
+A nota que a construtora emite ao consórcio pela sua cota de uma medição. O valor de face dela já é a cota. Ligada à
+medição, é dela que saem o protocolado e o recebido da cota no Fechamento: pelo valor de face, sem multiplicar pelo
+percentual, e pela baixa dos títulos dela; a fatura do consórcio ligada à mesma medição não entra na conta. Sem ela,
+vale a fatura do consórcio vezes a cota. Nunca as duas na mesma medição. O recebido dela é só o que foi baixado nos
+títulos dela no RM, mesmo com a medição recebida: a medição vira recebida quando o órgão paga o consórcio, e a cota
+só entrou quando o consórcio repassou (`docs/adr/0006`). O que falta dela numa medição recebida é repasse sem baixa:
+quem deve é o consórcio, não o órgão.
+_Avoid_: NFS-e da consorciada (quando a nota é a da própria construtora)
 
 **Baixa**:
 O registro no RM de que um título foi pago. A data da baixa é o dia do pagamento.
@@ -200,6 +233,57 @@ _Avoid_: bloqueio para o que só pede confirmação ou justificativa
 
 **Justificativa**:
 A linha escrita por quem segue adiante com algo fora da regra; fica na auditoria.
+
+**Situação**:
+A leitura de um dado em uma de quatro: feito, em andamento, vence em breve ou crítico. Cada uma tem cor e forma. O
+que não tem situação fica sem marca.
+_Avoid_: status, nível (nível é o do aviso: Crítico, Ação, Atenção)
+
+**Feito**:
+Aconteceu e não pede mais nada (recebida, anexada, em dia). Verde, círculo com visto.
+
+**Em andamento**:
+Está em curso e dentro do esperado. Azul, círculo meio cheio.
+
+**Vence em breve**:
+Ainda não venceu, falta sem travar, ou se acompanha. Amarelo, triângulo.
+_Avoid_: atenção como nome da situação (Atenção é um nível de aviso, que aparece como vence em breve)
+
+**Crítico**:
+Venceu, diverge, falhou, trava ou pede ação agora. Vermelho, octógono.
+
+**Glifo**:
+O símbolo que dá forma à situação, para ela não depender só da cor.
+
+**Selo**:
+A situação de uma linha: o glifo e uma palavra sobre o fundo claro da situação. Sem situação, é neutro e sem glifo.
+_Avoid_: pílula, chip, badge
+
+**Contador**:
+A quantidade ao lado de um título. Com situação, leva o glifo dela.
+
+**Painel**:
+O bloco com moldura preta e sombra dura, com o título dentro. É peça de tela, não um tipo de tela.
+_Avoid_: cartão, card; painel como nome de tela (ver Tela de leitura)
+
+**Tela de leitura**:
+A tela de números que a diretoria abre para ler, sem operar: Início, Obras, página da obra, Fechamento e Resumo das
+medições. É a elas que `.claude/rules/paineis.md` se refere quando diz "painéis".
+_Avoid_: painel, dashboard, relatório
+
+**Régua**:
+A linha preta acima de um título: a de grupo, grossa, e a de seção, fina.
+
+**Casca**:
+O que fica igual em toda tela: o menu lateral e o topo.
+_Avoid_: trilho, layout
+
+**Janela**:
+O painel que abre por cima da página para um formulário ou uma ação fora do fluxo dela.
+_Avoid_: modal, popup
+
+**Falha**:
+A ação ou a leitura que não deu certo. Aparece na faixa de crítico, com o octógono.
 
 **Engenharia**:
 O perfil de quem opera o ciclo da medição.

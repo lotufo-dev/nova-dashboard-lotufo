@@ -73,6 +73,17 @@ def test_uma_vencida_derruba_o_pronto_e_aponta_o_tipo(conn):
     assert itens[1]["situacao"] == "ok" and itens[3]["situacao"] == "ok"
 
 
+def test_pendente_separa_a_vencida_da_nunca_cadastrada(conn):
+    """As duas saem `pendente` (nenhuma vale hoje), mas so' a vencida trava o envio: `nunca_cadastrada` diz qual e'."""
+    cid = _contrato(conn)
+    _reg(conn, tipo=1)
+    _reg(conn, tipo=2, emissao="2026-01-01", validade="2026-02-01")   # vencida; o tipo 3 nunca foi cadastrado
+    itens = _por_tipo(checklist.pronto_para_protocolar(conn, cid))
+    assert (itens[2]["situacao"], itens[2]["nunca_cadastrada"]) == ("pendente", False)
+    assert (itens[3]["situacao"], itens[3]["nunca_cadastrada"]) == ("pendente", True)
+    assert (itens[1]["situacao"], itens[1]["nunca_cadastrada"]) == ("ok", False)
+
+
 def test_vencendo_conta_como_pronto_mas_aparece_com_aviso(conn):
     # 10 dias para vencer: da' para protocolar hoje, mas quem le precisa VER
     cid = _contrato(conn)

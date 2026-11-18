@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   certidoesOrdenadas, certidoesVencendo, chipCertidao, chipValidadeGarantia, colunas, empresasComCertidaoExigida, estadosRegularidade, garantiasAConferir,
-  matriz, obrasPorOrgao, pendenciaMaisUrgente, pendenciasDa, regularidadesFaltando, resumoEmpresa,
+  matriz, obrasPorOrgao, pendenciasDa, regularidadesFaltando, resumoEmpresa,
   situacaoCertidao, situacaoGarantia, type EmpresaDoc, type LinhaCertidao, type ObraDoc,
 } from "./matriz";
 
@@ -42,6 +42,7 @@ describe("redesenho de Documentos (#161)", () => {
     expect(resumoEmpresa(e(1, [c("federal", "ok", 90), c("fgts", "ok", 200)]))).toEqual({ texto: "Em dia", nivel: "ok", pendencias: 0 });
     expect(resumoEmpresa(e(1, [c("federal", "ok", 90), c("fgts", "ok", 25)]))).toMatchObject({ texto: "1 vence em 25 dias", nivel: "atencao" });
     expect(resumoEmpresa(e(1, [c("federal", "ok", 20), c("fgts", "vencendo", 12)]))).toMatchObject({ texto: "2 vencem em até 20 dias", nivel: "atencao" });
+    expect(resumoEmpresa(e(1, [c("federal", "vencendo", 1), c("fgts", "vencendo", 1)])).texto).toBe("2 vencem em até 1 dia");
     const r = resumoEmpresa(e(1, [c("federal", "vencida", null), c("estadual", "faltando", null), c("fgts", "faltando", null)],
       { situacao: "atrasada", competencia: "2026-06", esperada: "2026-07" }));
     expect(r).toEqual({ texto: "1 vencida · 2 faltam · regularidade atrasada", nivel: "acao", pendencias: 4 });
@@ -55,8 +56,6 @@ describe("redesenho de Documentos (#161)", () => {
   it("os pontos seguem a ordem do desenho e a pendência mais urgente leva o botão principal", () => {
     const emp = e(1, [c("falencia", "ok", 100), c("fgts", "vencendo", 4), c("federal", "ok", 100), c("municipal", "vencida", null)]);
     expect(certidoesOrdenadas(emp).map(x => x.chave)).toEqual(["federal", "municipal", "fgts", "falencia"]);
-    expect(pendenciaMaisUrgente(emp)!.chave).toBe("municipal");                  // vencida vem antes de quem ainda vigora
-    expect(pendenciaMaisUrgente(e(1, [c("federal", "ok", 100)]))).toBeNull();
   });
 
   it("a situação de uma certidão segue a janela de 30 dias; não exigida fica neutra", () => {
@@ -67,13 +66,14 @@ describe("redesenho de Documentos (#161)", () => {
     expect(situacaoCertidao(c("falencia", "ok", 100, false), "x").nivel).toBe("neutro");
   });
 
-  it("garantia: vence com ação aos 15 dias", () => {
+  it("garantia: a que vai vencer é atenção em qualquer prazo; só a vencida é ação", () => {
     const g = (dias: number, situacao: "ok" | "vencendo" | "vencida" | "baixada") =>
       ({ apolice: "AP-1", vigencia_fim: "2026-12-01", dias, origem: "contrato" as const, situacao });
     expect(situacaoGarantia(null, "")).toMatchObject({ texto: "sem vigência no cadastro", nivel: "neutro" });
     expect(situacaoGarantia(g(20, "vencendo"), "01/12/2026")).toMatchObject({ texto: "vence em 20 dias", nivel: "atencao" });
-    expect(situacaoGarantia(g(15, "vencendo"), "01/12/2026").nivel).toBe("acao");
-    expect(situacaoGarantia(g(-3, "vencida"), "01/12/2026")).toMatchObject({ texto: "vencida", nivel: "acao", forte: true });
+    expect(situacaoGarantia(g(15, "vencendo"), "01/12/2026").nivel).toBe("atencao");
+    expect(situacaoGarantia(g(0, "vencendo"), "01/12/2026").nivel).toBe("atencao");
+    expect(situacaoGarantia(g(-3, "vencida"), "01/12/2026")).toMatchObject({ texto: "vencida", nivel: "acao" });
     expect(situacaoGarantia(g(-3, "vencida"), "01/12/2026").nota).toBe("venceu em 01/12/2026 · apólice AP-1");
     expect(situacaoGarantia(g(300, "baixada"), "01/12/2026").nivel).toBe("neutro");
   });
@@ -133,7 +133,7 @@ describe("Documentos só cobra o que é exigido (#651)", () => {
     expect(chipValidadeGarantia(g(-3, "vencida"), "01/12/2026")).toEqual({ cor: "neutro", valor: "Último registro: 01/12/2026" });
     expect(chipValidadeGarantia(g(200, "ok"), "01/12/2026")).toEqual({ cor: "feito", valor: "01/12/2026" });
     expect(chipValidadeGarantia(g(20, "vencendo"), "01/12/2026")).toEqual({ cor: "breve", valor: "01/12/2026" });
-    expect(chipValidadeGarantia(g(10, "vencendo"), "01/12/2026").cor).toBe("critico");
+    expect(chipValidadeGarantia(g(10, "vencendo"), "01/12/2026").cor).toBe("breve");
     expect(chipValidadeGarantia(null, "")).toEqual({ cor: "critico", valor: "sem registro" });
   });
 

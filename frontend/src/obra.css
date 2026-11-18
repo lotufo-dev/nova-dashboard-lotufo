@@ -1,0 +1,175 @@
+/* Pagina da obra (redesenho da #774): a disposicao e os blocos proprios da pagina. A moldura do painel (.cartao), a
+   tabela (.tabela), o selo, o glifo e a legenda sao pecas de base de tokens.css. Cor, letra, espaco e borda so' por
+   variavel. */
+
+/* A pagina e' o container: os blocos mudam pela largura que sobra para o conteudo (menu aberto ou recolhido). Tres
+   faixas: larga (a coluna do lado cabe), media (ate' 1000 px: a 1024 com o menu aberto, uma coluna so') e estreita
+   (ate' 620 px: o celular). */
+.obra { container: obra-pagina / inline-size; }
+.obra > * { min-width: 0; }
+/* o titulo do painel alinha com o conteudo e com a primeira coluna das tabelas */
+.obra .cartao__cabeca, .obra .cartao__corpo, .obra .cartao__rodape { padding-left: var(--espaco-g); padding-right: var(--espaco-g); }
+.obra-rotulo { display: block; color: var(--cor-texto-secundario); font-size: var(--texto-meta); font-weight: var(--peso-normal); }
+.obra-nota { margin: 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+
+/* ------------------------------------------------------------ a faixa de numeros, sob a regua de grupo */
+.obra-resumo { display: grid; gap: var(--espaco-p); border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro); }
+.obra-numeros { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--espaco-m) var(--espaco-g); margin: 0; }
+.obra-numero { min-width: 0; }
+.obra-numero dt { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.obra-numero dd {
+  display: flex; align-items: center; gap: var(--espaco-pp); margin: 0; white-space: nowrap;
+  font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
+  font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-valor); line-height: var(--entrelinha-numero);
+}
+.obra-numero--critico { color: var(--situacao-critico-texto); }
+/* o executado: barra em tinta e o percentual ao lado (numero, nao situacao) */
+.obra-executado { display: flex; align-items: center; gap: var(--espaco-p); }
+.obra-executado__barra { flex: 1; height: var(--altura-barra-etapa); background: var(--cor-contador-neutro); overflow: hidden; }
+.obra-executado__barra span { display: block; height: 100%; background: var(--cor-barra-recebido); }
+.obra-executado__pct { flex: none; font-size: var(--texto-meta); font-weight: var(--peso-numero); font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------ as duas colunas */
+.obra .obra-grade {
+  display: grid; grid-template-columns: minmax(0, 1fr) var(--largura-coluna-lado); gap: var(--espaco-entre-blocos); align-items: start;
+}
+.obra .obra-grade__principal, .obra .obra-grade__lateral { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-entre-blocos); min-width: 0; }
+.obra #legenda-obra .legenda-cor { justify-content: flex-start; }
+
+/* ------------------------------------------------------------ o painel do prazo */
+.obra-prazo__cabeca { flex-wrap: wrap; justify-content: space-between; }
+.obra-prazo__corpo { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--espaco-m) var(--espaco-gg); padding: 0 var(--espaco-g) var(--espaco-m); }
+.obra-prazo__dias { min-width: 0; padding-top: var(--espaco-mini); }
+.obra-prazo__numero {
+  display: flex; align-items: center; gap: var(--espaco-pp); margin: 0;
+  font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
+  font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-valor); line-height: var(--entrelinha-numero);
+}
+.obra-prazo__numero--critico { color: var(--situacao-critico-texto); }
+.obra-prazo__numero--breve { color: var(--situacao-breve-texto); }
+/* o estado da obra que nao tem prazo correndo (paralisada, em encerramento, encerrada): palavras, nao numero */
+.obra-prazo__numero--estado { font-size: var(--texto-valor-menor); align-items: baseline; }
+/* as linhas do tempo dentro do painel: sem o respiro lateral de quando eram um cartao */
+.obra-prazo .lt { padding: var(--espaco-mini) 0 var(--espaco-p); }
+.obra-prazo .lt + .lt { border-top: var(--borda-linha); padding-top: var(--espaco-p); }
+.obra-prazo .lt__titulo { align-items: center; min-height: var(--altura-contador); margin-bottom: var(--espaco-gg); }
+.obra-prazo .lt__trilho { height: var(--altura-barra-etapa); }
+.obra-prazo .lt__feito { background: var(--cor-barra-recebido); }
+/* a conta do ritmo, embaixo, sob a regua de secao */
+.obra-ritmo {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--espaco-p) var(--espaco-g);
+  margin: 0 var(--espaco-g); padding: var(--regua-secao-respiro) 0 var(--espaco-m); border-top: var(--regua-secao);
+}
+.obra-ritmo dt { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.obra-ritmo dd { margin: 0; font-family: var(--fonte-numero); font-variant-numeric: tabular-nums; font-weight: var(--peso-numero); white-space: nowrap; }
+/* a conclusao estimada com o selo do que ela diz sobre o prazo: o selo quebra para baixo da data se nao couber */
+.obra-ritmo .obra-ritmo__conclusao { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-p); white-space: normal; }
+.obra-ritmo__conclusao > span { white-space: nowrap; }
+.obra-ritmo__conclusao .selo { flex: 0 1 auto; white-space: normal; }
+.obra-ritmo__conclusao .selo__texto { white-space: normal; overflow: visible; }
+
+/* ------------------------------------------------------------ as medicoes de agora (coluna do lado) */
+.obra-agora__lista { display: grid; margin: 0; padding: 0 var(--espaco-g) var(--espaco-m); }
+.obra-agora__lista > div { display: grid; gap: var(--espaco-mini); padding: var(--espaco-p) 0; }
+.obra-agora__lista > div:first-child { padding-top: 0; }
+.obra-agora__lista > div + div { border-top: var(--borda-linha); }
+.obra-agora__lista dd { display: grid; justify-items: start; gap: var(--espaco-mini); margin: 0; }
+.obra-agora__medicao { font-weight: var(--peso-forte); }
+.obra-agora__valor { font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-variant-numeric: tabular-nums; font-size: var(--texto-valor-menor); font-weight: var(--peso-numero); line-height: var(--entrelinha-numero); }
+.obra-agora .selo { max-width: 100%; }
+
+/* ------------------------------------------------------------ as secoes (abas): a faixa na pagina e os paineis embaixo */
+.obra-secoes { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-entre-blocos); min-width: 0; }
+.obra-secoes .abas--obra { padding: 0; border-bottom: var(--regua-secao); }
+.obra-secoes .abas--obra .aba { height: var(--alvo-minimo); padding: 0 var(--espaco-m); font-size: var(--texto-corpo); }
+.obra-secoes .abas--obra .aba:first-child { padding-left: 0; }
+.obra-secoes .painel-aba { padding: 0; gap: var(--espaco-entre-blocos); }
+.obra-secoes .pilha { gap: var(--espaco-entre-blocos); }
+/* os paineis da aba sao paineis da pagina: voltam a ter a sombra; o que mora dentro de outro painel segue sem ela */
+.obra-secoes .painel-aba > .cartao, .obra-secoes .painel-aba > .pilha > .cartao { box-shadow: var(--sombra-painel); }
+.obra-secoes .cartao .cartao { box-shadow: none; }
+.obra-secoes .medicoes__acoes { justify-content: flex-start; }
+.obra-secoes .medicoes__iniciar { max-width: 100%; height: auto; min-height: var(--alvo-minimo); padding-top: var(--espaco-pp); padding-bottom: var(--espaco-pp); white-space: normal; text-align: left; }
+
+/* a lista de medicoes da obra: as duas tabelas dividem as mesmas colunas */
+.obra-medicoes { table-layout: fixed; }
+.obra-medicoes th, .obra-medicoes td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
+.obra-medicoes th:first-child, .obra-medicoes td:first-child { padding-left: var(--espaco-g); }
+.obra-medicoes th:last-child, .obra-medicoes td:last-child { padding-right: var(--espaco-g); }
+.obra-medicoes tbody td { vertical-align: top; padding-top: var(--espaco-p); padding-bottom: var(--espaco-p); overflow-wrap: anywhere; }
+.obra-medicoes thead th { white-space: normal; vertical-align: bottom; }
+.obra-medicoes col.c-om-medicao { width: 24%; }
+.obra-medicoes col.c-om-estado { width: 23%; }
+.obra-medicoes col.c-om-valor { width: 17%; }
+.obra-medicoes--com-custo col.c-om-medicao { width: 20%; }
+.obra-medicoes--com-custo col.c-om-estado { width: 20%; }
+.obra-medicoes--com-custo col.c-om-valor { width: 15%; }
+.obra-medicoes--com-custo { min-width: calc(var(--alvo-minimo) * 19); }
+.obra-medicoes__sub { color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
+.obra-medicoes .selo { max-width: 100%; }
+.obra-medicoes .link-selo { display: inline-flex; max-width: 100%; margin-top: var(--espaco-mini); }
+
+/* tabelas largas das abas (instrumentos, evolucao mensal, reajuste): colunas mais juntas, para caber na caixa */
+.obra-secoes .tabela:not(.obra-medicoes) th, .obra-secoes .tabela:not(.obra-medicoes) td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
+.obra-secoes .tabela:not(.obra-medicoes) th:first-child, .obra-secoes .tabela:not(.obra-medicoes) td:first-child { padding-left: var(--espaco-g); }
+.obra-secoes .tabela:not(.obra-medicoes) th:last-child, .obra-secoes .tabela:not(.obra-medicoes) td:last-child { padding-right: var(--espaco-g); }
+.obra-secoes .tabela td.efeito { min-width: calc(var(--alvo-minimo) * 4); }
+.obra-secoes .cartao__cabeca { flex-wrap: wrap; }
+
+/* ---------------------------------------------------------------- faixa media: uma coluna so' */
+@container obra-pagina (max-width: 1000px) {
+  .obra .obra-grade { display: flex; flex-direction: column; align-items: stretch; }
+  .obra .obra-grade__principal, .obra .obra-grade__lateral { display: contents; }
+  .obra #prazo { order: 1; }
+  .obra #agora { order: 2; }
+  .obra #avisos-obra { order: 3; }
+  .obra #secoes { order: 4; }
+  .obra #legenda-obra { order: 5; }
+  .obra-numero dd { font-size: var(--texto-valor-menor); }
+  /* as duas medicoes de agora lado a lado */
+  .obra-agora__lista { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--espaco-g); }
+  .obra-agora__lista > div, .obra-agora__lista > div:first-child { padding: 0 0 var(--espaco-mini); }
+  .obra-agora__lista > div + div { border-top: 0; border-left: var(--borda-linha); padding-left: var(--espaco-g); }
+}
+
+/* ---------------------------------------------------------------- faixa estreita (celular) */
+@container obra-pagina (max-width: 620px) {
+  /* os numeros viram lista: rotulo a' esquerda, valor a' direita */
+  .obra-numeros { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-mini); }
+  .obra-numero { display: flex; align-items: baseline; justify-content: space-between; gap: var(--espaco-m); }
+  .obra-numero dd { font-size: var(--texto-corpo); }
+  .obra-prazo__corpo { grid-template-columns: minmax(0, 1fr); padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
+  .obra-prazo__numero { font-size: var(--texto-valor-menor); }
+  .obra-ritmo { grid-template-columns: minmax(0, 1fr); gap: var(--espaco-mini); margin: 0 var(--espaco-m); }
+  .obra-ritmo > div { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--espaco-mini) var(--espaco-m); }
+  .obra-ritmo dd { margin-left: auto; min-width: 0; }
+  .obra-ritmo .obra-ritmo__conclusao { justify-content: flex-end; }
+  .obra-agora__lista { grid-template-columns: minmax(0, 1fr); padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
+  .obra-agora__lista > div + div { border-left: 0; border-top: var(--borda-linha); padding: var(--espaco-p) 0 var(--espaco-mini); }
+  .obra .cartao__cabeca { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
+  .obra-secoes .abas--obra .aba { padding: 0 var(--espaco-p); font-size: var(--texto-meta); }
+
+  /* a lista de medicoes vira um bloco por medicao, com o rotulo da coluna ao lado do valor */
+  .obra-medicoes, .obra-medicoes :is(tbody, tr, td) { display: block; width: 100%; }
+  .obra-medicoes--com-custo { min-width: 0; }
+  .obra-medicoes thead, .obra-medicoes colgroup { display: none; }
+  .obra-medicoes tbody tr { padding: var(--espaco-p) var(--espaco-m); border-bottom: var(--borda-linha); }
+  .obra-medicoes tbody tr:last-child { border-bottom: 0; }
+  .obra-medicoes tbody td, .obra-medicoes tbody td:first-child, .obra-medicoes tbody td:last-child {
+    display: flex; justify-content: space-between; align-items: baseline; gap: var(--espaco-p);
+    padding: var(--espaco-traco) 0; border: 0; text-align: right;
+  }
+  .obra-medicoes tbody td:first-child { display: block; padding-bottom: var(--espaco-mini); text-align: left; }
+  .obra-medicoes tbody td:not(:first-child)::before { content: attr(data-rotulo); flex: none; color: var(--cor-texto-secundario); font-weight: var(--peso-normal); text-align: left; }
+  .estado-medicao { justify-content: flex-end; }
+  /* a celula com dois dados (as notas e, embaixo, "recebida em"): o segundo desce para a linha de baixo em vez de
+     dividir a largura com o primeiro (com quatro notas a data quebrava no meio da palavra) */
+  .obra-medicoes tbody td:not(:first-child) { flex-wrap: wrap; }
+  .obra-medicoes tbody td > .obra-medicoes__sub { flex-basis: 100%; text-align: right; overflow-wrap: normal; }
+}
+
+/* a trilha quebra linha em vez de cortar o nome do orgao e o da obra na borda da pagina */
+.topbar--obra .topbar__trilha { flex-wrap: wrap; row-gap: var(--espaco-pp); }
+.topbar--obra .migalhas ol { flex-wrap: wrap; }
+.instrumento__numero { overflow-wrap: anywhere; }
+.obra .docs-falta { padding-left: var(--espaco-g); padding-right: var(--espaco-g); }

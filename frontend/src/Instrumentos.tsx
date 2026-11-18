@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
-import { IconeAlerta, IconeCadeado } from "./icones";
+import { IconeCadeado } from "./icones";
 import { brl } from "./Medicoes";
 import { instrumentosDaObra, type AditivoApi, type InstrumentoCadastro, type InstrumentoPrazo } from "./obra";
 import { Link } from "./Link";
@@ -8,6 +8,7 @@ import { fmtCompetencia as mesBR, fmtDataPura } from "./tempo";
 import { fmtPercentualDoCadastro } from "./formato";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
+import Falha from "./Falha";
 
 // Contrato › Instrumentos (NAVEGACAO.md › Obra): aditivos (termos e apostilamentos de prazo, valor, escopo e
 // mistos), apostilamentos de reajuste, paralisacoes, reinicios e endossos numa lista so', do mais novo ao mais
@@ -26,15 +27,14 @@ function deltaBR(centavos: number): string {
   return (centavos > 0 ? "+" : centavos < 0 ? "−" : "") + brl(Math.abs(centavos));
 }
 
+// Quantos instrumentos aparecem antes do "Ver todos": os recentes respondem quase tudo; o resto e' historico.
+const RECENTES = 10;
+
 function Situacao({ a }: { a: AditivoApi }) {
   if (a.cancelado_em) return <Selo>Cancelado</Selo>;
-  if (a.status === "assinado") return (
-    <Selo classe="selo--ok"
-      sufixo={<IconeCadeado className="icone icone--p" titulo="Congelado" />}>
-      Assinado
-    </Selo>
-  );
-  return <Selo classe="selo--atencao">Em andamento</Selo>;
+  // assinado e' o estado comum da lista (dezenas de linhas na obra antiga): so' a palavra e o cadeado, sem selo
+  if (a.status === "assinado") return <span className="instrumentos__assinado">Assinado <IconeCadeado className="icone icone--p" titulo="Congelado" /></span>;
+  return <Selo situacao="andamento">Em andamento</Selo>;
 }
 
 /** O efeito do apostilamento de reajuste; a data-base leva ao ciclo dela na aba Reajuste. */
@@ -69,7 +69,10 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
   }, [contratoId]);
 
   const carregando = (aditivos === null && !erro) || (cadastro === null && !erroCadastro);
-  const linhas = instrumentosDaObra(aditivos ?? [], cadastro ?? [], prazo);
+  const todas = instrumentosDaObra(aditivos ?? [], cadastro ?? [], prazo);
+  // a obra antiga tem dezenas de instrumentos: os mais novos primeiro, o resto a um clique
+  const [verTodos, setVerTodos] = useState(false);
+  const linhas = verTodos ? todas : todas.slice(0, RECENTES);
 
   return (
     <section className="cartao" aria-labelledby="titulo-instrumentos" id="instrumentos">
@@ -77,11 +80,8 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
         <h2 className="cartao__titulo" id="titulo-instrumentos">Instrumentos</h2>
       </div>
 
-      {erro && <div className="cartao__corpo"><p className="erro" role="alert">
-        <IconeAlerta className="icone icone--p" />{erro}
-      </p></div>}
-      {erroCadastro && <div className="cartao__corpo"><p className="campo__nota">
-        Não foi possível ler os instrumentos do cadastro.</p></div>}
+      {erro && <div className="cartao__corpo"><Falha>{erro}</Falha></div>}
+      {erroCadastro && <div className="cartao__corpo"><Falha>Não foi possível ler os instrumentos do cadastro.</Falha></div>}
 
       {!carregando && !erro && !erroCadastro && linhas.length === 0 && (
         <div className="vazio">
@@ -95,7 +95,7 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
             <caption className="sr-only">Instrumentos do contrato, do mais novo ao mais antigo</caption>
             <thead>
               <tr>
-                <th scope="col">Data</th><th scope="col">Instrumento</th><th scope="col">Número</th>
+                <th scope="col">Data</th><th scope="col">Instrumento</th>
                 <th scope="col">Efeito</th><th scope="col" className="col-num">Δ valor</th><th scope="col">Situação</th>
               </tr>
             </thead>
@@ -107,8 +107,7 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
                   return (
                     <tr key={l.chave} className={par}>
                       <td className="num">{data(i.data)}</td>
-                      <td>{TIPO_CADASTRO[i.tipo] ?? i.tipo}</td>
-                      <td className="forte">{i.numero ?? "s/n"}</td>
+                      <td>{TIPO_CADASTRO[i.tipo] ?? i.tipo}<div className="forte instrumento__numero">{i.numero ?? "s/n"}</div></td>
                       <td className="num"><EfeitoDoCadastro i={i} contratoId={contratoId} /></td>
                       <td className="col-num num">—</td>
                       <td>—</td>
@@ -121,8 +120,7 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
                 return (
                   <tr key={l.chave} className={par}>
                     <td className="num">{data(a.data_assinatura)}</td>
-                    <td>{a.forma === "apostilamento" ? "Apostilamento" : "Termo aditivo"} {ROTULO_TIPO[a.tipo] ?? a.tipo}</td>
-                    <td className="forte">{a.numero ?? "s/n"}</td>
+                    <td>{a.forma === "apostilamento" ? "Apostilamento" : "Termo aditivo"} {ROTULO_TIPO[a.tipo] ?? a.tipo}<div className="forte instrumento__numero">{a.numero ?? "s/n"}</div></td>
                     {/* o objeto inteiro, que quebra linha: nada so' no passar do mouse */}
                     <td className="efeito">
                       {a.objeto && <div>{a.objeto}</div>}
@@ -134,7 +132,7 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
                     <td>
                       <Situacao a={a} />
                       {l.retroativo && (
-                        <Selo classe="selo--atencao" sufixo={<span className="sr-only"> — assinado depois do fim da execução que prorroga</span>}>
+                        <Selo situacao="breve" sufixo={<span className="sr-only"> — assinado depois do fim da execução que prorroga</span>}>
                           retroativo
                         </Selo>
                       )}
@@ -148,6 +146,11 @@ export default function Instrumentos({ contratoId, cadastro, erroCadastro }:
             </tbody>
           </table>
         </Rolagem>
+      )}
+      {!carregando && todas.length > RECENTES && !verTodos && (
+        <div className="cartao__rodape">
+          <button type="button" className="btn btn--pequeno" onClick={() => setVerTodos(true)}>Ver todos os {todas.length}</button>
+        </div>
       )}
     </section>
   );

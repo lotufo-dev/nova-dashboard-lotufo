@@ -4,8 +4,9 @@ import { brl } from "./formato";
 import { IconeAlerta } from "./icones";
 import { IconeCheck, mensagem } from "./NotasAEnviar";
 import "./notas.css";
-import Selo from "./Selo";
+import Selo, { Glifo } from "./Selo";
 import { fmtDataPura } from "./tempo";
+import Falha from "./Falha";
 
 // FRC (Fatura de Recebimento de Consorcio) gerada pela dashboard (2026-10-09): na etapa 3 de obra de consorcio, a
 // lista das notas esperadas (empresa x municipio, lidas do CONTEUDO do PDF), a area de arrastar as notas e o bloco
@@ -51,7 +52,7 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
   }, [medicaoId]);
   useEffect(() => { carregar().catch(e => setErro(mensagem(e))); }, [carregar, versao]);
 
-  if (!s) return erro ? <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p> : null;
+  if (!s) return erro ? <Falha>{erro}</Falha> : null;
   if (!s.disponivel) return s.motivo ? <p className="campo__nota">FRC do {s.consorcio}: {s.motivo}.</p> : null;
 
   const itens = s.itens ?? [];
@@ -137,7 +138,8 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
             return (
               <li key={i.chave}>
                 <span className={`nota-estado nota-estado--${ok ? "ok" : "falta"}`} title={ok ? "Anexada" : i.problema ? "Atenção" : "Falta"}>
-                  {ok ? <IconeCheck /> : <span aria-hidden="true">!</span>}
+                  {/* #722: o sinal da situacao, como nos outros itens: feito na anexada, vence em breve na que falta */}
+                  <Glifo situacao={ok ? "feito" : "breve"} />
                   <span className="sr-only">{ok ? "Anexada" : i.problema ? "Atenção" : "Falta"}</span>
                 </span>
                 <span className="nota-item">
@@ -194,7 +196,7 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
       <div className="frc__bloco">
         <div className="frc__cabeca">
           <h4 className="frc__titulo">FRC</h4>
-          {s.assinada && <Selo classe="selo--ok">Assinada</Selo>}
+          {s.assinada && <Selo situacao="feito">Assinada</Selo>}
           {s.frc && (
             <span className="campo__nota">
               nº <span className="nota-mono">{String(s.frc.numero).padStart(5, "0")}</span> gerada em {fmtDataPura(s.frc.data_geracao)}
@@ -226,7 +228,7 @@ export function FrcConsorcio({ medicaoId, podeEditar, versao, aoMudar, aoLer }: 
         </div>
       </div>
       <p className={feito ? "notas__ok" : "sr-only"} role="status">{feito}</p>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
     </section>
   );
 }

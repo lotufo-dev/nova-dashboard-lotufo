@@ -28,26 +28,28 @@ describe("Prazos", () => {
   });
 
   it("prazo vencido vira selo, só quando vence", async () => {
-    api.mockResolvedValue({ situacao: situacao({ dias_execucao: -5 }), historico: "", pleitos: [] });
+    api.mockResolvedValue({ situacao: situacao({ dias_execucao: -5, nivel_execucao: "critico", nivel_vigencia: "normal" }), historico: "", pleitos: [] });
     render(<Prazos contratoId={1} podeEditar={false} />);
     expect(await screen.findByText("vencida")).toBeTruthy();
     expect(screen.getAllByText("vencida")).toHaveLength(1);    // a vigencia segue em dia
   });
 
-  it("prazo perto do fim vira selo com os dias, nos limites do aviso (60 em Atenção, 30 em Crítico)", async () => {
-    api.mockResolvedValue({ situacao: situacao({ dias_execucao: 45, dias_vigencia: 10, vigencia_automatica: false }), historico: "", pleitos: [] });
+  it("prazo perto do fim vira selo com os dias, no nível que o servidor manda", async () => {
+    api.mockResolvedValue({ situacao: situacao({ dias_execucao: 45, dias_vigencia: 10, vigencia_automatica: false,
+      nivel_execucao: "atencao", nivel_vigencia: "critico" }), historico: "", pleitos: [] });
     render(<Prazos contratoId={1} podeEditar={false} />);
-    expect((await screen.findByText("vence em 45 dias")).closest(".selo")?.className).toContain("selo--atencao");
-    expect(screen.getByText("vence em 10 dias").closest(".selo")?.className).toContain("selo--acao");
+    expect((await screen.findByText("vence em 45 dias")).closest(".selo")?.className).toContain("selo--breve");
+    expect(screen.getByText("vence em 10 dias").closest(".selo")?.className).toContain("selo--critico");
   });
 
-  it("vigência que o órgão prorroga junto e obra em encerramento não levam selo (o servidor não avisa)", async () => {
-    api.mockResolvedValue({ situacao: situacao({ dias_vigencia: -10 }), historico: "", pleitos: [] });
+  it("vigência que o órgão prorroga junto e obra em encerramento não levam selo: o servidor manda o nível normal", async () => {
+    api.mockResolvedValue({ situacao: situacao({ dias_vigencia: -10, nivel_execucao: "normal", nivel_vigencia: "normal" }), historico: "", pleitos: [] });
     const r = render(<Prazos contratoId={1} podeEditar={false} />);
     expect(await screen.findByText("31/01/2027")).toBeTruthy();
     expect(screen.queryByText(/vencida|vence /)).toBeNull();
     r.unmount();
     api.mockResolvedValue({ situacao: situacao({ dias_execucao: -5, vigencia_automatica: false, dias_vigencia: -5,
+      nivel_execucao: "normal", nivel_vigencia: "normal",
       encerramento: { desde: "2026-10-01", marcos: {}, conclusao_comunicada: false } }), historico: "", pleitos: [] });
     render(<Prazos contratoId={1} podeEditar={false} />);
     expect(await screen.findByText("31/01/2027")).toBeTruthy();
@@ -55,7 +57,7 @@ describe("Prazos", () => {
   });
 
   it("obra paralisada não leva selo de vencimento da execução (D16)", async () => {
-    api.mockResolvedValue({ situacao: situacao({ dias_execucao: -5, paralisacao: { desde: "2026-09-01", numero: null } }),
+    api.mockResolvedValue({ situacao: situacao({ dias_execucao: -5, nivel_execucao: "normal", paralisacao: { desde: "2026-09-01", numero: null } }),
       historico: "", pleitos: [] });
     render(<Prazos contratoId={1} podeEditar={false} />);
     expect(await screen.findByText(/paralisada desde/)).toBeTruthy();
@@ -110,7 +112,7 @@ describe("Prazos", () => {
     const titulo = await screen.findByRole("heading", { name: /^Pedido de valor/ });
     expect(titulo.textContent).toMatch(/^Pedido de valor CT-001-EX-2026 de 27\/03\/2026, R\$\s1\.000\.000,00$/);
     const selo = screen.getByText("sem resposta");
-    expect(selo.closest(".selo")?.className).toContain("selo--atencao");
+    expect(selo.closest(".selo")?.className).toContain("selo--breve");
     expect(titulo.closest("section")?.textContent?.replace(/\s/g, " "))
       .toBe("Pedido de valor CT-001-EX-2026 de 27/03/2026, R$ 1.000.000,00, sem resposta");
     // a tela so' oferece carta de prorrogacao (e de conclusao, no encerramento); pedido de valor e' sessao manual
@@ -124,7 +126,7 @@ describe("Prazos", () => {
       pedidos_valor: [pedidoValor({ numero: "099/2024/01/01", data_assinatura: "2026-06-30", rotulo: "1º TA" })] });
     render(<Prazos contratoId={1} podeEditar={false} />);
     const selo = await screen.findByText("atendido pelo 1º TA");
-    expect(selo.closest(".selo")?.className).toContain("selo--ok");
+    expect(selo.closest(".selo")?.className).toContain("selo--feito");
     expect(screen.queryByText("sem resposta")).toBeNull();
   });
 

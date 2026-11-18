@@ -1,10 +1,9 @@
 import { useRef, useState } from "react";
-import CaixaAviso from "./CaixaAviso";
+import CaixaAviso, { CaixaJustificativa } from "./CaixaAviso";
 import CampoValor from "./CampoValor";
 import ErroCampo from "./ErroCampo";
 import { api, apiForm, mensagemDeErro } from "./api";
 import { brl } from "./formato";
-import { IconeAlerta } from "./icones";
 import { EXCECOES, tituloMedicao } from "./medicao";
 import { brlCampo, type Agir } from "./MedicaoAtos";
 import type { Medicao } from "./Medicoes";
@@ -12,6 +11,7 @@ import Selo from "./Selo";
 import { fmtDataPura, hojeLocal } from "./tempo";
 import "./passos.css";
 import "./planilhaCarta.css";
+import Falha from "./Falha";
 
 // Issue #290 (spec 2026-10-20 §2.1 passo 3 e §2.3): "Registrar boletim". A pessoa arrasta o PDF do orgao, o leitor
 // da capa do SMO (#285) propoe nº, data e valor, marcados como lidos; ela confere e aceita (origem `aceito`). Sem
@@ -53,7 +53,7 @@ export function AceiteDiferenca({ m, podeEditar, salvando, agir, aoFechar, erro 
   const capaDiverge = (m.capa_divergencias ?? []).length > 0;
   if (!comBoletim || ["cancelada", "desistida"].includes(m.estado) || pedido === null || aprovado === null
     || (aprovado >= pedido && !capaDiverge && !m.diferenca_aceita)) return null;
-  if (m.diferenca_aceita) return <Selo classe="selo--ok">Diferença aceita</Selo>;
+  if (m.diferenca_aceita) return <Selo situacao="feito">Diferença aceita</Selo>;
   if (!podeEditar) return null;
   if (!aberto) {
     return <div><button type="button" className="btn btn--pequeno" onClick={() => setAbertoAqui(true)}>Aceitar a diferença</button></div>;
@@ -72,20 +72,20 @@ export function AceiteDiferenca({ m, podeEditar, salvando, agir, aoFechar, erro 
   return (
     <form className="pilha" onSubmit={salvar} noValidate aria-label="Aceitar a diferença"
       onKeyDown={ev => ev.key === "Escape" && fechar()}>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha>{erro}</Falha>}
       {/* #286 (revisor, rodada 1 da PR #606): o aceite vale para o boletim inteiro; o que a capa diverge e' aceito junto */}
       {capaDiverge && (
         <ul aria-label="Divergências da capa do SMO aceitas junto">
           {(m.capa_divergencias ?? []).map(frase => <li key={frase}>{frase}</li>)}
         </ul>
       )}
-      <div className="campo">
+      <CaixaJustificativa>
         <label className="campo__rotulo" htmlFor="dif-justificativa">Justificativa</label>
         <textarea id="dif-justificativa" name="justificativa" className="entrada--larga" rows={2} maxLength={1000} autoFocus
           value={justificativa} onChange={ev => setJustificativa(ev.target.value)}
           {...(tentou && falta ? { "aria-invalid": true as const, "aria-describedby": "dif-erro" } : {})} />
         <ErroCampo id="dif-erro" erro={tentou ? falta : undefined} />
-      </div>
+      </CaixaJustificativa>
       <div className="form-inline">
         <button type="submit" className="btn btn--primario" disabled={salvando}>{salvando ? "Aceitando…" : "Aceitar a diferença"}</button>
         <button type="button" className="btn" onClick={fechar}>Cancelar</button>
@@ -222,8 +222,8 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
 
   return (
     <form className="pilha" onSubmit={salvar} noValidate aria-label="Registrar boletim" onKeyDown={ev => ev.key === "Escape" && aoFechar()}>
-      <p className="painel__titulo">Registrar o boletim da {m.numero}ª medição</p>
-      {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      <p className="painel__titulo">Registrar o boletim {m.tipo === "reajuste" ? "do reajuste " : ""}da {m.numero}ª medição</p>
+      {erro && <Falha>{erro}</Falha>}
       <div className="campo">
         <span className="campo__rotulo" id="bol-arquivo-rotulo">PDF do boletim</span>
         <div className={`planilha__soltar${sobre ? " planilha__soltar--sobre" : ""}`} data-testid="soltar-boletim"
@@ -241,8 +241,8 @@ export function FormBoletim({ m, salvando, agir, aoFechar, erro }: {
         </div>
       </div>
       <p className={lendo ? "" : "sr-only"} role="status">{lendo ? (mtpar ? "Lendo o boletim…" : "Lendo a capa…") : ""}</p>
-      {erroLeitura && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler o PDF: {erroLeitura}</p>}
-      {recusa && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{recusa}</p>}
+      {erroLeitura && <Falha>Não foi possível ler o PDF: {erroLeitura}</Falha>}
+      {recusa && <Falha>{recusa}</Falha>}
       {avisos.map(a => <CaixaAviso nivel="atencao" key={a}>{a}</CaixaAviso>)}
       {leituras.length > 0 && lido.valor === undefined && (
         <dl className="planilha__saldo" aria-label="Leituras do valor">
@@ -316,7 +316,7 @@ export function PassoBoletim({ ms, podeEditar, salvando, agir, erro }: {
         return (
           <section key={x.id} className="cartao med-painel" aria-label={nome}>
             <h3 className="med-painel__titulo">{nome}
-              {b ? <Selo classe="selo--ok">Anexado</Selo> : <Selo classe="selo--atencao">Não anexado</Selo>}</h3>
+              {b ? <Selo situacao="feito">Anexado</Selo> : <Selo situacao="breve">Não anexado</Selo>}</h3>
             {b && (
               <>
                 <dl className="orgao-faixa__dados" aria-label={`Boletim anexado${ms.length > 1 ? `: ${tituloMedicao(x)}` : ""}`}>

@@ -67,6 +67,20 @@ describe("Cronograma: saldo e reajuste contratado", () => {
     render(<Cronograma contratoId={1} podeEditar={false} />);
     expect(await screen.findByText("Vigente de execução")).toBeTruthy();
     expect(screen.queryByText("Reajuste contratado (fora do saldo)")).toBeNull();
+    expect(screen.queryByText("valor cheio do consórcio")).toBeNull();
+  });
+
+  it("em consórcio o cabeçalho diz a base: aqui é o valor cheio, e o alto da página mostra o mesmo saldo na cota", async () => {
+    comSaldo({ vigente_centavos: 100000, vigente_execucao_centavos: 100000, reajuste_contratado_centavos: 0,
+      medido_centavos: 99000, saldo_centavos: 1000, formula: "f", percentual_bp: 8000 });
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    expect(await screen.findByText("valor cheio do consórcio")).toBeTruthy();
+    cleanup();
+    comSaldo({ vigente_centavos: 100000, vigente_execucao_centavos: 100000, reajuste_contratado_centavos: 0,
+      medido_centavos: 99000, saldo_centavos: 1000, formula: "f", percentual_bp: 10000 });
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    await screen.findByText("Vigente de execução");
+    expect(screen.queryByText("valor cheio do consórcio")).toBeNull();
   });
 });
 
@@ -199,12 +213,29 @@ describe("Cronograma: evolução mensal", () => {
     const linhas = within(tabela).getAllByRole("row");
     expect(celulas(linhas[0], "th")).toBe("Competência|Pedido|Aprovado|Reajuste|Projeto|Situação");
     expect(linhas.slice(1).map(l => celulas(l, "td"))).toEqual([
-      "07/2026|R$ 250,01|R$ 240,03|R$ 10,01|—|atestado",
+      "07/2026|R$ 250,01|R$ 240,03|R$ 10,01|—|Atestado",
       "08/2026|R$ 150,03|—|—|—|provisório",
       "Total|R$ 400,04|R$ 240,03|R$ 10,01|—|",
     ]);
     expect(document.body.textContent).not.toMatch(/Previsto|Tabela por competência|777,77/);
     expect(document.querySelector(".cadeado")).toBeNull();
+  });
+
+  it("obra antiga: os últimos doze meses, os anteriores a um clique, e o total é sempre de todos; atestado sem selo", async () => {
+    const meses = Array.from({ length: 15 }, (_, i) => ponto(`2025-${String(i + 1).padStart(2, "0")}`.replace(/2025-(1[3-5])/, (_m, n) => `2026-0${Number(n) - 12}`),
+      { medido_execucao_centavos: 10000, pedido_execucao_centavos: 10000, aprovado_execucao_centavos: 10000 }));
+    api.mockImplementation((c: string) => Promise.resolve(
+      c.endsWith("/curva") ? { ...curva, curva: meses } : c.endsWith("/cronograma") ? VERSAO : c.endsWith("/versoes") ? versoes : null));
+    render(<Cronograma contratoId={1} podeEditar={false} />);
+    const tabela = await screen.findByRole("table", { name: "Evolução mensal" });
+    const corpo = () => within(tabela).getAllByRole("row").slice(1).map(l => celulas(l, "td"));
+    expect(corpo().length).toBe(1 + 12 + 1);
+    expect(corpo()[1]).toBe("04/2025|R$ 100,00|R$ 100,00|—|—|Atestado");
+    expect(corpo().at(-1)).toBe("Total|R$ 1.500,00|R$ 1.500,00|—|—|");
+    expect(tabela.querySelector("tbody .selo")).toBeNull();
+    fireEvent.click(within(tabela).getByRole("button", { name: "Ver os 3 meses anteriores" }));
+    expect(corpo().length).toBe(15 + 1);
+    expect(corpo()[0]).toContain("01/2025");
   });
 
   it("o gráfico previsto × medido não aparece; a lista de versões continua", async () => {

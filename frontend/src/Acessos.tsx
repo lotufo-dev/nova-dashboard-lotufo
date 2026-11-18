@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
-import { IconeAlerta } from "./icones";
+import Falha from "./Falha";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import { fmtDataHora } from "./tempo";
@@ -9,11 +9,11 @@ import { fmtDataHora } from "./tempo";
 // origem e navegador vem nulos nos eventos gravados antes do registro de acesso.
 export type Acesso = { data: string; sucesso: boolean; origem: string | null; navegador: string | null };
 
-/** Entrou (ponto e palavra, o comum) ou recusada (selo de atencao, a excecao). */
+/** Entrou (so' a palavra, o comum) ou recusada (selo de atencao, a excecao). */
 function ResultadoAcesso({ sucesso }: { sucesso: boolean }) {
   return sucesso
-    ? <span className="estado"><span className="estado__ponto" aria-hidden="true" />Entrou</span>
-    : <Selo classe="selo--atencao">recusada</Selo>;
+    ? <>Entrou</>
+    : <Selo situacao="breve">recusada</Selo>;
 }
 
 /** Os ultimos acessos de uma pessoa, lidos quando o componente monta: quem chama o monta so' quando a pessoa abre. */
@@ -24,7 +24,7 @@ export default function UltimosAcessos({ url, rotulo }: { url: string; rotulo: s
     api<Acesso[]>(url).then(l => { setAcessos(l); setErro(""); }).catch(e => setErro(mensagemDeErro(e)));
   }, [url]);
 
-  if (erro) return <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>;
+  if (erro) return <Falha>{erro}</Falha>;
   if (acessos === null) return <p>Carregando…</p>;
   if (acessos.length === 0) return <p>Nenhum acesso.</p>;
   return (

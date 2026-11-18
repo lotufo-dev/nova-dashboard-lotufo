@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { IconeAlerta } from "./icones";
+import { Glifo } from "./Selo";
 
 // Issue #213 (decisao do dono de 16/10/2026): documento faltando nao bloqueia o envio; o Enviar abre este aviso com
 // tudo o que falta e a pessoa decide. "Cancelar" nao manda nada; "Continuar com o envio" manda a lista confirmada,
@@ -38,8 +38,9 @@ export default function ConfirmarFaltas({ itens, mudou = false, aoCancelar, aoCo
     <div className="ol-modal-fundo" role="presentation">
       <div ref={caixa} className="confirmar-faltas" role="alertdialog" aria-modal="true"
         aria-labelledby="confirmar-faltas-titulo" aria-describedby="confirmar-faltas-texto" onKeyDown={teclas}>
-        <h2 className="confirmar-faltas__titulo" id="confirmar-faltas-titulo">
-          <IconeAlerta className="icone icone--p" />ATENÇÃO
+        {/* a confirmacao: faixa amarela com o triangulo; os botoes seguem ativos (#720) */}
+        <h2 className="confirmar-faltas__titulo aviso" id="confirmar-faltas-titulo">
+          <Glifo situacao="breve" />ATENÇÃO
         </h2>
         <div id="confirmar-faltas-texto">
           <p>{chamada ? chamada : mudou ? "O que falta mudou desde a sua confirmação. Agora falta:"

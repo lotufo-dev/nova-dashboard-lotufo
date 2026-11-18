@@ -2,11 +2,16 @@ import { Fragment, useEffect, useState } from "react";
 import { destinoDoAviso, semEmpresa, semObra, type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
 import { daAgenda, diasAteOAviso, porSecao, semRSOrfao, type Secao } from "./avisos";
+import Contador from "./Contador";
+import EmAbertoAParte from "./EmAbertoAParte";
+import Falha from "./Falha";
 import { brl, contar } from "./formato";
 import LegendaCor from "./LegendaCor";
 import type { Usuario } from "./Login";
 import { type Ir } from "./rota";
 import { Link } from "./Link";
+import Selo, { Glifo } from "./Selo";
+import type { Situacao } from "./situacao";
 import { fmtCompetencia, fmtMesCurto, fmtMesExtenso } from "./tempo";
 import "./inicio.css";
 
@@ -16,6 +21,9 @@ import "./inicio.css";
 // Acao operacional (nota a enviar, espelho a conferir) saiu daqui: vive nas telas dela e na tela Avisos.
 // #666: a caixa "Avisos importantes" le GET /api/inicio, a MESMA fila da tela Avisos (com o recorte do perfil), e usa a
 // mesma regra de secao (`avisos.ts`): a contagem dela e' a soma de Vencido, Esta semana e Este mes daquela tela.
+// #721 (redesenho, etapa 2a): a tela como o dono a montou em 15/11/2026. Os mesmos blocos e os mesmos numeros, em outra
+// disposicao: saudacao e numeros do mes no alto; o grupo "Cota da Lotufo" (a base dita uma vez, no titulo do grupo) com
+// o ciclo e a previsao lado a lado e o recebido embaixo; depois os avisos e a matriz, na largura toda.
 
 type ChaveEtapa = "em_analise" | "boletim" | "nota" | "protocolado" | "recebido_mes";
 // #642: uma etapa da faixa do ciclo, na cota da Lotufo; `mais_antigo_dias` nulo = etapa vazia ou sem idade (recebido)
@@ -32,7 +40,11 @@ export type PainelInicio = {
   hoje: string;
   protocoladas: { obras_protocoladas: number; obras_ativas: number; ultima: string | null };
   medido: { competencia: string; valor_centavos: number; quantidade: number; ultimo_lancamento: string | null };
-  a_receber: { liberado: boolean; valor_centavos: number | null; mais_60_centavos: number | null };
+  // 17/11/2026 (docs/adr/0006): o total soma so' a competencia de `ano_inicial` em diante que o RM ainda informa; o
+  // resto vem em `a_parte` (nulo sem o total liberado) e a tela o mostra numa linha propria, fora do total
+  a_receber: { liberado: boolean; valor_centavos: number | null; mais_60_centavos: number | null;
+    a_parte: { ano_inicial: string; valor_centavos: number; anterior_centavos: number; sem_atualizacao_centavos: number;
+      sem_atualizacao_desde: string | null } | null };
   ciclo: EtapaCiclo[];
   recebido_12m: MesRecebido[];
   // #652: `depois` = data esperada alem do proximo mes
@@ -47,41 +59,46 @@ export function saudacao(agora: Date = new Date()): string {
   return h >= 5 && h < 12 ? "Bom dia" : h >= 12 && h < 18 ? "Boa tarde" : "Boa noite";
 }
 
-// #642: rotulo de cada etapa e a cor da informacao (em andamento = azul; recebido = feito, verde)
-const ETAPAS: Record<ChaveEtapa, { rotulo: string; tom: "andamento" | "feito" }> = {
-  em_analise: { rotulo: "Em análise", tom: "andamento" },
-  boletim: { rotulo: "Boletim", tom: "andamento" },
-  nota: { rotulo: "Nota", tom: "andamento" },
-  protocolado: { rotulo: "Protocolado", tom: "andamento" },
-  recebido_mes: { rotulo: "Recebido no mês", tom: "feito" },
+// #642: o rotulo de cada etapa. #721: a cor e' a da propria etapa (inicio.css, --etapa-*), do azul claro da analise
+// ao azul escuro do protocolado, e o verde do recebido
+const ETAPAS: Record<ChaveEtapa, { rotulo: string }> = {
+  em_analise: { rotulo: "Em análise" },
+  boletim: { rotulo: "Boletim" },
+  nota: { rotulo: "Nota" },
+  protocolado: { rotulo: "Protocolado" },
+  recebido_mes: { rotulo: "Recebido no mês" },
 };
 
 const dias = (n: number) => contar(n, "dia", "dias");
 /** A quantidade da etapa: medicoes; no recebido, as notas com baixa no mes. */
 const quantos = (e: EtapaCiclo) => e.etapa === "recebido_mes" ? contar(e.quantidade, "nota", "notas") : contar(e.quantidade, "medição", "medições");
 
-/** Faixa do ciclo (#642): um trecho por etapa. O minimo de cada trecho e' o proprio conteudo (`min-content`: o valor
- *  inteiro numa linha, #659); a proporcao pelo valor vale para o espaco que sobra. Em container estreito a faixa vira
- *  lista vertical (inicio.css). A faixa e' desenho; quem usa leitor de tela le a tabela equivalente. */
-function FaixaCiclo({ etapas }: { etapas: EtapaCiclo[] }) {
-  const total = etapas.reduce((s, e) => s + Math.max(0, e.valor_centavos), 0);
-  const colunas = etapas.map(e =>
-    `minmax(min-content, ${total > 0 ? Math.round(100 * Math.max(0, e.valor_centavos) / total) : 1}fr)`).join(" ");
+/** Ciclo da medicao (#642, #721): uma etapa por linha, com a faixa na cor da etapa em cima. O comprimento da faixa e' a
+ *  fracao da etapa de maior valor (`--ini-etapa-fracao`); etapa com valor nunca fica sem faixa (minimo de 1%) e etapa
+ *  zerada nao tem faixa. A faixa e' desenho (o ::before da linha, em inicio.css); quem usa leitor de tela le a tabela
+ *  equivalente. */
+function CicloMedicao({ etapas, aParte }: { etapas: EtapaCiclo[]; aParte: PainelInicio["a_receber"]["a_parte"] }) {
+  const maior = Math.max(0, ...etapas.map(e => e.valor_centavos));
+  const fracao = (e: EtapaCiclo) => maior > 0 && e.valor_centavos > 0 ? Math.max(1, Math.round(100 * e.valor_centavos / maior)) : 0;
   return (
-    <section aria-labelledby="ini-ciclo" className="ini-painel ini-ciclo">
-      <h2 id="ini-ciclo">Ciclo da medição (cota da Lotufo)</h2>
-      <ol className="ini-faixa" aria-hidden="true" style={{ "--ini-faixa-colunas": colunas } as React.CSSProperties}>
+    <section aria-labelledby="ini-ciclo" className="cartao ini-painel ini-ciclo">
+      <div className="ini-painel__cab"><h2 id="ini-ciclo">Ciclo da medição</h2></div>
+      <ol className="ini-etapas" aria-hidden="true">
         {etapas.map(e => (
-          <li key={e.etapa} className={`ini-faixa__etapa ini-faixa__etapa--${ETAPAS[e.etapa].tom}`}>
-            <span className="ini-faixa__rotulo">{ETAPAS[e.etapa].rotulo}</span>
-            <span className="ini-faixa__valor">{brl(e.valor_centavos)}</span>
-            <span className="ini-faixa__conta">{quantos(e)}</span>
+          <li key={e.etapa} className={`ini-etapa ini-etapa--${e.etapa}`}
+            style={{ "--ini-etapa-fracao": `${fracao(e)}%` } as React.CSSProperties}>
+            <span className="ini-etapa__rotulo">{ETAPAS[e.etapa].rotulo}</span>
+            <span className="ini-etapa__valor">{brl(e.valor_centavos)}</span>
+            <span className="ini-etapa__qtd">{quantos(e)}</span>
             {e.mais_antigo_dias !== null && (
-              <span className="ini-faixa__conta">
+              <span className="ini-etapa__idade">
                 {e.mais_antigo_dias === 0 ? "mais antiga de hoje" : `mais antiga há ${dias(e.mais_antigo_dias)}`}</span>)}
           </li>
         ))}
       </ol>
+      {/* fora da etapa "Protocolado" e de todo total: o em aberto antigo e o que o RM deixou de informar */}
+      {aParte && <EmAbertoAParte anoInicial={aParte.ano_inicial} anterior={aParte.anterior_centavos}
+        semAtualizacao={aParte.sem_atualizacao_centavos} desde={aParte.sem_atualizacao_desde} />}
       {/* `sr-only` no div, nao na <table>: tabela ignora largura e overflow e alargava a pagina no celular (PR #676) */}
       <div className="sr-only"><table>
         <caption>Ciclo da medição por etapa, na cota da Lotufo</caption>
@@ -106,19 +123,19 @@ function curto(centavos: number): string {
   return centavos > 0 ? (centavos / 100).toLocaleString("pt-BR", { notation: "compact", maximumFractionDigits: 1 }) : "—";
 }
 
-/** Recebido em 12 meses (#652): uma barra por mes, a ultima e' o mes corrente; o tamanho de cada uma e' a fracao do
- *  maior mes (`--ini-rec-tamanho`). Em container estreito as barras deitam, um mes por linha (inicio.css). */
+/** Recebido em 12 meses (#652): uma barra de tinta por mes, a ultima e' o mes corrente; o tamanho de cada uma e' a
+ *  fracao do maior mes (`--ini-rec-tamanho`), com o valor curto logo acima dela (#721). Em painel estreito as barras
+ *  deitam, um mes por linha (inicio.css). */
 function Recebido12Meses({ meses }: { meses: MesRecebido[] }) {
   const maior = Math.max(0, ...meses.map(m => m.valor_centavos));
   return (
-    <section aria-labelledby="ini-recebido" className="ini-painel ini-recebido">
-      <h2 id="ini-recebido">Recebido em 12 meses (cota da Lotufo)</h2>
+    <section aria-labelledby="ini-recebido" className="cartao ini-painel ini-recebido">
+      <div className="ini-painel__cab"><h2 id="ini-recebido">Recebido em 12 meses</h2></div>
       <ol className="ini-rec" aria-hidden="true">
         {meses.map(m => (
           <li key={m.mes} className="ini-rec__mes"
             style={{ "--ini-rec-tamanho": `${maior > 0 ? Math.round(100 * Math.max(0, m.valor_centavos) / maior) : 0}%` } as React.CSSProperties}>
-            <span className="ini-rec__valor">{curto(m.valor_centavos)}</span>
-            <span className="ini-rec__trilho"><span className="ini-rec__coluna" /></span>
+            <span className="ini-rec__trilho"><span className="ini-rec__valor">{curto(m.valor_centavos)}</span><span className="ini-rec__coluna" /></span>
             <span className="ini-rec__rotulo">{fmtMesCurto(m.mes)}</span>
           </li>
         ))}
@@ -144,19 +161,28 @@ const LINHAS_PREVISAO: { chave: keyof PainelInicio["previsao"]; rotulo: string }
   { chave: "sem_previsao", rotulo: "Sem previsão" },
 ];
 
-/** Previsao de entrada (#652): o protocolado pela data esperada (protocolo + prazo do orgao). Cor da informacao: so' o
- *  atrasado, quando existe, e' critico (vermelho); o resto fica preto. */
+/** Previsao de entrada (#652, #721): o protocolado pela data esperada (protocolo + prazo do orgao), em extrato: a
+ *  chave de cor e o rotulo a' esquerda, o valor colado a' direita. Em cima, a faixa proporcional: um trecho por linha
+ *  que tem valor, na cor da chave dela (desenho; os numeros estao nas linhas). So' o atrasado, quando existe, e'
+ *  critico: texto no tom do critico e o simbolo da situacao; o resto fica em tinta. */
 function PrevisaoEntrada({ previsao }: { previsao: PainelInicio["previsao"] }) {
+  const total = LINHAS_PREVISAO.reduce((s, { chave }) => s + Math.max(0, previsao[chave].valor_centavos), 0);
   return (
-    <section aria-labelledby="ini-previsao" className="ini-painel ini-previsao">
-      <h2 id="ini-previsao">Previsão de entrada (cota da Lotufo)</h2>
+    <section aria-labelledby="ini-previsao" className="cartao ini-painel ini-previsao">
+      <div className="ini-painel__cab"><h2 id="ini-previsao">Previsão de entrada</h2></div>
+      {total > 0 && (
+        <div className="ini-previsao__faixa" aria-hidden="true">
+          {LINHAS_PREVISAO.filter(({ chave }) => previsao[chave].valor_centavos > 0).map(({ chave, rotulo }) =>
+            <span key={chave} className={`ini-previsao__seg ini-previsao__seg--${chave}`} title={rotulo}
+              style={{ flexGrow: previsao[chave].valor_centavos / total }} />)}
+        </div>)}
       <ul className="ini-previsao__linhas">
         {LINHAS_PREVISAO.map(({ chave, rotulo }) => {
           const g = previsao[chave];
           const critico = chave === "atrasado" && g.quantidade > 0;
           return (
-            <li key={chave} className={`ini-previsao__linha${critico ? " ini-previsao__linha--critico" : ""}`}>
-              <span className="ini-previsao__rotulo">{rotulo}</span>
+            <li key={chave} className={`ini-previsao__linha ini-previsao__linha--${chave}${critico ? " ini-previsao__linha--critico" : ""}`}>
+              <span className="ini-previsao__rotulo">{critico && <Glifo situacao="critico" />}{rotulo}</span>
               <span className="ini-previsao__valor">{brl(g.valor_centavos)}</span>
               <span className="ini-previsao__conta">{contar(g.quantidade, "medição", "medições")}</span>
             </li>);
@@ -167,7 +193,7 @@ function PrevisaoEntrada({ previsao }: { previsao: PainelInicio["previsao"] }) {
 }
 
 // #659: as etapas da matriz na ordem da legenda: do azul mais claro ao mais escuro, o verde do recebido e o vermelho
-// da protocolada alem do prazo
+// da protocolada alem do prazo, que leva tambem a marca "!" dentro da celula (#721; inicio.css)
 const ETAPAS_MATRIZ: { chave: EtapaMatriz; rotulo: string }[] = [
   { chave: "em_analise", rotulo: "Em análise" },
   { chave: "boletim", rotulo: "Boletim" },
@@ -184,8 +210,8 @@ const ROTULO_MATRIZ = Object.fromEntries(ETAPAS_MATRIZ.map(e => [e.chave, e.rotu
 function MatrizObras({ matriz }: { matriz: PainelInicio["matriz"] }) {
   const { competencias, grupos } = matriz;
   return (
-    <section aria-labelledby="ini-matriz" className="ini-painel ini-matriz">
-      <div className="ini-matriz__topo">
+    <section aria-labelledby="ini-matriz" className="cartao ini-painel ini-matriz">
+      <div className="ini-painel__cab">
         <h2 id="ini-matriz">Medições por obra e competência</h2>
         <ul className="ini-matriz__legenda" aria-label="Legenda das etapas">
           {ETAPAS_MATRIZ.map(e => <li key={e.chave}><span className={`ini-matriz__cor ini-matriz__cor--${e.chave}`} />{e.rotulo}</li>)}
@@ -235,9 +261,11 @@ function MatrizObras({ matriz }: { matriz: PainelInicio["matriz"] }) {
   );
 }
 
-// #666: as secoes da caixa, na ordem da tela Avisos; "Depois" (31 a 90 dias) fica so' la'. O tom e' a cor da
-// informacao: vencido = critico (vermelho); o que vence na semana ou no mes = vence em breve (ambar)
-const SECOES_DA_CAIXA: Partial<Record<Secao, "acao" | "atencao">> = { vencido: "acao", semana: "atencao", mes: "atencao" };
+// #666: as secoes da caixa, na ordem da tela Avisos; "Depois" (31 a 90 dias) fica so' la'. A situacao vem da secao (o
+// tempo), nao do `nivel` do aviso: vencido = critico; o que vence na semana ou no mes = vence em breve. #721: sao as
+// situacoes das pecas Contador e Selo, ditas direto. Nao passam por `situacaoDoNivel`: la' "acao" e' critico, e o
+// nome antigo daqui ("acao" no vencido, "atencao" no que vence) so' confundia.
+const SECOES_DA_CAIXA: Partial<Record<Secao, Situacao>> = { vencido: "critico", semana: "breve", mes: "breve" };
 const AVISOS_VISIVEIS = 3;
 
 /** O selo de dias do item: "há N dias" no vencido; "hoje" ou "em N dias" no que vence. */
@@ -246,14 +274,18 @@ function seloDeDias(a: Aviso, secao: Secao): string {
   return secao === "vencido" ? `há ${d}` : n === 0 ? "hoje" : `em ${d}`;
 }
 
-function ItemAviso({ a, secao, tom, ir }: { a: Aviso; secao: Secao; tom: "acao" | "atencao"; ir: Ir }) {
+function ItemAviso({ a, secao, situacao, ir }: { a: Aviso; secao: Secao; situacao: Situacao; ir: Ir }) {
   const d = destinoDoAviso(a);
-  // a obra (ou a empresa) abre a linha: a mensagem perde o "Nome: " do comeco, como na tela Avisos
+  // a obra (ou a empresa) abre o item, em destaque: a mensagem perde o "Nome: " do comeco, como na tela Avisos. Na tela
+  // a obra e a mensagem ficam em linhas separadas; o " · " entre as duas e' so' para o leitor de tela
   const quem = a.obra ?? a.entidade ?? "";
   const texto = semRSOrfao((a.obra ? semObra(a) : semEmpresa(a)).mensagem);
   const corpo = <>
-    <span className="ini-aviso__nome">{quem ? `${quem} · ${texto}` : texto}</span>
-    <span className={`ini-pilula ini-pilula--${tom}`}>{seloDeDias(a, secao)}</span>
+    <span className="ini-aviso__nome">
+      {quem && <><span className="ini-aviso__obra">{quem}</span><span className="sr-only"> · </span></>}
+      <span className="ini-aviso__msg">{texto}</span>
+    </span>
+    <Selo situacao={situacao}>{seloDeDias(a, secao)}</Selo>
   </>;
   return <li>{d ? <Link para={d.para} busca={d.busca} secao={d.secao} ir={ir} className="ini-aviso__linha">{corpo}</Link>
     : <span className="ini-aviso__linha">{corpo}</span>}</li>;
@@ -265,29 +297,30 @@ function CaixaAvisos({ avisos, ir }: { avisos: Aviso[] | null | undefined; ir: I
   const secoes = porSecao(daAgenda(avisos ?? [])).filter(s => SECOES_DA_CAIXA[s.id]);
   const total = secoes.reduce((n, s) => n + s.itens.length, 0);
   return (
-    <aside aria-labelledby="ini-avisos" className="ini-painel ini-avisos">
-      <header className="ini-avisos__topo">
+    <aside aria-labelledby="ini-avisos" className="cartao ini-painel ini-avisos">
+      <header className="ini-painel__cab">
         <h2 id="ini-avisos">Avisos importantes</h2>
-        {avisos && <span className="ini-aviso__conta ini-avisos__total" aria-label={contar(total, "aviso", "avisos")}>{total.toLocaleString("pt-BR")}</span>}
+        {avisos && <Contador rotulo={contar(total, "aviso", "avisos")}>{total.toLocaleString("pt-BR")}</Contador>}
         <Link para={{ tela: "avisos" }} ir={ir} className="ini-ver-todos" aria-label="Ver todos os avisos">Ver todos</Link>
       </header>
       {avisos === undefined && <p className="ini-carregando">Carregando…</p>}
-      {avisos === null && <p className="erro" role="alert">Não foi possível verificar os avisos. Recarregue a página para tentar de novo.</p>}
+      {avisos === null && <Falha>Não foi possível verificar os avisos. Recarregue a página para tentar de novo.</Falha>}
       {avisos && total === 0 && <p className="ini-vazio">Nenhum aviso.</p>}
       {avisos && total > 0 && (
         <div className="ini-avisos__secoes">
           {secoes.map(s => {
-            const tom = SECOES_DA_CAIXA[s.id] ?? "atencao", id = `ini-av-${s.id}`;
+            const situacao = SECOES_DA_CAIXA[s.id] ?? "breve", id = `ini-av-${s.id}`;
             return (
-              <section key={s.id} aria-labelledby={id} className={`ini-aviso ini-aviso--${s.itens.length > 0 ? tom : "neutro"}`}>
+              <section key={s.id} aria-labelledby={id} className="ini-aviso">
                 <header className="ini-aviso__topo">
                   <h3 id={id}>{s.rotulo}</h3>
-                  <span className="ini-aviso__conta">{s.itens.length.toLocaleString("pt-BR")}</span>
+                  {/* secao sem aviso: contador neutro, sem o simbolo da situacao */}
+                  <Contador situacao={s.itens.length > 0 ? situacao : undefined}>{s.itens.length.toLocaleString("pt-BR")}</Contador>
                 </header>
                 {s.itens.length > 0 && (
                   <ul className="ini-aviso__lista">
                     {s.itens.slice(0, AVISOS_VISIVEIS).map((a, i) =>
-                      <ItemAviso key={`${a.tipo}-${a.contrato_id}-${a.entidade_id ?? ""}-${a.medicao_id ?? ""}-${i}`} a={a} secao={s.id} tom={tom} ir={ir} />)}
+                      <ItemAviso key={`${a.tipo}-${a.contrato_id}-${a.entidade_id ?? ""}-${a.medicao_id ?? ""}-${i}`} a={a} secao={s.id} situacao={situacao} ir={ir} />)}
                   </ul>)}
               </section>);
           })}
@@ -319,7 +352,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
     return (
       <div className="ini">
         {titulo}
-        {erro ? <p className="erro" role="alert">Não foi possível carregar o início: {erro}</p>
+        {erro ? <Falha>Não foi possível carregar o início: {erro}</Falha>
           : <p className="ini-carregando">Carregando…</p>}
       </div>
     );
@@ -329,27 +362,31 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
 
   return (
     <div className="ini">
-      <div className="ini-topo">
-        {titulo}
-        <LegendaCor />
+      <div className="ini-grade">
+        <div className="ini-saudacao">
+          {titulo}
+          <LegendaCor />
+        </div>
+        <section aria-label="Números do mês" className="ini-numeros">
+          <dl className="ini-numeros__lista">
+            <div className="ini-numero">
+              <dt className="ini-numero__rotulo">Notas fiscais protocoladas em {fmtMesExtenso(p.hoje.slice(0, 7))}</dt>
+              <dd className="ini-numero__valor">{brl(p.notas_mes.valor_centavos)}</dd>
+            </div>
+            <div className="ini-numero">
+              <dt className="ini-numero__rotulo">Medido em {fmtMesExtenso(m.competencia)}</dt>
+              <dd className="ini-numero__valor">{brl(m.valor_centavos)}</dd>
+            </div>
+          </dl>
+        </section>
+        {/* a base dos valores, dita uma vez: vale para os tres paineis que vem a seguir */}
+        <div className="ini-cota"><h2>Cota da Lotufo</h2></div>
+        <CicloMedicao etapas={p.ciclo} aParte={p.a_receber.a_parte} />
+        <PrevisaoEntrada previsao={p.previsao} />
+        <Recebido12Meses meses={p.recebido_12m} />
+        <CaixaAvisos avisos={avisos} ir={ir} />
+        <MatrizObras matriz={p.matriz} />
       </div>
-      <FaixaCiclo etapas={p.ciclo} />
-      <Recebido12Meses meses={p.recebido_12m} />
-      <PrevisaoEntrada previsao={p.previsao} />
-      <MatrizObras matriz={p.matriz} />
-
-      <section aria-label="Números do mês" className="ini-numeros">
-        <div className="ini-numero">
-          <span className="ini-numero__rotulo">Notas fiscais protocoladas em {fmtMesExtenso(p.hoje.slice(0, 7))}</span>
-          <span className="ini-numero__valor">{brl(p.notas_mes.valor_centavos)}</span>
-        </div>
-        <div className="ini-numero">
-          <span className="ini-numero__rotulo">Medido em {fmtMesExtenso(m.competencia)}</span>
-          <span className="ini-numero__valor">{brl(m.valor_centavos)}</span>
-        </div>
-      </section>
-
-      <CaixaAvisos avisos={avisos} ir={ir} />
     </div>
   );
 }

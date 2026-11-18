@@ -2,7 +2,7 @@ import { useRascunho } from "./rascunho";
 import { useEffect, useRef, useState } from "react";
 import CaixaAviso from "./CaixaAviso";
 import { api, mensagemDeErro } from "./api";
-import { IconeAlerta, IconeMais } from "./icones";
+import { IconeMais } from "./icones";
 import { brl } from "./Medicoes";
 // A data de publicacao da versao e' decisao de CALENDARIO: vale no fuso do escritorio (America/Cuiaba),
 // nao no do navegador nem no UTC em que o carimbo esta gravado. Ver tempo.ts.
@@ -10,6 +10,7 @@ import { brl } from "./Medicoes";
 import { fmtCompetencia as competenciaBR, fmtData, fmtDataPura } from "./tempo";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
+import Falha from "./Falha";
 
 type ItemVersao = { competencia: string; valor_previsto_centavos: number };
 type Versao = { numero: number; criado_em: string; origem: string; itens: ItemVersao[] };
@@ -55,6 +56,9 @@ type Ponto = {
 type Saldo = {
   vigente_centavos: number; vigente_execucao_centavos?: number; reajuste_contratado_centavos?: number;
   medido_centavos: number; saldo_centavos: number; formula: string;
+  // a cota da empresa no contrato: em consorcio (menos de 100%) os numeros daqui sao o valor cheio, e o topo da
+  // pagina da obra mostra o mesmo saldo na cota
+  percentual_bp?: number;
 };
 type Curva = { curva: Ponto[]; saldo: Saldo };
 
@@ -140,9 +144,13 @@ function temMedicao(p: Ponto): boolean {
 
 /* ---------------------------------------------------------------- componente */
 
+// Quantos meses a Evolucao mensal mostra antes do "Ver os meses anteriores".
+const MESES_RECENTES = 12;
+
 export default function Cronograma({ contratoId, podeEditar }:
     { contratoId: number; podeEditar: boolean }) {
   const [versao, setVersao] = useState<Versao | null>(null);
+  const [verTodos, setVerTodos] = useState(false);   // a Evolucao mensal inteira, e nao so' os ultimos meses
   const [versoes, setVersoes] = useState<VersaoLista[]>([]);
   const [dados, setDados] = useState<Curva | null>(null);
   const [texto, setTexto] = useState("");
@@ -266,17 +274,19 @@ export default function Cronograma({ contratoId, podeEditar }:
     projeto: a.projeto + p.medido_projeto_centavos,
   }), { pedido: 0, aprovado: 0, reajuste: 0, projeto: 0 });
 
+  // a obra antiga tem dezenas de meses: os ultimos doze e, a um clique, os anteriores; o total e' sempre de todos
+  const anteriores = verTodos ? 0 : Math.max(0, pontos.length - MESES_RECENTES);
+
   return (
     <>
     {/* issue #647: o que a obra pediu e o que o orgao aprovou, mes a mes; aberta, sem o previsto */}
     <section className="cartao" aria-labelledby="titulo-evolucao-mensal" id="evolucao-mensal">
       <div className="cartao__cabeca">
         <h2 className="cartao__titulo" id="titulo-evolucao-mensal">Evolução mensal</h2>
+        {saldo && (saldo.percentual_bp ?? 10000) < 10000 && <span className="cartao__dica">valor cheio do consórcio</span>}
       </div>
 
-      {erro && <div className="cartao__corpo"><p className="erro" role="alert">
-        <IconeAlerta className="icone icone--p" />{erro}
-      </p></div>}
+      {erro && <div className="cartao__corpo"><Falha>{erro}</Falha></div>}
 
       {carregando && <div className="vazio"><p>Carregando…</p></div>}
 
@@ -329,7 +339,16 @@ export default function Cronograma({ contratoId, podeEditar }:
               </tr>
             </thead>
             <tbody>
-              {pontos.map((p, i) => {
+              {anteriores > 0 && (
+                <tr>
+                  <td colSpan={6}>
+                    <button type="button" className="btn btn--pequeno" onClick={() => setVerTodos(true)}>
+                      {anteriores === 1 ? "Ver o mês anterior" : `Ver os ${anteriores} meses anteriores`}
+                    </button>
+                  </td>
+                </tr>
+              )}
+              {pontos.slice(anteriores).map((p, i) => {
                 const semValor = (p.pedido_execucao_centavos ?? 0) === 0 && (p.aprovado_execucao_centavos ?? 0) === 0
                   && p.medido_reajuste_centavos === 0 && p.medido_projeto_centavos === 0;
                 const pend = (p.atestado_pendente && p.medido_execucao_centavos > 0) || pendenteOutras(p);
@@ -341,19 +360,9 @@ export default function Cronograma({ contratoId, podeEditar }:
                     <td className="col-num dinheiro num">{valorOuTraco(p.medido_reajuste_centavos)}</td>
                     <td className="col-num dinheiro num">{valorOuTraco(p.medido_projeto_centavos)}</td>
                     <td>
-                      {semValor ? (
-                        <span className="estado estado--aberto">
-                          <span className="estado__ponto" aria-hidden="true" />em aberto
-                        </span>
-                      ) : pend ? (
-                        <span className="estado estado--provisorio">
-                          <span className="estado__ponto" aria-hidden="true" />provisório
-                        </span>
-                      ) : (
-                        <span className="estado estado--atestado">
-                          <span className="estado__ponto" aria-hidden="true" />atestado
-                        </span>
-                      )}
+                      {/* a situacao da competencia, com glifo e palavra; em aberto fica neutra */}
+                      {/* atestado e' o estado comum (a obra antiga tem dezenas de meses assim): so' a palavra */}
+                      {semValor ? <Selo>em aberto</Selo> : pend ? <Selo situacao="andamento">provisório</Selo> : "Atestado"}
                     </td>
                   </tr>
                 );
@@ -405,7 +414,7 @@ export default function Cronograma({ contratoId, podeEditar }:
             <tbody>
               {versoes.map((v, i) => (
                 <tr key={v.numero} className={`linha${i % 2 === 1 ? " par" : ""}`}>
-                  <td className="forte num">{v.numero}{v.vigente && <>{" "}<Selo classe="selo--ok">Vigente</Selo></>}
+                  <td className="forte num">{v.numero}{v.vigente && <>{" "}<Selo situacao="feito">Vigente</Selo></>}
                     {v.superada_em && <>{" "}<Selo>Superada em {fmtData(v.superada_em)}</Selo></>}</td>
                   <td className="num">{v.data_documento ? fmtDataPura(v.data_documento) : fmtData(v.criado_em)}</td>
                   <td>{documentoDaVersao(v)}</td>

@@ -385,6 +385,98 @@ def test_certidao_vencida_bloqueia_com_409(api):
     assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
 
 
+def test_arquivo_do_envio_que_sumiu_do_disco_vira_erro_tratado(api):
+    """O arquivo de um anexo (a nota) nao esta' mais na pasta de dados: a previa nao monta. Antes era 500
+    (FileNotFoundError); agora e' um erro tratado, com a frase que a tela mostra."""
+    cl, c, ids = api
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"], ids["sinfra_reaj"]]}).json()["protocolo_id"]
+    assert cl.get(f"/api/notas/envio/{pid}").status_code == 200
+    rel = c.execute("SELECT arquivo FROM medicao_documentos WHERE medicao_id=? AND tipo_doc='nfs'",
+                    (ids["sinfra_exec"],)).fetchone()[0]
+    arquivos.caminho_seguro(rel).unlink()
+    r = cl.get(f"/api/notas/envio/{pid}")
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "Um arquivo deste envio não está mais disponível no servidor."
+
+
+def test_certidao_nunca_cadastrada_nao_trava_o_envio_e_a_vencida_trava(api):
+    """A situacao na tela segue o efeito (docs/adr/0002): a certidao exigida e nunca cadastrada e' documento faltando,
+    o envio sai com a confirmacao da lista do que falta; so' a vencida trava. O checklist diz qual e' qual
+    (`nunca_cadastrada`), e a tela mostra a primeira em atencao e a segunda em critico."""
+    cl, c, ids = api
+    c.execute("DELETE FROM certidoes WHERE tipo_id=(SELECT id FROM certidao_tipos WHERE chave='federal')")
+    c.commit()
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"], ids["sinfra_reaj"]]}).json()["protocolo_id"]
+    itens = cl.get(f"/api/contratos/{ids['sinfra']}/checklist-protocolo?natureza=execucao").json()["itens"]
+    federal = next(i for i in itens if i["chave"] == "federal")
+    assert (federal["situacao"], federal["nunca_cadastrada"]) == ("pendente", True)
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    assert d["bloqueio"] is None and any("federal" in p.lower() for p in d["pendencias"])
+    assert cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d)).status_code == 422       # pede a confirmacao
+    assert cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d, confirmadas=d["pendencias"])).status_code == 200
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 1
+
+
+def _nada_saiu_nem_foi_gravado(c, ids, pid, tmp_path):
+    assert list((tmp_path / "sim").rglob("*.json")) == []          # nada no simulador do e-mail
+    assert c.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+    assert c.execute("SELECT COUNT(*) FROM envio_medicoes").fetchone()[0] == 0
+    assert c.execute("SELECT COUNT(*) FROM medicao_protocolos").fetchone()[0] == 0
+    p = c.execute("SELECT situacao, envio_id, envio_reservado_em FROM protocolos WHERE id=?", (pid,)).fetchone()
+    assert (p["situacao"], p["envio_id"], p["envio_reservado_em"]) == ("rascunho", None, None)
+    assert {r[0] for r in c.execute("SELECT estado FROM medicoes WHERE id IN (?,?)",
+                                    (ids["sinfra_exec"], ids["sinfra_reaj"]))} == {"nota_emitida"}
+
+
+def test_envio_com_anexo_ausente_do_disco_e_recusado_inteiro(api, tmp_path):
+    """O envio nao se desfaz: com um anexo fora do disco, nenhum e-mail sai (nem parcial), nada e' gravado e nenhuma
+    reserva fica presa. A leitura dos anexos vem antes da reserva; a resposta e' a frase tratada, nao 500. Com o
+    arquivo de volta, o mesmo envio sai."""
+    cl, c, ids = api
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"], ids["sinfra_reaj"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    rel = c.execute("SELECT arquivo FROM medicao_documentos WHERE medicao_id=? AND tipo_doc='nfs'",
+                    (ids["sinfra_exec"],)).fetchone()[0]
+    caminho = arquivos.caminho_seguro(rel)
+    guardado = caminho.read_bytes()
+    caminho.unlink()
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d))
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == protocolo.ARQUIVO_AUSENTE
+    _nada_saiu_nem_foi_gravado(c, ids, pid, tmp_path)
+    r = cl.post("/api/protocolos/envio", json={"protocolo_ids": [pid], **_corpo(d)})       # a outra rota de envio
+    assert r.status_code == 409 and r.json()["detail"] == protocolo.ARQUIVO_AUSENTE, r.text
+    _nada_saiu_nem_foi_gravado(c, ids, pid, tmp_path)
+    caminho.write_bytes(guardado)
+    assert cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d)).status_code == 200
+    assert len(list((tmp_path / "sim" / "enviados").glob("*.json"))) == 1
+
+
+def test_anexo_que_some_depois_da_reserva_solta_a_reserva_e_nao_envia(api, tmp_path, monkeypatch):
+    """O arquivo some entre a previa do envio e a segunda leitura dos anexos, ja' com o protocolo reservado: a
+    reserva e' solta antes de qualquer e-mail, nada sai e a resposta e' a mesma frase."""
+    cl, c, ids = api
+    pid = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
+                                                    "medicao_ids": [ids["sinfra_exec"], ids["sinfra_reaj"]]}).json()["protocolo_id"]
+    d = cl.get(f"/api/notas/envio/{pid}").json()
+    original, leituras = protocolo._anexos_rotulados, []
+
+    def some_na_segunda_leitura(conn, p, hoje):
+        leituras.append(p["id"])
+        if len(leituras) > 1:           # a primeira e' a da previa, antes da reserva
+            raise FileNotFoundError("arquivo")
+        return original(conn, p, hoje)
+
+    monkeypatch.setattr(protocolo, "_anexos_rotulados", some_na_segunda_leitura)
+    r = cl.post(f"/api/notas/envio/{pid}/enviar", json=_corpo(d))
+    assert r.status_code == 409 and r.json()["detail"] == protocolo.ARQUIVO_AUSENTE, r.text
+    assert len(leituras) == 2
+    _nada_saiu_nem_foi_gravado(c, ids, pid, tmp_path)
+
+
 def test_envio_pelo_simulador_vira_aguardando_pagamento(api, tmp_path):
     cl, c, ids = api
     r = cl.post("/api/notas/envio/iniciar", json={"contrato_id": ids["sinfra"],
@@ -2364,3 +2456,41 @@ def test_reajuste_absorvido_nao_e_oferecido_como_irma(api):
     familia, _, o = protocolo._orgao(c, contrato)
     ms = [dict(c.execute("SELECT * FROM medicoes WHERE id=?", (ex,)).fetchone())]
     assert notas_envio._irmas(c, contrato, familia, o, ms, HOJE) == []
+
+
+def test_envio_que_junta_diz_o_numero_das_notas_e_de_qual_nota_falta_o_pdf(svc):
+    """Visto no passo "Envio da nota" sobre o volume real: as notas saiam so' como "NF", sem numero, e o cartao dizia
+    "Falta a nota fiscal" enquanto o passo Notas contava as duas notas do reajuste. O PDF que a leitura nao entendeu
+    leva o numero da nota ligada a ele, ou fica sem numero (a tela mostra o arquivo); a medicao sem PDF lista as notas
+    ja' ligadas a ela, uma a uma, com o numero como a nota o traz."""
+    c, ids = svc
+    ex, rj = ids["sinfra_exec"], ids["sinfra_reaj"]
+    c.execute("UPDATE medicao_documentos SET numero_nf=NULL WHERE medicao_id=?", (ex,))        # PDF sem leitura
+    c.execute("DELETE FROM medicao_documentos WHERE medicao_id=?", (rj,))                      # reajuste: sem PDF
+    for k, (numero, valor) in enumerate((("000009019", 700_001), ("000009024", 299_999))):   # mas com as notas do RM
+        nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv) "
+                        "VALUES (1, ?, ?, '2026-09-16', ?, 'ativa', '2.2.01')", (9100 + k, numero, valor)).lastrowid
+        c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
+                  "VALUES (?, ?, ?, 'manual', 't')", (rj, nid, valor))
+    c.commit()
+    sinfra, = _por_contrato(notas_envio.a_enviar(c, HOJE), ids["sinfra"])
+    assert [(n["numero"], n["natureza"], n["arquivo"]) for n in sinfra["notas"]] == [(None, "execucao", f"NFS 23{ex:02d}.pdf")]
+    item = next(i for i in sinfra["itens"] if i["chave"] == "notas")
+    assert item["estado"] == "falta" and sinfra["situacao"] == "pendente"
+    assert item["sem_pdf"] == [
+        {"natureza": "reajuste", "medicao_id": rj, "numero": "9019", "valor_centavos": 700_001},
+        {"natureza": "reajuste", "medicao_id": rj, "numero": "9024", "valor_centavos": 299_999}]
+    # o PDF ligado a uma nota (a leitura manual, ou a nota lida do proprio PDF) leva o numero dela
+    doc = c.execute("SELECT id FROM medicao_documentos WHERE medicao_id=?", (ex,)).fetchone()[0]
+    c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv, documento_id) "
+              "VALUES (1, 9200, '000009023', '2026-09-15', 1000000, 'ativa', '2.2.01', ?)", (doc,))
+    # sem nota ligada nem PDF: uma linha so', sem numero (falta a nota mesmo)
+    c.execute("UPDATE nf_alocacoes SET desfeita_em='2026-09-17' WHERE medicao_id=?", (rj,))
+    c.commit()
+    sinfra, = _por_contrato(notas_envio.a_enviar(c, HOJE), ids["sinfra"])
+    assert [n["numero"] for n in sinfra["notas"]] == ["9023"]
+    assert next(i for i in sinfra["itens"] if i["chave"] == "notas")["sem_pdf"] == [
+        {"natureza": "reajuste", "medicao_id": rj, "numero": None, "valor_centavos": None}]
+    # com o PDF de todas, nada falta
+    pronto, = _por_contrato(notas_envio.a_enviar(c, HOJE), ids["vg"])
+    assert next(i for i in pronto["itens"] if i["chave"] == "notas")["sem_pdf"] == []

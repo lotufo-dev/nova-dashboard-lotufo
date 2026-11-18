@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from app import arquivos, auditoria, cobranca_orgao, contratos, cronograma, db, dinheiro, oficios, reajuste, tempo
-from app.cadastro_arquivos import (NATUREZAS, TIPOS_ADITIVO, TIPOS_COM_NATUREZA, _corretor_de_valor,
+from app.cadastro_arquivos import (NATUREZAS, STATUS_FINAIS, TIPOS_ADITIVO, TIPOS_COM_NATUREZA, _corretor_de_valor,
                                    _reajuste_com_valor, competencias_do_apostilamento)
 
 
@@ -203,9 +203,12 @@ def _data_br(iso: str | None) -> str:
 
 # status do cadastro -> contratos.estado. "em_encerramento" nao e' estado do banco: e'
 # 'ativo' com encerramento_iniciado_em preenchido (migracao 018).
-_ESTADO = {"ativo": "ativo", "suspenso": "suspenso", "em_encerramento": "ativo", "encerrado": "encerrado"}
+_ESTADO = {"ativo": "ativo", "suspenso": "suspenso", "em_encerramento": "ativo", "encerrado": "encerrado",
+           "rescindido": "rescindido"}
 _EVENTO = {("ativo", "suspenso"): "suspensao", ("suspenso", "ativo"): "retomada",
-           ("ativo", "encerrado"): "encerramento", ("suspenso", "encerrado"): "encerramento"}
+           ("ativo", "encerrado"): "encerramento", ("suspenso", "encerrado"): "encerramento",
+           ("ativo", "rescindido"): "rescisao", ("suspenso", "rescindido"): "rescisao"}
+_ORIGEM_EVENTO = "Cadastro versionado"
 _CAMPOS_CONTRATO = ("nome_curto", "orgao", "orgao_id", "entidade_id", "objeto", "municipio", "lei", "cno",
                     "numero_processo", "centro_custo_rm", "valor_original_centavos",
                     "percentual_direito_bp", "execucao_inicio", "execucao_fim", "vigencia_inicio",
@@ -214,7 +217,7 @@ _CAMPOS_CONTRATO = ("nome_curto", "orgao", "orgao_id", "entidade_id", "objeto", 
                     "estado", "documentos", "objeto_completo", "cno_arquivo", "folga_vigencia_dias",
                     "centros_custo_anteriores_rm", "objeto_carta", "garantia_apolice", "garantia_vigencia_fim",
                     "garantia_arquivo", "indice_reajuste", "pecas_no_oficio", "passos_medicao",
-                    "tipos_cobranca_extras_rm")
+                    "tipos_cobranca_extras_rm", "centro_custo_empresa_rm")
 _CAMPOS_FISCAL = ("cargo", "tratamento", "portaria")
 
 
@@ -280,6 +283,26 @@ def _indice_das_bases(bases: list[dict]) -> str | None:
                      for d in sorted(bases, key=lambda d: d["mes"]))
 
 
+def _data_do_fim(conn, usuario_id, cid: int, c: dict) -> bool:
+    """A data do encerramento (ou da rescisao) declarada em `status_desde` vira o evento que a pagina da obra le em
+    "encerrada desde" (`contratos._status_desde`), inclusive na obra que ja' entra encerrada, que nao passa por
+    transicao de estado. Evento gravado nao muda: a data igual a' do evento que vale nao grava nada (reaplicar nao
+    duplica); a data diferente entra como evento novo, que diz a que corrige e passa a valer. Sem a data, nada."""
+    if c["status"] not in STATUS_FINAIS or not c["status_desde"]:
+        return False
+    tipo = contratos.EVENTO_POR_ESTADO[c["status"]]
+    antes = contratos.data_do_evento_de_estado(conn, cid, tipo)
+    if antes == c["status_desde"]:
+        return False
+    obs = _ORIGEM_EVENTO if antes is None else f"{_ORIGEM_EVENTO}: corrige a data anterior ({antes})"
+    conn.execute("INSERT INTO contrato_eventos (contrato_id, tipo, data, observacao) VALUES (?,?,?,?)",
+                 (cid, tipo, c["status_desde"], obs))
+    auditoria.registrar(conn, usuario_id, "cadastro.contrato_evento", "contrato", cid,
+                        None if antes is None else {"tipo": tipo, "data": antes},
+                        {"tipo": tipo, "data": c["status_desde"]})
+    return True
+
+
 def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
     nome_orgao = conn.execute("SELECT nome FROM orgaos WHERE id=?", (ids_orgao[c["orgao"]],)).fetchone()[0]
     ja = conn.execute("SELECT * FROM contratos WHERE numero_instrumento=?",
@@ -289,7 +312,7 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
         "SELECT 1 FROM medicoes WHERE contrato_id=? AND final=1 LIMIT 1", (ja["id"],)).fetchone() is not None
     if c["status"] == "em_encerramento":
         enc = c["status_desde"]
-    elif ja is not None and (c["status"] == "encerrado" or tem_final):
+    elif ja is not None and (c["status"] in STATUS_FINAIS or tem_final):
         enc = ja["encerramento_iniciado_em"]
         if tem_final and c["status"] == "ativo":
             rel["avisos"].append(f"{c['nome_curto']}: medição final marcada na operação; atualize o YAML "
@@ -327,7 +350,9 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
             "passos_medicao": None if c.get("passos_medicao") is None else _json(c["passos_medicao"]),
             # docs/adr/0015: tipos de movimento do RM que so' nesta obra tambem sao cobranca ao orgao; sem nenhum, NULL
             "tipos_cobranca_extras_rm": _json(c["tipos_cobranca_extras_rm"])
-            if c.get("tipos_cobranca_extras_rm") else None}
+            if c.get("tipos_cobranca_extras_rm") else None,
+            # docs/adr/0005: o centro de custo da propria empresa para o contrato de consorcio; sem a chave, NULL
+            "centro_custo_empresa_rm": c.get("centro_custo_empresa_rm")}
     mudou = False
     # A troca dos tipos de cobranca muda o a receber, o faturado e o vinculo das notas da obra: o relatorio (e o
     # ensaio) diz o antes e o depois ao lado do nome, em vez de so' "alterado".
@@ -370,9 +395,11 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
                 conn.execute("INSERT INTO contrato_eventos (contrato_id, tipo, data, observacao) "
                              "VALUES (?,?,?,?)",
                              (cid, tipo, c["status_desde"] or tempo.hoje_local().isoformat(),
-                              "Cadastro versionado"))
+                              _ORIGEM_EVENTO))
             mudou = True
             auditoria.registrar(conn, usuario_id, "cadastro.contrato", "contrato", cid, antes, depois)
+    if _data_do_fim(conn, usuario_id, cid, c):
+        mudou = True
 
     # Datas-base: o cadastro e' a verdade (configuracao, nao historico financeiro).
     atuais = {r["mes"]: {"indice": r["indice"], "aplica_a": r["aplica_a"]} for r in conn.execute(
@@ -386,15 +413,34 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
         auditoria.registrar(conn, usuario_id, "cadastro.datas_base", "contrato", cid, atuais, desejadas)
 
     # Fiscais: historico. So' acrescenta; o fiscal vigente e' o de `desde` mais recente.
+    # O e-mail e' opcional (migracao 094): sem ele, a linha e' a de mesmo nome e data, e o e-mail fica nulo.
     for f in c["fiscais"]:
-        cur = conn.execute("INSERT OR IGNORE INTO contrato_fiscais (contrato_id, nome, email, desde) "
-                           "VALUES (?,?,?,?)", (cid, f["nome"], f["email"], f["desde"]))
-        if cur.rowcount:
+        onde, args = ("email=?", (cid, f["email"], f["desde"])) if f["email"] is not None else \
+            ("email IS NULL AND nome=?", (cid, f["nome"], f["desde"]))
+        sql_linha = f"SELECT id, cargo, tratamento, portaria FROM contrato_fiscais WHERE contrato_id=? AND {onde} AND desde=?"
+        if conn.execute(sql_linha, args).fetchone() is None:
+            # O e-mail entrou ou saiu do cadastro: a linha do mesmo fiscal (nome e data) e' corrigida, em vez de o
+            # fiscal aparecer duas vezes. Sai o endereco generico do orgao que so' preenchia o campo; entra o que
+            # um documento do orgao passou a provar. Endereco que outra linha do cadastro usa nao e' mexido.
+            emails_do_cadastro = {x["email"] for x in c["fiscais"] if x["desde"] == f["desde"] and x["email"]}
+            outra = None
+            if f["nome"].strip():
+                outra = next((r for r in conn.execute(
+                    "SELECT id, email FROM contrato_fiscais WHERE contrato_id=? AND nome=? AND desde=? ORDER BY id",
+                    (cid, f["nome"], f["desde"]))
+                    if (r["email"] is None) != (f["email"] is None) and r["email"] not in emails_do_cadastro), None)
+            if outra is not None:
+                conn.execute("UPDATE contrato_fiscais SET email=? WHERE id=?", (f["email"], outra["id"]))
+                auditoria.registrar(conn, usuario_id, "cadastro.fiscal", "contrato", cid,
+                                    {"nome": f["nome"], "desde": f["desde"], "email": outra["email"]},
+                                    {"nome": f["nome"], "desde": f["desde"], "email": f["email"]})
+            else:
+                conn.execute("INSERT INTO contrato_fiscais (contrato_id, nome, email, desde) VALUES (?,?,?,?)",
+                             (cid, f["nome"], f["email"], f["desde"]))
+                auditoria.registrar(conn, usuario_id, "cadastro.fiscal", "contrato", cid, None, f)
             mudou = True
-            auditoria.registrar(conn, usuario_id, "cadastro.fiscal", "contrato", cid, None, f)
         # Bloco 5: cargo, tratamento e portaria sao descricao do fiscal (vao na carta) e podem ser corrigidos.
-        linha = conn.execute("SELECT id, cargo, tratamento, portaria FROM contrato_fiscais "
-                             "WHERE contrato_id=? AND email=? AND desde=?", (cid, f["email"], f["desde"])).fetchone()
+        linha = conn.execute(sql_linha, args).fetchone()
         antes_f = {k: linha[k] for k in _CAMPOS_FISCAL}
         depois_f = {k: f.get(k) for k in _CAMPOS_FISCAL}
         if antes_f != depois_f:

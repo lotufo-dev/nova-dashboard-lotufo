@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import Alertas, { avisosDaObra, type Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
-import ExecucaoContrato from "./ExecucaoContrato";
-import FichaObra, { RitmoEPrazo, type Ficha } from "./FichaObra";
-import { IconeAlerta, IconeVoltar } from "./icones";
+import FichaObra, { MedicoesAgora, PrazoDaObra, type Ficha } from "./FichaObra";
+import { IconeVoltar } from "./icones";
 import LegendaCor from "./LegendaCor";
 import type { Usuario } from "./Login";
 import IniciarProxima from "./IniciarProxima";
@@ -17,6 +16,9 @@ import { Link } from "./Link";
 import { Abas, destinoDeHref, Migalhas, VoltarOrigem } from "./Topo";
 import { baseDosValores } from "./formato";
 import Selo from "./Selo";
+import { situacaoDoNivel } from "./situacao";
+import "./obra.css";
+import Falha from "./Falha";
 
 // Bloco 6 (spec §10.3): cabecalho da obra, montado no servidor (`contratos.cabecalho`).
 type Cabecalho = {
@@ -26,7 +28,9 @@ type Cabecalho = {
   execucao_inicio?: string | null; vigencia_inicio?: string | null;
   execucao_fim: string | null; dias_execucao: number | null; vigencia_fim: string | null; dias_vigencia: number | null;
   execucao_sem_prazo?: boolean;      // #662: execucao registrada vencida e aditivo posterior so' de vigencia
+  nivel_execucao?: "critico" | "atencao" | "normal"; nivel_vigencia?: "critico" | "atencao" | "normal";   // `prazos.situacao` no servidor
   status: StatusObra;
+  status_desde?: string | null; paralisada_desde?: string | null;   // desde quando a obra esta' parada ou encerrada
   sem_fluxo_medicao?: boolean;       // #660: `passos_medicao: []` no cadastro: a obra não inicia medição
 };
 
@@ -35,8 +39,8 @@ export type StatusObra = "ativo" | "suspenso" | "em_encerramento" | "encerrado" 
 export const STATUS: Record<StatusObra, { rotulo: string; classe: string }> = {
   // Ativo e' o normal da carteira: neutro. Verde e' "concluido/recebido" (DESIGN.md › Colors) e 19
   // selos verdes abafavam os poucos que pedem atencao.
-  ativo: { rotulo: "Ativo", classe: "" }, suspenso: { rotulo: "Suspenso", classe: "selo--atencao" },
-  em_encerramento: { rotulo: "Em encerramento", classe: "selo--atencao" },
+  ativo: { rotulo: "Ativo", classe: "" }, suspenso: { rotulo: "Suspenso", classe: "breve" },
+  em_encerramento: { rotulo: "Em encerramento", classe: "breve" },
   encerrado: { rotulo: "Encerrado", classe: "" }, rescindido: { rotulo: "Rescindido", classe: "" },
 };
 
@@ -128,7 +132,7 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
 
   return (
     <>
-      <header className="topbar topbar--detalhe">
+      <header className="topbar topbar--detalhe topbar--obra">
         <div className="topbar__linha topbar__linha--quebra">
           <div className="topbar__trilha">
             <Link className="btn--voltar" para={lista.para} busca={lista.busca}>
@@ -141,18 +145,17 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
               ...(c ? [{ rotulo: c.orgao, para: { tela: "obras" as const }, busca: { orgao: c.orgao }, fixa: true }] : []),
               { rotulo: c?.obra ?? "Obra" }]} />
           </div>
-          <LegendaCor />
         </div>
         <div className="topbar__linha topbar__linha--quebra">
           <h1 className="topbar__titulo topbar__titulo--grande" title={c?.obra}>{c ? c.obra : "Obra"}</h1>
-          {c && c.status !== "ativo" && <Selo classe={STATUS[c.status]?.classe ?? ""}>{STATUS[c.status]?.rotulo ?? c.status}</Selo>}
+          {c && c.status !== "ativo" && <Selo situacao={situacaoDoNivel(STATUS[c.status]?.classe)}>{STATUS[c.status]?.rotulo ?? c.status}</Selo>}
           {/* a base dos numeros do resumo entra uma vez, aqui: a cota da Lotufo, so' onde ela nao tem 100% */}
           {c && <p className="topbar__meta topbar__meta--obra">{[c.orgao, `Contrato ${c.instrumento}`, cotaDaObra(c)].filter(Boolean).join(" · ")}</p>}
         </div>
       </header>
 
-      <div className="pagina ficha">
-        {erro && <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      <div className="pagina obra">
+        {erro && <Falha>{erro}</Falha>}
 
         {!c && !erro && (
           <section className="cartao">
@@ -164,12 +167,13 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
             faria as filhas repetirem o mesmo erro em cascata. */}
         {c && (
           <>
-          <FichaObra contratoId={contratoId} prazos={c} ficha={ficha} />
+          <FichaObra ficha={ficha} />
           <div className="obra-grade">
             <div className="obra-grade__principal">
-              <div id="ritmo"><RitmoEPrazo ficha={ficha} /></div>
+              <PrazoDaObra ficha={ficha} prazos={c} />
 
-              <section className="cartao" id="secoes" aria-label="Seções da obra">
+              {/* as secoes da obra: a faixa de abas direto na pagina e, embaixo, os paineis da aba (sem caixa em volta) */}
+              <section className="obra-secoes" id="secoes" aria-label="Seções da obra">
                 <Abas rotulo="Seções da obra" atual={abaAtiva} classe="abas--obra"
                   itens={ABAS.map(a => ({ id: a.id, rotulo: a.rotulo, para: { tela: "obra" as const, id: contratoId, aba: a.id } }))} />
 
@@ -191,13 +195,10 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
               </section>
             </div>
 
-            <aside className="obra-grade__lateral" aria-label="Avisos e prazos da obra">
+            <aside className="obra-grade__lateral" aria-label="Medições e avisos da obra">
+              <div id="agora"><MedicoesAgora contratoId={contratoId} ficha={ficha} /></div>
               <div id="avisos-obra"><AvisosDaObra contratoId={contratoId} itens={avisos} /></div>
-              <div id="execucao">
-                <ExecucaoContrato execucaoInicio={c.execucao_inicio ?? null} execucaoFim={c.execucao_fim}
-                  vigenciaInicio={c.vigencia_inicio ?? null} vigenciaFim={c.vigencia_fim} status={c.status}
-                  execucaoSemPrazo={c.execucao_sem_prazo} />
-              </div>
+              <div id="legenda-obra"><LegendaCor /></div>
             </aside>
           </div>
           </>

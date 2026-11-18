@@ -1,20 +1,25 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, mensagemDeErro } from "./api";
 import CaixaAviso from "./CaixaAviso";
-import { IconeAlerta, IconeLinkExterno, IconeSeta, IconeSiga } from "./icones";
+import Contador from "./Contador";
+import { IconeLinkExterno, IconeSeta, IconeSiga } from "./icones";
+import LegendaCor, { type ItemLegenda } from "./LegendaCor";
 import { Link } from "./Link";
 import type { ObraLista } from "./listaObras";
 import { FINAIS, tituloMedicao } from "./medicao";
 import { ir, trocarBusca, type Busca } from "./rota";
 import {
-  CATEGORIAS, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, nivelDias, nomeDoProcesso, ordenar, periodoDe, porCategoria,
-  DIAS_ACAO, DIAS_ATENCAO, roboAtivo, ROTULO_ENCERRADO, setorPessoa, situacaoDoBotao, tempoNoSetor, tituloDoEvento, TIPOS, volumeDe, type Movimentacao, type PainelSiga,
+  CATEGORIAS, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, nomeDoProcesso, ordenar, periodoDe, porCategoria,
+  DIAS_ACAO, DIAS_ATENCAO, roboAtivo, ROTULO_ENCERRADO, setorPessoa, situacaoDoBotao, situacaoDoTempo, tempoNoSetor, tituloDoEvento, TIPOS, volumeDe, type Movimentacao, type PainelSiga,
   type ProcessoSiga, type Robo, type TipoMovimentacao,
 } from "./siga";
+import Selo, { Glifo } from "./Selo";
 import { fmtData, fmtDataHora, fmtHora } from "./tempo";
 import "./siga.css";
+import Falha from "./Falha";
 
-// Tela SIGA (#329; redesenho #512, aprovado pelo dono em 06/11/2026): duas paginas. A principal e' uma tabela com a
+// Tela SIGA (#329; redesenho #512; fundacao do redesenho na #767): responde "onde esta' cada processo e qual esta'
+// parado ha' mais tempo". Duas paginas. A principal e' uma tabela com a
 // posicao atual de cada processo, do mais parado ao menos; clicar na linha abre o historico completo do processo
 // (a mesma rota, com ?processo=<id>). Tudo vem de GET /api/siga; aqui so' se desenha.
 // #663: a tabela principal tem uma secao por categoria (Medicoes, Aditivos, Indenizatorios, Outros) e o nome do
@@ -24,11 +29,20 @@ const RELER_A_CADA_MS = 60 * 60_000;   // o robo le de hora em hora (#657)
 const RELER_COM_ROBO_MS = 5_000;   // pedido na fila ou rodada em andamento (#343): a tela acompanha o robo
 const dataOuTraco = (iso: string | null) => (iso ? fmtData(iso) : "—");
 
+// O tempo no setor e' a situacao da linha: um selo com a forma e a cor de uma das quatro situacoes (siga.ts).
 function NoSetor({ p, agora }: { p: ProcessoSiga; agora: Date }) {
-  if (p.hoje > 0) return <span className="sg__dias sg__dias--hoje">hoje</span>;
-  const nivel = nivelDias(p.dias_uteis);
-  return <span className={`sg__dias${nivel ? ` sg__dias--${nivel}` : ""}`}>{tempoNoSetor(p, agora)}</span>;
+  const situacao = situacaoDoTempo(p);
+  const texto = p.hoje > 0 ? "hoje" : tempoNoSetor(p, agora);
+  if (!situacao) return <span className="sg__traco">{texto}</span>;
+  return <Selo situacao={situacao} className={`sg__dias sg__dias--${situacao}`}>{texto}</Selo>;
 }
+
+const LEGENDA: ItemLegenda[] = [
+  { situacao: "feito", texto: "andou hoje" },
+  { situacao: "andamento", texto: `menos de ${DIAS_ATENCAO} dias úteis no setor` },
+  { situacao: "breve", texto: `parado há ${DIAS_ATENCAO} dias úteis ou mais` },
+  { situacao: "critico", texto: `${DIAS_ACAO} dias úteis ou mais` },
+];
 
 const abrirHistorico = (id: number) => ir({ tela: "siga" }, { busca: { processo: String(id) } });
 
@@ -97,7 +111,7 @@ function Atualizar({ rotulo, processoId, robo, aoPedir }: {
       <button type="button" className="btn btn--pequeno" disabled={ocupado || situacao !== null} onClick={() => void pedir()}>
         {situacao === "lendo" ? "Lendo..." : ocupado || situacao === "na_fila" ? "Na fila" : rotulo}
       </button>
-      {erro && <p className="erro sg__erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      {erro && <Falha className="sg__erro">{erro}</Falha>}
     </>
   );
 }
@@ -107,7 +121,7 @@ function RoboAgora({ robo }: { robo: Robo }) {
   if (robo.rodada) {
     return (
       <p className="sg__lido sg__robo">
-        <i className="sg__ponto sg__ponto--lendo" aria-hidden="true" />
+        <span className="sg__pulsa"><Glifo situacao="andamento" /></span>
         Robô lendo agora · começou às <span className="num">{fmtHora(robo.rodada.iniciada_em)}</span> · {robo.rodada.tipo === "automatica" ? "rodada automática" : "pedido feito na tela"}
       </p>
     );
@@ -140,7 +154,7 @@ function Historico({ p, dados, aoPedir, podeEditar }: { p: ProcessoSiga; dados: 
         <IconeSeta className="icone icone--p" />
         <span aria-current="page">Histórico</span>
       </nav>
-      <header className="sg__cabeca">
+      <header className="sg__cabeca sg__cabeca--regua">
         <h1>Histórico · {nome}</h1>
         <p className="sg__sub">
           {[p.numero, `${total} ${total === 1 ? "movimentação" : "movimentações"}`, periodo].filter(Boolean).join(" · ")}
@@ -160,13 +174,13 @@ function Historico({ p, dados, aoPedir, podeEditar }: { p: ProcessoSiga; dados: 
         </div>
       </header>
       <div className="sg__filtros">
-        <div className="sg__chips" role="group" aria-label="Tipo de movimentação">
-          <button type="button" className="sg__chip" aria-pressed={tipo === null} onClick={() => escolher(null)}>
-            Todas <span className="num">{total}</span>
+        <div className="escolhas" role="group" aria-label="Tipo de movimentação">
+          <button type="button" className="escolha" aria-pressed={tipo === null} onClick={() => escolher(null)}>
+            Todas <span className="escolha__n num">{total}</span>
           </button>
           {TIPOS.map(t => (
-            <button key={t.tipo} type="button" className="sg__chip" aria-pressed={tipo === t.tipo} onClick={() => escolher(t.tipo)}>
-              {t.rotulo} <span className="num">{contagem[t.tipo]}</span>
+            <button key={t.tipo} type="button" className="escolha" aria-pressed={tipo === t.tipo} onClick={() => escolher(t.tipo)}>
+              {t.rotulo} <span className="escolha__n num">{contagem[t.tipo]}</span>
             </button>
           ))}
         </div>
@@ -175,9 +189,9 @@ function Historico({ p, dados, aoPedir, podeEditar }: { p: ProcessoSiga; dados: 
           autoComplete="off" onChange={ev => { setTexto(ev.target.value); setMostrando(PRIMEIRAS); }} />
       </div>
       {lista.length === 0 ? (
-        <section className="sg__quadro"><div className="sg__vazio"><p>{total === 0 ? "Nenhuma movimentação gravada." : "Nenhuma movimentação encontrada."}</p></div></section>
+        <section className="cartao sg__quadro"><div className="sg__vazio"><p>{total === 0 ? "Nenhuma movimentação gravada." : "Nenhuma movimentação encontrada."}</p></div></section>
       ) : (
-        <section className="sg__quadro" aria-label="Movimentações do processo">
+        <section className="cartao sg__quadro" aria-label="Movimentações do processo">
           <table className="sg__tabela sg__tabela--hist">
             <caption className="sr-only">Movimentações do processo, da mais recente para a mais antiga.</caption>
             <thead>
@@ -322,8 +336,8 @@ function AcompanharProcesso({ aoGravar }: { aoGravar: (id: number) => Promise<vo
           value={link} onChange={e => setLink(e.target.value)} />
       </div>
       <button type="submit" className="btn btn--primario" disabled={ocupado}>Acompanhar</button>
-      <button type="button" className="btn btn--pequeno" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
-      {erro && <p className="erro sg__erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      <button type="button" className="btn" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
+      {erro && <Falha className="sg__erro">{erro}</Falha>}
     </form>
   );
 }
@@ -354,7 +368,8 @@ function CorrigirCategoria({ p, aoGravar }: { p: ProcessoSiga; aoGravar: () => P
   if (!aberto) {
     return (
       <>
-        <button type="button" className="btn btn--pequeno" onClick={() => { setValor(atual()); setGravado(false); setAberto(true); }}>Corrigir categoria</button>
+        <button type="button" className="btn btn--pequeno" onClick={() => { setValor(atual()); setGravado(false); setAberto(true); }}>
+          {p.categoria_sugerida ? "Confirmar categoria" : "Corrigir categoria"}</button>
         <span className="sg__gravado" role="status">{gravado ? "Categoria gravada." : ""}</span>
       </>
     );
@@ -363,8 +378,8 @@ function CorrigirCategoria({ p, aoGravar }: { p: ProcessoSiga; aoGravar: () => P
     <form className="form-inline sg__novo" onSubmit={enviar} aria-label="Corrigir categoria">
       <CamposCategoria id="siga-corrigir" valor={valor} mudar={setValor} obras={obras} aoFalhar={setErro} />
       <button type="submit" className="btn btn--primario" disabled={ocupado}>Salvar</button>
-      <button type="button" className="btn btn--pequeno" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
-      {erro && <p className="erro sg__erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p>}
+      <button type="button" className="btn" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
+      {erro && <Falha className="sg__erro">{erro}</Falha>}
     </form>
   );
 }
@@ -397,7 +412,7 @@ export default function SigaPagina({ busca, agora, podeEditar = true }: { busca:
     return (
       <div className="pagina">
         {erro
-          ? <div className="form-inline"><p className="erro" role="alert"><IconeAlerta className="icone icone--p" />Não foi possível ler os processos do SIGA: {erro}</p>
+          ? <div className="form-inline"><Falha>Não foi possível ler os processos do SIGA: {erro}</Falha>
               <button type="button" className="btn btn--pequeno" onClick={() => void carregar()}>Tentar de novo</button></div>
           : <p className="campo__nota">Carregando os processos…</p>}
       </div>
@@ -432,13 +447,9 @@ export default function SigaPagina({ busca, agora, podeEditar = true }: { busca:
   const subtitulo = [`${n} ${n === 1 ? "processo" : "processos"}`, dados.lido_em ? `última leitura ${fmtHora(dados.lido_em)}` : null]
     .filter(Boolean).join(" · ");
   const cabeca = (
-    <header className="sg__cabeca sg__cabeca--principal">
+    <header className="sg__cabeca sg__cabeca--principal sg__cabeca--regua">
       <p className="sg__sub">{subtitulo}</p>
-      <ul className="sg__legenda" aria-label="Cor do tempo no setor">
-        <li><i className="sg__ponto sg__ponto--hoje" aria-hidden="true" />andou hoje</li>
-        <li><i className="sg__ponto sg__ponto--atencao" aria-hidden="true" />parado há {DIAS_ATENCAO} dias úteis ou mais</li>
-        <li><i className="sg__ponto sg__ponto--acao" aria-hidden="true" />{DIAS_ACAO} dias úteis ou mais</li>
-      </ul>
+      <LegendaCor itens={LEGENDA} />
     </header>
   );
   const agoraDe = agora ?? new Date();
@@ -448,9 +459,9 @@ export default function SigaPagina({ busca, agora, podeEditar = true }: { busca:
       {cabeca}
       {topo}
       {n === 0 ? (
-        <section className="sg__quadro"><div className="sg__vazio"><IconeSiga className="icone" /><p>{vazio}</p></div></section>
+        <section className="cartao sg__quadro"><div className="sg__vazio"><IconeSiga className="icone" /><p>{vazio}</p></div></section>
       ) : (
-        <section className="sg__quadro" aria-label="Processos no SIGA">
+        <section className="cartao sg__quadro" aria-label="Processos no SIGA">
           <table className="sg__tabela" role="grid">
             <caption className="sr-only">Processos acompanhados no SIGA, por categoria, do mais parado ao menos. Escolha um para ver o histórico.</caption>
             <colgroup><col className="sg__c-proc" /><col className="sg__c-onde" /><col className="sg__c-quem" /><col className="sg__c-setor" /><col className="sg__c-ultima" /><col className="sg__c-prot" /><col className="sg__c-seta" /></colgroup>
@@ -471,8 +482,8 @@ export default function SigaPagina({ busca, agora, podeEditar = true }: { busca:
       )}
       {encerrados.length > 0 && (
         <details className="sg__encerrados" aria-label="Encerrados">
-          <summary>Encerrados <span className="num">{encerrados.length}</span></summary>
-          <section className="sg__quadro">
+          <summary>Encerrados <Contador>{encerrados.length}</Contador></summary>
+          <section className="cartao sg__quadro">
             <table className="sg__tabela">
               <caption className="sr-only">Processos encerrados: medição recebida ou processo arquivado. Escolha um para ver o histórico.</caption>
               <colgroup><col className="sg__c-proc-enc" /><col className="sg__c-onde-enc" /><col className="sg__c-sit" /><col className="sg__c-ultima-enc" /><col className="sg__c-prot" /><col className="sg__c-seta" /></colgroup>

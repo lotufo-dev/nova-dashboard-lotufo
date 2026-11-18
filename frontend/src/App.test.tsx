@@ -173,7 +173,7 @@ describe("App: o menu lateral largo", () => {
     expect(nav.getAttribute("data-estado")).toBe("largo");
     const links = within(nav).getAllByRole("link");
     expect(links.map(l => l.textContent)).toEqual(
-      ["Início", "Medições", "Obras", "Avisos", "SIGA", "Documentos", "A receber", "Carteira", "Âncoras DocuSign", "Administração"]);
+      ["Início", "Medições", "Resumo das medições", "Obras", "Avisos", "SIGA", "Documentos", "Fechamento", "Âncoras DocuSign", "Administração"]);
     for (const l of links) expect(l.querySelector("svg")).not.toBeNull();
     expect(within(nav).getByRole("link", { name: "SIGA" }).getAttribute("aria-current")).toBe("page");
     expect(links.filter(l => l.getAttribute("aria-current") === "page")).toHaveLength(1);
@@ -255,6 +255,14 @@ describe("App: o menu lateral no celular (375 px)", () => {
     const nav = await screen.findByRole("navigation", { name: "Navegação principal" });
     expect(nav.getAttribute("data-estado")).toBe("largo");
     await act(async () => { ouvintes.forEach(f => f({ matches: true })); });
+    expect(nav.getAttribute("data-estado")).toBe("recolhido");
+    // #779: alargar de volta devolve a escolha guardada (largo), em vez de deixar recolhido ate' recarregar
+    await act(async () => { ouvintes.forEach(f => f({ matches: false })); });
+    expect(nav.getAttribute("data-estado")).toBe("largo");
+    // quem escolheu recolhido no computador continua recolhido depois de estreitar e alargar
+    try { localStorage.setItem("menu-lateral", "recolhido"); } catch { /* sem armazenamento */ }
+    await act(async () => { ouvintes.forEach(f => f({ matches: true })); });
+    await act(async () => { ouvintes.forEach(f => f({ matches: false })); });
     expect(nav.getAttribute("data-estado")).toBe("recolhido");
   });
 

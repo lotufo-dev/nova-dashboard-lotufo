@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import CaixaAviso from "./CaixaAviso";
+import CaixaAviso, { CaixaJustificativa } from "./CaixaAviso";
 import CampoValor from "./CampoValor";
 import ErroCampo from "./ErroCampo";
 import { api, apiForm } from "./api";
-import { IconeAlerta } from "./icones";
 import { Link } from "./Link";
 import { DA_PLANILHA, DO_ESPELHO, EXCECOES, type Metade } from "./medicao";
 import type { Medicao } from "./Medicoes";
 import Selo from "./Selo";
+import Falha from "./Falha";
 
 // Os atos de UMA medicao (valor, recebimento, cancelar ou desistir, medicao final), num formulario
 // que a pagina da medicao abre numa janela. O protocolo feito fora virou o "Registrar envio feito fora do sistema"
@@ -43,7 +43,7 @@ export function valorEditavel(m: Medicao, campo: "protocolado" | "atestado", pod
 type Base = { m: Medicao; salvando: boolean; agir: Agir; aoFechar: () => void; erro?: string };
 
 function Erro({ erro }: { erro?: string }) {
-  return erro ? <p className="erro" role="alert"><IconeAlerta className="icone icone--p" />{erro}</p> : null;
+  return erro ? <Falha>{erro}</Falha> : null;
 }
 
 type PropsValor = Base & { campo: "protocolado" | "atestado" };
@@ -202,7 +202,7 @@ export function FormProtocoloManual({ contratoId, m, salvando, agir, aoFechar, e
           </CaixaAviso>
         )}
         {checklist && pendentes.length === 0 && (
-          <Selo classe="selo--ok">Documentos em dia</Selo>
+          <Selo situacao="feito">Documentos em dia</Selo>
         )}
         {divergentes.length > 0 && (
           <CaixaAviso nivel="critico" como="span">NF {divergentes.join(", ")} diverge{divergentes.length > 1 ? "m" : ""} do espelho</CaixaAviso>
@@ -223,13 +223,13 @@ export function FormProtocoloManual({ contratoId, m, salvando, agir, aoFechar, e
             </label>
             <ErroCampo id="campo-apesar-erro" erro={erroDe("apesar")} />
             {apesar && (
-              <div className="campo">
+              <CaixaJustificativa>
                 <label className="campo__rotulo" htmlFor="campo-justificativa">Justificativa</label>
                 <input id="campo-justificativa" name="justificativa" autoComplete="off" className="entrada--larga" required maxLength={500}
                   value={justificativa} {...ligacao("justificativa", "campo-justificativa")}
                   onChange={ev => setJustificativa(ev.target.value)} />
                 <ErroCampo id="campo-justificativa-erro" erro={erroDe("justificativa")} />
-              </div>
+              </CaixaJustificativa>
             )}
           </>
         )}
@@ -257,11 +257,14 @@ export function FormRecebimento({ m, salvando, agir, aoFechar, erro }: Base) {
   const falta = [...motivo.trim()].length < MIN_MOTIVO_RECEBIMENTO
     ? `Escreva o motivo, com pelo menos ${MIN_MOTIVO_RECEBIMENTO} caracteres.` : undefined;
   const erroMotivo = tentou ? falta : undefined;
+  // Decisao de 17/11/2026 (docs/adr/0006): a data e' obrigatoria (o servidor recusa sem ela e com data futura)
+  const erroData = tentou && !data ? "Informe a data em que o dinheiro entrou." : undefined;
   async function salvar(ev: React.FormEvent) {
     ev.preventDefault();
     setTentou(true);
+    if (!data) { document.getElementById("campo-data-marco")?.focus(); return; }
     if (falta) { document.getElementById("campo-motivo-recebimento")?.focus(); return; }
-    const corpo = { estado: "recebida", motivo: motivo.trim(), ...(data ? { data } : {}) };
+    const corpo = { estado: "recebida", motivo: motivo.trim(), data };
     const ok = await agir(() => api(`/api/medicoes/${m.id}/estado`, {
       method: "POST", body: JSON.stringify(corpo),
     }), "Recebimento registrado.");
@@ -273,18 +276,20 @@ export function FormRecebimento({ m, salvando, agir, aoFechar, erro }: Base) {
       <Erro erro={erro} />
       <div className="form-inline">
         <div className="campo">
-          <label className="campo__rotulo" htmlFor="campo-data-marco">Data da baixa (opcional)</label>
-          <input id="campo-data-marco" name="data_baixa" autoComplete="off" type="date" className="entrada--media" autoFocus value={data}
+          <label className="campo__rotulo" htmlFor="campo-data-marco">Data do recebimento</label>
+          <input id="campo-data-marco" name="data_baixa" autoComplete="off" type="date" className="entrada--media" autoFocus required value={data}
+            {...(erroData ? { "aria-invalid": true as const, "aria-describedby": "campo-data-marco-erro" } : {})}
             onChange={ev => setData(ev.target.value)} />
+          <ErroCampo id="campo-data-marco-erro" erro={erroData} />
         </div>
-        <div className="campo">
+        <CaixaJustificativa>
           <label className="campo__rotulo" htmlFor="campo-motivo-recebimento">Motivo</label>
           <input id="campo-motivo-recebimento" name="motivo" autoComplete="off" className="entrada--larga" required maxLength={1000}
             value={motivo}
             {...(erroMotivo ? { "aria-invalid": true as const, "aria-describedby": "campo-motivo-recebimento-erro" } : {})}
             onChange={ev => setMotivo(ev.target.value)} />
           <ErroCampo id="campo-motivo-recebimento-erro" erro={erroMotivo} />
-        </div>
+        </CaixaJustificativa>
         <button type="submit" className="btn btn--primario" disabled={salvando}>{salvando ? "Registrando…" : "Registrar recebimento"}</button>
         <button type="button" className="btn" onClick={aoFechar}>Cancelar</button>
       </div>
@@ -344,11 +349,11 @@ export function FormSemAOutra({ pronta, salvando, agir, aoFechar, erro }: {
       <p className="painel__titulo">{execucao ? "Enviar a medição sem o reajuste" : "Enviar o reajuste sem a medição"}</p>
       <Erro erro={erro} />
       <div className="form-inline">
-        <div className="campo">
+        <CaixaJustificativa>
           <label className="campo__rotulo" htmlFor="campo-sem-a-outra">Justificativa (obrigatória)</label>
           <textarea id="campo-sem-a-outra" name="justificativa" className="entrada--larga" rows={2} required minLength={10}
             maxLength={2000} autoFocus value={texto} onChange={ev => setTexto(ev.target.value)} />
-        </div>
+        </CaixaJustificativa>
         <button type="submit" className="btn btn--primario" disabled={salvando || texto.trim().length < 10}>
           {salvando ? "Liberando…" : execucao ? "Liberar o envio só da medição" : "Liberar o envio só do reajuste"}
         </button>
@@ -374,11 +379,11 @@ export function FormMotivo({ id, titulo, rotulo, placeholder, acao, acaoOcupada,
     <form className="painel-inline" onSubmit={enviar} onKeyDown={ev => ev.key === "Escape" && aoFechar()}>
       <p className="painel__titulo">{titulo}</p>
       <div className="form-inline">
-        <div className="campo">
+        <CaixaJustificativa>
           <label className="campo__rotulo" htmlFor={id}>{rotulo}</label>
           <input id={id} name="motivo" autoComplete="off" className="entrada--larga" required maxLength={1000} autoFocus
             placeholder={placeholder} value={motivo} onChange={ev => setMotivo(ev.target.value)} />
-        </div>
+        </CaixaJustificativa>
         <button type="submit" className={`btn ${destrutivo ? "btn--destrutivo" : "btn--primario"}`} disabled={ocupado || !motivo.trim()}>
           {ocupado ? acaoOcupada : acao}
         </button>

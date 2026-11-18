@@ -97,13 +97,14 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
 
   return (
     <section className="med-passo" id="passo-6" aria-labelledby="passo-6-titulo">
-      <h2 className="sr-only" id="passo-6-titulo">Pagamento</h2>
-      <div className="cartao pag-numeros">
+      <div className="med-quadro__cab"><h2 className="med-quadro__titulo" id="passo-6-titulo">Pagamento</h2></div>
+      {/* #722: os tres numeros no alto do passo, sem caixa propria */}
+      <div className="pag-numeros">
         <div>
           <p className="pag-numeros__rotulo">A receber{rotuloCota ? " · cota da Lotufo" : ""}</p>
           <p className="pag-numeros__valor pag-numeros__valor--acento num" aria-label={`A receber: ${brl(receber.falta)}`}>{brl(receber.falta)}</p>
           {/* issue #562: o a receber sai de nota que diverge do espelho */}
-          {(grupo[0]?.pagamento_cota?.falta_divergente_centavos ?? 0) > 0 && <Selo classe="selo--acao">Nota divergente do espelho</Selo>}
+          {(grupo[0]?.pagamento_cota?.falta_divergente_centavos ?? 0) > 0 && <Selo situacao="critico">Nota divergente do espelho</Selo>}
         </div>
         <div>
           <p className="pag-numeros__rotulo">Total da medição</p>
@@ -126,7 +127,9 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
         </div>
       </div>
 
-      <div className="med-duas">
+      {/* a caixa mede a largura do passo: notas e processo ficam lado a lado quando ha' largura */}
+      <div className="pag-par">
+      <div className="med-duas pag-duas">
         <section className="cartao med-painel" aria-labelledby="pag-notas">
           <h3 className="med-painel__titulo" id="pag-notas">Notas e pagamento</h3>
           <div className="med-caixa">
@@ -140,17 +143,27 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
                 {notas.map(({ n, m }) => {
                   // o valor e' o nominal da NF (bruto); a situacao no financeiro e' a dos titulos (liquidos)
                   const falta = faltaDaNota(n);
+                  // #756: a fatura do consorcio que a nota da propria empresa tirou da conta: o bruto dela nao e' o
+                  // cobrado e nao entra em numero nenhum; aparece sem valor e sem situacao, como no Fechamento
+                  if (n.fora_da_conta) return (
+                    <tr key={n.nota_id}>
+                      <td>NF {Number(n.numero) || n.numero}{grupo.length > 1 ? ` · ${m.tipo === "reajuste" ? "reajuste" : "medição"}` : ""}</td>
+                      <td colSpan={2}>fatura do consórcio, não entra na conta</td>
+                    </tr>
+                  );
                   return (
                     <tr key={n.nota_id}>
                       <td>NF {Number(n.numero) || n.numero}{grupo.length > 1 ? ` · ${m.tipo === "reajuste" ? "reajuste" : "medição"}` : ""}
                         {!daLotufo(n) ? " · outra coligada" : ""}</td>
                       <td className="col-num num">{brl(n.valor_centavos)}</td>
+                      {/* #722: a nota por pagar ou paga em parte esta' em andamento; "vence em breve" e' so' de prazo */}
                       <td>{falta === null ? "—"
-                        : falta === 0 ? <Selo classe="selo--ok">paga{n.recebido_em ? ` em ${fmtDataPura(n.recebido_em.slice(0, 10))}` : ""}</Selo>
-                        : n.recebido_centavos > 0 ? <Selo classe="selo--atencao">paga em parte</Selo>
-                        : <Selo classe="selo--atencao">em aberto</Selo>}
+                        : falta === 0 ? <Selo situacao="feito">paga{n.recebido_em ? ` em ${fmtDataPura(n.recebido_em.slice(0, 10))}` : ""}</Selo>
+                        : n.recebido_centavos > 0 ? <Selo situacao="andamento">paga em parte</Selo>
+                        : <Selo situacao="andamento">em aberto</Selo>}
+                        {/* #755: o titulo que o RM deixou de devolver; selo neutro (nao e' situacao da nota), fora dos totais */}
                         {(n.titulos_excluidos_rm ?? []).map((t, i) => (
-                          <span key={i}>{" "}<Selo>título de <span className="num">{brl(t.valor_original_centavos)}</span> excluído no RM</Selo></span>
+                          <span key={i}>{" "}<Selo className="pag-excluido">título de <span className="num">{brl(t.valor_original_centavos)}</span> excluído no RM</Selo></span>
                         ))}</td>
                     </tr>
                   );
@@ -167,21 +180,29 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
           </div>
           {receber.falta !== null && receber.total !== null && receber.total > 0 && (
             <div className="medidor" aria-label="Recebido">
+              <span className="medidor__rotulo" aria-hidden="true">Recebido</span>
               <div className="medidor__barra"><div className="medidor__cheio" style={{ width: `${pct}%` }} /></div>
               <span className="medidor__texto">{pct}%</span>
             </div>
           )}
-          {receber.falta !== null && receber.total !== null && receber.total > 0 && (
-            <p className="num">{brl(receber.recebido)} recebido de {brl(receber.total)}</p>
-          )}
-          <p>{recebida ? <Selo classe="selo--ok">Recebida</Selo>
-            : quitado ? <Selo classe="selo--ok">Recebido</Selo>
-            : nadaAReceber ? null
-            : grupo.some(x => ["protocolada", "nf_emitida"].includes(x.estado) || x.recebe_sem_protocolo) ? <Selo classe={receber.parcial ? "selo--ok" : "selo--atencao"}>{receber.parcial ? "Recebido em parte" : "Aguardando o órgão"}</Selo> : null}</p>
+          <div className="pag-recebido">
+            {receber.falta !== null && receber.total !== null && receber.total > 0 && (
+              <p className="num">{brl(receber.recebido)} recebido de {brl(receber.total)}</p>
+            )}
+            {/* #722: recebido em parte e aguardando o orgao sao andamento; o visto de feito so' com tudo recebido.
+                #743: a nota emitida da obra sem o passo "Envio da nota" tambem aguarda o orgao */}
+            <p>{recebida ? <Selo situacao="feito">Recebida</Selo>
+              : quitado ? <Selo situacao="feito">Recebido</Selo>
+              : nadaAReceber ? null
+              : grupo.some(x => ["protocolada", "nf_emitida"].includes(x.estado) || x.recebe_sem_protocolo) ? <Selo situacao="andamento">{receber.parcial ? "Recebido em parte" : "Aguardando o órgão"}</Selo> : null}</p>
+          </div>
           {/* issue #53: o recebimento a mao e' so' do admin (o servidor recusa outro perfil) */}
+          {/* o recebimento e' de cada medicao: no par (medicao e reajuste) o botao diz de qual, senao seriam dois iguais */}
           {recebiveis.map(x => (
             <div key={x.id}>
-              <button type="button" className="btn btn--pequeno" title={tituloMedicao(x)} onClick={() => aoReceber(x)}>Registrar recebimento</button>
+              <button type="button" className="btn" title={tituloMedicao(x)} onClick={() => aoReceber(x)}>
+                Registrar recebimento{grupo.length > 1 ? (x.tipo === "reajuste" ? " do reajuste" : " da medição") : ""}
+              </button>
             </div>
           ))}
         </section>
@@ -210,12 +231,13 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
                   <div><dt>Enviada em</dt><dd className="num">{env ? fmtDataPura(env) : "—"}</dd></div>
                 </dl>
                 {proc?.link && (
-                  <a className="link" href={proc.link} target="_blank" rel="noreferrer">Abrir o acompanhamento <IconeLinkExterno className="icone icone--p" /></a>
+                  <a className="link pag-externo" href={proc.link} target="_blank" rel="noreferrer">Abrir o acompanhamento <IconeLinkExterno className="icone icone--p" /></a>
                 )}
               </div>
             );
           })}
         </section>
+      </div>
       </div>
     </section>
   );

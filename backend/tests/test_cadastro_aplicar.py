@@ -142,6 +142,29 @@ def test_passos_medicao_do_contrato_grava_a_lista_e_sem_a_chave_fica_nulo(conn):
     assert gravado() is None
 
 
+def test_centro_custo_empresa_rm_grava_audita_e_o_ensaio_nao_grava(conn):
+    """docs/adr/0005: o centro de custo da propria empresa no contrato de consorcio entra pelo cadastro, fica na
+    auditoria e sai quando a chave sai do arquivo. O ensaio nao grava."""
+    def gravado():
+        return conn.execute("SELECT centro_custo_empresa_rm FROM contratos").fetchone()[0]
+    com = lambda centro: _cad(contratos=[_contrato(centro_custo_empresa_rm=centro)])
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    assert gravado() is None
+    assert cadastro_aplicar.aplicar(conn, 1, com(None))["contratos"] == {"criados": [], "alterados": [], "iguais": 1}
+    r = cadastro_aplicar.aplicar(conn, 1, com("9.005.001"), ensaio=True)
+    assert r["ensaio"] is True and r["contratos"]["alterados"] == ["MT-402"] and gravado() is None
+    assert cadastro_aplicar.aplicar(conn, 1, com("9.005.001"))["contratos"]["alterados"] == ["MT-402"]
+    assert gravado() == "9.005.001"
+    ev = conn.execute("SELECT usuario_id, antes, depois FROM audit_log WHERE acao='cadastro.contrato' "
+                      "ORDER BY id DESC LIMIT 1").fetchone()
+    assert ev["usuario_id"] == 1
+    assert (json.loads(ev["antes"]), json.loads(ev["depois"])) == (
+        {"centro_custo_empresa_rm": None}, {"centro_custo_empresa_rm": "9.005.001"})
+    assert cadastro_aplicar.aplicar(conn, 1, com("9.005.001"))["contratos"] == {"criados": [], "alterados": [], "iguais": 1}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    assert gravado() is None
+
+
 def test_tipos_cobranca_extras_rm_grava_audita_e_o_ensaio_mostra_a_troca_sem_gravar(conn):
     """docs/adr/0015: o tipo extra do contrato entra pelo cadastro. O relatorio diz o antes e o depois ao lado da obra
     (a troca muda o a receber e o faturado dela); o ensaio mostra o mesmo e nao grava; sem a chave ou com a lista
@@ -394,6 +417,98 @@ def test_suspender_gera_evento_do_contrato(conn):
     ev = conn.execute("SELECT tipo, data FROM contrato_eventos").fetchall()
     assert [(e["tipo"], e["data"]) for e in ev] == [("suspensao", "2025-10-01")]
     assert conn.execute("SELECT estado FROM contratos").fetchone()[0] == "suspenso"
+
+
+# --- data do encerramento (ou da rescisao) pelo cadastro: `status_desde` do contrato que acabou -------------------
+
+def _eventos(conn):
+    return [(e["tipo"], e["data"], e["observacao"]) for e in conn.execute(
+        "SELECT tipo, data, observacao FROM contrato_eventos ORDER BY id")]
+
+
+def _desde(conn):
+    import datetime
+    from app import contratos
+    return contratos.cabecalho(conn, 1, datetime.date(2026, 11, 17))["status_desde"]
+
+
+def _auditados(conn):
+    return [(json.loads(x["antes"]) if x["antes"] else None, json.loads(x["depois"])) for x in conn.execute(
+        "SELECT antes, depois FROM audit_log WHERE acao='cadastro.contrato_evento' ORDER BY id")]
+
+
+def test_obra_que_entra_encerrada_com_data_grava_o_evento_e_reaplicar_nao_duplica(conn):
+    """A obra que ja' entra no cadastro encerrada nao passa por mudanca de estado: a data de `status_desde` vira o
+    evento de encerramento, auditado, e o cabecalho da pagina da obra a devolve."""
+    cad = _cad(contratos=[_contrato(status="encerrado", status_desde="2026-09-30")])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["contratos"]["criados"] == ["MT-402"]
+    assert _eventos(conn) == [("encerramento", "2026-09-30", "Cadastro versionado")]
+    assert _desde(conn) == "2026-09-30"
+    assert _auditados(conn) == [(None, {"tipo": "encerramento", "data": "2026-09-30"})]
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["contratos"]["iguais"] == 1 and r["contratos"]["alterados"] == []
+    assert len(_eventos(conn)) == 1 and len(_auditados(conn)) == 1
+
+
+def test_trocar_a_data_do_encerramento_grava_evento_novo_que_corrige_o_anterior(conn):
+    """Evento gravado nao muda: a data nova entra como outro evento, que diz a que corrige e passa a valer, mesmo
+    sendo anterior a' que estava (vale o ultimo gravado, nao a maior data)."""
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(status="encerrado", status_desde="2026-09-30")]))
+    cad = _cad(contratos=[_contrato(status="encerrado", status_desde="2026-09-12")])
+    r = cadastro_aplicar.aplicar(conn, 1, cad)
+    assert r["contratos"]["alterados"] == ["MT-402"]
+    assert _eventos(conn) == [("encerramento", "2026-09-30", "Cadastro versionado"),
+                              ("encerramento", "2026-09-12", "Cadastro versionado: corrige a data anterior (2026-09-30)")]
+    assert _desde(conn) == "2026-09-12"
+    assert _auditados(conn)[-1] == ({"tipo": "encerramento", "data": "2026-09-30"},
+                                    {"tipo": "encerramento", "data": "2026-09-12"})
+    assert cadastro_aplicar.aplicar(conn, 1, cad)["contratos"]["iguais"] == 1 and len(_eventos(conn)) == 2
+
+
+def test_obra_encerrada_sem_data_fica_como_antes_e_a_data_entra_depois(conn):
+    sem = _cad(contratos=[_contrato(status="encerrado")])
+    cadastro_aplicar.aplicar(conn, 1, sem)
+    assert _eventos(conn) == [] and _desde(conn) is None
+    assert conn.execute("SELECT estado FROM contratos").fetchone()[0] == "encerrado"
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(status="encerrado", status_desde="2026-09-30")]))
+    assert _eventos(conn) == [("encerramento", "2026-09-30", "Cadastro versionado")] and _desde(conn) == "2026-09-30"
+    # a data sai do arquivo: o evento gravado fica e continua valendo
+    assert cadastro_aplicar.aplicar(conn, 1, sem)["contratos"]["iguais"] == 1
+    assert len(_eventos(conn)) == 1 and _desde(conn) == "2026-09-30"
+
+
+def test_encerrar_obra_ativa_com_data_grava_um_evento_so(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(status="encerrado", status_desde="2026-09-30")]))
+    assert _eventos(conn) == [("encerramento", "2026-09-30", "Cadastro versionado")]
+    assert _auditados(conn) == []          # a mudanca de estado ja' e' auditada em cadastro.contrato
+
+
+def test_encerramento_registrado_fora_do_cadastro_com_a_mesma_data_nao_ganha_outro_evento(conn):
+    from app import contratos
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato()]))
+    contratos.mudar_estado(conn, 1, 1, "encerrado", "2026-09-30", None)
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(status="encerrado", status_desde="2026-09-30")]))
+    assert r["contratos"]["iguais"] == 1 and _eventos(conn) == [("encerramento", "2026-09-30", None)]
+
+
+def test_obra_rescindida_grava_o_evento_de_rescisao_com_a_data(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(status="rescindido", status_desde="2026-05-04")]))
+    assert conn.execute("SELECT estado FROM contratos").fetchone()[0] == "rescindido"
+    assert _eventos(conn) == [("rescisao", "2026-05-04", "Cadastro versionado")] and _desde(conn) == "2026-05-04"
+    outra = {"nome_curto": "Outra", "numero_instrumento": "020/2024/00/00-SINFRA"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(**outra)]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(**outra, status="rescindido")]))
+    assert [e[0] for e in _eventos(conn)] == ["rescisao", "rescisao"]     # a mudanca ativo -> rescindido
+    assert conn.execute("SELECT estado FROM contratos WHERE nome_curto='Outra'").fetchone()[0] == "rescindido"
+
+
+def test_ensaio_da_data_do_encerramento_relata_e_nao_grava(conn):
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(status="encerrado")]))
+    r = cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(status="encerrado", status_desde="2026-09-30")]),
+                                 ensaio=True)
+    assert r["contratos"]["alterados"] == ["MT-402"] and _eventos(conn) == []
 
 
 def test_valor_original_nao_muda_com_medicao_congelada(conn):
@@ -2486,3 +2601,46 @@ def test_pleito_do_aditivo_corrigido_passa_ao_apostilamento_mais_antigo_no_mesmo
     assert r["pleitos"]["alterados"] == ["MT-402/reajuste CT-122-LT-2026: atendido por ap-21 "
                                          "(termo de 15/06/2026, anterior ao ta-08)"]
     assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
+
+
+# --- fiscal sem e-mail (migracao 094) ---------------------------------------------------------------------------------
+
+def _fiscais(conn):
+    return [tuple(r) for r in conn.execute("SELECT nome, email, desde, cargo, portaria FROM contrato_fiscais ORDER BY id")]
+
+
+def test_fiscal_sem_email_grava_nulo_e_aplicar_de_novo_nao_duplica(conn):
+    ana = {"nome": "Ana", "email": None, "desde": "2026-01-01", "cargo": "Fiscal do Contrato", "tratamento": "Senhora",
+           "portaria": "Portaria n.º 1/2026"}
+    zeno = {"nome": "Zeno", "email": "z@orgao-a.exemplo.com.br", "desde": "2025-01-01"}
+    cad = _cad(contratos=[_contrato(fiscais=[zeno, ana])])
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    esperado = [("Zeno", "z@orgao-a.exemplo.com.br", "2025-01-01", None, None),
+                ("Ana", None, "2026-01-01", "Fiscal do Contrato", "Portaria n.º 1/2026")]
+    assert _fiscais(conn) == esperado
+    auditoria_antes = conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.fiscal'").fetchone()[0]
+    cadastro_aplicar.aplicar(conn, 1, cad)
+    assert _fiscais(conn) == esperado
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.fiscal'").fetchone()[0] == auditoria_antes
+    # a descricao do fiscal sem e-mail tambem se corrige
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(fiscais=[zeno, {**ana, "portaria": "Portaria n.º 2/2026"}])]))
+    assert _fiscais(conn)[1] == ("Ana", None, "2026-01-01", "Fiscal do Contrato", "Portaria n.º 2/2026")
+
+
+def test_email_generico_que_sai_do_cadastro_sai_da_linha_do_fiscal_e_o_que_entra_depois_volta_nela(conn):
+    ana = {"nome": "Ana", "email": "protocolo@orgao-a.exemplo.com.br", "desde": "2026-01-01", "cargo": "Fiscal"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(fiscais=[ana])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(fiscais=[{**ana, "email": None}])]))
+    assert _fiscais(conn) == [("Ana", None, "2026-01-01", "Fiscal", None)]
+    ev = conn.execute("SELECT antes, depois FROM audit_log WHERE acao='cadastro.fiscal' ORDER BY id DESC LIMIT 1").fetchone()
+    assert json.loads(ev["antes"])["email"] == "protocolo@orgao-a.exemplo.com.br" and json.loads(ev["depois"])["email"] is None
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(fiscais=[{**ana, "email": "ana@orgao-a.exemplo.com.br"}])]))
+    assert _fiscais(conn) == [("Ana", "ana@orgao-a.exemplo.com.br", "2026-01-01", "Fiscal", None)]
+
+
+def test_email_que_muda_de_um_endereco_para_outro_continua_acrescentando(conn):
+    """So' a entrada e a saida do e-mail corrigem a linha; a troca de endereco segue o historico de sempre."""
+    ana = {"nome": "Ana", "email": "a1@orgao-a.exemplo.com.br", "desde": "2026-01-01"}
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(fiscais=[ana])]))
+    cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(fiscais=[{**ana, "email": "a2@orgao-a.exemplo.com.br"}])]))
+    assert [f[1] for f in _fiscais(conn)] == ["a1@orgao-a.exemplo.com.br", "a2@orgao-a.exemplo.com.br"]

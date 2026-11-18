@@ -2,6 +2,8 @@
 paths:
   - "backend/app/inicio.py"
   - "backend/app/diretoria.py"
+  - "backend/app/fechamento.py"
+  - "backend/app/resumo_medicoes.py"
   - "backend/app/paineis.py"
   - "backend/app/avisos*.py"
   - "backend/app/custo_obra.py"
@@ -9,10 +11,10 @@ paths:
   - "backend/app/api_diretoria.py"
   - "backend/app/api_paineis.py"
   - "frontend/src/Inicio.tsx"
-  - "frontend/src/Diretoria.tsx"
-  - "frontend/src/AReceberPagina.tsx"
+  - "frontend/src/ObrasCarteira.tsx"
+  - "frontend/src/Fechamento.tsx"
+  - "frontend/src/ResumoDasMedicoes.tsx"
   - "frontend/src/AvisosPagina.tsx"
-  - "frontend/src/CustoObra.tsx"
   - "frontend/src/avisos.ts"
 ---
 

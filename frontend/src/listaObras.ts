@@ -24,7 +24,10 @@ export type ObraLista = {
   posicao?: PosicaoObra | null;
 };
 
-export type PosicaoObra = { vigente_centavos: number; medido_centavos: number; saldo_centavos: number; a_receber_centavos: number | null };
+// 17/11/2026 (docs/adr/0006): `a_receber_centavos` soma so' a competencia de `a_receber_ano_inicial` em diante que o RM ainda
+// informa; o anterior e a nota sem atualizacao do RM vem a' parte, fora do total (nulos ate' o total ser liberado)
+export type PosicaoObra = { vigente_centavos: number; medido_centavos: number; saldo_centavos: number; a_receber_centavos: number | null;
+  a_receber_ano_inicial?: string; a_receber_anterior_centavos?: number | null; a_receber_sem_atualizacao_centavos?: number | null };
 
 /** `paralisadas`: os ids das obras paralisadas (`prazoDaObra`); a execucao delas nao vence (D16). */
 export type FiltroObras = {
@@ -139,52 +142,37 @@ export function posicaoDe(o: ObraLista): PosicaoObra {
   return o.posicao ?? { vigente_centavos: 0, medido_centavos: 0, saldo_centavos: 0, a_receber_centavos: null };
 }
 
-export type TotaisObras = { contratado: number; medido: number; saldo: number; aReceber: number; temReceber: boolean };
+export type TotaisObras = { contratado: number; medido: number; saldo: number; aReceber: number; temReceber: boolean;
+  // o a receber que fica fora do total (docs/adr/0006): o de competencia anterior e o sem atualizacao do RM
+  aReceberAnterior: number; aReceberSemAtualizacao: number; anoInicial: string | null };
 
 /** Os totais (do topo ou de um contratante), somados sobre as linhas que a tabela mostra, ja' na cota: so' soma, nenhum
  *  arredondamento novo. O a receber so' tem valor com o total liberado (todas as obras com nulo): nulo vira "—", nunca zero. */
 export function totaisDe(obras: ObraLista[]): TotaisObras {
-  const t: TotaisObras = { contratado: 0, medido: 0, saldo: 0, aReceber: 0, temReceber: false };
+  const t: TotaisObras = { contratado: 0, medido: 0, saldo: 0, aReceber: 0, temReceber: false,
+    aReceberAnterior: 0, aReceberSemAtualizacao: 0, anoInicial: null };
   for (const o of obras) {
     const p = posicaoDe(o);
     t.contratado += p.vigente_centavos; t.medido += p.medido_centavos; t.saldo += p.saldo_centavos;
     if (p.a_receber_centavos != null) { t.aReceber += p.a_receber_centavos; t.temReceber = true; }
+    t.aReceberAnterior += p.a_receber_anterior_centavos ?? 0;
+    t.aReceberSemAtualizacao += p.a_receber_sem_atualizacao_centavos ?? 0;
+    t.anoInicial = p.a_receber_ano_inicial ?? t.anoInicial;
   }
   return t;
 }
 
-/** Quanto da obra ja' foi executado, em %, inteiro: medido (execucao e projeto) ÷ valor vigente (da posicao na cota quando a
+/** Percentual inteiro por PISO: 99,6% e' 99%, nunca 100%. So' mostra 100% quem concluiu (#779). Sem base, nulo. */
+export function pctPiso(parte: number, base: number): number | null {
+  return base > 0 ? Math.floor((parte * 100) / base) : null;
+}
+
+/** Quanto da obra ja' foi executado, em %, inteiro (por piso): medido (execucao e projeto) ÷ valor vigente (da posicao na cota quando a
  *  lista a traz; a razao e' a mesma do cheio). Sem valor vigente, nulo. */
 export function pctExecutado(o: ObraLista): number | null {
   const v = o.posicao ? o.posicao.vigente_centavos : vigenteDe(o);
   const m = o.posicao ? o.posicao.medido_centavos : medidoDe(o);
-  return v > 0 ? Math.round((m * 100) / v) : null;
-}
-
-export type ResumoContratante = {
-  obras: number; encerradas: number; vigente: number; medido: number; saldo: number; pct: number;
-  comAviso: number; criticos: number; nivelMax: Nivel | null;
-};
-
-/** O resumo de um grupo de obras: so' as em andamento (nem encerradas nem rescindidas) entram nos numeros; as
- *  encerradas (e rescindidas) sao so' contadas. O saldo e' vigente − medido somados, entao a linha "Todas as obras" e' a soma das
- *  linhas dos contratantes. `criticos`: avisos criticos; `comAviso`: obras com algum aviso. */
-export function resumoContratante(obras: ObraLista[], avisos: ReadonlyMap<number, Aviso[]> | null = null): ResumoContratante {
-  const ativas = obras.filter(o => !FORA.has(o.estado));
-  const r: ResumoContratante = { obras: ativas.length, encerradas: obras.filter(o => FORA.has(o.estado)).length,
-    vigente: 0, medido: 0, saldo: 0, pct: 0, comAviso: 0, criticos: 0, nivelMax: null };
-  for (const o of ativas) {
-    r.vigente += vigenteDe(o); r.medido += medidoDe(o); r.saldo += vigenteDe(o) - medidoDe(o);
-    const av = avisos?.get(o.id) ?? [];
-    if (av.length) r.comAviso += 1;
-    for (const a of av) {
-      if (a.nivel === "critico") r.criticos += 1;
-      const n: Nivel = GRAVIDADE[a.nivel] === undefined ? "atencao" : a.nivel;
-      if (r.nivelMax === null || GRAVIDADE[n] < GRAVIDADE[r.nivelMax]) r.nivelMax = n;
-    }
-  }
-  r.pct = r.vigente > 0 ? Math.round((r.medido * 100) / r.vigente) : 0;
-  return r;
+  return pctPiso(m, v);
 }
 
 /** O contratante da obra: a sigla do orgao do cadastro, a mesma de Medicoes ("SINFRA" para a familia toda); sem ela,

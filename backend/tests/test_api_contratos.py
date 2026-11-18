@@ -195,9 +195,10 @@ def test_custo_rm_exige_ver_paineis(client, monkeypatch):
     assert client.get(f"/api/contratos/{cid}/custo-rm").status_code == 403
 
 
-def test_ficha_traz_ultima_medicao_em_andamento_e_vencimentos(client_admin, monkeypatch):
+def test_ficha_traz_ultima_medicao_em_andamento_e_o_fim_da_execucao(client_admin, monkeypatch):
     """#510: a ficha executiva da obra. Ultima = a recebida mais nova; em andamento = a aberta mais nova, com a etapa
-    e o desde; vencimentos = fim da execucao e fim da vigencia, com o nivel do semaforo (sem certidao: #661)."""
+    e o desde; vencimentos = o fim da execucao, com o nivel do semaforo (sem certidao: #661; o fim da vigencia e a
+    contagem das outras medicoes abertas sairam com os cartoes que os mostravam)."""
     import datetime
     from app import db, medicoes, tempo
     hoje = datetime.date(2026, 11, 6)
@@ -222,7 +223,7 @@ def test_ficha_traz_ultima_medicao_em_andamento_e_vencimentos(client_admin, monk
     assert f["em_andamento"]["etapa"] == "Pagamento"
     v = {x["chave"]: x for x in f["vencimentos"]}
     assert v["execucao"]["data"] == "2026-11-18" and v["execucao"]["dias"] == 12 and v["execucao"]["nivel"] == "critico"
-    assert v["vigencia"]["data"] == "2027-02-16" and v["vigencia"]["nivel"] == "normal"
+    assert set(v) == {"execucao"} and "outras" not in f["em_andamento"]
     assert f["contrato"]["original_igual"] is True and f["contrato"]["tas"] == 0
     conn = db.get_conn()
     conn.execute("UPDATE medicoes SET estado='espelho_enviado' WHERE id=?", (b,))
@@ -259,9 +260,52 @@ def test_ficha_obra_sem_medicao_e_inexistente_404(client_admin):
     assert client_admin.get("/api/contratos/99999/ficha").status_code == 404
 
 
-def test_ficha_nivel_do_prazo_e_o_semaforo():
-    from app.ficha_obra import nivel_do_prazo
-    assert [nivel_do_prazo(d) for d in (None, -3, 30, 31, 90, 91)] == ["normal", "critico", "critico", "atencao", "atencao", "normal"]
+def test_nivel_do_prazo_e_um_so_nos_limites_do_aviso():
+    """Os limites sao os do aviso "Execução vencendo" (60 dias do fim, critico aos 30), em `prazos`: o numero dos
+    dias da ficha, as linhas do tempo, a aba Prazos e os avisos usam a mesma funcao."""
+    from app import prazos
+    assert (prazos.DIAS_EXECUCAO, prazos.DIAS_CRITICO, prazos.DIAS_VIGENCIA) == (60, 30, 60)
+    assert [prazos.nivel_do_prazo(d) for d in (None, -3, 30, 31, 60, 61)] == [
+        "normal", "critico", "critico", "atencao", "atencao", "normal"]
+
+
+def test_obra_paralisada_com_execucao_vencida_nao_tem_nivel_no_numero_nem_na_linha_do_tempo(client_admin, monkeypatch):
+    """Uma regra so' para o painel "Prazo": o nivel do numero (ficha) e o das linhas do tempo (cabecalho) saem de
+    `ficha_obra.nivel_do_prazo`. A obra ativa vencida e' critica nos dois; paralisada, em nenhum."""
+    import datetime
+    from app import db, tempo
+    monkeypatch.setattr(tempo, "hoje_local", lambda: datetime.date(2026, 12, 1))
+    cid = novo_contrato({**NOVO, "execucao_fim": "2026-10-20", "vigencia_fim": "2026-12-21"})
+
+    def niveis():
+        f = client_admin.get(f"/api/contratos/{cid}/ficha").json()
+        cab = client_admin.get(f"/api/contratos/{cid}/cabecalho").json()
+        return f["vencimentos"][0]["nivel"], cab["nivel_execucao"], cab["nivel_vigencia"], cab["dias_execucao"]
+
+    def prazos_da_aba():
+        s = client_admin.get(f"/api/contratos/{cid}/prazos").json()["situacao"]
+        return s["nivel_execucao"], s["nivel_vigencia"]
+
+    assert niveis() == ("critico", "critico", "critico", -42)
+    assert prazos_da_aba() == ("critico", "critico")          # a aba Prazos le a mesma regra
+    conn = db.get_conn()
+    conn.execute("UPDATE contratos SET estado='suspenso' WHERE id=?", (cid,))
+    conn.commit(); conn.close()
+    assert niveis() == ("normal", "normal", "normal", -42)
+    assert prazos_da_aba() == ("normal", "normal")
+
+
+def test_nivel_do_prazo_cala_onde_o_aviso_cala():
+    """A regra unica (`prazos._niveis`): paralisacao registrada cala a execucao e nao a vigencia; a vigencia que o
+    orgao prorroga junto nao tem nivel; em encerramento, nenhum dos dois."""
+    from app import prazos
+    s = {"dias_execucao": -5, "dias_vigencia": 45, "paralisacao": None, "vigencia_automatica": False, "encerramento": None}
+    assert prazos._niveis("ativo", s) == ("critico", "atencao")
+    assert prazos._niveis("ativo", {**s, "paralisacao": {"desde": "2026-09-01", "numero": None}}) == ("normal", "atencao")
+    assert prazos._niveis("ativo", {**s, "vigencia_automatica": True}) == ("critico", "normal")
+    assert prazos._niveis("ativo", {**s, "encerramento": {"desde": "2026-10-01"}}) == ("normal", "normal")
+    assert prazos._niveis("ativo", {**s, "dias_execucao": None}) == ("normal", "atencao")
+    assert prazos._niveis("encerrado", s) == ("normal", "normal")
 
 
 def test_ficha_conta_so_os_tas_que_valem(client_admin):
@@ -344,9 +388,10 @@ def test_ficha_original_igual_compara_com_o_vigente_de_execucao(client_admin):
     assert f["topo"]["vigente_centavos"] == 100_000_000 and f["topo"]["reajuste_centavos"] == 500
 
 
-def test_ficha_ritmo_e_prazo_na_cota_e_com_o_saldo_do_topo(client_admin, monkeypatch):
-    """#655: o cartao "Ritmo e prazo" fala na mesma base do resto do resumo: ritmo na cota da Lotufo e o saldo do
-    topo (o mesmo numero do cartao Execucao). Conclusao, situacao e dias sao os de `prazos.ritmo_e_prazo`."""
+def test_ficha_ritmo_e_prazo_na_cota(client_admin, monkeypatch):
+    """#655: o ritmo do painel "Prazo" fala na mesma base do resto do resumo: na cota da Lotufo. Conclusao, situacao
+    e dias sao os de `prazos.ritmo_e_prazo`. O saldo e o fim da execucao sairam do bloco: a tela os tem no topo e na
+    linha do tempo."""
     import datetime
     from app import contratos, db, prazos, tempo
     hoje = datetime.date(2026, 10, 15)   # janela 04 a 09/2026: as duas medicoes do cenario estao nela
@@ -361,9 +406,26 @@ def test_ficha_ritmo_e_prazo_na_cota_e_com_o_saldo_do_topo(client_admin, monkeyp
     r = f["ritmo"]
     assert cheio["ritmo_centavos"] == 66_666_72 and cheio["situacao"] == "atrasa" and cheio["dias_alem"] > 0
     assert r["ritmo_centavos"] == contratos.cota(66_666_72, 4900) == 32_666_69
-    assert r["saldo_centavos"] == f["topo"]["saldo_centavos"] == 391_999_84
-    assert (r["conclusao"], r["execucao_fim"], r["situacao"], r["dias_alem"]) == (
-        cheio["conclusao"], "2026-12-20", "atrasa", cheio["dias_alem"])
+    assert f["topo"]["saldo_centavos"] == 391_999_84
+    assert set(r) == {"ritmo_centavos", "conclusao", "situacao", "dias_alem"}
+    assert (r["conclusao"], r["situacao"], r["dias_alem"]) == (cheio["conclusao"], "atrasa", cheio["dias_alem"])
+    # so' a obra ativa, fora do encerramento e sem paralisacao tem prazo a cobrar: na que ja' fez a medicao final,
+    # o painel dizia "N dias alem do prazo" pelo ritmo ao lado de "vencido ha' N dias". O ritmo continua
+    conn = db.get_conn()
+    conn.execute("UPDATE contratos SET encerramento_iniciado_em='2026-10-01' WHERE id=?", (cid,))
+    conn.commit()
+    r = prazos.ritmo_e_prazo(conn, cid, hoje)
+    assert (r["ritmo_centavos"], r["conclusao"], r["situacao"], r["dias_alem"]) == (66_666_72, None, None, None)
+    conn.execute("UPDATE contratos SET encerramento_iniciado_em=NULL WHERE id=?", (cid,))
+    conn.execute("INSERT INTO instrumentos (contrato_id, chave, tipo, data, dados) VALUES (?, 'par-1', 'paralisacao', "
+                 "'2026-10-10', '{}')", (cid,))
+    conn.commit()
+    assert prazos.ritmo_e_prazo(conn, cid, hoje)["situacao"] is None
+    conn.execute("DELETE FROM instrumentos WHERE contrato_id=?", (cid,))
+    conn.execute("UPDATE contratos SET estado='encerrado' WHERE id=?", (cid,))
+    conn.commit()
+    assert prazos.ritmo_e_prazo(conn, cid, hoje)["situacao"] is None
+    conn.close()
 
 
 def test_listar_traz_a_posicao_na_cota_igual_ao_topo_da_pagina_da_obra(client_admin):
@@ -395,7 +457,7 @@ def test_listar_traz_o_a_receber_na_cota_so_com_o_total_liberado(client_admin):
     conn = db.get_conn()
     conn.execute("INSERT OR REPLACE INTO cadastro_geral (chave, valor) VALUES ('diretoria', ?)", (json.dumps({"total_a_receber_liberado": True}),))
     conn.commit()
-    tela = {o["contrato_id"]: o["valor_centavos"] for o in diretoria.a_receber(conn)["por_obra"]}
+    tela = diretoria.a_receber_por_obra(conn, na_cota=True)
     conn.close()
     lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
     assert lista[cid]["posicao"]["a_receber_centavos"] == 147_000_16 + 49_000_00 == tela[cid]   # 147.000,1617 e 49.000,00
@@ -421,4 +483,18 @@ def test_ficha_vencimentos_sem_certidao_da_empresa(client_admin, monkeypatch):
     finally:
         conn.close()
     venc = client_admin.get(f"/api/contratos/{cid}/ficha").json()["vencimentos"]
-    assert [x["chave"] for x in venc] == ["execucao", "vigencia"]
+    assert [x["chave"] for x in venc] == ["execucao"]
+
+
+def test_cabecalho_da_obra_encerrada_pelo_cadastro_traz_a_data_do_encerramento(client_admin):
+    """A obra que entra no cadastro ja' encerrada, com `status_desde`, chega a' pagina com a data ("encerrada desde"):
+    o `cadastro-exemplo/` inteiro aplicado, lido pela API do cabecalho."""
+    from app import cadastro_aplicar, cadastro_arquivos, db
+    from tests.conftest import CADASTRO_EXEMPLO
+    conn = db.get_conn()
+    cadastro_aplicar.aplicar(conn, 1, cadastro_arquivos.preparar(CADASTRO_EXEMPLO))
+    ids = {r["nome_curto"]: r["id"] for r in conn.execute("SELECT id, nome_curto FROM contratos")}
+    conn.close()
+    cab = client_admin.get(f"/api/contratos/{ids['Obra Encerrada']}/cabecalho").json()
+    assert (cab["status"], cab["status_desde"]) == ("encerrado", "2023-11-17")
+    assert client_admin.get(f"/api/contratos/{ids['Obra Própria']}/cabecalho").json()["status_desde"] is None

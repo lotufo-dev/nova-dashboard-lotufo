@@ -20,6 +20,26 @@ export type PendenciaCadastro = { contrato_id: number; obra: string | null; falt
 export type AvisoSemData = { contrato_id: number | null; obra: string | null; aviso: string };
 export type PendenciasCadastro = { documentos: PendenciaCadastro[]; sem_data: AvisoSemData[] };
 
+/** A mesma pendencia repetida por competencia na mesma obra (o termo de apostilamento que falta, mes a mes) vira uma
+ *  linha so': "... da competência entre 05/2022 e 05/2026 (49 competências) ...", com o `desde` da primeira. So' a
+ *  apresentacao: a lista do servidor nao muda, e a pendencia de uma competencia so' fica como veio. */
+export function pendenciasAgrupadas(lista: PendenciaCadastro[]): PendenciaCadastro[] {
+  const COMPETENCIA = /\b\d{2}\/\d{4}\b/;
+  const grupos = new Map<string, PendenciaCadastro[]>();
+  for (const p of lista) {
+    const porCompetencia = p.desde?.length === 7 && COMPETENCIA.test(p.falta);
+    const chave = porCompetencia ? `${p.contrato_id}|${p.falta.replace(COMPETENCIA, "#")}` : `${p.contrato_id}|${p.falta}|${p.desde}`;
+    grupos.set(chave, [...(grupos.get(chave) ?? []), p]);
+  }
+  return [...grupos.values()].map(g => {
+    if (g.length === 1) return g[0];
+    const ordem = [...g].sort((a, b) => (a.desde ?? "").localeCompare(b.desde ?? ""));
+    const mes = (p: PendenciaCadastro) => p.falta.match(COMPETENCIA)![0];
+    return { ...ordem[0], falta: ordem[0].falta.replace(COMPETENCIA,
+      `entre ${mes(ordem[0])} e ${mes(ordem[ordem.length - 1])} (${g.length} competências)`) };
+  });
+}
+
 /* ------------------------------------------------------------ reconciliacao */
 
 export type NfSolta = { id: number; coligada: number; numero: string; serie: string | null; emissao: string | null;
@@ -36,24 +56,39 @@ export type Desfeita = { id: number; medicao_id: number; desfeita_em: string; mo
 // e' o que o RM mostra em aberto, cheio. O recebimento manual vale; a linha e' o aviso de que o RM nao tem a baixa.
 export type RecebidaSemBaixa = { medicao_id: number; contrato_id: number; numero_instrumento: string; numero: number; tipo: string;
                                  competencia: string | null; recebida_em: string | null; nota_id: number; numero_nf: string;
-                                 serie: string | null; falta_centavos: number };
+                                 serie: string | null; falta_centavos: number; a_mao: boolean };
+// docs/adr/0006: titulo que o RM deu como baixado com o valor baixado menor que o original por mais de R$ 1,00 (uma
+// linha por titulo, valor cheio). Nao e' divida; fica a' vista para o administrador conferir. A nota sem medicao ligada
+// vem com a medicao nula.
+export type BaixadoComDiferenca = { titulo_id: number; nota_id: number; contrato_id: number; numero_instrumento: string;
+                                    medicao_id: number | null; numero: number | null; tipo: string | null; competencia: string | null;
+                                    numero_nf: string; serie: string | null; valor_original_centavos: number;
+                                    valor_baixado_centavos: number; diferenca_centavos: number; data_baixa: string | null };
 // #22: as NFs sem medicao e as alocacoes desfeitas chegam em paginas; `totais` e' o numero exato de cada uma e
 // `ha_mais` diz se existe pagina seguinte
 type PorPaginado<T> = { nfs_sem_medicao: T; alocacoes_desfeitas: T };
 export type Reconciliacao = { nfs_sem_medicao: NfSolta[]; medicoes_sem_nf: MedSemNf[]; divergencias: Divergencia[];
                               alocacoes_desfeitas: Desfeita[]; recebidas_sem_baixa: RecebidaSemBaixa[];
+                              baixados_com_diferenca: BaixadoComDiferenca[];
                               totais: PorPaginado<number>; ha_mais: PorPaginado<boolean> };
 type CampoPaginado = keyof PorPaginado<unknown>;
 
-export type CategoriaRec = "nfs" | "medicoes" | "divergencias" | "desfeitas" | "recebidas";
+export type CategoriaRec = "nfs" | "medicoes" | "divergencias" | "desfeitas" | "recebidas" | "baixados";
 /** Os grupos, na ordem da tela (`?categoria=` na URL). */
 export const CATEGORIAS_REC: { id: CategoriaRec; campo: Exclude<keyof Reconciliacao, "totais" | "ha_mais">; titulo: string }[] = [
   { id: "nfs", campo: "nfs_sem_medicao", titulo: "NFs sem medição" },
   { id: "medicoes", campo: "medicoes_sem_nf", titulo: "Medições sem NF do RM" },
   { id: "divergencias", campo: "divergencias", titulo: "Divergências de valor" },
   { id: "desfeitas", campo: "alocacoes_desfeitas", titulo: "Alocações desfeitas" },
-  { id: "recebidas", campo: "recebidas_sem_baixa", titulo: "Notas de recebimentos à mão sem baixa no RM" },
+  { id: "recebidas", campo: "recebidas_sem_baixa", titulo: "Notas de medições recebidas sem baixa no RM" },
+  { id: "baixados", campo: "baixados_com_diferenca", titulo: "Títulos baixados no RM por valor menor" },
 ];
+
+/** A resposta da API com todo grupo presente: o servidor de antes do grupo "baixados" nao o manda (a tela nova pode
+ *  abrir antes de o servidor reiniciar no deploy). */
+export function completarRec(r: Reconciliacao): Reconciliacao {
+  return { ...r, baixados_com_diferenca: r.baixados_com_diferenca ?? [] };
+}
 
 // #22: a API (`sincronizacao_rm.reconciliacao`) manda duas listas em paginas (200 NFs sem medicao, 50 alocacoes
 // desfeitas, das mais recentes), depois da linha de id `?<parametro>=` (a ultima que a tela ja' tem: o cursor nao
@@ -119,7 +154,8 @@ export function rotuloRec(c: CategoriaRec, n: number): string {
     case "medicoes": return n === 1 ? "medição sem NF do RM" : "medições sem NF do RM";
     case "divergencias": return n === 1 ? "divergência de valor" : "divergências de valor";
     case "desfeitas": return n === 1 ? "alocação desfeita" : "alocações desfeitas";
-    case "recebidas": return n === 1 ? "nota de recebimento à mão sem baixa no RM" : "notas de recebimentos à mão sem baixa no RM";
+    case "recebidas": return n === 1 ? "nota de medição recebida sem baixa no RM" : "notas de medições recebidas sem baixa no RM";
+    case "baixados": return n === 1 ? "título baixado no RM por valor menor" : "títulos baixados no RM por valor menor";
   }
 }
 
@@ -138,6 +174,7 @@ export function reconciliacaoDaObra(rec: Reconciliacao, obra: { id: number; nume
     divergencias: rec.divergencias.filter(d => d.contrato_id === obra.id),
     alocacoes_desfeitas: obra.numero_instrumento === null ? [] : rec.alocacoes_desfeitas.filter(d => d.numero_instrumento === obra.numero_instrumento),
     recebidas_sem_baixa: rec.recebidas_sem_baixa.filter(x => x.contrato_id === obra.id),
+    baixados_com_diferenca: rec.baixados_com_diferenca.filter(x => x.contrato_id === obra.id),
     // os totais sao os da API, sem obra; a contagem da obra sai de `contaRec`
     totais: rec.totais, ha_mais: rec.ha_mais,
   };
