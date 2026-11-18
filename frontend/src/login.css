@@ -1,7 +1,8 @@
-/* Tela de login (#768): a fundacao do redesenho na unica tela fora da casca. A' esquerda o desenho da obra sobre a
-   cor do menu; a' direita, sobre o papel, a marca como no menu (o L e o nome em dois pesos), o titulo sob a regua de
-   grupo, os campos de canto reto e o botao principal em tinta. Cor, familia, tamanho, espaco e borda so' por variavel.
-   Classes "entrar__*" para nao colidir com o .login antigo do tokens.css. */
+/* Tela de login (#768, #821): a unica tela fora da casca, em duas metades. A' esquerda, sobre a cor do menu, a marca
+   parada: o L em vetor e o nome em dois pesos, as mesmas pecas do menu, uma em cima da outra. A' direita, sobre o
+   papel, o titulo sob a regua de grupo, os campos de canto reto e o botao principal em tinta. Nada se move.
+   Cor, familia, tamanho, espaco e borda so' por variavel. Classes "entrar__*" para nao colidir com o .login antigo
+   do tokens.css. */
 .entrar {
   display: flex;
   min-height: 100vh;
@@ -11,39 +12,34 @@
   background: var(--cor-papel);
 }
 
-.entrar__visual {
-  position: relative;
-  flex: 1 1 auto;
+/* as duas metades tem a mesma largura: a marca fica ao lado do formulario, e nenhum dos dois num canto */
+.entrar__marca,
+.entrar__painel {
+  flex: 1 1 0;
   min-width: 0;
-  overflow: hidden;
-  /* fundo estatico: e' o que fica se o 3D nao abrir */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.entrar__marca {
+  gap: var(--espaco-g);
+  padding: var(--espaco-xxg) var(--espaco-xg);
   background: var(--cor-menu);
   color: var(--cor-menu-texto);
 }
-/* mask: a pista sai pelas laterais sumindo aos poucos, como se fosse ao infinito */
-.entrar__canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0%, var(--cor-tinta) 14%, var(--cor-tinta) 80%, transparent 100%);
-  mask-image: linear-gradient(90deg, transparent 0%, var(--cor-tinta) 14%, var(--cor-tinta) 80%, transparent 100%); }
-.entrar__canvas[hidden] { display: none; }
-.entrar__visual::before,
-.entrar__visual::after { content: ""; position: absolute; left: 0; right: 0; pointer-events: none; z-index: 1; height: calc(var(--espaco-xxg) * 3); }
-.entrar__visual::before { top: 0; background: linear-gradient(var(--cor-menu) 0%, transparent 100%); }
-.entrar__visual::after { bottom: 0; background: linear-gradient(transparent 0%, var(--cor-menu) 75%); }
-
-.entrar__painel {
-  width: calc(var(--largura-menu) * 2);
-  flex: none;
-  padding: var(--espaco-xxg) var(--espaco-xg);
-  background: var(--cor-papel);
-  border-left: var(--borda-painel);
-}
-.entrar__topo { display: flex; flex-direction: column; gap: var(--espaco-xxg); }
-.entrar__marca { display: flex; align-items: center; gap: var(--espaco-p); min-height: var(--alvo-minimo); }
-.entrar__simbolo { width: var(--simbolo-marca-largura); height: var(--simbolo-marca-altura); flex: none; }
-.entrar__nome { font-family: var(--fonte-marca); font-weight: var(--peso-marca); font-size: var(--texto-marca); line-height: var(--entrelinha-justa); }
+/* o simbolo cresce na proporcao do menu (28 x 29); o nome vai no maior passo da escala de letra */
+.entrar__simbolo { width: calc(var(--simbolo-marca-largura) * 7); height: calc(var(--simbolo-marca-altura) * 7); flex: none; }
+.entrar__nome { font-family: var(--fonte-marca); font-weight: var(--peso-marca); font-size: var(--texto-titulo-pagina); line-height: var(--entrelinha-justa); }
 .entrar__nome-apoio { font-family: var(--fonte-marca-apoio); font-weight: var(--peso-normal); }
 
-.entrar__bloco { display: flex; flex-direction: column; gap: var(--espaco-g); border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro); }
+.entrar__painel { padding: var(--espaco-xxg) var(--espaco-xg); }
+.entrar__bloco {
+  display: flex; flex-direction: column; gap: var(--espaco-g);
+  width: 100%; max-width: calc(var(--largura-menu) + var(--largura-nome-obra) / 2);
+  border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro);
+}
 .entrar__titulo { margin: 0; font-size: var(--texto-titulo-pagina); }
 
 .entrar__form { display: flex; flex-direction: column; gap: var(--espaco-m); }
@@ -51,7 +47,11 @@
 .entrar__campo input { width: 100%; font-weight: var(--peso-normal); }
 .entrar__botao { width: 100%; margin-top: var(--espaco-pp); }
 
-@media (max-width: 900px) {
-  .entrar__visual { display: none; }
-  .entrar__painel { width: 100%; padding: var(--espaco-xg) var(--espaco-m); border-left: 0; }
+/* celular: uma coluna, o formulario primeiro e a marca embaixo, ocupando o que sobra da altura */
+@media (max-width: 760px) {
+  .entrar { flex-direction: column; }
+  .entrar__painel { order: 1; flex: none; padding: var(--espaco-xg) var(--espaco-m); }
+  .entrar__bloco { max-width: none; }
+  .entrar__marca { order: 2; flex: 1 0 auto; gap: var(--espaco-m); padding: var(--espaco-xg) var(--espaco-m); }
+  .entrar__simbolo { width: calc(var(--simbolo-marca-largura) * 5); height: calc(var(--simbolo-marca-altura) * 5); }
 }
