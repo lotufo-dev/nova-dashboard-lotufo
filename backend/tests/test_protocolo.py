@@ -1320,7 +1320,7 @@ def test_enviar_execucao_leva_o_reajuste_negativo_absorvido_no_protocolo_e_no_en
     assert c.execute("SELECT 1 FROM envio_medicoes WHERE envio_id=? AND medicao_id=?", (envio, rj)).fetchone()
 
 
-# --- fiscal sem e-mail (migracao 091): A/C da carta, nunca destinatario --------------------------------------------
+# --- fiscal sem e-mail (migracao 094): A/C da carta, nunca destinatario --------------------------------------------
 
 def _fiscal_sem_email(c):
     c.execute("UPDATE contrato_fiscais SET email=NULL"); c.commit()

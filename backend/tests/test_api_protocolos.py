@@ -806,7 +806,7 @@ def test_reserva_presa_responde_409_nas_rotas_de_edicao_do_protocolo(api, monkey
     assert d["situacao"] == "montado" and len(d["pecas"]) == 1
 
 
-# --- fiscal sem e-mail (migracao 091) ---------------------------------------------------------------------------------
+# --- fiscal sem e-mail (migracao 094) ---------------------------------------------------------------------------------
 
 def _tira_o_email_do_fiscal():
     c = db.get_conn()

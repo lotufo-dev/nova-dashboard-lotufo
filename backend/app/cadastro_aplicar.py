@@ -388,7 +388,7 @@ def _contrato(conn, usuario_id, c, ids_orgao, ids_ent, rel) -> int:
         auditoria.registrar(conn, usuario_id, "cadastro.datas_base", "contrato", cid, atuais, desejadas)
 
     # Fiscais: historico. So' acrescenta; o fiscal vigente e' o de `desde` mais recente.
-    # O e-mail e' opcional (migracao 091): sem ele, a linha e' a de mesmo nome e data, e o e-mail fica nulo.
+    # O e-mail e' opcional (migracao 094): sem ele, a linha e' a de mesmo nome e data, e o e-mail fica nulo.
     for f in c["fiscais"]:
         onde, args = ("email=?", (cid, f["email"], f["desde"])) if f["email"] is not None else \
             ("email IS NULL AND nome=?", (cid, f["nome"], f["desde"]))

@@ -2511,7 +2511,7 @@ def test_pleito_do_aditivo_corrigido_passa_ao_apostilamento_mais_antigo_no_mesmo
     assert cadastro_aplicar.aplicar(conn, 1, cad)["pleitos"]["alterados"] == []
 
 
-# --- fiscal sem e-mail (migracao 091) ---------------------------------------------------------------------------------
+# --- fiscal sem e-mail (migracao 094) ---------------------------------------------------------------------------------
 
 def _fiscais(conn):
     return [tuple(r) for r in conn.execute("SELECT nome, email, desde, cargo, portaria FROM contrato_fiscais ORDER BY id")]

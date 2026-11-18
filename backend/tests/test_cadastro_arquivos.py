@@ -1348,7 +1348,7 @@ def test_cadastro_exemplo_traz_o_pacote_assinado_na_familia_sinfra():
     assert "Relatório de Cálculo de Medição Reajustada" in orgao["regras"]["pacote_assinado"]["reajuste"]
 
 
-# --- fiscal sem e-mail (migracao 091): o e-mail so' entra quando um documento do orgao o prova ----------------------
+# --- fiscal sem e-mail (migracao 094): o e-mail so' entra quando um documento do orgao o prova ----------------------
 
 def test_fiscal_sem_email_e_aceito_com_nome_e_sai_com_email_nulo(tmp_path):
     c = {**CONTRATO, "fiscais": [

@@ -1,4 +1,4 @@
-"""Migracao 091: o fiscal do contrato pode ficar sem e-mail.
+"""Migracao 094: o fiscal do contrato pode ficar sem e-mail.
 
 Reconstroi `contrato_fiscais` so' para tirar o NOT NULL do e-mail, pela receita da 042 e da 078: nenhuma linha muda,
 pode rodar de novo e e' atomica. O indice parcial segura a repeticao do fiscal sem e-mail.
@@ -12,17 +12,17 @@ from app import db
 
 pytestmark = pytest.mark.migracao_real
 
-ARQUIVO = "091_fiscal_sem_email.sql"
+ARQUIVO = "094_fiscal_sem_email.sql"
 COLUNAS = "id, contrato_id, nome, email, desde, cargo, tratamento, portaria"
 
 
 @pytest.fixture
-def antes_da_091(tmp_path, monkeypatch):
-    """Banco "ate' a 090": roda todas as migracoes anteriores a 091, de uma copia da pasta."""
+def antes_da_094(tmp_path, monkeypatch):
+    """Banco "ate a 093": roda todas as migracoes anteriores a 094, de uma copia da pasta."""
     pasta = tmp_path / "migracoes"
     pasta.mkdir()
     for f in db.MIGRATIONS_DIR.glob("*.sql"):
-        if f.name < "091":
+        if f.name < "094":
             shutil.copy(f, pasta / f.name)
     monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
     original = db.MIGRATIONS_DIR
@@ -57,15 +57,15 @@ def _rodar(c):
     c.execute("PRAGMA foreign_keys=ON")
 
 
-def test_antes_da_091_o_email_era_obrigatorio(antes_da_091):
-    c = antes_da_091
+def test_antes_da_094_o_email_era_obrigatorio(antes_da_094):
+    c = antes_da_094
     _semear(c)
     with pytest.raises(sqlite3.IntegrityError):
         c.execute("INSERT INTO contrato_fiscais (contrato_id, nome, email, desde) VALUES (1,'Sem',NULL,'2026-04-01')")
 
 
-def test_nenhuma_linha_muda_e_o_email_passa_a_aceitar_nulo(antes_da_091):
-    c = antes_da_091
+def test_nenhuma_linha_muda_e_o_email_passa_a_aceitar_nulo(antes_da_094):
+    c = antes_da_094
     _semear(c)
     antes = _linhas(c)
     colunas = [(r[1], r[2]) for r in c.execute("PRAGMA table_info(contrato_fiscais)")]
@@ -81,8 +81,8 @@ def test_nenhuma_linha_muda_e_o_email_passa_a_aceitar_nulo(antes_da_091):
     assert c.execute("SELECT email FROM contrato_fiscais WHERE nome='Fiscal Tres'").fetchone()[0] is None
 
 
-def test_as_unicidades_continuam_e_o_fiscal_sem_email_nao_repete(antes_da_091):
-    c = antes_da_091
+def test_as_unicidades_continuam_e_o_fiscal_sem_email_nao_repete(antes_da_094):
+    c = antes_da_094
     _semear(c)
     _rodar(c)
     with pytest.raises(sqlite3.IntegrityError):                      # a de sempre: contrato, e-mail e data
@@ -96,8 +96,8 @@ def test_as_unicidades_continuam_e_o_fiscal_sem_email_nao_repete(antes_da_091):
         c.execute("INSERT INTO contrato_fiscais (contrato_id, nome, email, desde) VALUES (99,'Sem',NULL,'2026-04-01')")
 
 
-def test_pode_rodar_de_novo_sem_perder_o_fiscal_sem_email(antes_da_091):
-    c = antes_da_091
+def test_pode_rodar_de_novo_sem_perder_o_fiscal_sem_email(antes_da_094):
+    c = antes_da_094
     _semear(c)
     _rodar(c)
     c.execute("INSERT INTO contrato_fiscais (contrato_id, nome, email, desde) VALUES (1,'Sem',NULL,'2026-04-01')")

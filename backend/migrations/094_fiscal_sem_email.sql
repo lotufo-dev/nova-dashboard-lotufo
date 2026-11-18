@@ -1,4 +1,4 @@
--- 091: o fiscal do contrato pode ser cadastrado sem e-mail. O e-mail so' entra no cadastro quando aparece em
+-- 094: o fiscal do contrato pode ser cadastrado sem e-mail. O e-mail so' entra no cadastro quando aparece em
 -- documento ou mensagem do proprio orgao; o fiscal provado por documento (nome, cargo, portaria) vale como A/C da
 -- carta mesmo sem endereco, e nao entra como destinatario.
 --
