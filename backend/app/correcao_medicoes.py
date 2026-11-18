@@ -203,8 +203,12 @@ def _notas(conn, coligada: int, nf: str, so_ativas: bool) -> list:
 
 
 def _nfs_ativas(conn, mid: int) -> list[dict]:
-    return [dict(r) for r in conn.execute(
-        "SELECT a.id, a.nota_id, n.numero, n.coligada, n.serie, n.idmov, n.valor_centavos FROM nf_alocacoes a "
+    """As notas ligadas (vinculo vigente). `valor_vinculo`: o que a nota vale NESTA medicao, o valor atual dela ou, no
+    vinculo partilhado (docs/adr/0005, "Uma nota em mais de uma medicao"), o valor da parte."""
+    return [{**dict(r), "valor_vinculo": r["valor_alocado_centavos"] if r["partilhada"] else r["valor_centavos"]}
+            for r in conn.execute(
+        "SELECT a.id, a.nota_id, n.numero, n.coligada, n.serie, n.idmov, n.valor_centavos, a.valor_alocado_centavos, "
+        "a.partilhada FROM nf_alocacoes a "
         "JOIN notas_fiscais n ON n.id=a.nota_id WHERE a.medicao_id=? AND a.desfeita_em IS NULL ORDER BY a.id", (mid,))]
 
 
@@ -320,7 +324,7 @@ def _cancelar(conn, uid, m, op, fonte):
         for col in dict.fromkeys(a["coligada"] for a in desligadas):
             da_col = [n for n in notas_v if n["coligada"] == col]
             alvo = contratos.cota(valor_v, pct) if col == lotufo else valor_v
-            if da_col and (alvo is None or sum(n["valor_centavos"] for n in da_col) >= alvo):
+            if da_col and (alvo is None or sum(n["valor_vinculo"] for n in da_col) >= alvo):
                 continue
             falta = (f"tem NF da coligada {col} que não cobre o valor dela" if da_col
                      else f"não tem NF ligada da coligada {col}")
@@ -532,35 +536,57 @@ def _ligar_nf(conn, uid, m, op, fonte):
     mapa = diretoria._mapa_contratos(conn)
     novas, ja = [], []
     for ref in nfs:
+        # docs/adr/0005 ("Uma nota em mais de uma medicao"): `{idmov: N, valor: "1.234,56"}` liga so' essa PARTE da
+        # nota a esta medicao; o resto da nota vai para outra medicao, em outra operacao, com o valor dela
+        parte = None
+        if isinstance(ref, dict) and "valor" in ref:
+            parte = _valor(ref, "valor")
+            if parte is None or parte <= 0:
+                raise ValueError(f"nota {ref!r} inválida: o valor da parte precisa ser maior que zero")
+            ref = {k: v for k, v in ref.items() if k != "valor"}
         nota = _nota_da_referencia(conn, coligada, ref)
         nf = nota["numero"]
         if nota["id"] in ligadas:
             ja.append(nota)
             continue
-        if any(n["id"] == nota["id"] for n, _ in novas):
+        if any(n["id"] == nota["id"] for n, _, _ in novas):
             raise ValueError(f"NF {nf} repetida na operação")
-        outra = conn.execute("SELECT m.id, m.numero, m.tipo FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id "
-                             "WHERE a.nota_id=? AND a.desfeita_em IS NULL", (nota["id"],)).fetchone()
-        if outra is not None:
-            raise ValueError(f"NF {nf} já está na {medicoes.nome_medicao(outra['numero'], outra['tipo']).lower()} "
-                             f"(id {outra['id']}): desligue-a lá antes (desligar_nf)")
-        novas.append((nota, _conferir_centro(conn, m, nota, forcar, mapa)))
+        if parte is None:
+            outra = conn.execute("SELECT m.id, m.numero, m.tipo, a.partilhada FROM nf_alocacoes a JOIN medicoes m "
+                                 "ON m.id=a.medicao_id WHERE a.nota_id=? AND a.desfeita_em IS NULL", (nota["id"],)).fetchone()
+            if outra is not None:
+                raise ValueError(f"NF {nf} já está na {medicoes.nome_medicao(outra['numero'], outra['tipo']).lower()} "
+                                 f"(id {outra['id']}): desligue-a lá antes (desligar_nf)"
+                                 + ("; se a nota é das duas medições, diga o valor da parte desta ({idmov: N, valor: ...})"
+                                    if outra["partilhada"] else ""))
+        else:
+            _exigir_migracao(conn, "nf_alocacoes", "partilhada", "093")
+            if parte > nota["valor_centavos"]:
+                raise ValueError(f"a parte de {dinheiro.format_brl(parte)} é maior que a NF {nf} "
+                                 f"({dinheiro.format_brl(nota['valor_centavos'])})")
+        novas.append((nota, _conferir_centro(conn, m, nota, forcar, mapa), parte))
     if not novas:
         raise _JaFeito("NF " + ", ".join(n["numero"] for n in ja) + " já ligada")
     # Recebida sem a nota ligada (paga, mas o vinculo faltou) recebe a NF: o estado fica, so' o elo com o RM entra
     if m["estado"] in ENCERRADAS:
         raise ValueError(f"medição {medicoes.rotulo_estado(m['estado'])} não recebe NF")
     valor = m["valor_atestado_centavos"] if m["valor_atestado_centavos"] is not None else m["valor_protocolado_centavos"]
-    soma = sum(n["valor_centavos"] for n in _nfs_ativas(conn, m["id"]) if n["coligada"] == coligada) + sum(
-        n["valor_centavos"] for n, _ in novas)
+    soma = sum(n["valor_vinculo"] for n in _nfs_ativas(conn, m["id"]) if n["coligada"] == coligada) + sum(
+        n["valor_centavos"] if parte is None else parte for n, _, parte in novas)
     cobre = valor is None or soma >= valor
     if not cobre and not parcial:
         raise ValueError(f"as notas somam {dinheiro.format_brl(soma)} e a medição vale {dinheiro.format_brl(valor)} "
                          "(se a medição foi faturada em mais notas e só estas vêm agora, use parcial: true)")
     detalhes = []
-    for nota, problema in novas:
-        sincronizacao_rm.alocar(conn, uid, nota["id"], m["id"], "manual", None, REGRA_NF, aceita_recebida=True)
+    for nota, problema, parte in novas:
+        sincronizacao_rm.alocar(conn, uid, nota["id"], m["id"], "manual", None, REGRA_NF, aceita_recebida=True,
+                                valor_da_parte=parte)
         texto = f"{_fmt_nf(nota)} ligada"
+        if parte is not None:
+            ja_partes = conn.execute("SELECT COALESCE(SUM(valor_alocado_centavos), 0) FROM nf_alocacoes WHERE nota_id=? "
+                                     "AND desfeita_em IS NULL", (nota["id"],)).fetchone()[0]
+            texto += (f" pela parte de {dinheiro.format_brl(parte)}; da nota, "
+                      f"{dinheiro.format_brl(nota['valor_centavos'] - ja_partes)} seguem sem medição")
         if problema:
             texto += f" (centro de custo forçado: {problema})"
         detalhes.append(texto)
@@ -573,7 +599,7 @@ def _ligar_nf(conn, uid, m, op, fonte):
         detalhes.append(f"AVISO: parcial, as notas somam {dinheiro.format_brl(soma)} de {dinheiro.format_brl(valor)}; "
                         "fica protocolada até a nota que falta ser ligada e paga, ou o recebimento ser registrado à mão (a "
                         "sincronização com o RM não fecha medição com notas que não cobrem o valor)")
-    op["_forcado"] = [{"nf": n["numero"], "problema": p} for n, p in novas if p]
+    op["_forcado"] = [{"nf": n["numero"], "problema": p} for n, p, _ in novas if p]
     return detalhes
 
 

@@ -65,7 +65,7 @@ import time
 from collections import Counter
 from decimal import Decimal, InvalidOperation
 
-from app import auditoria, cobranca_orgao, contratos, db, medicoes, rm, tempo
+from app import auditoria, cobranca_orgao, contratos, db, dinheiro, medicoes, rm, tempo
 
 log = logging.getLogger("app.rm")
 
@@ -197,12 +197,33 @@ def _upsert_baixa(conn, linha: dict) -> None:
 
 # --------------------------------------------------------------- alocacoes
 
+def partes_da_nota(conn, nota_id: int, total: int) -> dict[int, int]:
+    """docs/adr/0005 ("Uma nota em mais de uma medicao"): reparte um valor DA NOTA (o devido, o recebido ou a falta dos
+    titulos dela) entre os vinculos PARTILHADOS vigentes, na proporcao do valor de cada parte, com o resto da nota que
+    nenhuma medicao levou: {alocacao_id: parte} e, na chave None, a parte do resto. So' inteiros
+    (`dinheiro.ratear_proporcional`): as partes somam o total. Nota sem vinculo partilhado: tudo no resto."""
+    nf = conn.execute("SELECT valor_centavos FROM notas_fiscais WHERE id=?", (nota_id,)).fetchone()
+    vinculos = conn.execute("SELECT id, valor_alocado_centavos FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL "
+                            "AND partilhada=1 ORDER BY id", (nota_id,)).fetchall()
+    pesos = [v["valor_alocado_centavos"] for v in vinculos]
+    pesos.append(max(0, (nf["valor_centavos"] if nf else 0) - sum(pesos)))
+    if sum(pesos) <= 0:
+        return {None: total}
+    partes = dinheiro.ratear_proporcional(total, pesos)
+    return {**{v["id"]: p for v, p in zip(vinculos, partes)}, None: partes[-1]}
+
+
 def alocar(conn, usuario_id, nota_id: int, medicao_id: int, origem: str, confianca: float | None,
-           regra: str, aceita_recebida: bool = False) -> int:
+           regra: str, aceita_recebida: bool = False, valor_da_parte: int | None = None) -> int:
     """Liga a NF a' medicao. Bloco 3: nao move mais `protocolada -> nf_emitida`; em medicao nascida
     do espelho fecha `nota_emitida` quando nao falta nota (notas.fechar_se_completa).
 
     Reentrante em db.mutacao. Recusa NF cancelada, medicao encerrada e alocacao repetida.
+
+    `valor_da_parte` (docs/adr/0005, "Uma nota em mais de uma medicao"; so' a correcao de cadastro o passa): o vinculo
+    vale por PARTE da nota, com esse valor (`partilhada`). A mesma nota pode entao estar em outras medicoes, desde que
+    todos os vinculos vigentes dela sejam partilhados e somem no maximo o valor da nota. So' em medicao sem espelho: na
+    que nasceu do espelho a nota liga pela saida dele, inteira.
     """
     from app import notas   # import local: notas importa este modulo
     with db.mutacao(conn):
@@ -222,18 +243,37 @@ def alocar(conn, usuario_id, nota_id: int, medicao_id: int, origem: str, confian
         # do RM, para a recebida a' mao cuja nota chega depois (issue #713)
         if m["estado"] in ("cancelada", "desistida") or (m["estado"] == "recebida" and not aceita_recebida):
             raise ValueError(f"Medição em estado {m['estado']} não recebe NF")
-        if conn.execute("SELECT 1 FROM nf_alocacoes WHERE nota_id=? AND desfeita_em IS NULL",
-                        (nota_id,)).fetchone():
-            raise ValueError(f"Nota fiscal {nf['numero']} já está alocada a uma medição")
+        vigentes = conn.execute("SELECT medicao_id, valor_alocado_centavos, partilhada FROM nf_alocacoes "
+                                "WHERE nota_id=? AND desfeita_em IS NULL", (nota_id,)).fetchall()
+        if valor_da_parte is None:
+            if vigentes:
+                raise ValueError(f"Nota fiscal {nf['numero']} já está alocada a uma medição")
+        else:
+            if valor_da_parte <= 0:
+                raise ValueError(f"O valor da parte da nota fiscal {nf['numero']} precisa ser maior que zero")
+            if any(v["medicao_id"] == medicao_id for v in vigentes):
+                raise ValueError(f"Nota fiscal {nf['numero']} já está alocada a esta medição")
+            if any(not v["partilhada"] for v in vigentes):
+                raise ValueError(f"Nota fiscal {nf['numero']} já está alocada inteira a uma medição: desfaça esse vínculo "
+                                 "e ligue de novo com o valor de cada parte")
+            soma = sum(v["valor_alocado_centavos"] for v in vigentes) + valor_da_parte
+            if soma > nf["valor_centavos"]:
+                raise ValueError(f"As partes da nota fiscal {nf['numero']} somariam {dinheiro.format_brl(soma)}, mais que "
+                                 f"o valor dela ({dinheiro.format_brl(nf['valor_centavos'])})")
+            if notas.esperadas_do_espelho(conn, medicao_id) is not None:
+                raise ValueError("Medição com espelho não recebe parte de nota: a nota liga pela saída do espelho")
         cur = conn.execute(
-            "INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, confianca, regra) "
-            "VALUES (?,?,?,?,?,?)", (medicao_id, nota_id, nf["valor_centavos"], origem, confianca, regra))
+            "INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, confianca, regra, partilhada) "
+            "VALUES (?,?,?,?,?,?,?)", (medicao_id, nota_id, nf["valor_centavos"] if valor_da_parte is None else valor_da_parte,
+                                       origem, confianca, regra, 0 if valor_da_parte is None else 1))
         auditoria.registrar(conn, usuario_id, "nf.alocar", "medicao", medicao_id, None,
                             {"nota_id": nota_id, "nf": f"{nf['numero']}/{nf['serie'] or ''}",
                              "coligada": nf["coligada"], "valor_centavos": nf["valor_centavos"],
                              "origem": origem, "confianca": confianca, "regra": regra,
                              # issue #713: da' para listar os vinculos feitos em medicao ja' recebida
-                             "estado_medicao": m["estado"]})
+                             "estado_medicao": m["estado"],
+                             **({"partilhada": True, "valor_da_parte_centavos": valor_da_parte}
+                                if valor_da_parte is not None else {})})
         notas.fechar_se_completa(conn, usuario_id, medicao_id)
         return cur.lastrowid
 
@@ -289,6 +329,10 @@ def _refazer_vinculo_da_que_voltou(conn, nota_id: int) -> int | None:
     if nf["situacao"] != "ativa":
         return nao("a nota voltou desconsiderada" if nf["desconsiderada_em"] is not None
                    else "a nota voltou cancelada no RM")
+    if a["partilhada"]:
+        # docs/adr/0005: a nota partilhada tinha um vinculo por medicao, feitos pela correcao de cadastro com o valor
+        # de cada parte; refazer so' o ultimo deixaria a nota pela metade
+        return nao("a nota estava partilhada entre medições: religue pela correção de cadastro (ligar_nf)")
     if conn.execute("SELECT 1 FROM nf_alocacoes WHERE nota_id=? AND id>?", (nota_id, a["id"])).fetchone():
         return nao("a nota teve outro vínculo depois da exclusão")
     m = conn.execute("""SELECT m.id, m.estado, e.coligada_rm,
@@ -392,7 +436,7 @@ def notas_da_medicao(conn, medicao_id: int) -> list[dict]:
     da_cota = {e["nota_id"] for e in esperadas or [] if e["nota_id"] is not None}
     out = []
     for r in conn.execute("""
-            SELECT a.id AS alocacao_id, a.valor_alocado_centavos, a.origem, a.confianca, a.regra,
+            SELECT a.id AS alocacao_id, a.valor_alocado_centavos, a.origem, a.confianca, a.regra, a.partilhada,
                    n.id AS nota_id, n.coligada, n.idmov, n.numero, n.serie, n.emissao, n.valor_centavos, n.situacao,
                    n.origem AS origem_nota, n.confirmacao, n.documento_id, n.valor_pdf_centavos, n.conferencia,
                    n.justificativa, n.leitura, n.municipio
@@ -402,6 +446,14 @@ def notas_da_medicao(conn, medicao_id: int) -> list[dict]:
         d["conferencia"] = json.loads(d["conferencia"] or "[]")
         d["recebido_centavos"], d["devido_centavos"], d["recebido_em"] = _recebido_da_nota(conn, r["nota_id"])
         d["falta_centavos"] = _falta_por_titulo(conn, r["nota_id"], aberto_inteiro=True) or 0
+        # docs/adr/0005 ("Uma nota em mais de uma medicao"): `valor_vinculo_centavos` e' o que a nota vale NESTA
+        # medicao: o valor atual da nota no vinculo inteiro, o valor da parte no partilhado. No partilhado, o devido,
+        # o recebido e a falta dos titulos sao os da parte (rateio proporcional, so' inteiros; as partes somam a nota)
+        d["partilhada"] = bool(r["partilhada"])
+        d["valor_vinculo_centavos"] = r["valor_alocado_centavos"] if r["partilhada"] else r["valor_centavos"]
+        if r["partilhada"]:
+            for campo in ("recebido_centavos", "devido_centavos", "falta_centavos"):
+                d[campo] = partes_da_nota(conn, r["nota_id"], d[campo])[r["alocacao_id"]]
         # issue #755: os titulos desta nota que o RM deixou de devolver; aparecem, e nao entram em devido/recebido/falta
         d["titulos_excluidos_rm"] = [dict(b) for b in conn.execute(
             "SELECT valor_original_centavos, valor_baixado_centavos, excluida_rm_em FROM baixas "
@@ -487,11 +539,15 @@ def pagamento_cota(conn, medicao_id: int) -> dict | None:
                 if devido <= 0:
                     sem_titulo = True
                     continue
+                falta_nota = _falta_por_titulo(conn, x["nota_id"], aberto_inteiro=True) or 0
+                if x.get("partilhada"):
+                    # docs/adr/0005: da nota em mais de uma medicao, so' a parte desta
+                    devido = partes_da_nota(conn, x["nota_id"], devido)[x["alocacao_id"]]
+                    falta_nota = partes_da_nota(conn, x["nota_id"], falta_nota)[x["alocacao_id"]]
                 devido = contratos.cota(devido, x["pct"]) or 0
                 # quitada pela leitura do Fechamento (`_recebimento`): titulos baixados faltando ate' a tolerancia, ou
                 # a fatura do consorcio de medicao recebida; a nota da empresa, so' pela baixa dos titulos dela
-                f = 0 if x["quitada"] else min(
-                    contratos.cota(_falta_por_titulo(conn, x["nota_id"], aberto_inteiro=True) or 0, x["pct"]) or 0, devido)
+                f = 0 if x["quitada"] else min(contratos.cota(falta_nota, x["pct"]) or 0, devido)
                 total += devido; falta += f; recebido += devido - f
             continue
         if esp is None:
@@ -1072,7 +1128,7 @@ def _leitura_do_recebimento(conn, m, extras, passos_de, tolerancia: int) -> dict
     # do vinculo, como na nota do PDF confirmada com outro valor), nao o congelado em `valor_alocado_centavos`.
     # issue #589: a execucao que absorveu reajuste negativo e' coberta pelo valor do par (o da nota)
     valor = medicoes.valor_do_par(conn, m["id"], m["valor"])
-    soma = sum(x["valor_centavos"] for x in notas)
+    soma = sum(x["valor_vinculo_centavos"] for x in notas)      # no vinculo partilhado, o valor da parte (adr 0005)
     if valor is None:
         # sem valor na medicao nao ha' o que cobrir: segue pelos titulos, salvo vinculo desfeito a' mao (S1)
         if conn.execute("SELECT 1 FROM nf_alocacoes WHERE medicao_id=? AND desfeita_em IS NOT NULL "
@@ -1145,7 +1201,7 @@ def recebidas_a_mao_sem_cobrir(conn) -> list[dict]:
         ligadas = [x for x in notas_da_medicao(conn, mid) if x["coligada"] == m["coligada_rm"]]
         if valor is None or not ligadas or _notas.esperadas(conn, mid):
             continue
-        soma = sum(x["valor_centavos"] for x in ligadas)
+        soma = sum(x["valor_vinculo_centavos"] for x in ligadas)
         if soma < valor:
             out.append({"medicao_id": mid, "contrato_id": m["contrato_id"], "notas_centavos": soma, "valor_centavos": valor})
     return out

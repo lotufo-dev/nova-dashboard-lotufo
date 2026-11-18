@@ -204,18 +204,16 @@ def _notas_em_aberto(conn, preteridas=frozenset()) -> list[dict]:
     # issue #755: a nota excluida no RM nao e' ativa; o filtro fica escrito para a conta nao depender so' da situacao
     for n in conn.execute("SELECT * FROM notas_fiscais WHERE idmov IS NOT NULL AND situacao='ativa' AND emissao IS NOT NULL "
                           f"AND excluida_rm_em IS NULL AND codtmv IN ({','.join('?' * len(tipos))})", tipos):
-        ligadas = conn.execute("""SELECT m.id, m.contrato_id, m.estado FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id
-                                  WHERE a.nota_id=? AND a.desfeita_em IS NULL""", (n["id"],)).fetchall()
-        if any(r["estado"] in em_aberto for r in ligadas):
+        ligadas = conn.execute("""SELECT m.id, m.contrato_id, m.estado, m.competencia, a.id AS alocacao_id, a.partilhada
+                                  FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id
+                                  WHERE a.nota_id=? AND a.desfeita_em IS NULL ORDER BY a.id""", (n["id"],)).fetchall()
+        partilhada = any(r["partilhada"] for r in ligadas)
+        if not partilhada and any(r["estado"] in em_aberto for r in ligadas):
             continue                                        # a medicao em aberto ja' conta
         if n["id"] in preteridas:
             continue                                        # a medicao conta pela nota da empresa ao consorcio (#756)
-        if ligadas and all(r["id"] in a_mao for r in ligadas):
+        if not partilhada and ligadas and all(r["id"] in a_mao for r in ligadas):
             continue                                        # recebida a mao: o registro manual vale (#203)
-        # (`sincronizacao_rm.alocar` so' liga a nota a uma medicao; se um dia houver nota partida com medicao
-        # fechada de outro jeito, ela fica inteira no a receber, como antes do #203)
-        # (`sincronizacao_rm.alocar` so' liga a nota a uma medicao; se um dia houver nota partida com medicao
-        # fechada de outro jeito, ela fica inteira no a receber, como antes do #203)
         if ligadas:
             cid = ligadas[0]["contrato_id"]
         else:
@@ -231,6 +229,15 @@ def _notas_em_aberto(conn, preteridas=frozenset()) -> list[dict]:
         falta = sincronizacao_rm._falta_por_titulo(conn, n["id"], aberto_inteiro=True, baixa_total_quita=True)
         if falta <= TOLERANCIA_CENTAVOS:
             continue
+        if partilhada:
+            # docs/adr/0005 ("Uma nota em mais de uma medicao"): a falta da nota reparte-se entre as partes
+            # (`sincronizacao_rm.partes_da_nota`). A parte da medicao em aberto ja' conta por ela e a da recebida a'
+            # mao nao conta (#203); ficam a parte da medicao fechada de outro jeito e o resto que nenhuma medicao levou
+            partes = sincronizacao_rm.partes_da_nota(conn, n["id"], falta)
+            falta = partes[None] + sum(partes.get(r["alocacao_id"], 0) for r in ligadas
+                                       if r["estado"] not in em_aberto and r["id"] not in a_mao)
+            if falta <= 0:
+                continue
         out.append({"estado": "protocolada", "tipo": "nota", "numero": n["numero"], "nf": _numero_nf(n["numero"]),
                     "valor_atestado_centavos": None, "valor_protocolado_centavos": falta, "pct": c["pct"],
                     "protocolo_em": n["emissao"], "orgao_id": c["orgao_id"], "orgao_nome": c["orgao_nome"],
