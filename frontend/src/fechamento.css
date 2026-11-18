@@ -55,6 +55,15 @@
 .fch .fch-tabela tfoot .fch-primeira { background: var(--cor-superficie); }
 .fch-rolagem { margin: 0; }
 
+/* familias de valor (#805): a marca da etapa no cabecalho da coluna, a etiqueta (variacao ou diferenca) sob o valor,
+   alinhada a' direita como ele, e o em aberto no tom do "vence em breve". A etiqueta quebra em duas linhas quando a
+   coluna aperta (tokens.css), entao nao alarga a tabela nem sai da celula. */
+.fch-cel { display: grid; justify-items: end; gap: var(--espaco-grade); min-width: 0; }
+.fch .fch-tabela :is(tbody, tfoot) td.fch-em-aberto { color: var(--valor-atencao-texto); }
+.fch .fch-tabela thead .marca-etapa { gap: var(--espaco-mini); }
+/* o total do ano tambem leva a etiqueta da diferenca: os valores da linha ficam no alto, como nas linhas dos meses */
+.fch .fch-tabela--meses tfoot :is(th, td) { vertical-align: top; }
+
 /* abrir o mes e a obra: o nome e' o botao (teclado e leitor de tela), com a seta que gira */
 .fch-abre {
   display: inline-flex; align-items: center; gap: var(--espaco-pp); height: auto; min-height: var(--alvo-minimo);
@@ -121,6 +130,9 @@
   .fch .fch-tabela--meses tbody .fch-linha--medicao > th[scope="row"]:first-child { padding-left: var(--espaco-gg); }
   .fch .fch-tabela--meses .fch-primeira { white-space: normal; }
   .fch .fch-tabela--meses .fch-abre { white-space: normal; text-align: left; }
+  /* a etiqueta nao cabe numa linha na coluna apertada: as duas partes ficam uma sobre a outra, e o fundo acompanha
+     o texto em vez de ocupar a coluna inteira */
+  .fch .fch-tabela--meses :is(.variacao, .diferenca) { flex-direction: column; align-items: flex-end; }
 }
 
 /* ---------------------------------------------------------------- em aberto em blocos (ate' 640 px)

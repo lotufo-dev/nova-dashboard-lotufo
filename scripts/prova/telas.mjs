@@ -26,7 +26,8 @@
 //   destino  o caminho em que a tela termina, quando ela so' leva a outra (`/notas/envio/:id` abre a pagina da medicao)
 //
 // Todo item do menu de um perfil precisa de uma tela aqui para esse perfil: a prova reprova o item sem tela.
-import { cabecalhoCom, CUSTO_DA_OBRA, detalheDoEnvio, espelhoEnviadoPorFora, espelhoGerado, falha, inicioComAParte,
+import { cabecalhoCom, CUSTO_DA_OBRA, detalheDoEnvio, espelhoEnviadoPorFora, espelhoGerado, falha, fechamentoComValores,
+         inicioComAParte, inicioComVariacoes,
          medicaoComEspelhoEnviadoPorFora, medicaoComEspelhoGerado, medicaoComExcluidosNoRm, obrasComAParte, reconciliacaoComBaixados,
          medicaoComNotaDivergente, medicaoComNotaEmitida, medicaoDaMtpar, NOTAS_COM_DIVERGENCIA, notasAEnviar, notasComEnvioAberto,
          PDF_ILEGIVEL,
@@ -84,6 +85,9 @@ export const TELAS = [
   // o a receber antigo e o sem atualizacao do RM, na linha a' parte do painel do ciclo (docs/adr/0006)
   { rota: "inicio", id: "inicio-a-parte", caminho: "/inicio", perfis: ["diretoria"], espera: ".ini-ciclo .em-aberto-a-parte",
     simular: [{ caminho: /^\/api\/inicio\/painel$/, ajustar: inicioComAParte }] },
+  // as familias de valor (#805): os dois numeros do alto com a variacao contra as referencias (subiu, caiu e estavel)
+  { rota: "inicio", id: "inicio-variacoes", caminho: "/inicio", perfis: ["diretoria"], espera: ".ini-numero__variacoes .variacao",
+    simular: [{ caminho: /^\/api\/inicio\/painel$/, ajustar: inicioComVariacoes }] },
   // a ultima rede: uma resposta que a tela nao sabe desenhar derruba o desenho e aparece "A tela parou de responder"
   { rota: "inicio", id: "tela-parou", caminho: "/inicio", perfis: TODOS, espera: ".falha", parou: true,
     simular: [{ caminho: /^\/api\/inicio\/painel$/, corpo: RESPOSTA_QUE_QUEBRA }] },
@@ -147,6 +151,13 @@ export const TELAS = [
   { rota: "fechamento", id: "fechamento", caminho: "/fechamento", perfis: TODOS, espera: ".fch-numeros" },
   { rota: "fechamento", id: "fechamento-2025", caminho: "/fechamento", perfis: TODOS, antes: ".fch-numeros", espera: ".fch-tabela--aberto",
     passos: [{ clicar: '.escolha:has-text("2025")' }] },
+  // as familias de valor (#805): a tabela do mes com dois anos (a variacao do medido), as tres leituras da diferenca
+  // entre o aprovado e o pedido e o em aberto; no segundo estado, o mes aberto ate' a medicao
+  { rota: "fechamento", id: "fechamento-valores", caminho: "/fechamento", perfis: ["diretoria"], espera: ".fch-tabela--meses .variacao",
+    simular: [{ caminho: /^\/api\/fechamento$/, corpo: fechamentoComValores }] },
+  { rota: "fechamento", id: "fechamento-valores-medicao", caminho: "/fechamento", perfis: ["diretoria"], antes: ".fch-tabela--meses .variacao",
+    espera: ".fch-linha--medicao", simular: [{ caminho: /^\/api\/fechamento$/, corpo: fechamentoComValores }],
+    passos: [{ clicar: '.fch-abre[aria-label^="Julho de 2026"]' }, { clicar: '.fch-abre[aria-label^="Obra Exemplo"]' }] },
   { rota: "fechamento", id: "fechamento-erro", caminho: "/fechamento", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/fechamento$/) },
   { rota: "ancoras-docusign", id: "ancoras-docusign", caminho: "/ancoras-docusign", perfis: OPERA, espera: ".anc" },

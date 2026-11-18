@@ -2,13 +2,17 @@ import { Fragment, useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import CaixaAviso from "./CaixaAviso";
 import Contador from "./Contador";
+import Diferenca from "./Diferenca";
 import { brl, contar } from "./formato";
 import { Link } from "./Link";
+import MarcaEtapa from "./MarcaEtapa";
 import { tituloMedicao } from "./medicao";
 import Rolagem from "./Rolagem";
 import { type Ir } from "./rota";
 import Selo from "./Selo";
-import { fmtCompetencia, fmtDataPura, fmtMesExtenso } from "./tempo";
+import { fmtCompetencia, fmtDataPura, fmtMesCurto, fmtMesExtenso } from "./tempo";
+import { diferenca, variacao, type Etapa } from "./valores";
+import Variacao from "./Variacao";
 import "./fechamento.css";
 import Falha from "./Falha";
 
@@ -19,12 +23,21 @@ import Falha from "./Falha";
 //
 // Duas pecas nao existiam na fundacao (decisao do dono de 16/11/2026): o mes abre as obras, e a obra as medicoes, como
 // linhas recuadas da mesma tabela; a comparacao entre os anos fica em painel proprio ("2026 × 2025").
+//
+// #805 (decisao do dono de 18/11/2026): a tabela do mes leva as familias de valor. O cabecalho de cada coluna traz a
+// marca da etapa do dinheiro; o medido de cada mes encerrado diz a variacao contra o mesmo mes do ano anterior; o
+// aprovado diz a diferenca contra o pedido, so' das medicoes que tem os dois valores; o em aberto sai no tom do "vence
+// em breve". Nao ha' diferenca entre o protocolado e o aprovado nem entre o recebido e o protocolado: falta de nota ou
+// de pagamento nao e' diferenca de valor. As referencias e o limite vem do servidor.
 
 // Com o total a receber ainda nao liberado no cadastro (a trava da lista de Obras e do Inicio), o recebido, o em
 // aberto e a marca de cada nota vem nulos e as listas do em aberto vem vazias: a tela diz a trava em uma frase.
 type Numeros = {
   medido_centavos: number; aprovado_centavos: number; protocolado_centavos: number; recebido_centavos: number | null;
   em_aberto_centavos: number | null;
+  /** #805: os dois lados da diferenca aprovado × pedido, so' das medicoes que tem o valor do boletim e o pedido (a
+   *  medicao em analise fica fora: nela nao ha' diferenca, ha' etapa nao alcancada) */
+  aprovado_com_pedido_centavos?: number; pedido_do_aprovado_centavos?: number;
 };
 /** As tres partes que somam o em aberto do ano: (a) notas que o orgao nao pagou, (a') repasse sem baixa (o orgao ja'
  *  pagou o consorcio e a nota da empresa segue sem baixa) e (b) medicoes sem nota ligada. */
@@ -39,7 +52,9 @@ type MedicaoLinha = Numeros & {
   competencia: string; protocolo_em: string | null; notas: NotaLinha[]; notas_fora_da_conta?: NotaFora[]; sem_nota?: boolean;
 };
 type ObraLinha = Numeros & { contrato_id: number; obra: string; medicoes: MedicaoLinha[] };
-type Mes = Numeros & { competencia: string; obras: ObraLinha[] };
+/** #805: `medido_ano_anterior_centavos` e' o medido do mesmo mes do ano anterior; nulo no mes ainda aberto e quando o
+ *  ano anterior nao esta' na pagina ou nao teve medido no mes */
+type Mes = Numeros & { competencia: string; obras: ObraLinha[]; medido_ano_anterior_centavos?: number | null };
 /** (a) nota protocolada nao paga (a paga em parte, pelo que falta), (a') nota da empresa ao consorcio sem baixa em
  *  medicao que o orgao ja' pagou, ou (b) medicao protocolada sem nota ligada. */
 type EmAberto = {
@@ -68,14 +83,21 @@ export type RespostaFechamento = {
   em_aberto: EmAberto[]; em_aberto_anteriores: Contagem;
   notas_sem_medicao: { em_aberto: NotaSolta[]; em_aberto_centavos: number | null; pagas: Contagem };
   cobertura: Record<string, Cobertura>; notas_diferem?: NotaDifere[]; pares_mistos?: ParMisto[];
+  /** #805: acima de quantos milesimos do pedido a diferenca do aprovado e' critica (o limite do aviso "aprovado abaixo
+   *  do pedido") */
+  diferenca_critica_por_mil?: number;
   total_a_receber_liberado: boolean;
 };
 
-// `curta`: a coluna que fica no celular (a 390 px a tabela mostra o medido e o recebido de cada mes)
-const COLUNAS: { chave: keyof Numeros; rotulo: string; curta?: boolean }[] = [
-  { chave: "medido_centavos", rotulo: "Medido", curta: true }, { chave: "aprovado_centavos", rotulo: "Aprovado" },
-  { chave: "protocolado_centavos", rotulo: "Protocolado" }, { chave: "recebido_centavos", rotulo: "Recebido", curta: true },
-  { chave: "em_aberto_centavos", rotulo: "Em aberto" },
+type Coluna = "medido_centavos" | "aprovado_centavos" | "protocolado_centavos" | "recebido_centavos" | "em_aberto_centavos";
+// `curta`: a coluna que fica no celular (a 390 px a tabela mostra o medido e o recebido de cada mes). `etapa`: a marca
+// da etapa do dinheiro no cabecalho da tabela do mes (#805); o aprovado e' o valor do boletim, e o medido junta
+// etapas (o aprovado e, sem boletim, o pedido), por isso fica sem marca
+const COLUNAS: { chave: Coluna; rotulo: string; curta?: boolean; etapa?: Etapa }[] = [
+  { chave: "medido_centavos", rotulo: "Medido", curta: true }, { chave: "aprovado_centavos", rotulo: "Aprovado", etapa: "boletim" },
+  { chave: "protocolado_centavos", rotulo: "Protocolado", etapa: "protocolado" },
+  { chave: "recebido_centavos", rotulo: "Recebido", curta: true, etapa: "recebido" },
+  { chave: "em_aberto_centavos", rotulo: "Em aberto", etapa: "em_aberto" },
 ];
 const opcional = (c: { curta?: boolean }) => (c.curta ? "" : " fch-col-opcional");
 const COMPARAVEIS = COLUNAS.slice(0, 4);
@@ -111,12 +133,44 @@ function NumerosDoAno({ f, ano }: { f: RespostaFechamento; ano: string }) {
 
 /* ------------------------------------------------------------------ tabela do mes */
 
-function Celulas({ x }: { x: Numeros }) {
+/** A referencia da variacao do medido de um mes: a competencia do mesmo mes do ano anterior e o medido dela. */
+type Referencia = { competencia: string; centavos: number };
+
+/** As cinco celulas de valor de uma linha (mes, obra, medicao ou total). Familias de valor (#805): sob o medido, a
+ *  variacao contra `referencia` (so' a linha do mes a tem); sob o aprovado, a diferenca contra o pedido, quando a
+ *  linha tem os dois lados e a pagina tem o limite do servidor (`limite`); o em aberto, no tom do "vence em breve". */
+function Celulas({ x, limite, referencia }: { x: Numeros; limite?: number; referencia?: Referencia | null }) {
   return (
     <>
-      {COLUNAS.map(c => <td key={c.chave} className={`col-num dinheiro num${opcional(c)}`}>{valor(x[c.chave])}</td>)}
+      {COLUNAS.map(c => {
+        const v = x[c.chave];
+        const comVariacao = c.chave === "medido_centavos" && !!referencia && variacao(v, referencia.centavos) !== null;
+        const comDiferenca = c.chave === "aprovado_centavos" && limite !== undefined && !!v
+          && diferenca(x.aprovado_com_pedido_centavos, x.pedido_do_aprovado_centavos, limite) !== null;
+        const emAberto = c.chave === "em_aberto_centavos" && !!v;
+        return (
+          <td key={c.chave} className={`col-num dinheiro num${opcional(c)}${emAberto ? " fch-em-aberto" : ""}`}>
+            {comVariacao || comDiferenca ? (
+              <span className="fch-cel">
+                <span>{valor(v)}</span>
+                {comVariacao && referencia && <Variacao atual={v} referencia={referencia.centavos} rotulo={fmtMesCurto(referencia.competencia)}
+                  porExtenso={`${fmtMesExtenso(referencia.competencia)} de ${referencia.competencia.slice(0, 4)}`} />}
+                {comDiferenca && limite !== undefined && <Diferenca valor={x.aprovado_com_pedido_centavos} base={x.pedido_do_aprovado_centavos}
+                  nomeBase="pedido" limitePorMil={limite} />}
+              </span>
+            ) : valor(v)}
+          </td>
+        );
+      })}
     </>
   );
+}
+
+/** O mesmo mes do ano anterior, com o medido dele, quando o servidor o manda (#805). */
+function referenciaDoMes(m: Mes): Referencia | null {
+  const centavos = m.medido_ano_anterior_centavos;
+  if (centavos === null || centavos === undefined) return null;
+  return { competencia: `${Number(m.competencia.slice(0, 4)) - 1}${m.competencia.slice(4)}`, centavos };
 }
 
 /** As notas da medicao, cada uma com a situacao: recebida, paga em parte, repasse sem baixa (o orgao ja' pagou o
@@ -159,7 +213,7 @@ function BotaoAbre({ aberto, controla, rotulo, children, onClick }:
 type Abertos = { tem: (k: string) => boolean; trocar: (k: string) => void };
 
 /** O mes abre as obras, e a obra abre as medicoes, na propria tabela, com as colunas alinhadas. */
-function LinhasDoMes({ m, ab, ir }: { m: Mes; ab: Abertos; ir: Ir }) {
+function LinhasDoMes({ m, ab, ir, limite }: { m: Mes; ab: Abertos; ir: Ir; limite?: number }) {
   if (!ab.tem(m.competencia)) return null;
   return (
     <>
@@ -173,7 +227,7 @@ function LinhasDoMes({ m, ab, ir }: { m: Mes; ab: Abertos; ir: Ir }) {
                 <BotaoAbre aberto={ab.tem(chave)} controla={id} rotulo={`${o.obra}, medições de ${fmtCompetencia(m.competencia)}`}
                   onClick={() => ab.trocar(chave)}>{o.obra}</BotaoAbre>
               </th>
-              <Celulas x={o} />
+              <Celulas x={o} limite={limite} />
             </tr>
             {ab.tem(chave) && o.medicoes.map((md, j) => (
               <tr key={md.medicao_id} className="fch-linha fch-linha--medicao" id={j === 0 ? id : undefined}>
@@ -181,7 +235,7 @@ function LinhasDoMes({ m, ab, ir }: { m: Mes; ab: Abertos; ir: Ir }) {
                   <Link className="link" para={{ tela: "medicao", obra: md.contrato_id, id: md.medicao_id }} ir={ir}>{tituloMedicao(md)}</Link>
                   <Notas m={md} />
                 </th>
-                <Celulas x={md} />
+                <Celulas x={md} limite={limite} />
               </tr>
             ))}
           </Fragment>
@@ -198,6 +252,7 @@ function TabelaDoAno({ f, ano, ir }: { f: RespostaFechamento; ano: string; ir: I
     trocar: k => setAbertos(s => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; }),
   };
   const meses = f.meses.filter(m => m.competencia.startsWith(`${ano}-`));
+  const limite = f.diferenca_critica_por_mil;
   if (meses.length === 0) return <p className="fch-vazio">Nenhum lançamento em {ano}.</p>;
   return (
     <Rolagem rotulo={`Por mês de competência, ${ano}`} className="tabela-wrap fch-rolagem">
@@ -206,7 +261,11 @@ function TabelaDoAno({ f, ano, ir }: { f: RespostaFechamento; ano: string; ir: I
         <thead>
           <tr>
             <th scope="col" className="fch-primeira">Mês</th>
-            {COLUNAS.map(c => <th key={c.chave} scope="col" className={`col-num${opcional(c)}`}>{c.rotulo}</th>)}
+            {COLUNAS.map(c => (
+              <th key={c.chave} scope="col" className={`col-num${opcional(c)}`}>
+                {c.etapa ? <MarcaEtapa etapa={c.etapa}>{c.rotulo}</MarcaEtapa> : c.rotulo}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -220,14 +279,14 @@ function TabelaDoAno({ f, ano, ir }: { f: RespostaFechamento; ano: string; ir: I
                     <span className="fch-mes-curto" aria-hidden="true">{nomeMes(m.competencia).slice(0, 3)}</span>
                   </BotaoAbre>
                 </th>
-                <Celulas x={m} />
+                <Celulas x={m} limite={limite} referencia={referenciaDoMes(m)} />
               </tr>
-              <LinhasDoMes m={m} ab={ab} ir={ir} />
+              <LinhasDoMes m={m} ab={ab} ir={ir} limite={limite} />
             </Fragment>
           ))}
         </tbody>
         <tfoot>
-          <tr><th scope="row" className="fch-primeira">Total de {ano}</th><Celulas x={f.por_ano[ano]} /></tr>
+          <tr><th scope="row" className="fch-primeira">Total de {ano}</th><Celulas x={f.por_ano[ano]} limite={limite} /></tr>
         </tfoot>
       </table>
     </Rolagem>
@@ -237,7 +296,7 @@ function TabelaDoAno({ f, ano, ir }: { f: RespostaFechamento; ano: string; ir: I
 /* ------------------------------------------------------------------ comparacao */
 
 function Comparacao({ f }: { f: RespostaFechamento }) {
-  const [chave, setChave] = useState<keyof Numeros>("medido_centavos");
+  const [chave, setChave] = useState<Coluna>("medido_centavos");
   const [a, b] = f.anos;
   const porMes = new Map(f.meses.map(m => [m.competencia, m]));
   const mms = [...new Set(f.meses.map(m => m.competencia.slice(5)))].sort();

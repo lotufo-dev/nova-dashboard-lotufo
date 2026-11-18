@@ -8,11 +8,14 @@ import Falha from "./Falha";
 import { brl, contar } from "./formato";
 import LegendaCor from "./LegendaCor";
 import type { Usuario } from "./Login";
+import MarcaEtapa from "./MarcaEtapa";
 import { type Ir } from "./rota";
 import { Link } from "./Link";
 import Selo, { Glifo } from "./Selo";
 import type { Situacao } from "./situacao";
 import { fmtCompetencia, fmtMesCurto, fmtMesExtenso } from "./tempo";
+import type { Etapa } from "./valores";
+import Variacao from "./Variacao";
 import "./inicio.css";
 
 // Inicio do redesenho de 11/2026: informacao geral para a diretoria. Issue #642 (decisao do dono de 10/11/2026): a
@@ -24,6 +27,8 @@ import "./inicio.css";
 // #721 (redesenho, etapa 2a): a tela como o dono a montou em 15/11/2026. Os mesmos blocos e os mesmos numeros, em outra
 // disposicao: saudacao e numeros do mes no alto; o grupo "Cota da Lotufo" (a base dita uma vez, no titulo do grupo) com
 // o ciclo e a previsao lado a lado e o recebido embaixo; depois os avisos e a matriz, na largura toda.
+// #805 (decisao do dono de 18/11/2026): os dois numeros do alto dizem se estao melhor ou pior que antes, com a peca
+// Variacao. As referencias vem do servidor, com a mesma conta do numero em outro periodo; a tela so' desenha.
 
 type ChaveEtapa = "em_analise" | "boletim" | "nota" | "protocolado" | "recebido_mes";
 // #642: uma etapa da faixa do ciclo, na cota da Lotufo; `mais_antigo_dias` nulo = etapa vazia ou sem idade (recebido)
@@ -36,10 +41,14 @@ type GrupoPrevisao = { valor_centavos: number; quantidade: number };
 type EtapaMatriz = "em_analise" | "boletim" | "nota" | "protocolado" | "atrasado" | "recebida";
 type CelulaMatriz = { etapa: EtapaMatriz; medicao_id: number } | null;
 type ObraMatriz = { contrato_id: number; obra: string; celulas: CelulaMatriz[] };
+/** #805: o medido de outra competencia, a referencia da variacao; nulo sem com o que comparar */
+type ReferenciaMedido = { competencia: string; valor_centavos: number } | null;
 export type PainelInicio = {
   hoje: string;
   protocoladas: { obras_protocoladas: number; obras_ativas: number; ultima: string | null };
-  medido: { competencia: string; valor_centavos: number; quantidade: number; ultimo_lancamento: string | null };
+  // #805: `anterior` e' a competencia anterior e `ano_anterior` a mesma competencia do ano anterior
+  medido: { competencia: string; valor_centavos: number; quantidade: number; ultimo_lancamento: string | null;
+    anterior: ReferenciaMedido; ano_anterior: ReferenciaMedido };
   // 17/11/2026 (docs/adr/0006): o total soma so' a competencia de `ano_inicial` em diante que o RM ainda informa; o
   // resto vem em `a_parte` (nulo sem o total liberado) e a tela o mostra numa linha propria, fora do total
   a_receber: { liberado: boolean; valor_centavos: number | null; mais_60_centavos: number | null;
@@ -50,8 +59,19 @@ export type PainelInicio = {
   // #652: `depois` = data esperada alem do proximo mes
   previsao: Record<"neste_mes" | "proximo_mes" | "atrasado" | "sem_previsao" | "depois", GrupoPrevisao>;
   matriz: { competencias: string[]; grupos: { contratante: string; obras: ObraMatriz[] }[] };
-  notas_mes: { mes: string; valor_centavos: number; notas: number; obras: number };
+  // #805: `anterior` e' o mes anterior ate' o mesmo dia do mes (`ate_dia`: o dia de hoje, ou o ultimo dia do mes
+  // anterior quando ele e' mais curto); nulo sem com o que comparar
+  notas_mes: { mes: string; valor_centavos: number; notas: number; obras: number;
+    anterior: { mes: string; ate_dia: number; valor_centavos: number } | null };
 };
+
+/** O mes de uma referencia, curto e por extenso. O ano so' entra quando nao e' o do numero comparado: "set" e
+ *  "setembro" no mesmo ano; "dez/25" e "dezembro de 2025" em outro. */
+function mesDaReferencia(referencia: string, atual: string): { curto: string; extenso: string } {
+  const mesmoAno = referencia.slice(0, 4) === atual.slice(0, 4);
+  const curto = fmtMesCurto(referencia), extenso = fmtMesExtenso(referencia);
+  return mesmoAno ? { curto: curto.split("/")[0], extenso } : { curto, extenso: `${extenso} de ${referencia.slice(0, 4)}` };
+}
 
 /** "Bom dia" / "Boa tarde" / "Boa noite" pela hora de Cuiaba. */
 export function saudacao(agora: Date = new Date()): string {
@@ -203,6 +223,8 @@ const ETAPAS_MATRIZ: { chave: EtapaMatriz; rotulo: string }[] = [
   { chave: "atrasado", rotulo: "Atrasado" },
 ];
 const ROTULO_MATRIZ = Object.fromEntries(ETAPAS_MATRIZ.map(e => [e.chave, e.rotulo])) as Record<EtapaMatriz, string>;
+// a marca da legenda e' a peca MarcaEtapa (#805); a matriz chama de "recebida" a etapa que a peca chama de "recebido"
+const marcaDaMatriz = (e: EtapaMatriz): Etapa => (e === "recebida" ? "recebido" : e);
 
 /** Matriz obra por competencia (#659): uma linha por obra ativa, agrupada por contratante, e uma celula por competencia
  *  com a cor da etapa da medicao. A celula pintada e' o link para a medicao, com o nome (obra, competencia, etapa) no
@@ -214,7 +236,7 @@ function MatrizObras({ matriz }: { matriz: PainelInicio["matriz"] }) {
       <div className="ini-painel__cab">
         <h2 id="ini-matriz">Medições por obra e competência</h2>
         <ul className="ini-matriz__legenda" aria-label="Legenda das etapas">
-          {ETAPAS_MATRIZ.map(e => <li key={e.chave}><span className={`ini-matriz__cor ini-matriz__cor--${e.chave}`} />{e.rotulo}</li>)}
+          {ETAPAS_MATRIZ.map(e => <li key={e.chave}><MarcaEtapa etapa={marcaDaMatriz(e.chave)}>{e.rotulo}</MarcaEtapa></li>)}
         </ul>
       </div>
       {grupos.length === 0 ? <p className="ini-vazio">Nenhuma obra ativa.</p> : <>
@@ -358,7 +380,11 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
     );
   }
 
-  const m = p.medido;
+  const m = p.medido, nm = p.notas_mes;
+  const mesDeHoje = p.hoje.slice(0, 7);
+  const refNotas = nm.anterior && mesDaReferencia(nm.anterior.mes, mesDeHoje);
+  const refAnterior = m.anterior && mesDaReferencia(m.anterior.competencia, m.competencia);
+  const refAnoAnterior = m.ano_anterior && mesDaReferencia(m.ano_anterior.competencia, m.competencia);
 
   return (
     <div className="ini">
@@ -370,12 +396,25 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
         <section aria-label="Números do mês" className="ini-numeros">
           <dl className="ini-numeros__lista">
             <div className="ini-numero">
-              <dt className="ini-numero__rotulo">Notas fiscais protocoladas em {fmtMesExtenso(p.hoje.slice(0, 7))}</dt>
-              <dd className="ini-numero__valor">{brl(p.notas_mes.valor_centavos)}</dd>
+              <dt className="ini-numero__rotulo">Notas fiscais protocoladas em {fmtMesExtenso(mesDeHoje)}</dt>
+              <dd className="ini-numero__valor">{brl(nm.valor_centavos)}</dd>
+              {/* o mes de hoje esta' pela metade: compara com o mes anterior ate' o mesmo dia, e o rotulo diz isso */}
+              {nm.anterior && refNotas && (
+                <dd className="ini-numero__variacoes">
+                  <Variacao atual={nm.valor_centavos} referencia={nm.anterior.valor_centavos}
+                    rotulo={`${refNotas.curto} até o dia ${nm.anterior.ate_dia}`} porExtenso={`${refNotas.extenso} até o dia ${nm.anterior.ate_dia}`} />
+                </dd>)}
             </div>
             <div className="ini-numero">
               <dt className="ini-numero__rotulo">Medido em {fmtMesExtenso(m.competencia)}</dt>
               <dd className="ini-numero__valor">{brl(m.valor_centavos)}</dd>
+              {(m.anterior || m.ano_anterior) && (
+                <dd className="ini-numero__variacoes">
+                  {m.anterior && refAnterior && <Variacao atual={m.valor_centavos} referencia={m.anterior.valor_centavos}
+                    rotulo={refAnterior.curto} porExtenso={refAnterior.extenso} />}
+                  {m.ano_anterior && refAnoAnterior && <Variacao atual={m.valor_centavos} referencia={m.ano_anterior.valor_centavos}
+                    rotulo={refAnoAnterior.curto} porExtenso={refAnoAnterior.extenso} />}
+                </dd>)}
             </div>
           </dl>
         </section>

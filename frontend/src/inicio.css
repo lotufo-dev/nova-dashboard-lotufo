@@ -69,6 +69,8 @@
   font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
   font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-numero); line-height: var(--entrelinha-numero);
 }
+/* #805: a variacao de cada numero, logo abaixo dele; duas lado a lado, e a segunda desce quando nao cabe */
+.ini-numero__variacoes { display: flex; flex-wrap: wrap; gap: var(--espaco-mini) var(--espaco-pp); margin: var(--espaco-mini) 0 0; }
 @media (max-width: 760px) { .ini-numeros__lista { flex-direction: column; } }
 
 /* ================================================================ CICLO DA MEDICAO
@@ -204,8 +206,8 @@ a.ini-aviso__linha:hover { background: var(--cor-papel-sombreado); }
   display: flex; flex-wrap: wrap; gap: var(--espaco-mini) var(--espaco-m); margin: 0 0 0 auto; padding: 0; list-style: none;
   font-size: var(--texto-meta); color: var(--cor-texto-secundario);
 }
-.ini-matriz__legenda li { display: inline-flex; align-items: center; gap: var(--espaco-pp); white-space: nowrap; }
-.ini-matriz__cor { flex: none; width: var(--tamanho-chave); height: var(--tamanho-chave); border-radius: var(--raio-canto); }
+/* a chave de cor de cada item e' a peca MarcaEtapa (tokens.css) */
+.ini-matriz__legenda li { white-space: nowrap; }
 .ini-matriz__grade { min-width: 0; }
 .ini-matriz__linha {
   display: grid; grid-template-columns: minmax(0, var(--largura-nome-obra)) repeat(12, minmax(0, 1fr)); column-gap: var(--espaco-grade);
@@ -233,12 +235,12 @@ a.ini-matriz__celula:hover { outline: var(--borda-grossa) solid var(--cor-tinta)
   content: var(--etapa-atrasado-marca); font-size: var(--texto-meta); font-weight: var(--peso-sinal);
   line-height: var(--entrelinha-justa); color: var(--cor-sobre-ponto);
 }
-.ini-matriz__cor--em_analise, .ini-matriz__celula--em_analise { background: var(--etapa-analise); box-shadow: inset 0 0 0 var(--etapa-borda-largura) var(--etapa-analise-borda); }
-.ini-matriz__cor--boletim, .ini-matriz__celula--boletim { background: var(--etapa-boletim); }
-.ini-matriz__cor--nota, .ini-matriz__celula--nota { background: var(--etapa-nota); }
-.ini-matriz__cor--protocolado, .ini-matriz__celula--protocolado { background: var(--etapa-protocolado); }
-.ini-matriz__cor--recebida, .ini-matriz__celula--recebida { background: var(--etapa-recebido); }
-.ini-matriz__cor--atrasado, .ini-matriz__celula--atrasado { background: var(--etapa-atrasado); }
+.ini-matriz__celula--em_analise { background: var(--etapa-analise); box-shadow: inset 0 0 0 var(--etapa-borda-largura) var(--etapa-analise-borda); }
+.ini-matriz__celula--boletim { background: var(--etapa-boletim); }
+.ini-matriz__celula--nota { background: var(--etapa-nota); }
+.ini-matriz__celula--protocolado { background: var(--etapa-protocolado); }
+.ini-matriz__celula--recebida { background: var(--etapa-recebido); }
+.ini-matriz__celula--atrasado { background: var(--etapa-atrasado); }
 @container (max-width: 520px) {
   .ini-matriz__linha { grid-template-columns: repeat(12, minmax(0, 1fr)); }
   .ini-matriz__linha--meses > :first-child { grid-column-start: 1; }
