@@ -371,6 +371,22 @@ def ritmo_e_prazo(conn, contrato_id: int, hoje: datetime.date | None = None) -> 
             "dias_alem": dias if atrasa else None}
 
 
+def ritmo_na_cota(conn, contrato_id: int, hoje: datetime.date, percentual_bp: int | None, saldo_na_cota: int) -> dict:
+    """`ritmo_e_prazo` com o ritmo e o necessario na COTA da Lotufo: a conta UNICA do painel "Prazo" da pagina da obra
+    (`ficha_obra.da_obra`, #655, #803) e da coluna Andamento da lista de Obras (`api_contratos.listar`, #805).
+    O ritmo e' a cota do ritmo cheio. O necessario por mes e' `saldo_na_cota` (o saldo a executar que a tela mostra:
+    `paineis.posicao_na_cota`) dividido pelas competencias que restam, para a conta da tela fechar ao centavo: a cota
+    aplicada ao necessario cheio poderia ficar a um centavo do saldo da tela dividido (o saldo da tela e' a diferenca
+    de dois valores ja' arredondados). Conclusao, situacao e dias nao mudam com a cota (saldo e ritmo na mesma
+    proporcao)."""
+    r = ritmo_e_prazo(conn, contrato_id, hoje)
+    if r["ritmo_centavos"] is not None:
+        r["ritmo_centavos"] = contratos.cota(r["ritmo_centavos"], percentual_bp)
+    if r["necessario_centavos"] is not None:
+        r["necessario_centavos"] = necessario_por_mes(saldo_na_cota, r["competencias_restantes"])
+    return r
+
+
 def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
     hoje = hoje or tempo.hoje_local()
     out = []

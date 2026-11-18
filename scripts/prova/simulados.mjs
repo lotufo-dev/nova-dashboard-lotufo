@@ -297,6 +297,80 @@ export const fechamentoComValores = reg => {
 export const obrasComAParte = obras => obras.map((o, i) => ({ ...o, posicao: { ...o.posicao, a_receber_ano_inicial: "2025",
   a_receber_anterior_centavos: i === 0 ? 70003 : 0, a_receber_sem_atualizacao_centavos: i === 0 ? 40001 : 0 } }));
 
+// #805, Obras por contratante: a carteira que o cadastro de exemplo nao tem (ele tem um orgao so', duas obras em
+// andamento e nenhuma medicao no mes fechado). Quatro contratantes (as siglas sao as que o codigo conhece; as obras e
+// os valores sao inventados): obra devagar, em atencao e adiantada; obra paralisada, com a execucao vencida, em
+// encerramento e encerrada; contratante com e sem prazo de pagamento; medido do mes subindo, caindo, estavel e sem
+// medicao. `carteiraSimulada` troca o /api/contratos e `painelDaCarteira` ajusta o /api/diretoria com o farol, os
+// motivos, os avisos criticos e o prazo de pagamento dessas obras. As competencias andam com o dia da prova.
+const competenciaHa = meses => { const h = new Date(); return new Date(Date.UTC(h.getFullYear(), h.getMonth() - meses, 1)).toISOString().slice(0, 7); };
+const REAIS = 100;
+const daCarteira = (id, nome, contratante, chave, x) => {
+  const vigente = x.vigente * REAIS, medido = x.medido * REAIS, fim = hojeDaProva() + (x.dias ?? 200) * DIA;
+  return {
+    id, orgao: x.orgao ?? contratante, contratante, contratante_chave: chave, orgao_sub: x.sub ?? null, numero_instrumento: `00${id - 9000}/2025/00/00-EXEMPLO`,
+    nome_curto: nome, estado: x.estado ?? "ativo", encerramento_iniciado_em: x.encerramento ?? null, entidade_id: 1, percentual_direito_bp: x.bp ?? 10000,
+    valor_vigente_centavos: vigente, valor_vigente_execucao_centavos: vigente, medido_centavos: medido, saldo_centavos: vigente - medido,
+    execucao_fim_vigente: dataEm(fim), vigencia_fim_vigente: dataEm(fim, 90), dias_execucao: x.dias ?? 200, dias_vigencia: (x.dias ?? 200) + 90,
+    vigencia_automatica: false, paralisada_desde: x.paralisada ?? null, pedido_prorrogacao: null,
+    posicao: { vigente_centavos: vigente, medido_centavos: medido, saldo_centavos: vigente - medido, a_receber_centavos: (x.receber ?? 0) * REAIS,
+      a_receber_ano_inicial: "2025", a_receber_anterior_centavos: 0, a_receber_sem_atualizacao_centavos: 0 },
+    andamento: { ritmo_centavos: x.ritmo == null ? null : x.ritmo * REAIS, necessario_centavos: x.necessario == null ? null : x.necessario * REAIS },
+    medido_mes: { competencia: competenciaHa(1), valor_centavos: (x.mes ?? 0) * REAIS, referencia_competencia: competenciaHa(2),
+      referencia_centavos: (x.antes ?? 0) * REAIS },
+  };
+};
+const CARTEIRA = () => [
+  // SINFRA: devagar (27% e 18% do necessario), adiantada, em atencao, em encerramento e uma encerrada
+  daCarteira(9001, "Avenida Alfa", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 120_000_000, medido: 44_400_000,
+    ritmo: 2_400_000, necessario: 8_800_000, mes: 1_600_000, antes: 1_760_000 }),
+  daCarteira(9002, "Corredor Beta", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", bp: 4900, vigente: 210_000_000, medido: 178_500_000,
+    ritmo: 4_100_000, necessario: 3_600_000, mes: 3_300_000, antes: 2_790_000, receber: 3_900_000, dias: 96 }),
+  daCarteira(9003, "Estações Gama", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", vigente: 180_000_000, medido: 63_000_000,
+    ritmo: 7_000_000, necessario: 38_700_000, mes: 14_600_000, antes: 9_600_000, dias: 40 }),
+  daCarteira(9004, "Quartel Delta", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 12_000_000, medido: 5_640_000,
+    ritmo: 500_000, necessario: 600_000, mes: 600_000, antes: 600_000, receber: 600_000, dias: 250 }),
+  daCarteira(9005, "Bairros Épsilon", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", vigente: 8_000_000, medido: 7_960_000,
+    ritmo: 300_000, necessario: null, mes: 200_000, antes: 510_000, dias: 4, encerramento: dataEm(hojeDaProva(), -20) }),
+  daCarteira(9006, "Travessia Zeta", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 30_000_000, medido: 30_000_000,
+    estado: "encerrado", ritmo: null, necessario: null, dias: -400 }),
+  // MTPAR, sem prazo de pagamento no sistema: uma com a execucao vencida e uma em atencao
+  daCarteira(9007, "Trevo Eta", "MTPAR", "mtpar", { vigente: 90_000_000, medido: 74_700_000, ritmo: 900_000, necessario: null,
+    mes: 3_100_000, antes: 4_000_000, receber: 7_100_000, dias: -24 }),
+  daCarteira(9008, "Anel Teta", "MTPAR", "mtpar", { vigente: 124_600_000, medido: 49_840_000, ritmo: 2_000_000, necessario: 2_500_000, dias: 900 }),
+  // Pref. Cuiaba: uma obra paralisada
+  daCarteira(9009, "Orla Iota", "Pref. Cuiabá", "pref-cuiaba", { vigente: 66_500_000, medido: 37_240_000, estado: "suspenso",
+    paralisada: dataEm(hojeDaProva(), -100), ritmo: 300_000, necessario: null, mes: 900_000, antes: 905_000, receber: 900_000 }),
+  // SES-MT: uma obra adiantada, sem nada pendente e sem medicao no mes (o contratante fica "Em dia")
+  daCarteira(9010, "Hospital Capa", "SES-MT", "ses-mt", { vigente: 168_300_000, medido: 156_519_000, ritmo: 5_000_000, necessario: 4_000_000, dias: 75 }),
+];
+export const carteiraSimulada = () => CARTEIRA();
+
+const farolDaCarteira = (o, farol, motivos = []) => ({
+  contrato_id: o.id, seq: o.id - 9000, obra: o.nome_curto, contratante: o.contratante, empreita: o.percentual_direito_bp === 10000 ? "PRÓPRIA" : "CONSÓRCIO",
+  direito: o.percentual_direito_bp / 10000, pi_va: o.posicao.vigente_centavos, faturados: o.posicao.medido_centavos, saldo: o.posicao.saldo_centavos,
+  status: "EM ANDAMENTO", termino: o.execucao_fim_vigente, vigencia: o.vigencia_fim_vigente, farol,
+  motivo: motivos.map(m => m[1]).join("; "),
+  motivos: motivos.map(([nivel, texto]) => ({ tipo: "simulado", nivel, dias: null, valor_centavos: null, texto })) });
+const MOTIVOS = {
+  9001: ["vermelho", [["critico", "14ª Medição: aprovado 18,7% abaixo do pedido"], ["atencao", "garantia vence em 28 dias"]]],
+  9002: ["atencao", [["atencao", "prorrogação pedida há 9 dias"]]],
+  9003: ["vermelho", [["critico", "garantia não cobre o fim da execução"], ["acao", "execução termina em 40 dias"], ["atencao", "reajuste esperando apostilamento"]]],
+  9005: ["acao", [["acao", "execução termina em 4 dias"]]],
+  9007: ["vermelho", [["critico", "execução venceu há 24 dias"]]],
+  9009: ["atencao", [["atencao", "obra paralisada há 100 dias"]]],
+};
+export const painelDaCarteira = painel => {
+  const emAndamento = CARTEIRA().filter(o => o.estado !== "encerrado");
+  const obras = emAndamento.map(o => farolDaCarteira(o, ...(MOTIVOS[o.id] ?? ["verde", []])));
+  return { ...painel, obras, prazo_pagamento: { SINFRA: 47, "Pref. Cuiabá": 62, "SES-MT": 38 },
+    reajustes_apostilamento: { competencias: 3, valor_centavos: 41_250_000, obras: [
+      { contrato_id: 9003, obra: "Estações Gama", competencias: 2, valor_centavos: 30_000_000 },
+      { contrato_id: 9004, obra: "Quartel Delta", competencias: 1, valor_centavos: 11_250_000 }] },
+    avisos: obras.flatMap(o => o.motivos.map(m => ({ tipo: m.tipo, nivel: m.nivel, publico: ["diretoria"], contrato_id: o.contrato_id, obra: o.obra,
+      dias: null, valor_centavos: null, mensagem: `${o.obra}: ${m.texto}`, destino: { tela: "contrato", id: o.contrato_id, aba: "prazos" } }))) };
+};
+
 // A reconciliacao com o grupo "Títulos baixados no RM por valor menor" (docs/adr/0006): o banco da prova nao tem titulo
 // baixado com diferenca. Uma linha com medicao e outra de nota sem medicao, na primeira obra da prova.
 export const reconciliacaoComBaixados = (rec, reg) => ({ ...rec, baixados_com_diferenca: [

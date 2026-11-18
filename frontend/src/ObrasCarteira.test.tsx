@@ -79,8 +79,8 @@ describe("As peças da lista de Obras que vieram da Carteira (#748, redesenho #7
     api.mockResolvedValue([]);
     render(<Qdop p={PAINEL} ir={() => {}} />);
     expect(screen.getByRole("link", { name: /Exportar QDOP/ }).getAttribute("href")).toBe("/api/diretoria/qdop.xlsx");
-    expect((await screen.findByRole("link", { name: /^0 obras terminam em 90.dias$/ })).getAttribute("href")).toBe("/obras?termina=90");
-    expect(screen.getByRole("link", { name: "0 obras terminam em 6 meses" }).getAttribute("href")).toBe("/obras?termina=180");
+    expect((await screen.findByRole("link", { name: /^0 obras terminam em 90.dias$/ })).getAttribute("href")).toBe("/obras/todas?termina=90");
+    expect(screen.getByRole("link", { name: "0 obras terminam em 6 meses" }).getAttribute("href")).toBe("/obras/todas?termina=180");
     expect(screen.getByRole("link", { name: "0 avisos da diretoria" }).getAttribute("href")).toBe("/avisos");
     // o painel "Obras pelo farol" saiu: o filtro, a tabela e o rodape' moram num painel so'
     expect(screen.queryByText("Obras pelo farol")).toBeNull();
@@ -103,5 +103,21 @@ describe("As peças da lista de Obras que vieram da Carteira (#748, redesenho #7
     expect(texto(segunda)).toEqual(["Obra Consórcio", "2", "R$ 1.000,01"]);
     expect((total.textContent ?? "").replace(/\s/g, " ")).toBe("Total5R$ 7.500,04");
     expect(within(tabela).getByRole("link", { name: "Obra Própria" }).getAttribute("href")).toBe("/obras/7/reajuste");
+  });
+
+  it("#805: recolhidos, os reajustes nascem fechados com a quantidade de obras e o total na faixa do título, e abrem a mesma tabela", () => {
+    const reajustes = { competencias: 5, valor_centavos: 750_004,
+      obras: [{ contrato_id: 7, obra: "Obra Própria", competencias: 3, valor_centavos: 650_003 },
+              { contrato_id: 8, obra: "Obra Consórcio", competencias: 2, valor_centavos: 100_001 }] };
+    const { container } = render(<Reajustes r={reajustes} ir={() => {}} recolhido />);
+    const painel = container.querySelector("details")!;
+    expect(painel.open).toBe(false);
+    const titulo = painel.querySelector("summary")!;
+    expect(titulo.querySelector("h2")!.textContent).toBe("Reajustes esperando apostilamento");
+    expect(titulo.querySelector(".contador")!.textContent).toBe("22 obras");            // o número e, para o leitor de tela, "2 obras"
+    expect((titulo.querySelector(".obras-reajustes__total")!.textContent ?? "").replace(/\s/g, " ")).toBe("R$ 7.500,04");
+    fireEvent.click(titulo);
+    const tabela = within(painel).getByRole("table", { name: /Reajustes esperando apostilamento/, hidden: true });
+    expect(within(tabela).getByRole("link", { name: "Obra Consórcio", hidden: true }).getAttribute("href")).toBe("/obras/8/reajuste");
   });
 });

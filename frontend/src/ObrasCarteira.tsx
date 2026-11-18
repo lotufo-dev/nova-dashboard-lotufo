@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { type Aviso } from "./Alertas";
 import { api } from "./api";
 import { motivosDaLinha, porFarol, type Motivo } from "./carteira";
-import { fmtDias, fmtPercentual } from "./formato";
-import { IconeBaixar } from "./icones";
+import Contador from "./Contador";
+import { contar, fmtDias, fmtPercentual } from "./formato";
+import { IconeBaixar, IconeSeta } from "./icones";
 import { filtrarObras, type ObraLista } from "./listaObras";
 import { brl } from "./Medicoes";
 import { type Ir } from "./rota";
@@ -23,11 +24,15 @@ type Obra = {
   pi_va: number; faturados: number; saldo: number; status: string; termino: string | null;
   vigencia?: string | null; farol: "verde" | "atencao" | "acao" | "vermelho"; motivo: string; motivos?: Motivo[];
 };
+/** A obra no painel da diretoria: o farol e os motivos dele, que a lista e a pagina do contratante mostram (#805). */
+export type ObraPainel = Obra;
 /** #279: por obra, as competências de reajuste já medidas sem apostilamento e o medido delas, na cota. */
 type ReajusteObra = { contrato_id: number; obra: string; competencias: number; valor_centavos: number };
 export type Painel = {
   hoje: string; medido_ano: { ano: string; valor_centavos: number }; obras: Obra[]; avisos: Aviso[];
   reajustes_apostilamento?: { competencias: number; valor_centavos: number; obras: ReajusteObra[] };
+  /** #805: o prazo de pagamento de cada contratante, em dias (docs/adr/0007), pela sigla dele; sem casos, fica fora. */
+  prazo_pagamento?: Record<string, number>;
 };
 
 // O selo diz a palavra do nivel (D12, D10), a mesma do selo dos avisos, com a forma pelo mesmo criterio (o mapa
@@ -65,10 +70,11 @@ function Secao({ id, titulo, acoes, children }:
 const PRAZOS = [{ dias: 90, busca: "90", quando: `em ${fmtDias(90)}` }, { dias: 180, busca: "180", quando: "em 6\u00a0meses" }];
 
 /** #279 (spec 2026-10-20 §2.2): o reajuste já medido (pedido ou aprovado) das competências sem apostilamento, por
- *  obra; a obra leva à aba Reajuste dela, com cada competência. */
-export function Reajustes({ r, ir }: { r: NonNullable<Painel["reajustes_apostilamento"]>; ir: Ir }) {
-  return (
-    <Secao id="dir-reajustes" titulo="Reajustes esperando apostilamento">
+ *  obra; a obra leva à aba Reajuste dela, com cada competência. `recolhido` (#805): o painel nasce fechado, com a
+ *  quantidade de obras e o total na faixa do título, e abre a tabela ao clicar. */
+export function Reajustes({ r, ir, recolhido = false }: { r: NonNullable<Painel["reajustes_apostilamento"]>; ir: Ir; recolhido?: boolean }) {
+  const tabela = (
+    <>
       {r.obras.length === 0 ? (
         <div className="vazio vazio--curto"><p>Nenhum reajuste esperando apostilamento.</p></div>
       ) : (
@@ -92,7 +98,19 @@ export function Reajustes({ r, ir }: { r: NonNullable<Painel["reajustes_apostila
           </table>
         </Rolagem>
       )}
-    </Secao>
+    </>
+  );
+  if (!recolhido) return <Secao id="dir-reajustes" titulo="Reajustes esperando apostilamento">{tabela}</Secao>;
+  return (
+    <details className="cartao obras-reajustes">
+      <summary className="cartao__cabeca">
+        <IconeSeta className="icone icone--p seta" />
+        <h2 className="cartao__titulo" id="dir-reajustes">Reajustes esperando apostilamento</h2>
+        <Contador rotulo={contar(r.obras.length, "obra", "obras")}>{r.obras.length}</Contador>
+        <span className="obras-reajustes__total num">{brl(r.valor_centavos)}</span>
+      </summary>
+      {tabela}
+    </details>
   );
 }
 
@@ -197,7 +215,7 @@ export function Qdop({ p, ir }: { p: Painel; ir: Ir }) {
             const n = lista ? filtrarObras(lista, { termina: x.dias }).length : null;
             return (
               <li key={x.busca}>
-                <Link para={{ tela: "obras" }} busca={{ termina: x.busca }} ir={ir}>
+                <Link para={{ tela: "obras", aba: "todas" }} busca={{ termina: x.busca }} ir={ir}>
                   {n === null ? `Obras que terminam ${x.quando}` : n === 1 ? `1 obra termina ${x.quando}` : `${n} obras terminam ${x.quando}`}
                 </Link>
               </li>

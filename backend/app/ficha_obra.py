@@ -64,16 +64,9 @@ def da_obra(conn: sqlite3.Connection, contrato_id: int, hoje: datetime.date | No
     bp = v["percentual_direito_bp"]
     s = paineis.saldo(conn, contrato_id)
     posicao = paineis.posicao_na_cota(s["vigente_execucao_centavos"], s["medido_centavos"], bp)   # a da lista (#645)
-    # #655: o ritmo do painel "Prazo" na mesma base do topo: vai na cota. A conclusao e a situacao nao mudam com a
-    # cota (saldo e ritmo na mesma proporcao).
-    ritmo = prazos.ritmo_e_prazo(conn, contrato_id, hoje)
-    if ritmo["ritmo_centavos"] is not None:
-        ritmo["ritmo_centavos"] = contratos.cota(ritmo["ritmo_centavos"], bp)
-    # #803: o necessario por mes na cota e' a mesma conta de `prazos` sobre o saldo do topo, para a tela fechar ao
-    # centavo: saldo a executar / competencias que restam = necessario. A cota aplicada ao necessario cheio poderia
-    # ficar a um centavo do saldo da tela dividido (o saldo do topo e' a diferenca de dois valores ja' arredondados).
-    if ritmo["necessario_centavos"] is not None:
-        ritmo["necessario_centavos"] = prazos.necessario_por_mes(posicao["saldo_centavos"], ritmo["competencias_restantes"])
+    # #655, #803: o ritmo e o necessario por mes do painel "Prazo" na mesma base do topo, a cota, pela conta que a
+    # lista de Obras tambem usa (`prazos.ritmo_na_cota`)
+    ritmo = prazos.ritmo_na_cota(conn, contrato_id, hoje, bp, posicao["saldo_centavos"])
     return {"topo": {**posicao,
                      "reajuste_centavos": contratos.cota(s["reajuste_contratado_centavos"], bp)},
             "ritmo": ritmo,

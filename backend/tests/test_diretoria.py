@@ -86,6 +86,15 @@ def cenario(tmp_path, monkeypatch):
     c.close()
 
 
+def test_painel_traz_o_prazo_de_pagamento_de_cada_contratante_pela_conta_unica(cenario):
+    # #805: a pagina do contratante mostra o prazo de pagamento do orgao; e' o de `prazos_do_orgao` (docs/adr/0007),
+    # pela sigla do contratante da lista de Obras. A MTPAR tem dois recebimentos em doze meses: fica fora (sem previsao)
+    c, _ = cenario
+    p = diretoria.painel(c, HOJE)
+    assert p["prazo_pagamento"] == diretoria.prazos_do_orgao(diretoria._medicoes(c), HOJE) == {"SINFRA": 10}
+    assert diretoria._quantil(ATRASOS, diretoria.PRAZO_QUARTIL) == 10
+
+
 def test_motivos_da_obra_um_a_um_sem_o_nome_da_obra(cenario, monkeypatch):
     c, ids = cenario                   # A5: motivos[] estruturado, na ordem dos avisos
     monkeypatch.setattr(diretoria._av, "listar", lambda conn, hoje, publico: [

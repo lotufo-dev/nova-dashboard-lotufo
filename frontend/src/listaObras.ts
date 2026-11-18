@@ -3,7 +3,9 @@
 // filtra, ordena e se le o nivel dos avisos de prazo que a tela ja' carrega (nenhum limiar novo no front).
 
 import type { Aviso, Nivel } from "./Alertas";
-import { fmtDias } from "./formato";
+import { fmtDias, fmtPercentual } from "./formato";
+import { fmtDataPura, fmtMesCurto, fmtMesExtenso } from "./tempo";
+import { andamento } from "./valores";
 
 export type ObraLista = {
   id: number; orgao: string; numero_instrumento: string; nome_curto?: string | null; estado: string;
@@ -22,7 +24,17 @@ export type ObraLista = {
   // #645: o que a lista de Obras mostra, ja' NA COTA da Lotufo e na base de execucao, pela conta do topo da pagina da
   // obra (servidor); o a receber e' nulo ate' o total ser liberado
   posicao?: PosicaoObra | null;
+  // #805 (Obras por contratante), tudo do servidor e na cota: a chave da pagina do contratante (nula no contrato sem
+  // orgao no cadastro); o ritmo e o necessario por mes, pela conta do painel "Prazo" da pagina da obra; e o medido da
+  // ultima competencia fechada com o da anterior, o mesmo numero do Fechamento
+  contratante_chave?: string | null;
+  andamento?: { ritmo_centavos: number | null; necessario_centavos: number | null } | null;
+  medido_mes?: MedidoMes | null;
 };
+
+/** O medido de uma competencia fechada e a referencia da variacao (a competencia anterior); sem referencia que sirva
+ *  (anterior ao primeiro ano que as telas contam), os dois campos dela vem nulos. */
+export type MedidoMes = { competencia: string; valor_centavos: number; referencia_competencia: string | null; referencia_centavos: number | null };
 
 // 17/11/2026 (docs/adr/0006): `a_receber_centavos` soma so' a competencia de `a_receber_ano_inicial` em diante que o RM ainda
 // informa; o anterior e a nota sem atualizacao do RM vem a' parte, fora do total (nulos ate' o total ser liberado)
@@ -189,12 +201,113 @@ export function contratantesDe(lista: ObraLista[]): string[] {
 
 /** As obras agrupadas pelo contratante (#645), os grupos na ordem do nome do contratante e as obras de cada um na ordem
  *  do nome, com o subtotal do grupo (`totaisDe`). */
-export function gruposPorContratante(obras: ObraLista[]): { contratante: string; obras: ObraLista[]; subtotal: TotaisObras }[] {
+export function gruposPorContratante(obras: ObraLista[]): GrupoDeObras[] {
   return contratantesDe(obras).map(contratante => {
     const doGrupo = obras.filter(o => contratanteDaObra(o) === contratante)
       .sort((a, b) => nomeDaObra(a).localeCompare(nomeDaObra(b), "pt-BR"));
-    return { contratante, obras: doGrupo, subtotal: totaisDe(doGrupo) };
+    return { contratante, chave: doGrupo.find(o => o.contratante_chave)?.contratante_chave ?? null, obras: doGrupo, subtotal: totaisDe(doGrupo) };
   });
+}
+
+/** `chave`: a da pagina do contratante (`contratante_chave` do servidor); nula no grupo sem orgao no cadastro. */
+export type GrupoDeObras = { contratante: string; chave: string | null; obras: ObraLista[]; subtotal: TotaisObras };
+
+/* --------------------------------------------------- andamento e o que pede atencao (#805) */
+
+/** A leitura do andamento da obra (Adiantada, Atencao, Devagar) e o percentual do necessario, pela regua UNICA de
+ *  `valores.ts`: a mesma da peca `Andamento`, para a contagem "N obras devagar" nunca discordar da barra desenhada.
+ *  Nula na obra sem necessario (sem prazo a cumprir: parada, vencida, em encerramento, sem saldo) ou sem ritmo. */
+export const andamentoDaObra = (o: ObraLista) => andamento(o.andamento?.ritmo_centavos, o.andamento?.necessario_centavos);
+
+/** Obra paralisada: o estado suspenso ou a ordem de paralisacao em vigor (`paralisada_desde`, do servidor). */
+export const estaParalisada = (o: ObraLista) => o.estado === "suspenso" || !!o.paralisada_desde;
+
+/** Execucao vencida que conta: so' na obra ativa, fora do encerramento e sem paralisacao, como o servidor decide o
+ *  nivel do prazo (`prazos._niveis`); os dias sao dele (nulos quando o prazo de execucao nao e' conhecido, #662). */
+export function execucaoVencida(o: ObraLista): boolean {
+  return o.estado === "ativo" && !o.encerramento_iniciado_em && !estaParalisada(o)
+    && o.dias_execucao !== null && o.dias_execucao !== undefined && o.dias_execucao < 0;
+}
+
+/** Quantos avisos criticos cada obra tem, dos avisos da diretoria (`/api/diretoria`, os mesmos do farol). */
+export function criticosPorObra(avisos: { contrato_id: number | null; nivel: string }[]): Map<number, number> {
+  const m = new Map<number, number>();
+  for (const a of avisos) if (a.contrato_id !== null && a.nivel === "critico") m.set(a.contrato_id, (m.get(a.contrato_id) ?? 0) + 1);
+  return m;
+}
+
+/** O medido do mes fechado de um conjunto de obras: a soma do que o servidor mandou em cada uma (so' soma). Sem
+ *  nenhuma obra com o dado, nulo; a referencia so' soma quando o servidor a manda. */
+export function medidoDoMes(obras: ObraLista[]): MedidoMes | null {
+  const com = obras.map(o => o.medido_mes).filter((m): m is MedidoMes => !!m);
+  if (com.length === 0) return null;
+  const { competencia, referencia_competencia } = com[0];
+  return { competencia, valor_centavos: com.reduce((t, m) => t + m.valor_centavos, 0), referencia_competencia,
+    referencia_centavos: referencia_competencia === null ? null : com.reduce((t, m) => t + (m.referencia_centavos ?? 0), 0) };
+}
+
+/** Os nomes do mes do medido ("outubro", "out") e da referencia da variacao ("set", "setembro"; de outro ano, com o
+ *  ano: "dez/25", "dezembro de 2025"). Sem referencia que sirva, nula. */
+export function mesesDoMedido(mm: MedidoMes): { extenso: string; curto: string; referencia: { curto: string; extenso: string } | null } {
+  const ref = mm.referencia_competencia;
+  const mesmoAno = ref !== null && ref.slice(0, 4) === mm.competencia.slice(0, 4);
+  return {
+    extenso: fmtMesExtenso(mm.competencia), curto: fmtMesCurto(mm.competencia).split("/")[0],
+    referencia: ref === null ? null : {
+      curto: mesmoAno ? fmtMesCurto(ref).split("/")[0] : fmtMesCurto(ref),
+      extenso: mesmoAno ? fmtMesExtenso(ref) : `${fmtMesExtenso(ref)} de ${ref.slice(0, 4)}`,
+    },
+  };
+}
+
+/** O fim da execucao, para a linha de apoio sob o nome da obra ("execução até 31/03/2027"); sem data, nulo. */
+export function fimDaExecucao(iso: string | null | undefined): string | null {
+  return iso ? `execução até ${fmtDataPura(iso.slice(0, 10))}` : null;
+}
+
+/** A participacao de um contratante no contratado da carteira, com uma casa ("47,1%"); sem carteira, nula. */
+export function participacao(parte: number, carteira: number): string | null {
+  return carteira > 0 ? fmtPercentual(parte / carteira, 1) : null;
+}
+
+/** Os numeros de um conjunto de obras (a carteira ou um contratante): os totais da posicao, o medido do mes fechado,
+ *  as contagens do andamento (`comAndamento` e' o "de M": as obras em que a leitura existe) e do que pede atencao. */
+export type ResumoObras = {
+  obras: number; totais: TotaisObras; medidoMes: MedidoMes | null;
+  comAndamento: number; devagar: number; atencao: number;
+  paralisadas: number; execucaoVencida: number; avisosCriticos: number;
+};
+
+export function resumoDe(obras: ObraLista[], criticos?: ReadonlyMap<number, number>): ResumoObras {
+  const r: ResumoObras = { obras: obras.length, totais: totaisDe(obras), medidoMes: medidoDoMes(obras),
+    comAndamento: 0, devagar: 0, atencao: 0, paralisadas: 0, execucaoVencida: 0, avisosCriticos: 0 };
+  for (const o of obras) {
+    const a = andamentoDaObra(o);
+    if (a) { r.comAndamento += 1; if (a.leitura === "devagar") r.devagar += 1; else if (a.leitura === "atencao") r.atencao += 1; }
+    if (estaParalisada(o)) r.paralisadas += 1;
+    if (execucaoVencida(o)) r.execucaoVencida += 1;
+    r.avisosCriticos += criticos?.get(o.id) ?? 0;
+  }
+  return r;
+}
+
+/** A vista Andamento: as obras com prazo a cumprir (o servidor mandou o necessario), da que mede a menor parte do
+ *  necessario para a que mede a maior; no empate do percentual, pela razao exata e depois pelo nome. A obra sem ritmo
+ *  (sem medicao de execucao na janela) nao tem leitura e vai ao fim, pelo nome. */
+export function porAndamento(obras: ObraLista[]): ObraLista[] {
+  const comPrazo = obras.filter(o => (o.andamento?.necessario_centavos ?? 0) > 0);
+  const razao = (o: ObraLista) => (o.andamento?.ritmo_centavos ?? 0) / (o.andamento?.necessario_centavos ?? 1);
+  return comPrazo.sort((a, b) => {
+    const la = andamentoDaObra(a), lb = andamentoDaObra(b);
+    if (!la || !lb) return (la ? 0 : 1) - (lb ? 0 : 1) || nomeDaObra(a).localeCompare(nomeDaObra(b), "pt-BR");
+    return la.pct - lb.pct || razao(a) - razao(b) || nomeDaObra(a).localeCompare(nomeDaObra(b), "pt-BR");
+  });
+}
+
+/** Os blocos da vista "Por contratante": do maior contratado para o menor (a participacao na carteira e' o que o bloco
+ *  mostra); no empate, pelo nome. */
+export function contratantesPorContratado(obras: ObraLista[]): GrupoDeObras[] {
+  return gruposPorContratante(obras).sort((a, b) => b.subtotal.contratado - a.subtotal.contratado || a.contratante.localeCompare(b.contratante, "pt-BR"));
 }
 
 /** O contratante da URL: `?c=todas` e' "Todas as obras" (sem recorte de orgao); `?c=<orgao>` (ou o `?orgao=` dos

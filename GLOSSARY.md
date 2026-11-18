@@ -9,7 +9,13 @@ recebimento. Cada termo tem um significado só, usado na tela, nas issues, nos t
 
 **Órgão**:
 Quem contrata a obra, aprova a medição e paga.
-_Avoid_: cliente, contratante (salvo em relatório oficial que use a palavra)
+_Avoid_: cliente; contratante para um órgão só (ver Contratante; em relatório oficial que use a palavra, vale)
+
+**Contratante**:
+O órgão como as telas de leitura o agrupam: "SINFRA" reúne todas as superintendências; os outros órgãos são, cada
+um, um contratante. É o primeiro nível de Obras: cada contratante tem página própria, com as obras dele, e é dele o
+prazo de pagamento (`docs/adr/0007`).
+_Avoid_: órgão (é quem assina o contrato: "SINFRA - SUEF II"), cliente
 
 **Entidade**:
 Empresa ou consórcio que assina contrato ou emite nota: a construtora, um consórcio ou uma consorciada.

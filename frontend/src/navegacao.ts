@@ -59,6 +59,7 @@ export function itemDe(r: Rota): ItemMenu | "conta" | null {
     case "obra": return "obras";
     case "documentos-empresa": return "documentos";
     case "medicao": case "nova-medicao": case "notas-envio": return "medicoes";
+    case "contratante": return "obras";   // a pagina do contratante fica dentro de Obras (#805)
     default: return r.tela;
   }
 }
@@ -74,6 +75,7 @@ export function tituloDe(tela: Rota["tela"]): string {
     case "inicio": return "Início";
     case "conta": return "Minha conta";
     case "notas-envio": return "Enviar a nota";
+    case "contratante": return "Obras";
     default: return ROTULO[tela];
   }
 }

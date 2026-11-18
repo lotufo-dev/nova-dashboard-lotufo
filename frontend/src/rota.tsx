@@ -19,8 +19,10 @@ import { confirmarSaida, haRascunho } from "./rascunho";
 
 // Abas da obra (NAVEGACAO.md › Obra). As notas moram na pagina de cada medicao.
 export type AbaObra = "ficha" | "medicoes" | "prazos" | "reajuste" | "documentos" | "contrato";
-// Vistas da lista de Obras (#748): a Posicao e' a padrao e nao entra na URL; o Resumo e o QDOP vieram da Carteira.
-export type AbaObras = "posicao" | "resumo" | "qdop";
+// Vistas de Obras (#805): "Por contratante" e' a padrao e nao entra na URL ("/obras"); "/obras/todas" (a tabela de
+// todas as obras), "/obras/andamento" e "/obras/qdop". Os enderecos de antes: "/obras/posicao" abre "Todas as obras"
+// e "/obras/resumo" (os totais por contratante que vieram da Carteira, #748) abre "Por contratante".
+export type AbaObras = "contratantes" | "todas" | "andamento" | "qdop";
 // Abas da Administracao (NAVEGACAO.md › Administracao). A Saude e' a padrao e nao entra na URL.
 export type AbaAdmin = "saude" | "reconciliacao" | "usuarios" | "auditoria" | "pendencias";
 // Resumo das medicoes (#749): "/resumo-medicoes", com a competencia na busca (?mes=2026-09).
@@ -40,6 +42,8 @@ export type Rota =
   | { tela: "documentos" }
   | { tela: "documentos-empresa"; id: number; aba?: AbaDocumentos }
   | { tela: "obras"; aba?: AbaObras }
+  // a pagina de um contratante (#805): "/obras/contratante/sinfra". A chave vem do servidor (`contratante_chave`)
+  | { tela: "contratante"; chave: string }
   | { tela: "fechamento" }
   | { tela: "notas-envio"; id: number }
   | { tela: "obra"; id: number; aba: AbaObra }
@@ -58,7 +62,9 @@ type EstadoHistorico = { origem?: Origem };
 
 const ABAS: readonly AbaObra[] = ["medicoes", "prazos", "reajuste", "documentos", "contrato"];
 const ABAS_DOCUMENTOS: readonly AbaDocumentos[] = ["certidoes", "regularidade", "garantia"];
-const ABAS_OBRAS: readonly AbaObras[] = ["posicao", "resumo", "qdop"];
+const ABAS_OBRAS: readonly AbaObras[] = ["contratantes", "todas", "andamento", "qdop"];
+// As vistas de antes da #805: a Posicao era a tabela de todas as obras; o Resumo, os totais por contratante.
+const ABAS_OBRAS_ANTIGAS: Record<string, AbaObras> = { posicao: "todas", resumo: "contratantes" };
 const ABAS_ADMIN: readonly AbaAdmin[] = ["saude", "reconciliacao", "usuarios", "auditoria", "pendencias"];
 // Os enderecos de Medicoes de antes do quadro (#643): o link guardado em e-mail ou favorito abre o quadro.
 const ABAS_MEDICOES_ANTIGAS: readonly string[] = ["iniciar", "em-andamento", "resumo", "sem-medicao", "planilha-gerada", "planilha-enviada", "boletim-recebido",
@@ -79,7 +85,7 @@ const SIMPLES_ANTIGAS: Record<string, Simples> = {
 // #748: a Carteira saiu. O Resumo e o QDOP foram para a lista de Obras; a Producao (faturado por mes) virou o
 // Fechamento; o Custo virou coluna na aba Medicoes de cada obra. "/painel" e "/diretoria" eram a Carteira antes.
 const CARTEIRA_ANTIGA: Record<string, Rota> = {
-  resumo: { tela: "obras", aba: "resumo" }, qdop: { tela: "obras", aba: "qdop" }, producao: { tela: "fechamento" },
+  resumo: { tela: "obras" }, qdop: { tela: "obras", aba: "qdop" }, producao: { tela: "fechamento" },
   custo: { tela: "obras" },
 };
 
@@ -103,6 +109,10 @@ function ehAbaAdmin(s: string): s is AbaAdmin {
   return (ABAS_ADMIN as readonly string[]).includes(s);
 }
 
+/** A chave de um contratante na URL: letras, digitos, ponto, traco e sublinhado (as chaves de orgao do cadastro). */
+function ehChave(s: string | undefined): s is string {
+  return s !== undefined && /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(s);
+}
 
 function ehId(s: string): boolean {
   return /^[1-9][0-9]{0,14}$/.test(s);
@@ -116,8 +126,14 @@ export function parseRota(pathname: string): Rota {
   if (partes.length === 1 && Object.prototype.hasOwnProperty.call(SIMPLES_ANTIGAS, a)) return { tela: SIMPLES_ANTIGAS[a] };
   if (partes.length === 1 && (a === "carteira" || a === "painel" || a === "diretoria")) return CARTEIRA_ANTIGA.resumo;
   if (a === "carteira" && partes.length === 2 && Object.prototype.hasOwnProperty.call(CARTEIRA_ANTIGA, b)) return CARTEIRA_ANTIGA[b];
-  // As vistas da lista de Obras (#748): "/obras/resumo", "/obras/qdop"; a Posicao ("/obras/posicao") e' "/obras".
-  if (a === "obras" && partes.length === 2 && ehAbaObras(b)) return b === "posicao" ? { tela: "obras" } : { tela: "obras", aba: b };
+  // As vistas de Obras (#805): "/obras/todas", "/obras/andamento", "/obras/qdop"; "Por contratante" e' "/obras". Os
+  // enderecos de antes ("/obras/posicao", "/obras/resumo") abrem a vista que ficou no lugar.
+  if (a === "obras" && partes.length === 2) {
+    const vista = Object.prototype.hasOwnProperty.call(ABAS_OBRAS_ANTIGAS, b) ? ABAS_OBRAS_ANTIGAS[b] : b;
+    if (ehAbaObras(vista)) return vista === "contratantes" ? { tela: "obras" } : { tela: "obras", aba: vista };
+  }
+  // A pagina do contratante (#805): "/obras/contratante/<chave>".
+  if (a === "obras" && b === "contratante") return partes.length === 3 && ehChave(c) ? { tela: "contratante", chave: c } : { tela: "raiz" };
   if ((a === "obras" || a === "contratos") && b !== undefined) {
     // So' inteiro positivo em decimal: "/obras/abc" e "/obras/1e3" nao sao obras, sao caminhos
     // desconhecidos. Number("") seria 0 e passaria sem isto. Ate' 15 digitos: cabe no inteiro seguro do
@@ -161,7 +177,8 @@ export function caminhoDe(r: Rota): string {
     case "medicao": return `/obras/${r.obra}/medicoes/${r.id}`;
     case "nova-medicao": return `/obras/${r.obra}/medicoes/nova`;
     case "documentos-empresa": return r.aba && r.aba !== "certidoes" ? `/documentos/${r.id}/${r.aba}` : `/documentos/${r.id}`;
-    case "obras": return r.aba && r.aba !== "posicao" ? `/obras/${r.aba}` : "/obras";
+    case "obras": return r.aba && r.aba !== "contratantes" ? `/obras/${r.aba}` : "/obras";
+    case "contratante": return `/obras/contratante/${encodeURIComponent(r.chave)}`;
     case "admin": return r.aba && r.aba !== "saude" ? `/admin/${r.aba}` : "/admin";
     case "notas-envio": return `/notas/envio/${r.id}`;
     default: return `/${r.tela}`;

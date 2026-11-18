@@ -129,6 +129,8 @@ do rótulo, na etiqueta sob o valor ou na barra.
   arredondamento do órgão e conta como igual (decisão do dono de 10/11/2026).
 - **Andamento:** a partir de 100% do necessário, "Adiantada", no tom do feito; de 70% a 99%, "Atenção", no tom de
   "vence em breve"; abaixo de 70%, "Devagar", no tom do crítico. Sem necessário ou sem ritmo, nada aparece.
+  A contagem de obras por leitura ("3 devagar", "2 em atenção") vai numa etiqueta do tom da leitura, sem glifo:
+  é valor, não situação (#805).
 - **Tempo parado:** os dias numa etapa ou num setor, com o selo da situação e os limites do SIGA (seção "Quando
   usar cada uma" das situações).
 - **Fica em tinta:** valor de contrato, data, número de documento e o próprio número ao lado da marca ou da
@@ -154,6 +156,9 @@ do rótulo, na etiqueta sob o valor ou na barra.
 - **Régua de grupo:** linha preta de 2 px acima do título de um grupo de blocos e no alto da página. **Régua de
   seção:** linha preta de 1 px sob o cabeçalho da tabela, acima de subtítulo dentro de painel e na base de gráfico.
   Linhas de uma tabela se separam por um fio cinza, sem zebra.
+- **Cabeçalho de grupo forte:** faixa de tinta cheia com a letra clara, que abre um grupo de linhas de tabela ou um
+  bloco (o contratante, em Obras), com o subtotal do grupo nas colunas. Motivo: na linha cinza o contratante sumia
+  entre as obras, e a página parecia uma lista só (decisão do dono de 18/11/2026, #805).
 - **Painel:** moldura preta de 2 px e sombra dura (deslocada 8 px, sem desfoque), com o título dentro e sem régua
   embaixo dele. A janela de diálogo é um painel por cima de um véu; menu suspenso, lista de sugestões e a janela do
   e-mail levam a mesma sombra, e não há sombra com desfoque. Motivo: a moldura separa o painel do papel sem

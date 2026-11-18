@@ -77,3 +77,10 @@ export function andamento(ritmo: number | null | undefined, necessario: number |
   const pct = Math.floor(ritmo * 100 / necessario);
   return { leitura: pct >= ADIANTADA_DESDE_PCT ? "adiantada" : pct >= ATENCAO_DESDE_PCT ? "atencao" : "devagar", pct };
 }
+
+/** Valor em reais abreviado, so' para a frase do andamento ("R$ 2,4 mi/mês de R$ 8,8 mi"): "R$ 2,4 mi", "R$ 350 mil",
+ *  "R$ 980". E' leitura de ordem de grandeza ao lado do percentual; o valor exato fica na coluna propria ou na pagina
+ *  da obra, com `brl`. */
+export function reaisCurtos(centavos: number): string {
+  return `R$ ${(centavos / 100).toLocaleString("pt-BR", { notation: "compact", maximumFractionDigits: 1 })}`;
+}

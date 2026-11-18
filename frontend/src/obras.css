@@ -9,7 +9,8 @@
 .obras { container: obras-pagina / inline-size; }
 .obras > * { min-width: 0; }
 
-.obras-topo { flex-wrap: wrap; justify-content: space-between; gap: var(--espaco-p) var(--espaco-g); }
+/* a linha do titulo tem a altura do campo de busca em todas as vistas: as abas nao sobem nem descem ao trocar de vista */
+.obras-topo { flex-wrap: wrap; justify-content: space-between; gap: var(--espaco-p) var(--espaco-g); min-height: var(--alvo-minimo); }
 .obras-topo__sub { margin-left: var(--espaco-pp); color: var(--cor-texto-secundario); font-size: var(--texto-titulo-bloco); font-weight: var(--peso-normal); letter-spacing: 0; }
 .obras-busca { display: flex; align-items: center; flex-wrap: wrap; gap: var(--espaco-pp) var(--espaco-m); font-size: var(--texto-meta); }
 .obras-busca__campo { width: calc(var(--alvo-minimo) * 7); max-width: 100%; }
@@ -37,15 +38,32 @@
 .obras-posicao tbody td { vertical-align: middle; padding-top: var(--espaco-p); padding-bottom: var(--espaco-p); }
 .linha--obra { cursor: pointer; }
 .obras-posicao__nome { font-size: var(--texto-corpo); font-weight: var(--peso-forte); }
-.obras-posicao__sub { color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
+.obras-posicao__sub { color: var(--cor-texto-secundario); font-size: var(--texto-mini); white-space: nowrap; }
 .obras-posicao__farol { margin-top: var(--espaco-mini); }
-/* o contratante: a linha que abre o grupo, com o subtotal nas colunas */
-.obras-posicao .obras-grupo th, .obras-posicao .obras-grupo td {
-  background: var(--cor-papel-sombreado); font-weight: var(--peso-forte);
-  padding-top: var(--espaco-pp); padding-bottom: var(--espaco-pp); border-bottom: var(--borda-linha);
+/* o contratante: o CABECALHO DE GRUPO FORTE (#805), em tinta cheia com a letra clara, que abre o grupo com o subtotal
+   nas colunas. Antes era uma linha cinza, e o contratante sumia entre as obras. O nome leva a' pagina dele. */
+.obras-posicao .obras-grupo th, .obras-posicao .obras-grupo td, .obras-posicao .obras-grupo td.dinheiro {
+  background: var(--cor-tinta); color: var(--cor-papel); font-weight: var(--peso-forte);
+  padding-top: var(--espaco-pp); padding-bottom: var(--espaco-pp); border-bottom: 0;
 }
-.obras-posicao .obras-grupo th { text-align: left; color: var(--cor-tinta); }
-.obras-posicao tbody + tbody .obras-grupo th, .obras-posicao tbody + tbody .obras-grupo td { border-top: var(--regua-secao); }
+.obras-posicao .obras-grupo th { text-align: left; font-size: var(--texto-corpo); }
+.obras-posicao .obras-grupo th a { color: inherit; }
+.obras-grupo__n { margin-left: var(--espaco-pp); color: var(--cor-papel-escuro); font-size: var(--texto-mini); font-weight: var(--peso-normal); white-space: nowrap; }
+.obras-posicao .obras-grupo .obras-exec__trilho { background: var(--cor-texto-secundario); }
+.obras-posicao .obras-grupo .obras-exec__barra { background: var(--cor-papel); }
+/* sobre a tinta, o contorno de foco e' claro */
+.obras-posicao .obras-grupo a:focus-visible, .obras-contratante__cabeca a:focus-visible { outline-color: var(--cor-papel); }
+/* sob o nome: a situacao com o motivo escrito; na coluna propria da pagina do contratante, o mesmo desenho */
+.obras-situacao { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-traco) var(--espaco-pp); font-size: var(--texto-meta); }
+.obras-situacao__motivo { min-width: 0; color: var(--cor-tinta); }
+.obras-situacao__mais { font-size: var(--texto-mini); white-space: nowrap; }
+.obras-do-contratante__situacao { min-width: calc(var(--alvo-minimo) * 4); }
+/* o percentual do necessario e' o que separa uma obra da outra na vista Andamento: numero em tinta, do corpo */
+.obras-posicao tbody td.obras-andamento__pct { color: var(--cor-tinta); font-size: var(--texto-corpo); font-weight: var(--peso-numero); }
+/* celula com o valor e a etiqueta dele embaixo (a variacao do medido, a participacao na carteira) */
+.obras-cel { display: inline-grid; justify-items: end; gap: var(--espaco-traco); }
+/* o a receber e' o em aberto: o valor sai no tom dele, como no Fechamento (docs/identidade-visual.md, "Valores") */
+.obras-em-aberto, .obras-posicao tbody td.dinheiro .obras-em-aberto { color: var(--valor-atencao-texto); }
 /* o executado: a barra em tinta (numero, nao situacao: 0% nao e' "feito") e o percentual ao lado */
 .obras-exec { display: flex; align-items: center; gap: var(--espaco-p); min-width: calc(var(--alvo-minimo) * 3); }
 .obras-exec__trilho { flex: 1; height: var(--altura-barra-etapa); background: var(--cor-contador-neutro); overflow: hidden; }
@@ -56,6 +74,70 @@
   padding: var(--espaco-m) var(--espaco-g); border-top: var(--borda-linha);
   color: var(--cor-texto-secundario); font-size: var(--texto-meta);
 }
+
+/* ------------------------------------------------------------ os numeros com apoio e as etiquetas (#805) */
+/* a segunda linha de um numero da faixa: a variacao, a participacao na carteira, "obras devagar" */
+.obras-numero dd.obras-numero__apoio {
+  margin-top: var(--espaco-mini); white-space: normal; color: var(--cor-texto-secundario);
+  font-family: var(--fonte-texto); font-stretch: var(--largura-texto); font-weight: var(--peso-normal);
+  font-size: var(--texto-mini); line-height: var(--entrelinha-titulo);
+}
+/* ETIQUETA DE CONTAGEM DO ANDAMENTO: quantas obras estao devagar ou em atencao. E' familia de valor, nao situacao: o
+   tom da leitura, sem glifo (o selo com glifo fica para a paralisada, a execucao vencida e o aviso critico). */
+.obras-etiqueta {
+  display: inline-flex; align-items: baseline; padding: var(--espaco-fio) var(--espaco-pp); border-radius: var(--raio-selo);
+  background: var(--valor-estavel-fundo); color: var(--valor-estavel-texto);
+  font-family: var(--fonte-texto); font-stretch: var(--largura-texto); font-size: var(--texto-meta); font-weight: var(--peso-forte);
+  font-variant-numeric: tabular-nums lining-nums; white-space: nowrap;
+}
+.obras-etiqueta--devagar { background: var(--valor-ruim-fundo); color: var(--valor-ruim-texto); }
+.obras-etiqueta--atencao { background: var(--valor-atencao-fundo); color: var(--valor-atencao-texto); }
+.obras-etiquetas { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-pp); margin: 0; padding: 0; list-style: none; }
+.obras-etiquetas--emdia { font-size: var(--texto-meta); }
+
+/* ------------------------------------------------------------ "Por contratante": um bloco por contratante (#805) */
+.obras-contratantes {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--alvo-minimo) * 7), 1fr));
+  gap: var(--espaco-g); margin: 0; padding: 0; list-style: none;
+}
+/* o bloco e' um painel com o cabecalho de grupo forte; o link do nome cobre o bloco inteiro */
+.obras-contratante {
+  position: relative; display: flex; flex-direction: column; min-width: 0;
+  border: var(--borda-painel); background: var(--cor-superficie); box-shadow: var(--sombra-painel);
+}
+.obras-contratante--link:hover { background: var(--cor-papel-sombreado); }
+.obras-contratante__cabeca {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--espaco-pp);
+  padding: var(--espaco-pp) var(--espaco-m); background: var(--cor-tinta); color: var(--cor-papel);
+}
+.obras-contratante__nome { margin: 0; min-width: 0; color: inherit; font-size: var(--texto-titulo-bloco); }
+.obras-contratante__link { color: inherit; }
+.obras-contratante__link::after { content: ""; position: absolute; inset: 0; }
+.obras-contratante__link:focus-visible { outline: none; }
+.obras-contratante:has(.obras-contratante__link:focus-visible) { outline: var(--largura-foco) solid var(--cor-foco); outline-offset: var(--espaco-traco); }
+.obras-contratante__n { flex: none; color: var(--cor-papel-escuro); font-size: var(--texto-meta); }
+.obras-contratante__numeros { display: grid; gap: var(--espaco-p); margin: 0; padding: var(--espaco-m); }
+.obras-contratante__numeros > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--espaco-p); min-width: 0; }
+.obras-contratante__numeros dt { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.obras-contratante__numeros dd { margin: 0; min-width: 0; text-align: right; font-size: var(--texto-meta); font-weight: var(--peso-numero); }
+.obras-contratante__numeros .obras-exec { min-width: calc(var(--alvo-minimo) * 4); }
+.obras-contratante__apoio { color: var(--cor-texto-secundario); font-size: var(--texto-mini); font-weight: var(--peso-normal); }
+/* a linha do medido do mes tem valor e variacao; sem medicao no mes fica so' o traco. Ela reserva as duas linhas para
+   as linhas seguintes cairem na mesma altura em todo bloco (decisao do dono de 18/11/2026: remanejar o espacamento) */
+.obras-contratante__dupla { min-height: calc(var(--texto-meta) * var(--entrelinha) + var(--texto-mini) * var(--entrelinha) + var(--espaco-traco) + var(--espaco-mini)); }
+/* as etiquetas sao o rodape do bloco: uma regua em cima, sempre no pe'. O rodape reserva duas linhas de etiqueta, para
+   a regua cair na mesma altura em todo bloco mesmo quando as etiquetas de um deles quebram a linha */
+.obras-contratante > .obras-etiquetas {
+  margin-top: auto; padding: var(--espaco-p) var(--espaco-m); border-top: var(--borda-linha);
+  min-height: calc(var(--alvo-minimo) * 2); align-content: center;
+}
+.obras-contratante > .obras-etiquetas--emdia { display: flex; align-items: center; }
+
+/* os reajustes esperando apostilamento, recolhidos: a quantidade e o total na faixa do titulo */
+.obras-reajustes > summary { flex-wrap: wrap; padding-bottom: var(--espaco-m); }
+.obras-reajustes__total { margin-left: auto; font-weight: var(--peso-numero); }
+/* a pagina do contratante: os atalhos para as outras paginas */
+.obras-atalhos { display: flex; flex-wrap: wrap; gap: var(--espaco-pp) var(--espaco-g); font-size: var(--texto-meta); }
 
 /* ------------------------------------------------------------ QDOP: um painel, com o filtro e o rodape */
 .qdop-painel__cabeca { flex-wrap: wrap; }
@@ -82,6 +164,39 @@
   .obras-posicao th:first-child, .obras-posicao td:first-child, .qdop-tabela th:first-child, .qdop-tabela td:first-child { padding-left: var(--espaco-p); }
   .obras-posicao th:last-child, .obras-posicao td:last-child, .qdop-tabela th:last-child, .qdop-tabela td:last-child { padding-right: var(--espaco-p); }
   .obras-exec { min-width: calc(var(--alvo-minimo) * 2); gap: var(--espaco-pp); }
+  /* #805: com a coluna Andamento, as sete colunas de "Todas as obras" nao cabem nos 724 px da caixa. Nesta faixa a
+     tabela vira uma grade de colunas fixas, as mesmas em todas as linhas: os valores na primeira linha da obra e o
+     andamento numa segunda, sob eles (a barra e a frase lado a lado); o nome ocupa as duas. O executado fica so' com
+     o percentual (que e' o numero; a barra e' desenho) e o cabecalho "Andamento" sai, porque a peca ja' diz o que e'.
+     A obra sem leitura do andamento nao ganha a segunda linha. */
+  .obras-todas, .obras-todas :is(thead, tbody) { display: block; }
+  .obras-todas tr {
+    display: grid; align-items: start; grid-template-rows: auto 1fr;
+    grid-template-columns: minmax(0, 1fr) repeat(3, calc(var(--alvo-minimo) * 3)) calc(var(--alvo-minimo) * 1.8) calc(var(--alvo-minimo) * 3);
+  }
+  .obras-todas :is(th, td) { display: block; min-width: 0; }
+  .obras-todas thead th { font-size: var(--texto-mini); white-space: normal; }
+  /* o valor de nove digitos ocupa a coluna inteira: sem respiro a' esquerda, para todos alinharem a' direita */
+  .obras-todas :is(th, td).col-num { padding-left: 0; }
+  .obras-todas thead th:nth-child(6), .obras-todas td.obras-grupo__vazio, .obras-todas td.obras-posicao__andamento--sem { display: none; }
+  .obras-todas tr.obras-grupo { align-items: center; background: var(--cor-tinta); }
+  .obras-todas tbody tr.linha--obra { border-bottom: var(--borda-linha); }
+  .obras-todas tbody:last-child tr.linha--obra:last-child { border-bottom: 0; }
+  .obras-todas tbody tr.linha--obra > td { border-bottom: 0; }
+  .obras-todas tbody tr.linha--obra > td:first-child { grid-row: 1 / span 2; }
+  .obras-todas tbody td.obras-posicao__andamento { grid-column: 2 / -1; grid-row: 2; padding-top: 0; }
+  .obras-todas .andamento { grid-template-columns: var(--largura-min-andamento) minmax(0, 1fr); align-items: center; column-gap: var(--espaco-p); }
+  .obras-todas .obras-exec { min-width: 0; justify-content: flex-end; }
+  .obras-todas .obras-exec__trilho { display: none; }
+  .obras-todas .obras-exec__pct { min-width: 0; }
+  .obras-todas thead th:nth-child(5) { text-align: right; }
+  /* a vista Andamento e a pagina do contratante: o andamento mais estreito, e o apoio sob o nome quebra linha */
+  .obras-posicao .andamento { min-width: calc(var(--alvo-minimo) * 2.5); }
+  .obras-posicao__sub { white-space: normal; }
+  /* a pagina do contratante: a barra do executado mais curta e a situacao com o motivo em menos largura */
+  .obras-do-contratante .obras-exec { min-width: calc(var(--alvo-minimo) * 1.75); }
+  .obras-do-contratante__situacao { min-width: calc(var(--alvo-minimo) * 2.75); }
+  .obras-contratantes { gap: var(--espaco-m); }
   .qdop-filtros { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
   /* o QDOP cabe na caixa: o que identifica a obra e os motivos quebram linha */
   .qdop-tabela__sub { white-space: normal; }
@@ -92,7 +207,7 @@
 @container obras-pagina (max-width: 620px) {
   /* os numeros viram lista: rotulo a' esquerda, valor a' direita */
   .obras-numeros { grid-template-columns: minmax(0, 1fr); gap: var(--espaco-mini); }
-  .obras-numero { display: flex; align-items: baseline; justify-content: space-between; gap: var(--espaco-m); }
+  .obras-numero { display: flex; align-items: baseline; justify-content: space-between; gap: 0 var(--espaco-m); }
   .obras-numero dd { font-size: var(--texto-corpo); }
 
   /* a tabela vira um bloco por obra, com os mesmos numeros: o rotulo da coluna vai ao lado do valor */
@@ -111,9 +226,27 @@
   :is(.obras-posicao, .qdop-tabela) :is(tbody, tfoot) td:not(:first-child)::before {
     content: attr(data-rotulo); flex: 0 1 auto; min-width: 0; max-width: 55%; color: var(--cor-texto-secundario); font-weight: var(--peso-normal); text-align: left; white-space: normal;
   }
-  .obras-posicao tbody tr.obras-grupo { background: var(--cor-papel-sombreado); border-top: var(--regua-secao); }
+  .obras-posicao tbody tr.obras-grupo { background: var(--cor-tinta); border-bottom: 0; }
   .obras-posicao .obras-grupo th, .obras-posicao .obras-grupo td { border: 0; }
+  .obras-posicao .obras-grupo td:not(:first-child)::before { color: var(--cor-papel-escuro); }
+  .obras-posicao .obras-grupo td.obras-grupo__vazio { display: none; }
   .obras-exec { min-width: 0; width: 55%; }
+  /* os numeros com apoio: a segunda linha desce, a' direita */
+  .obras-numero { flex-wrap: wrap; }
+  .obras-numero dd.obras-numero__apoio { flex-basis: 100%; margin-top: 0; text-align: right; }
+  /* a situacao com o motivo ganha a largura do bloco, sob o rotulo */
+  .obras-posicao tbody td.obras-do-contratante__situacao { display: block; min-width: 0; text-align: left; }
+  .obras-posicao tbody td.obras-do-contratante__situacao::before { display: block; max-width: none; margin-bottom: var(--espaco-mini); }
+  .obras-posicao tbody td.obras-posicao__andamento .andamento { text-align: left; }
+  .obras-contratante__numeros .obras-exec { width: auto; min-width: calc(var(--alvo-minimo) * 3.5); }
+  :is(.obras-todas, .obras-do-contratante) .obras-exec { min-width: 0; }
+  /* no celular "Todas as obras" e' um bloco por obra como as outras: desfaz a grade da faixa media */
+  .obras-todas .obras-exec__trilho { display: block; }
+  .obras-todas td.obras-posicao__andamento--sem { display: flex; }
+  .obras-todas .andamento { grid-template-columns: none; }
+  .obras-todas tbody tr.linha--obra:last-child { border-bottom: var(--borda-linha); }
+  .obras-posicao__sub { white-space: normal; }
+  .obras-reajustes > summary { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
   .obras-busca, .obras-busca__campo { width: 100%; }
   .obras-rodape, .qdop-rodape { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
   /* QDOP: os motivos ganham a largura do bloco, sob o selo */

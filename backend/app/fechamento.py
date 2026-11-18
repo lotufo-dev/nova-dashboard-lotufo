@@ -409,12 +409,39 @@ def _pares_mistos(linhas: list[dict]) -> list[dict]:
     return sorted(out, key=lambda e: (e["competencia"], e["obra"], e["contrato_id"], e["medicao_numero"], e["tipo"]))
 
 
+def medido_na_cota(m: dict) -> int:
+    """O medido de UMA medicao de `_medicoes`, na cota: o aprovado e, sem boletim, o pedido (`GLOSSARY.md`, Medido);
+    sem valor nenhum, zero. A UNICA conta do medido por competencia: a desta pagina (`_linha_medicao`) e a do "medido
+    no mes" da lista de Obras (`medido_do_mes_fechado`)."""
+    valor = m["aprovado"] if m["aprovado"] is not None else m["pedido"]
+    return (contratos.cota(valor, m["pct"]) or 0) if valor is not None else 0
+
+
+def medido_do_mes_fechado(conn, hoje: datetime.date) -> dict:
+    """Issue #805 (Obras por contratante): o medido de cada obra na ultima competencia FECHADA (o mes anterior ao de
+    `hoje`; o mes em curso ainda recebe medicao, como em `_medido_do_ano_anterior`) e na competencia anterior a ela, a
+    referencia da variacao. E' o `medido_centavos` que esta pagina mostra para a obra naquele mes: as mesmas medicoes
+    (`_medicoes`) e a mesma conta por medicao (`medido_na_cota`), sem montar o fechamento inteiro (notas e titulos).
+    `referencia_competencia` e' nula quando o mes de referencia e' anterior ao primeiro ano que as telas da diretoria
+    contam (`ANOS`): nao serve de referencia. Obra sem medicao no mes fica fora de `por_obra`."""
+    mes, anterior = diretoria._mes(hoje, -1), diretoria._mes(hoje, -2)
+    por_obra: dict[str, dict[int, int]] = {mes: {}, anterior: {}}
+    for m in _medicoes(conn):
+        da_competencia = por_obra.get(m["competencia"])
+        if da_competencia is not None:
+            da_competencia[m["contrato_id"]] = da_competencia.get(m["contrato_id"], 0) + medido_na_cota(m)
+    com_referencia = anterior[:4] >= ANOS[0]
+    return {"competencia": mes, "por_obra": por_obra[mes],
+            "referencia_competencia": anterior if com_referencia else None,
+            "referencia_por_obra": por_obra[anterior] if com_referencia else {}}
+
+
 def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
     cota = lambda v: contratos.cota(v, m["pct"]) or 0
     valor = m["aprovado"] if m["aprovado"] is not None else m["pedido"]
     aprovado = _aprovado(m)
     n = _zero()
-    n["medido_centavos"] = cota(valor) if valor is not None else 0
+    n["medido_centavos"] = medido_na_cota(m)
     n["aprovado_centavos"] = cota(aprovado) if aprovado is not None else 0
     # issue #805: a diferenca aprovado x pedido so' existe com o valor do boletim gravado e o pedido; a medicao em
     # analise e a de nota emitida sem o valor do boletim ficam fora dos dois lados

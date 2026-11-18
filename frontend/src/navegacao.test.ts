@@ -41,5 +41,8 @@ describe("navegação por perfil", () => {
     expect(tituloDaSecao({ tela: "resumo-medicoes" })).toBe("Resumo das medições");
     expect(tituloDaSecao({ tela: "siga" })).toBe("SIGA");
     expect(tituloDe("siga")).toBe("SIGA");
+    // #805: a página do contratante fica dentro de Obras, no menu e na barra
+    expect(itemDe({ tela: "contratante", chave: "sinfra" })).toBe("obras");
+    expect(tituloDaSecao({ tela: "contratante", chave: "sinfra" })).toBe("Obras");
   });
 });

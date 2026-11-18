@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Aviso } from "./Alertas";
-import { avisoPrincipal, contratantesDe, escopoDaUrl, filtrarObras, gruposPorContratante, pctExecutado, pctPiso, posicaoDe, prazoDaObra, totaisDe, type ObraLista } from "./listaObras";
+import {
+  andamentoDaObra, avisoPrincipal, contratantesDe, contratantesPorContratado, criticosPorObra, escopoDaUrl, estaParalisada, execucaoVencida,
+  filtrarObras, fimDaExecucao, gruposPorContratante, medidoDoMes, mesesDoMedido, participacao, pctExecutado, pctPiso, porAndamento, posicaoDe,
+  prazoDaObra, resumoDe, totaisDe, type ObraLista,
+} from "./listaObras";
 
 const o = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => ({
   id, orgao: "SINFRA", numero_instrumento: `${id}/2026`, nome_curto: nome, estado: "ativo", ...extra });
@@ -141,5 +145,78 @@ describe("lista de Obras na cota da Lotufo, por contratante (#645)", () => {
     expect(filtrarObras(lista, { q: "pon" }).map(x => x.id)).toEqual([1]);
     expect(filtrarObras(lista, { q: "3/2026" }).map(x => x.id)).toEqual([3]);
     expect(filtrarObras(lista, { q: "" })).toHaveLength(3);
+  });
+});
+
+describe("Obras por contratante: andamento, medido do mês e o que pede atenção (#805)", () => {
+  const mes = (valor: number, referencia: number | null, ref: string | null = "2026-09") =>
+    ({ competencia: "2026-10", valor_centavos: valor, referencia_competencia: ref, referencia_centavos: referencia });
+  const ritmo = (r: number | null, n: number | null) => ({ ritmo_centavos: r, necessario_centavos: n });
+  const pos = (vigente: number, medido: number) => ({ vigente_centavos: vigente, medido_centavos: medido, saldo_centavos: vigente - medido, a_receber_centavos: null });
+  const obras = [
+    o(1, "Ponte", { contratante: "SINFRA", contratante_chave: "sinfra", posicao: pos(1000, 100), andamento: ritmo(69_999, 100_000), medido_mes: mes(500, 400) }),
+    o(2, "Avenida", { contratante: "SINFRA", contratante_chave: "sinfra", posicao: pos(3000, 100), andamento: ritmo(70_000, 100_000), medido_mes: mes(100, 0) }),
+    o(3, "Trevo", { contratante: "MTPAR", contratante_chave: "mtpar", posicao: pos(5000, 100), andamento: ritmo(100_000, 100_000), medido_mes: mes(0, 300) }),
+    // sem ritmo (sem medição na janela), com prazo a cumprir; paralisada; e com a execução vencida
+    o(4, "Anel", { contratante: "MTPAR", contratante_chave: "mtpar", andamento: ritmo(null, 50_000) }),
+    o(5, "Orla", { orgao: "sem cadastro", estado: "suspenso", dias_execucao: -10, andamento: ritmo(10, null) }),
+    o(6, "Cais", { orgao: "sem cadastro", dias_execucao: -3, andamento: ritmo(10, null) }),
+  ];
+
+  it("a leitura do andamento usa a régua única (70% e 100%): a contagem nunca discorda da barra", () => {
+    expect(obras.map(andamentoDaObra)).toEqual([
+      { leitura: "devagar", pct: 69 }, { leitura: "atencao", pct: 70 }, { leitura: "adiantada", pct: 100 }, null, null, null]);
+    const r = resumoDe(obras);
+    expect([r.obras, r.comAndamento, r.devagar, r.atencao]).toEqual([6, 3, 1, 1]);
+  });
+
+  it("paralisada e execução vencida: a vencida só conta na obra ativa, fora do encerramento e sem paralisação", () => {
+    expect(obras.map(estaParalisada)).toEqual([false, false, false, false, true, false]);
+    expect(obras.map(execucaoVencida)).toEqual([false, false, false, false, false, true]);
+    expect(execucaoVencida(o(7, "X", { dias_execucao: -3, encerramento_iniciado_em: "2026-10-01" }))).toBe(false);
+    expect(execucaoVencida(o(7, "X", { dias_execucao: -3, paralisada_desde: "2026-10-01" }))).toBe(false);
+    expect(execucaoVencida(o(7, "X", { dias_execucao: null }))).toBe(false);           // sem prazo de execução conhecido (#662)
+    expect(execucaoVencida(o(7, "X", { dias_execucao: 0 }))).toBe(false);              // no dia do fim ainda não venceu
+    const r = resumoDe(obras);
+    expect([r.paralisadas, r.execucaoVencida]).toEqual([1, 1]);
+  });
+
+  it("os avisos críticos contam por obra, dos avisos que a tela recebe", () => {
+    const criticos = criticosPorObra([{ contrato_id: 1, nivel: "critico" }, { contrato_id: 1, nivel: "critico" }, { contrato_id: 1, nivel: "acao" },
+      { contrato_id: 3, nivel: "critico" }, { contrato_id: null, nivel: "critico" }]);
+    expect([...criticos]).toEqual([[1, 2], [3, 1]]);
+    expect(resumoDe(obras, criticos).avisosCriticos).toBe(3);
+    expect(resumoDe(obras.filter(x => x.contratante === "MTPAR"), criticos).avisosCriticos).toBe(1);
+  });
+
+  it("o medido do mês é só a soma do que o servidor mandou; sem referência que sirva, ela fica nula", () => {
+    expect(medidoDoMes(obras)).toEqual({ competencia: "2026-10", valor_centavos: 600, referencia_competencia: "2026-09", referencia_centavos: 700 });
+    expect(medidoDoMes([o(1, "A")])).toBeNull();
+    const semReferencia = [o(1, "A", { medido_mes: mes(500, null, null) }), o(2, "B", { medido_mes: mes(100, null, null) })];
+    expect(medidoDoMes(semReferencia)).toEqual({ competencia: "2026-10", valor_centavos: 600, referencia_competencia: null, referencia_centavos: null });
+  });
+
+  it("os nomes do mês do medido e da referência; referência de outro ano leva o ano", () => {
+    expect(mesesDoMedido(mes(1, 1))).toEqual({ extenso: "outubro", curto: "out", referencia: { curto: "set", extenso: "setembro" } });
+    expect(mesesDoMedido({ competencia: "2027-01", valor_centavos: 1, referencia_competencia: "2026-12", referencia_centavos: 1 }))
+      .toEqual({ extenso: "janeiro", curto: "jan", referencia: { curto: "dez/26", extenso: "dezembro de 2026" } });
+    expect(mesesDoMedido(mes(1, null, null)).referencia).toBeNull();
+  });
+
+  it("a vista Andamento: do menor para o maior percentual do necessário; sem ritmo vai ao fim; sem necessário fica fora", () => {
+    expect(porAndamento(obras).map(x => x.nome_curto)).toEqual(["Ponte", "Avenida", "Trevo", "Anel"]);
+    // no mesmo percentual inteiro, a razão exata desempata
+    const empate = [o(1, "B", { andamento: ritmo(27_900, 100_000) }), o(2, "A", { andamento: ritmo(27_100, 100_000) })];
+    expect(porAndamento(empate).map(x => x.nome_curto)).toEqual(["A", "B"]);
+  });
+
+  it("os blocos vão do maior contratado para o menor, com a chave da página; a participação tem uma casa", () => {
+    const grupos = contratantesPorContratado(obras);
+    expect(grupos.map(g => [g.contratante, g.chave, g.subtotal.contratado])).toEqual([["MTPAR", "mtpar", 5000], ["SINFRA", "sinfra", 4000], ["sem cadastro", null, 0]]);
+    expect(participacao(4000, 9000)).toMatch(/^44,4\s?%$/);
+    expect(participacao(4500, 9000)).toMatch(/^50\s?%$/);
+    expect(participacao(1, 0)).toBeNull();
+    expect(fimDaExecucao("2027-03-31")).toBe("execução até 31/03/2027");
+    expect(fimDaExecucao(null)).toBeNull();
   });
 });
