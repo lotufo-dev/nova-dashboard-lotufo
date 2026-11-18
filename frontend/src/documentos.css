@@ -45,9 +45,13 @@ a.doc-chip:focus-visible { outline: var(--largura-foco) solid var(--cor-foco); o
 /* o glifo ao lado do valor e a data sempre na linha de baixo: as celulas da linha ficam da mesma altura */
 .doc-chip__valor { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--espaco-traco) var(--espaco-mini); min-width: 0; }
 .doc-chip__valor small { grid-column: 1 / -1; }
-/* na linha, o glifo corre junto do texto: valor comprido (numero da apolice) quebra sem deixar o glifo sozinho */
-.doc-chip--linha .doc-chip__valor { display: block; overflow-wrap: anywhere; }
-.doc-chip--linha .doc-chip__valor .glifo { margin-right: var(--espaco-mini); vertical-align: calc(var(--espaco-traco) * -1); }
+/* na linha, o glifo fica na primeira linha do texto: o valor comprido (apolice de 22 digitos ou mais) quebra dentro
+   da propria caixa, ao lado do glifo. Correndo junto do texto (em bloco), o numero inteiro descia para a linha de
+   baixo antes de quebrar e o glifo ficava sozinho em cima */
+.doc-chip--linha .doc-chip__valor { display: flex; align-items: baseline; gap: 0 var(--espaco-mini); }
+.doc-chip--linha .doc-chip__valor .glifo { position: relative; top: var(--espaco-traco); }
+.doc-chip--linha .doc-chip__valor b { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.doc-chip--linha .doc-chip__valor small { flex: none; }
 .doc-chip__valor b {
   font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
   font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-valor-menor); line-height: var(--entrelinha-numero); overflow-wrap: break-word;
@@ -65,7 +69,7 @@ a.doc-chip:focus-visible { outline: var(--largura-foco) solid var(--cor-foco); o
 /* na linha (Renovar agora, Garantias): sem fundo, o glifo e a palavra no tom da situacao, como numa tabela */
 .doc-chip--linha { padding: 0; background: none; }
 .doc-chip--linha .doc-chip__valor b { font-family: var(--fonte-texto); font-stretch: var(--largura-texto); font-size: var(--texto-meta); font-weight: var(--peso-forte); line-height: var(--entrelinha); }
-.doc-chip--linha .doc-chip__valor small { margin-left: var(--espaco-mini); font-size: var(--texto-meta); color: var(--cor-tinta); }
+.doc-chip--linha .doc-chip__valor small { font-size: var(--texto-meta); color: var(--cor-tinta); }
 
 /* "Renovar agora" (#658): empresa, certidao, validade e as acoes, uma linha por certidao */
 .doc-linha--renovar { grid-template-columns: minmax(calc(var(--espaco-xxg) * 2), calc(var(--largura-menu) - var(--espaco-g))) minmax(calc(var(--espaco-xxg) + var(--espaco-pp)), 1fr) minmax(calc(var(--espaco-xxg) * 2), 1.5fr) auto; padding-top: var(--espaco-pp); padding-bottom: var(--espaco-pp); }
