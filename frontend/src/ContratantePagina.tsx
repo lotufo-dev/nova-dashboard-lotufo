@@ -26,12 +26,7 @@ import "./obras.css";
 
 const FORA = new Set(["encerrado", "rescindido"]);
 
-/** As abas que a pagina ja' desenha. As outras (Medicoes, A receber, Processos no SIGA, Avisos) ja' tem endereco na
- *  rota (#814) e chegam com a issue #818: ate' la' o App leva o endereco delas para a pagina como ela e' hoje. Quem
- *  construir uma aba a acrescenta aqui, e o endereco dela passa a abrir. */
-export const ABAS_PRONTAS: readonly AbaContratante[] = ["obras"];
-
-// `aba`: a aba do endereco. Por ora so' existe a de Obras (ver ABAS_PRONTAS).
+// `aba`: a aba do endereco. Por ora so' existe a de Obras (ver ABAS_PRONTAS, em abasDoContratante.ts).
 export default function ContratantePagina({ chave, perfil, busca = {}, ir }: {
   chave: string; aba?: AbaContratante; perfil: string; busca?: Busca; ir: Ir;
 }) {

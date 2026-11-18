@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Caminho from "./Caminho";
-import ContratantePagina, { ABAS_PRONTAS } from "./ContratantePagina";
+import { ABAS_PRONTAS } from "./abasDoContratante";
+import ContratantePagina from "./ContratantePagina";
 import type { ObraLista } from "./listaObras";
 import { useRota } from "./rota";
 

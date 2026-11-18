@@ -6,7 +6,8 @@ import { BarraSuperior, Trilho } from "./Casca";
 import Documentos from "./Documentos";
 import DocumentosEmpresa from "./DocumentosEmpresa";
 import AbrirEnvio from "./AbrirEnvio";
-import ContratantePagina, { ABAS_PRONTAS } from "./ContratantePagina";
+import { ABAS_PRONTAS } from "./abasDoContratante";
+import ContratantePagina from "./ContratantePagina";
 import ContratoPagina from "./ContratoPagina";
 import Contratos from "./Contratos";
 import Inicio from "./Inicio";
@@ -74,7 +75,7 @@ export default function App() {
       substituir(entradaDe(usuario.perfil));
     } else if (rota.tela === "contratante" && rota.aba
       && (!ABAS_PRONTAS.includes(rota.aba) || (rota.aba === "siga" && usuario.perfil === "diretoria"))) {
-      // A aba do contratante que a pagina ainda nao desenha (ContratantePagina.ABAS_PRONTAS) abre a pagina como ela e'
+      // A aba do contratante que a pagina ainda nao desenha (ABAS_PRONTAS, abasDoContratante.ts) abre a pagina como ela e'
       // hoje. E a aba do SIGA segue a tela SIGA: quem nao a ve cai na pagina do contratante.
       substituir({ tela: "contratante", chave: rota.chave });
     } else if (rota.tela === "obras" && busca.avisos === "1") {
