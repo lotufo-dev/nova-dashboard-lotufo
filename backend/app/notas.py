@@ -8,7 +8,7 @@ Nada aqui muda estado para tras.
 import datetime
 import json
 
-from app import arquivos, auditoria, db, dinheiro, espelho, frc, leitura_nfse, leitura_pdf, medicoes, permissoes, tempo
+from app import arquivos, auditoria, db, dinheiro, espelho, frc, leitura_nfse, leitura_pdf, medicoes, permissoes, tempo, texto
 
 EMISSOR_LOTUFO = "lotufo"
 CAMPOS_CONFERIDOS = ("valor", "iss", "inss", "irrf", "ibs", "cbs", "liquido")   # liquido por ultimo: tolera os tributos
@@ -572,7 +572,7 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
         if dias >= DIAS_AUSENTE_RM:
             out.append({"tipo": "nota_ausente_rm", "nota_id": r["nota_id"], "numero": r["numero"],
                         "medicao_id": r["medicao_id"], "contrato_id": r["contrato_id"], "dias": dias,
-                        "mensagem": f"nota {r['numero']} protocolada há {dias} dias e ainda não apareceu no RM"})
+                        "mensagem": f"nota {r['numero']} protocolada há {texto.dias(dias)} e ainda não apareceu no RM"})
     for r in conn.execute("""
         SELECT DISTINCT a.medicao_id, m.contrato_id, n.numero_int AS numero, n.id AS nota_id, a.motivo_desfazer
         FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id JOIN medicoes m ON m.id=a.medicao_id

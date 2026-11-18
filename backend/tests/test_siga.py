@@ -970,7 +970,7 @@ def test_resumo_dos_nao_lidos_conta_cada_processo_da_rodada_uma_vez(conn, robo):
         {"tipo": "nao_lido", "processo_id": robo.ids[0], "texto": "não lido às 10:03: A página do processo não abriu"},
         {"tipo": "nao_lido", "processo_id": None,
          "texto": "processo XYZ999 não lido às 10:03: Processo da lista do robô"},
-        {"tipo": "nao_lidos", "processo_id": None, "texto": "1 de 1 processos não foram lidos"}]
+        {"tipo": "nao_lidos", "processo_id": None, "texto": "1 de 1 processo não foi lido"}]
 
 
 def test_rodada_sem_fim_ha_mais_de_12_minutos_avisa_ate_outra_terminar(conn, robo):
@@ -1113,7 +1113,7 @@ def test_processo_vivo_sem_leitura_ha_mais_de_2_horas_uteis_mostra_nao_lido(conn
     agora = _cuiaba(2026, 10, 28, 11)
     assert _nao_lido_do_beta(conn, robo, _cuiaba(2026, 10, 28, 8, 30), agora) == [
         {"tipo": "nao_lido", "processo_id": robo.ids[1], "texto": "não lido às 11:00: Não abriu"},
-        {"tipo": "nao_lidos", "processo_id": None, "texto": "1 de 3 processos não foram lidos"}]
+        {"tipo": "nao_lidos", "processo_id": None, "texto": "1 de 3 processos não foi lido"}]
 
 
 def test_nao_lido_conta_das_8h_quando_a_ultima_leitura_e_de_ontem(conn, robo):

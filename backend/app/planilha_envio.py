@@ -18,7 +18,7 @@ import hashlib
 import io
 import zipfile
 
-from app import arquivos, auditoria, carta, correio, db, envio_reserva, espelhos, medicoes, oficios, pleitos, tempo
+from app import arquivos, auditoria, carta, correio, db, envio_reserva, espelhos, medicoes, oficios, pleitos, tempo, texto
 from app.protocolo import AnexosMudaram     # a mesma recusa (com `codigo`) do envio da nota e do protocolo
 # issue #462: a mesma regra cobra (ou nao) a peca na etapa `medicao` do protocolo
 from app.protocolo import PECA_NO_OFICIO, tipos_no_oficio
@@ -346,7 +346,7 @@ def enviar(conn, usuario: dict, medicao_id: int, numero_oficio: str, para: list[
     _conferir_anexos(anexos_previa, pv["anexos"])
     justificativa = (justificativa or "").strip() or None
     if pv["pendencias"] and len(justificativa or "") < MIN_JUSTIFICATIVA:
-        raise ValueError(f"{len(pv['pendencias'])} pendência(s) na prévia: informe a justificativa "
+        raise ValueError(f"{texto.contar(len(pv['pendencias']), 'pendência', 'pendências')} na prévia: informe a justificativa "
                          f"(ao menos {MIN_JUSTIFICATIVA} caracteres) para enviar assim")
     # Reserva atomica antes do e-mail: dois cliques simultaneos mandam um e-mail so'. A condicao da reserva
     # (envio_reserva._CONDICAO) confere, no mesmo UPDATE, que a versao ainda e' a vigente e a medicao ainda envia.

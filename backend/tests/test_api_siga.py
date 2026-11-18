@@ -621,7 +621,7 @@ def test_fim_com_nao_lidos_e_falha_aparecem_no_painel(client_admin, com_token, s
     assert _fim(client_admin, r["rodada_id"], nao_lido).status_code == 200
     assert _robo_painel(client_admin)["avisos"] == [
         {"tipo": "nao_lido", "processo_id": beta, "texto": "não lido às 13:01: Processo sem código"},
-        {"tipo": "nao_lidos", "processo_id": None, "texto": "1 de 2 processos não foram lidos"}]
+        {"tipo": "nao_lidos", "processo_id": None, "texto": "1 de 2 processos não foi lido"}]
     relogio_movel(1)
     client_admin.post("/api/siga/atualizar", json={"processo_id": alfa})
     r = _rodada(client_admin)

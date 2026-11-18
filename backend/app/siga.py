@@ -17,7 +17,7 @@ import unicodedata
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from app import auditoria, db, medicoes, tempo
+from app import auditoria, db, medicoes, tempo, texto
 from app import avisos as registro_avisos
 from app.feriados import dia_util
 
@@ -1048,7 +1048,8 @@ def situacao_robo(conn, agora: datetime.datetime | None = None, fora: dict[int, 
         da_rodada = json.loads(ultima["processos"])
         faltaram = len({n["processo_id"] for n in nao_lidos} & set(da_rodada))
         if faltaram:
-            avisos.append(_aviso_robo("nao_lidos", f"{faltaram} de {len(da_rodada)} processos não foram lidos"))
+            avisos.append(_aviso_robo("nao_lidos", f"{faltaram} de {texto.contar(len(da_rodada), 'processo', 'processos')} "
+                                      + ("não foi lido" if faltaram == 1 else "não foram lidos")))
     # so' a mais recente: rodadas mortas seguidas (todas passando dos 10 minutos) nao viram uma linha cada
     morta = conn.execute("SELECT iniciada_em FROM siga_rodadas WHERE terminada_em IS NULL AND iniciada_em < ? "
                          "AND id > ? ORDER BY id DESC LIMIT 1",
@@ -1103,7 +1104,7 @@ def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) ->
         onde = f" em {d['setor']}" if d["setor"] else ""
         out.append({**registro_avisos.aviso(
             "siga_parado", "acao" if dias >= DIAS_ACAO else "atencao",
-            f"processo {p['numero']} parado{onde} há {dias} dias úteis", p["contrato_id"],
+            f"processo {p['numero']} parado{onde} há {texto.dias_uteis(dias)}", p["contrato_id"],
             registro_avisos.obra(conn, p["contrato_id"]), dias=dias,
             destino={"tela": "siga", "processo": p["id"]}, data=parado_desde, sentido="desde"),
             "medicao_id": p["medicao_id"]})

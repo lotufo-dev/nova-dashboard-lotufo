@@ -339,7 +339,7 @@ export default function Cronograma({ contratoId, podeEditar }:
                 <tr>
                   <td colSpan={6}>
                     <button type="button" className="btn btn--pequeno" onClick={() => setVerTodos(true)}>
-                      Ver os {anteriores} meses anteriores
+                      {anteriores === 1 ? "Ver o mês anterior" : `Ver os ${anteriores} meses anteriores`}
                     </button>
                   </td>
                 </tr>

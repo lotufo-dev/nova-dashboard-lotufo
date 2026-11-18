@@ -42,6 +42,7 @@ describe("redesenho de Documentos (#161)", () => {
     expect(resumoEmpresa(e(1, [c("federal", "ok", 90), c("fgts", "ok", 200)]))).toEqual({ texto: "Em dia", nivel: "ok", pendencias: 0 });
     expect(resumoEmpresa(e(1, [c("federal", "ok", 90), c("fgts", "ok", 25)]))).toMatchObject({ texto: "1 vence em 25 dias", nivel: "atencao" });
     expect(resumoEmpresa(e(1, [c("federal", "ok", 20), c("fgts", "vencendo", 12)]))).toMatchObject({ texto: "2 vencem em até 20 dias", nivel: "atencao" });
+    expect(resumoEmpresa(e(1, [c("federal", "vencendo", 1), c("fgts", "vencendo", 1)])).texto).toBe("2 vencem em até 1 dia");
     const r = resumoEmpresa(e(1, [c("federal", "vencida", null), c("estadual", "faltando", null), c("fgts", "faltando", null)],
       { situacao: "atrasada", competencia: "2026-06", esperada: "2026-07" }));
     expect(r).toEqual({ texto: "1 vencida · 2 faltam · regularidade atrasada", nivel: "acao", pendencias: 4 });

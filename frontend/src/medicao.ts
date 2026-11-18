@@ -1,6 +1,7 @@
 // Regras de APRESENTACAO da pagina da medicao (NAVEGACAO.md › Medicao): funcoes puras sobre o que a API ja
 // entrega. Nada aqui decide estado, valor ou prazo — isso mora no servidor.
 
+import { contar } from "./formato";
 import { PASSOS } from "./Passos";
 
 export type MarcoProtocolo = { id: number; data: string; numero_oficio: string | null; numero_processo: string | null;
@@ -206,7 +207,7 @@ export function itensOQueFalta(m: MedicaoBase, faltamNotas: number | null, check
     // a competencia da regularidade e' a exigida HOJE pelo servidor (nao a da medicao): o texto diz isso
     const o_que = i.chave === "regularidade" ? `regularidade exigida hoje${i.esperada ? ` (${competencia(i.esperada)})` : ""}` : i.tipo;
     // "sem validade hoje": o mesmo texto das pendencias do protocolo e do registro de protocolo feito fora
-    const quando = i.situacao === "vencendo" ? (i.dias === null ? "vence em breve" : i.dias <= 0 ? "vence hoje" : `vence em ${i.dias} dias`) : "sem validade hoje";
+    const quando = i.situacao === "vencendo" ? (i.dias === null ? "vence em breve" : i.dias <= 0 ? "vence hoje" : `vence em ${contar(i.dias, "dia", "dias")}`) : "sem validade hoje";
     itens.push({ tipo: "documento", nivel: i.situacao === "vencendo" ? "atencao" : "critico", entidadeId: i.entidade_id, texto: `${quem}: ${o_que} · ${quando}` });
   }
   if (protocolo) {

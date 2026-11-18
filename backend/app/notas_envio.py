@@ -11,7 +11,7 @@ from email import policy
 from email.parser import BytesParser
 from email.utils import parseaddr, parsedate_to_datetime
 
-from app import arquivos, auditoria, certidoes, db, documentos, frc, medicoes, notas, oficios, protocolo, tempo
+from app import arquivos, auditoria, certidoes, db, documentos, frc, medicoes, notas, oficios, protocolo, tempo, texto
 
 log = logging.getLogger(__name__)
 
@@ -229,7 +229,7 @@ def _itens(conn, c: dict, familia: str, ms: list[dict], hoje: datetime.date) -> 
                 est, msg = "falta", f"{rot} sem certidão"
             elif s["situacao"] in ("ok", "vencendo") and s["dias"] < AVISO_DIAS:
                 est, msg = "aviso", f"{rot} vence hoje" if s["dias"] == 0 else \
-                    f"{rot} vence em {s['dias']} dia{'s' if s['dias'] > 1 else ''}"
+                    f"{rot} vence em {texto.dias(s['dias'])}"
             else:
                 continue
             msgs.append(msg)
