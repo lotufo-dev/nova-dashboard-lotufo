@@ -31,7 +31,7 @@ import { avisosEmVolume, semAvisos, cabecalhoCom, cabecalhoEmDia, CUSTO_DA_OBRA,
          medicaoComEspelhoEnviadoPorFora, medicaoComEspelhoGerado, medicaoComExcluidosNoRm, obrasComAParte, reconciliacaoComBaixados,
          medicaoComNotaDivergente, medicaoComNotaEmitida, medicaoDaMtpar, NOTAS_COM_DIVERGENCIA, notasAEnviar, notasComEnvioAberto,
          PDF_ILEGIVEL,
-         prazosEmEncerramento, prazosParalisada, PREVIA_DO_ESPELHO, PROTOCOLO_ID, RESPOSTA_QUE_QUEBRA, RM_EXCLUSAO_RECUSADA,
+         prazosEmEncerramento, prazosParalisada, PREVIA_DO_ESPELHO, PROTOCOLO_ID, RESPOSTA_QUE_QUEBRA, resumoEmQuadro, RM_EXCLUSAO_RECUSADA,
          SIGA_COM_PROCESSOS } from "./simulados.mjs";
 
 import { carteiraSimulada, painelDaCarteira } from "./simulados.mjs";
@@ -95,6 +95,9 @@ const comAvisosEmVolume = tela => [
   { ...tela, perfis: ["diretoria"], simular: [{ caminho: /^\/api\/inicio$/, ajustar: avisosEmVolume("diretoria") }] },
 ];
 
+// issue #805: o mes do Resumo das medicoes com medicao em cada etapa (ver simulados.mjs)
+const comResumo = opcoes => [{ caminho: /^\/api\/resumo-medicoes$/, ajustar: resumoEmQuadro(opcoes) }];
+
 export const TELAS = [
   // ---- Inicio
   { rota: "inicio", id: "inicio", caminho: "/inicio", perfis: TODOS, espera: ".ini" },
@@ -119,7 +122,20 @@ export const TELAS = [
     passos: [{ clicar: '.quadro__tabela button:has-text("Iniciar")' }] },
   { rota: "medicoes", id: "medicoes-erro", caminho: "/medicoes", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/medicoes\/resumo$/) },
-  { rota: "resumo-medicoes", id: "resumo-medicoes", caminho: "/resumo-medicoes", perfis: TODOS, espera: ".rdm-faixa" },
+  // ---- Resumo das medicoes em quadro por etapa (#805): o cadastro de exemplo, e o mes simulado (ver simulados.mjs)
+  // com medicao em cada etapa, as diferencas para o pedido, as obras sem medicao e os meses anteriores, nas duas
+  // vistas, na aba dos meses anteriores, com o filtro por contratante (etapas vazias) e no mes sem medicao
+  { rota: "resumo-medicoes", id: "resumo-medicoes", caminho: "/resumo-medicoes", perfis: TODOS, espera: ".rdm-abas" },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-quadro", caminho: "/resumo-medicoes", perfis: TODOS, espera: ".rdm-quadro .rdm-cartao .diferenca",
+    simular: comResumo() },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-tabela", caminho: "/resumo-medicoes?vista=tabela", perfis: ["diretoria"],
+    espera: ".rdm-tabela--etapas .rdm-grupo", simular: comResumo() },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-anteriores", caminho: "/resumo-medicoes?aba=anteriores", perfis: ["diretoria"],
+    espera: ".rdm-tabela--etapas .rdm-grupo", simular: comResumo() },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-contratante", caminho: "/resumo-medicoes?contratante=MTPAR", perfis: ["diretoria"],
+    espera: ".rdm-quadro .rdm-coluna__vazia", simular: comResumo({ contratante: "MTPAR" }) },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-vazio", caminho: "/resumo-medicoes", perfis: ["diretoria"], espera: ".rdm-vazio",
+    simular: comResumo({ vazio: true }) },
   { rota: "resumo-medicoes", id: "resumo-medicoes-erro", caminho: "/resumo-medicoes", perfis: SO_ADMIN, espera: "#conteudo [role=alert]",
     erro: true, simular: falha(/^\/api\/resumo-medicoes$/) },
 
