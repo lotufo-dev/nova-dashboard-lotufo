@@ -416,6 +416,116 @@ describe("Espelho: o passo Espelhos (#514)", () => {
     expect(screen.getByRole("button", { name: "Enviar ao faturamento" })).toBeTruthy();
   });
 
+  // issue #798: o espelho que foi ao faturamento por e-mail, fora do sistema
+  const POR_FORA = { ...ESPELHO, medicoes: [{ id: 1, tipo: "execucao", estado: "espelho_enviado" }],
+    envio_externo: { enviado_em: "2026-10-20", observacao: "pelo Outlook", registrado_em: "2026-10-22 13:00:00", registrado_por_nome: "Maria" } };
+  const faturamento = (podeEditar = true, aoMudar = () => {}) =>
+    render(<Espelho contratoId={1} podeEditar={podeEditar} aoMudar={aoMudar} medicao={{ id: 1, tipo: "execucao" }} parte="faturamento" />);
+
+  it("“Já enviei por fora” registra a data e a observação, e o passo passa a mostrar o envio por fora (#798)", async () => {
+    const posts: { caminho: string; corpo: Record<string, unknown> }[] = [];
+    let registrado = false;
+    api.mockImplementation((caminho: string, opts?: RequestInit) => {
+      if (caminho === "/api/contratos/1/espelho") return Promise.resolve({ regra: REGRA, espelhos: [registrado ? POR_FORA : ESPELHO] });
+      if (opts?.method === "POST") {
+        posts.push({ caminho, corpo: JSON.parse(String(opts.body)) });
+        registrado = true;
+        return Promise.resolve({ espelho_id: 7, enviado_em: "2026-10-20" });
+      }
+      return Promise.resolve([]);
+    });
+    const aoMudar = vi.fn();
+    faturamento(true, aoMudar);
+    const botao = await screen.findByRole("button", { name: "Já enviei por fora" });
+    expect(botao.className).toBe("botao-link");
+    expect(screen.getByRole("button", { name: "Enviar ao faturamento" }).className).toContain("btn--primario");
+    fireEvent.click(botao);
+    const janela = within(screen.getByRole("dialog", { name: "Registrar envio do espelho por fora" }));
+    const data = janela.getByLabelText("Data do envio") as HTMLInputElement;
+    expect(data.required).toBe(true);
+    expect(data.max).toBe(data.value);                      // abre em hoje, e o futuro nao se escolhe
+    fireEvent.change(data, { target: { value: "2026-10-20" } });
+    fireEvent.change(janela.getByLabelText("Observação (opcional)"), { target: { value: "  pelo Outlook " } });
+    fireEvent.click(janela.getByRole("button", { name: "Registrar" }));
+    expect(await screen.findByText("Enviado por fora em 20/10/2026")).toBeTruthy();
+    expect(posts).toEqual([{ caminho: "/api/espelhos/7/envio-externo", corpo: { enviado_em: "2026-10-20", observacao: "pelo Outlook" } }]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByText("Não enviado ao faturamento")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Já enviei por fora" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Enviar ao faturamento" })).toBeNull();
+    // o envio pelo sistema continua possivel, sem ser a acao principal
+    expect(screen.getByRole("button", { name: "Enviar de novo" }).className).not.toContain("btn--primario");
+    expect(screen.getByRole("status").textContent).toBe("Envio por fora registrado. A medição passou a Espelho enviado.");
+    expect(aoMudar).toHaveBeenCalledTimes(1);
+  });
+
+  it("sem observação, o registro por fora manda só a data (#798)", async () => {
+    const corpos: unknown[] = [];
+    api.mockImplementation((caminho: string, opts?: RequestInit) => {
+      if (opts?.method === "POST") { corpos.push(JSON.parse(String(opts.body))); return Promise.resolve({}); }
+      return Promise.resolve(caminho === "/api/contratos/1/espelho" ? { regra: REGRA, espelhos: [ESPELHO] } : []);
+    });
+    faturamento();
+    fireEvent.click(await screen.findByRole("button", { name: "Já enviei por fora" }));
+    const data = (screen.getByLabelText("Data do envio") as HTMLInputElement).value;
+    fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
+    await waitFor(() => expect(corpos).toEqual([{ enviado_em: data }]));
+  });
+
+  it("quem só consulta não vê “Já enviei por fora”, e o espelho já enviado não o oferece (#798)", async () => {
+    api.mockResolvedValue({ regra: REGRA, espelhos: [ESPELHO] });
+    const { unmount } = faturamento(false);
+    expect(await screen.findByText("Não enviado ao faturamento")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Já enviei por fora" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Enviar ao faturamento" })).toBeNull();
+    unmount();
+    api.mockResolvedValue({ regra: REGRA, espelhos: [{ ...ESPELHO, envio: { id: 9, remetente: "maria@l.com", para: ["f@x.com"],
+      copia: [], assunto: "A", enviado_em: "2026-10-10 13:00:00" } }] });
+    faturamento();
+    expect(await screen.findByRole("button", { name: "Enviar de novo" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Já enviei por fora" })).toBeNull();
+  });
+
+  it("a recusa do registro por fora aparece na janela; no 409 a lista é lida de novo (#798)", async () => {
+    const MSG_DATA = "A data do envio é anterior ao período do espelho (início em 01/05/2026)";
+    const MSG_JA = "O envio por fora desta versão do espelho já está registrado (em 20/10/2026, por Maria).";
+    let recusa: ApiErro = new ApiErro(422, MSG_DATA);
+    let leituras = 0;
+    api.mockImplementation((caminho: string, opts?: RequestInit) => {
+      if (opts?.method === "POST") return Promise.reject(recusa);
+      if (caminho === "/api/contratos/1/espelho") { leituras += 1; return Promise.resolve({ regra: REGRA, espelhos: [leituras > 1 ? POR_FORA : ESPELHO] }); }
+      return Promise.resolve([]);
+    });
+    const aoMudar = vi.fn();
+    faturamento(true, aoMudar);
+    fireEvent.click(await screen.findByRole("button", { name: "Já enviei por fora" }));
+    fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
+    expect(await screen.findByText(MSG_DATA)).toBeTruthy();
+    expect(screen.getByRole("dialog")).toBeTruthy();         // a janela fica, com o que foi digitado
+    expect(leituras).toBe(1);
+    expect(aoMudar).not.toHaveBeenCalled();
+    recusa = new ApiErro(409, MSG_JA, { mensagem: MSG_JA, codigo: "ESPELHO_ENVIO_EXTERNO_JA_REGISTRADO" });
+    fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
+    expect(await screen.findByText(MSG_JA)).toBeTruthy();
+    expect(await screen.findByText("Enviado por fora em 20/10/2026")).toBeTruthy();    // o que ja' vale, atras da janela
+    expect(aoMudar).toHaveBeenCalledTimes(1);
+  });
+
+  it("depois do registro por fora, enviar pelo sistema pede a confirmação do reenvio (#798)", async () => {
+    api.mockImplementation((caminho: string) => {
+      if (caminho === "/api/contratos/1/espelho") return Promise.resolve({ regra: REGRA, espelhos: [POR_FORA] });
+      if (caminho === "/api/espelhos/7/envio") return Promise.resolve({ para: ["f@x.com"], copia: [], assunto: "Emissão NF",
+        corpo: "Bom dia.", anexos: [], total: 0, limite: 1,
+        avisos: ["a versão 1 deste espelho já foi enviada ao faturamento; este envio substitui"] });
+      if (caminho.startsWith("/api/correio/remetente")) return Promise.resolve({ remetente: "eu@lotufo.com" });
+      return Promise.resolve([]);
+    });
+    faturamento();
+    fireEvent.click(await screen.findByRole("button", { name: "Enviar de novo" }));
+    const caixa = await screen.findByLabelText("Confirmo o reenvio desta versão (substitui o envio anterior)") as HTMLInputElement;
+    expect(caixa.checked).toBe(false);
+  });
+
   it("consórcio que emite só a cota: as notas somam a cota e o espelho confere pelo valor cheio da medição (code-review)", async () => {
     const cota = { ...ESPELHO, entradas: { medicao: 1000001 }, medicoes: [{ id: 1, tipo: "execucao", estado: "espelho_gerado" }],
       saidas: [saida("cuiaba-medicao", "medicao", "Cuiabá", 180000)] };

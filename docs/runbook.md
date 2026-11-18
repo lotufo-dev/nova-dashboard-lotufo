@@ -757,6 +757,18 @@ o valor da medição segue a versão vigente. Opcional: anexar o PDF que o órg�
 Protocolar continua pelo botão da linha da medição até o bloco 5. Obra sem regra ativa mostra "fluxo
 antigo" e continua gerando o espelho pelo Power Automate.
 
+**Espelho enviado por fora (issue #798).** Quando o espelho foi ao faturamento por e-mail, fora do sistema,
+o passo Espelhos da página da medição tem "Já enviei por fora", ao lado de "Enviar ao faturamento": a
+pessoa informa a data do envio (não futura, não anterior ao período do espelho) e, se quiser, uma
+observação. Nenhum e-mail sai. A medição passa a `espelho_enviado`, o passo Notas abre e o registro entra
+na linha do tempo, com quem fez. A data informada vale como o dia do envio do espelho no vínculo da nota
+pela saída do espelho (`docs/adr/0005`). O registro vale para a versão vigente: a versão nova volta a
+pedir o envio. Versão já enviada pelo sistema não recebe o registro, o repetido responde 409 e, com um
+envio pelo sistema em andamento ou preso, o registro espera o envio terminar ou a liberação. Depois do
+registro, "Enviar de novo" continua possível e pede a confirmação do reenvio. Não há desfazer pela tela:
+a versão nova do espelho recebe um registro novo, mas para o vínculo da nota continua valendo o envio
+mais antigo da medição, pelo sistema ou por fora.
+
 **Arquivos.** `dados/espelhos/<sha>.docx` (gerados), `dados/modelos/<sha>.docx` (modelos copiados pelo
 `cadastro aplicar`), `dados/evidencias/<sha>.pdf`. O snapshot horário do backup cobre só o banco; essas
 pastas vão pela cópia dos arquivos do backup (issues #55 e #441). O caminho gravado no banco é relativo à pasta do banco.

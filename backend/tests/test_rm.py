@@ -1356,6 +1356,46 @@ def test_reenvio_do_espelho_nao_solta_a_nota_emitida_entre_os_envios(conn, tmp_p
     assert r["alocacoes"] == 1, r
 
 
+def _espelho_enviado_por_fora(conn, mid, dia):
+    """O espelho da medicao sem envio pelo sistema (o fixture envia) e com o envio por fora registrado em `dia`."""
+    from app import espelhos
+    eid = conn.execute("SELECT espelho_id FROM espelho_medicoes WHERE medicao_id=?", (mid,)).fetchone()[0]
+    with db.mutacao(conn):
+        conn.execute("UPDATE espelhos SET envio_id=NULL")
+        conn.execute("DELETE FROM envio_medicoes")
+        conn.execute("UPDATE medicoes SET estado='espelho_gerado' WHERE id=?", (mid,))
+    espelhos.registrar_envio_externo(conn, 1, eid, dia)
+    return eid
+
+
+@pytest.mark.parametrize("emissao, liga", [
+    ("2026-09-14", True),       # a nota do dia do envio por fora vale, como no envio pelo sistema
+    ("2026-09-16", True),
+    ("2026-09-13", False),      # a de antes do envio nao e' a nota pedida pelo espelho
+])
+def test_data_do_envio_por_fora_vale_como_o_dia_do_envio_do_espelho(conn, tmp_path, espelho_mt402, emissao, liga):
+    """Issue #798 (docs/adr/0005): o dia informado no registro por fora e' o dia do pedido da nota."""
+    _, mid = espelho_mt402
+    _espelho_enviado_por_fora(conn, mid, "2026-09-14")
+    assert medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado"
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910, emissao=emissao)], []))
+    assert r["alocacoes"] == (1 if liga else 0), r
+    if liga:
+        assert conn.execute("SELECT regra FROM nf_alocacoes WHERE medicao_id=?", (mid,)).fetchone()[0] == "saida_espelho"
+        assert medicoes.detalhe(conn, mid)["estado"] == "nota_emitida"
+    else:
+        assert not _tem_nf(conn, mid) and medicoes.detalhe(conn, mid)["estado"] == "espelho_enviado"
+
+
+def test_envio_pelo_sistema_depois_do_registro_por_fora_nao_empurra_o_dia_do_pedido(conn, tmp_path, espelho_mt402):
+    """Issue #798: entre o envio por fora e o envio pelo sistema vale o mais antigo, como no reenvio (#708)."""
+    _, mid = espelho_mt402
+    eid = _espelho_enviado_por_fora(conn, mid, "2026-09-10")
+    _enviar_espelho(conn, eid, [mid], em="2026-09-20 14:00:00")        # reenvio pelo sistema, confirmado
+    r = sincronizacao_rm.sincronizar(conn, _simulador(tmp_path, [_nota_da_27a(910, emissao="2026-09-14")], []))
+    assert r["alocacoes"] == 1, r
+
+
 def test_nota_com_um_centavo_de_diferenca_da_saida_nao_liga(conn, tmp_path, espelho_mt402):
     """A saida so' vale pelo valor EXATO: R$ 719.190,71 (centavo impar) contra R$ 719.190,72 fica sem vinculo."""
     _, mid = espelho_mt402

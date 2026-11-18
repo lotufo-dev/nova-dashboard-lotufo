@@ -11,7 +11,8 @@ import { larDoEspelho, tituloMedicao } from "./medicao";
 import { brl } from "./Medicoes";
 import { Link } from "./Link";
 // data-hora no fuso de Cuiaba (tempo.ts), e nao no do navegador; competencia em MM/AAAA
-import { fmtCompetencia as competenciaBR, fmtDataHora as dataHoraBR, fmtDataPura as dataBR } from "./tempo";
+import { fmtCompetencia as competenciaBR, fmtDataHora as dataHoraBR, fmtDataPura as dataBR, hojeLocal } from "./tempo";
+import Janela from "./Janela";
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
@@ -39,11 +40,14 @@ const MIN_JUSTIFICATIVA_SEM_BOLETIM = 10;    // espelhos.MIN_JUSTIFICATIVA_SEM_B
 const ESTADOS_ESPELHO = ["espelho_gerado", "espelho_enviado"];
 type Arquivo = { documento_id: number; saida: string; nome: string; tamanho: number };
 type Envio = { id: number; remetente: string; para: string[]; copia: string[]; assunto: string; enviado_em: string };
+// #798: o envio ao faturamento feito por fora, registrado na versao (o dia informado, sem hora)
+type EnvioExterno = { enviado_em: string; observacao: string | null; registrado_em: string; registrado_por_nome: string | null };
 type EspelhoDetalhe = {
   id: number; numero: number; competencia: string; versao: number; situacao: "vigente" | "substituido";
   entradas: Record<string, number>; periodo_inicio: string | null; periodo_fim: string | null;
   criado_em: string; criado_por_nome: string | null; motivo: string | null; saidas: Saida[];
   medicoes: { id: number; tipo: string; estado: string; superado?: boolean }[]; arquivos: Arquivo[]; envio: Envio | null;
+  envio_externo?: EnvioExterno | null;
 };
 type PreviaEnvio = { para: string[]; copia: string[]; assunto: string; corpo: string;
   anexos: { nome: string; tamanho: number }[]; total: number; limite: number; avisos: string[] };
@@ -107,6 +111,8 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
   // ESPELHO_JA_ENVIADO de quem tinha a tela aberta quando outro acabou de enviar.
   const [reenviar, setReenviar] = useState(false);
   const [jaEnviado, setJaEnviado] = useState(false);
+  // #798: "Já enviei por fora" -- o espelho cujo envio por fora esta' sendo registrado (a janela aberta)
+  const [fora, setFora] = useState<EspelhoDetalhe | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [feito, setFeito] = useState("");
   // o espelho que acabou de ser gerado na obra: a mensagem aponta para a medicao dele
@@ -260,6 +266,24 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
       if (envioReservado(e)) setReservado({ id: passo.espelho.id, reserva: e.corpo });
       if (e instanceof ApiErro && e.status === 409 && e.corpo?.codigo === "ESPELHO_JA_ENVIADO") setJaEnviado(true);
     } finally { setOcupado(false); }
+  };
+
+  // #798: registra o envio feito por fora (nenhum e-mail sai). A recusa aparece na janela; no 409 (outra pessoa
+  // acabou de registrar ou de enviar) a lista e' lida de novo, para a tela de tras mostrar o que ja' vale.
+  const registrarFora = async (esp: EspelhoDetalhe, enviadoEm: string, observacao: string): Promise<string | null> => {
+    setErro(""); setFeito("");
+    try {
+      await api(`/api/espelhos/${esp.id}/envio-externo`, { method: "POST",
+        body: JSON.stringify({ enviado_em: enviadoEm, ...(observacao ? { observacao } : {}) }) });
+    } catch (e) {
+      if (e instanceof ApiErro && e.status === 409) { void carregar().catch(() => {}); aoMudar(); }
+      return mensagem(e);
+    }
+    setFora(null);
+    setFeito("Envio por fora registrado. A medição passou a Espelho enviado");
+    await carregar().catch(() => {});
+    aoMudar();
+    return null;
   };
 
   // Evidencia do orgao (spec §3 passo 1, opcional): o PDF que o orgao mandou vai para a medicao
@@ -554,7 +578,7 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
         <div className="cartao__corpo">
           <p className="painel__titulo">Enviar ao faturamento</p>
           {passo.previa.avisos.map(a => <CaixaAviso nivel="atencao" key={a}>{a}</CaixaAviso>)}
-          {(passo.espelho.envio || jaEnviado) && (
+          {(passo.espelho.envio || passo.espelho.envio_externo || jaEnviado) && (
             <label>
               <input type="checkbox" checked={reenviar} onChange={ev => setReenviar(ev.target.checked)} />{" "}
               Confirmo o reenvio desta versão (substitui o envio anterior)
@@ -588,22 +612,21 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
         // o envio, e gerar de novo partiria dos valores antigos da superada)
         const superadas = esp.medicoes.filter(m => m.superado);
         const soLeitura = superadas.length > 0;
+        // #798: enviado pelo sistema, enviado por fora (o dia informado) ou ainda nao enviado
+        const enviado = !!esp.envio || !!esp.envio_externo;
+        const seloEnvio = esp.envio ? <Selo situacao="feito">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
+          : esp.envio_externo ? <Selo situacao="feito">Enviado por fora em {dataBR(esp.envio_externo.enviado_em)}</Selo>
+          : <Selo situacao="breve">Não enviado ao faturamento</Selo>;
         return (
         <article className={parte ? "pilha espelho__item" : "cartao__corpo espelho__item"} key={esp.id} aria-label={`Espelho nº ${esp.numero}`}>
           {!parte && (
           <div className="espelho__cabeca">
             <strong>Nº {esp.numero} · {competenciaBR(esp.competencia)}</strong>
             {/* o estado do envio e' SELO (nao texto de apoio): e' o que diz se falta um passo */}
-            {esp.envio
-              ? <Selo situacao="feito">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
-              : <Selo situacao="breve">Não enviado ao faturamento</Selo>}
+            {seloEnvio}
           </div>
           )}
-          {parte === "faturamento" && (
-            <p>{esp.envio
-              ? <Selo situacao="feito">Enviado em {dataHoraBR(esp.envio.enviado_em)}</Selo>
-              : <Selo situacao="breve">Não enviado ao faturamento</Selo>}</p>
-          )}
+          {parte === "faturamento" && <p>{seloEnvio}</p>}
           {parte === "espelho" && tabelaResumo(esp)}
           {parte === "espelho" && (
             <details className="detalhes">
@@ -644,9 +667,13 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
             <div className={parte ? "med-acoes" : "form-inline"}>
               {/* primario so' enquanto nao foi enviado: "Enviar de novo" nao e' o proximo passo */}
               {so("faturamento") && !soLeitura && (
-                <button type="button" className={`btn btn--pequeno${esp.envio ? "" : " btn--primario"}`} disabled={ocupado} onClick={() => abrirEnvio(esp)}>
-                  {esp.envio ? "Enviar de novo" : "Enviar ao faturamento"}
+                <button type="button" className={`btn btn--pequeno${enviado ? "" : " btn--primario"}`} disabled={ocupado} onClick={() => abrirEnvio(esp)}>
+                  {enviado ? "Enviar de novo" : "Enviar ao faturamento"}
                 </button>
+              )}
+              {/* #798: o espelho que ja' foi ao faturamento por e-mail, fora do sistema, so' se registra */}
+              {so("faturamento") && !soLeitura && !enviado && (
+                <button type="button" className="botao-link" disabled={ocupado} onClick={() => { setErro(""); setFeito(""); setFora(esp); }}>Já enviei por fora</button>
               )}
               {so("espelho") && !soLeitura && <button type="button" className="btn btn--pequeno" onClick={() => abrirForm(esp)}>Gerar de novo</button>}
               {so("espelho") && (
@@ -673,6 +700,49 @@ export default function Espelho({ contratoId, podeEditar, aoMudar, aoSaberRegra,
           </ul>
         </details>
       )}
+      {fora && <EnvioPorFora key={fora.id} aoFechar={() => setFora(null)}
+        aoRegistrar={(data, obs) => registrarFora(fora, data, obs)} />}
     </Raiz>
+  );
+}
+
+const TETO_OBSERVACAO_EXTERNO = 500;    // espelhos.TETO_OBSERVACAO_EXTERNO
+
+/** "Já enviei por fora" (#798): a data do envio ao faturamento e, se quiser, uma observacao. Nenhum e-mail sai. */
+function EnvioPorFora({ aoFechar, aoRegistrar }: {
+  aoFechar: () => void;
+  /** devolve a recusa do servidor, ou null quando gravou (quem chama fecha a janela) */
+  aoRegistrar: (enviadoEm: string, observacao: string) => Promise<string | null>;
+}) {
+  const [data, setData] = useState(hojeLocal());
+  const [obs, setObs] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const [erro, setErro] = useState("");
+  async function registrar(ev: React.FormEvent) {
+    ev.preventDefault();
+    setOcupado(true); setErro("");
+    const recusa = await aoRegistrar(data, obs.trim());
+    if (recusa !== null) { setErro(recusa); setOcupado(false); }
+  }
+  return (
+    <Janela titulo="Registrar envio do espelho por fora" aoFechar={aoFechar}>
+      <form className="pilha" onSubmit={registrar}>
+        <div className="campo">
+          <label className="campo__rotulo" htmlFor="esp-fora-data">Data do envio</label>
+          <input id="esp-fora-data" name="enviado_em" type="date" required autoFocus className="entrada--media" value={data}
+            max={hojeLocal()} onChange={e => setData(e.target.value)} />
+        </div>
+        <div className="campo">
+          <label className="campo__rotulo" htmlFor="esp-fora-obs">Observação (opcional)</label>
+          <textarea id="esp-fora-obs" name="observacao" rows={2} maxLength={TETO_OBSERVACAO_EXTERNO} value={obs}
+            onChange={e => setObs(e.target.value)} />
+        </div>
+        {erro && <Falha>{erro}</Falha>}
+        <div className="iniciar__rodape">
+          <button type="submit" className="btn btn--primario" disabled={ocupado || !data}>{ocupado ? "Gravando…" : "Registrar"}</button>
+          <button type="button" className="btn" onClick={aoFechar}>Cancelar</button>
+        </div>
+      </form>
+    </Janela>
   );
 }

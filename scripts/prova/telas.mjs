@@ -26,8 +26,8 @@
 //   destino  o caminho em que a tela termina, quando ela so' leva a outra (`/notas/envio/:id` abre a pagina da medicao)
 //
 // Todo item do menu de um perfil precisa de uma tela aqui para esse perfil: a prova reprova o item sem tela.
-import { cabecalhoCom, CUSTO_DA_OBRA, detalheDoEnvio, espelhoGerado, falha, inicioComAParte, medicaoComEspelhoGerado,
-         medicaoComExcluidosNoRm, obrasComAParte, reconciliacaoComBaixados,
+import { cabecalhoCom, CUSTO_DA_OBRA, detalheDoEnvio, espelhoEnviadoPorFora, espelhoGerado, falha, inicioComAParte,
+         medicaoComEspelhoEnviadoPorFora, medicaoComEspelhoGerado, medicaoComExcluidosNoRm, obrasComAParte, reconciliacaoComBaixados,
          medicaoComNotaDivergente, medicaoComNotaEmitida, medicaoDaMtpar, NOTAS_COM_DIVERGENCIA, notasAEnviar, notasComEnvioAberto,
          PDF_ILEGIVEL,
          prazosEmEncerramento, prazosParalisada, PREVIA_DO_ESPELHO, PROTOCOLO_ID, RESPOSTA_QUE_QUEBRA, RM_EXCLUSAO_RECUSADA,
@@ -58,6 +58,11 @@ const comEspelhoGerado = [
   { caminho: MEDICOES_DA_OBRA, ajustar: medicaoComEspelhoGerado },
   { caminho: /^\/api\/contratos\/\d+\/espelho$/, ajustar: espelhoGerado },
   { caminho: /^\/api\/espelhos\/\d+\/envio$/, corpo: PREVIA_DO_ESPELHO },
+];
+// issue #798: o espelho com o envio ao faturamento registrado como feito por fora
+const comEspelhoEnviadoPorFora = [
+  { caminho: MEDICOES_DA_OBRA, ajustar: medicaoComEspelhoEnviadoPorFora },
+  { caminho: /^\/api\/contratos\/\d+\/espelho$/, ajustar: espelhoEnviadoPorFora },
 ];
 // o envio da nota ja' comecado (com protocolo): a linha do envio abre o e-mail ao orgao
 const comEnvioAberto = divergente => [
@@ -202,6 +207,11 @@ export const TELAS = [
     simular: comEspelhoGerado, passos: passo("Espelhos") },
   { rota: "medicao", id: "medicao-espelho-email", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: "#passo-3 .ol-janela",
     simular: comEspelhoGerado, passos: [...passo("Espelhos"), { clicar: '#passo-3 button:has-text("Enviar ao faturamento")' }] },
+  // issue #798: a janela "Já enviei por fora" do espelho, e o passo depois do registro (o envio por fora e a data)
+  { rota: "medicao", id: "medicao-espelho-fora", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
+    simular: comEspelhoGerado, passos: [...passo("Espelhos"), { clicar: '#passo-3 button:has-text("Já enviei por fora")' }] },
+  { rota: "medicao", id: "medicao-espelho-enviado-fora", caminho: MEDICAO, perfis: TODOS, antes: "nav.passos",
+    espera: '#passo-3 .selo:has-text("Enviado por fora em 21/05/2025")', simular: comEspelhoEnviadoPorFora, passos: passo("Espelhos") },
   // o e-mail ao orgao aberto no passo "Envio da nota"; com a nota divergente, a caixa de justificativa acima dele
   { rota: "medicao", id: "medicao-envio-email", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: "#envio-aberto .nota-secao",
     simular: comEnvioAberto(false), passos: abrirEnvio },

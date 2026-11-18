@@ -800,6 +800,8 @@ def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int,
     from app import medicao_planilhas     # issue #283: o envio da planilha/carta (import local: ele importa este)
     medicao_planilhas.eventos_geracao(conn, list(out), out)
     medicao_planilhas.eventos_envio(conn, list(out), out)
+    from app import espelhos              # issue #798: o envio do espelho registrado como feito por fora
+    espelhos.eventos_envio_externo(conn, list(out), out)
     for eventos in out.values():
         eventos.sort(key=lambda e: e["data"] or "")      # estavel: no mesmo segundo, o protocolado vem antes
     return out
@@ -1438,6 +1440,10 @@ def linhas_em_andamento(conn, hoje: datetime.date | None = None, obras: dict[int
     envio_de = dict(conn.execute(
         "SELECT en.medicao_id, MAX(v.enviado_em) FROM envio_medicoes en JOIN envios v ON v.id=en.envio_id "
         "GROUP BY en.medicao_id").fetchall())
+    # issue #798: o envio do espelho vigente registrado como feito por fora (o dia informado)
+    externo_de = dict(conn.execute(
+        "SELECT em.medicao_id, MAX(e.envio_externo_em) FROM espelho_medicoes em JOIN espelhos e ON e.id=em.espelho_id "
+        "WHERE e.situacao='vigente' AND e.envio_externo_em IS NOT NULL GROUP BY em.medicao_id").fetchall())
 
     planilha_de = dict(conn.execute("SELECT medicao_id, MIN(criado_em) FROM medicao_planilhas GROUP BY medicao_id").fetchall())
 
@@ -1452,7 +1458,9 @@ def linhas_em_andamento(conn, hoje: datetime.date | None = None, obras: dict[int
         if m["estado"] == "espelho_gerado":
             return _dia(espelho_de.get(m["id"])) or _dia(m["espelho_em"])
         if m["estado"] == "espelho_enviado":
-            return _dia(envio_de.get(m["id"]))
+            # o mais recente entre o e-mail do sistema e o envio por fora registrado
+            dias = [d for d in (_dia(envio_de.get(m["id"])), _dia(externo_de.get(m["id"]))) if d]
+            return max(dias) if dias else None
         if m["estado"] == "nota_emitida":
             return _dia(m["nota_emitida_em"])
         return _dia(m["protocolado_em"])
@@ -1700,7 +1708,8 @@ def _datas_dos_passos(conn, m: dict) -> dict[int, datetime.date | None]:
         "SELECT atestado_em FROM medicao_atestos WHERE medicao_id=? AND (meio IS NOT NULL OR arquivo IS NOT NULL) "
         "AND atestado_em IS NOT NULL ORDER BY id DESC LIMIT 1", (m["id"],)).fetchone()
     espelho = conn.execute(
-        "SELECT v.enviado_em FROM espelho_medicoes em JOIN espelhos e ON e.id=em.espelho_id "
+        # issue #798: sem e-mail do sistema, o dia do envio por fora registrado na versao vigente
+        "SELECT COALESCE(v.enviado_em, e.envio_externo_em) FROM espelho_medicoes em JOIN espelhos e ON e.id=em.espelho_id "
         "LEFT JOIN envios v ON v.id=e.envio_id WHERE em.medicao_id=? AND e.situacao='vigente' "
         "ORDER BY e.versao DESC, e.id DESC LIMIT 1", (m["id"],)).fetchone()
     return {1: envio, 2: _dia(boletim[0] if boletim else m["atestado_em"]), 3: _dia(espelho[0]) if espelho else None,

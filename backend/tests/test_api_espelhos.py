@@ -402,3 +402,133 @@ def test_api_espelho_usa_o_aprovado_do_boletim(client_admin, ambiente_api):
     m = client_admin.get(f"/api/medicoes/{mid}").json()
     assert (m["valor_protocolado_centavos"], m["valor_atestado_centavos"], m["diferenca_centavos"]) == (
         12_345_67, 12_000_01, -345_66)
+
+
+# --- issue #798: "Já enviei por fora" -------------------------------------------------------------------------
+
+def _externo(eid):
+    c = db.get_conn()
+    try:
+        e = c.execute("SELECT envio_externo_em, envio_id, envio_reservado_em FROM espelhos WHERE id=?", (eid,)).fetchone()
+        return tuple(e), c.execute("SELECT COUNT(*) FROM audit_log WHERE acao='espelho.envio_externo'").fetchone()[0]
+    finally:
+        c.close()
+
+
+def test_api_registro_por_fora_abre_as_notas_sem_mandar_email(client_admin, ambiente_api, monkeypatch):
+    from app import notas
+    from tests.test_notas import _nota_como
+    falso = CorreioFalso()
+    monkeypatch.setattr(correio, "cliente", falso)
+    eid, _ = _pronto(client_admin, ambiente_api)
+    r = client_admin.post(f"/api/espelhos/{eid}/envio-externo",
+                          json={"enviado_em": "2026-10-20", "observacao": "pelo Outlook"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"espelho_id": eid, "enviado_em": "2026-10-20"}
+    assert falso.enviados == [] and _estado(eid) == ({"envio_id": None, "envio_reservado_em": None}, 0)
+    d = client_admin.get(f"/api/espelhos/{eid}").json()
+    assert d["envio"] is None and d["medicoes"][0]["estado"] == "espelho_enviado"
+    assert d["envio_externo"] == {"enviado_em": "2026-10-20", "observacao": "pelo Outlook",
+                                  "registrado_em": d["envio_externo"]["registrado_em"], "registrado_por_nome": "Admin"}
+    mid = d["medicoes"][0]["id"]
+    m = client_admin.get(f"/api/medicoes/{mid}").json()
+    assert {"data": "2026-10-20", "texto": "Espelho enviado ao faturamento por fora em 20/10/2026 (pelo Outlook), "
+                                           "registrado por Admin"} in m["edicoes_valor"]
+    # o passo Notas: a nota entra e a medicao fecha `nota_emitida`
+    saida = next(s for s in d["saidas"] if s["natureza"] == "medicao")
+    monkeypatch.setattr(notas.leitura_pdf, "texto_de_pdf_com_limite",
+                        lambda pdf: _nota_como({**saida, "municipio": "Cuiabá"}, 901))
+    n = client_admin.post(f"/api/medicoes/{mid}/notas",
+                          files={"arquivo": ("901.pdf", _pdf_com_texto("nota"), "application/pdf")})
+    assert n.status_code == 201, n.text
+    assert (n.json()["faltam"], n.json()["estado"]) == (0, "nota_emitida")
+
+
+def test_api_registro_por_fora_valida_e_respeita_o_perfil(client, client_admin, ambiente_api):
+    cid = ambiente_api
+    eid, _ = _pronto(client_admin, cid)
+    for corpo, trecho in (({"enviado_em": "20/10/2026"}, "Data do envio inválida"),
+                          ({"enviado_em": "2999-01-01"}, "não pode ser futura"),
+                          ({"enviado_em": "2026-09-30"}, "anterior ao período do espelho")):
+        r = client_admin.post(f"/api/espelhos/{eid}/envio-externo", json=corpo)
+        assert r.status_code == 422 and trecho in r.json()["detail"], r.text
+    assert client_admin.post(f"/api/espelhos/{eid}/envio-externo", json={}).status_code == 422
+    assert client_admin.post(f"/api/espelhos/{eid}/envio-externo",
+                             json={"enviado_em": "2026-10-20", "observacao": "x" * 501}).status_code == 422
+    assert client_admin.post("/api/espelhos/999/envio-externo", json={"enviado_em": "2026-10-20"}).status_code == 404
+    assert _externo(eid) == ((None, None, None), 0)
+    # quem so' consulta nao registra
+    conn = db.get_conn()
+    auth.criar_usuario(conn, "Dir", "dir@l.com", "senha-forte-123", "diretoria"); conn.close()
+    _login(client, "dir@l.com")
+    assert client.post(f"/api/espelhos/{eid}/envio-externo", json={"enviado_em": "2026-10-20"}).status_code == 403
+    assert _externo(eid) == ((None, None, None), 0)
+
+
+def test_dois_registros_por_fora_simultaneos_dao_um_200_e_um_409(client_admin, ambiente_api):
+    eid, _ = _pronto(client_admin, ambiente_api)
+    largada, respostas = threading.Barrier(2), []
+
+    def dispara():
+        largada.wait()
+        respostas.append(client_admin.post(f"/api/espelhos/{eid}/envio-externo", json={"enviado_em": "2026-10-20"}))
+
+    ts = [threading.Thread(target=dispara) for _ in range(2)]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    assert sorted(r.status_code for r in respostas) == [200, 409], [r.text for r in respostas]
+    perdeu = next(r for r in respostas if r.status_code == 409).json()["detail"]
+    assert perdeu["codigo"] == "ESPELHO_ENVIO_EXTERNO_JA_REGISTRADO" and perdeu["reservado_por_nome"] == "Admin"
+    assert _externo(eid) == (("2026-10-20", None, None), 1)
+    # o repetido, depois, tambem e' 409 e nao duplica
+    assert client_admin.post(f"/api/espelhos/{eid}/envio-externo", json={"enviado_em": "2026-10-20"}).status_code == 409
+    assert _externo(eid)[1] == 1
+    c = db.get_conn()
+    try:
+        assert c.execute("SELECT COUNT(*) FROM audit_log WHERE acao='medicao.estado'").fetchone()[0] == 1
+    finally:
+        c.close()
+
+
+@pytest.mark.parametrize("espera", [0.3, 0.0], ids=["graph-lento", "instantaneo"])
+def test_registro_por_fora_e_envio_pelo_sistema_simultaneos_so_um_vence(client_admin, ambiente_api, monkeypatch, espera):
+    """Os dois atos na mesma largada: ou o e-mail sai e o registro por fora e' recusado, ou o registro entra e o
+    e-mail nao sai. Nunca os dois."""
+    eid, corpo = _pronto(client_admin, ambiente_api)
+    falso = CorreioFalso(espera=espera)
+    monkeypatch.setattr(correio, "cliente", falso)
+    largada, respostas = threading.Barrier(2), {}
+
+    def dispara(nome, rota, json):
+        largada.wait()
+        respostas[nome] = client_admin.post(f"/api/espelhos/{eid}/{rota}", json=json)
+
+    ts = [threading.Thread(target=dispara, args=("envio", "enviar", corpo)),
+          threading.Thread(target=dispara, args=("fora", "envio-externo", {"enviado_em": "2026-10-20"}))]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    codigos = {k: r.status_code for k, r in respostas.items()}
+    assert sorted(codigos.values())[0] == 200 and sorted(codigos.values())[1] in (409, 422), [r.text for r in respostas.values()]
+    (externo_em, envio_id, reservado), auditados = _externo(eid)
+    assert reservado is None
+    if codigos["envio"] == 200:
+        assert len(falso.enviados) == 1 and envio_id is not None and (externo_em, auditados) == (None, 0)
+    else:
+        assert falso.enviados == [] and envio_id is None and (externo_em, auditados) == ("2026-10-20", 1)
+        assert respostas["envio"].json()["detail"]["codigo"] == "ESPELHO_JA_ENVIADO"
+
+
+def test_api_envio_pelo_sistema_depois_do_registro_por_fora_pede_a_confirmacao_do_reenvio(client_admin, ambiente_api,
+                                                                                         monkeypatch):
+    eid, corpo = _pronto(client_admin, ambiente_api)
+    falso = CorreioFalso()
+    monkeypatch.setattr(correio, "cliente", falso)
+    assert client_admin.post(f"/api/espelhos/{eid}/envio-externo", json={"enviado_em": "2026-10-20"}).status_code == 200
+    r = client_admin.post(f"/api/espelhos/{eid}/enviar", json=corpo)
+    assert r.status_code == 409 and r.json()["detail"]["codigo"] == "ESPELHO_JA_ENVIADO", r.text
+    assert falso.enviados == []
+    assert client_admin.post(f"/api/espelhos/{eid}/enviar", json={**corpo, "reenviar": True}).status_code == 200
+    assert len(falso.enviados) == 1
+    # e o enviado pelo sistema nao recebe registro por fora
+    e2, corpo2 = _pronto(client_admin, ambiente_api, numero=41)
+    assert client_admin.post(f"/api/espelhos/{e2}/enviar", json=corpo2).status_code == 200
+    r = client_admin.post(f"/api/espelhos/{e2}/envio-externo", json={"enviado_em": "2026-10-20"})
+    assert r.status_code == 409 and r.json()["detail"]["codigo"] == "ESPELHO_JA_ENVIADO", r.text

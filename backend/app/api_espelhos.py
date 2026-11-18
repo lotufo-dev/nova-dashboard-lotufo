@@ -159,6 +159,27 @@ def enviar(espelho_id: ID, dados: EnvioIn, usuario: dict = Depends(exigir("edita
     return {"envio_id": eid}
 
 
+class EnvioExternoIn(BaseModel):
+    enviado_em: str = Field(max_length=10)          # AAAA-MM-DD; a regra da data mora no repositorio
+    observacao: str | None = Field(default=None, max_length=espelhos.TETO_OBSERVACAO_EXTERNO)
+
+
+@router.post("/api/espelhos/{espelho_id}/envio-externo")
+def envio_externo(espelho_id: ID, dados: EnvioExternoIn, usuario: dict = Depends(exigir("editar_cadastros")),
+                  conn: sqlite3.Connection = Depends(conexao)):
+    """"Já enviei por fora" (issue #798): registra o envio do espelho ao faturamento feito fora do sistema. Nenhum
+    e-mail sai. A mesma permissao do envio; o repetido e o que perde a corrida respondem 409."""
+    _espelho(conn, espelho_id)
+    try:
+        return espelhos.registrar_envio_externo(conn, usuario["id"], espelho_id, dados.enviado_em, dados.observacao)
+    except envio_reserva.EnvioEmAndamento as e:
+        conn.rollback()
+        raise HTTPException(409, detail=e.detalhe()) from None
+    except ValueError as e:
+        conn.rollback()
+        raise HTTPException(422, str(e)) from None
+
+
 # --- documentos locais da medicao (evidencia do orgao, spec §3 passo 1) ----------------------
 
 PDF = "application/pdf"
