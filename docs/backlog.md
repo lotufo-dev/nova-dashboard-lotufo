@@ -7,6 +7,14 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 
 ## Código
 
+- 2026-11-18 Obra encerrada com saldo: o cadastro do contrato não tem onde dizer o motivo do encerramento. O contrato que acaba pelo fim do prazo sem concluir o objeto aparece "encerrada" com percentual baixo e saldo a executar, sem explicação (visto na MT-251 Chapada). Decidir o campo no contrato (`cadastro_arquivos.py`) e onde a página da obra e o QDOP o mostram; o QDOP diz "Concluída" para toda encerrada.
+- 2026-11-18 Página da obra encerrada ou rescindida: o administrador ainda vê o formulário "Nova medição". Tirar ou trocar por texto.
+- 2026-11-18 Idade do a receber em obra sem o passo "Envio da nota": conta de `nota_emitida_em` da medição. Quando a nota ligada é uma substituta emitida depois, a data da medição fica a antiga e a linha entra em "há mais de 60 dias" antes da hora (visto na Maternidade VG, 3ª). Falta ato de correção para a data ou a regra passar a usar a emissão da nota ligada (`diretoria.py`; dinheiro, pede segunda revisão).
+- 2026-11-18 Carga de medições (`carga_medicoes.py`): grava o aprovado e a data, mas não leva a medição de `planilha_enviada` a `boletim_recebido`; fica "em análise" com valor aprovado até alguém anexar o boletim pela tela. E a medição final de valor zero não tem caminho para fechar: fica "aprovada, à espera da nota" para sempre. Decidir o estado final da medição zero.
+- 2026-11-18 `corrigir-medicoes`: arquivo com `desligar_nf` seguido de `ligar_nf` da mesma nota não é repetível; rodar de novo refaz os dois eventos em vez de responder "já feito" (`correcao_medicoes.py`).
+- 2026-11-18 Protocolo já gravado não aceita complemento: não há ato para acrescentar o número do ofício ou do processo do órgão a um protocolo que existe; a correção hoje cria uma segunda linha de protocolo na mesma medição (a idade conta da mais antiga, então o número não muda).
+- 2026-11-18 Pleitos: o cadastro só conhece pedido de aditivo (prazo ou valor). Pleito indenizatório, pedido de reequilíbrio e pedido de ordem de paralisação não têm tipo e ficam fora da dashboard. Decidir se entram.
+- 2026-11-18 Roteiro de prova (`scripts/prova`): as telas de ação da medição (cancelar, desistência, protocolo por fora, recebimento) usam a primeira medição do banco; na cópia da produção ela está recebida e as quatro reprovam sem defeito no sistema. Escolher a medição pelo estado que a tela pede.
 - 2026-11-17 Cota em consórcio com várias faturas na mesma medição: o Fechamento arredonda a cota uma vez, na soma das faturas, e a reparte (`fechamento._cotas`); o faturado e o recebido por mês direto do RM (`diretoria.rm_por_mes`) ainda arredondam nota a nota e podem ficar um centavo diferentes do Fechamento. Levar a mesma conta para lá.
 - 2026-11-17 Painel Prazo da obra encerrada ou rescindida: as linhas do tempo ainda trazem a marca "Hoje" no fim do trilho (`ExecucaoContrato.tsx`); o estado e a data já saem no lugar dos dias. Decidir se a marca some.
 - 2026-11-17 Envio da nota: a medição com menos PDFs anexados do que notas ligadas não é acusada (`notas_envio._itens` só olha a medição sem PDF nenhum); o PDF que a leitura não entende não diz de qual nota é.
@@ -65,8 +73,7 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 
 ## Externo (dono)
 
-- Nenhum em 17/11/2026.
-- 2026-11-17 Job `ponta-a-ponta` (#701): falta torná-lo obrigatório. Depois de três execuções verdes seguidas no `master`, o dono acrescenta o check `ponta-a-ponta` (nome exato) aos checks obrigatórios do ruleset `master protegida` (Settings › Rules › Rulesets). Até lá o job roda em PR, no `master` e na fila de merge, mas vermelho não barra o merge. Feito isso, fechar a #701.
+- Nenhum em 18/11/2026.
 
 ## Decisões vigentes (registro)
 
