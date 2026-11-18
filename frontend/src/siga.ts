@@ -20,6 +20,8 @@ export type ProcessoSiga = {
   id: number; codigo: string | null; link: string | null; numero: string | null; nome: string | null;
   // o_que_e: a segunda parte do nome montado pelo servidor ("7ª Medição", "Aditivo de prazo")
   categoria: Categoria; complemento: string | null; o_que_e: string;
+  // a categoria veio do nome que o robo mandou (ninguem escolheu ainda): a tela oferece confirmar
+  categoria_sugerida?: boolean;
   contrato_id: number | null; obra: string | null; medicao_id: number | null; medicao_titulo: string | null;
   protocolo_id: number | null; situacao: string | null; setor: string; caixa_entrada: boolean; com_quem: string;
   // #657: medicao recebida ou processo arquivado; derivado pelo servidor a cada leitura. null = vivo
