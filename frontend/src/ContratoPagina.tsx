@@ -23,6 +23,8 @@ import Falha from "./Falha";
 // Bloco 6 (spec §10.3): cabecalho da obra, montado no servidor (`contratos.cabecalho`).
 type Cabecalho = {
   id: number; obra: string; orgao: string; instrumento: string;
+  // #805: a sigla do contratante e a chave da pagina dele, para o caminho "Obras › contratante › obra"
+  contratante?: string | null; contratante_chave?: string | null;
   percentual_lotufo_bp: number;
   // os inicios alimentam as linhas do tempo (#160); nulos quando o cadastro nao os tem
   execucao_inicio?: string | null; vigencia_inicio?: string | null;
@@ -127,22 +129,29 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
     document.title = `${c ? c.obra : "Obra"}${rotulo ? ` · ${rotulo}` : ""} · grupolotufo`;
   }, [c, aba]);
 
-  // "Todas as obras" volta a lista; se foi dela que se chegou, com os filtros que ela tinha.
-  const lista = origem?.tela === "obras" ? destinoDeHref(origem.href) : { para: { tela: "obras" as const }, busca: undefined };
+  // O caminho e' Obras › contratante › obra (#805), e o "voltar" segue o caminho: sobe um nivel, para a pagina do
+  // contratante. Se foi de uma vista de Obras que se chegou (a tabela filtrada, o Andamento, o QDOP) ou da pagina do
+  // contratante com filtro, volta a ela, como estava. A obra sem orgao no cadastro nao tem pagina de contratante.
+  const doContratante = c?.contratante_chave ? { tela: "contratante" as const, chave: c.contratante_chave } : null;
+  const nomeContratante = c ? c.contratante ?? c.orgao : null;
+  const volta = origem?.tela === "obras" ? { ...destinoDeHref(origem.href), rotulo: "Obras" }
+    : origem?.tela === "contratante" ? { ...destinoDeHref(origem.href), rotulo: nomeContratante ?? "Contratante" }
+      : doContratante ? { para: doContratante, busca: undefined, rotulo: nomeContratante ?? "Contratante" }
+        : { para: { tela: "obras" as const }, busca: undefined, rotulo: "Obras" };
 
   return (
     <>
       <header className="topbar topbar--detalhe topbar--obra">
         <div className="topbar__linha topbar__linha--quebra">
           <div className="topbar__trilha">
-            <Link className="btn--voltar" para={lista.para} busca={lista.busca}>
-              <IconeVoltar className="icone icone--p" /> Todas as obras
+            <Link className="btn--voltar" para={volta.para} busca={volta.busca}>
+              <IconeVoltar className="icone icone--p" /> {volta.rotulo}
             </Link>
-            <VoltarOrigem origem={origem} alemDe={["obras"]} />
-            {/* Obras › contratante › obra. O contratante e' o orgao do contrato; o link dele abre a lista de Obras
-                daquele orgao (a lista ja' filtra por ?orgao=) e nao a origem de onde se chegou. */}
+            <VoltarOrigem origem={origem} alemDe={["obras", "contratante"]} />
+            {/* Obras › contratante › obra. O contratante leva a' pagina dele (ou a ela como estava, se foi de la' que se
+                chegou); sem orgao no cadastro, e' so' o nome. */}
             <Migalhas origem={origem} itens={[{ rotulo: "Obras", para: { tela: "obras" } },
-              ...(c ? [{ rotulo: c.orgao, para: { tela: "obras" as const }, busca: { orgao: c.orgao }, fixa: true }] : []),
+              ...(nomeContratante ? [{ rotulo: nomeContratante, para: doContratante ?? undefined }] : []),
               { rotulo: c?.obra ?? "Obra" }]} />
           </div>
         </div>

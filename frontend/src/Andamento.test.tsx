@@ -47,6 +47,24 @@ describe("Andamento (#805)", () => {
     expect(largura(render(<Andamento ritmo={400_000} necessario={100_000} />).container)).toBe("100%");
   });
 
+  it("com os valores: a palavra, a razão e o ritmo por mês contra o necessário, abreviados", () => {
+    // R$ 2.400.000,00 por mês de R$ 8.800.000,00 necessários
+    const { container } = render(<Andamento ritmo={240_000_000} necessario={880_000_000} detalhe="valores" />);
+    const linhas = [...container.querySelectorAll(".andamento__texto")].map(p => (p.textContent ?? "").replace(/\s/g, " "));
+    expect(linhas).toEqual(["Devagar · 27% do necessário", "R$ 2,4 mi/mês de R$ 8,8 mi"]);
+    cleanup();
+    // abaixo do milhão e abaixo do milhar
+    const menor = render(<Andamento ritmo={35_000_000} necessario={98_000} detalhe="valores" />).container;
+    expect((menor.querySelector(".andamento__valores")?.textContent ?? "").replace(/\s/g, " ")).toBe("R$ 350 mil/mês de R$ 980");
+  });
+
+  it("só a palavra, na tabela que já traz o percentual e os valores em colunas", () => {
+    const { container } = render(<Andamento ritmo={81_000} necessario={100_000} detalhe="palavra" />);
+    expect(texto(container)).toBe("Atenção");
+    expect(container.querySelector(".andamento__valores")).toBeNull();
+    expect(largura(container)).toMatch(/^62\.3/);
+  });
+
   it("sem necessário (nulo ou zero) ou sem ritmo, nada aparece", () => {
     for (const [ritmo, necessario] of [[100, null], [100, undefined], [100, 0], [100, -5], [null, 100], [undefined, 100], [-1, 100]] as const) {
       const { container } = render(<Andamento ritmo={ritmo} necessario={necessario} />);

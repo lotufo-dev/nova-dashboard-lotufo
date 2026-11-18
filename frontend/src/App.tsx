@@ -6,6 +6,7 @@ import { BarraSuperior, Trilho } from "./Casca";
 import Documentos from "./Documentos";
 import DocumentosEmpresa from "./DocumentosEmpresa";
 import AbrirEnvio from "./AbrirEnvio";
+import ContratantePagina from "./ContratantePagina";
 import ContratoPagina from "./ContratoPagina";
 import Contratos from "./Contratos";
 import Inicio from "./Inicio";
@@ -82,9 +83,10 @@ export default function App() {
 
   useEffect(() => {
     // A obra e a medicao poem o proprio titulo ("MT-388 · Prazos"), quando o cabecalho delas chega.
-    if (rota.tela === "obra" || rota.tela === "medicao" || rota.tela === "documentos-empresa") return;
+    // O contratante tambem ("SINFRA · Obras"), quando a lista chega.
+    if (rota.tela === "obra" || rota.tela === "medicao" || rota.tela === "documentos-empresa" || rota.tela === "contratante") return;
     // a vista de Obras e a aba da Administracao entram no titulo ("Obras · QDOP"), como a da obra ("MT-388 · Prazos")
-    const aba = rota.tela === "obras" && rota.aba && rota.aba !== "posicao" ? { resumo: "Resumo", qdop: "QDOP" }[rota.aba]
+    const aba = rota.tela === "obras" && rota.aba && rota.aba !== "contratantes" ? { todas: "Todas as obras", andamento: "Andamento", qdop: "QDOP" }[rota.aba]
       : rota.tela === "admin" && rota.aba && rota.aba !== "saude" ? ABAS_ADMIN.find(a => a.id === rota.aba)?.rotulo : undefined;
     document.title = rota.tela === "raiz" ? tituloDe("raiz") : `${tituloDe(rota.tela)}${aba ? ` · ${aba}` : ""} · grupolotufo`;
   }, [rota]);
@@ -103,7 +105,7 @@ export default function App() {
 
   // A barra superior diz a SECAO; quem tem titulo proprio (o objeto, ou o "Bom dia" do Inicio) fica com o h1 da
   // pagina, e a barra nao repete um segundo h1.
-  const tituloProprio = ehDetalhe(rota) || rota.tela === "inicio" || rota.tela === "obras"
+  const tituloProprio = ehDetalhe(rota) || rota.tela === "inicio" || rota.tela === "obras" || rota.tela === "contratante"
     || (rota.tela === "siga" && /^\d+$/.test(busca.processo ?? ""));   // o historico do processo tem o h1 dele
 
   return (
@@ -134,6 +136,8 @@ export default function App() {
             // obra A podia ser publicado na B. A aba vem da URL: cada aba tem link; sem aba, a pagina abre na primeira (#646).
             <ContratoPagina key={rota.id} contratoId={rota.id} usuario={usuario} aba={rota.aba} origem={origem} busca={busca} />
           )}
+          {/* a pagina do contratante (#805), entre a lista de Obras e a obra; `key` na chave: outro contratante remonta */}
+          {rota.tela === "contratante" && <ContratantePagina key={rota.chave} chave={rota.chave} perfil={usuario.perfil} busca={busca} ir={ir} />}
           {rota.tela === "medicao" && (
             // `key` na medicao: trocar de medicao (a da mesma competencia) remonta a pagina e os formularios dela.
             <MedicaoPagina key={`${rota.obra}-${rota.id}`} contratoId={rota.obra} medicaoId={rota.id} usuario={usuario} origem={origem} />
