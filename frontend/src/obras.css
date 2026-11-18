@@ -155,15 +155,35 @@
   .obras-posicao th:first-child, .obras-posicao td:first-child, .qdop-tabela th:first-child, .qdop-tabela td:first-child { padding-left: var(--espaco-p); }
   .obras-posicao th:last-child, .obras-posicao td:last-child, .qdop-tabela th:last-child, .qdop-tabela td:last-child { padding-right: var(--espaco-p); }
   .obras-exec { min-width: calc(var(--alvo-minimo) * 2); gap: var(--espaco-pp); }
-  /* #805: com a coluna Andamento, as sete colunas de "Todas as obras" so' cabem na caixa sem a barra do executado
-     (fica o percentual, que e' o numero) e com o andamento mais estreito; o apoio sob o nome quebra linha */
-  .obras-todas .obras-exec { min-width: 0; }
+  /* #805: com a coluna Andamento, as sete colunas de "Todas as obras" nao cabem nos 724 px da caixa. Nesta faixa a
+     tabela vira uma grade de colunas fixas, as mesmas em todas as linhas: os valores na primeira linha da obra e o
+     andamento numa segunda, sob eles (a barra e a frase lado a lado); o nome ocupa as duas. O executado fica so' com
+     o percentual (que e' o numero; a barra e' desenho) e o cabecalho "Andamento" sai, porque a peca ja' diz o que e'.
+     A obra sem leitura do andamento nao ganha a segunda linha. */
+  .obras-todas, .obras-todas :is(thead, tbody) { display: block; }
+  .obras-todas tr {
+    display: grid; align-items: start; grid-template-rows: auto 1fr;
+    grid-template-columns: minmax(0, 1fr) repeat(3, calc(var(--alvo-minimo) * 3)) calc(var(--alvo-minimo) * 1.8) calc(var(--alvo-minimo) * 3);
+  }
+  .obras-todas :is(th, td) { display: block; min-width: 0; }
+  .obras-todas thead th { font-size: var(--texto-mini); white-space: normal; }
+  /* o valor de nove digitos ocupa a coluna inteira: sem respiro a' esquerda, para todos alinharem a' direita */
+  .obras-todas :is(th, td).col-num { padding-left: 0; }
+  .obras-todas thead th:nth-child(6), .obras-todas td.obras-grupo__vazio, .obras-todas td.obras-posicao__andamento--sem { display: none; }
+  .obras-todas tr.obras-grupo { align-items: center; background: var(--cor-tinta); }
+  .obras-todas tbody tr.linha--obra { border-bottom: var(--borda-linha); }
+  .obras-todas tbody:last-child tr.linha--obra:last-child { border-bottom: 0; }
+  .obras-todas tbody tr.linha--obra > td { border-bottom: 0; }
+  .obras-todas tbody tr.linha--obra > td:first-child { grid-row: 1 / span 2; }
+  .obras-todas tbody td.obras-posicao__andamento { grid-column: 2 / -1; grid-row: 2; padding-top: 0; }
+  .obras-todas .andamento { grid-template-columns: var(--largura-min-andamento) minmax(0, 1fr); align-items: center; column-gap: var(--espaco-p); }
+  .obras-todas .obras-exec { min-width: 0; justify-content: flex-end; }
   .obras-todas .obras-exec__trilho { display: none; }
   .obras-todas .obras-exec__pct { min-width: 0; }
-  .obras-posicao .andamento { min-width: calc(var(--alvo-minimo) * 2.75); }
+  .obras-todas thead th:nth-child(5) { text-align: right; }
+  /* a vista Andamento e a pagina do contratante: o andamento mais estreito, e o apoio sob o nome quebra linha */
+  .obras-posicao .andamento { min-width: calc(var(--alvo-minimo) * 2.5); }
   .obras-posicao__sub { white-space: normal; }
-  .obras-posicao .obras-grupo th { font-size: var(--texto-meta); }
-  .obras-grupo__n { display: block; margin-left: 0; }
   /* a pagina do contratante: a barra do executado mais curta e a situacao com o motivo em menos largura */
   .obras-do-contratante .obras-exec { min-width: calc(var(--alvo-minimo) * 1.75); }
   .obras-do-contratante__situacao { min-width: calc(var(--alvo-minimo) * 2.75); }
@@ -211,9 +231,12 @@
   .obras-posicao tbody td.obras-posicao__andamento .andamento { text-align: left; }
   .obras-contratante__numeros .obras-exec { width: auto; min-width: calc(var(--alvo-minimo) * 3.5); }
   :is(.obras-todas, .obras-do-contratante) .obras-exec { min-width: 0; }
+  /* no celular "Todas as obras" e' um bloco por obra como as outras: desfaz a grade da faixa media */
   .obras-todas .obras-exec__trilho { display: block; }
+  .obras-todas td.obras-posicao__andamento--sem { display: flex; }
+  .obras-todas .andamento { grid-template-columns: none; }
+  .obras-todas tbody tr.linha--obra:last-child { border-bottom: var(--borda-linha); }
   .obras-posicao__sub { white-space: normal; }
-  .obras-grupo__n { display: inline; margin-left: var(--espaco-pp); }
   .obras-reajustes > summary { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
   .obras-busca, .obras-busca__campo { width: 100%; }
   .obras-rodape, .qdop-rodape { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }

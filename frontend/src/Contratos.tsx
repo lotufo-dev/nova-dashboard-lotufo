@@ -249,7 +249,7 @@ export default function Contratos({ ir, busca = {}, aba = "contratantes" }: { ir
                               {/* o medido passou do valor vigente: em critico, como no alto da pagina da obra */}
                               {p.saldo_centavos < 0 && <Glifo situacao="critico" />}{brl(p.saldo_centavos)}</td>
                             <td data-rotulo="Executado"><Executado pct={pctExecutado(o)} /></td>
-                            <td data-rotulo="Andamento" className="obras-posicao__andamento">
+                            <td data-rotulo="Andamento" className={`obras-posicao__andamento${andamentoDaObra(o) ? "" : " obras-posicao__andamento--sem"}`}>
                               {/* sem necessario ou sem ritmo a peca nao desenha nada: fica o tracinho. A tabela ja' tem
                                   quatro colunas de valor: aqui vai a palavra e a razao; os valores por mes estao na
                                   pagina do contratante e na vista Andamento */}
