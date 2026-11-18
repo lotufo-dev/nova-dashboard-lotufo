@@ -2,9 +2,6 @@
   "enabledPlugins": {
     "codex@openai-codex": true
   },
-  "env": {
-    "CLAUDE_CODE_SUBAGENT_MODEL": "opus"
-  },
   "permissions": {
     "allow": [
       "Bash(python -m pytest *)",
