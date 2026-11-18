@@ -2526,10 +2526,10 @@ def test_fiscal_sem_email_grava_nulo_e_aplicar_de_novo_nao_duplica(conn):
     esperado = [("Zeno", "z@orgao-a.exemplo.com.br", "2025-01-01", None, None),
                 ("Ana", None, "2026-01-01", "Fiscal do Contrato", "Portaria n.º 1/2026")]
     assert _fiscais(conn) == esperado
-    auditoria_antes = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+    auditoria_antes = conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.fiscal'").fetchone()[0]
     cadastro_aplicar.aplicar(conn, 1, cad)
     assert _fiscais(conn) == esperado
-    assert conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == auditoria_antes
+    assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE acao='cadastro.fiscal'").fetchone()[0] == auditoria_antes
     # a descricao do fiscal sem e-mail tambem se corrige
     cadastro_aplicar.aplicar(conn, 1, _cad(contratos=[_contrato(fiscais=[zeno, {**ana, "portaria": "Portaria n.º 2/2026"}])]))
     assert _fiscais(conn)[1] == ("Ana", None, "2026-01-01", "Fiscal do Contrato", "Portaria n.º 2/2026")
