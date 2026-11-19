@@ -32,8 +32,10 @@ O que a tela mostra nasce aqui, pronto:
   data esperada do recebimento (`diretoria.esperada`: o primeiro protocolo + o prazo do orgao, o mesmo "Atrasado" do
   Inicio); antes dela, ou sem prazo do orgao, em andamento; o protocolo de hoje e' feito. `esperada` e' a data
   prevista, so' quando o prazo do orgao e' conhecido. Conta do PRIMEIRO protocolo, o mesmo da data na linha e da data
-  esperada (a fila de Medicoes conta os dias do ultimo protocolo, `medicoes.linhas_em_andamento`; a situacao e' a
-  mesma, porque so' depende da data esperada). No repasse sem baixa o orgao ja' pagou: nao ha' tempo parado com o
+  esperada, com a data esperada de cada medicao. A fila de Medicoes conta os dias do ultimo protocolo
+  (`medicoes.linhas_em_andamento`) e usa a menor data esperada do par medicao + reajuste: a mesma medicao sai com dias
+  diferentes quando tem mais de um protocolo de nota, e a situacao pode divergir no par protocolado em datas
+  diferentes (linha de 18/11/2026 no docs/backlog.md). No repasse sem baixa o orgao ja' pagou: nao ha' tempo parado com o
   orgao, e a linha leva a data do recebimento (`orgao_pagou_em`, nula quando a medicao foi recebida sem data).
 
 Com o total a receber ainda nao liberado no cadastro (`diretoria._liberado`, a trava do Fechamento, do Inicio e da
