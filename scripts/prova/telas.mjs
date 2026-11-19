@@ -37,6 +37,7 @@ import { fechamentoEmAbas } from "./simulados.mjs";   // #815: em linha propria,
 
 import { carteiraSimulada, filaSimulada, painelDaCarteira } from "./simulados.mjs";
 import { cabecalhoDeNomeLongo } from "./simulados.mjs";
+import { aReceberComNotas } from "./simulados.mjs";   // #816: em linha propria, para nao mexer nas listas de cima
 // issue #817 (reestrutura 5c): a Inicio com o ciclo por contratante e o medido em 12 meses
 import { inicioPorContratante, inicioSemCiclo } from "./simulados.mjs";
 
@@ -438,10 +439,26 @@ export const TELAS = [
   { rota: "conta", id: "conta", caminho: "/conta", perfis: TODOS, espera: ".conta-eu" },
 
   // ---- Menu em areas, caminho no alto e as rotas das paginas novas (#814)
-  // A receber: a pagina-casca (o estado vazio), inteira e so' de um contratante; a #816 traz as notas
-  { rota: "a-receber", id: "a-receber", caminho: "/a-receber", perfis: TODOS, espera: "#conteudo .vazio" },
-  { rota: "a-receber", id: "a-receber-contratante", caminho: "/a-receber?contratante=SINFRA", perfis: ["diretoria"],
-    espera: '#conteudo .vazio a[href="/a-receber"]' },
+  // A receber (#816): o em aberto nota a nota. A do cadastro de exemplo; com notas (os grupos recolhidos e um aberto),
+  // filtrada por contratante, o contratante sem nada em aberto, a pagina vazia, a trava e a falha (ver simulados.mjs)
+  { rota: "a-receber", id: "a-receber", caminho: "/a-receber", perfis: TODOS, espera: "#conteudo .arc" },
+  { rota: "a-receber", id: "a-receber-notas", caminho: "/a-receber", perfis: TODOS, espera: "#conteudo tr.arc-grupo",
+    simular: [{ caminho: /^\/api\/a-receber$/, corpo: aReceberComNotas() }] },
+  { rota: "a-receber", id: "a-receber-grupo-aberto", caminho: "/a-receber", perfis: ["diretoria"], antes: "#conteudo tr.arc-grupo",
+    espera: "#conteudo .arc-a-parada", passos: [{ clicar: "#conteudo .arc-grupo__abre" }],
+    simular: [{ caminho: /^\/api\/a-receber$/, corpo: aReceberComNotas() }] },
+  { rota: "a-receber", id: "a-receber-contratante", caminho: "/a-receber?contratante=sinfra", perfis: TODOS, espera: "#conteudo .arc-a-parada",
+    simular: [{ caminho: /^\/api\/a-receber$/, corpo: aReceberComNotas() }] },
+  { rota: "a-receber", id: "a-receber-contratante-a-parte", caminho: "/a-receber?contratante=pref-vg", perfis: ["diretoria"],
+    espera: "#conteudo .arc-antigo", simular: [{ caminho: /^\/api\/a-receber$/, corpo: aReceberComNotas() }] },
+  { rota: "a-receber", id: "a-receber-contratante-vazio", caminho: "/a-receber?contratante=ses-mt", perfis: ["diretoria"],
+    espera: '#conteudo .vazio a[href="/a-receber"]', simular: [{ caminho: /^\/api\/a-receber$/, corpo: aReceberComNotas() }] },
+  { rota: "a-receber", id: "a-receber-vazia", caminho: "/a-receber", perfis: ["diretoria"], espera: "#conteudo .vazio",
+    simular: [{ caminho: /^\/api\/a-receber$/, corpo: aReceberComNotas({ vazio: true }) }] },
+  { rota: "a-receber", id: "a-receber-trava", caminho: "/a-receber", perfis: ["diretoria"], espera: "#conteudo .arc .aviso",
+    simular: [{ caminho: /^\/api\/a-receber$/, corpo: aReceberComNotas({ trava: true }) }] },
+  { rota: "a-receber", id: "a-receber-erro", caminho: "/a-receber", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
+    simular: falha(/^\/api\/a-receber$/) },
   // os enderecos de antes de Documentos: a aba na busca e "/documentos/certidoes" abrem a pagina do assunto
   { rota: "documentos", id: "documentos-endereco-de-antes", caminho: "/documentos?aba=garantias", destino: "/documentos/garantias",
     perfis: SO_ADMIN, espera: ".doc-garantias .doc-corpo" },

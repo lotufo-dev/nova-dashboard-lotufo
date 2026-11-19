@@ -870,6 +870,70 @@ export const cabecalhoDeNomeLongo = cabecalho => ({
 export const LOGIN_RECUSADO = { detail: "E-mail ou senha inválidos, ou usuário bloqueado" };
 export const LOGIN_NO_LIMITE = { detail: "Muitas tentativas de entrar a partir deste computador. Tente de novo em alguns minutos." };
 
+// ---- A receber (#816): o em aberto nota a nota com o que o cadastro de exemplo nao tem. Quatro contratantes com
+// linhas (um de nome comprido e sem pagina, sem orgao no cadastro) e um sem nada em aberto, que fica na fileira com
+// zero; valores de nove e dez digitos; tempo parado em cada leitura (alem do prazo do orgao, dentro dele, sem prazo,
+// protocolo de hoje), o repasse sem baixa, a paga em parte, a medicao sem nota e a nota sem protocolo; a' parte, duas
+// notas sem medicao e o em aberto antigo. O subtotal, o total e o de cada ano sao somados aqui como o servidor soma,
+// para a tela receber numeros que fecham. `vazio`: nada em aberto (a fileira so' com zeros); `trava`: o total a
+// receber nao liberado. Tudo inventado.
+const AR_ANOS = ["2025", "2026"];
+const arParada = (desde, dias, situacao, esperada = null, prazo = null) => ({
+  desde, dias_uteis: dias, hoje: dias === 0, situacao, prazo_orgao_dias: prazo, esperada, alem_do_prazo: situacao === "critico" });
+const arGrupo = (contratante, chave, prazo, linhas = [], extra = {}) => {
+  const por_ano = Object.fromEntries(AR_ANOS.map(a => [a, linhas.filter(l => l.competencia.startsWith(a)).reduce((t, l) => t + l.valor_centavos, 0)]));
+  const soltas = extra.notas_sem_medicao ?? [];
+  return { contratante, chave, prazo_orgao_dias: prazo, quantidade: linhas.length, em_aberto_centavos: linhas.reduce((t, l) => t + l.valor_centavos, 0),
+    por_ano, alem_do_prazo: linhas.filter(l => l.parada?.alem_do_prazo).length, linhas, notas_sem_medicao: soltas,
+    notas_sem_medicao_centavos: soltas.reduce((t, n) => t + n.valor_centavos, 0), anteriores: { quantidade: 0, valor_centavos: 0 }, ...extra };
+};
+export const aReceberComNotas = ({ vazio = false, trava = false } = {}) => reg => {
+  if (trava) return { anos: AR_ANOS, total_a_receber_liberado: false };
+  let id = 9800;
+  const l = (obra, competencia, protocolo, valor, parada, extra = {}) => {
+    id += 1;
+    return { tipo_aberto: "nota", nota_id: id, numero: String(41000 + id), valor_centavos: valor, paga_em_parte: false, contrato_id: reg.obra,
+      obra, medicao_id: id === 9801 ? reg.medicao : id, medicao_numero: 3 + (id % 20), tipo: "execucao", competencia, protocolo_em: protocolo,
+      emitida_em: null, parada, orgao_pagou_em: null, ...extra };
+  };
+  const hoje = dataEm(hojeDaProva());
+  const grupos = vazio ? [arGrupo("SINFRA", "sinfra", 52), arGrupo("SES-MT", "ses-mt", null)] : [
+    arGrupo("SINFRA", "sinfra", 52, [
+      l("Rodovia Alfa", "2026-05", "2026-06-10", 412_345_678_90, arParada("2026-06-10", 112, "critico", "2026-08-01", 52)),
+      l("Avenida Beta", "2026-07", "2026-08-04", 98_765_432_10, arParada("2026-08-04", 74, "critico", "2026-09-25", 52), { paga_em_parte: true }),
+      l("Rodovia Alfa", "2026-08", "2026-09-15", 205_000_000_00, arParada("2026-09-15", 46, "andamento", "2026-11-06", 52), { tipo: "reajuste" }),
+      l("Ponte Gama", "2026-09", "2026-10-06", 31_250_000_01, arParada("2026-10-06", 31, "andamento", "2026-11-27", 52)),
+      l("Corredor Delta", "2026-09", "2026-10-20", 7_000_000_03, arParada("2026-10-20", 21, "andamento", "2026-12-11", 52),
+        { tipo_aberto: "sem_nota", nota_id: null, numero: null }),
+      l("Avenida Beta", "2026-10", hoje, 64_800_000_00, arParada(hoje, 0, "feito", null, 52)),
+    ]),
+    arGrupo("MTPAR", "mtpar", 38, [
+      l("Trevo Épsilon", "2025-11", "2025-12-15", 150_000_000_00, arParada("2025-12-15", 230, "critico", "2026-01-22", 38)),
+      l("Trevo Épsilon", "2026-08", "2026-09-01", 55_555_555_55, arParada("2026-09-01", 55, "andamento", "2026-10-09", 38)),
+      l("Viaduto Zeta", "2026-09", "2026-10-02", 12_000_000_00, null, { tipo_aberto: "repasse", orgao_pagou_em: "2026-11-03" }),
+    ]),
+    arGrupo("Pref. Várzea Grande", "pref-vg", null, [
+      l("Escola Eta", "2026-09", null, 3_333_333_33, arParada("2026-10-14", 25, "andamento"), { emitida_em: "2026-10-14" }),
+    ], { notas_sem_medicao: [{ nota_id: 9890, numero: "41990", contrato_id: reg.obra, obra: "Escola Eta", emissao: "2026-07-01",
+      valor_centavos: 1_777_777_77, paga_em_parte: false }], anteriores: { quantidade: 2, valor_centavos: 4_000_000_00 } }),
+    arGrupo("Secretaria Municipal de Infraestrutura e Obras de Exemplo do Norte", null, null, [
+      l("Requalificação urbana do corredor central, trecho do terminal ao distrito industrial, lote 3", "2026-06", "2026-07-08", 23_456_789_01,
+        arParada("2026-07-08", 94, "andamento")),
+    ], { notas_sem_medicao: [{ nota_id: 9891, numero: "41991", contrato_id: reg.obra, obra: "Requalificação urbana do corredor central",
+      emissao: null, valor_centavos: 890_000_00, paga_em_parte: true }] }),
+    arGrupo("SES-MT", "ses-mt", null),
+  ];
+  const lista = grupos.sort((a, b) => b.em_aberto_centavos - a.em_aberto_centavos || porNome(a.contratante, b.contratante));
+  const soma = k => lista.reduce((t, g) => t + g[k], 0);
+  return { anos: AR_ANOS, total_a_receber_liberado: true, em_aberto_centavos: soma("em_aberto_centavos"),
+    por_ano: Object.fromEntries(AR_ANOS.map(a => [a, lista.reduce((t, g) => t + g.por_ano[a], 0)])), quantidade: soma("quantidade"),
+    alem_do_prazo: soma("alem_do_prazo"), notas_sem_medicao_centavos: soma("notas_sem_medicao_centavos"),
+    notas_sem_medicao: lista.flatMap(g => g.notas_sem_medicao).sort((a, b) => (a.emissao ?? "9999").localeCompare(b.emissao ?? "9999")),
+    anteriores: { quantidade: lista.reduce((t, g) => t + g.anteriores.quantidade, 0),
+      valor_centavos: lista.reduce((t, g) => t + g.anteriores.valor_centavos, 0) },
+    contratantes: lista };
+};
+
 // ---- Documentos em tres paginas (#820): o painel sem empresa, sem obra e sem nada a renovar (cada pagina mostra o
 // estado vazio dela)
 export const DOCUMENTOS_VAZIO = { hoje: "2026-09-23", empresas: [], contratos: [], renovar_agora: [] };

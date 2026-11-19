@@ -416,3 +416,15 @@ O perfil de quem só lê.
 
 **Administrador**:
 O perfil que cuida de usuários, auditoria, pendências de cadastro e exceções registradas.
+
+**Em aberto**:
+O que foi cobrado e ainda não entrou, pela competência da medição e pelo valor bruto da nota: a nota protocolada não
+paga (a paga em parte, pelo que falta nos títulos), o repasse sem baixa e a medição protocolada sem nota ligada. É o
+número do Fechamento e o total da página A receber, que o mostra nota a nota. A nota sem medição ligada e a competência
+anterior a 2025 ficam à parte, fora do total (`docs/adr/0006`).
+_Avoid_: a receber para este número (é outra conta)
+
+**A receber (o número)**:
+O da Início e da lista de Obras: a medição que espera o pagamento, pelo valor dela na cota, e as cobranças do RM que
+nenhuma medição em aberto representa, pelo que falta nos títulos. A conta que o liga ao em aberto está no
+`docs/adr/0006`. Não é o total da página A receber, que soma o em aberto.

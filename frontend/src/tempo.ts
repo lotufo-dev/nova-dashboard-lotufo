@@ -124,6 +124,15 @@ export function fmtDataCurta(iso: string): string {
   return m === null ? iso : `${m[3]}/${m[2]}/${m[1].slice(2)}`;
 }
 
+/** Data PURA ("AAAA-MM-DD") -> "DD/MM" no ano de hoje (Cuiaba) e "DD/MM/AAAA" em outro ano (#816: com prazo do
+ *  orgao longo, a data esperada cai no ano que vem, e "22/05" sem o ano se lia como maio passado). Sem fuso, como
+ *  `fmtDataPura`; vazio ou o que nao for data vira null. `hoje` ("AAAA-MM-DD") e' para o teste. */
+export function fmtDiaNoAno(iso: string | null | undefined, hoje: string = hojeLocal()): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((iso ?? "").trim());
+  if (m === null) return null;
+  return m[1] === hoje.slice(0, 4) ? `${m[3]}/${m[2]}` : `${m[3]}/${m[2]}/${m[1]}`;
+}
+
 /** Competencia "AAAA-MM" -> "MM/AAAA" (DESIGN.md › Numeros e datas). E' mes de calendario, sem
  *  fuso; vazio vira "—" e o que nao for competencia aparece cru. */
 export function fmtCompetencia(c: string | null | undefined): string {

@@ -5,7 +5,7 @@ A tela e' de quem OPERA e responde "o que eu preciso fazer agora?". Tres vistas 
   parada para a menos; `concluidas` (as recebidas da competencia) e `sem_medicao` (as obras ativas sem medicao nela);
 - `quadro`: o quadro do mes (obra x passo, issue #643), agrupado por contratante, sem as obras sem medicao;
 - `anteriores`: as medicoes de competencias anteriores que ainda pedem acao de quem opera; as que so' esperam o
-  pagamento e as anteriores a `diretoria.ANO_INICIAL` viram contagem (o em aberto mora no Fechamento).
+  pagamento e as anteriores a `diretoria.ANO_INICIAL` viram contagem (o em aberto mora na pagina A receber, #816).
 
 Nada daqui e' regra nova de estado nem de passo. As medicoes abertas, a linha unica de medicao + reajuste e o marco de
 cada situacao sao os de `medicoes.linhas_em_andamento`; o quadro, as obras e o "Iniciar", os de `medicoes.resumo`; os

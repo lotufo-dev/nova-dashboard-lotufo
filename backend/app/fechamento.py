@@ -613,10 +613,40 @@ def _medido_do_ano_anterior(lista: list[dict], hoje: datetime.date) -> None:
                                              if encerrada and anterior and anterior["medido_centavos"] > 0 else None)
 
 
-def _fechamento(conn, hoje: datetime.date) -> dict:
+def _linhas_das_medicoes(conn) -> list[dict]:
+    """A linha (`_linha_medicao`) de cada medicao que mede, com as notas dela: a base de toda soma desta pagina e da
+    pagina A receber (`a_receber.py`, issue #816), que le o em aberto daqui sem refazer a conta. As chaves que comecam
+    com `_` sao internas e saem antes da resposta (`_fechamento`)."""
     ms = _medicoes(conn)
     notas = _notas_por_medicao(conn, {m["id"] for m in ms})
-    linhas = [_linha_medicao(conn, m, notas.get(m["id"], [])) for m in ms]
+    return [_linha_medicao(conn, m, notas.get(m["id"], [])) for m in ms]
+
+
+def _em_aberto_da_medicao(x: dict, emitida_em: str | None) -> list[dict]:
+    """As linhas do em aberto de UMA medicao (`_linha_medicao`), a UNICA definicao delas: (a) e (a') nota a nota, pelo
+    que falta de cada nota que conta e nao esta' recebida, e (b) a medicao sem nota ligada, pelo valor dela. Cada uma
+    leva a obra, a medicao, a competencia e de quando a espera conta (`protocolo_em`; na medicao sem protocolo da obra
+    sem o passo "Envio da nota", `emitida_em`). O em aberto do Fechamento (`_fechamento`, o do ano e o anterior a
+    `ANOS`) e o da pagina A receber (issue #816) saem daqui."""
+    abertas = [{"tipo_aberto": "repasse" if nt["aguarda_repasse"] else "nota", "nota_id": nt["nota_id"], "numero": nt["numero"],
+                "valor_centavos": nt["em_aberto_centavos"], "paga_em_parte": nt["paga_em_parte"]}
+               for nt in x["notas"] if not nt["recebida"]]
+    if x["sem_nota_centavos"]:
+        abertas.append({"tipo_aberto": "sem_nota", "nota_id": None, "numero": None,
+                        "valor_centavos": x["sem_nota_centavos"], "paga_em_parte": False})
+    return [{**e, "contrato_id": x["contrato_id"], "obra": x["obra"], "medicao_id": x["medicao_id"],
+             "medicao_numero": x["numero"], "tipo": x["tipo"], "competencia": x["competencia"],
+             "protocolo_em": x["protocolo_em"], "emitida_em": emitida_em} for e in abertas]
+
+
+def ordem_do_em_aberto(e: dict) -> tuple:
+    """A ordem das linhas do em aberto: de onde a espera conta (o protocolo; sem ele, a emissao da nota), a mais antiga
+    primeiro, e a sem data no fim; depois a obra, a competencia e o numero da nota."""
+    return (e["protocolo_em"] or e["emitida_em"] or "9999", e["obra"], e["competencia"], e["numero"] or "")
+
+
+def _fechamento(conn, hoje: datetime.date) -> dict:
+    linhas = _linhas_das_medicoes(conn)
     cobertura = _cobertura(linhas)
     mistos = _pares_mistos(linhas)
 
@@ -631,12 +661,7 @@ def _fechamento(conn, hoje: datetime.date) -> dict:
         difere = x.pop("_difere")
         emitida_em = x.pop("_emitida_em")
         ano = x["competencia"][:4]
-        abertas = [{"tipo_aberto": "repasse" if nt["aguarda_repasse"] else "nota", "nota_id": nt["nota_id"], "numero": nt["numero"],
-                    "valor_centavos": nt["em_aberto_centavos"], "paga_em_parte": nt["paga_em_parte"]}
-                   for nt in x["notas"] if not nt["recebida"]]
-        if x["sem_nota_centavos"]:
-            abertas.append({"tipo_aberto": "sem_nota", "nota_id": None, "numero": None,
-                            "valor_centavos": x["sem_nota_centavos"], "paga_em_parte": False})
+        abertas = _em_aberto_da_medicao(x, emitida_em)
         if ano < ANOS[0]:
             anteriores["quantidade"] += len(abertas)
             anteriores["valor_centavos"] += sum(e["valor_centavos"] for e in abertas)
@@ -651,9 +676,7 @@ def _fechamento(conn, hoje: datetime.date) -> dict:
         _somar(mes, x)
         nome, chave = contratante_de[x["contrato_id"]]
         _somar(do_contratante[ano].setdefault(nome, {"contratante": nome, "contratante_chave": chave, **_zero()}), x)
-        em_aberto += [{**e, "contrato_id": x["contrato_id"], "obra": x["obra"], "medicao_id": x["medicao_id"],
-                       "medicao_numero": x["numero"], "tipo": x["tipo"], "competencia": x["competencia"],
-                       "protocolo_em": x["protocolo_em"], "emitida_em": emitida_em} for e in abertas]
+        em_aberto += abertas
         if difere:
             diferem.append({"contrato_id": x["contrato_id"], "obra": x["obra"], "medicao_id": x["medicao_id"],
                             "medicao_numero": x["numero"], "tipo": x["tipo"], "competencia": x["competencia"], **difere})
@@ -676,7 +699,7 @@ def _fechamento(conn, hoje: datetime.date) -> dict:
         for m in lista:
             if m["competencia"][5:7] <= ate:
                 _somar(acumulado[m["competencia"][:4]], m)
-    em_aberto.sort(key=lambda e: (e["protocolo_em"] or e["emitida_em"] or "9999", e["obra"], e["competencia"], e["numero"] or ""))
+    em_aberto.sort(key=ordem_do_em_aberto)
     # o em aberto (a) + (a') + (b), linha a linha; o total e as tres partes de cada ano estao em `por_ano` (a tela
     # mostra o painel do ano escolhido). (c) e o em aberto de antes de 2025 ficam a' parte, de qualquer ano.
     saida = {"anos": list(ANOS), "meses": lista, "por_ano": por_ano, "acumulado": {"ate_mes": ate, **acumulado},

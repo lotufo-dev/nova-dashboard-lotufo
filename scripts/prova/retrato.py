@@ -77,6 +77,7 @@ ROTAS = (
     "/api/espelhos/{espelho}/envio",
     "/api/diretoria",
     "/api/fechamento",
+    "/api/a-receber",
     "/api/resumo-medicoes",
     "/api/documentos",
     "/api/entidades",

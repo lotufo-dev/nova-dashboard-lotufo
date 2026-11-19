@@ -1,11 +1,12 @@
 """Numeros da diretoria (bloco 8; spec 2026-09-21 §10.5): o Resumo e o QDOP da lista de Obras, a exportacao do QDOP,
-a pagina Fechamento (issue #748) e a pagina Resumo das medicoes (issue #749). So' leitura; a operacao tambem ve."""
+a pagina Fechamento (issue #748), a pagina A receber (issue #816) e a pagina Resumo das medicoes (issue #749). So'
+leitura; a operacao tambem ve."""
 import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
-from app import diretoria, fechamento, qdop, resumo_medicoes, tempo
+from app import a_receber, diretoria, fechamento, qdop, resumo_medicoes, tempo
 from app.api_auth import conexao
 from app.api_paineis import _csv, _texto_seguro
 from app.dinheiro import format_brl
@@ -27,6 +28,14 @@ def fechamento_mensal(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sq
     aberto nota a nota (`app/fechamento.py`). Issue #815: e os mesmos numeros de cada contratante no ano
     (`por_contratante`), que somam o total do ano."""
     return fechamento.fechamento(conn)
+
+
+@router.get("/api/a-receber")
+def a_receber_nota_a_nota(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #816: o em aberto do Fechamento nota a nota, por contratante e pela data do protocolo, com o tempo parado
+    e a data prevista de cada linha (`app/a_receber.py`). Quem ve o Fechamento ve esta pagina; com o total a receber
+    nao liberado, so' a trava."""
+    return a_receber.a_receber(conn)
 
 
 # issue #805: o filtro por contratante da pagina; a sigla que a propria resposta lista em `contratantes`
