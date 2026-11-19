@@ -186,17 +186,22 @@ def _periodo(conn, m: dict) -> str:
 
 
 def _docs_nota(conn, medicao_ids: list[int]) -> list[dict]:
+    """Os PDFs de nota e a FRC assinada que vao ao orgao, na ordem do envio: a unica lista de onde saem o PDF unico,
+    os anexos soltos, os numeros da carta, o corpo do e-mail e o passo de envio da tela."""
     if not medicao_ids:
         return []
     marcas = ",".join("?" * len(medicao_ids))
     docs = [dict(r) for r in conn.execute(
-        f"SELECT id, medicao_id, tipo_doc, nome, numero_nf, arquivo FROM medicao_documentos "
+        f"SELECT id, medicao_id, tipo_doc, nome, numero_nf, municipio, consorciada, arquivo FROM medicao_documentos "
         f"WHERE medicao_id IN ({marcas}) AND tipo_doc IN ('nfs','nf','fatura') AND arquivo IS NOT NULL "
         f"ORDER BY tipo_doc='fatura', id", medicao_ids)]
     # Issue #169: com a FRC gerada pela dashboard, so' a assinada da FRC vigente vai; a de FRC substituida fica.
     assinadas = {mid: frc.assinada(conn, mid) for mid in {d["medicao_id"] for d in docs if d["tipo_doc"] == "fatura"}}
-    return [d for d in docs if d["tipo_doc"] != "fatura" or not assinadas[d["medicao_id"]]["controla"]
-            or (assinadas[d["medicao_id"]]["documento"] or {}).get("id") == d["id"]]
+    # Issue #873 (docs/adr/0017): na obra de consorcio vai a nota que a FRC soma; a substituida fica na medicao.
+    fora = {i for mid in {d["medicao_id"] for d in docs if d["tipo_doc"] == "nfs"} for i in frc.fora_do_envio(conn, mid)}
+    return [d for d in docs if d["id"] not in fora
+            and (d["tipo_doc"] != "fatura" or not assinadas[d["medicao_id"]]["controla"]
+                 or (assinadas[d["medicao_id"]]["documento"] or {}).get("id") == d["id"])]
 
 
 def _pecas(conn, protocolo_id: int) -> list[dict]:
@@ -672,12 +677,14 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
     pecas = _pecas(conn, protocolo_id)
     config_pecas = _config_pecas(regras)
     frcs_no_pacote: list[int] | None = None
+    notas_no_pacote: list[int] | None = None
     for parte in e.partes:
         if parte == "carta":
             partes.append(carta.gerar(a_assinar))
         elif parte == "notas":
             docs = _docs_nota(conn, [m["id"] for m in ms])
             frcs_no_pacote = sorted(d["id"] for d in docs if d["tipo_doc"] == "fatura")   # issue #169 (041)
+            notas_no_pacote = sorted(d["id"] for d in docs if d["tipo_doc"] != "fatura")  # issue #873 (096)
             if docs and e.divisorias:
                 partes.append(carta.pagina_titulo(["NOTA FISCAL"], em))
             partes += [_bytes(d["arquivo"]) for d in docs]
@@ -706,8 +713,9 @@ def montar(conn, usuario_id: int, protocolo_id: int, corpo: str | None = None,
         _editavel(_linha(conn, protocolo_id), conn)
         conn.execute("UPDATE protocolos SET corpo_carta=?, montado_arquivo=?, montado_sha256=?, montado_paginas=?, "
                      "montado_em=datetime('now'), assinado_arquivo=NULL, assinado_sha256=NULL, conferencia=NULL, "
-                     "situacao='montado', montado_frcs=?, montado_apostilamentos=? WHERE id=?",
+                     "situacao='montado', montado_frcs=?, montado_notas=?, montado_apostilamentos=? WHERE id=?",
                      (editado, rel, sha, n, None if frcs_no_pacote is None else json.dumps(frcs_no_pacote),
+                      None if notas_no_pacote is None else json.dumps(notas_no_pacote),
                       # o mapa do que foi de fato renderizado: so' o texto que usa a frase compara depois
                       # issue #519: com o timbre desta montagem, que a conferencia do assinado tira das paginas
                       json.dumps({"cita": cita, "apostilamentos": aps if cita else [],
@@ -899,6 +907,32 @@ def frc_recusadas(conn, p: dict) -> list[str]:
     return out
 
 
+PACOTE_NOTAS_MUDARAM = ("As notas que vão ao órgão mudaram depois que o pacote foi montado: monte o pacote de novo (e "
+                        "assine de novo, se já tinha assinado)")
+
+
+def notas_do_pacote_mudaram(conn, p: dict) -> str | None:
+    """Issue #873 (docs/adr/0017): na obra de consorcio com as notas DENTRO do pacote, o montado leva as notas de
+    quando foi montado (ids em `montado_notas`, migracao 096) e a carta cita os numeros delas. Se a lista que vai ao
+    orgao agora e' outra (nota trocada pela consorciada, nota que faltava anexada depois), o envio espera montar de
+    novo. Pacote de antes da 096 (NULL) nao diz o que levou: so' pede montar de novo onde alguma nota da medicao ja'
+    nao vai ao orgao, que e' o caso em que ele pode ter a nota antiga dentro.
+    Obra propria fica como era (o pacote vale como foi montado): la' todo PDF de nota anexado vai, nao ha' como tirar
+    um anexado por engano, e o bloqueio so' teria saida levando-o junto (segunda revisao da PR, rodada 2)."""
+    if not p.get("montado_arquivo") or p["situacao"] in ("enviado", "descartado"):
+        return None
+    e = _contexto(conn, p)[2]
+    if not (e.carta and "notas" in e.partes):
+        return None
+    ids = [m["id"] for m in _medicoes(conn, p["id"])]
+    if not any(frc.de_consorcio(conn, i) for i in ids):
+        return None
+    if p.get("montado_notas") is None:
+        return PACOTE_NOTAS_MUDARAM if any(frc.fora_do_envio(conn, i) for i in ids) else None
+    agora = sorted(d["id"] for d in _docs_nota(conn, ids) if d["tipo_doc"] != "fatura")
+    return None if json.loads(p["montado_notas"]) == agora else PACOTE_NOTAS_MUDARAM
+
+
 def apostilamento_mudou(conn, p: dict) -> str | None:
     """Issue #278 (revisor e gate Sol, rodadas 1 e 2 da PR #435): o pacote montado cita o termo de apostilamento de
     quando foi montado (o mapa gravado na montagem, migracao 060). Na MT-PAR e na Prefeitura:
@@ -927,6 +961,8 @@ def motivos_bloqueio(conn, p: dict, hoje: datetime.date) -> list[str]:
     vencidas = certidoes_vencidas(conn, p, hoje)
     motivos = (["Certidão vencida — renove antes de enviar: " + "; ".join(vencidas)] if vencidas else []) + \
         frc_recusadas(conn, p)
+    if notas_mudaram := notas_do_pacote_mudaram(conn, p):
+        motivos.append(notas_mudaram)
     if mudou := apostilamento_mudou(conn, p):
         motivos.append(mudou)
     if sem_texto := texto_nao_guardado(conn, p):
@@ -960,7 +996,8 @@ def texto_nao_guardado(conn, p: dict) -> str | None:
 
 
 # Issue #448: os motivos que montar o pacote de novo resolve (a FRC vigente, o termo de agora e o texto guardado)
-MOTIVOS_DE_MONTAR_DE_NOVO = (*PACOTE_SEM_A_FRC_VIGENTE, APOSTILAMENTO_MUDOU, TEXTO_NAO_GUARDADO)
+# Issue #873: e as notas de agora
+MOTIVOS_DE_MONTAR_DE_NOVO = (*PACOTE_SEM_A_FRC_VIGENTE, PACOTE_NOTAS_MUDARAM, APOSTILAMENTO_MUDOU, TEXTO_NAO_GUARDADO)
 
 
 def bloqueio(conn, p: dict, hoje: datetime.date) -> str | None:
@@ -1117,6 +1154,8 @@ def receber_assinado(conn, usuario_id: int, protocolo_id: int, pdf: bytes) -> di
         raise ValueError("Monte o pacote antes de anexar o assinado")
     assinado = assinatura.textos(pdf)
     _recusar_frc_fora_do_assinado(conn, p, assinado)         # antes de ler o montado: a recusa barata primeiro
+    if velho := notas_do_pacote_mudaram(conn, p):            # issue #873: assinar o pacote de antes nao resolve
+        raise ValueError(velho)
     montado = assinatura.textos(_bytes(p["montado_arquivo"]))
     _recusar_termo_fora_do_assinado(conn, p, montado, assinado)     # o lock confere o mesmo montado (sha256)
     conf = assinatura.conferir(montado, assinado)
@@ -1129,6 +1168,8 @@ def receber_assinado(conn, usuario_id: int, protocolo_id: int, pdf: bytes) -> di
             raise ValueError("O pacote foi montado de novo enquanto o assinado era conferido: anexe o assinado do "
                              "pacote de agora")
         _recusar_frc_fora_do_assinado(conn, agora, assinado)
+        if velho := notas_do_pacote_mudaram(conn, agora):
+            raise ValueError(velho)
         conn.execute("UPDATE protocolos SET assinado_arquivo=?, assinado_sha256=?, assinado_em=datetime('now'), "
                      "conferencia=?, situacao='assinado' WHERE id=?", (rel, sha, json.dumps(conf), protocolo_id))
         auditoria.registrar(conn, usuario_id, "protocolo.assinado", "protocolo", protocolo_id, None,
@@ -1416,6 +1457,9 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
         agora = [r for x in agora_ps for r in frc_recusadas(conn, x)]
         # issue #278 (revisor, rodada 2 da PR #435): o termo pode ter mudado entre a reserva e a leitura dos anexos
         agora += [m for x in agora_ps if (m := apostilamento_mudou(conn, x))]
+        # issue #873 (segunda revisao, rodada 2): nota trocada ou anexada entre a previa e a reserva; o anexo e' o
+        # PDF do pacote, que nao muda, entao a conferencia dos anexos nao a veria
+        agora += [m for x in agora_ps if (m := notas_do_pacote_mudaram(conn, x))]
         if agora:
             raise Bloqueio(" · ".join(dict.fromkeys(agora)))
         _conferir_anexos([{"nome": n, "tamanho": len(b)} for n, b, _ in rotulados], pv["anexos"])

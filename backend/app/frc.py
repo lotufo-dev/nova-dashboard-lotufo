@@ -163,9 +163,40 @@ def checklist(conn, m: dict) -> dict:
                         _leitura=doc["leitura"])
         itens.append(item)
     sobras = [{"documento_id": x["documento_id"], "nome": x["nome"], "numero": numero_na_frc(x["leitura"]),
-               "empresa": nomes.get(x["empresa"], "empresa fora do cadastro") if x["empresa"] else "empresa fora do cadastro"}
+               "empresa": nomes.get(x["empresa"], "empresa fora do cadastro") if x["empresa"] else "empresa fora do cadastro",
+               "emissor": x["empresa"], "municipio": x["leitura"].get("municipio")}
               for x in lidas if x["documento_id"] not in usados]
     return {"itens": itens, "nao_lidas": nao_lidas, "sobras": sobras, "tem_espelho": esp is not None}
+
+
+def de_consorcio(conn, medicao_id: int) -> bool:
+    """A medicao e' de obra de consorcio (o contrato e' de uma entidade de papel consorcio)?"""
+    return _contexto(conn, medicao_id)[1] is not None
+
+
+def fora_do_envio(conn, medicao_id: int) -> set[int]:
+    """Issue #873 (docs/adr/0017): os PDFs de nota da medicao (ids de `medicao_documentos`) que NAO vao ao orgao.
+
+    Obra de consorcio com espelho vigente que espera notas nesta natureza: vai ao orgao o que a FRC soma, e a FRC e' o
+    `checklist`. Fica fora o PDF que o sistema SABE que nao e' nota da FRC:
+    - a nota substituida: o PDF lido que sobra, de empresa e municipio cuja nota esperada ja' e' atendida por outro PDF
+      (o ultimo anexado), mesmo com outra nota ainda em falta;
+    - com todas as esperadas atendidas, tudo o que sobra: o lido que nao atende nenhuma e o que nao foi lido.
+    Enquanto falta nota esperada, o PDF que sobra sem ser substituido (CNPJ que o cadastro nao liga a' empresa,
+    municipio lido diferente) e o nao lido podem ser a nota que falta, e continuam indo.
+    O documento nao se apaga nem se marca: continua na medicao, como historico.
+    Obra propria e medicao sem espelho: nada fica fora (a nota da propria empresa segue o vinculo, `notas.py`)."""
+    m, ent, _ = _contexto(conn, medicao_id)
+    if ent is None:
+        return set()
+    ck = checklist(conn, m)
+    if not ck["itens"]:
+        return set()
+    if all(i["situacao"] == "anexada" for i in ck["itens"]):
+        return {x["documento_id"] for x in ck["sobras"]} | {x["documento_id"] for x in ck["nao_lidas"]}
+    atendidas = [i for i in ck["itens"] if i["situacao"] == "anexada"]
+    return {x["documento_id"] for x in ck["sobras"]
+            if any(i["emissor"] == x["emissor"] and _mesmo_municipio(i["municipio"], x["municipio"]) for i in atendidas)}
 
 
 def _bloqueio(ck: dict) -> str | None:

@@ -14,7 +14,8 @@ import openpyxl
 import pypdf
 import pytest
 
-from app import cadastro_aplicar, cadastro_arquivos, espelho, espelhos, frc, leitura_pdf, medicoes, notas, notas_envio, protocolo
+from app import arquivos, cadastro_aplicar, cadastro_arquivos, espelho, espelhos, frc, leitura_pdf, medicoes, notas, notas_envio, protocolo
+from tests import ficticios
 from tests.conftest import CADASTRO_EXEMPLO, _pdf_com_texto
 from tests.test_notas import CNPJ_BETA, CNPJ_PROPRIA, _fixture, _texto, conn, usuario  # noqa: F401  (fixtures)
 
@@ -330,6 +331,217 @@ def test_assinada_de_frc_substituida_nao_deixa_o_item_pronto(conn, usuario, cons
     item, faltas = _item_frc(conn, cid, mid)
     assert (item["estado"], item["detalhe"], faltas) == ("ok", f"Assinada anexada · FRC {n} assinada de novo.pdf", [])
     assert [d["id"] for d in protocolo._docs_nota(conn, [mid]) if d["tipo_doc"] == "fatura"] == [nova]
+
+
+# Issue #873: a consorciada Beta emite outra nota de Varzea Grande no lugar da primeira (mesmos valores, outro numero).
+NOTA_TROCADA = ("beta", 20260000304, "Várzea Grande", 200000001, 8800000, 4000000, 2400000)
+HOJE_873 = __import__("datetime").date(2026, 10, 9)
+
+
+def _trocar_a_nota_da_beta(conn, usuario, mid, _texto):  # noqa: F811
+    """As quatro notas, a FRC, a nota trocada, a FRC gerada de novo e a assinada dela. Devolve os ids dos documentos:
+    (as quatro primeiras, a nova, a FRC assinada). O texto de cada PDF e' "nota <numero>", para achar no pacote."""
+    n = ULTIMA + 1
+    docs = []
+    for nota in NOTAS_FRC:
+        _texto(_texto_da(nota))
+        docs.append(notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto(f"nota {nota[1]}"),
+                                     f"NFSE {nota[1]}.pdf")["documento_id"])
+    _texto(_texto_da(NOTA_TROCADA))
+    nova = notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto(f"nota {NOTA_TROCADA[1]}"),
+                            f"NFSE {NOTA_TROCADA[1]}.pdf")["documento_id"]
+    frc.gerar(conn, usuario, mid, n)
+    assinada = _assinar(conn, usuario, mid, _texto, f"FRC {n} assinada.pdf")["documento_id"]
+    return docs, nova, assinada
+
+
+def test_nota_substituida_fica_na_medicao_e_nao_vai_ao_orgao(conn, usuario, consorcio14, _texto):  # noqa: F811
+    """Issue #873: com duas notas da mesma empresa e municipio vale a ultima anexada, como na FRC. A antiga continua na
+    medicao e nao sai nos anexos soltos do e-mail, na lista de numeros da carta nem no passo de envio da tela."""
+    cid, mid = consorcio14
+    n = ULTIMA + 1
+    docs, nova, assinada = _trocar_a_nota_da_beta(conn, usuario, mid, _texto)
+    velha = docs[0]
+    # a antiga nao se apaga: os cinco PDFs de nota continuam na medicao, e a FRC mostra a antiga como a que sobra
+    guardados = [r[0] for r in conn.execute("SELECT id FROM medicao_documentos WHERE medicao_id=? AND tipo_doc='nfs' "
+                                            "AND arquivo IS NOT NULL ORDER BY id", (mid,))]
+    assert guardados == [*docs, nova]
+    assert [x["documento_id"] for x in frc.situacao(conn, mid)["sobras"]] == [velha]
+    assert frc.fora_do_envio(conn, mid) == {velha}
+    # a lista unica do envio: as quatro vigentes e a FRC assinada
+    vao = protocolo._docs_nota(conn, [mid])
+    assert [d["id"] for d in vao] == [*docs[1:], nova, assinada]
+    # carta: a lista de numeros cita a nota nova e nao a antiga
+    numeros = protocolo._numeros_nf(vao)
+    assert "20260000304" in numeros and "20260000204" not in numeros
+    # passo de envio da tela: quatro notas, sem a antiga
+    c = protocolo._contrato(conn, cid)
+    m = dict(conn.execute("SELECT * FROM medicoes WHERE id=?", (mid,)).fetchone())
+    itens, nfs, _ = notas_envio._itens(conn, c, "sinfra", [m], HOJE_873)
+    item = next(i for i in itens if i["chave"] == "notas")
+    assert item["rotulo"] == "Notas fiscais (4)" and "20260000204" not in item["detalhe"]
+    assert sorted(x["numero"] for x in nfs) == ["20260000205", "20260000304", "2284", "2286"]
+    assert next(i for i in itens if i["chave"] == "consorcio")["estado"] == "ok"
+    # anexos soltos do e-mail (SINFRA): as quatro notas vigentes e a FRC assinada
+    pid = protocolo.criar(conn, usuario["id"], cid, "nota", [mid], None)
+    p = protocolo._linha(conn, pid)
+    pv = protocolo.previa_envio(conn, [pid], hoje=HOJE_873)
+    soltos = [a["nome"] for a in pv["anexos"] if a["origem"] in ("nota", "frc")]
+    assert soltos == ["NFSE 20260000205.pdf", "NFSE 2284.pdf", "NFSE 2286.pdf", "NFSE 20260000304.pdf",
+                      f"FRC {n} assinada.pdf"]
+    assert pv["bloqueio"] is None and "notas fiscais" in pv["corpo"]
+    assert protocolo.frc_recusadas(conn, p) == [] and not [
+        x for x in protocolo.pendencias(conn, p, HOJE_873) if x["codigo"] in ("sem_nota", "consorcio")]
+
+
+def _texto_do_pacote(conn, pid) -> str:
+    p = protocolo._linha(conn, pid)
+    return "\n".join(pg.extract_text() for pg in pypdf.PdfReader(str(arquivos.caminho_seguro(p["montado_arquivo"]))).pages)
+
+
+def test_nota_substituida_nao_entra_no_pacote_nem_na_carta(conn, usuario, consorcio14, _texto):  # noqa: F811
+    """Issue #873, no orgao em que as notas vao dentro do PDF unico (aqui, a familia prefeitura): o pacote montado e a
+    carta levam a nota vigente. O pacote montado antes da troca fica bloqueado ate' montar de novo, e a nova montagem
+    sai sem a nota antiga."""
+    cid, mid = consorcio14
+    n = ULTIMA + 1
+    conn.execute("UPDATE orgaos SET familia='prefeitura' WHERE id=(SELECT orgao_id FROM contratos WHERE id=?)", (cid,))
+    conn.commit()
+    for nota in NOTAS_FRC:
+        _texto(_texto_da(nota))
+        notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto(f"nota {nota[1]}"), f"NFSE {nota[1]}.pdf")
+    _assinar(conn, usuario, mid, _texto, f"FRC {n} assinada.pdf")
+    pid = protocolo.criar(conn, usuario["id"], cid, "unico", [mid], "7")
+    protocolo.montar(conn, usuario["id"], pid, hoje=HOJE_873)
+    assert "nota 20260000204" in _texto_do_pacote(conn, pid)
+    # a Beta troca a nota de Varzea Grande: FRC gerada e assinada de novo
+    _texto(_texto_da(NOTA_TROCADA))
+    notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto(f"nota {NOTA_TROCADA[1]}"), f"NFSE {NOTA_TROCADA[1]}.pdf")
+    frc.gerar(conn, usuario, mid, n)
+    assinada = _assinar(conn, usuario, mid, _texto, f"FRC {n} assinada de novo.pdf")["documento_id"]
+    # o pacote de antes leva a nota antiga e a FRC anterior: o envio espera montar de novo
+    assert protocolo.frc_recusadas(conn, protocolo._linha(conn, pid)) == [protocolo.PACOTE_FRC_VELHA]
+    assert protocolo.motivos_bloqueio(conn, protocolo._linha(conn, pid), HOJE_873) == [
+        protocolo.PACOTE_FRC_VELHA, protocolo.PACOTE_NOTAS_MUDARAM]
+    corpo = protocolo.corpo_padrao(conn, pid)
+    assert "20260000304" in corpo and "20260000204" not in corpo
+    protocolo.montar(conn, usuario["id"], pid, hoje=HOJE_873)
+    texto = _texto_do_pacote(conn, pid)
+    for numero in ("20260000205", "2284", "2286", "20260000304"):
+        assert f"nota {numero}" in texto, numero
+    assert "20260000204" not in texto
+    p = protocolo._linha(conn, pid)
+    assert json.loads(p["montado_frcs"]) == [assinada] and protocolo.frc_recusadas(conn, p) == []
+    assert [x for x in notas_envio._paginas(conn, p, "prefeitura", {}, HOJE_873) if x.startswith("NF ")] == [
+        "NF 20260000205", "NF 2284", "NF 2286", "NF 20260000304"]
+
+
+def test_com_nota_esperada_em_falta_so_a_substituida_fica_fora(conn, usuario, consorcio14, _texto):  # noqa: F811
+    """Issue #873 (segunda revisao da PR): enquanto falta nota esperada, o PDF que a leitura nao entendeu e o lido que
+    nao casa com nenhuma esperada podem ser a nota que falta e continuam indo; a substituida (outra nota da mesma
+    empresa e municipio anexada depois) fica fora mesmo assim. Com as quatro atendidas, tudo o que sobra fica fora."""
+    _, mid = consorcio14
+    docs = [r["documento_id"] for r in _anexar(conn, usuario, mid, _texto, NOTAS_FRC[:3])]   # falta a 2286
+    _texto("NOTA FISCAL DE SERVIÇOS ELETRÔNICA\nleiaute que o leitor ainda nao conhece")
+    nao_lida = notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto("rascunho"), "rascunho.pdf")["documento_id"]
+    # nota lida de CNPJ que o cadastro nao liga a nenhuma consorciada (a filial, por exemplo): pode ser a que falta
+    _texto(_cuiaba(ficticios.mascara(ficticios.RIVOLI), 77, "Várzea Grande", 200000002, 8800000, 4000000, 2400000))
+    estranha = notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto("nota 77"), "NFSE 77.pdf")["documento_id"]
+    assert [x["documento_id"] for x in frc.situacao(conn, mid)["sobras"]] == [estranha]
+    assert frc.fora_do_envio(conn, mid) == set()
+    assert [d["id"] for d in protocolo._docs_nota(conn, [mid])] == [*docs, nao_lida, estranha]
+    # a Beta troca a nota de Varzea Grande com a 2286 ainda em falta: a antiga ja' fica fora
+    _texto(_texto_da(NOTA_TROCADA))
+    nova = notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto("nota 304"), "NFSE 304.pdf")["documento_id"]
+    assert frc.fora_do_envio(conn, mid) == {docs[0]}
+    assert [d["id"] for d in protocolo._docs_nota(conn, [mid])] == [*docs[1:], nao_lida, estranha, nova]
+    # a 2286 chega: as quatro esperadas atendidas, e o que sobra nao e' nota da FRC
+    _texto(_texto_da(NOTAS_FRC[3]))
+    ultima = notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto("nota 2286"), "NFSE 2286.pdf")["documento_id"]
+    assert frc.fora_do_envio(conn, mid) == {docs[0], nao_lida, estranha}
+    assert [d["id"] for d in protocolo._docs_nota(conn, [mid])] == [*docs[1:], nova, ultima]
+
+
+def _pacote_da_prefeitura(conn, usuario, cid, mid, _texto, assinar: bool):  # noqa: F811
+    """As quatro notas (a FRC sai sozinha), a assinada se pedida, e o pacote montado na familia prefeitura."""
+    conn.execute("UPDATE orgaos SET familia='prefeitura' WHERE id=(SELECT orgao_id FROM contratos WHERE id=?)", (cid,))
+    conn.commit()
+    for nota in NOTAS_FRC:
+        _texto(_texto_da(nota))
+        notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto(f"nota {nota[1]}"), f"NFSE {nota[1]}.pdf")
+    if assinar:
+        _assinar(conn, usuario, mid, _texto, f"FRC {ULTIMA + 1} assinada.pdf")
+    pid = protocolo.criar(conn, usuario["id"], cid, "unico", [mid], "7")
+    protocolo.montar(conn, usuario["id"], pid, hoje=HOJE_873)
+    return pid
+
+
+def test_pacote_montado_sem_a_assinada_bloqueia_quando_a_nota_e_trocada(conn, usuario, consorcio14, _texto):  # noqa: F811
+    """Issue #873 (segunda revisao da PR): sem FRC assinada anexada, a regra da 041 nao segura o pacote velho. O pacote
+    guarda as notas que levou (096): trocada a nota, o envio e o anexo do assinado esperam montar de novo, e a tela
+    oferece o Montar de novo."""
+    cid, mid = consorcio14
+    pid = _pacote_da_prefeitura(conn, usuario, cid, mid, _texto, assinar=False)
+    p = protocolo._linha(conn, pid)
+    assert len(json.loads(p["montado_notas"])) == 4 and protocolo.notas_do_pacote_mudaram(conn, p) is None
+    assert protocolo.bloqueio(conn, p, HOJE_873) is None
+    _texto(_texto_da(NOTA_TROCADA))
+    notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto(f"nota {NOTA_TROCADA[1]}"), f"NFSE {NOTA_TROCADA[1]}.pdf")
+    p = protocolo._linha(conn, pid)
+    assert protocolo.motivos_bloqueio(conn, p, HOJE_873) == [protocolo.PACOTE_NOTAS_MUDARAM]
+    with pytest.raises(ValueError, match="As notas que vão ao órgão mudaram"):
+        protocolo.receber_assinado(conn, usuario["id"], pid, _pdf_com_texto("assinado do pacote de antes"))
+    d = notas_envio.detalhe_envio(conn, pid, hoje=HOJE_873)
+    assert d["bloqueio"] == protocolo.PACOTE_NOTAS_MUDARAM and d["remontar"] and d["remontar_liberado"]
+    assert d["envio"]["situacao"] == "bloqueado" and "Pacote com as notas de antes: monte de novo" in d["envio"]["aviso"]
+    protocolo.montar(conn, usuario["id"], pid, hoje=HOJE_873)
+    texto = _texto_do_pacote(conn, pid)
+    assert "nota 20260000304" in texto and "20260000204" not in texto
+    assert protocolo.notas_do_pacote_mudaram(conn, protocolo._linha(conn, pid)) is None
+
+
+def test_pacote_montado_antes_da_096_so_pede_montar_de_novo_com_nota_que_nao_vai(conn, usuario, consorcio14, _texto):  # noqa: F811
+    """Issue #873: o pacote de antes da migracao 096 nao diz que notas levou. Sem nota sobrando na medicao ele segue
+    valendo; com a nota trocada (o pacote pode ter a antiga dentro, mesmo com a FRC assinada vigente nele), o envio
+    espera montar de novo."""
+    cid, mid = consorcio14
+    pid = _pacote_da_prefeitura(conn, usuario, cid, mid, _texto, assinar=True)
+    conn.execute("UPDATE protocolos SET montado_notas=NULL WHERE id=?", (pid,))
+    conn.commit()
+    assert protocolo.motivos_bloqueio(conn, protocolo._linha(conn, pid), HOJE_873) == []
+    # como ficou o pacote montado com a regra antiga: as cinco notas e a assinada da FRC vigente dentro
+    _texto(_texto_da(NOTA_TROCADA))
+    notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto(f"nota {NOTA_TROCADA[1]}"), f"NFSE {NOTA_TROCADA[1]}.pdf")
+    frc.gerar(conn, usuario, mid, ULTIMA + 1)
+    assinada = _assinar(conn, usuario, mid, _texto, f"FRC {ULTIMA + 1} assinada de novo.pdf")["documento_id"]
+    conn.execute("UPDATE protocolos SET montado_frcs=? WHERE id=?", (json.dumps([assinada]), pid))
+    conn.commit()
+    p = protocolo._linha(conn, pid)
+    assert protocolo.frc_recusadas(conn, p) == []
+    assert protocolo.motivos_bloqueio(conn, p, HOJE_873) == [protocolo.PACOTE_NOTAS_MUDARAM]
+
+
+def test_obra_propria_e_medicao_sem_espelho_mandam_todas_as_notas(conn, usuario, consorcio14, _texto):  # noqa: F811
+    """Issue #873: a regra da FRC so' vale onde ha' FRC. Medicao de consorcio sem espelho vigente e obra propria
+    continuam mandando todos os PDFs de nota anexados."""
+    cid, _ = consorcio14
+    sem_espelho = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": 50, "tipo": "execucao", "competencia": "2026-09"})
+    propria = conn.execute("SELECT id FROM contratos WHERE entidade_id IS NULL OR entidade_id NOT IN "
+                           "(SELECT consorcio_id FROM entidade_consorciadas) LIMIT 1").fetchone()[0]
+    da_propria = medicoes.criar(conn, 1, {"contrato_id": propria, "numero": 50, "tipo": "execucao",
+                                          "competencia": "2026-09"})
+    for mid in (sem_espelho, da_propria):
+        ids = []
+        for k in (1, 2):
+            rel, sha = arquivos.gravar_bytes("notas", _pdf_com_texto(f"nota {mid}-{k}"), "pdf")
+            ids.append(conn.execute(
+                "INSERT INTO medicao_documentos (medicao_id, fonte, tipo_doc, nome, numero_nf, item_id, arquivo, sha256, "
+                "tamanho, leitura) VALUES (?, 'operacao', 'nfs', ?, ?, ?, ?, ?, 10, ?)",
+                (mid, f"NFSE {k}.pdf", str(k), sha, rel, sha,
+                 json.dumps({"ok": True, "numero": k, "prestador_cnpj": BETA, "municipio": "Cuiabá"}))).lastrowid)
+        conn.commit()
+        assert frc.fora_do_envio(conn, mid) == set()
+        assert [d["id"] for d in protocolo._docs_nota(conn, [mid])] == ids
 
 
 def test_assinada_so_se_anexa_sobre_a_frc_vigente_atualizada(conn, usuario, consorcio14, _texto):  # noqa: F811
