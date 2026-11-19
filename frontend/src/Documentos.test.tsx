@@ -3,7 +3,9 @@ import { afterEach, expect, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { api, apiForm } from "./api";
-import Documentos from "./Documentos";
+import DocumentosCertidoes from "./DocumentosCertidoes";
+import DocumentosGarantias from "./DocumentosGarantias";
+import DocumentosRegularidade from "./DocumentosRegularidade";
 import { competenciaDoNome } from "./documentosDados";
 import { chipCertidao, competenciasRegularidade } from "./matriz";
 
@@ -22,16 +24,24 @@ const usuario = { id: 1, nome: "U", email: "u@lotufo.com", perfil: "engenharia" 
 
 const linhaDe = (nome: string) => screen.getByRole("link", { name: nome }).closest("li")!;
 
-test("três abas com contador: certidões a renovar, regularidade faltando e garantias a conferir", async () => {
-  render(<Documentos usuario={usuario} />);
-  await screen.findByRole("link", { name: "Lotufo" });
-  const abas = screen.getAllByRole("tab").map(t => t.textContent);
-  expect(abas).toEqual(["Certidões 2 a renovar", "Regularidade mensal 1 faltando", "Garantias 1 a conferir"]);
-  expect(screen.getByRole("button", { name: /Anexar PDF/ })).toBeTruthy();
+// #820: as tres paginas sem a fileira de abas; cada uma traz no alto o contador do que pede acao, e o "Anexar PDF"
+// fica onde se anexa (Certidoes e Regularidade)
+test.each([
+  ["Certidões", () => <DocumentosCertidoes usuario={usuario} />, "2 a renovar", "contador--critico", true],
+  ["Regularidade mensal", () => <DocumentosRegularidade usuario={usuario} />, "1 faltando", "contador--critico", true],
+  ["Garantias", () => <DocumentosGarantias />, "1 a conferir", "contador--breve", false],
+])("página %s: sem abas, o contador no alto e o Anexar PDF só onde se anexa", async (_nome, pagina, conta, classe, anexa) => {
+  render(pagina());
+  const contador = await screen.findByText(conta);
+  expect(contador.closest(".contador")!.className).toContain(classe);
+  expect(contador.closest(".doc-topo")).toBeTruthy();
+  expect(screen.queryByRole("tab")).toBeNull();
+  expect(screen.queryByRole("tablist")).toBeNull();
+  expect(!!screen.queryByRole("button", { name: /Anexar PDF/ })).toBe(anexa);
 });
 
 test("aba Certidões: uma linha por empresa, chips com os dias e a cor pela situação", async () => {
-  render(<Documentos usuario={usuario} />);
+  render(<DocumentosCertidoes usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   const l = within(linhaDe("Lotufo"));
   l.getByText("própria");
@@ -60,15 +70,15 @@ test("empresa sem certidão exigida sai da aba Certidões e continua no Anexar P
     ok: false, motivo: "datas-implausiveis", digitavel: true, mensagem: "Confira as datas no documento e digite",
     lidos: { entidade_id: 1, tipo: "trabalhista", emissao: "2026-06-24", validade: "2028-12-21", natureza: "negativa" },
   });
-  const { rerender } = render(<Documentos usuario={usuario} />);
+  const { rerender } = render(<DocumentosCertidoes usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   expect([...screen.getByRole("list", { name: "Certidões por empresa" }).querySelectorAll(".doc-linha__nome a")].map(a => a.textContent))
     .toEqual(["Beta Ltda", "Consórcio Alfa", "Lotufo"]);
   fireEvent.change(screen.getByLabelText("Escolher PDFs para anexar"), { target: { files: [new File(["%PDF"], "cndt.pdf", { type: "application/pdf" })] } });
   await screen.findByText(/Confira as datas/);
   within(screen.getByLabelText("Empresa")).getByRole("option", { name: /Consórcio Sem Certidão/ });
-  rerender(<Documentos usuario={usuario} pagina="regularidade" />);
-  screen.getByText(/Não exigida: .*Consórcio Sem Certidão/);
+  rerender(<DocumentosRegularidade usuario={usuario} />);
+  await screen.findByText(/Não exigida: .*Consórcio Sem Certidão/);
 });
 
 test("vence hoje e vence em até 7 dias são âmbar ou vermelho pelas regras da legenda", () => {
@@ -82,7 +92,7 @@ test("vence hoje e vence em até 7 dias são âmbar ou vermelho pelas regras da 
 });
 
 test("aba Regularidade: só quem tem folha, seis meses com o estado de cada um", async () => {
-  render(<Documentos usuario={usuario} pagina="regularidade" />);
+  render(<DocumentosRegularidade usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   expect(screen.queryByRole("link", { name: "Beta Ltda" })).toBeNull();
   const l = within(linhaDe("Lotufo"));
@@ -112,7 +122,7 @@ test("a competência esperada só vale a partir do dia 10 do mês seguinte (ante
 });
 
 test("aba Garantias: por órgão, com a contagem, e os quatro chips por obra (sem ART)", async () => {
-  render(<Documentos usuario={usuario} pagina="garantias" />);
+  render(<DocumentosGarantias />);
   await screen.findByText("Obra Alfa");
   expect(screen.getAllByRole("heading", { level: 2 }).map(h => h.textContent)).toEqual([
     "SINFRA 2 obras", "MTPAR 1 obra", "Prefeituras 1 obra",
@@ -135,7 +145,7 @@ test("contrato de contratante privado aparece no grupo Privados (#651)", async (
   const base = (await import("./documentosTeste")).PAINEL;
   vi.mocked(api).mockImplementationOnce(async () => ({ ...base,
     contratos: base.contratos.map(o => ({ ...o, tipo_contratante: o.contrato_id === 7 ? "PRIVADO" : "PÚBLICO" })) }));
-  render(<Documentos usuario={usuario} pagina="garantias" />);
+  render(<DocumentosGarantias />);
   await screen.findByText("Obra Gama");
   expect(screen.getAllByRole("heading", { level: 2 }).map(h => h.textContent)).toEqual([
     "SINFRA 2 obras", "MTPAR 1 obra", "Privados 1 obra",
@@ -148,7 +158,7 @@ test("grupo grande mostra as primeiras obras e '+N obras'", async () => {
     orgao: "SES", art: null, cno: null, cobre_execucao: { cobre: null, ate: null } }));
   const { api } = await import("./api");
   vi.mocked(api).mockImplementationOnce(async () => ({ ...(await import("./documentosTeste")).PAINEL, contratos: mais }));
-  render(<Documentos usuario={usuario} pagina="garantias" />);
+  render(<DocumentosGarantias />);
   await screen.findByText("Obra X0");
   expect(screen.queryByText("Obra X8")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "+3 obras" }));
@@ -161,14 +171,14 @@ test("garantia sem fim de execução cadastrado: 'Cobre a execução' fica neutr
     garantia: { apolice: "AP-1", vigencia_fim: "2027-12-31", dias: 400, origem: "contrato" as const, situacao: "ok" as const },
     cobre_execucao: { cobre: null, ate: null } };
   vi.mocked(api).mockImplementationOnce(async () => ({ ...(await import("./documentosTeste")).PAINEL, contratos: [obra] }));
-  render(<Documentos usuario={usuario} pagina="garantias" />);
+  render(<DocumentosGarantias />);
   await screen.findByText("Obra Sem Fim");
   const chip = within(screen.getByText("Obra Sem Fim").closest("li")!).getByText("—").closest(".doc-chip")!;
   expect(chip.className).toContain("doc-chip--neutro");
 });
 
 test("a legenda muda com a aba", async () => {
-  render(<Documentos usuario={usuario} pagina="garantias" />);
+  render(<DocumentosGarantias />);
   await screen.findByText("Obra Alfa");
   screen.getByText("não cobre");
   const legenda = within(screen.getByRole("list", { name: "Legenda das cores" }));
@@ -177,27 +187,23 @@ test("a legenda muda com a aba", async () => {
   expect(screen.queryByText("aguardando o DP")).toBeNull();
 });
 
-test("cada assunto tem o próprio endereço: a aba escolhida leva a ele (#814)", async () => {
-  window.history.replaceState(null, "", "/documentos");
-  render(<Documentos usuario={usuario} />);
-  await screen.findByRole("link", { name: "Lotufo" });
-  fireEvent.click(screen.getByRole("tab", { name: /Garantias/ }));
-  expect(window.location.pathname + window.location.search).toBe("/documentos/garantias");
-  fireEvent.click(screen.getByRole("tab", { name: /Regularidade mensal/ }));
-  expect(window.location.pathname + window.location.search).toBe("/documentos/regularidade");
-  fireEvent.click(screen.getByRole("tab", { name: /Certidões/ }));
-  expect(window.location.pathname + window.location.search).toBe("/documentos");
-  window.history.replaceState(null, "", "/");
+test("a empresa abre como filha da página de onde se veio: Certidões na aba certidões, Regularidade na aba dela (#820)", async () => {
+  render(<DocumentosCertidoes usuario={usuario} />);
+  expect((await screen.findByRole("link", { name: "Lotufo" })).getAttribute("href")).toBe("/documentos/1");
+  cleanup();
+  render(<DocumentosRegularidade usuario={usuario} />);
+  expect((await screen.findByRole("link", { name: "Lotufo" })).getAttribute("href")).toBe("/documentos/1/regularidade");
 });
 
-test("a página aberta vem do endereço (a prop `pagina`), não mais da busca", async () => {
-  render(<Documentos usuario={usuario} busca={{ aba: "garantias" }} pagina="regularidade" />);
+test("diretoria na Regularidade: vê os meses, sem o Anexar PDF", async () => {
+  render(<DocumentosRegularidade usuario={{ ...usuario, perfil: "diretoria" }} />);
   await screen.findByRole("list", { name: "Regularidade mensal por empresa" });
-  expect(screen.getAllByRole("tab").map(t => t.getAttribute("aria-selected"))).toEqual(["false", "true", "false"]);
+  expect(screen.queryByRole("button", { name: /Anexar PDF/ })).toBeNull();
+  expect(screen.queryByLabelText(/Escolher PDFs/i)).toBeNull();
 });
 
-test("diretoria vê as abas e o ZIP, mas não o Anexar PDF", async () => {
-  render(<Documentos usuario={{ ...usuario, perfil: "diretoria" }} />);
+test("diretoria vê o ZIP, mas não o Anexar PDF", async () => {
+  render(<DocumentosCertidoes usuario={{ ...usuario, perfil: "diretoria" }} />);
   await screen.findByRole("link", { name: "Lotufo" });
   expect(screen.queryByRole("button", { name: /Anexar PDF/ })).toBeNull();
   expect(screen.queryByLabelText(/Escolher PDFs/i)).toBeNull();
@@ -212,7 +218,7 @@ test("Anexar PDF: datas lidas implausíveis abrem a digitação já preenchida (
     mensagem: "As datas lidas (emissão 24/06/2026, validade 21/12/2028) não batem com o prazo normal desta certidão: confira no documento e digite",
     lidos: { entidade_id: 1, tipo: "trabalhista", emissao: "2026-06-24", validade: "2028-12-21", natureza: "negativa" },
   });
-  render(<Documentos usuario={usuario} />);
+  render(<DocumentosCertidoes usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   fireEvent.change(screen.getByLabelText("Escolher PDFs para anexar"), { target: { files: [pdf("cndt.pdf")] } });
   await screen.findByText(/não batem com o prazo normal/);
@@ -228,7 +234,7 @@ test("Anexar PDF: certidão lida vai para conferir e descarta", async () => {
     ok: true, leitura: { tipo: "fgts", tipo_nome: "FGTS", natureza: "negativa", entidade_id: 1, entidade: "Lotufo",
       emissao: "2026-09-20", validade: "2026-10-19", numero: "123", validade_calculada: false },
   });
-  render(<Documentos usuario={usuario} />);
+  render(<DocumentosCertidoes usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   fireEvent.change(screen.getByLabelText("Escolher PDFs para anexar"), { target: { files: [pdf("crf.pdf")] } });
   await screen.findByText(/válida até 19\/10\/2026/);
@@ -241,7 +247,7 @@ test("Anexar PDF: a folha do DP aparece como regularidade e grava pelo endpoint 
     .mockResolvedValueOnce({ ok: true, documento: "regularidade",
       leitura: { documento: "regularidade", competencia: "2026-08", entidade_id: 1, entidade: "Lotufo" } } as never)
     .mockResolvedValueOnce({ documento: "regularidade", entidade: "Lotufo", competencia: "2026-08" } as never);
-  render(<Documentos usuario={usuario} />);
+  render(<DocumentosCertidoes usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   fireEvent.change(screen.getByLabelText("Escolher PDFs para anexar"), { target: { files: [pdf("folha.pdf")] } });
   await screen.findByText(/regularidade mensal de 08\/2026/);
@@ -253,7 +259,7 @@ test("Anexar PDF: a folha do DP aparece como regularidade e grava pelo endpoint 
 test("Anexar PDF: folha de empresa desconhecida cai na fila humana como recusada", async () => {
   vi.mocked(apiForm).mockResolvedValueOnce({ ok: false, motivo: "regularidade-sem-empresa", digitavel: false,
     mensagem: "Folha do DP de 08/2026: empresa não identificada no cadastro." });
-  render(<Documentos usuario={usuario} />);
+  render(<DocumentosCertidoes usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   fireEvent.change(screen.getByLabelText("Escolher PDFs para anexar"), { target: { files: [pdf("folha.pdf")] } });
   expect((await screen.findAllByText(/empresa não identificada/)).length).toBeGreaterThan(0);
@@ -263,7 +269,7 @@ test("Anexar PDF: folha de empresa desconhecida cai na fila humana como recusada
 test("o ZIP das vigentes fica na linha da empresa e diz o que ela respondeu", async () => {
   const buscar = vi.fn(async () => new Response(JSON.stringify({ detail: "nenhuma certidão vigente em 2026-09-23" }), { status: 422 }));
   vi.stubGlobal("fetch", buscar);
-  render(<Documentos usuario={usuario} />);
+  render(<DocumentosCertidoes usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   fireEvent.click(screen.getByRole("button", { name: "ZIP das certidões vigentes de Lotufo" }));
   expect((screen.getByLabelText("Certidões vigentes em") as HTMLInputElement).value).toBe("2026-09-23");
@@ -280,7 +286,7 @@ test("competência pelo nome do arquivo do DP", () => {
 
 test("link salvo da tela antiga (?empresa=N) abre a página da empresa, trocando o endereço", async () => {
   window.history.replaceState(null, "", "/documentos?empresa=3#emp-3");
-  render(<Documentos usuario={usuario} busca={{ empresa: "3" }} />);
+  render(<DocumentosCertidoes usuario={usuario} busca={{ empresa: "3" }} />);
   await waitFor(() => expect(window.location.pathname).toBe("/documentos/3"));
   expect(window.location.search).toBe("");
   expect(window.location.hash).toBe("");
@@ -291,7 +297,7 @@ test("link salvo da tela antiga (?empresa=N) abre a página da empresa, trocando
 const bloco = () => within(screen.getByRole("region", { name: "Renovar agora" }));
 
 test("Renovar agora: uma linha por certidão, com a validade, Emitir e Anexar", async () => {
-  render(<Documentos usuario={usuario} />);
+  render(<DocumentosCertidoes usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   const linhas = bloco().getAllByRole("listitem");
   expect(linhas.map(x => x.querySelector(".doc-renovar__certidao")!.textContent)).toEqual(["Municipal", "FGTS"]);
@@ -306,15 +312,15 @@ test("Renovar agora: uma linha por certidão, com a validade, Emitir e Anexar", 
   expect(within(linhas[1]).getByRole("link", { name: /Emitir FGTS de Lotufo/ }).className).toContain("btn--primario");
   expect(linhas.map(x => x.querySelector(".doc-chip .glifo")?.className)).toEqual(["glifo glifo--critico", "glifo glifo--breve"]);
   within(linhas[1]).getByRole("button", { name: "Anexar FGTS de Lotufo" });
-  // o bloco e' da aba Certidoes
+  // o bloco e' da pagina Certidoes
   cleanup();
-  render(<Documentos usuario={usuario} pagina="garantias" />);
+  render(<DocumentosGarantias />);
   await screen.findByText("Obra Alfa");
   expect(screen.queryByRole("region", { name: "Renovar agora" })).toBeNull();
 });
 
 test("Renovar agora: diretoria vê as linhas, sem Emitir nem Anexar", async () => {
-  render(<Documentos usuario={{ ...usuario, perfil: "diretoria" }} />);
+  render(<DocumentosCertidoes usuario={{ ...usuario, perfil: "diretoria" }} />);
   await screen.findByRole("link", { name: "Lotufo" });
   expect(bloco().getAllByRole("listitem")).toHaveLength(2);
   expect(bloco().queryByRole("link", { name: /Emitir/ })).toBeNull();
@@ -328,17 +334,27 @@ test("sem nada a renovar o bloco não aparece, o contador some e o chip que venc
     ...PAINEL, renovar_agora: [],
     empresas: [{ ...lotufo, certidoes: lotufo.certidoes.filter(x => x.chave === "fgts").map(x => ({ ...x, renovar: false, proximo_protocolo: null })) }],
   });
-  render(<Documentos usuario={usuario} />);
+  render(<DocumentosCertidoes usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   expect(screen.queryByRole("region", { name: "Renovar agora" })).toBeNull();
-  expect(screen.getByRole("tab", { name: /Certidões/ }).textContent).toBe("Certidões");
+  expect(screen.queryByText(/a renovar/)).toBeNull();
   const chip = within(linhaDe("Lotufo")).getByText("FGTS", { selector: ".doc-chip__rotulo" }).closest(".doc-chip")!;
   expect(chip.textContent).toContain("4 d");
   expect(chip.className).toContain("doc-chip--feito");
+  // diretoria, sem nada a renovar: no alto so' a legenda (sem contador nem Anexar)
+  cleanup();
+  vi.mocked(api).mockResolvedValueOnce({ ...PAINEL, renovar_agora: [], empresas: [] });
+  render(<DocumentosCertidoes usuario={{ ...usuario, perfil: "diretoria" }} />);
+  await screen.findByText("Nenhuma empresa.");
+  const alto = document.querySelector(".doc-topo")!;
+  expect(alto.querySelector(".contador")).toBeNull();
+  expect(alto.querySelector("button")).toBeNull();
+  within(alto as HTMLElement).getByRole("list", { name: "Legenda das cores" });
+  expect(screen.queryByRole("region", { name: "Certidões por empresa" })).toBeNull();
 });
 
 test("a legenda das certidões fala do próximo protocolo, não dos 7 dias", async () => {
-  render(<Documentos usuario={usuario} />);
+  render(<DocumentosCertidoes usuario={usuario} />);
   await screen.findByRole("link", { name: "Lotufo" });
   const legenda = within(screen.getByRole("list", { name: "Legenda das cores" }));
   legenda.getByText("vence antes do próximo protocolo");
@@ -346,7 +362,7 @@ test("a legenda das certidões fala do próximo protocolo, não dos 7 dias", asy
 });
 
 test("aba Garantias: os quatro chips em quatro colunas, no cabeçalho e nas linhas", async () => {
-  render(<Documentos usuario={usuario} pagina="garantias" />);
+  render(<DocumentosGarantias />);
   await screen.findByText("Obra Alfa");
   const grupo = screen.getByRole("region", { name: "Garantias de SINFRA" });
   const grades = [...grupo.querySelectorAll(".doc-chips")];
@@ -354,4 +370,12 @@ test("aba Garantias: os quatro chips em quatro colunas, no cabeçalho e nas linh
   for (const g of grades) { expect(g.className).toContain("doc-chips--4"); expect(g.children).toHaveLength(4); }
   const css = readFileSync(join(process.cwd(), "src", "documentos.css"), "utf8");
   expect(css).toContain(".doc-chips--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }");
+});
+
+test("falha ao ler o painel: a página diz o que houve, sem o Carregando nem o corpo", async () => {
+  vi.mocked(api).mockRejectedValueOnce(new Error("O servidor não respondeu."));
+  render(<DocumentosGarantias />);
+  await screen.findByRole("alert");
+  expect(screen.queryByText("Carregando…")).toBeNull();
+  expect(document.querySelector(".doc-corpo")).toBeNull();
 });

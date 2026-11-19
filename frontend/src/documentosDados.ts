@@ -28,6 +28,10 @@ export const TIPOS: { chave: string; rotulo: string }[] = [
   { chave: "municipal", rotulo: "Municipal (Cuiabá)" }, { chave: "falencia", rotulo: "Falência (TJMT)" },
 ];
 export const ROTULO_TIPO: Record<string, string> = Object.fromEntries(TIPOS.map(t => [t.chave, t.rotulo]));
+/** O papel da empresa, como a linha dela diz (Certidoes e Regularidade). */
+export const PAPEL: Record<string, string> = { lotufo: "própria", consorcio: "consórcio", consorciada: "consorciada" };
+/** O nome curto das cinco certidoes da matriz (a falencia so' entra onde exigida). */
+export const NOME_CHIP: Record<string, string> = { federal: "Federal", fgts: "FGTS", trabalhista: "CNDT", estadual: "Estadual", municipal: "Municipal" };
 export function cnpjBR(c: string): string {
   return c.length === 14 ? `${c.slice(0, 2)}.${c.slice(2, 5)}.${c.slice(5, 8)}/${c.slice(8, 12)}-${c.slice(12)}` : c;
 }
