@@ -51,6 +51,9 @@
 }
 .arc .arc-tabela thead th:first-child { width: 34%; }
 .arc .arc-tabela--soltas thead th:first-child { width: auto; }
+/* o selo do tempo parado nao corta ("112 dias úteis" inteiro): a coluna tem o minimo dele, e a data prevista embaixo
+   quebra em duas linhas quando aperta */
+.arc .arc-tabela td.arc-a-parada { min-width: calc(var(--alvo-minimo) * 3.5); }
 
 /* a linha: a obra forte e a medicao com a competencia embaixo; a data e o valor nao quebram */
 .arc-obra { display: block; color: var(--cor-tinta); font-weight: var(--peso-forte); text-decoration: none; overflow-wrap: anywhere; }
@@ -70,11 +73,16 @@ a.arc-obra:hover { text-decoration: underline; text-underline-offset: var(--afas
 }
 .arc .arc-tabela tbody tr.arc-grupo > td.dinheiro { color: var(--cor-papel); }
 .arc-grupo__cab { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-p); }
+/* o botao sem a moldura nem a altura fixa do botao de base: o nome comprido quebra em linhas, e o fundo continua o da
+   faixa ao passar o mouse */
 .arc-grupo__abre {
-  display: inline-flex; align-items: center; gap: var(--espaco-pp); min-height: var(--alvo-menor); padding: 0;
-  border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  display: inline-flex; align-items: center; gap: var(--espaco-pp); height: auto; min-height: var(--alvo-menor); padding: 0;
+  border: 0; background: none; box-shadow: none; color: inherit; font: inherit; line-height: var(--entrelinha-justa);
+  text-align: left; cursor: pointer;
 }
-.arc-grupo__abre:hover { text-decoration: underline; text-underline-offset: var(--afastamento-sublinhado); }
+.arc-grupo__abre:is(:hover, :active):not(:disabled) {
+  background: none; color: inherit; text-decoration: underline; text-underline-offset: var(--afastamento-sublinhado);
+}
 .arc-grupo__abre:focus-visible { outline-color: var(--cor-papel); }
 .arc-grupo__seta { display: inline-block; min-width: var(--espaco-m); font-size: var(--texto-meta); }
 .arc-grupo__meta { color: var(--cor-papel-escuro); font-size: var(--texto-mini); font-weight: var(--peso-normal); }
@@ -85,6 +93,13 @@ a.arc-obra:hover { text-decoration: underline; text-underline-offset: var(--afas
 .arc-antigo dt { color: var(--cor-texto-secundario); }
 .arc-antigo dd { margin: 0; font-weight: var(--peso-forte); }
 .arc-painel__cab + .arc-antigo { border-top: 0; padding-top: 0; }
+
+/* ---------------------------------------------------------------- faixa media (a 1024 com o menu aberto)
+   A coluna da medicao deixa de reservar um terco da largura: o nome da obra quebra, e o valor de dez digitos, o selo
+   da nota e o tempo parado cabem sem cortar. */
+@container arc-pagina (max-width: 900px) {
+  .arc .arc-tabela thead th:first-child { width: auto; }
+}
 
 /* ---------------------------------------------------------------- um bloco por linha (ate' 640 px)
    As cinco colunas nao cabem: a linha vira um bloco, com a obra e o valor em cima e a nota, o protocolo e o tempo
