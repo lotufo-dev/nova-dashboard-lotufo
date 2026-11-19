@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import type { Usuario } from "./Login";
-import { ir, medicaoDaBusca, type Busca, type Origem } from "./rota";
+import { ir, medicaoDaBusca, temOrigem, type Busca, type Origem, type Rota } from "./rota";
 import { Link } from "./Link";
 import { FaixaPasso, PassoCartao, Passos, passosDa } from "./Passos";
 import { NovaPlanilhaCarta } from "./PlanilhaCarta";
 import { baseDosValores } from "./formato";
-import { Migalhas, VoltarOrigem } from "./Topo";
+import { useNomesDoCaminho } from "./nomesDoCaminho";
+import { VoltarOrigem } from "./Topo";
 import "./etapas.css";
 
 // Medicao que ainda nao existe (#153): a antiga tela "Nova medição" virou o primeiro passo da pagina da medicao. Desde a
@@ -15,8 +16,12 @@ import "./etapas.css";
 // Passos.tsx; a obra sem planilha/carta comeca em Espelhos). Os outros passos aparecem na barra, mas so' liberam depois.
 
 type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number;
+  // #805: a sigla do contratante e a chave da pagina dele, para o caminho do topo
+  contratante?: string | null; contratante_chave?: string | null;
   /** #660: os passos da medição que a obra inicia, decididos no servidor (família do órgão e cadastro da obra) */
   passos_medicao?: number[] };
+// as telas que estao no caminho da medicao (Obras › contratante › obra › ...): o trecho delas ja' volta sozinho
+const FORA_DO_CAMINHO: Rota["tela"][] = ["obras", "contratante"];
 
 // A janela "Iniciar processo" (#151) manda o número, a competência e a série pela busca da URL
 // (?numero=25&competencia=2026-10&tipo=projeto); valor fora do padrão é ignorado.
@@ -45,19 +50,23 @@ export default function MedicaoNova({ contratoId, usuario, origem, busca = {} }:
   }, [contratoId]);
   const obra = cab?.obra ?? "Obra";
   useEffect(() => { document.title = `${obra} · ${nome} · grupolotufo`; }, [obra, nome]);
+  // o caminho do topo (#814): Obras › contratante › obra › Medições › Nova medição
+  useNomesDoCaminho({ obra: cab?.obra, medicao: nome,
+    contratante: cab ? { nome: cab.contratante ?? cab.orgao, chave: cab.contratante_chave } : null });
   const passos = cab?.passos_medicao?.length ? cab.passos_medicao : passosDa(regraAtiva !== false);
   const atual = passos[0];
   const aberto = vendo !== null && passos.includes(vendo) ? vendo : atual;
 
   return (
     <>
-      <header className="topbar topbar--detalhe med-trilha">
-        <div className="topbar__trilha">
-          <VoltarOrigem origem={origem} alemDe={["obras", "medicoes"]} />
-          <Migalhas origem={origem} itens={[{ rotulo: "Medições", para: { tela: "medicoes" } },
-            { rotulo: obra, para: { tela: "obra", id: contratoId, aba: "medicoes" } }, { rotulo: nome }]} />
-        </div>
-      </header>
+      {/* o caminho e' da barra do topo (#814); aqui, so' o "← origem" de quem chegou de fora dele */}
+      {temOrigem(origem, FORA_DO_CAMINHO) && (
+        <header className="topbar topbar--detalhe med-trilha">
+          <div className="topbar__trilha">
+            <VoltarOrigem origem={origem} alemDe={FORA_DO_CAMINHO} />
+          </div>
+        </header>
+      )}
       <div className="pagina med">
         <div className="med-cabeca">
           <div>

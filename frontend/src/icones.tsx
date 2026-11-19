@@ -198,3 +198,32 @@ export function IconeCheck(p: Props) {
 export function IconeTraco(p: Props) {
   return <Svg {...p}><path d="M6 12h12" /></Svg>;
 }
+
+/* Menu em areas (#814): as paginas que nasceram com ele. */
+/* A receber: o valor que ainda vai entrar (a seta que chega a' linha). */
+export function IconeAReceber(p: Props) {
+  return <Svg {...p}>
+    <path d="M12 3v12" /><path d="M7 10.5l5 5 5-5" /><path d="M4 20.5h16" />
+  </Svg>;
+}
+
+/* Regularidade mensal: o documento conferido. */
+export function IconeDocumentoVisto(p: Props) {
+  return <Svg {...p}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8.5 14.5l2.5 2.5 4.5-5" />
+  </Svg>;
+}
+
+/* Garantias: o escudo. */
+export function IconeEscudo(p: Props) {
+  return <Svg {...p}>
+    <path d="M12 2.5l8 3v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-6z" />
+  </Svg>;
+}
+
+/* Minha conta: a pessoa. */
+export function IconePessoa(p: Props) {
+  return <Svg {...p}>
+    <circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" />
+  </Svg>;
+}

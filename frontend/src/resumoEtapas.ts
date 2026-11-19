@@ -36,8 +36,13 @@ export type RespostaResumo = {
   etapas: ContagemDaEtapa[];
   /** O medido da competencia (o numero do Fechamento) e as referencias da variacao; nula a que nao serve. */
   medido: { valor_centavos: number; mes_anterior: Referencia | null; ano_anterior: Referencia | null };
-  /** O protocolado e o recebido da competencia anterior na mesma data, um mes antes; nulo o que nao tem lastro. */
-  mesma_altura: { competencia: string; ate: string; protocolado_centavos: number | null; recebido_centavos: number | null } | null;
+  /** Tudo o que a competencia ja' protocolou ate' hoje, recebido depois ou nao (decisao do dono de 18/11/2026): e' o
+   *  que a variacao do protocolado compara, e nao o valor da etapa (o que esta' parado nela agora, que cai quando o
+   *  orgao paga). Nulo sem lastro (medicao que passou pelo protocolado sem a data do protocolo). */
+  protocolado_acumulado_centavos: number | null;
+  /** A competencia anterior na mesma data, um mes antes: o que ja' tinha protocolado (o acumulado) e o que ja' tinha
+   *  recebido; nulo o que nao tem lastro. */
+  mesma_altura: { competencia: string; ate: string; protocolado_acumulado_centavos: number | null; recebido_centavos: number | null } | null;
   diferenca_critica_por_mil: number;
   grupos: { contratante: string; medicoes: number; valor_centavos: number; linhas: Linha[] }[];
   sem_medicao: SemMedicao[];
@@ -53,6 +58,10 @@ export const ETAPAS: { chave: Etapa; rotulo: string }[] = [
 ];
 export const ANTES = "Planilha/carta a enviar";
 export const ROTULO = { antes: ANTES, ...Object.fromEntries(ETAPAS.map(e => [e.chave, e.rotulo])) } as Record<EtapaDaVez, string>;
+
+/** A palavra que vai antes do valor do protocolado acumulado (o termo do glossario), na linha da variacao: a variacao
+ *  fala desse numero (com o que ja' foi recebido), e nao do valor da coluna, que e' so' o que esta' na etapa agora. */
+export const ACUMULADO = "acumulado";
 
 export const maiuscula = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 

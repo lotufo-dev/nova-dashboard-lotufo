@@ -420,7 +420,7 @@ export const obrasComAParte = obras => obras.map((o, i) => ({ ...o, posicao: { .
 // `parada` da fila de trabalho: no protocolado, sem prazo do orgao (a MTPAR), dentro do prazo e alem dele; aprovado
 // abaixo do pedido (pequeno e critico) e acima dele; recebida com os dias da nota ao recebimento; planilha/carta
 // ainda nao enviada; obras sem medicao (uma que nunca mediu) e meses anteriores em aberto de tres competencias.
-// O protocolado tem a referencia da mesma altura e o recebido vem sem lastro (sem variacao). `contratante` recorta
+// O protocolado tem a variacao do acumulado contra a mesma altura e o recebido vem sem lastro (sem variacao). `contratante` recorta
 // como o servidor (a MTPAR fica com quatro etapas vazias); `vazio` e' o mes sem medicao nenhuma.
 // A resposta verdadeira da' o dia, a competencia e de quando e' o dado; o resto e' trocado.
 const ETAPAS_DO_RESUMO = ["em_analise", "boletim", "nota", "protocolado", "recebido"];
@@ -497,14 +497,18 @@ export const resumoEmQuadro = ({ contratante = null, vazio = false } = {}) => re
     return { contratante: n, medicoes: quantas(ls), valor_centavos: soma(ls), linhas: ls };
   });
   const medido = soma(linhasDoMes);
+  const acumulado = soma(linhasDoMes.filter(l => l.etapa === "protocolado" || l.etapa === "recebido"));
   // o mesmo dia de hoje, um mes antes (o dia 29 em diante fica no 28, para caber em qualquer mes)
   const d = new Date(hoje), ate = dataEm(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, Math.min(28, d.getUTCDate())));
   return { ...resposta, contratante, contratantes, etapas: porEtapa(linhasDoMes),
     // o medido subiu contra o mes anterior e ficou estavel contra o mesmo mes do ano anterior
     medido: { valor_centavos: medido, mes_anterior: medido ? { competencia: mesAntes(mes, 1), valor_centavos: Math.round(medido / 1.068) } : null,
       ano_anterior: medido ? { competencia: mesAntes(mes, 12), valor_centavos: Math.round(medido / 0.99) } : null },
-    // o protocolado caiu contra a mesma altura do mes anterior; o recebido nao tem lastro (sem variacao)
-    mesma_altura: medido ? { competencia: mesAntes(mes, 1), ate, protocolado_centavos: 3_780_000 * REAIS, recebido_centavos: null } : null,
+    // o protocolado compara o acumulado (o que esta' na etapa e o que ja' foi recebido), que subiu contra o da
+    // competencia anterior na mesma altura, embora o valor da etapa seja bem menor: o orgao pagou cedo. O recebido
+    // nao tem lastro (sem variacao)
+    protocolado_acumulado_centavos: acumulado,
+    mesma_altura: medido ? { competencia: mesAntes(mes, 1), ate, protocolado_acumulado_centavos: Math.round(acumulado / 1.09), recebido_centavos: null } : null,
     diferenca_critica_por_mil: 5, grupos, sem_medicao: recorte(semMedicao), anteriores_etapas: porEtapa(linhasDeAntes),
     anteriores: [...new Set(linhasDeAntes.map(l => l.competencia))].sort().map(c => {
       const ls = linhasDeAntes.filter(l => l.competencia === c);
@@ -559,6 +563,10 @@ const CARTEIRA = () => [
     paralisada: dataEm(hojeDaProva(), -100), ritmo: 300_000, necessario: null, mes: 900_000, antes: 905_000, receber: 900_000 }),
   // SES-MT: uma obra adiantada, sem nada pendente e sem medicao no mes (o contratante fica "Em dia")
   daCarteira(9010, "Hospital Capa", "SES-MT", "ses-mt", { vigente: 168_300_000, medido: 156_519_000, ritmo: 5_000_000, necessario: 4_000_000, dias: 75 }),
+  // SINFRA, decisao do dono de 18/11/2026: devagar (37% do necessario) e sem aviso nenhum. Na pagina do contratante a
+  // Situacao diz o motivo do andamento, e nao "Em dia"
+  daCarteira(9016, "Ponte Pi", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 54_000_000, medido: 16_200_000,
+    ritmo: 1_100_000, necessario: 2_900_000, mes: 1_050_000, antes: 1_000_000, dias: 390 }),
 ];
 export const carteiraSimulada = () => CARTEIRA_INTEIRA();
 
@@ -843,6 +851,16 @@ export const filaSimulada = (resposta, reg) => {
     anteriores: { linhas: anteriores, esperam_pagamento: 17, antes_do_ano_inicial: 4, ano_inicial: "2025" },
   };
 };
+
+// ------------------------------------------------------------------ caminho no alto (#814)
+// O cabecalho da obra com nomes compridos, como os da producao: o contratante escrito por extenso e a obra com o
+// trecho e o lote no nome. O caminho do topo ("Obras › contratante › obra › Medições › 15ª Medição") tem de quebrar
+// em linhas a 390 px em vez de cortar ou de alargar a pagina. Nomes inventados.
+export const cabecalhoDeNomeLongo = cabecalho => ({
+  ...cabecalho,
+  contratante: "Secretaria de Estado de Infraestrutura e Logística",
+  obra: "Rodovia Exemplo, trecho do entroncamento ao distrito, lote 2",
+});
 
 // ---- Tela de login (#821): o que o servidor responde a quem tenta entrar. Simuladas porque a recusa de verdade
 // conta no limite de tentativas por computador, e a prova ja' entra uma vez por perfil e largura.

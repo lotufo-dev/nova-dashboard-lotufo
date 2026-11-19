@@ -2,7 +2,7 @@ import { motivosDaLinha } from "./carteira";
 import EmAbertoAParte from "./EmAbertoAParte";
 import { brl, contar, fmtDias } from "./formato";
 import { Link } from "./Link";
-import { mesesDoMedido, pctPiso, type MedidoMes, type ResumoObras } from "./listaObras";
+import { mesesDoMedido, pctPiso, type LeituraDaObra, type MedidoMes, type ResumoObras } from "./listaObras";
 import MarcaEtapa from "./MarcaEtapa";
 import { SeloFarol, type ObraPainel } from "./ObrasCarteira";
 import { type Ir } from "./rota";
@@ -121,9 +121,22 @@ export function EtiquetasDeAtencao({ r, semAndamento = false }: { r: ResumoObras
 
 /** A situacao da obra com o motivo escrito: o selo do farol (a palavra do nivel) e o primeiro motivo dele, na ordem
  *  do servidor (o mais grave primeiro); os outros ficam nos avisos da obra. A obra em dia fica so' com a palavra, em
- *  tinta. Sem o painel (carregando, falhou) ou sem a obra nele, nada. */
-export function SituacaoDaObra({ obra, ir }: { obra: ObraPainel | undefined; ir: Ir }) {
+ *  tinta. Sem o painel (carregando, falhou) ou sem a obra nele, nada.
+ *  `andamento` (decisao do dono de 18/11/2026): a leitura do andamento da obra (`andamentoDaObra`, a regua unica),
+ *  na tabela que tem a coluna Andamento ao lado. A obra sem aviso e com o andamento Devagar nao diz "Em dia", que
+ *  contradiria a coluna vizinha: diz o motivo do andamento, com a palavra na etiqueta da familia (valor, sem glifo).
+ *  Qualquer aviso do farol continua ganhando, e Atencao no andamento nao tira o "Em dia". */
+export function SituacaoDaObra({ obra, ir, andamento }: { obra: ObraPainel | undefined; ir: Ir; andamento?: LeituraDaObra | null }) {
   if (!obra) return null;
+  if (obra.farol === "verde" && andamento?.leitura === "devagar") {
+    return (
+      <div className="obras-situacao">
+        {/* a mesma palavra da peca `Andamento`, na coluna ao lado (o teste da pagina do contratante confere) */}
+        <span className="obras-etiqueta obras-etiqueta--devagar">Devagar</span>
+        <span className="obras-situacao__motivo">mede <span className="num">{andamento.pct.toLocaleString("pt-BR")}%</span> do necessário</span>
+      </div>
+    );
+  }
   if (obra.farol === "verde") return <span className="obras-situacao__emdia">Em dia</span>;
   const { visiveis, mais } = motivosDaLinha(obra.motivos, 1);
   return (

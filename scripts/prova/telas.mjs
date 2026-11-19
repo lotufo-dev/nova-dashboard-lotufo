@@ -36,6 +36,7 @@ import { avisosEmVolume, semAvisos, cabecalhoCom, cabecalhoEmDia, CUSTO_DA_OBRA,
 import { fechamentoEmAbas } from "./simulados.mjs";   // #815: em linha propria, para nao mexer na lista de cima
 
 import { carteiraSimulada, filaSimulada, painelDaCarteira } from "./simulados.mjs";
+import { cabecalhoDeNomeLongo } from "./simulados.mjs";
 // issue #817 (reestrutura 5c): a Inicio com o ciclo por contratante e o medido em 12 meses
 import { inicioPorContratante, inicioSemCiclo } from "./simulados.mjs";
 
@@ -244,10 +245,10 @@ export const TELAS = [
 
   // ---- Documentos: as tres abas, a fila do "Anexar PDF", a janela do ZIP e a pagina da empresa
   { rota: "documentos", id: "documentos", caminho: "/documentos", perfis: TODOS, espera: ".doc-painel-aba" },
-  { rota: "documentos", id: "documentos-regularidade", caminho: "/documentos", perfis: TODOS, antes: ".doc-painel-aba", espera: ".doc-painel-aba",
-    passos: [{ clicar: '.escolha:has-text("Regularidade")' }] },
-  { rota: "documentos", id: "documentos-garantias", caminho: "/documentos", perfis: TODOS, antes: ".doc-painel-aba", espera: ".doc-painel-aba",
-    passos: [{ clicar: '.escolha:has-text("Garantias")' }] },
+  // #814: cada assunto tem o proprio endereco (e o proprio item no menu); antes eram abas de "/documentos"
+  { rota: "documentos", id: "documentos-regularidade", caminho: "/documentos/regularidade", perfis: TODOS,
+    espera: '#aba-regularidade[aria-selected="true"]' },
+  { rota: "documentos", id: "documentos-garantias", caminho: "/documentos/garantias", perfis: TODOS, espera: '#aba-garantias[aria-selected="true"]' },
   { rota: "documentos", id: "documentos-anexar", caminho: "/documentos", perfis: OPERA, antes: ".doc-painel-aba", espera: ".doc-fila form",
     simular: [{ metodo: "POST", caminho: /^\/api\/documentos\/anexar\/ler$/, corpo: PDF_ILEGIVEL }],
     passos: [{ arquivo: ['input[aria-label="Escolher PDFs para anexar"]', "certidao-de-prova.pdf"] }] },
@@ -423,6 +424,34 @@ export const TELAS = [
 
   // ---- Minha conta
   { rota: "conta", id: "conta", caminho: "/conta", perfis: TODOS, espera: ".conta-eu" },
+
+  // ---- Menu em areas, caminho no alto e as rotas das paginas novas (#814)
+  // A receber: a pagina-casca (o estado vazio), inteira e so' de um contratante; a #816 traz as notas
+  { rota: "a-receber", id: "a-receber", caminho: "/a-receber", perfis: TODOS, espera: "#conteudo .vazio" },
+  { rota: "a-receber", id: "a-receber-contratante", caminho: "/a-receber?contratante=SINFRA", perfis: ["diretoria"],
+    espera: '#conteudo .vazio a[href="/a-receber"]' },
+  // os enderecos de antes de Documentos: a aba na busca e "/documentos/certidoes" abrem a pagina do assunto
+  { rota: "documentos", id: "documentos-endereco-de-antes", caminho: "/documentos?aba=garantias", destino: "/documentos/garantias",
+    perfis: SO_ADMIN, espera: '#aba-garantias[aria-selected="true"]' },
+  { rota: "documentos", id: "documentos-certidoes-por-extenso", caminho: "/documentos/certidoes", destino: "/documentos", perfis: SO_ADMIN,
+    espera: ".doc-painel-aba" },
+  // a aba do contratante ja' tem endereco; enquanto a #818 nao chega, ele abre a pagina do contratante
+  { rota: "contratante", id: "contratante-aba", caminho: "/obras/contratante/sinfra/medicoes", destino: "/obras/contratante/sinfra",
+    perfis: ["diretoria"], espera: ".obras-do-contratante" },
+  // O menu no estado que as outras telas nao mostram: um clique no botao do pe' o recolhe no computador (so' os
+  // icones, com o fio entre as areas) e o abre por cima da tela no celular (onde ele nasce recolhido). No computador a
+  // escolha fica guardada no navegador: a segunda tela desfaz o clique, e as telas seguintes voltam ao menu aberto.
+  // As duas ficam JUNTAS e nesta ordem.
+  { rota: "inicio", id: "menu-alternado", caminho: "/inicio", perfis: TODOS, antes: ".ini", espera: "nav.menu .menu__recolher",
+    passos: [{ clicar: "nav.menu .menu__recolher" }] },
+  { rota: "inicio", id: "menu-de-volta", caminho: "/inicio", perfis: TODOS, antes: ".ini", espera: "nav.menu .menu__recolher",
+    passos: [{ clicar: "nav.menu .menu__recolher" }] },
+  // o caminho com os cinco trechos e nomes compridos (o contratante por extenso, a obra de nome longo): a barra do
+  // topo quebra em linhas em vez de cortar ou de alargar a pagina
+  { rota: "medicao", id: "caminho-longo", caminho: MEDICAO, perfis: TODOS, antes: "nav.passos", espera: ".topo .caminho li:nth-child(5)",
+    simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoDeNomeLongo }] },
+  { rota: "obra", id: "caminho-longo-obra", caminho: "/obras/:obra/prazos", perfis: ["diretoria"], antes: OBRA_GRADE,
+    espera: ".topo .caminho li:nth-child(4)", simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoDeNomeLongo }] },
 ];
 
 // Rotas do roteador que a prova nao abre, cada uma com o motivo.

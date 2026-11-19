@@ -109,8 +109,6 @@
 .sg__dias .glifo { margin-top: var(--espaco-grade); }
 
 /* ---------------------------------------------------------------- historico */
-.sg__trilha { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini); color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
-.sg__trilha .icone { flex: none; }
 .sg__filtros { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--espaco-p); }
 .sg__busca { width: calc(var(--alvo-minimo) * 8); max-width: 100%; }
 .sg__abrir { display: inline-flex; align-items: center; gap: var(--espaco-pp); }

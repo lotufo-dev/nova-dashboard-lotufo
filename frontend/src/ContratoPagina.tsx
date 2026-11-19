@@ -13,7 +13,8 @@ import Reajuste from "./Reajuste";
 import { NovoProtocolo } from "./Protocolo";
 import { ir, medicaoDaBusca, type AbaObra as Aba, type Busca, type Origem } from "./rota";
 import { Link } from "./Link";
-import { Abas, destinoDeHref, Migalhas, VoltarOrigem } from "./Topo";
+import { useNomesDoCaminho } from "./nomesDoCaminho";
+import { Abas, destinoDeHref, VoltarOrigem } from "./Topo";
 import { baseDosValores } from "./formato";
 import Selo from "./Selo";
 import { situacaoDoNivel } from "./situacao";
@@ -138,6 +139,9 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
     : origem?.tela === "contratante" ? { ...destinoDeHref(origem.href), rotulo: nomeContratante ?? "Contratante" }
       : doContratante ? { para: doContratante, busca: undefined, rotulo: nomeContratante ?? "Contratante" }
         : { para: { tela: "obras" as const }, busca: undefined, rotulo: "Obras" };
+  // O caminho em si ("Obras › SINFRA › MT-388") e' da barra do topo (#814): a pagina diz os nomes que ja' carregou. O
+  // contratante leva a' pagina dele; o orgao sem chave no cadastro aparece so' com o nome.
+  useNomesDoCaminho({ obra: c?.obra, contratante: nomeContratante ? { nome: nomeContratante, chave: c?.contratante_chave } : null });
 
   return (
     <>
@@ -148,11 +152,6 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
               <IconeVoltar className="icone icone--p" /> {volta.rotulo}
             </Link>
             <VoltarOrigem origem={origem} alemDe={["obras", "contratante"]} />
-            {/* Obras › contratante › obra. O contratante leva a' pagina dele (ou a ela como estava, se foi de la' que se
-                chegou); sem orgao no cadastro, e' so' o nome. */}
-            <Migalhas origem={origem} itens={[{ rotulo: "Obras", para: { tela: "obras" } },
-              ...(nomeContratante ? [{ rotulo: nomeContratante, para: doContratante ?? undefined }] : []),
-              { rotulo: c?.obra ?? "Obra" }]} />
           </div>
         </div>
         <div className="topbar__linha topbar__linha--quebra">

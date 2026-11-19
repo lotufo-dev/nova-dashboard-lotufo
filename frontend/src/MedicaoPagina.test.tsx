@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiErro } from "./api";
+import Caminho from "./Caminho";
 import type { Usuario } from "./Login";
 import MedicaoPagina from "./MedicaoPagina";
 
@@ -113,13 +114,38 @@ describe("Página da medição: o trilho, a etapa aberta e a coluna da direita",
     expect(await screen.findByRole("heading", { name: "Notas", level: 2 })).toBeTruthy();
   });
 
-  it("o caminho do topo: Medições volta à aba onde a medição está e a obra leva à página da obra", async () => {
-    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida" }] });
-    pagina();
+  // O caminho é da barra do topo (#814): aqui ele entra ao lado da página, como a casca o desenha, e a página diz os
+  // nomes que carregou (a obra, o contratante dela e a medição).
+  it("o caminho do topo: Obras › contratante › obra › Medições › a medição, cada trecho com o endereço dele", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida" }],
+      "/api/contratos/1/cabecalho": { obra: "Hospital", orgao: "SES", instrumento: "CT 1/2026", percentual_lotufo_bp: 10000,
+        contratante: "SES-MT", contratante_chave: "ses-mt" } });
+    render(<><Caminho rota={{ tela: "medicao", obra: 1, id: 5 }} ehH1={false} />
+      <MedicaoPagina contratoId={1} medicaoId={5} usuario={usuario} origem={null} /></>);
     const caminho = await screen.findByRole("navigation", { name: "Você está em" });
     await waitFor(() => expect(within(caminho).getByRole("link", { name: "Hospital" })).toBeTruthy());
-    expect(within(caminho).getByRole("link", { name: "Medições" }).getAttribute("href")).toBe("/medicoes");
+    await waitFor(() => expect([...caminho.querySelectorAll("li")].map(li => li.textContent))
+      .toEqual(["Obras", "SES-MT", "Hospital", "Medições", "23ª Medição"]));
+    expect(within(caminho).getByRole("link", { name: "SES-MT" }).getAttribute("href")).toBe("/obras/contratante/ses-mt");
     expect(within(caminho).getByRole("link", { name: "Hospital" }).getAttribute("href")).toBe("/obras/1");
+    expect(within(caminho).getByRole("link", { name: "Medições" }).getAttribute("href")).toBe("/obras/1/medicoes");
+    // a página não desenha trilha própria, e sem origem não há a linha do "← origem"
+    expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);
+    expect(document.querySelector(".med-trilha")).toBeNull();
+  });
+
+  it("vindo de uma tela que não está no caminho (a fila de Medições), a página mostra o “← Medições” com os filtros", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "nota_emitida" }] });
+    const { unmount } = render(<MedicaoPagina contratoId={1} medicaoId={5} usuario={usuario}
+      origem={{ tela: "medicoes", href: "/medicoes/quadro?mes=2026-09" }} />);
+    await screen.findByRole("navigation", { name: "Passos da medição" });
+    const voltar = document.querySelector<HTMLAnchorElement>(".med-trilha .topbar__trilha > a.btn--voltar")!;
+    expect([voltar.textContent!.trim(), voltar.getAttribute("href")]).toEqual(["Medições", "/medicoes/quadro?mes=2026-09"]);
+    unmount();
+    // de Obras ou da página do contratante o trecho do caminho já volta: sem botão
+    render(<MedicaoPagina contratoId={1} medicaoId={5} usuario={usuario} origem={{ tela: "obras", href: "/obras/todas?q=hosp" }} />);
+    await screen.findByRole("navigation", { name: "Passos da medição" });
+    expect(document.querySelector(".med-trilha")).toBeNull();
   });
 
   it("título “Nª Medição + Reajuste”, o total somado no alto, o Resumo em faixa e a Linha do tempo ao lado", async () => {

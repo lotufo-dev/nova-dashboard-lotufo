@@ -12,8 +12,8 @@ import MarcaEtapa from "./MarcaEtapa";
 import { type Painel } from "./ObrasCarteira";
 import { AReceber, EtiquetasDeAtencao, Executado, MedidoNoMes, NumerosDeObras, SituacaoDaObra } from "./ObrasPecas";
 import Rolagem from "./Rolagem";
-import { type Busca, type Ir } from "./rota";
-import { Migalhas } from "./Topo";
+import { useNomesDoCaminho } from "./nomesDoCaminho";
+import { type AbaContratante, type Busca, type Ir } from "./rota";
 import "./obras.css";
 
 // A pagina do contratante (#805), o segundo nivel de Obras: "/obras/contratante/<chave>". A chave e' a que o servidor
@@ -21,12 +21,15 @@ import "./obras.css";
 // No alto, os mesmos numeros do bloco do contratante (das obras em andamento dele), com a participacao na carteira e o
 // prazo de pagamento do orgao; embaixo, uma linha por obra, com o andamento e a situacao com o motivo. Tudo na COTA da
 // Lotufo e do servidor (`/api/contratos`, `/api/diretoria`). `?situacao=todas` traz as obras encerradas a' tabela.
-// As abas Medicoes, A receber e Processos no SIGA do contratante ficam para a PR seguinte; ate' la', os atalhos levam
-// a's paginas que ja' existem.
+// As abas Medicoes, A receber e Processos no SIGA do contratante ficam para a PR seguinte (#818); ate' la', os atalhos
+// levam a's paginas que ja' existem. O endereco de cada aba ja' existe na rota (`aba`, #814).
 
 const FORA = new Set(["encerrado", "rescindido"]);
 
-export default function ContratantePagina({ chave, perfil, busca = {}, ir }: { chave: string; perfil: string; busca?: Busca; ir: Ir }) {
+// `aba`: a aba do endereco. Por ora so' existe a de Obras (ver ABAS_PRONTAS, em abasDoContratante.ts).
+export default function ContratantePagina({ chave, perfil, busca = {}, ir }: {
+  chave: string; aba?: AbaContratante; perfil: string; busca?: Busca; ir: Ir;
+}) {
   const [lista, setLista] = useState<ObraLista[] | null>(null);
   // o painel da diretoria: o farol com os motivos, os avisos e o prazo de pagamento; undefined = carregando; null = falhou
   const [painel, setPainel] = useState<Painel | null | undefined>(undefined);
@@ -54,15 +57,12 @@ export default function ContratantePagina({ chave, perfil, busca = {}, ir }: { c
   const aqui = { tela: "contratante" as const, chave };
 
   useEffect(() => { document.title = `${nome ?? "Contratante"} · Obras · grupolotufo`; }, [nome]);
+  // o caminho ("Obras › SINFRA") e' da barra do topo (#814): a pagina so' diz o nome do contratante, quando a lista chega
+  useNomesDoCaminho({ contratante: nome ? { nome, chave } : null });
 
   return (
     <>
       <header className="topbar topbar--detalhe">
-        <div className="topbar__linha topbar__linha--quebra">
-          <div className="topbar__trilha">
-            <Migalhas itens={[{ rotulo: "Obras", para: { tela: "obras" } }, { rotulo: nome ?? "Contratante" }]} />
-          </div>
-        </div>
         <div className="topbar__linha topbar__linha--quebra obras-topo">
           <h1 className="topbar__titulo topbar__titulo--grande">{nome ?? "Contratante"} <span className="obras-topo__sub">cota da Lotufo</span></h1>
           {nome && <p className="topbar__meta">{contar(r.obras, "obra em andamento", "obras em andamento")}</p>}
@@ -106,6 +106,8 @@ export default function ContratantePagina({ chave, perfil, busca = {}, ir }: { c
                     <tbody>
                       {linhas.map(o => {
                         const fim = fimDaExecucao(o.execucao_fim_vigente);
+                        // a mesma leitura na coluna Andamento e na Situacao (devagar sem aviso nao e' "Em dia")
+                        const leitura = andamentoDaObra(o);
                         return (
                           <tr key={o.id} className="linha linha--obra" onClick={e => { if (!(e.target as HTMLElement).closest("a")) ir({ tela: "obra", id: o.id, aba: "ficha" }); }}>
                             <td data-rotulo="Obra">
@@ -115,14 +117,14 @@ export default function ContratantePagina({ chave, perfil, busca = {}, ir }: { c
                             <td data-rotulo="Executado"><Executado pct={pctExecutado(o)} /></td>
                             <td data-rotulo="Andamento" className="obras-posicao__andamento">
                               {/* #822: a leitura vem do servidor. Fora da regua a peca escreve o motivo; sem nada, o tracinho */}
-                              {andamentoDaObra(o)
+                              {leitura
                                 ? <Andamento leitura={o.andamento?.leitura} ritmo={o.andamento?.ritmo_centavos} necessario={o.andamento?.necessario_centavos} detalhe="valores" />
                                 : <Andamento leitura={o.andamento?.leitura} vazio="—" />}
                             </td>
                             <td data-rotulo={`Medido${mes ? ` em ${mes}` : " no mês"}`} className="col-num dinheiro"><MedidoNoMes mm={o.medido_mes} /></td>
                             <td data-rotulo="A receber" className="col-num dinheiro"><AReceber centavos={posicaoDe(o).a_receber_centavos} /></td>
                             <td data-rotulo="Situação" className="obras-do-contratante__situacao">
-                              {FORA.has(o.estado) ? (o.estado === "encerrado" ? "Encerrada" : "Rescindida") : <SituacaoDaObra obra={doPainel.get(o.id)} ir={ir} />}
+                              {FORA.has(o.estado) ? (o.estado === "encerrado" ? "Encerrada" : "Rescindida") : <SituacaoDaObra obra={doPainel.get(o.id)} ir={ir} andamento={leitura} />}
                             </td>
                           </tr>
                         );

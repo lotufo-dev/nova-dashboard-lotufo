@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import Caminho from "./Caminho";
+import { ABAS_PRONTAS } from "./abasDoContratante";
 import { comLeitura, leituraDeTeste } from "./andamentoTeste";
 import ContratantePagina from "./ContratantePagina";
 import type { ObraLista } from "./listaObras";
@@ -42,9 +44,12 @@ const PAINEL = {
   avisos: [aviso(1, "critico"), aviso(1, "atencao"), aviso(5, "critico")],
 };
 
+// o caminho é da barra do topo (#814): aqui ele entra ao lado da página, como a casca o desenha
 function Pagina({ perfil = "diretoria" }: { perfil?: string }) {
   const { rota, busca, ir } = useRota();
-  return rota.tela === "contratante" ? <ContratantePagina chave={rota.chave} perfil={perfil} busca={busca} ir={ir} /> : <p>outra tela</p>;
+  return rota.tela === "contratante"
+    ? <><Caminho rota={rota} perfil={perfil} ehH1={false} /><ContratantePagina chave={rota.chave} aba={rota.aba} perfil={perfil} busca={busca} ir={ir} /></>
+    : <p>outra tela</p>;
 }
 function abrir(url: string, perfil?: string) {
   window.history.replaceState(null, "", url);
@@ -71,6 +76,13 @@ describe("Página do contratante (#805)", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("SINFRA cota da Lotufo");
     expect(document.querySelector(".topbar__meta")!.textContent).toBe("3 obras em andamento");
     await waitFor(() => expect(document.title).toBe("SINFRA · Obras · grupolotufo"));
+    // a página não desenha trilha própria (#814): a única é a da barra do topo
+    expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);
+    expect(document.querySelector(".topbar .caminho, .topbar__trilha")).toBeNull();
+  });
+
+  it("por ora a página só desenha a aba Obras; as outras já têm endereço (#814) e chegam com a #818", async () => {
+    expect(ABAS_PRONTAS).toEqual(["obras"]);
   });
 
   it("o cabeçalho traz os números do bloco: contratado e participação, medido, medido no mês, a receber, prazo e andamento", async () => {
@@ -115,6 +127,48 @@ describe("Página do contratante (#805)", () => {
     fireEvent.click(linha("Cavalaria"));
     expect(window.location.pathname).toBe("/obras/2");
     expect((window.history.state as { origem?: { tela: string; href: string } }).origem).toEqual({ tela: "contratante", href: "/obras/contratante/sinfra" });
+  });
+
+  it("devagar é motivo da situação: a obra devagar sem aviso não diz 'Em dia'; o aviso do farol continua ganhando", async () => {
+    // decisao do dono de 18/11/2026: "Devagar" numa coluna e "Em dia" na outra se contradiziam
+    const ritmo = (centavos: number) => ({ andamento: { ritmo_centavos: centavos, necessario_centavos: 100_00 } });
+    const obras = [
+      obra(1, "Anel Viário", ritmo(69_99)),        // devagar (69,99% e' 69%, pela regua da coluna), sem aviso
+      obra(2, "Estações BRT", ritmo(40_00)),       // devagar, com aviso critico
+      obra(3, "5 Bairros", ritmo(40_00)),          // devagar, com aviso de atencao
+      obra(4, "Cavalaria", ritmo(70_00)),          // em atencao (70%), sem aviso
+      obra(5, "Granito", ritmo(120_00)),           // adiantada, sem aviso
+      obra(6, "Trevo Novo"),                       // sem leitura do andamento, sem aviso
+    ];
+    const painel = { ...PAINEL, avisos: [aviso(2, "critico")], obras: [
+      noPainel(1, "Anel Viário", "verde"), noPainel(2, "Estações BRT", "vermelho", ["garantia não cobre o fim da execução"]),
+      noPainel(3, "5 Bairros", "atencao", ["prorrogação pedida há 9 dias"]), noPainel(4, "Cavalaria", "verde"),
+      noPainel(5, "Granito", "verde"), noPainel(6, "Trevo Novo", "verde")] };
+    api.mockImplementation(async (caminho: string) => (caminho === "/api/contratos" ? obras : painel));
+    abrir("/obras/contratante/sinfra");
+    const tabela = await screen.findByRole("table", { name: /Obras de SINFRA/ });
+    const celula = (nome: string, rotulo: string) =>
+      within(tabela).getByRole("link", { name: nome }).closest("tr")!.querySelector<HTMLElement>(`td[data-rotulo="${rotulo}"]`)!;
+    const situacao = (nome: string) => celula(nome, "Situação");
+    await waitFor(() => expect(situacao("Estações BRT").querySelector(".selo")).toBeTruthy());
+
+    // devagar sem aviso: a Situacao diz o motivo do andamento, com o mesmo percentual da coluna Andamento
+    expect(limpo(celula("Anel Viário", "Andamento").textContent)).toBe("Devagar · 69% do necessárioR$ 70/mês de R$ 100");
+    expect(limpo(situacao("Anel Viário").textContent)).toBe("Devagarmede 69% do necessário");
+    expect(situacao("Anel Viário").querySelector(".obras-situacao__emdia")).toBeNull();
+    // andamento e' valor, nao situacao: a palavra vai na etiqueta do tom da leitura, sem selo e sem glifo
+    expect(situacao("Anel Viário").querySelector(".obras-etiqueta--devagar")!.textContent)
+      .toBe(celula("Anel Viário", "Andamento").querySelector(".andamento__palavra")!.textContent);        // a mesma palavra
+    expect(situacao("Anel Viário").querySelector(".selo, .glifo")).toBeNull();
+
+    // devagar com aviso critico, ou com aviso de atencao: o aviso ganha, e o andamento fica so' na coluna dele
+    expect(limpo(situacao("Estações BRT").textContent)).toBe("Críticogarantia não cobre o fim da execução");
+    expect(limpo(situacao("5 Bairros").textContent)).toBe("Atençãoprorrogação pedida há 9 dias");
+    for (const nome of ["Estações BRT", "5 Bairros"]) expect(situacao(nome).querySelector(".obras-etiqueta--devagar")).toBeNull();
+
+    // em dia: em atencao no andamento (so' o devagar vira motivo), adiantada e sem leitura
+    expect(limpo(celula("Cavalaria", "Andamento").textContent)).toContain("Atenção · 70% do necessário");
+    for (const nome of ["Cavalaria", "Granito", "Trevo Novo"]) expect(limpo(situacao(nome).textContent)).toBe("Em dia");
   });
 
   it("só as obras do contratante, em andamento; 'Ver todas' traz a encerrada sem mudar os números do alto", async () => {
