@@ -9,7 +9,7 @@ import {
   certidaoPendente, certidoesOrdenadas, NOME_CURTO, resumoEmpresa, situacaoCertidao,
   situacaoGarantia, type EmpresaDoc,
 } from "./matriz";
-import { temOrigem, type AbaDocumentos, type Origem } from "./rota";
+import { temOrigem, type AbaDocumentos, type Origem, type Rota } from "./rota";
 import Selo from "./Selo";
 import { fmtCompetencia as mesBR, fmtDataPura } from "./tempo";
 import { useNomesDoCaminho } from "./nomesDoCaminho";
@@ -29,6 +29,13 @@ const ABAS: { id: AbaDocumentos; rotulo: string }[] = [
   { id: "regularidade", rotulo: "Regularidade do mês" },
   { id: "garantia", rotulo: "Garantia por obra" },
 ];
+
+// A pagina da area de que esta e' filha (#820), pela aba: a mesma que o caminho do topo mostra e o menu acende.
+const PAGINA_MAE: Record<AbaDocumentos, Rota> = {
+  certidoes: { tela: "documentos" },
+  regularidade: { tela: "documentos", pagina: "regularidade" },
+  garantia: { tela: "documentos", pagina: "garantias" },
+};
 
 const REG_TEXTO = { ok: "em dia", atrasada: "atrasada", faltando: "nenhuma anexada" } as const;
 
@@ -140,7 +147,7 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
         {painel && !e && (
           <div className="cartao vazio">
             <p className="vazio__titulo">Nenhum documento exigido.</p>
-            <p><Link para={{ tela: "documentos" }}>Ver todas as empresas</Link></p>
+            <p><Link para={PAGINA_MAE[aba]}>Ver todas as empresas</Link></p>
           </div>
         )}
 

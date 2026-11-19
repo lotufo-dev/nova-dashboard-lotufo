@@ -1,15 +1,17 @@
-/* Documentos (#161, #513; fundacao do redesenho na #767): a lista em tres abas e a pagina da empresa. A moldura do
+/* Documentos (#161, #513; fundacao do redesenho na #767; tres paginas na #820): Certidoes, Regularidade mensal,
+   Garantias e a pagina da empresa. A moldura do
    painel (.cartao), a tabela (.tabela), o botao (.btn), o selo, o glifo, o contador e a legenda sao pecas de base de
    tokens.css. Cor, familia, tamanho, espaco e borda so' por variavel. */
 
-/* ---------------------------------------------------------------- alto da lista: regua, abas e o Anexar */
+/* ---------------------------------------------------------------- alto da pagina: regua, contador e o Anexar */
 .doc-topo {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--espaco-p) var(--espaco-g);
   border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro);
 }
-.doc-topo__acoes { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-p); margin-left: auto; }
-.doc .legenda-cor { margin-top: calc(var(--espaco-p) * -1); }
-.doc-painel-aba { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-entre-blocos); }
+.doc-topo__conta { margin: 0; }
+/* a legenda da pagina e o Anexar PDF na mesma linha do contador: a pagina cabe em uma tela e meia (#820) */
+.doc-topo__acoes { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--espaco-p) var(--espaco-g); margin-left: auto; }
+.doc-corpo { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-entre-blocos); }
 
 /* ---------------------------------------------------------------- painel de linhas */
 .doc-bloco { min-width: 0; padding: var(--espaco-g) 0 var(--espaco-mini); }
@@ -80,7 +82,13 @@ a.doc-chip:focus-visible { outline: var(--largura-foco) solid var(--cor-foco); o
    1024 px (#658) */
 .doc-chips--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .doc-chips--4 { column-gap: var(--espaco-m); }
-.doc-grupo { padding-top: var(--espaco-m); }
+/* #820: com o volume real (vinte e tantas obras), a linha da obra e' justa como a do "Renovar agora", e a apolice de
+   24 digitos cabe numa linha so' a 1440 px */
+.doc-linha--obra { padding-top: var(--espaco-pp); padding-bottom: var(--espaco-pp); }
+@media (min-width: 721px) {
+  .doc-garantias .doc-chips--4 { grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr)); }
+}
+.doc-grupo { padding-top: var(--espaco-p); }
 .doc-grupo .doc-linhas > .doc-linha:first-child { border-top: 0; }
 .doc-linha--cabeca { align-items: end; padding-top: 0; padding-bottom: var(--espaco-pp); border-bottom: var(--regua-secao); }
 .doc-grupo__cabeca { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-pp); margin: 0; font-size: var(--texto-titulo-sub); }
@@ -109,8 +117,8 @@ a.doc-chip:focus-visible { outline: var(--largura-foco) solid var(--cor-foco); o
   .doc-linha--renovar { grid-template-columns: minmax(0, 1fr); }
   .doc-renovar__acoes { justify-content: flex-start; }
   .doc-grupo__mais { margin: 0 var(--espaco-p); }
-  .doc-aba { flex: 1 1 100%; justify-content: space-between; }
-  .doc-abas, .doc-topo__acoes { width: 100%; }
+  .doc-topo__acoes { width: 100%; justify-content: space-between; }
+  .doc-topo__acoes .legenda-cor { justify-content: flex-start; }
 }
 
 /* ---------------------------------------------------------------- pecas comuns */

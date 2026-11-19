@@ -243,17 +243,29 @@ export const TELAS = [
   { rota: "siga", id: "siga-erro", caminho: "/siga", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/siga$/) },
 
-  // ---- Documentos: as tres abas, a fila do "Anexar PDF", a janela do ZIP e a pagina da empresa
-  { rota: "documentos", id: "documentos", caminho: "/documentos", perfis: TODOS, espera: ".doc-painel-aba" },
-  // #814: cada assunto tem o proprio endereco (e o proprio item no menu); antes eram abas de "/documentos"
+  // ---- Documentos: as tres paginas (#820: Certidoes, Regularidade mensal e Garantias, cada uma no proprio endereco e
+  // no proprio item do menu; antes eram abas de "/documentos"), a fila do "Anexar PDF", a janela do ZIP e a empresa
+  { rota: "documentos", id: "documentos", caminho: "/documentos", perfis: TODOS, espera: ".doc-certidoes .doc-corpo" },
   { rota: "documentos", id: "documentos-regularidade", caminho: "/documentos/regularidade", perfis: TODOS,
-    espera: '#aba-regularidade[aria-selected="true"]' },
-  { rota: "documentos", id: "documentos-garantias", caminho: "/documentos/garantias", perfis: TODOS, espera: '#aba-garantias[aria-selected="true"]' },
-  { rota: "documentos", id: "documentos-anexar", caminho: "/documentos", perfis: OPERA, antes: ".doc-painel-aba", espera: ".doc-fila form",
+    espera: ".doc-regularidade .doc-corpo" },
+  { rota: "documentos", id: "documentos-garantias", caminho: "/documentos/garantias", perfis: TODOS, espera: ".doc-garantias .doc-corpo" },
+  { rota: "documentos", id: "documentos-anexar", caminho: "/documentos", perfis: OPERA, antes: ".doc-certidoes .doc-corpo", espera: ".doc-fila form",
     simular: [{ metodo: "POST", caminho: /^\/api\/documentos\/anexar\/ler$/, corpo: PDF_ILEGIVEL }],
     passos: [{ arquivo: ['input[aria-label="Escolher PDFs para anexar"]', "certidao-de-prova.pdf"] }] },
-  { rota: "documentos", id: "documentos-zip", caminho: "/documentos", perfis: OPERA, antes: ".doc-painel-aba", espera: "dialog.doc-janela[open]",
+  // o "Anexar PDF" da Regularidade e' o mesmo das Certidoes (o servidor decide pelo conteudo)
+  { rota: "documentos", id: "documentos-regularidade-anexar", caminho: "/documentos/regularidade", perfis: SO_ADMIN,
+    antes: ".doc-regularidade .doc-corpo", espera: ".doc-fila form",
+    simular: [{ metodo: "POST", caminho: /^\/api\/documentos\/anexar\/ler$/, corpo: PDF_ILEGIVEL }],
+    passos: [{ arquivo: ['input[aria-label="Escolher PDFs para anexar"]', "certidao-de-prova.pdf"] }] },
+  { rota: "documentos", id: "documentos-zip", caminho: "/documentos", perfis: OPERA, antes: ".doc-certidoes .doc-corpo", espera: "dialog.doc-janela[open]",
     passos: [{ clicar: ".doc-linha__zip" }] },
+  // as tres paginas sem nada: uma linha curta no lugar da lista
+  { rota: "documentos", id: "documentos-vazio", caminho: "/documentos", perfis: ["diretoria"], espera: ".doc-certidoes .doc-corpo .vazio",
+    simular: [{ caminho: /^\/api\/documentos$/, corpo: DOCUMENTOS_VAZIO }] },
+  { rota: "documentos", id: "documentos-regularidade-vazio", caminho: "/documentos/regularidade", perfis: ["diretoria"],
+    espera: ".doc-regularidade .doc-corpo .vazio", simular: [{ caminho: /^\/api\/documentos$/, corpo: DOCUMENTOS_VAZIO }] },
+  { rota: "documentos", id: "documentos-garantias-vazio", caminho: "/documentos/garantias", perfis: ["diretoria"],
+    espera: ".doc-garantias .doc-corpo .vazio", simular: [{ caminho: /^\/api\/documentos$/, corpo: DOCUMENTOS_VAZIO }] },
   { rota: "documentos", id: "documentos-erro", caminho: "/documentos", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/documentos$/) },
   { rota: "documentos-empresa", id: "documentos-empresa", caminho: "/documentos/:empresa", perfis: TODOS, espera: ".doc-abas-cartao" },
@@ -432,9 +444,9 @@ export const TELAS = [
     espera: '#conteudo .vazio a[href="/a-receber"]' },
   // os enderecos de antes de Documentos: a aba na busca e "/documentos/certidoes" abrem a pagina do assunto
   { rota: "documentos", id: "documentos-endereco-de-antes", caminho: "/documentos?aba=garantias", destino: "/documentos/garantias",
-    perfis: SO_ADMIN, espera: '#aba-garantias[aria-selected="true"]' },
+    perfis: SO_ADMIN, espera: ".doc-garantias .doc-corpo" },
   { rota: "documentos", id: "documentos-certidoes-por-extenso", caminho: "/documentos/certidoes", destino: "/documentos", perfis: SO_ADMIN,
-    espera: ".doc-painel-aba" },
+    espera: ".doc-certidoes .doc-corpo" },
   // a aba do contratante ja' tem endereco; enquanto a #818 nao chega, ele abre a pagina do contratante
   { rota: "contratante", id: "contratante-aba", caminho: "/obras/contratante/sinfra/medicoes", destino: "/obras/contratante/sinfra",
     perfis: ["diretoria"], espera: ".obras-do-contratante" },
@@ -503,6 +515,9 @@ export const ESTADOS_DO_LOGIN = [
   { id: "espera", simular: [{ metodo: "POST", caminho: ENTRAR, pendurar: true }],
     espera: 'form.entrar__form button[type="submit"]:disabled' },
 ];
+
+// ---- Documentos em tres paginas (#820): o painel vazio
+import { DOCUMENTOS_VAZIO } from "./simulados.mjs";
 
 // ---- Busca unica do topo (#819): os passos que abrem a busca e digitam a pergunta, nas tres larguras
 import { BUSCA_CHEIA, BUSCA_VAZIA } from "./simulados.mjs";
