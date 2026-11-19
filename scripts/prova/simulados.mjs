@@ -528,6 +528,10 @@ const CARTEIRA = () => [
     paralisada: dataEm(hojeDaProva(), -100), ritmo: 300_000, necessario: null, mes: 900_000, antes: 905_000, receber: 900_000 }),
   // SES-MT: uma obra adiantada, sem nada pendente e sem medicao no mes (o contratante fica "Em dia")
   daCarteira(9010, "Hospital Capa", "SES-MT", "ses-mt", { vigente: 168_300_000, medido: 156_519_000, ritmo: 5_000_000, necessario: 4_000_000, dias: 75 }),
+  // SINFRA, decisao do dono de 18/11/2026: devagar (37% do necessario) e sem aviso nenhum. Na pagina do contratante a
+  // Situacao diz o motivo do andamento, e nao "Em dia"
+  daCarteira(9016, "Ponte Pi", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 54_000_000, medido: 16_200_000,
+    ritmo: 1_100_000, necessario: 2_900_000, mes: 1_050_000, antes: 1_000_000, dias: 390 }),
 ];
 export const carteiraSimulada = () => CARTEIRA_INTEIRA();
 
