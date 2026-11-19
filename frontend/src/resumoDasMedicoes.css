@@ -5,7 +5,8 @@
 
 /* A pagina e' o container: os blocos mudam de forma pela largura que sobra para o conteudo (com o menu lateral aberto
    ou recolhido), e nao pela largura da janela. Tres faixas:
-   - larga: o quadro com as cinco etapas lado a lado;
+   - larga: o quadro com as cinco etapas lado a lado (ate' 1050 px, a faixa dos numeros do alto ja' vai em duas
+     linhas de tres);
    - media (ate' 900 px: a 1024 com o menu aberto): o quadro vira uma etapa embaixo da outra, cada uma com os cartoes
      lado a lado (cinco colunas de 150 px cortariam o valor e a obra; a pagina nao rola de lado nem o quadro);
    - estreita (ate' 640 px: o celular): uma coluna, e a tabela vira um bloco por medicao. */
@@ -62,6 +63,15 @@
 .rdm-faixa__apoio { color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
 .rdm-faixa__apoio :is(.variacao, .diferenca) { justify-content: flex-start; text-align: left; }
 .rdm-faixa__variacoes { display: flex; flex-wrap: wrap; gap: var(--espaco-mini); }
+/* a variacao do protocolado compara o acumulado, e nao o valor da etapa: o numero de que ela fala vai escrito antes
+   dela, numa linha propria, e um fio a aparta da contagem de medicoes, para nao ler como legenda do valor de cima.
+   So' o NUMERO nao se parte: na coluna estreita a frase quebra entre a palavra e o numero. A frase inteira sem
+   quebra era mais larga que a coluna com o menu aberto (entre 1200 e 1280 px de janela) e passava por baixo da
+   etiqueta do Recebido */
+.rdm-faixa__variacao { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-traco) var(--espaco-mini); }
+.rdm-faixa__variacao--com-base { margin-top: var(--espaco-traco); padding-top: var(--espaco-mini); border-top: var(--borda-linha); }
+.rdm-faixa__base { min-width: 0; }
+.rdm-faixa__base .num { white-space: nowrap; color: var(--cor-tinta); font-weight: var(--peso-forte); }
 /* o medido do mes junta as cinco etapas: separado delas por um fio */
 .rdm-faixa__item--medido { padding-left: var(--espaco-m); border-left: var(--borda-linha); }
 
@@ -167,11 +177,17 @@ a.rdm-obra:hover { text-decoration: underline; text-underline-offset: var(--afas
 .rdm-etapa__dado { display: inline-flex; align-items: center; gap: var(--espaco-mini); }
 .rdm-etapa--atual .rdm-etapa__dado { font-weight: var(--peso-forte); }
 
-/* ---------------------------------------------------------------- faixa media (a 1024 com o menu aberto) */
-@container rdm-pagina (max-width: 900px) {
-  /* a faixa das etapas em duas linhas de tres */
+/* ---------------------------------------------------------------- a faixa das etapas em duas linhas de tres
+   Antes de o quadro mudar (janela ate' uns 1345 px com o menu aberto: 1200, 1280): em seis colunas a coluna fica mais
+   estreita que um valor de oito digitos ("R$ 12.345.678,90"), que encostava no vizinho, e a linha do acumulado nao
+   cabia. A partir de 1050 px de conteudo (1366 com o menu aberto) a coluna comporta esse valor */
+@container rdm-pagina (max-width: 1050px) {
   .rdm-faixa, .rdm-faixa:has(.rdm-faixa__item--medido) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .rdm-faixa__item--medido { padding-left: 0; border-left: 0; }
+}
+
+/* ---------------------------------------------------------------- faixa media (a 1024 com o menu aberto) */
+@container rdm-pagina (max-width: 900px) {
   /* o quadro: uma etapa embaixo da outra; o cabecalho numa linha e os cartoes lado a lado */
   .rdm-quadro { grid-template-columns: minmax(0, 1fr); gap: var(--espaco-m); }
   .rdm-coluna__cab { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--espaco-traco) var(--espaco-m); }
@@ -200,7 +216,10 @@ a.rdm-obra:hover { text-decoration: underline; text-underline-offset: var(--afas
   .rdm-faixa__item dt { grid-column: 1; grid-row: 1; }
   .rdm-faixa__valor { grid-column: 2; grid-row: 1; text-align: right; font-size: var(--texto-corpo); }
   .rdm-faixa__qtd { grid-column: 1; grid-row: 2; }
-  .rdm-faixa__variacao { grid-column: 2; grid-row: 2; justify-self: end; }
+  .rdm-faixa__variacao { grid-column: 2; grid-row: 2; justify-self: end; justify-content: flex-end; }
+  /* com a base escrita antes, a variacao nao cabe ao lado da quantidade: vai para a linha de baixo, inteira; a
+     linha do item ja' separa, o fio fica so' nas telas largas */
+  .rdm-faixa__variacao--com-base { grid-column: 1 / -1; grid-row: 3; margin-top: 0; padding-top: 0; border-top: 0; }
   .rdm-faixa__variacoes { grid-column: 1 / -1; grid-row: 2; justify-content: flex-end; }
   .rdm-faixa__apoio :is(.variacao, .diferenca) { justify-content: flex-end; text-align: right; }
   .rdm-abas { column-gap: var(--espaco-m); }

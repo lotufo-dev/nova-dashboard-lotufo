@@ -515,56 +515,225 @@ def test_um_mes_antes_no_mesmo_dia_ou_no_ultimo_dia_do_mes():
     assert antes(datetime.date(2026, 7, 31)) == datetime.date(2026, 6, 30)
 
 
-def test_mesma_altura_e_o_retrato_da_competencia_anterior_um_mes_antes_pelas_datas_dos_eventos(conn, cenario):
-    """Hoje e' 16/11 e a competencia e' outubro: a referencia e' o que as medicoes de setembro tinham no protocolado e
-    no recebido em 16/10. Cada medicao entra pela data do evento, com o medido de hoje."""
+def _protocolo_da_11(c, ids, dia):
+    """A 11ª da Obra Propria (cenario), de setembro, foi recebida em 30/10 sem protocolo registrado: ganha um."""
+    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) SELECT id, ?, 'manual' FROM medicoes "
+              "WHERE contrato_id=? AND numero=11", (dia, ids["propria"]))
+
+
+def _protocolado_de_hoje(r):
+    """O que esta' na etapa protocolado agora: o valor que a coluna mostra."""
+    return next(e for e in r["etapas"] if e["etapa"] == "protocolado")["valor_centavos"]
+
+
+def test_mesma_altura_e_a_competencia_anterior_um_mes_antes_pelas_datas_dos_eventos(conn, cenario):
+    """Hoje e' 16/11 e a competencia e' outubro: a referencia e' o que as medicoes de setembro tinham em 16/10. O
+    recebido e' o que ja' estava recebido; o protocolado e' o ACUMULADO (o que ja' tinha sido protocolado, recebido
+    depois ou nao). Cada medicao entra pela data do evento, com o medido de hoje."""
     c, ids = conn, cenario
-    # a 11ª recebida da Obra Propria (cenario) nao tem protocolo registrado: ganha um, para a referencia ter lastro
-    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) SELECT id, '2026-10-01', 'manual' FROM medicoes "
-              "WHERE contrato_id=? AND numero=11", (ids["propria"],))
-    # recebida antes de 16/10: estava no recebido; recebida depois e protocolada antes: estava no protocolado
+    _protocolo_da_11(c, ids, "2026-10-01")       # para a referencia ter lastro
+    # protocolada em 05/10 e recebida em 14/10: ja' tinha saido da etapa em 16/10, e conta no acumulado e no recebido
     _medicao(c, ids["consorcio"], 6, "recebida", 300_000, comp="2026-09", recebida_em="2026-10-14", protocolo=("2026-10-05",))
+    # protocolada em 12/10 e recebida so' em 25/10: no acumulado, fora do recebido de 16/10
     _medicao(c, ids["companhia"], 2, "recebida", 40_000, comp="2026-09", recebida_em="2026-10-25", protocolo=("2026-10-12",))
-    # protocolada ate' 16/10 e ainda nao recebida: no protocolado; a obra sem o envio da nota recebe sem protocolo
+    # protocolada no proprio dia 16/10 (o limite conta); a obra sem o envio da nota recebe sem protocolar
     _medicao(c, ids["sem_envio"], 2, "protocolada", 15_000, comp="2026-09", protocolo=("2026-10-16",))
     _medicao(c, ids["sem_envio"], 1, "recebida", 9_000, comp="2026-09", recebida_em="2026-10-16")
     c.commit()
     r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
-    # protocolado em 16/10: a 11ª (5.000: protocolo em 01/10, recebida em 30/10), a 2ª da Companhia (40.000) e a 2ª da
-    # Sem Envio (15.000); a 5ª da Obra Parada so' foi protocolada em 20/10. Recebido: 300.000 x 33,33% = 99.990, e 9.000
+    # protocolado ate' 16/10: a 11ª (5.000, protocolo em 01/10), a 6ª do Consorcio (300.000 x 33,33% = 99.990), a 2ª da
+    # Companhia (40.000) e a 2ª da Sem Envio (15.000); a 5ª da Obra Parada so' foi protocolada em 20/10.
+    # Recebido ate' 16/10: 99.990 e 9.000
     assert r["mesma_altura"] == {"competencia": "2026-09", "ate": "2026-10-16",
-                                 "protocolado_centavos": 5_000 + 40_000 + 15_000, "recebido_centavos": 99_990 + 9_000}
-    # o numero comparado e' o da propria etapa hoje
-    assert next(e for e in r["etapas"] if e["etapa"] == "protocolado")["valor_centavos"] == 99_999
-    # olhando setembro, a referencia e' agosto, na mesma data
-    assert resumo_medicoes.resumo(conn, HOJE, mes="2026-09")["mesma_altura"] == {
-        "competencia": "2026-08", "ate": "2026-10-16", "protocolado_centavos": 0, "recebido_centavos": 0}
+                                 "protocolado_acumulado_centavos": 5_000 + 99_990 + 40_000 + 15_000,
+                                 "recebido_centavos": 99_990 + 9_000}
+    # de outubro, so' a 12ª da Obra Propria foi protocolada: sem nada recebido, o acumulado e' o valor da coluna
+    assert r["protocolado_acumulado_centavos"] == _protocolado_de_hoje(r) == 99_999
+    # olhando setembro, a referencia e' agosto, na mesma data; o acumulado de setembro vai ate' hoje (a 5ª entra)
+    setembro = resumo_medicoes.resumo(conn, HOJE, mes="2026-09")
+    assert setembro["mesma_altura"] == {"competencia": "2026-08", "ate": "2026-10-16",
+                                        "protocolado_acumulado_centavos": 0, "recebido_centavos": 0}
+    assert setembro["protocolado_acumulado_centavos"] == 5_000 + 99_990 + 40_000 + 15_000 + 20_000
+
+
+def test_orgao_que_paga_cedo_nao_derruba_a_variacao_do_protocolado(conn, cenario):
+    """Decisao do dono de 18/11/2026: a variacao do protocolado compara o ACUMULADO. Quando o orgao paga, o valor sai
+    da etapa protocolado (o retrato cai) e o acumulado fica: receber mais rapido nao piora o numero."""
+    c, ids = conn, cenario
+    # setembro tinha 125.000 protocolados em 16/10: a 11ª do cenario (5.000) e a 9ª (120.000)
+    _protocolo_da_11(c, ids, "2026-10-01")
+    _medicao(c, ids["propria"], 9, "protocolada", 120_000, comp="2026-09", protocolo=("2026-10-08",))
+    # outubro: alem da 12ª da Obra Propria (99.999), o Consorcio protocola a execucao e o reajuste da 8ª em 05/11.
+    # Centavo impar e rateio com residuo: 1.000.002 x 33,33% = 333.300,67 -> 333.301 em cada uma; as duas somam 666.602,
+    # um centavo a mais que a cota da soma (666.601,33). O acumulado soma a cota de cada medicao, como a coluna
+    par = [_medicao(c, ids["consorcio"], 8, "protocolada", 1_000_002, tipo=tipo, protocolo=("2026-11-05",))
+           for tipo in ("execucao", "reajuste")]
+    c.commit()
+    antes = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    referencia = antes["mesma_altura"]["protocolado_acumulado_centavos"]
+    assert referencia == 125_000
+    assert antes["protocolado_acumulado_centavos"] == _protocolado_de_hoje(antes) == 99_999 + 333_301 + 333_301
+    # o orgao paga as duas do Consorcio em 12/11, uma semana depois do protocolo
+    c.execute("UPDATE medicoes SET estado='recebida', recebida_em='2026-11-12' WHERE id IN (?,?)", par)
+    c.commit()
+    depois = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    # o retrato caiu abaixo da referencia: contra ele, a variacao sairia negativa
+    assert _protocolado_de_hoje(depois) == 99_999 < referencia
+    # o acumulado nao se mexeu com o recebimento e continua acima da referencia: a variacao nao fica negativa
+    assert depois["protocolado_acumulado_centavos"] == antes["protocolado_acumulado_centavos"] == 766_601
+    assert depois["protocolado_acumulado_centavos"] >= depois["mesma_altura"]["protocolado_acumulado_centavos"] == referencia
+    # e o que foi pago aparece no recebido, sem sair do protocolado acumulado
+    assert next(e for e in depois["etapas"] if e["etapa"] == "recebido")["valor_centavos"] == 666_602
+    # a medicao que ainda nao chegou ao protocolado (a 7ª do Consorcio, em analise) nao entra
+    assert depois["protocolado_acumulado_centavos"] < depois["medido"]["valor_centavos"]
+
+
+def test_obra_sem_a_etapa_so_entra_no_acumulado_com_o_protocolo_registrado(conn, cenario):
+    """A obra sem o passo "Envio da nota" nao tem a etapa: a recebida dela nunca protocolou, e o recebimento dela nao
+    prova protocolo nenhum, nem no lado de hoje nem na referencia. Com o protocolo registrado mesmo assim, o registro
+    vale, antes e depois do recebimento (receber nao tira do acumulado)."""
+    c, ids = conn, cenario
+    _protocolo_da_11(c, ids, "2026-10-01")       # a referencia com lastro: 5.000
+    mid = _medicao(c, ids["sem_envio"], 5, "protocolada", 30_000, protocolo=("2026-11-11",))
+    _medicao(c, ids["sem_envio"], 6, "recebida", 8_000, recebida_em="2026-11-12")
+    # na referencia: recebida antes do corte e recebida sem data, as duas sem protocolo. Ficam fora, e nao tiram o lastro
+    _medicao(c, ids["sem_envio"], 1, "recebida", 9_000, comp="2026-09", recebida_em="2026-10-10")
+    _medicao(c, ids["sem_envio"], 2, "recebida", 7_000, comp="2026-09")
+    c.commit()
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    assert r["protocolado_acumulado_centavos"] == 99_999 + 30_000
+    assert r["mesma_altura"]["protocolado_acumulado_centavos"] == 5_000
+    c.execute("UPDATE medicoes SET estado='recebida', recebida_em='2026-11-13' WHERE id=?", (mid,))
+    c.commit()
+    assert resumo_medicoes.resumo(conn, HOJE, mes=MES)["protocolado_acumulado_centavos"] == 99_999 + 30_000
+    # com o protocolo registrado depois do corte e o recebimento antes dele (dado torto), o recebimento prova
+    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) SELECT id, '2026-10-20', 'manual' FROM medicoes "
+              "WHERE contrato_id=? AND numero=1 AND competencia='2026-09'", (ids["sem_envio"],))
+    c.commit()
+    assert resumo_medicoes.resumo(conn, HOJE, mes=MES)["mesma_altura"]["protocolado_acumulado_centavos"] == 5_000 + 9_000
 
 
 def test_mesma_altura_sem_a_data_do_evento_nao_tem_referencia(conn, cenario):
-    """So' aparece o que tem lastro: a etapa em que alguma medicao da competencia anterior chegou sem a data do evento
-    vem nula, e a outra continua."""
+    """So' aparece o que tem lastro: o lado em que alguma medicao nao da' para situar no dia de corte vem nulo (a tela
+    nao mostra a variacao), e o outro continua."""
     c, ids = conn, cenario
-    # o cenario: a 11ª da Obra Propria foi recebida em 30/10 sem protocolo registrado, numa obra que tem a etapa. Nao
-    # da' para dizer se estava no protocolado em 16/10; o recebido tem a data
+    # o cenario: a 11ª da Obra Propria, de setembro, foi recebida em 30/10 sem protocolo registrado, numa obra que tem
+    # a etapa. O recebimento prova o protocolo ate' 30/10, depois do corte: nao da' para dizer se em 16/10 ela ja'
+    # estava protocolada. O recebido tem a data
     r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
-    assert r["mesma_altura"] == {"competencia": "2026-09", "ate": "2026-10-16", "protocolado_centavos": None, "recebido_centavos": 0}
-    # recebida antes de 16/10, mesmo sem o protocolo: ja' tinha saido do protocolado, e a referencia volta
+    assert r["mesma_altura"] == {"competencia": "2026-09", "ate": "2026-10-16",
+                                 "protocolado_acumulado_centavos": None, "recebido_centavos": 0}
+    assert r["protocolado_acumulado_centavos"] == 99_999              # o lado de outubro tem lastro
+    # recebida antes de 16/10 e ainda sem o protocolo: o recebimento prova que ja' estava protocolada naquele dia
     c.execute("UPDATE medicoes SET recebida_em='2026-10-15' WHERE contrato_id=? AND numero=11", (ids["propria"],))
     c.commit()
     assert resumo_medicoes.resumo(conn, HOJE, mes=MES)["mesma_altura"] == {
-        "competencia": "2026-09", "ate": "2026-10-16", "protocolado_centavos": 0, "recebido_centavos": 5_000}
-    # recebida sem a data do recebimento: nem o recebido nem o protocolado daquele dia tem lastro
+        "competencia": "2026-09", "ate": "2026-10-16", "protocolado_acumulado_centavos": 5_000, "recebido_centavos": 5_000}
+    # com o protocolo registrado, o numero e' o mesmo
+    _protocolo_da_11(c, ids, "2026-10-02")
+    c.commit()
+    assert resumo_medicoes.resumo(conn, HOJE, mes=MES)["mesma_altura"] == {
+        "competencia": "2026-09", "ate": "2026-10-16", "protocolado_acumulado_centavos": 5_000, "recebido_centavos": 5_000}
+    # recebida sem a data do recebimento: o recebido daquele dia nao tem lastro; com a data do protocolo, o protocolado
+    # acumulado tem
     _medicao(c, ids["consorcio"], 6, "recebida", 300_000, comp="2026-09", protocolo=("2026-10-05",))
     c.commit()
     assert resumo_medicoes.resumo(conn, HOJE, mes=MES)["mesma_altura"] == {
-        "competencia": "2026-09", "ate": "2026-10-16", "protocolado_centavos": None, "recebido_centavos": None}
-    # protocolada pelo estado, sem a data do protocolo (o legado `nf_emitida`): o protocolado nao tem lastro
+        "competencia": "2026-09", "ate": "2026-10-16", "protocolado_acumulado_centavos": 5_000 + 99_990, "recebido_centavos": None}
+    # protocolada pelo estado, sem a data do protocolo (o legado `nf_emitida`): nao da' para dizer se ja' estava
+    # protocolada em 16/10, e a referencia do protocolado nao tem lastro
     c.execute("UPDATE medicoes SET recebida_em='2026-10-10' WHERE contrato_id=? AND numero=6", (ids["consorcio"],))
     _medicao(c, ids["companhia"], 2, "nf_emitida", 40_000, comp="2026-09")
     c.commit()
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    assert r["mesma_altura"] == {"competencia": "2026-09", "ate": "2026-10-16",
+                                 "protocolado_acumulado_centavos": None, "recebido_centavos": 5_000 + 99_990}
+    # ate' HOJE o estado basta: olhando setembro, ela esta' protocolada agora e conta no acumulado da competencia
+    assert resumo_medicoes.resumo(conn, HOJE, mes="2026-09")["protocolado_acumulado_centavos"] == 5_000 + 99_990 + 40_000 + 20_000
+
+
+def test_recebimento_prova_o_protocolo_ate_a_data_dele(conn, cenario):
+    """O orgao paga rapido e a baixa chega antes de alguem registrar o protocolo: a medicao recebida sem protocolo
+    registrado, na obra que tem a etapa, ja' estava protocolada no dia do recebimento. Na referencia ela conta com o
+    recebimento ate' o corte; recebida depois do corte, ou sem a data do recebimento, nao da' para situar: nulo."""
+    c, ids = conn, cenario
+    c.execute("UPDATE medicoes SET recebida_em='2026-10-15' WHERE contrato_id=? AND numero=11", (ids["propria"],))   # 5.000
+    # o Consorcio, com centavo impar: 1.000.001 x 33,33% = 333.300,33 -> 333.300. Recebida no proprio dia do corte
+    seis = _medicao(c, ids["consorcio"], 6, "recebida", 1_000_001, comp="2026-09", recebida_em="2026-10-16")
+    c.commit()
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    assert r["mesma_altura"] == {"competencia": "2026-09", "ate": "2026-10-16",
+                                 "protocolado_acumulado_centavos": 5_000 + 333_300, "recebido_centavos": 5_000 + 333_300}
+    # o recebimento anterior ao protocolo registrado (dado torto) conta pelo recebimento: protocolo em 20/10, depois
+    # do corte, e recebida em 12/10
+    _medicao(c, ids["companhia"], 2, "recebida", 40_000, comp="2026-09", recebida_em="2026-10-12", protocolo=("2026-10-20",))
+    c.commit()
+    assert resumo_medicoes.resumo(conn, HOJE, mes=MES)["mesma_altura"]["protocolado_acumulado_centavos"] == 5_000 + 333_300 + 40_000
+    # recebida um dia depois do corte, sem protocolo: em 16/10 podia estar protocolada ou nao. O recebido continua
+    c.execute("UPDATE medicoes SET recebida_em='2026-10-17' WHERE id=?", (seis,))
+    c.commit()
     assert resumo_medicoes.resumo(conn, HOJE, mes=MES)["mesma_altura"] == {
-        "competencia": "2026-09", "ate": "2026-10-16", "protocolado_centavos": None, "recebido_centavos": 5_000 + 99_990}
+        "competencia": "2026-09", "ate": "2026-10-16", "protocolado_acumulado_centavos": None, "recebido_centavos": 5_000 + 40_000}
+    # recebida sem protocolo e sem a data do recebimento: nem o protocolado nem o recebido daquele dia tem lastro
+    c.execute("UPDATE medicoes SET recebida_em=NULL WHERE id=?", (seis,))
+    c.commit()
+    assert resumo_medicoes.resumo(conn, HOJE, mes=MES)["mesma_altura"] == {
+        "competencia": "2026-09", "ate": "2026-10-16", "protocolado_acumulado_centavos": None, "recebido_centavos": None}
+    # olhando setembro, ate' hoje o estado basta: recebida, ja' passou pelo protocolado
+    assert resumo_medicoes.resumo(conn, HOJE, mes="2026-09")["protocolado_acumulado_centavos"] == 5_000 + 333_300 + 40_000 + 20_000
+
+
+def test_acumulado_de_hoje_conta_a_recebida_sem_protocolo_registrado(conn, cenario):
+    """No lado de hoje o estado basta: a medicao da competencia recebida sem protocolo registrado, numa obra que tem a
+    etapa, ja' passou pelo protocolado, com ou sem a data do recebimento. A variacao nao some quando a baixa chega
+    antes do registro do protocolo."""
+    c, ids = conn, cenario
+    _protocolo_da_11(c, ids, "2026-10-01")
+    _medicao(c, ids["propria"], 9, "protocolada", 120_000, comp="2026-09", protocolo=("2026-10-08",))
+    mid = _medicao(c, ids["parada"], 7, "recebida", 44_000, recebida_em="2026-11-12")
+    c.commit()
+    r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    assert r["protocolado_acumulado_centavos"] == 99_999 + 44_000
+    assert r["mesma_altura"]["protocolado_acumulado_centavos"] == 125_000
+    # o valor da coluna e' outro numero: o que esta' na etapa pelo estado
+    assert _protocolado_de_hoje(r) == 99_999
+    # sem a data do recebimento tambem conta, e registrar o protocolo depois nao muda o numero
+    _medicao(c, ids["parada"], 8, "recebida", 10_001)
+    c.commit()
+    assert resumo_medicoes.resumo(conn, HOJE, mes=MES)["protocolado_acumulado_centavos"] == 99_999 + 44_000 + 10_001
+    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) VALUES (?, '2026-11-06', 'manual')", (mid,))
+    c.commit()
+    assert resumo_medicoes.resumo(conn, HOJE, mes=MES)["protocolado_acumulado_centavos"] == 99_999 + 44_000 + 10_001
+
+
+def test_acumulado_de_hoje_fecha_com_o_protocolado_mais_o_recebido_das_obras_com_a_etapa(conn, cenario):
+    """O fechamento do numero novo: ate' hoje, o protocolado acumulado e' o valor da etapa protocolado mais o da etapa
+    recebido, menos o recebido que nunca protocolou (a obra sem o passo "Envio da nota", sem protocolo registrado).
+    Com consorcio (centavo impar e residuo de rateio), reajuste, legado sem data e recebida sem protocolo."""
+    c, ids = conn, cenario
+    # no protocolado: a 12ª da Obra Propria (cenario, 99.999), o legado sem data na Companhia e a Sem Envio com protocolo
+    _medicao(c, ids["companhia"], 4, "nf_emitida", 21_001)
+    _medicao(c, ids["sem_envio"], 5, "protocolada", 30_000, protocolo=("2026-11-11",))
+    # no recebido, vindas do protocolado: o par do Consorcio (333.301 cada), a recebida sem protocolo com e sem a data
+    # do recebimento, e a da Sem Envio com protocolo registrado
+    for tipo in ("execucao", "reajuste"):
+        _medicao(c, ids["consorcio"], 8, "recebida", 1_000_002, tipo=tipo, recebida_em="2026-11-12", protocolo=("2026-11-05",))
+    _medicao(c, ids["parada"], 7, "recebida", 44_000, recebida_em="2026-11-12")
+    _medicao(c, ids["parada"], 8, "recebida", 10_001)
+    _medicao(c, ids["sem_envio"], 7, "recebida", 7_003, recebida_em="2026-11-13", protocolo=("2026-11-09",))
+    # no recebido, sem nunca ter protocolado: a Sem Envio sem protocolo
+    nunca_protocolou = 8_000
+    _medicao(c, ids["sem_envio"], 6, "recebida", nunca_protocolou, recebida_em="2026-11-12")
+    c.commit()
+    for quem in (None, "SINFRA", "Companhia de Exemplo"):
+        r = resumo_medicoes.resumo(conn, HOJE, mes=MES, contratante=quem)
+        etapa = {e["etapa"]: e["valor_centavos"] for e in r["etapas"]}
+        fora = 0 if quem == "Companhia de Exemplo" else nunca_protocolou
+        assert r["protocolado_acumulado_centavos"] == etapa["protocolado"] + etapa["recebido"] - fora, quem
+    inteiro = resumo_medicoes.resumo(conn, HOJE, mes=MES)
+    assert inteiro["protocolado_acumulado_centavos"] == (99_999 + 21_001 + 30_000) + (333_301 + 333_301 + 44_000 + 10_001 + 7_003)
+    # e nunca passa do medido do mes (o numero do Fechamento), que ainda tem o que nao chegou ao protocolado
+    assert inteiro["protocolado_acumulado_centavos"] < inteiro["medido"]["valor_centavos"] == _medido_do_fechamento(conn, MES)
 
 
 def _prazo_da_sinfra(c, ids):
@@ -697,10 +866,13 @@ def test_filtro_por_contratante_recorta_tudo_e_a_lista_de_contratantes_fica_inte
     assert [(e["etapa"], e["medicoes"], e["valor_centavos"]) for e in r["etapas"] if e["medicoes"]] == [("boletim", 1, 50_000)]
     assert r["medido"] == {"valor_centavos": 50_000, "mes_anterior": None, "ano_anterior": None}
     assert r["sem_medicao"] == [] and r["anteriores"] == []
-    assert r["mesma_altura"] == {"competencia": "2026-09", "ate": "2026-10-16", "protocolado_centavos": 0, "recebido_centavos": 0}
+    assert r["mesma_altura"] == {"competencia": "2026-09", "ate": "2026-10-16",
+                                 "protocolado_acumulado_centavos": 0, "recebido_centavos": 0}
+    assert r["protocolado_acumulado_centavos"] == 0          # o recorte vale para o acumulado: a 12ª e' da SINFRA
     sinfra = resumo_medicoes.resumo(conn, HOJE, mes=MES, contratante="SINFRA")
     assert sinfra["medido"]["valor_centavos"] == 333_300 + 99_999 + 70_000
     assert sinfra["medido"]["mes_anterior"] == {"competencia": "2026-09", "valor_centavos": 25_000}
+    assert sinfra["protocolado_acumulado_centavos"] == 99_999
     assert [o["contrato_id"] for o in sinfra["sem_medicao"]] == [ids["parada"]]
     assert [g["competencia"] for g in sinfra["anteriores"]] == ["2026-08", "2026-09"]
     # o contratante que nao existe nao tem nada, e a lista continua dizendo quem tem
@@ -752,7 +924,7 @@ def test_rota_e_exportacao_da_relacao(client_admin, _sem_certidoes):
     assert r.status_code == 200
     d = r.json()
     assert set(d) == {"hoje", "mes", "em_trabalho", "atualizacao", "contratante", "contratantes", "etapas", "medido",
-                      "mesma_altura", "diferenca_critica_por_mil", "grupos", "sem_medicao", "anteriores_etapas", "anteriores"}
+                      "protocolado_acumulado_centavos", "mesma_altura", "diferenca_critica_por_mil", "grupos", "sem_medicao", "anteriores_etapas", "anteriores"}
     assert d["medido"]["valor_centavos"] == 152_001 == sum(e["valor_centavos"] for e in d["etapas"])
     [linha] = [x for g in d["grupos"] for x in g["linhas"]]
     assert (linha["medicao_ids"], linha["etapa"], linha["valor_centavos"]) == ([mid, reajuste], "nota", 152_001)

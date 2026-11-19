@@ -71,7 +71,9 @@ const RESUMO: RespostaResumo = {
   ],
   medido: { valor_centavos: 16_383_301, mes_anterior: { competencia: "2026-09", valor_centavos: 15_000_000 },
     ano_anterior: { competencia: "2025-10", valor_centavos: 16_383_301 } },
-  mesma_altura: { competencia: "2026-09", ate: "2026-10-16", protocolado_centavos: 20_000_000, recebido_centavos: null },
+  // o protocolado acumulado: o que esta' na etapa (151.000,01) e o que ja' foi recebido (500,00)
+  protocolado_acumulado_centavos: 15_150_001,
+  mesma_altura: { competencia: "2026-09", ate: "2026-10-16", protocolado_acumulado_centavos: 12_500_000, recebido_centavos: null },
   diferenca_critica_por_mil: 5,
   grupos: [{ contratante: "Companhia de Exemplo", medicoes: 2, valor_centavos: 383_300, linhas: [CONSORCIO, REAJUSTE] },
     { contratante: "Secretaria de Exemplo", medicoes: 4, valor_centavos: 16_000_001, linhas: [PROPRIA, QUARTA, SEXTA] }],
@@ -144,17 +146,67 @@ describe("Resumo das medições em quadro por etapa (#749, #805)", () => {
     expect(itens.slice(0, 5).map(i => texto(i.querySelector(".rdm-faixa__qtd")))).toEqual(["1 medição", "1 medição", "", "3 medições", "1 medição"]);
     expect(itens.slice(0, 5).map(i => i.querySelector(".marca-etapa__cor")?.className)).toEqual(
       ["em_analise", "boletim", "nota", "protocolado", "recebido"].map(x => `marca-etapa__cor marca-etapa__cor--${x}`));
-    // o protocolado contra a mesma altura do mes anterior, com a referencia escrita; o recebido veio sem lastro: nada
+    // o protocolado: o ACUMULADO da competencia (151.500,01, com os 500,00 ja' recebidos) contra o da anterior na
+    // mesma altura (125.000,00). A linha da variacao mostra o numero de que a seta fala e a referencia escrita; o
+    // recebido veio sem lastro: nada
     const [, , , protocolado, recebido, medido] = itens;
-    expect(protocolado.querySelector(".variacao")?.className).toBe("variacao variacao--ruim");
-    expect(texto(protocolado.querySelector(".variacao"))).toContain("× set até 16/10");
-    expect(texto(protocolado.querySelector(".variacao .sr-only"))).toBe("caiu 24,5% em relação a setembro até 16 de outubro");
+    expect(protocolado.querySelector(".variacao")?.className).toBe("variacao variacao--bom");
+    expect(texto(protocolado.querySelector(".rdm-faixa__base"))).toBe("acumulado R$ 151.500,01");
+    expect(texto(protocolado.querySelector(".rdm-faixa__variacao"))).toBe(
+      "acumulado R$ 151.500,01 ▲ +21,2%× set até 16/10subiu 21,2% em relação a setembro até 16 de outubro");
     expect(recebido.querySelector(".variacao")).toBeNull();
     expect(itens[0].querySelector(".variacao")).toBeNull();
     // o medido: contra o mes anterior e contra o mesmo mes do ano anterior
     expect([...medido.querySelectorAll(".variacao")].map(v => [v.className, texto(v.querySelector(".sr-only"))])).toEqual([
       ["variacao variacao--bom", "subiu 9,2% em relação a setembro"],
       ["variacao variacao--estavel", "estável em relação a outubro de 2025"]]);
+  });
+
+  it("o órgão pagou cedo: o valor do protocolado cai, e a variação, que compara o acumulado, não fica vermelha", async () => {
+    // decisao do dono de 18/11/2026. Das 150.000,00 protocoladas, 110.000,00 ja' foram recebidas: na etapa restam
+    // 40.000,00, menos que as 125.000,00 da referencia; o acumulado (150.000,00) esta' 20% acima dela
+    const etapas = RESUMO.etapas.map(x => x.etapa === "protocolado" ? { ...x, medicoes: 1, valor_centavos: 4_000_000 }
+      : x.etapa === "recebido" ? { ...x, medicoes: 2, valor_centavos: 11_000_000 } : x);
+    api.mockResolvedValue({ ...RESUMO, etapas, protocolado_acumulado_centavos: 15_000_000,
+      mesma_altura: { ...RESUMO.mesma_altura!, recebido_centavos: 10_000_000 } });
+    const { container } = abrir();
+    await screen.findByRole("heading", { name: "Outubro de 2026" });
+    const [, , , protocolado, recebido] = [...container.querySelectorAll(".rdm-faixa__item")];
+    expect(texto(protocolado.querySelector(".rdm-faixa__valor"))).toBe("R$ 40.000,00");          // o valor continua o da etapa
+    expect(protocolado.querySelector(".variacao")?.className).toBe("variacao variacao--bom");
+    // o acumulado, que e' outro numero, vai escrito ao lado da variacao dele
+    expect(texto(protocolado.querySelector(".rdm-faixa__variacao"))).toBe(
+      "acumulado R$ 150.000,00 ▲ +20,0%× set até 16/10subiu 20,0% em relação a setembro até 16 de outubro");
+    // no recebido o valor da etapa ja' e' o acumulado: a variacao compara o proprio valor, sem a base escrita
+    expect(texto(recebido.querySelector(".rdm-faixa__variacao"))).toBe("▲ +10,0%× set até 16/10subiu 10,0% em relação a setembro até 16 de outubro");
+    expect(recebido.querySelector(".rdm-faixa__base")).toBeNull();
+  });
+
+  it("tudo o que foi protocolado já foi recebido: a etapa fica no traço e a linha do acumulado continua", async () => {
+    const etapas = RESUMO.etapas.map(x => x.etapa === "protocolado" ? { ...x, medicoes: 0, valor_centavos: 0 }
+      : x.etapa === "recebido" ? { ...x, medicoes: 3, valor_centavos: 15_000_000 } : x);
+    api.mockResolvedValue({ ...RESUMO, etapas, protocolado_acumulado_centavos: 15_000_000 });
+    const { container } = abrir();
+    await screen.findByRole("heading", { name: "Outubro de 2026" });
+    const protocolado = [...container.querySelectorAll(".rdm-faixa__item")][3];
+    expect(texto(protocolado.querySelector(".rdm-faixa__valor"))).toBe("—");
+    expect(protocolado.querySelector(".rdm-faixa__qtd")).toBeNull();
+    expect(texto(protocolado.querySelector(".rdm-faixa__variacao"))).toContain("acumulado R$ 150.000,00 ▲ +20,0%");
+  });
+
+  it("sem lastro num dos lados do protocolado acumulado, somem o número e a variação", async () => {
+    api.mockResolvedValue({ ...RESUMO, protocolado_acumulado_centavos: null });
+    const { container, unmount } = abrir();
+    await screen.findByRole("heading", { name: "Outubro de 2026" });
+    const protocolado = () => [...container.querySelectorAll(".rdm-faixa__item")][3];
+    expect(texto(protocolado().querySelector(".rdm-faixa__valor"))).toBe("R$ 151.000,01");
+    expect(protocolado().querySelector(".rdm-faixa__variacao, .rdm-faixa__base, .variacao")).toBeNull();
+    unmount();
+    api.mockResolvedValue({ ...RESUMO, mesma_altura: { ...RESUMO.mesma_altura!, protocolado_acumulado_centavos: null } });
+    const outra = abrir();
+    await screen.findByRole("heading", { name: "Outubro de 2026" });
+    // o lado de hoje existe, mas sem a referencia nao ha' variacao: o numero solto nao aparece
+    expect([...outra.container.querySelectorAll(".rdm-faixa__item")][3].querySelector(".rdm-faixa__variacao, .rdm-faixa__base, .variacao")).toBeNull();
   });
 
   it("o quadro tem uma coluna por etapa, com a quantidade e o valor, e um cartão por medição, o de maior valor primeiro", async () => {
