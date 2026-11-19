@@ -16,8 +16,8 @@ const RECEBIDO: Record<string, number> = { "2025-11": 120_000_000, "2026-03": 35
 
 // #659: as 12 competencias da matriz terminam no mes anterior ao de hoje
 const MESES_MATRIZ = ["2025-10", ...MESES_12.slice(0, 11)];
-// #817: o medido das mesmas 12 competencias (valores redondos inventados)
-const MEDIDO: Record<string, number> = { "2025-10": 900_000_000, "2026-08": 1_800_000_000, "2026-09": 1_500_000_000 };
+// #817: o medido das mesmas 12 competencias (valores de tabela: 10, 20 e 15 milhoes)
+const MEDIDO: Record<string, number> = { "2025-10": 1_000_000_000, "2026-08": 2_000_000_000, "2026-09": 1_500_000_000 };
 type Celula = PainelInicio["matriz"]["grupos"][number]["obras"][number]["celulas"][number];
 const celulas = (ultimas: Celula[]): Celula[] => [...Array<Celula>(12 - ultimas.length).fill(null), ...ultimas];
 
@@ -60,13 +60,15 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   ...extra,
 });
 
-// #817: o ciclo aberto em dois contratantes, com valores redondos inventados. A faixa do ciclo e o a receber do painel
-// sao a soma das linhas, como no servidor (a tela mostra os dois e eles tem de fechar); o B nao tem pagina (chave nula)
+// #817: o ciclo aberto em dois contratantes, com valores de tabela (degraus de um milhao). A faixa do ciclo e o a
+// receber do painel sao a soma das linhas, como no servidor (a tela mostra os dois e eles tem de fechar); o B nao tem
+// pagina (chave nula) e tem duas etapas vazias
+const MI = 100_000_000;   // R$ 1.000.000,00 em centavos
 const LINHAS_POR_CONTRATANTE: PainelInicio["ciclo_por_contratante"] = [
-  { contratante: "Contratante A", chave: "contratante-a", em_analise_centavos: 200_000, boletim_centavos: 0, nota_centavos: 500_000,
-    protocolado_centavos: 900_000_000, a_receber_centavos: 1_000_000_000 },
-  { contratante: "Contratante B", chave: null, em_analise_centavos: 0, boletim_centavos: 100_000, nota_centavos: 0,
-    protocolado_centavos: 600_000_000, a_receber_centavos: 500_000_000 },
+  { contratante: "Contratante A", chave: "contratante-a", em_analise_centavos: 1 * MI, boletim_centavos: 2 * MI, nota_centavos: 3 * MI,
+    protocolado_centavos: 4 * MI, a_receber_centavos: 5 * MI },
+  { contratante: "Contratante B", chave: null, em_analise_centavos: 0, boletim_centavos: 1 * MI, nota_centavos: 0,
+    protocolado_centavos: 2 * MI, a_receber_centavos: 3 * MI },
 ];
 const comContratantes = (extra: Partial<PainelInicio> = {}): PainelInicio => {
   const base = painel();
@@ -647,9 +649,9 @@ describe("Início", () => {
       "marca-etapa__cor marca-etapa__cor--protocolado", "marca-etapa__cor marca-etapa__cor--em_aberto"]);
     // etapa sem valor no contratante: tracinho
     expect(linhasDaTabela(tabela)).toEqual([
-      ["Contratante A", "R$ 2.000,00", "—", "R$ 5.000,00", "R$ 9.000.000,00", "R$ 10.000.000,00"],
-      ["Contratante B", "—", "R$ 1.000,00", "—", "R$ 6.000.000,00", "R$ 5.000.000,00"],
-      ["Total", "R$ 2.000,00", "R$ 1.000,00", "R$ 5.000,00", "R$ 15.000.000,00", "R$ 15.000.000,00"],
+      ["Contratante A", "R$ 1.000.000,00", "R$ 2.000.000,00", "R$ 3.000.000,00", "R$ 4.000.000,00", "R$ 5.000.000,00"],
+      ["Contratante B", "—", "R$ 1.000.000,00", "—", "R$ 2.000.000,00", "R$ 3.000.000,00"],
+      ["Total", "R$ 1.000.000,00", "R$ 3.000.000,00", "R$ 3.000.000,00", "R$ 6.000.000,00", "R$ 8.000.000,00"],
     ]);
     // o nome do contratante e o "Total" sao o cabecalho da linha
     expect(within(tabela).getAllByRole("rowheader").map(limpo)).toEqual(["Contratante A", "Contratante B", "Total"]);
@@ -691,12 +693,12 @@ describe("Início", () => {
     expect(within(regiao).getAllByRole("link").map(a => [(a.getAttribute("aria-label") ?? limpo(a)).replace(/\s/g, " "),
       a.getAttribute("href")])).toEqual([
       ["Contratante A", "/obras/contratante/contratante-a"],
-      ["Contratante A: R$ 10.000.000,00 a receber", "/obras/contratante/contratante-a"],
+      ["Contratante A: R$ 5.000.000,00 a receber", "/obras/contratante/contratante-a"],
     ]);
     expect(regiao.querySelector("a[href='/a-receber']")).toBeNull();
     const [b, total] = [...regiao.querySelectorAll("tbody tr:nth-child(2), tfoot tr")];
     expect([limpo(b.lastElementChild!.querySelector(".ini-orgaos__valor")), limpo(total.lastElementChild!.querySelector(".ini-orgaos__valor"))])
-      .toEqual(["R$ 5.000.000,00", "R$ 15.000.000,00"]);
+      .toEqual(["R$ 3.000.000,00", "R$ 8.000.000,00"]);
     expect([b, total].every(l => l.querySelector("a") === null)).toBe(true);
     // o clique navega pelo roteador, para a pagina do contratante
     await act(async () => { within(regiao).getByRole("link", { name: /a receber$/ }).click(); });
@@ -729,9 +731,9 @@ describe("Início", () => {
     expect(meses.map(m => limpo(m.querySelector(".ini-rec__rotulo")))).toEqual(
       ["out/25", "nov/25", "dez/25", "jan/26", "fev/26", "mar/26", "abr/26", "mai/26", "jun/26", "jul/26", "ago/26", "set/26"]);
     expect(meses.map(m => limpo(m.querySelector(".ini-rec__valor")))).toEqual(
-      ["9 mi", "—", "—", "—", "—", "—", "—", "—", "—", "—", "18 mi", "15 mi"]);
+      ["10 mi", "—", "—", "—", "—", "—", "—", "—", "—", "—", "20 mi", "15 mi"]);
     expect(meses.map(m => m.style.getPropertyValue("--ini-rec-tamanho"))).toEqual(
-      ["50%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "100%", "83%"]);
+      ["50%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "100%", "75%"]);
     // as mesmas pecas do desenho do recebido: o trilho com o valor e a coluna, e o mes
     const doRecebido = screen.getByRole("region", { name: REGIAO_RECEBIDO }).querySelector(".ini-rec__mes")!;
     expect([...meses[0].children].map(c => c.className)).toEqual([...doRecebido.children].map(c => c.className));
@@ -741,7 +743,7 @@ describe("Início", () => {
     const linhas = within(tabela).getAllByRole("row").map(l => [...l.children].map(limpo));
     expect(linhas).toHaveLength(13);
     expect([linhas[0], linhas[1], linhas[2], linhas[12]]).toEqual(
-      [["Competência", "Medido"], ["10/2025", "R$ 9.000.000,00"], ["11/2025", "R$ 0,00"], ["09/2026", "R$ 15.000.000,00"]]);
+      [["Competência", "Medido"], ["10/2025", "R$ 10.000.000,00"], ["11/2025", "R$ 0,00"], ["09/2026", "R$ 15.000.000,00"]]);
   });
 
   it("#817: o medido de cada mês abre o mês no Fechamento; competência sem medido não é link", async () => {
@@ -750,8 +752,8 @@ describe("Início", () => {
     const regiao = await screen.findByRole("region", { name: MEDIDO_12 });
     const links = within(regiao).getAllByRole("link");
     expect(links.map(a => [a.getAttribute("aria-label")?.replace(/\s/g, " "), a.getAttribute("href")])).toEqual([
-      ["Medido em 10/2025: R$ 9.000.000,00", "/fechamento?mes=2025-10"],
-      ["Medido em 08/2026: R$ 18.000.000,00", "/fechamento?mes=2026-08"],
+      ["Medido em 10/2025: R$ 10.000.000,00", "/fechamento?mes=2025-10"],
+      ["Medido em 08/2026: R$ 20.000.000,00", "/fechamento?mes=2026-08"],
       ["Medido em 09/2026: R$ 15.000.000,00", "/fechamento?mes=2026-09"],
     ]);
     expect(links.every(a => a.getAttribute("title") === a.getAttribute("aria-label"))).toBe(true);
