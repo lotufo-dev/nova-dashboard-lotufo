@@ -3,7 +3,7 @@ import { api, mensagemDeErro } from "./api";
 import CaixaAviso from "./CaixaAviso";
 import Contador from "./Contador";
 import { contar } from "./formato";
-import { IconeLinkExterno, IconeSeta, IconeSiga } from "./icones";
+import { IconeLinkExterno, IconeSeta, IconeSiga, IconeVoltar } from "./icones";
 import LegendaCor, { type ItemLegenda } from "./LegendaCor";
 import { Link } from "./Link";
 import type { ObraLista } from "./listaObras";
@@ -11,8 +11,8 @@ import { FINAIS, tituloMedicao } from "./medicao";
 import { useNomesDoCaminho } from "./nomesDoCaminho";
 import { ir, trocarBusca, type Busca } from "./rota";
 import {
-  CATEGORIAS, categoriaDaBusca, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, naoLidoDe, nomeDoProcesso, ordenar,
-  periodoDe, porCategoria, roboAtivo, ROTULO_ENCERRADO, setorPessoa, situacaoDoBotao, tempoNoSetor, tituloDoEvento, TIPOS, volumeDe,
+  CATEGORIAS, categoriaDaBusca, contagemPorTipo, dataHoraCurta, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, naoLidoDe, nomeDoProcesso, ordenar,
+  periodoDe, porCategoria, roboAtivo, ROTULO_ENCERRADO, setorPessoa, situacaoDoBotao, tempoNoSetor, textoSemMovimentacao, tituloDoEvento, TIPOS, volumeDe,
   type Categoria, type LimitesSiga, type Movimentacao, type PainelSiga, type ProcessoSiga, type Robo, type TipoMovimentacao,
 } from "./siga";
 import Selo, { Glifo } from "./Selo";
@@ -29,22 +29,26 @@ import Falha from "./Falha";
 // ?processo=<id>). Tudo vem de GET /api/siga, inclusive as contagens e a leitura do tempo; aqui so' se desenha.
 // #663: o nome do processo e' montado pelo sistema (obra e assunto); quem edita cadastros corrige categoria, obra e
 // complemento no historico.
+// #840: "No setor há" e' so' o tempo de permanencia, em texto comum; o destaque (a cor da linha e o selo) vai para
+// "Dias sem movimentação", que conta da mesma movimentacao que "Última movimentação" mostra. O historico abre com o
+// botao "‹ SIGA", que volta ao quadro com a categoria de onde se veio.
 
 const RELER_A_CADA_MS = 60 * 60_000;   // o robo le de hora em hora (#657)
 const RELER_COM_ROBO_MS = 5_000;   // pedido na fila ou rodada em andamento (#343): a tela acompanha o robo
 const traco = <span className="sg__traco">—</span>;
 
-// O tempo no setor e' a situacao da linha: o selo da situacao que o SERVIDOR leu (a regua do tempo parado).
-function NoSetor({ p, agora }: { p: ProcessoSiga; agora: Date }) {
-  const texto = p.hoje > 0 ? "andou hoje" : tempoNoSetor(p, agora);
+// Os dias sem movimentacao sao a situacao da linha (#840): o selo da situacao que o SERVIDOR leu (a regua do tempo
+// parado). O tempo no setor fica em texto comum, sem selo, sem cor e sem icone.
+function SemMovimentacao({ p }: { p: ProcessoSiga }) {
+  const texto = textoSemMovimentacao(p);
   if (!p.situacao_tempo) return <span className="sg__traco">{texto}</span>;
   return <Selo situacao={p.situacao_tempo} className="sg__dias">{texto}</Selo>;
 }
 
 const legendaDe = (l: LimitesSiga): ItemLegenda[] => [
   { situacao: "feito", texto: "andou hoje" },
-  { situacao: "andamento", texto: `menos de ${l.dias_atencao} dias úteis no setor` },
-  { situacao: "breve", texto: `parado há ${l.dias_atencao} dias úteis ou mais` },
+  { situacao: "andamento", texto: `sem movimentação há menos de ${l.dias_atencao} dias úteis` },
+  { situacao: "breve", texto: `sem movimentação há ${l.dias_atencao} dias úteis ou mais` },
   { situacao: "critico", texto: `${l.dias_critico} dias úteis ou mais` },
 ];
 
@@ -53,11 +57,12 @@ const buscaDa = (categoria: Categoria | null): Busca => (categoria ? { categoria
 const abrirHistorico = (id: number, categoria: Categoria | null) =>
   ir({ tela: "siga" }, { busca: { ...buscaDa(categoria), processo: String(id) } });
 
-// As sete colunas, as mesmas em todo painel: o olho desce pela mesma coluna de uma categoria para a outra.
+// As nove colunas (#840), as mesmas em todo painel: o olho desce pela mesma coluna de uma categoria para a outra.
 const COLUNAS = (
   <colgroup>
     <col className="sg__c-proc" /><col className="sg__c-contr" /><col className="sg__c-onde" /><col className="sg__c-quem" />
-    <col className="sg__c-setor" /><col className="sg__c-ultima" /><col className="sg__c-seta" />
+    <col className="sg__c-setor" /><col className="sg__c-parado" /><col className="sg__c-ultima" /><col className="sg__c-tipo" />
+    <col className="sg__c-seta" />
   </colgroup>
 );
 
@@ -65,7 +70,8 @@ function Linha({ p, agora, robo, categoria }: { p: ProcessoSiga; agora: Date; ro
   const volume = volumeDe(p.situacao);
   const ultima = p.ultima;
   const lendo = robo.rodada?.processos.includes(p.id) ?? false;
-  // encerrado (#657): sem "nao lido" e sem cor de atraso; no lugar de "Com quem" e "No setor ha'", a situacao
+  // encerrado (#657): sem "nao lido" e sem cor de atraso; no lugar de "Com quem", "No setor ha'" e "Dias sem
+  // movimentação", a situacao
   const naoLido = p.encerrado ? null : naoLidoDe(robo, p.id);
   const abrir = () => abrirHistorico(p.id, categoria);
   return (
@@ -96,32 +102,27 @@ function Linha({ p, agora, robo, categoria }: { p: ProcessoSiga; agora: Date; ro
       {p.contratante && (
         <td data-rotulo="Contratante">{p.contratante}{p.orgao_sub && <span className="sg__fraco">{p.orgao_sub}</span>}</td>
       )}
-      <td data-rotulo="Onde está">
+      <td data-rotulo="Setor">
         <span className="sg__nome">{p.setor || "—"}</span>
         {p.caixa_entrada && <span className="sg__fraco">caixa de entrada</span>}
         {volume && <span className="sg__fraco">{volume}</span>}
       </td>
-      {p.encerrado ? <td colSpan={2} data-rotulo="Situação">{ROTULO_ENCERRADO[p.encerrado]}</td> : (
+      {p.encerrado ? <td colSpan={3} data-rotulo="Situação">{ROTULO_ENCERRADO[p.encerrado]}</td> : (
         <>
           <td data-rotulo="Com quem">{p.com_quem || traco}</td>
-          <td data-rotulo="No setor há"><NoSetor p={p} agora={agora} /></td>
+          <td data-rotulo="No setor há">{p.desde === null ? traco : tempoNoSetor(p, agora)}</td>
+          <td data-rotulo="Dias sem movimentação"><SemMovimentacao p={p} /></td>
         </>
       )}
-      <td data-rotulo="Última movimentação">
-        {ultima ? (
-          <>
-            <span className="num">{fmtData(ultima.data).slice(0, 5)}</span>{" "}
-            <span>{tituloDoEvento(ultima.evento)}</span>
-          </>
-        ) : traco}
-      </td>
+      <td data-rotulo="Última movimentação">{ultima ? <span className="num">{dataHoraCurta(ultima.data, agora)}</span> : traco}</td>
+      <td data-rotulo="Tipo de movimentação">{ultima ? tituloDoEvento(ultima.evento) || traco : traco}</td>
       <td className="sg__seta" aria-hidden="true"><IconeSeta className="icone" /></td>
     </tr>
   );
 }
 
-/** O painel de uma categoria (#805): o cabecalho de grupo forte, com quantos processos ela tem e quantos estao
- *  parados alem do limite critico, e as linhas do mais parado ao menos (a ordem de `porCategoria`). */
+/** O painel de uma categoria (#805): o cabecalho de grupo forte, com quantos processos ela tem e quantos estao sem
+ *  movimentacao alem do limite critico (#840), e as linhas do mais parado ao menos (a ordem de `porCategoria`). */
 export function PainelDaCategoria({ secao, limites, agora, robo, categoria }: {
   secao: { categoria: Categoria; rotulo: string; processos: ProcessoSiga[] }; limites: LimitesSiga; agora: Date; robo: Robo;
   categoria: Categoria | null;
@@ -137,8 +138,8 @@ export function PainelDaCategoria({ secao, limites, agora, robo, categoria }: {
           {parados > 0 && (
             <Selo situacao="critico">
               {/* a faixa e' estreita: "10+ dias úteis" para quem ve, por extenso para quem ouve */}
-              <span aria-hidden="true">{contar(parados, "parado", "parados")} há {limites.dias_critico}+ dias úteis</span>
-              <span className="sr-only">{contar(parados, "parado", "parados")} há {limites.dias_critico} dias úteis ou mais</span>
+              <span aria-hidden="true">{parados.toLocaleString("pt-BR")} sem movimentação há {limites.dias_critico}+ dias úteis</span>
+              <span className="sr-only">{parados.toLocaleString("pt-BR")} sem movimentação há {limites.dias_critico} dias úteis ou mais</span>
             </Selo>
           )}
         </span>
@@ -148,8 +149,9 @@ export function PainelDaCategoria({ secao, limites, agora, robo, categoria }: {
         {COLUNAS}
         <thead>
           <tr>
-            <th scope="col">Processo</th><th scope="col">Contratante</th><th scope="col">Onde está</th><th scope="col">Com quem</th>
-            <th scope="col">No setor há</th><th scope="col">Última movimentação</th><th scope="col"><span className="sr-only">Abrir</span></th>
+            <th scope="col">Processo</th><th scope="col">Contratante</th><th scope="col">Setor</th><th scope="col">Com quem</th>
+            <th scope="col">No setor há</th><th scope="col">Dias sem movimentação</th><th scope="col">Última movimentação</th>
+            <th scope="col">Tipo de movimentação</th><th scope="col"><span className="sr-only">Abrir</span></th>
           </tr>
         </thead>
         <tbody>
@@ -217,8 +219,8 @@ const PASSO_HISTORICO = 30;
 const PRIMEIRAS = 15;
 
 // Pagina do historico de um processo (#512): todas as movimentacoes gravadas, com filtro por tipo e busca.
-function Historico({ p, dados, aoPedir, podeEditar }: {
-  p: ProcessoSiga; dados: PainelSiga; aoPedir: () => Promise<void>; podeEditar: boolean;
+function Historico({ p, dados, aoPedir, podeEditar, categoria }: {
+  p: ProcessoSiga; dados: PainelSiga; aoPedir: () => Promise<void>; podeEditar: boolean; categoria: Categoria | null;
 }) {
   const [tipo, setTipo] = useState<TipoMovimentacao | null>(null);
   const [texto, setTexto] = useState("");
@@ -235,6 +237,10 @@ function Historico({ p, dados, aoPedir, podeEditar }: {
   return (
     <div className="pagina siga sg-hist">
       <header className="sg__cabeca sg__cabeca--regua">
+        {/* #840: o botao de voltar ao quadro, a vista, com a categoria de onde se veio; o caminho do topo continua */}
+        <Link className="btn--voltar sg__voltar" para={{ tela: "siga" }} busca={buscaDa(categoria)}>
+          <IconeVoltar className="icone icone--p" /> SIGA
+        </Link>
         <h1>Histórico · {nome}</h1>
         <p className="sg__sub">
           {/* o aviso da linha continua aqui, onde quem edita corrige a categoria (#805) */}
@@ -504,7 +510,7 @@ export default function SigaPagina({ busca, agora, podeEditar = true }: { busca:
   // ?processo=<id> abre o historico (o "Abrir" do aviso tambem); id que nao existe cai na tabela
   const categoria = categoriaDaBusca(busca);
   const aberto = /^\d+$/.test(busca.processo ?? "") ? processos.find(p => p.id === Number(busca.processo)) : undefined;
-  if (aberto) return <Historico key={aberto.id} p={aberto} dados={dados} aoPedir={carregar} podeEditar={podeEditar} />;
+  if (aberto) return <Historico key={aberto.id} p={aberto} dados={dados} aoPedir={carregar} podeEditar={podeEditar} categoria={categoria} />;
 
   const robo = dados.robo;
   // #657: os paineis so' tem os vivos; os encerrados ficam recolhidos no fim da pagina
@@ -539,7 +545,7 @@ export default function SigaPagina({ busca, agora, podeEditar = true }: { busca:
       <Numero rotulo="Processos acompanhados" n={dados.numeros.acompanhados}>
         {dados.lido_em && <>última leitura <span className="num">{fmtHora(dados.lido_em)}</span></>}
       </Numero>
-      <Numero rotulo={`Parados há ${dados.limites.dias_critico} dias úteis ou mais`} n={dados.numeros.parados} situacao="critico" />
+      <Numero rotulo={`Sem movimentação há ${dados.limites.dias_critico} dias úteis ou mais`} n={dados.numeros.parados} situacao="critico" />
       <Numero rotulo="Andaram hoje" n={dados.numeros.andaram_hoje} situacao="feito" />
       <Numero rotulo="Não lidos na última rodada" n={dados.numeros.nao_lidos} situacao="breve" />
     </dl>
@@ -583,8 +589,8 @@ export default function SigaPagina({ busca, agora, podeEditar = true }: { busca:
               {COLUNAS}
               <thead>
                 <tr>
-                  <th scope="col">Processo</th><th scope="col">Contratante</th><th scope="col">Onde está</th><th scope="col" colSpan={2}>Situação</th>
-                  <th scope="col">Última movimentação</th><th scope="col"><span className="sr-only">Abrir</span></th>
+                  <th scope="col">Processo</th><th scope="col">Contratante</th><th scope="col">Setor</th><th scope="col" colSpan={3}>Situação</th>
+                  <th scope="col">Última movimentação</th><th scope="col">Tipo de movimentação</th><th scope="col"><span className="sr-only">Abrir</span></th>
                 </tr>
               </thead>
               <tbody>

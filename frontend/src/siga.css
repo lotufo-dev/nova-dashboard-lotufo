@@ -29,6 +29,9 @@
 
 .sg__cabeca { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-mini) var(--espaco-g); }
 .sg__cabeca--regua { border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro); }
+/* #840: o "‹ SIGA" do historico, com contorno, como o voltar da barra do topo */
+.sg__voltar { flex: none; border: var(--borda-campo); background: var(--cor-superficie); }
+.sg__voltar:hover:not(:disabled) { border-color: var(--cor-texto-secundario); }
 .sg__cabeca h1 { flex-basis: 100%; margin: 0; font-size: var(--texto-numero); line-height: var(--entrelinha-titulo); overflow-wrap: anywhere; }
 .sg__sub { margin: 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .sg__cabeca > .sg__sub { flex-basis: 100%; }
@@ -66,8 +69,15 @@
 /* #805: as mesmas sete colunas em todo painel (e nos encerrados). "Protocolado em" desceu para baixo do nome do
    processo e deu lugar ao contratante, com a largura da palavra "Contratante" no painel de ~724 px (a 1024 px);
    "No setor há" fica com a largura do selo de duas palavras numa linha, e "Com quem", com a de um nome sem partir. */
-.sg__c-proc { width: 25%; } .sg__c-contr { width: 13%; } .sg__c-onde { width: 12%; } .sg__c-quem { width: 12%; }
-.sg__c-setor { width: 19%; } .sg__c-ultima { width: 15%; } .sg__c-seta { width: 4%; }
+/* #840: nove colunas. "No setor há" virou texto comum (estreita); "Dias sem movimentação" leva o selo, com a largura
+   dele em duas linhas; "Última movimentação" e' "dd/mm hh:mm" (quebra entre a data e a hora) e o tipo, uma palavra
+   ("Recebimento" numa linha a 1024 px). No cabecalho, "movimentação" nao cabe inteira a 1024 px: separa em silabas
+   (`hyphens`, a pagina e' pt-BR) em vez de invadir a coluna vizinha. */
+.sg__c-proc { width: 18%; } .sg__c-contr { width: 10%; } .sg__c-onde { width: 10%; } .sg__c-quem { width: 11%; }
+.sg__c-setor { width: 8%; } .sg__c-parado { width: 14%; } .sg__c-ultima { width: 11%; } .sg__c-tipo { width: 14%; }
+.sg__c-seta { width: 4%; }
+.sg__tabela thead th, .sg__tabela td[data-rotulo="Tipo de movimentação"] { hyphens: auto; }
+.sg__tabela thead th { overflow-wrap: anywhere; }
 .sg__tabela td.sg__seta { text-align: right; color: var(--cor-texto-secundario); }
 .sg__seta .icone { width: var(--tamanho-icone); height: var(--tamanho-icone); }
 

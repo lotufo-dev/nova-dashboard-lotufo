@@ -347,15 +347,17 @@ describe("Medições: fila de trabalho, quadro do mês e meses anteriores (#805)
       expect(delta[1].querySelector(".selo--andamento")).not.toBeNull();
     });
 
-    it("a medição com processo vivo do SIGA mostra o setor e o tempo no setor na célula do passo (#664)", async () => {
-      const siga = { processo_id: 5, setor: "SUPE", dias_uteis: 5, desde: "2026-10-20T09:00:00-04:00", hoje: 0 };
+    it("a medição com processo vivo do SIGA mostra o setor e os dias sem movimentação na célula do passo (#664, #840)", async () => {
+      // no setor ha' 20 dias uteis, sem movimentacao ha' 5: a celula diz os 5, na leitura do servidor
+      const siga = { processo_id: 5, setor: "SUPE", dias_uteis: 20, desde: "2026-10-01T09:00:00-04:00", hoje: 0,
+        dias_sem_movimentacao: 5, ultima_em: "2026-10-20T09:00:00-04:00", situacao_tempo: "breve" as const };
       const comSiga = noQuadro(DELTA, { passos: noQuadro(DELTA).passos.map(p => p.numero === 2 ? { ...p, siga } : p) });
       responder(url => url.startsWith("/api/medicoes/fila")
         ? { ...FILA, quadro: [{ ...QUADRO[0], linhas: [comSiga] }] } : undefined);
       render(<MedicoesPagina usuario={usuario} aba="quadro" />);
       const tabela = await screen.findByRole("table", { name: "Quadro do mês" });
       const posicao = within(linhaDa(tabela, "Rodovia Delta")).getAllByRole("cell")[1].querySelector(".quadro__siga") as HTMLElement;
-      expect(posicao.textContent).toBe("No SIGA: SUPE 5 dias úteis");
+      expect(posicao.textContent).toBe("No SIGA: SUPE sem movimentação há 5 dias úteis");
       expect(posicao.querySelector(".quadro__siga-tempo--breve .glifo--breve")).not.toBeNull();
     });
 

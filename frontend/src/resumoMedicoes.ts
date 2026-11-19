@@ -2,6 +2,8 @@
 // GET /api/medicoes/resumo. Situacao, marco, dias parados e a linha unica de medicao + reajuste sao do servidor
 // (`medicoes.resumo`); aqui so' os rotulos, os limiares de cor do "Parada há" e o agrupamento por contratante.
 
+import type { Situacao as SituacaoDoTempo } from "./situacao";
+
 export type Situacao = "planilha-gerada" | "planilha-enviada" | "boletim-recebido" | "faturamento" | "aguardando-nota" | "enviar-nota" | "aguardando-pagamento";
 export type SituacaoOuSem = "sem-medicao" | Situacao;
 
@@ -31,7 +33,12 @@ export type MedicaoCurta = { numero: number; tipo: string; competencia: string }
 /** #643, quadro do mês: o passo de uma obra na competência. `data` (AAAA-MM-DD) só no passo feito; `medicao_id` só no da vez. */
 /** #664: o processo vivo do SIGA da medição que está no passo: setor atual, entrada nele, dias úteis e quantas
  *  movimentações teve hoje (os da tela SIGA). */
-export type SigaNoQuadro = { processo_id: number; setor: string; dias_uteis: number | null; desde: string | null; hoje: number };
+// #840: dias_sem_movimentacao e situacao_tempo sao a leitura de "parado" do servidor (`siga.parado`); o tempo no setor
+// (desde, dias_uteis) fica so' como informacao
+export type SigaNoQuadro = {
+  processo_id: number; setor: string; dias_uteis: number | null; desde: string | null; hoje: number;
+  dias_sem_movimentacao: number | null; ultima_em: string | null; situacao_tempo: SituacaoDoTempo | null;
+};
 export type PassoQuadro = {
   numero: number; nome: string; situacao: "feito" | "atual" | "futuro"; data: string | null; medicao_id: number | null;
   siga: SigaNoQuadro | null;

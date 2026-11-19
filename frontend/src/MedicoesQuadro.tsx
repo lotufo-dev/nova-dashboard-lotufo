@@ -7,7 +7,7 @@ import { Aprovado } from "./MedicoesFila";
 import { diaMes, PASSOS } from "./Passos";
 import type { SigaNoQuadro } from "./resumoMedicoes";
 import Selo, { Glifo } from "./Selo";
-import { situacaoDoAtraso, tempoNoSetor } from "./siga";
+import { situacaoDoAtraso, textoSemMovimentacao } from "./siga";
 import { textoDoTempo } from "./parada";
 
 // O QUADRO DO MES (#643, aprovado pelo dono em 10/11/2026), a segunda vista de Medicoes desde a #805: uma linha por
@@ -18,18 +18,18 @@ import { textoDoTempo } from "./parada";
 
 const traco = <span className="medicoes__traco">—</span>;
 
-/** #664: onde está o processo do SIGA da medição que está neste passo: sigla do setor e tempo no setor, com o texto da
- *  tela SIGA (o `NoSetor` de SigaPagina: "hoje" quando houve movimentação hoje; senão `tempoNoSetor`) e a situação do
- *  atraso de `nivelDias`. Sem data de entrada no setor, só a sigla. */
+/** #664: onde está o processo do SIGA da medição que está neste passo: sigla do setor e, #840, há quanto tempo ele está
+ *  sem movimentação, com o texto da coluna "Dias sem movimentação" da tela SIGA ("hoje" quando andou hoje) e a
+ *  situação do atraso pela leitura do servidor. Sem movimentação nenhuma, só a sigla. */
 function PosicaoSiga({ siga }: { siga: SigaNoQuadro | null }) {
   if (!siga) return null;
   const situacao = situacaoDoAtraso(siga);
-  const tempo = siga.hoje > 0 ? "hoje" : siga.desde === null || siga.dias_uteis === null ? "—" : tempoNoSetor(siga, new Date());
+  const tempo = siga.hoje > 0 ? "hoje" : textoSemMovimentacao(siga);
   return (
     <span className="quadro__siga">
       <span className="sr-only">No SIGA: </span>
       <span className="quadro__siga-setor">{siga.setor}</span>
-      {tempo !== "—" && <> <span className={`quadro__siga-tempo num${situacao ? ` quadro__siga-tempo--${situacao}` : ""}`}>{situacao && <Glifo situacao={situacao} />}{tempo}</span></>}
+      {tempo !== "—" && <> <span className={`quadro__siga-tempo num${situacao ? ` quadro__siga-tempo--${situacao}` : ""}`}>{situacao && <Glifo situacao={situacao} />}{tempo !== "hoje" && <span className="sr-only">sem movimentação há </span>}{tempo}</span></>}
     </span>
   );
 }

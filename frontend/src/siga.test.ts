@@ -1,25 +1,33 @@
 import { describe, expect, it } from "vitest";
 import {
-  casaComBusca, categoriaDaBusca, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, naoLidoDe, nivelDias, nomeDoProcesso, ordenar, periodoDe, porCategoria, situacaoDoAtraso,
-  roboAtivo, setorPessoa, situacaoDoBotao, tempoNoSetor, tituloDoEvento, volumeDe, type Movimentacao, type ProcessoSiga, type Robo,
+  casaComBusca, categoriaDaBusca, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, naoLidoDe, nomeDoProcesso, ordenar, periodoDe, porCategoria, situacaoDoAtraso,
+  roboAtivo, setorPessoa, situacaoDoBotao, tempoNoSetor, textoSemMovimentacao, dataHoraCurta, tituloDoEvento, volumeDe, type Movimentacao, type ProcessoSiga, type Robo,
 } from "./siga";
 
 const p = (extra: Partial<ProcessoSiga>): ProcessoSiga => ({
   id: 1, codigo: null, link: null, numero: null, nome: null, contrato_id: null, obra: null, medicao_id: null,
   categoria: "outros", complemento: null, o_que_e: "Outro", categoria_a_conferir: null, contratante: null, orgao_sub: null,
   situacao_tempo: null, medicao_titulo: null, protocolo_id: null, situacao: null, encerrado: null, setor: "", caixa_entrada: false, com_quem: "",
-  desde: null, dias_uteis: null, hoje: 0, ultima: null, protocolado_em: null, movimentacoes: [], ...extra });
+  desde: null, dias_uteis: null, dias_sem_movimentacao: null, hoje: 0, ultima: null, protocolado_em: null, movimentacoes: [], ...extra });
 
 describe("siga", () => {
-  it("nível pelos dias úteis: âmbar em 5, vermelho em 10", () => {
-    expect([null, 0, 4, 5, 9, 10, 30].map(nivelDias)).toEqual([null, null, null, "atencao", "atencao", "acao", "acao"]);
+  it("o atraso (quadro de Medições) é a leitura do servidor sem o 'em andamento': só o atraso e o andou hoje levam marca (#840)", () => {
+    expect((["feito", "andamento", "breve", "critico", null] as const).map(s => situacaoDoAtraso({ situacao_tempo: s })))
+      .toEqual(["feito", undefined, "breve", "critico", undefined]);
   });
 
-  it("o atraso no setor (quadro de Medições): feito se andou hoje, crítico em 10 dias úteis, vence em breve em 5; dentro do prazo, nenhuma", () => {
-    // a leitura do tempo da tela SIGA (com o "em andamento") vem pronta do servidor, em `situacao_tempo` (#805)
-    const atraso = (dias_uteis: number | null, hoje = 0) => situacaoDoAtraso(p({ dias_uteis, hoje }));
-    expect([0, 4, 5, 10, null].map(d => atraso(d))).toEqual([undefined, undefined, "breve", "critico", undefined]);
-    expect(atraso(12, 1)).toBe("feito");
+  it("Dias sem movimentação: andou hoje, dias úteis do servidor, menos de 1 dia útil e sem movimentação (#840)", () => {
+    expect(textoSemMovimentacao(p({ hoje: 1, dias_sem_movimentacao: 0 }))).toBe("andou hoje");
+    expect(textoSemMovimentacao(p({ dias_sem_movimentacao: 1 }))).toBe("1 dia útil");
+    expect(textoSemMovimentacao(p({ dias_sem_movimentacao: 12 }))).toBe("12 dias úteis");
+    expect(textoSemMovimentacao(p({ dias_sem_movimentacao: 0 }))).toBe("menos de 1 dia útil");
+    expect(textoSemMovimentacao(p({}))).toBe("—");
+  });
+
+  it("Última movimentação em data e hora; o ano só quando não é o de hoje (#840)", () => {
+    const agora = new Date("2026-10-26T15:00:00Z");
+    expect(dataHoraCurta("2026-10-23T17:05:00-04:00", agora)).toBe("23/10 17:05");
+    expect(dataHoraCurta("2025-12-30T08:00:00-04:00", agora)).toBe("30/12/2025 08:00");
   });
 
   it("a categoria escolhida vem da URL (?categoria=); sem ela, ou com valor que não é categoria, todas (#805)", () => {
@@ -52,13 +60,14 @@ describe("siga", () => {
     expect(tempoNoSetor(p({ desde: "ilegível", dias_uteis: 0 }), agora)).toBe("—");
   });
 
-  it("ordem: do mais parado ao menos (dias úteis), empate pelo mais antigo no setor; quem andou hoje não sobe; sem data vai para o fim", () => {
+  it("ordem: do mais parado ao menos (dias sem movimentação, #840), empate pela última movimentação mais antiga; o tempo no setor não conta; sem movimentação vai para o fim", () => {
+    const ultima = (data: string): Movimentacao => ({ data, evento: "Recebimento", tipo: "recebimento", cad_lotacao: "", cad_pessoa: "", at_lotacao: "", at_pessoa: "" });
     const lista = [
-      p({ id: 1, dias_uteis: 6, desde: "2026-10-20T10:00:00-04:00" }),
-      p({ id: 2, dias_uteis: 6, desde: "2026-10-19T10:00:00-04:00" }),
-      p({ id: 3, hoje: 1, dias_uteis: 0, desde: "2026-10-28T09:00:00-04:00" }),
-      p({ id: 4, dias_uteis: null, desde: null }),
-      p({ id: 5, dias_uteis: 12, desde: "2026-10-10T10:00:00-04:00" }),
+      p({ id: 1, dias_sem_movimentacao: 6, ultima: ultima("2026-10-20T10:00:00-04:00") }),
+      p({ id: 2, dias_sem_movimentacao: 6, ultima: ultima("2026-10-19T10:00:00-04:00") }),
+      p({ id: 3, hoje: 1, dias_uteis: 40, dias_sem_movimentacao: 0, ultima: ultima("2026-10-28T09:00:00-04:00") }),
+      p({ id: 4, dias_sem_movimentacao: null }),
+      p({ id: 5, dias_uteis: 12, dias_sem_movimentacao: 12, ultima: ultima("2026-10-10T10:00:00-04:00") }),
     ];
     expect(ordenar(lista).map(x => x.id)).toEqual([5, 2, 1, 3, 4]);
     expect(lista.map(x => x.id)).toEqual([1, 2, 3, 4, 5]);   // não mexe na lista de entrada
@@ -125,9 +134,9 @@ describe("siga", () => {
 
   it("seções por categoria na ordem fixa, cada uma do mais parado ao menos; a vazia não aparece (#663)", () => {
     const lista = [
-      p({ id: 1, categoria: "outros", dias_uteis: 1 }), p({ id: 2, categoria: "medicoes", dias_uteis: 2 }),
-      p({ id: 3, categoria: "outros", dias_uteis: 9 }), p({ id: 4, categoria: "medicoes", dias_uteis: 7 }),
-      p({ id: 5, categoria: "aditivos", dias_uteis: 30 }),
+      p({ id: 1, categoria: "outros", dias_sem_movimentacao: 1 }), p({ id: 2, categoria: "medicoes", dias_sem_movimentacao: 2 }),
+      p({ id: 3, categoria: "outros", dias_sem_movimentacao: 9 }), p({ id: 4, categoria: "medicoes", dias_sem_movimentacao: 7 }),
+      p({ id: 5, categoria: "aditivos", dias_sem_movimentacao: 30 }),
     ];
     expect(porCategoria(lista).map(s => [s.rotulo, s.processos.map(x => x.id)])).toEqual(
       [["Medições", [4, 2]], ["Aditivos", [5]], ["Outros", [3, 1]]]);

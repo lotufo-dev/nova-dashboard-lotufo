@@ -6,9 +6,10 @@ const mov = (data, evento, tipo, extra = {}) => ({
   data, evento, tipo, cad_lotacao: "PROTOC/ORGAO", cad_pessoa: "Beltrano", at_lotacao: "COFIN/ORGAO", at_pessoa: "Fulano", ...extra,
 });
 
-// a leitura do tempo no setor, como o servidor a manda (`siga.situacao_do_tempo`): o encerrado nao tem
-const tempoDe = p => (p.encerrado ? null : p.hoje > 0 ? "feito" : p.dias_uteis === null ? null
-  : p.dias_uteis >= 10 ? "critico" : p.dias_uteis >= 5 ? "breve" : "andamento");
+// a leitura de "parado", como o servidor a manda (`siga.parado`, #840: sobre os dias sem movimentacao): o encerrado
+// nao tem
+const tempoDe = p => (p.encerrado ? null : p.hoje > 0 ? "feito" : p.dias_sem_movimentacao === null ? null
+  : p.dias_sem_movimentacao >= 10 ? "critico" : p.dias_sem_movimentacao >= 5 ? "breve" : "andamento");
 
 const processo = extra => {
   const p = {
@@ -20,6 +21,8 @@ const processo = extra => {
     ultima: mov("2026-10-20T10:00:00-04:00", "Recebimento", "recebimento"), protocolado_em: "2026-10-01T08:00:00-04:00",
     movimentacoes: [mov("2026-10-20T10:00:00-04:00", "Recebimento", "recebimento")], ...extra,
   };
+  // #840: sem dizer, os dias sem movimentacao sao os do setor (o processo nao andou desde que entrou)
+  if (!("dias_sem_movimentacao" in extra)) p.dias_sem_movimentacao = p.ultima === null ? null : p.dias_uteis;
   return { ...p, situacao_tempo: tempoDe(p) };
 };
 
@@ -66,12 +69,13 @@ const PROCESSOS_DO_SIGA = [
   processo({ id: 5, nome: "Processo Ômega", numero: "ORGAO-PRO-2025/00090", contrato_id: 2, obra: "Obra Própria", ...sinfra, medicao_id: 2,
     medicao_titulo: "2ª Medição", categoria: "medicoes", o_que_e: "2ª Medição", encerrado: "recebida", dias_uteis: 40 }),
   processo({ id: 6, nome: "Processo Zeta", numero: "ORGAO-PRO-2026/00031", contrato_id: 9011, obra: "Complexo Lambda", ...mtpar, medicao_id: 9701,
-    medicao_titulo: "24ª Medição", categoria: "medicoes", o_que_e: "24ª Medição", dias_uteis: 25, setor: "NUCLEO-ADM", com_quem: "Sicrana",
+    medicao_titulo: "24ª Medição", categoria: "medicoes", o_que_e: "24ª Medição", dias_uteis: 25, dias_sem_movimentacao: 11, setor: "NUCLEO-ADM", com_quem: "Sicrana",
     desde: "2026-09-22T10:00:00-04:00", ultima: mov("2026-10-13T11:00:00-04:00", "Juntada | despacho", "juntada"),
     protocolado_em: "2026-09-08T08:00:00-04:00" }),
   processo({ id: 7, nome: "Processo Eta", numero: "ORGAO-PRO-2026/00032", contrato_id: 9012, obra: "Ponte Mi", ...sinfra, protocolo_id: 6,
     medicao_titulo: "7ª Medição e Reajuste da 7ª Medição", categoria: "medicoes", o_que_e: "7ª Medição e Reajuste da 7ª Medição",
-    dias_uteis: 17, setor: "CCONT", com_quem: "Beltrano", desde: "2026-10-02T10:00:00-04:00", protocolado_em: "2026-09-25T08:00:00-04:00" }),
+    dias_uteis: 17, setor: "CCONT", com_quem: "Beltrano", desde: "2026-10-02T10:00:00-04:00", protocolado_em: "2026-09-25T08:00:00-04:00",
+    dias_sem_movimentacao: 1, ultima: mov("2026-10-27T16:20:00-04:00", "Recebimento", "recebimento", { at_lotacao: "CCONT/ORGAO", at_pessoa: "Beltrano" }) }),
   processo({ id: 8, nome: "Processo Teta", numero: "ORGAO-PRO-2026/00033", contrato_id: 1, obra: "Obra Consórcio", ...sinfra, medicao_id: 3,
     medicao_titulo: "7ª Medição", categoria: "medicoes", o_que_e: "7ª Medição", dias_uteis: 7, setor: "CCONT",
     desde: "2026-10-19T10:00:00-04:00" }),
@@ -747,7 +751,7 @@ export const avisosEmVolume = publico => (inicio, reg) => {
       mensagem: `Construtora Alfa: ${qual} ${dias < 0 ? "vencida" : "vence"} em ${dataBR(data)}`, destino: { tela: "documentos" }, data, sentido: "prazo" };
   };
   // SIGA: o processo parado no orgao
-  const siga = (i, dias) => ({ ...base(i, "siga_parado", "acao", dias, "desde", d => `processo ORGAO-PRO-2026/00007 parado em COFIN desde ${d}`,
+  const siga = (i, dias) => ({ ...base(i, "siga_parado", "acao", dias, "desde", d => `processo ORGAO-PRO-2026/00007 em COFIN sem movimentação desde ${d}`,
     "medicoes", SO_OPERACAO), destino: { tela: "siga", processo: 2 } });
   // os vencidos: de 2 a 6 por obra, o mais antigo de cada uma cada vez mais novo (890, 758, 641... dias)
   const vencidos = OBRAS_DOS_AVISOS.flatMap((_, i) => {
@@ -838,7 +842,8 @@ export const filaSimulada = (resposta, reg) => {
     passos: l.passos.map(p => ({ ...p, data: p.situacao === "feito" ? dataEm(hojeDaProva(), -30 + p.numero * 3) : null,
       medicao_id: p.situacao === "atual" ? l.medicao_id : null, parada: p.situacao === "atual" ? l.parada : null,
       siga: p.situacao === "atual" && p.numero === 2 && l.parada.dias_uteis === 11
-        ? { processo_id: 1, setor: "SUPE", dias_uteis: 6, desde: "2026-10-20T10:00:00-04:00", hoje: 0 } : null })),
+        ? { processo_id: 1, setor: "SUPE", dias_uteis: 6, desde: "2026-10-20T10:00:00-04:00", hoje: 0,
+          dias_sem_movimentacao: 6, ultima_em: "2026-10-20T10:00:00-04:00", situacao_tempo: "breve" } : null })),
   });
   const contratantes = [...new Set(doMes.map(l => l.contratante))];
   const quadro = contratantes.map(c => { const ls = doMes.filter(l => l.contratante === c); return { contratante: c, ...somaDaFila(ls), linhas: ls.map(noQuadro) }; })
@@ -1007,7 +1012,8 @@ export const aReceberDoContratante = ({ trava = false, de = "sinfra", como = nul
 };
 
 /** Processos no SIGA: os vivos da SINFRA no SIGA simulado, do mais parado para o menos, com o "nao lido" deles. */
-const doMaisParado = (a, b) => (b.dias_uteis ?? -1) - (a.dias_uteis ?? -1) || (a.desde ?? "9").localeCompare(b.desde ?? "9") || a.id - b.id;
+const doMaisParado = (a, b) => (b.dias_sem_movimentacao ?? -1) - (a.dias_sem_movimentacao ?? -1)
+  || (a.ultima?.data ?? "9").localeCompare(b.ultima?.data ?? "9") || a.id - b.id;
 const PROCESSOS_DA_SINFRA = SIGA_COM_NAO_LIDOS.processos.filter(p => p.contratante === "SINFRA" && !p.encerrado).sort(doMaisParado);
 export const SIGA_DO_CONTRATANTE = {
   lido_em: SIGA_COM_NAO_LIDOS.lido_em, limites: SIGA_COM_NAO_LIDOS.limites,

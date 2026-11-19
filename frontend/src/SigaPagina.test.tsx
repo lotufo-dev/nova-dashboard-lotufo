@@ -19,17 +19,21 @@ const tipoDe = (evento: string): TipoMovimentacao => {
 const AGORA = new Date("2026-10-28T15:30:00Z");
 const mov = (data: string, evento: string, extra: Partial<Movimentacao> = {}): Movimentacao => ({
   data, evento, tipo: tipoDe(evento), cad_lotacao: "PROTOC/ORGAO", cad_pessoa: "Beltrano", at_lotacao: "COFIN/ORGAO", at_pessoa: "Fulano", ...extra });
-// a leitura do tempo no setor como o servidor a manda (`siga.situacao_do_tempo`); o encerrado nao tem
-const tempoDe = (p: Pick<ProcessoSiga, "encerrado" | "hoje" | "dias_uteis">): ProcessoSiga["situacao_tempo"] =>
-  p.encerrado ? null : p.hoje > 0 ? "feito" : p.dias_uteis === null ? null : p.dias_uteis >= 10 ? "critico" : p.dias_uteis >= 5 ? "breve" : "andamento";
+// a leitura de "parado" como o servidor a manda (`siga.parado`, #840: sobre os dias sem movimentacao); o encerrado nao tem
+const tempoDe = (p: Pick<ProcessoSiga, "encerrado" | "hoje" | "dias_sem_movimentacao">): ProcessoSiga["situacao_tempo"] => {
+  const d = p.dias_sem_movimentacao;
+  return p.encerrado ? null : p.hoje > 0 ? "feito" : d === null ? null : d >= 10 ? "critico" : d >= 5 ? "breve" : "andamento";
+};
 const processo = (extra: Partial<ProcessoSiga>): ProcessoSiga => {
   const p: ProcessoSiga = {
     id: 1, codigo: null, link: null, numero: null, nome: null, contrato_id: null, obra: null, contratante: null, orgao_sub: null, medicao_id: null,
     categoria: extra.medicao_id ? "medicoes" : "outros", categoria_a_conferir: null, complemento: null, o_que_e: extra.medicao_titulo ?? "Outro",
     medicao_titulo: null, protocolo_id: null, situacao: "1º Volume - Aguardando Andamento [COFIN, [X]]", encerrado: null, setor: "COFIN",
-    caixa_entrada: false, com_quem: "Fulano", desde: "2026-10-20T10:00:00-04:00", dias_uteis: 6, hoje: 0, situacao_tempo: null,
+    caixa_entrada: false, com_quem: "Fulano", desde: "2026-10-20T10:00:00-04:00", dias_uteis: 6, dias_sem_movimentacao: null, hoje: 0, situacao_tempo: null,
     ultima: mov("2026-10-20T10:00:00-04:00", "Recebimento"), protocolado_em: "2026-10-01T08:00:00-04:00",
     movimentacoes: [mov("2026-10-20T10:00:00-04:00", "Recebimento")], ...extra };
+  // sem dizer, os dias sem movimentacao sao os do setor (o processo nao andou desde que entrou)
+  if (extra.dias_sem_movimentacao === undefined) p.dias_sem_movimentacao = p.dias_uteis;
   return { ...p, situacao_tempo: extra.situacao_tempo !== undefined ? extra.situacao_tempo : tempoDe(p) };
 };
 
@@ -115,10 +119,11 @@ describe("SigaPagina", () => {
     // cada painel tem a propria tabela, com as mesmas colunas, sob o cabecalho em tinta
     expect(screen.getAllByRole("grid")).toHaveLength(4);
     for (const s of paineis()) {
+      // #840: os nomes e a ordem das colunas
       expect(within(s).getAllByRole("columnheader").map(c => c.textContent)).toEqual(
-        ["Processo", "Contratante", "Onde está", "Com quem", "No setor há", "Última movimentação", "Abrir"]);
+        ["Processo", "Contratante", "Setor", "Com quem", "No setor há", "Dias sem movimentação", "Última movimentação", "Tipo de movimentação", "Abrir"]);
       expect(s.firstElementChild?.className).toBe("sg-grupo__cabeca");
-      expect(s.querySelectorAll("colgroup col")).toHaveLength(7);
+      expect(s.querySelectorAll("colgroup col")).toHaveLength(9);
     }
     // o cabecalho diz quantos processos o grupo tem e, no selo do critico, quantos estao parados alem do limite
     const cabeca = (i: number) => paineis()[i].querySelector(".sg-grupo__n") as HTMLElement;
@@ -126,8 +131,8 @@ describe("SigaPagina", () => {
     expect(cabeca(0).querySelector(".selo")).toBeNull();
     expect(cabeca(2).querySelector(".num")?.textContent).toBe("1 processo");
     expect(cabeca(2).querySelector(".selo")?.className).toBe("selo selo--critico");
-    expect(within(cabeca(2)).getByText("1 parado há 10 dias úteis ou mais").className).toBe("sr-only");
-    expect(within(cabeca(3)).getByText("1 parado há 10+ dias úteis").getAttribute("aria-hidden")).toBe("true");
+    expect(within(cabeca(2)).getByText("1 sem movimentação há 10 dias úteis ou mais").className).toBe("sr-only");
+    expect(within(cabeca(3)).getByText("1 sem movimentação há 10+ dias úteis").getAttribute("aria-hidden")).toBe("true");
     expect(screen.queryByRole("complementary")).toBeNull();
   });
 
@@ -191,13 +196,13 @@ describe("SigaPagina", () => {
     // o numero em tinta; a situacao no simbolo ao lado do rotulo
     expect(numerosDaFaixa()).toEqual([
       ["Processos acompanhados", "5", null],
-      ["Parados há 10 dias úteis ou mais", "2", "glifo glifo--critico"],
+      ["Sem movimentação há 10 dias úteis ou mais", "2", "glifo glifo--critico"],
       ["Andaram hoje", "2", "glifo glifo--feito"],
       ["Não lidos na última rodada", "1", "glifo glifo--breve"]]);
     expect(screen.getByLabelText("Processos no SIGA").querySelector(".sg-numero__apoio")?.textContent).toBe("última leitura 11:00");
     const legenda = screen.getByRole("list", { name: "Legenda das cores" });
     expect(within(legenda).getAllByRole("listitem").map(li => li.textContent)).toEqual(
-      ["andou hoje", "menos de 5 dias úteis no setor", "parado há 5 dias úteis ou mais", "10 dias úteis ou mais"]);
+      ["andou hoje", "sem movimentação há menos de 5 dias úteis", "sem movimentação há 5 dias úteis ou mais", "10 dias úteis ou mais"]);
     // cada situacao da legenda tem a forma dela (o glifo), alem da cor
     expect(within(legenda).getAllByRole("listitem").map(li => li.querySelector(".glifo")?.className)).toEqual(
       ["glifo glifo--feito", "glifo glifo--andamento", "glifo glifo--breve", "glifo glifo--critico"]);
@@ -207,11 +212,11 @@ describe("SigaPagina", () => {
     mostrar(painel([ALFA, GAMA], { numeros: { acompanhados: 7, parados: 0, andaram_hoje: 0, nao_lidos: 0 }, limites: { dias_atencao: 3, dias_critico: 8 } }));
     await carregada();
     expect(numerosDaFaixa()).toEqual([
-      ["Processos acompanhados", "7", null], ["Parados há 8 dias úteis ou mais", "0", null],
+      ["Processos acompanhados", "7", null], ["Sem movimentação há 8 dias úteis ou mais", "0", null],
       ["Andaram hoje", "0", null], ["Não lidos na última rodada", "0", null]]);
     expect(within(screen.getByRole("list", { name: "Legenda das cores" })).getAllByRole("listitem").map(li => li.textContent)).toEqual(
-      ["andou hoje", "menos de 3 dias úteis no setor", "parado há 3 dias úteis ou mais", "8 dias úteis ou mais"]);
-    expect(within(paineis()[1]).getByText("1 parado há 8 dias úteis ou mais")).toBeTruthy();
+      ["andou hoje", "sem movimentação há menos de 3 dias úteis", "sem movimentação há 3 dias úteis ou mais", "8 dias úteis ou mais"]);
+    expect(within(paineis()[1]).getByText("1 sem movimentação há 8 dias úteis ou mais")).toBeTruthy();
   });
 
   it("Processo: obra e assunto em negrito, com link para a obra e, no processo de medição, para a medição; o nome do robô só sem obra; o número não entra no nome (#663, #805)", async () => {
@@ -248,8 +253,8 @@ describe("SigaPagina", () => {
     expect(celula(/Indenizatório/)?.textContent).toBe("MTPAR");
     expect(celula(/Processo Beta/)).toBeNull();
     expect((screen.getByRole("row", { name: /Processo Beta/ }).querySelector("td.sg__proc") as HTMLTableCellElement).colSpan).toBe(2);
-    // com ou sem contratante, a linha fecha as mesmas sete colunas
-    expect([colunasDe(/Aditivo de prazo/), colunasDe(/Indenizatório/), colunasDe(/Processo Beta/)]).toEqual([7, 7, 7]);
+    // com ou sem contratante, a linha fecha as mesmas nove colunas
+    expect([colunasDe(/Aditivo de prazo/), colunasDe(/Indenizatório/), colunasDe(/Processo Beta/)]).toEqual([9, 9, 9]);
   });
 
   it("categoria a conferir: aviso discreto na linha quando o servidor diz que o nome indica outra categoria; nas demais, nada (#805)", async () => {
@@ -290,10 +295,38 @@ describe("SigaPagina", () => {
 
   it("a cor da linha é a que o servidor manda, não uma conta da tela (#805)", async () => {
     // 12 dias uteis lidos pelo servidor como "em andamento": a tela desenha o que veio
-    mostrar(painel([processo({ id: 5, nome: "Processo Gama", dias_uteis: 12, situacao_tempo: "andamento" })]));
+    mostrar(painel([processo({ id: 5, nome: "Processo Gama", dias_uteis: 2, dias_sem_movimentacao: 12, situacao_tempo: "andamento" })]));
     await carregada();
     expect(screen.getByRole("row", { name: "Processo Gama" }).className).toBe("sg__linha sg__linha--andamento");
     expect(screen.getByText("12 dias úteis").closest(".selo")?.className).toBe("selo selo--andamento sg__dias");
+  });
+
+  it("entrou no setor há 5 dias úteis e andou ontem: 'No setor há' em texto comum, 'Dias sem movimentação' 1 dia útil sem atenção (#840)", async () => {
+    const ONTEM = processo({ id: 30, nome: "Processo Ontem", desde: "2026-10-21T09:00:00-04:00", dias_uteis: 5, dias_sem_movimentacao: 1,
+      ultima: mov("2026-10-27T16:20:00-04:00", "Recebimento") });
+    mostrar(painel([ONTEM]));
+    const linha = await screen.findByRole("row", { name: "Processo Ontem" });
+    const noSetor = linha.querySelector('td[data-rotulo="No setor há"]') as HTMLElement;
+    expect(noSetor.textContent).toBe("5 dias úteis");
+    expect(noSetor.querySelector(".selo, .glifo, .icone, [class*='--']")).toBeNull();
+    const semMov = linha.querySelector('td[data-rotulo="Dias sem movimentação"]') as HTMLElement;
+    expect(semMov.textContent).toBe("1 dia útil");
+    expect(semMov.querySelector(".selo")?.className).toBe("selo selo--andamento sg__dias");
+    expect(linha.className).toBe("sg__linha sg__linha--andamento");
+    expect(linha.querySelector('td[data-rotulo="Última movimentação"]')?.textContent).toBe("27/10 16:20");
+  });
+
+  it("sem movimentação há 10 dias úteis ou mais: o destaque de ação só na coluna 'Dias sem movimentação' (#840)", async () => {
+    const PARADO_10 = processo({ id: 31, nome: "Processo Parado", desde: "2026-09-01T09:00:00-04:00", dias_uteis: 40, dias_sem_movimentacao: 10,
+      ultima: mov("2025-12-30T08:00:00-04:00", "Juntada | documento DOC-1") });
+    mostrar(painel([PARADO_10]));
+    const linha = await screen.findByRole("row", { name: "Processo Parado" });
+    expect(linha.querySelectorAll(".selo--critico")).toHaveLength(1);
+    expect(linha.querySelector(".selo--critico")?.closest("td")?.getAttribute("data-rotulo")).toBe("Dias sem movimentação");
+    expect(linha.querySelector('td[data-rotulo="No setor há"]')?.textContent).toBe("40 dias úteis");
+    // o ano aparece quando nao e' o de hoje; o tipo sai sem o texto depois de " |"
+    expect(linha.querySelector('td[data-rotulo="Última movimentação"]')?.textContent).toBe("30/12/2025 08:00");
+    expect(linha.querySelector('td[data-rotulo="Tipo de movimentação"]')?.textContent).toBe("Juntada");
   });
 
   it("No setor há: minutos e horas antes de um dia útil, para quem não andou hoje", async () => {
@@ -304,35 +337,37 @@ describe("SigaPagina", () => {
     expect(screen.getByText("30 min")).toBeTruthy();    // desde 11h00
   });
 
-  it("Onde está: setor, caixa de entrada e volume; Última movimentação com dia/mês e o evento sem o texto depois de ' |'; protocolado em, sob o nome", async () => {
+  it("Setor: setor, caixa de entrada e volume; Última movimentação em data e hora e o Tipo sem o texto depois de ' |'; protocolado em, sob o nome (#840)", async () => {
     mostrar(painel([ALFA, BETA]));
     const beta = await screen.findByRole("row", { name: /Processo Beta/ });
     expect(within(beta).getByText("GABIN")).toBeTruthy();
     expect(within(beta).getByText("caixa de entrada")).toBeTruthy();
     expect(within(beta).getByText("(2º Volume)")).toBeTruthy();
     const alfa = screen.getByRole("row", { name: /Obra Alfa/ });
-    expect(within(alfa).getByText("28/10")).toBeTruthy();
-    expect(within(alfa).getByText("Recebimento")).toBeTruthy();
+    expect(within(beta).getByText("GABIN").closest("td")?.getAttribute("data-rotulo")).toBe("Setor");
+    expect(alfa.querySelector('td[data-rotulo="Última movimentação"]')?.textContent).toBe("28/10 09:30");
+    expect(alfa.querySelector('td[data-rotulo="Tipo de movimentação"]')?.textContent).toBe("Recebimento");
     expect(within(alfa).queryByText(/texto do órgão/)).toBeNull();
     expect(within(alfa).getByText("Fulano")).toBeTruthy();                // Com quem
     expect(within(alfa).getByText("01/10/2026").closest(".sg__fraco")?.textContent).toBe("protocolado em 01/10/2026");
     expect(within(alfa).getByText("01/10/2026").closest("td")?.className).toBe("sg__proc");
   });
 
-  it("a 1024 px as sete colunas cabem na largura do painel: o cabeçalho quebra entre palavras e a tabela não passa da caixa (#650, #805)", async () => {
+  it("a 1024 px as nove colunas cabem na largura do painel: o cabeçalho quebra entre palavras e a tabela não passa da caixa (#650, #805, #840)", async () => {
     // o jsdom nao mede layout: aqui so' a presenca das regras e das classes; a medida foi conferida no navegador
     const css = readFileSync(join(process.cwd(), "src", "siga.css"), "utf8").split("@container")[0];
     expect(css).not.toMatch(/\.sg__tabela th\s*\{[^}]*white-space:\s*nowrap/);
     expect(css).toMatch(/\.sg__tabela\s*\{[^}]*width:\s*100%;\s*table-layout:\s*fixed/);
     const largura = (col: string) => Number(new RegExp(`\\.sg__c-${col}\\s*\\{\\s*width:\\s*(\\d+)%`).exec(css)?.[1]);
-    const colunas = ["proc", "contr", "onde", "quem", "setor", "ultima", "seta"];
+    const colunas = ["proc", "contr", "onde", "quem", "setor", "parado", "ultima", "tipo", "seta"];
     expect(colunas.reduce((soma, c) => soma + largura(c), 0)).toBe(100);
-    expect(largura("setor")).toBeGreaterThanOrEqual(19);      // o selo "25 dias úteis" numa linha no painel de ~724 px
-    expect(largura("contr")).toBeGreaterThanOrEqual(13);      // a palavra "Contratante" do cabeçalho, sem encostar na vizinha
+    expect(largura("parado")).toBeGreaterThanOrEqual(14);     // o selo "25 dias úteis" em duas linhas no painel de ~724 px
+    expect(largura("contr")).toBeGreaterThanOrEqual(10);      // "Contratante" no cabeçalho, separada em sílabas, sem encostar na vizinha
+    expect(largura("quem")).toBeGreaterThanOrEqual(11);       // um nome sem partir a 1024 px
     mostrar(painel([ALFA]));
     const alfa = await screen.findByRole("row", { name: /Obra Alfa/ });
     expect(within(alfa).getByText("01/10/2026").className).toBe("num");
-    expect(document.querySelectorAll("colgroup col")).toHaveLength(7);
+    expect(document.querySelectorAll("colgroup col")).toHaveLength(9);
   });
 
   it("na página estreita a linha vira bloco e a cor do tempo parado passa para o bloco (#805)", () => {
@@ -423,6 +458,25 @@ describe("SigaPagina", () => {
     expect(screen.getByText("ORGAO-PRO-2026/00001 · 5 movimentações · 20/10/2026 a 28/10/2026")).toBeTruthy();
     expect(screen.getByRole("link", { name: /Abrir no SIGA/ }).getAttribute("href")).toBe("https://siga.exemplo.com.br/acompanhar?n=ABC123");
     expect(screen.getByRole("link", { name: "Ver a medição" }).getAttribute("href")).toBe("/obras/7/medicoes/31#passo-5");
+  });
+
+  it("histórico: o botão '‹ SIGA' no alto volta ao quadro, com a categoria de onde se veio; o caminho continua (#840)", async () => {
+    window.history.replaceState(null, "", "/siga?categoria=aditivos&processo=21");
+    mostrarComCaminho(painel([ALFA, ADITIVO]), { categoria: "aditivos", processo: "21" });
+    const h1 = await screen.findByRole("heading", { level: 1 });
+    const voltar = h1.closest("header")!.querySelector("a.sg__voltar") as HTMLAnchorElement;
+    expect(voltar.textContent?.trim()).toBe("SIGA");
+    expect(voltar.className).toBe("btn--voltar sg__voltar");
+    expect(voltar.getAttribute("href")).toBe("/siga?categoria=aditivos");
+    expect(voltar.compareDocumentPosition(h1) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();   // no alto, antes do título
+    expect(screen.getByRole("navigation", { name: "Você está em" })).toBeTruthy();
+    fireEvent.click(voltar);
+    expect(window.location.pathname + window.location.search).toBe("/siga?categoria=aditivos");
+    cleanup();
+    // sem categoria, volta ao quadro inteiro
+    mostrar(painel([ALFA]), { processo: "1" });
+    await screen.findByRole("heading", { level: 1 });
+    expect(document.querySelector("a.sg__voltar")?.getAttribute("href")).toBe("/siga");
   });
 
   it("histórico: tabela De/Para, a mais recente primeiro, documento na juntada", async () => {
@@ -858,7 +912,7 @@ describe("SigaPagina", () => {
     expect(secao.querySelector("summary")?.textContent).toBe("Encerrados 2");
     expect(within(secao).getAllByRole("row").slice(1).map(l => l.getAttribute("aria-label"))).toEqual(["Obra Zeta · 5ª Medição", "Processo Eta"]);
     expect(within(secao).getAllByRole("columnheader").map(c => c.textContent)).toEqual(
-      ["Processo", "Contratante", "Onde está", "Situação", "Última movimentação", "Abrir"]);
+      ["Processo", "Contratante", "Setor", "Situação", "Última movimentação", "Tipo de movimentação", "Abrir"]);
     expect(within(within(secao).getByRole("row", { name: /Obra Zeta/ })).getByText("Medição recebida")).toBeTruthy();
     expect(within(within(secao).getByRole("row", { name: "Processo Eta" })).getByText("Arquivado")).toBeTruthy();
     // no fim da página: depois da tabela principal
