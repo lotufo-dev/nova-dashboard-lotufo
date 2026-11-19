@@ -146,6 +146,16 @@ def _confere_soma(f):
         assert tot["sem_nota_centavos"] == sum(e["valor_centavos"] for e in do_ano if e["tipo_aberto"] == "sem_nota")
         assert tot["em_aberto_centavos"] == tot["protocolado_centavos"] - tot["recebido_centavos"] + tot["sem_nota_centavos"]
         assert tot["em_aberto_centavos"] == sum(tot[k] for k in fechamento.PARTES_DO_ABERTO)
+        # por contratante (issue #815): as linhas do ano somam o total do ano em TODA coluna, e cada contratante
+        # aparece uma vez; a participacao do medido soma 1000 milesimos, ou nao existe em linha nenhuma
+        linhas = f["por_contratante"][ano]
+        for k in SOMAS:
+            assert sum(g[k] for g in linhas) == tot[k], (ano, k)
+        assert len({g["contratante"] for g in linhas}) == len(linhas)
+        partes = [g["participacao_medido_por_mil"] for g in linhas]
+        assert all(x is None for x in partes) or (sum(partes) == 1000 and min(partes) >= 0)
+        assert [g["medido_centavos"] for g in linhas] == sorted((g["medido_centavos"] for g in linhas), reverse=True)
+    assert set(f["por_contratante"]) == set(f["anos"])
     assert all(e["competencia"][:4] in f["anos"] for e in f["em_aberto"])
     # nenhuma nota em duas partes: a que conta numa medicao (a), a que ficou fora da conta e a sem medicao ligada (c)
     mds = [md for m in f["meses"] for o in m["obras"] for md in o["medicoes"]]
@@ -173,6 +183,7 @@ def test_sem_lancamento_a_pagina_vem_vazia_sem_zero_disfarcado(cenario):
     assert f["anos"] == ["2025", "2026"] and f["meses"] == [] and f["em_aberto"] == []
     assert f["acumulado"]["ate_mes"] is None and f["notas_diferem"] == [] and f["pares_mistos"] == []
     assert f["por_ano"]["2025"]["meses"] == f["por_ano"]["2026"]["meses"] == 0
+    assert f["por_contratante"] == {"2025": [], "2026": []}
     assert f["notas_sem_medicao"] == {"em_aberto": [], "em_aberto_centavos": 0, "pagas": {"quantidade": 0, "valor_centavos": 0}}
     assert f["cobertura"]["2026"] == {"aprovado_centavos": 0, "com_nota_centavos": 0, "sem_nota_centavos": 0,
                                       "medicoes_sem_nota": 0, "percentual": None}
@@ -1837,3 +1848,205 @@ def test_medido_do_mes_fechado_sem_referencia_antes_do_primeiro_ano_da_pagina(ce
     # virou o ano: dezembro e' a competencia fechada e novembro a referencia
     r = fechamento.medido_do_mes_fechado(c, datetime.date(2027, 1, 5))
     assert (r["competencia"], r["referencia_competencia"]) == ("2026-12", "2026-11")
+
+
+# ---------------------------------------------------------------- por contratante (issue #815)
+
+@pytest.fixture
+def contratantes(tmp_path, monkeypatch):
+    """Tres contratantes e cinco obras: a SINFRA com duas superintendencias (uma obra propria e uma de consorcio a
+    50%), a Secretaria X (uma propria e uma de consorcio a 33,33%) e a Companhia Y (uma propria)."""
+    monkeypatch.setenv("DASH_DB_PATH", str(tmp_path / "t.db"))
+    c = db.get_conn(); db.migrate(c)
+    uid = auth.criar_usuario(c, "Adm", "adm@exemplo.com.br", "senha-forte-123", "admin")
+    orgao = lambda chave, nome, familia: {"chave": chave, "nome": nome, "familia": familia, "cnpj": None,   # noqa: E731
+                                          "regras": {"nome_qdop": nome.upper(), "tipo_contratante": "PÚBLICO"}}
+    consorcio = lambda nome, org, numero, pct: {**_contrato(nome, org, numero), "entidade": "cons",   # noqa: E731
+                                                "percentual_direito_bp": pct}
+    cadastro_aplicar.aplicar(c, uid, {
+        "orgaos": [orgao("sinfra-um", "SINFRA - SUEF I", "sinfra"),
+                   orgao("sinfra-dois", "SINFRA - SUPU (Pavimentação Urbana)", "sinfra"),
+                   orgao("orgao-x", "Secretaria X", "prefeitura"), orgao("companhia-y", "Companhia Y", "mtpar")],
+        "entidades": [{"chave": "lotufo", "nome": "Construtora Alfa Ltda", "cnpj": "31200101000130", "papel": "lotufo",
+                       "coligada_rm": 1, "sigla_oficio": "AL", "nome_curto": "Alfa"},
+                      {"chave": "cons", "nome": "Consórcio Teste", "cnpj": "31200404000152", "papel": "consorcio",
+                       "coligada_rm": 12, "sigla_oficio": None, "nome_curto": "Consórcio"}],
+        "contratos": [_contrato("Estrada", "sinfra-um", "IC 1/2025"), consorcio("Ponte", "sinfra-dois", "IC 2/2025", 5000),
+                      _contrato("Escola", "orgao-x", "IC 3/2025"), consorcio("Hospital", "orgao-x", "IC 4/2025", 3333),
+                      _contrato("Galpão", "companhia-y", "IC 5/2025")],
+        "avisos": [], "geral": {"qdop": {"modelo_caminho": str(MODELO)}, "diretoria": {"total_a_receber_liberado": True}}})
+    ids = {r["nome_curto"]: r["id"] for r in c.execute("SELECT id, nome_curto FROM contratos")}
+    yield c, ids
+    c.close()
+
+
+def _do_contratante(f, ano, nome):
+    return next(g for g in f["por_contratante"][ano] if g["contratante"] == nome)
+
+
+def _lancar_dois_anos(c, ids):
+    """2026: a SINFRA com obra propria paga e consorcio em tres faturas (uma paga); uma fatura do consorcio partilhada
+    entre a Ponte (SINFRA) e o Hospital (Secretaria X); na Secretaria X, nota paga em parte, medicao sem nota ligada
+    e medicao em analise. 2025: uma medicao em cada contratante. Antes de 2025: fora da pagina."""
+    estrada = medir(c, ids["Estrada"], 9, "2026-02", "recebida", 1_000_001, aprovado=900_001, protocolo="2026-03-05")
+    nota(c, 900_001, [estrada], titulos=PAGO(830_001))
+    ponte = medir(c, ids["Ponte"], 4, "2026-03", "protocolada", 3_000_003, aprovado=3_000_003, protocolo="2026-04-02")
+    nota(c, 1_000_001, [ponte], coligada=12, emissao="2026-03-08", titulos=PAGO(930_001))
+    for _ in range(2):
+        nota(c, 1_000_001, [ponte], coligada=12)
+    reajuste = medir(c, ids["Ponte"], 4, "2026-03", "protocolada", 400_001, tipo="reajuste", protocolo="2026-04-02")
+    hospital = medir(c, ids["Hospital"], 2, "2026-03", "protocolada", 300_003, protocolo="2026-04-09")
+    partilhada = nota(c, 700_004, coligada=12)                      # 400.001 do reajuste da Ponte + 300.003 do Hospital
+    nid = c.execute("SELECT id FROM notas_fiscais WHERE numero=?", (f"{int(partilhada):09d}",)).fetchone()[0]
+    for mid, parte in ((reajuste, 400_001), (hospital, 300_003)):
+        c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra, partilhada) "
+                  "VALUES (?, ?, ?, 'manual', 'correcao_cadastro', 1)", (mid, nid, parte))
+    escola = medir(c, ids["Escola"], 5, "2026-05", "protocolada", 500_000, protocolo="2026-06-01")
+    nota(c, 500_000, [escola], titulos=[(465_000, 400_000, 4)])     # paga em parte: faltam 65.000
+    medir(c, ids["Escola"], 6, "2026-06", "protocolada", 70_001, protocolo="2026-07-01")      # sem nota ligada
+    medir(c, ids["Escola"], 7, "2026-07", "planilha_enviada", 33_333)                         # em analise
+    velha = medir(c, ids["Estrada"], 1, "2025-03", "recebida", 600_001, aprovado=600_001, protocolo="2025-04-01")
+    nota(c, 600_001, [velha], emissao="2025-03-20", titulos=PAGO(560_001))
+    medir(c, ids["Hospital"], 1, "2025-11", "boletim_recebido", 1_000_000, aprovado=999_999)
+    medir(c, ids["Galpão"], 1, "2025-11", "planilha_enviada", 250_000)
+    antiga = medir(c, ids["Escola"], 1, "2024-11", "protocolada", 50_000, protocolo="2025-01-10")
+    nota(c, 50_000, [antiga])
+    c.commit()
+    return {"ponte": ponte, "reajuste": reajuste, "hospital": hospital, "partilhada": nid}
+
+
+def test_por_contratante_soma_o_total_do_ano_em_cada_coluna_com_consorcio_e_nota_partilhada(contratantes):
+    """Issue #815: a linha do contratante e' a soma das mesmas linhas de medicao que somam o mes e o ano. As duas
+    superintendencias da SINFRA sao um contratante so'; a fatura do consorcio em tres parcelas entra pela cota da soma
+    (um arredondamento, com o residuo); a fatura partilhada entre obras de DOIS contratantes entra em cada um pela
+    parte dele, uma vez; e o que e' anterior a 2025 nao entra em linha nenhuma."""
+    c, ids = contratantes
+    m = _lancar_dois_anos(c, ids)
+    f = fechamento.fechamento(c, datetime.date(2026, 11, 18))
+    # a Ponte: 3.000.003 x 50% = 1.500.001,5 -> 1.500.002, e a fatura paga levou 500.001; o reajuste, 400.001 x 50% =
+    # 200.000,5 -> 200.001; o Hospital, 300.003 x 33,33% = 99.990,9999 -> 99.991
+    assert _numeros(_medicao(f, m["ponte"])) == (1_500_002, 1_500_002, 1_500_002, 500_001, 1_000_001)
+    assert _numeros(_medicao(f, m["reajuste"])) == (200_001, 200_001, 200_001, 0, 200_001)
+    assert _numeros(_medicao(f, m["hospital"])) == (99_991, 99_991, 99_991, 0, 99_991)
+    assert [g["contratante"] for g in f["por_contratante"]["2026"]] == ["SINFRA", "Secretaria X"]   # o maior medido primeiro
+    sinfra, secretaria = f["por_contratante"]["2026"]
+    assert (sinfra["contratante_chave"], secretaria["contratante_chave"]) == ("sinfra", "orgao-x")
+    # SINFRA = Estrada (900.001 paga) + Ponte (execucao e reajuste)
+    assert _numeros(sinfra) == (2_600_004, 2_600_004, 2_600_004, 1_400_002, 1_200_002)
+    # Secretaria X = Escola (500.000 paga em parte, 70.001 sem nota, 33.333 em analise) + Hospital (99.991)
+    assert _numeros(secretaria) == (703_325, 669_992, 599_991, 435_000, 234_992)
+    assert _numeros(f["por_ano"]["2026"]) == (3_303_329, 3_269_996, 3_199_995, 1_835_002, 1_434_994)
+    for ano in f["anos"]:
+        for k in SOMAS:
+            assert sum(g[k] for g in f["por_contratante"][ano]) == f["por_ano"][ano][k], (ano, k)
+    # as partes do em aberto e o corte do aprovado tambem descem para o contratante
+    assert (secretaria["em_aberto_notas_centavos"], secretaria["sem_nota_centavos"]) == (164_991, 70_001)
+    assert (sinfra["abaixo_do_pedido_centavos"], sinfra["pedido_do_aprovado_centavos"]) == (100_000, 1_000_001 + 1_500_002)
+    # a nota partilhada: uma vez so', a parte de cada medicao na cota do contrato dela (200.001 + 99.991)
+    partes = [n["valor_centavos"] for mes in f["meses"] for o in mes["obras"] for md in o["medicoes"]
+              for n in md["notas"] if n["nota_id"] == m["partilhada"]]
+    assert sorted(partes) == [99_991, 200_001]
+    # participacao no medido do ano, em milesimos, com o residuo: 787,09 e 212,91 -> 787 e 213
+    assert (sinfra["participacao_medido_por_mil"], secretaria["participacao_medido_por_mil"]) == (787, 213)
+    # 2025: cada contratante com a sua medicao; a Companhia Y so' aparece no ano em que mediu
+    assert {g["contratante"]: _numeros(g) for g in f["por_contratante"]["2025"]} == {
+        "SINFRA": (600_001, 600_001, 600_001, 600_001, 0),
+        "Secretaria X": (333_300, 333_300, 0, 0, 0),                     # 999.999 x 33,33% = 333.299,67 -> 333.300
+        "Companhia Y": (250_000, 0, 0, 0, 0)}
+    assert _do_contratante(f, "2025", "Companhia Y")["contratante_chave"] == "companhia-y"
+    assert "Companhia Y" not in {g["contratante"] for g in f["por_contratante"]["2026"]}
+    # o em aberto anterior a 2025 fica fora das linhas, como fica fora dos anos
+    assert f["em_aberto_anteriores"] == {"quantidade": 1, "valor_centavos": 50_000}
+    _confere_soma(f)
+
+
+def test_por_contratante_nota_partilhada_paga_em_parte_reparte_a_falta_e_continua_fechando(contratantes):
+    """A fatura partilhada entre dois contratantes paga em parte: a falta dos titulos (200.001) reparte-se pelas
+    partes (114.286 e 85.715, com o residuo) e cada contratante fica em aberto pela cota da parte dele. O recebido e
+    o em aberto das linhas continuam somando o total do ano."""
+    c, ids = contratantes
+    m = _lancar_dois_anos(c, ids)
+    antes = fechamento.fechamento(c)
+    c.execute("UPDATE baixas SET valor_baixado_centavos=valor_original_centavos-200001, status_lan=4, data_baixa='2026-07-01' "
+              "WHERE nota_id=?", (m["partilhada"],))
+    c.commit()
+    f = fechamento.fechamento(c)
+    # 114.286 x 50% = 57.143 no reajuste da Ponte; 85.715 x 33,33% = 28.568,8 -> 28.569 no Hospital
+    assert _numeros(_medicao(f, m["reajuste"])) == (200_001, 200_001, 200_001, 200_001 - 57_143, 57_143)
+    assert _numeros(_medicao(f, m["hospital"])) == (99_991, 99_991, 99_991, 99_991 - 28_569, 28_569)
+    for nome, recebeu in (("SINFRA", 200_001 - 57_143), ("Secretaria X", 99_991 - 28_569)):
+        a, d = _do_contratante(antes, "2026", nome), _do_contratante(f, "2026", nome)
+        assert d["recebido_centavos"] == a["recebido_centavos"] + recebeu
+        assert d["em_aberto_centavos"] == a["em_aberto_centavos"] - recebeu
+        assert (d["medido_centavos"], d["protocolado_centavos"]) == (a["medido_centavos"], a["protocolado_centavos"])
+    _confere_soma(f)
+
+
+def test_por_contratante_consorcio_com_a_nota_da_empresa_e_a_fatura_ligadas_conta_uma_vez(exemplo):
+    """Com a nota da empresa ao consorcio e a fatura do consorcio ligadas a' mesma medicao, a linha do contratante leva
+    so' a nota da empresa, pela face (a escolha de `_notas_da_conta`): a mesma conta do mes, nao outra."""
+    c, k = exemplo
+    m1 = medir(c, k, 1, "2026-03", "protocolada", 2_000_001, aprovado=2_000_001, protocolo="2026-04-10")
+    nota(c, 2_400_003, [m1], coligada=CONSORCIO, titulos=PAGO(2_232_003))
+    nota(c, 1_000_001, [m1], coligada=EMPRESA, centro="5.001.001")
+    propria = medir(c, _propria(c), 1, "2026-03", "protocolada", 700_001, aprovado=700_001, protocolo="2026-04-12")
+    nota(c, 700_001, [propria], titulos=PAGO(650_001))
+    f = fechamento.fechamento(c)
+    # o cadastro de exemplo tem um orgao so', da familia sinfra: um contratante, igual ao total do ano
+    assert [g["contratante"] for g in f["por_contratante"]["2026"]] == ["SINFRA"]
+    linha = f["por_contratante"]["2026"][0]
+    assert _numeros(linha) == (1_700_002, 1_700_002, 1_700_002, 700_001, 1_000_001)   # e nao 1.200.002 a mais da fatura
+    assert _numeros(linha) == _numeros(f["por_ano"]["2026"]) == _numeros(_mes(f, "2026-03"))
+    assert linha["participacao_medido_por_mil"] == 1000
+    _confere_soma(f)
+
+
+def test_por_contratante_participacao_reparte_o_residuo_e_some_sem_medido_ou_com_medido_negativo(contratantes):
+    c, ids = contratantes
+    for obra in ("Estrada", "Escola", "Galpão"):
+        medir(c, ids[obra], 1, "2025-06", "planilha_enviada", 100_001)
+    f = fechamento.fechamento(c)
+    # tres partes iguais: 333,33 cada; o milesimo que sobra vai para a primeira (empate: a ordem do nome)
+    assert [(g["contratante"], g["participacao_medido_por_mil"]) for g in f["por_contratante"]["2025"]] == [
+        ("Companhia Y", 334), ("Secretaria X", 333), ("SINFRA", 333)]
+    assert f["por_contratante"]["2026"] == []
+    _confere_soma(f)
+    # reajuste negativo maior que o medido do contratante: nao ha' parte de um total assim, e a soma continua fechando
+    medir(c, ids["Galpão"], 1, "2025-06", "planilha_enviada", -150_001, tipo="reajuste")
+    f = fechamento.fechamento(c)
+    assert _do_contratante(f, "2025", "Companhia Y")["medido_centavos"] == -50_000
+    assert all(g["participacao_medido_por_mil"] is None for g in f["por_contratante"]["2025"])
+    assert sum(g["medido_centavos"] for g in f["por_contratante"]["2025"]) == f["por_ano"]["2025"]["medido_centavos"] == 150_002
+    _confere_soma(f)
+
+
+def test_por_contratante_obra_sem_orgao_no_cadastro_fica_com_o_texto_do_contrato_sem_chave(contratantes):
+    c, ids = contratantes
+    c.execute("UPDATE contratos SET orgao_id=NULL, orgao='ÓRGÃO ANTIGO' WHERE id=?", (ids["Galpão"],))
+    c.commit()
+    medir(c, ids["Galpão"], 1, "2026-01", "planilha_enviada", 10_001)
+    f = fechamento.fechamento(c)
+    assert [(g["contratante"], g["contratante_chave"], g["medido_centavos"]) for g in f["por_contratante"]["2026"]] == [
+        ("ÓRGÃO ANTIGO", None, 10_001)]
+    _confere_soma(f)
+
+
+def test_por_contratante_com_a_trava_nao_leva_o_recebido_nem_o_em_aberto(contratantes):
+    """Sem o total a receber liberado, as linhas por contratante perdem o recebido, o em aberto e as partes dele, como
+    o mes e o ano; medido, aprovado, protocolado e a participacao (que e' do medido) continuam."""
+    c, ids = contratantes
+    _lancar_dois_anos(c, ids)
+    livre = fechamento.fechamento(c)
+    c.execute("UPDATE cadastro_geral SET valor=? WHERE chave='diretoria'", (json.dumps({"total_a_receber_liberado": False}),))
+    c.commit()
+    f = fechamento.fechamento(c)
+    assert f["total_a_receber_liberado"] is False
+    for ano in f["anos"]:
+        assert len(f["por_contratante"][ano]) == len(livre["por_contratante"][ano]) > 0
+        for g, antes in zip(f["por_contratante"][ano], livre["por_contratante"][ano]):
+            assert all(g[k] is None for k in fechamento.ESCONDIDOS)
+            assert {k: v for k, v in g.items() if k not in fechamento.ESCONDIDOS} == {
+                k: v for k, v in antes.items() if k not in fechamento.ESCONDIDOS}
+    # nenhum recebido nem em aberto de contratante sobra na resposta (os de 2026 e o recebido de 2025)
+    texto = json.dumps(f)
+    assert all(str(v) not in texto for v in (1_400_002, 1_200_002, 435_000, 234_992, 1_835_002, 1_434_994, 164_991))

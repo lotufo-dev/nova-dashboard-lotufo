@@ -1,6 +1,8 @@
-/* Fechamento (#748): a disposicao e os blocos proprios da pagina. A moldura do painel (.cartao), a tabela (.tabela),
-   o selo, o contador e a caixa de aviso sao pecas de base de tokens.css. Cor, familia, tamanho, espaco e borda so'
-   por variavel. */
+/* Fechamento (#748, em abas na #815): a disposicao e os blocos proprios da pagina. A moldura do painel (.cartao), a
+   tabela (.tabela), as abas (.abas), a escolha (.escolha), o selo e a caixa de aviso sao pecas de base de tokens.css.
+   Cor, familia, tamanho, espaco e borda so' por variavel.
+   Nenhuma aba passa de uma tela e meia a 1440 px com doze meses e um aviso: por isso o painel nao repete o nome da
+   aba como titulo, as linhas das tabelas de cinco numeros sao mais baixas e o link do em aberto fica ao lado do rotulo. */
 
 /* A pagina e' o container: os blocos mudam de forma pela largura que sobra para o conteudo (com o menu lateral aberto
    ou recolhido), e nao pela largura da janela. Tres faixas: larga, media (ate' 900 px: a 1024 com o menu aberto) e
@@ -12,6 +14,12 @@
 }
 .fch-vazio { margin: 0; padding: 0 var(--espaco-g) var(--espaco-g); color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .fch > .fch-vazio { padding: 0; }
+
+/* as tres abas da pagina (#815): a peca de abas da fundacao, com a regua da secao embaixo, como no Resumo das
+   medicoes; em tela estreita quebram de linha em vez de rolar */
+.fch-abas { flex-wrap: wrap; border-bottom: var(--regua-secao); }
+.fch-abas .aba { height: var(--alvo-minimo); padding: 0 var(--espaco-m); font-size: var(--texto-corpo); white-space: nowrap; }
+.fch-abas .aba:first-child { padding-left: 0; }
 
 /* grupo "Cota da Lotufo": a regua grossa da Inicio, com o ano ao lado */
 .fch-cota {
@@ -25,22 +33,22 @@
   display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--espaco-m) var(--espaco-g);
   margin: 0;
 }
-.fch-numero { min-width: 0; }
-.fch-numero__rotulo { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+/* o rotulo em cima e o valor embaixo; o link do em aberto para a pagina A receber (#815) vai ao lado do rotulo */
+.fch-numero { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--espaco-pp); align-items: baseline; }
+.fch-numero__rotulo { grid-area: 1 / 1; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .fch-numero__valor {
-  margin: 0; white-space: nowrap;
+  grid-area: 2 / 1 / 3 / -1; margin: 0; white-space: nowrap;
   font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
   font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-valor-menor); line-height: var(--entrelinha-numero);
 }
+.fch-numero__porta { grid-area: 1 / 2; margin: 0; font-size: var(--texto-meta); white-space: nowrap; }
 
-/* painel */
-.fch .fch-painel { min-width: 0; padding: var(--espaco-g) 0 var(--espaco-mini); }
+/* painel: sem titulo (o nome da aba ja' diz o que ele mostra); a comparacao abre com a escolha do numero */
+.fch .fch-painel { min-width: 0; padding: var(--espaco-m) 0 var(--espaco-mini); }
 .fch-painel__cab {
   display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-pp) var(--espaco-p);
-  padding: 0 var(--espaco-g); margin-bottom: var(--titulo-margem-base);
+  padding: 0 var(--espaco-g); margin-bottom: var(--espaco-p);
 }
-.fch-painel__cab h2 { margin: 0; font-size: var(--texto-titulo-sub); }
-.fch-painel__cab .escolhas { margin-left: auto; }
 
 /* tabela: a da fundacao, com a primeira coluna presa a' esquerda quando a caixa rola */
 .fch .fch-tabela th, .fch .fch-tabela td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
@@ -62,7 +70,18 @@
 .fch .fch-tabela :is(tbody, tfoot) td.fch-em-aberto { color: var(--valor-atencao-texto); }
 .fch .fch-tabela thead .marca-etapa { gap: var(--espaco-mini); }
 /* o total do ano tambem leva a etiqueta da diferenca: os valores da linha ficam no alto, como nas linhas dos meses */
-.fch .fch-tabela--meses tfoot :is(th, td) { vertical-align: top; }
+.fch .fch-tabela--cinco tfoot :is(th, td) { vertical-align: top; }
+/* a linha tem o valor e a etiqueta embaixo dele: com o respiro menor, doze meses e o total cabem numa tela e meia.
+   No celular a linha vira bloco e tem o respiro dela (la' embaixo). */
+@container fch-pagina (min-width: 561px) {
+  .fch .fch-tabela.fch-tabela--cinco :is(tbody, tfoot) > tr > :is(th, td) { padding-top: var(--espaco-pp); padding-bottom: var(--espaco-pp); }
+  /* o botao tem a altura minima de um alvo: a margem negativa deixa o nome na linha do valor */
+  .fch .fch-tabela--cinco .fch-abre { margin: calc((var(--espaco-pp) + var(--espaco-traco)) * -1) 0; }
+}
+/* por contratante (#815): a participacao no medido do ano, sob o valor, em texto de apoio (nao e' familia de valor:
+   nao compara com referencia nem tem limite) */
+.fch-parte { color: var(--cor-texto-secundario); font-family: var(--fonte-texto); font-size: var(--texto-mini); font-weight: var(--peso-normal); white-space: nowrap; }
+.fch-linha--contratante > th { font-weight: var(--peso-forte); }
 
 /* abrir o mes e a obra: o nome e' o botao (teclado e leitor de tela), com a seta que gira */
 .fch-abre {
@@ -94,95 +113,48 @@
 /* a base dos numeros, uma vez, sob o titulo do grupo */
 .fch-base { margin: calc(var(--espaco-entre-blocos) * -0.5) 0 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .fch-aviso { margin: 0; }
-.fch-soltas .fch-aviso { margin: 0 var(--espaco-g) var(--espaco-p); }
 
 .fch .fch-mes-curto { display: none; }
 
-/* em aberto: as duas partes que somam o total, cada uma com o seu subtotal na linha do grupo */
-.fch .fch-tabela tbody tr.fch-grupo > th, .fch .fch-tabela tbody tr.fch-grupo > td {
-  background: var(--cor-papel-sombreado); font-weight: var(--peso-forte); border-top: var(--borda-linha);
-}
-.fch-soltas { border-top: var(--regua-secao); margin-top: var(--espaco-m); padding-top: var(--espaco-m); }
-.fch-soltas__base { margin: 0 var(--espaco-g) var(--espaco-m); color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
-.fch-soltas__titulo { margin: 0 var(--espaco-g) var(--espaco-p); font-size: var(--texto-meta); }
-.fch-sub { display: block; color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
-.fch .fch-tabela--aberto td, .fch .fch-tabela--aberto tbody th { white-space: nowrap; }
-/* a obra e a nota (numero e selo) quebram antes de a coluna Valor sair da caixa */
-.fch .fch-tabela--aberto td:is(.fch-a-obra, .fch-a-nota) { white-space: normal; }
-/* a linha sem a data: o texto diz a verdade, no tamanho das datas e em tom de apoio, e pode quebrar */
-.fch .fch-tabela--aberto tbody th.fch-sem-data { white-space: normal; color: var(--cor-texto-secundario); }
-.fch-nota { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-pp); }
-.fch-aparte { display: grid; gap: var(--espaco-mini); margin: 0; padding: var(--espaco-m) var(--espaco-g) var(--espaco-m); border-top: var(--borda-linha); font-size: var(--texto-meta); }
-.fch-aparte > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--espaco-mini) var(--espaco-m); }
-.fch-aparte dt { color: var(--cor-texto-secundario); }
-.fch-aparte dd { margin: 0; font-weight: var(--peso-forte); }
+/* por contratante (#815): o nome alinhado com o cabecalho e com o total (a regra de base da linha de tabela recua
+   4 px a menos) */
+.fch .fch-tabela--contratantes tbody th[scope="row"]:first-child { padding-left: var(--espaco-g); }
 
 /* ---------------------------------------------------------------- faixa media (a 1024 com o menu aberto) */
 @container fch-pagina (max-width: 900px) {
   /* os cinco numeros em 3 + 2, sem deixar um sozinho na segunda linha */
   .fch-numeros { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  /* as seis colunas da tabela do mes cabem na caixa: letra de apoio, colunas mais juntas e o nome quebrando */
-  .fch .fch-tabela--meses, .fch .fch-tabela--meses .fch-abre { font-size: var(--texto-mini); }
-  .fch .fch-tabela--meses th, .fch .fch-tabela--meses td { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
-  .fch .fch-tabela--meses th:first-child { padding-left: var(--espaco-m); }
-  .fch .fch-tabela--meses th:last-child, .fch .fch-tabela--meses td:last-child { padding-right: var(--espaco-m); }
+  /* as seis colunas da tabela do mes e da do contratante cabem na caixa: letra de apoio, colunas mais juntas e o
+     nome quebrando */
+  .fch .fch-tabela--cinco, .fch .fch-tabela--cinco .fch-abre { font-size: var(--texto-mini); }
+  .fch .fch-tabela--cinco th, .fch .fch-tabela--cinco td { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
+  .fch .fch-tabela--cinco th:first-child { padding-left: var(--espaco-m); }
+  .fch .fch-tabela--cinco th:last-child, .fch .fch-tabela--cinco td:last-child { padding-right: var(--espaco-m); }
   .fch .fch-tabela--meses tbody .fch-linha--obra > th[scope="row"]:first-child { padding-left: var(--espaco-g); }
   .fch .fch-tabela--meses tbody .fch-linha--medicao > th[scope="row"]:first-child { padding-left: var(--espaco-gg); }
-  .fch .fch-tabela--meses .fch-primeira { white-space: normal; }
+  .fch .fch-tabela--cinco .fch-primeira { white-space: normal; }
   .fch .fch-tabela--meses .fch-abre { white-space: normal; text-align: left; }
   /* a etiqueta nao cabe numa linha na coluna apertada: as duas partes ficam uma sobre a outra, e o fundo acompanha
      o texto em vez de ocupar a coluna inteira */
-  .fch .fch-tabela--meses :is(.variacao, .diferenca) { flex-direction: column; align-items: flex-end; }
-}
-
-/* ---------------------------------------------------------------- em aberto em blocos (ate' 640 px)
-   As cinco colunas do em aberto nao cabem: a tabela vira blocos (como a lista de Obras no celular), com a obra e o
-   valor em cima e a medicao, a nota e a data embaixo, o rotulo escrito antes do dado. */
-@container fch-pagina (max-width: 640px) {
-  .fch .fch-tabela--aberto, .fch .fch-tabela--aberto :is(tbody, tfoot) { display: block; width: 100%; }
-  .fch .fch-tabela--aberto thead { position: absolute; width: var(--espaco-fio); height: var(--espaco-fio); overflow: hidden; clip: rect(0 0 0 0); }
-  .fch .fch-tabela--aberto tr {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--espaco-p); row-gap: var(--espaco-traco);
-    grid-template-areas: "obra valor" "medicao medicao" "nota nota" "data data"; align-items: start;
-    padding: var(--espaco-pp) var(--espaco-g); border-bottom: var(--borda-linha);
-  }
-  .fch .fch-tabela--soltas tbody tr { grid-template-areas: "obra valor" "nota nota" "data data"; }
-  .fch .fch-tabela--aberto tfoot tr { border-top: var(--regua-secao); border-bottom: 0; }
-  .fch .fch-tabela--aberto tbody:last-of-type tr:last-child { border-bottom: 0; }
-  .fch .fch-tabela--aberto.tabela tr > :is(th, td) {
-    display: block; min-width: 0; padding: 0; border: 0; position: static; background: none;
-    white-space: normal; text-align: left; font-size: var(--texto-mini);
-  }
-  .fch .fch-tabela--aberto :is(tr.fch-grupo, tfoot tr) { grid-template-areas: "obra valor"; align-items: baseline; }
-  .fch .fch-tabela--aberto.tabela :is(tr.fch-grupo, tfoot tr) > th { grid-area: obra; }
-  .fch .fch-tabela--aberto tbody tr.fch-grupo { background: var(--cor-papel-sombreado); border-top: var(--borda-linha); }
-  .fch .fch-tabela--aberto .fch-a-obra { grid-area: obra; font-weight: var(--peso-forte); }
-  .fch .fch-tabela--aberto.tabela tr > td.col-num { grid-area: valor; text-align: right; white-space: nowrap; }
-  .fch .fch-tabela--aberto .fch-a-medicao { grid-area: medicao; }
-  .fch .fch-tabela--aberto .fch-a-medicao .fch-sub { display: inline; margin-left: var(--espaco-pp); }
-  .fch .fch-tabela--aberto .fch-a-nota { grid-area: nota; }
-  .fch .fch-tabela--aberto.tabela tr > .fch-a-data { grid-area: data; color: var(--cor-texto-secundario); font-weight: var(--peso-normal); }
-  /* o selo da nota no tamanho do texto do bloco: maior que ele, caia para a linha de baixo */
-  .fch .fch-tabela--aberto .selo { font-size: var(--texto-mini); }
-  .fch .fch-tabela--aberto [data-rotulo]::before { content: attr(data-rotulo) " "; color: var(--cor-texto-secundario); font-family: var(--fonte-texto); }
+  .fch .fch-tabela--cinco :is(.variacao, .diferenca) { flex-direction: column; align-items: flex-end; }
+  .fch .fch-tabela--contratantes tbody th[scope="row"]:first-child { padding-left: var(--espaco-m); }
 }
 
 /* ---------------------------------------------------------------- faixa estreita (celular) */
 @container fch-pagina (max-width: 560px) {
-  /* os cinco numeros em lista: rotulo a' esquerda, valor a' direita */
+  /* as abas juntas, na letra de apoio, para as tres caberem numa linha */
+  .fch-abas { column-gap: var(--espaco-m); }
+  .fch-abas .aba { padding: 0; font-size: var(--texto-meta); }
+  /* os cinco numeros em lista: rotulo a' esquerda, valor a' direita; o link do em aberto, na linha de baixo */
   .fch-numeros { grid-template-columns: minmax(0, 1fr); gap: var(--espaco-pp); }
-  .fch-numero { display: flex; align-items: baseline; justify-content: space-between; gap: var(--espaco-p); }
+  .fch-numero { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--espaco-p); }
+  .fch-numero__porta { order: 1; flex-basis: 100%; text-align: right; }
   /* o painel com a margem de dentro menor: sobra largura para dois valores de centenas de milhoes lado a lado */
   .fch-painel__cab { padding: 0 var(--espaco-pp); }
-  .fch-painel__cab .escolhas { margin-left: 0; }
   .fch-vazio { padding: 0 var(--espaco-pp) var(--espaco-p); }
-  .fch-soltas .fch-aviso, .fch-soltas__titulo, .fch-soltas__base { margin-left: var(--espaco-pp); margin-right: var(--espaco-pp); }
-  .fch-aparte { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
-  .fch .fch-tabela--aberto tr { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
 
-  /* A tabela do mes e a da comparacao tambem viram blocos: cada linha e' uma grade com as mesmas tres colunas, entao
-     os numeros continuam alinhados. Na do mes ficam o medido e o recebido (os outros numeros estao no alto e no em
-     aberto). */
+  /* A tabela do mes e a da comparacao viram blocos: cada linha e' uma grade com as mesmas tres colunas, entao os
+     numeros continuam alinhados. Na do mes ficam o medido e o recebido (os outros numeros estao no alto). */
   .fch :is(.fch-tabela--meses, .fch-tabela--comparacao), .fch :is(.fch-tabela--meses, .fch-tabela--comparacao) :is(thead, tbody, tfoot) {
     display: block; width: 100%;
   }
@@ -208,4 +180,27 @@
   .fch .fch-tabela--meses tbody .fch-linha--obra > th[scope="row"]:first-child { padding-left: var(--espaco-m); }
   .fch .fch-tabela--meses tbody .fch-linha--medicao > th[scope="row"]:first-child { padding-left: var(--espaco-g); }
   .fch .fch-tabela--meses :is(.fch-linha--obra, .fch-linha--medicao) > th + td { grid-column: 2; }
+  /* na comparacao a etiqueta da variacao fica em duas linhas, como na tabela do mes na faixa media */
+  .fch .fch-tabela--comparacao .variacao { flex-direction: column; align-items: flex-end; }
+
+  /* Por contratante (#815): um bloco por contratante, com o nome em cima e os cinco numeros embaixo, cada um com o
+     rotulo da coluna escrito antes (`data-rotulo`). Aqui os cinco aparecem: e' a pergunta da aba. */
+  .fch .fch-tabela--contratantes, .fch .fch-tabela--contratantes :is(tbody, tfoot) { display: block; width: 100%; }
+  .fch .fch-tabela--contratantes thead { position: absolute; width: var(--espaco-fio); height: var(--espaco-fio); overflow: hidden; clip: rect(0 0 0 0); }
+  .fch .fch-tabela--contratantes tr {
+    display: grid; grid-template-columns: minmax(0, 1fr); row-gap: var(--espaco-mini);
+    padding: var(--espaco-pp); border-bottom: var(--borda-linha);
+  }
+  .fch .fch-tabela--contratantes tbody th[scope="row"]:first-child { padding-left: 0; }
+  /* no bloco ha' largura para a etiqueta numa linha so' */
+  .fch .fch-tabela--contratantes .diferenca { flex-direction: row; align-items: baseline; }
+  .fch .fch-tabela--contratantes tbody tr:last-child { border-bottom: 0; }
+  .fch .fch-tabela--contratantes tfoot tr { border-top: var(--regua-secao); border-bottom: 0; }
+  .fch .fch-tabela--contratantes.tabela tr > :is(th, td) {
+    display: flex; align-items: baseline; justify-content: space-between; gap: var(--espaco-p);
+    min-width: 0; padding: 0; border: 0; position: static; background: none; white-space: normal; text-align: left;
+  }
+  .fch .fch-tabela--contratantes.tabela tr > th { font-size: var(--texto-meta); font-weight: var(--peso-forte); }
+  .fch .fch-tabela--contratantes.tabela tr > td { font-size: var(--texto-mini); }
+  .fch .fch-tabela--contratantes td[data-rotulo]::before { content: attr(data-rotulo); color: var(--cor-texto-secundario); font-family: var(--fonte-texto); font-weight: var(--peso-normal); }
 }

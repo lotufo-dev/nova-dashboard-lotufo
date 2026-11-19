@@ -354,6 +354,28 @@ export const fechamentoComValores = reg => {
   };
 };
 
+// #815, Fechamento em abas: a aba Por contratante com o que o cadastro de exemplo nao tem (ele tem um orgao so'). O
+// total de cada ano de `fechamentoComValores` repartido entre quatro contratantes, o ultimo de nome comprido e sem
+// pagina (sem orgao no cadastro); cada coluna das linhas soma o total do ano, como no servidor, com o resto no
+// primeiro. `vazio` e' a pagina sem lancamento nenhum, nas tres abas. Valores inventados.
+const FCH_CONTRATANTES = [["SINFRA", "sinfra", 560], ["MTPAR", "mtpar", 250], ["Pref. Várzea Grande", "pref-vg", 120],
+  ["Secretaria Municipal de Infraestrutura e Obras de Exemplo do Norte", null, 70]];
+const fchPorContratante = total => {
+  const linhas = FCH_CONTRATANTES.map(([contratante, chave, porMil]) => ({ contratante, contratante_chave: chave,
+    ...Object.fromEntries(FCH_SOMAVEIS.map(k => [k, Math.floor(total[k] * porMil / 1000)])), participacao_medido_por_mil: porMil }));
+  for (const k of FCH_SOMAVEIS) linhas[0][k] += total[k] - linhas.reduce((t, x) => t + x[k], 0);
+  return linhas;
+};
+export const fechamentoEmAbas = ({ vazio = false } = {}) => reg => {
+  const f = fechamentoComValores(reg);
+  if (!vazio) return { ...f, por_contratante: { 2025: fchPorContratante(f.por_ano[2025]), 2026: fchPorContratante(f.por_ano[2026]) } };
+  const zero = fchSoma([]);
+  const semCobertura = { aprovado_centavos: 0, com_nota_centavos: 0, sem_nota_centavos: 0, medicoes_sem_nota: 0, percentual: null };
+  return { ...f, meses: [], por_ano: { 2025: { ...zero, meses: 0 }, 2026: { ...zero, meses: 0 } },
+    acumulado: { ate_mes: null, 2025: zero, 2026: zero }, por_contratante: { 2025: [], 2026: [] }, em_aberto: [],
+    cobertura: { 2025: semCobertura, 2026: semCobertura } };
+};
+
 export const obrasComAParte = obras => obras.map((o, i) => ({ ...o, posicao: { ...o.posicao, a_receber_ano_inicial: "2025",
   a_receber_anterior_centavos: i === 0 ? 70003 : 0, a_receber_sem_atualizacao_centavos: i === 0 ? 40001 : 0 } }));
 
