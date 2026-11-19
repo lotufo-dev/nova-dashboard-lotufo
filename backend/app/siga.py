@@ -152,6 +152,24 @@ def _marcacao_ou_anotacao(evento: str | None) -> bool:
     return "marcacao" in texto or "anotacao" in texto
 
 
+def _estado(situacao: str | None) -> str:
+    """O estado do ultimo volume ou via da situacao, sem acento e em minusculas: '1º Volume - Arquivado [PROTOC, [X]]'
+    -> 'arquivado'; '1ª Via (Setor Competente) - Sobrestado [X]' -> 'sobrestado'."""
+    ultimo_volume = (situacao or "").split(" | ")[-1]
+    return _sem_acento(ultimo_volume.split("[")[0]).split(" - ", 1)[-1].strip()
+
+
+def sobrestado(situacao: str | None) -> bool:
+    """Processo suspenso pelo orgao (#841): o estado do ultimo volume ou via comeca por "sobrestad". Nao e' atraso."""
+    return _estado(situacao).startswith("sobrestad")
+
+
+def juntado(situacao: str | None) -> bool:
+    """Processo juntado a outro (#841): o estado do ultimo volume ou via comeca por "juntad" ('1º Volume - Juntado
+    [...]'). A movimentacao "Juntada" e' outra coisa (um documento juntado a ESTE processo) e nao encerra."""
+    return _estado(situacao).startswith("juntad")
+
+
 def derivar(situacao: str | None, movimentacoes: list[dict], hoje: datetime.date) -> dict:
     """Movimentacoes com `data` em 'AAAA-MM-DD HH:MM:SS'. As canceladas nao entram em nenhuma conta.
 
@@ -190,6 +208,8 @@ def derivar(situacao: str | None, movimentacoes: list[dict], hoje: datetime.date
         "hoje": sum(m["data"][:10] == hoje_iso for m in andamentos),
         "ultima": ultima,
         "protocolado_em": validas[0]["data"] if validas else None,
+        # #841: suspenso pelo orgao; a leitura de "parado" (`parado`) diz "sobrestado" no lugar dos dias
+        "sobrestado": sobrestado(situacao),
     }
 
 
@@ -213,27 +233,83 @@ def arquivado(situacao: str | None, movimentacoes: list[dict]) -> bool:
     return evento.startswith("arquiv") and "cancelad" not in evento
 
 
-def _encerramento(estado_da_medicao: str | None, situacao: str | None, movimentacoes: list[dict]) -> str | None:
-    """Por que o processo esta' encerrado (#657): `recebida` (ligado a medicao recebida), `arquivado` ou None (vivo).
-    Derivado a cada leitura, nunca gravado: a medicao que deixa de estar recebida devolve o processo."""
+def _local(carimbo_utc: str) -> str:
+    """Carimbo UTC do banco -> 'AAAA-MM-DD HH:MM:SS' em hora de Cuiaba, o formato das movimentacoes do SIGA."""
+    return tempo.para_local(_instante(carimbo_utc)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def movimentacao_depois(movimentacoes: list[dict], encerrado_em: str) -> dict | None:
+    """A primeira movimentacao posterior ao encerramento a' mao (`encerrado_em`, UTC do banco), fora Marcacao,
+    Anotacao e cancelada (a regua da #840). E' ela que devolve o processo ao quadro (#841)."""
+    desde = _local(encerrado_em)
+    depois = sorted((m for m in movimentacoes if m["data"] > desde and not _marcacao_ou_anotacao(m["evento"])
+                     and "cancelad" not in (m["evento"] or "").lower()), key=lambda m: m["data"])
+    return depois[0] if depois else None
+
+
+# Por que o processo esta' encerrado (#657, #841): os automaticos e o encerrado a' mao
+MOTIVOS_AUTOMATICOS = ("recebida", "arquivado", "juntado")
+
+
+def _encerramento(estado_da_medicao: str | None, situacao: str | None, movimentacoes: list[dict],
+                  manual_em: str | None = None) -> str | None:
+    """A leitura unica de "encerrado" (#657, #841): `recebida` (ligado a medicao recebida), `arquivado`, `juntado`
+    (juntado a outro processo), `manual` (encerrado a' mao em `manual_em`, UTC, sem movimentacao depois) ou None
+    (vivo). Os automaticos sao derivados a cada leitura, nunca gravados: a medicao que deixa de estar recebida devolve
+    o processo. `situacao` e' a da ultima leitura com movimentacoes (`_situacoes`): a leitura vazia nao conta. Nada por
+    setor nem por tempo."""
     if estado_da_medicao == "recebida":
         return "recebida"
-    return "arquivado" if arquivado(situacao, movimentacoes) else None
+    if arquivado(situacao, movimentacoes):
+        return "arquivado"
+    if juntado(situacao):
+        return "juntado"
+    if manual_em is not None and movimentacao_depois(movimentacoes, manual_em) is None:
+        return "manual"
+    return None
+
+
+def _situacoes(conn, ids=None) -> dict[int, str | None]:
+    """{processo: situacao da ultima leitura que vale} (#841): a leitura vazia (`sem_movimentacoes`) fica gravada e
+    nao vale como situacao. Processo sem leitura que vale nao entra."""
+    filtro, args = "", []
+    if ids is not None:
+        ids = list(ids)
+        if not ids:
+            return {}
+        filtro, args = f" AND l.processo_id IN ({','.join('?' * len(ids))})", ids
+    return {r[0]: r[1] for r in conn.execute(
+        "SELECT l.processo_id, l.situacao FROM siga_leituras l WHERE l.id=(SELECT u.id FROM siga_leituras u "
+        "WHERE u.processo_id=l.processo_id AND u.sem_movimentacoes=0 ORDER BY u.lido_em DESC, u.id DESC LIMIT 1)"
+        + filtro, args)}
+
+
+def _manuais(conn) -> dict[int, dict]:
+    """{processo: encerramento a' mao em aberto} (#841), com o nome de quem encerrou."""
+    return {r["processo_id"]: dict(r) for r in conn.execute(
+        "SELECT e.id, e.processo_id, e.motivo, e.encerrado_em, u.nome AS por FROM siga_encerramentos e "
+        "JOIN usuarios u ON u.id=e.encerrado_por WHERE e.reaberto_em IS NULL")}
 
 
 def encerrados(conn) -> dict[int, str]:
     """{id do processo: motivo} dos processos encerrados (`_encerramento`)."""
     out = {}
+    situacoes, manuais = _situacoes(conn), _manuais(conn)
     for p in conn.execute("SELECT sp.id, m.estado FROM siga_processos sp LEFT JOIN medicoes m ON m.id=sp.medicao_id "
                           "ORDER BY sp.id").fetchall():
-        leitura = conn.execute("SELECT situacao FROM siga_leituras WHERE processo_id=? ORDER BY lido_em DESC, id DESC "
-                               "LIMIT 1", (p["id"],)).fetchone()
         movs = [] if p["estado"] == "recebida" else conn.execute(
             "SELECT data, evento FROM siga_movimentacoes WHERE processo_id=?", (p["id"],)).fetchall()
-        motivo = _encerramento(p["estado"], leitura["situacao"] if leitura else None, movs)
+        manual = manuais.get(p["id"])
+        motivo = _encerramento(p["estado"], situacoes.get(p["id"]), movs, manual["encerrado_em"] if manual else None)
         if motivo:
             out[p["id"]] = motivo
     return out
+
+
+def fora_do_robo(conn) -> dict[int, str]:
+    """Os encerrados que o robo deixa de ler: o encerrado a' mao continua sendo lido (#841), para voltar sozinho com
+    movimentacao nova."""
+    return {pid: motivo for pid, motivo in encerrados(conn).items() if motivo != "manual"}
 
 
 def _ultimas_leituras(conn) -> dict[int, str]:
@@ -343,6 +419,10 @@ def _vincular(conn, processo_id: int) -> None:
                      (processo_id,)).fetchone()
     if not p["numero"] or p["protocolo_id"] is not None or p["medicao_id"] is not None:
         return
+    # #841: o vinculo que alguem desfez pela tela nao volta sozinho pelo numero igual
+    if conn.execute("SELECT 1 FROM audit_log WHERE acao='siga.vinculo_desfeito' AND entidade='siga_processo' "
+                    "AND entidade_id=? LIMIT 1", (str(processo_id),)).fetchone():
+        return
     achado = _vinculo(conn, p["numero"])
     if achado:
         contrato_id, protocolo_id, medicao_id = achado
@@ -386,14 +466,37 @@ def gravar_leitura(conn, lido_em: datetime.datetime, processos: list[dict]) -> d
     with db.mutacao(conn):
         for codigo, numero, nome, situacao, movs in conferidos:
             pid = _gravar_processo(conn, codigo, numero, nome)
-            conn.execute("INSERT OR IGNORE INTO siga_leituras (processo_id, lido_em, situacao) VALUES (?,?,?)",
-                         (pid, lido, situacao))
+            # #841: o SIGA as vezes devolve a lista vazia para um processo que tem historico. A leitura fica gravada
+            # (o robo leu), marcada, e nao vale como situacao: nao apaga nada, nao muda os dias, nao encerra nem reabre
+            vazia = not movs and conn.execute("SELECT 1 FROM siga_movimentacoes WHERE processo_id=? LIMIT 1",
+                                              (pid,)).fetchone() is not None
+            conn.execute("INSERT OR IGNORE INTO siga_leituras (processo_id, lido_em, situacao, sem_movimentacoes) "
+                         "VALUES (?,?,?,?)", (pid, lido, situacao, int(vazia)))
             for mov in movs:
                 novas += conn.execute(
                     "INSERT OR IGNORE INTO siga_movimentacoes (processo_id, data, evento, cad_lotacao, cad_pessoa, "
                     "at_lotacao, at_pessoa) VALUES (?,?,?,?,?,?,?)", (pid, *mov)).rowcount
             _vincular(conn, pid)
+            _reabrir_com_movimentacao(conn, pid)
     return {"gravados": len(conferidos), "novas_movimentacoes": novas}
+
+
+def _reabrir_com_movimentacao(conn, processo_id: int) -> None:
+    """O encerrado a' mao volta sozinho com movimentacao posterior ao encerramento (#841), e isso fica registrado: a
+    linha do encerramento ganha a data da reabertura e a movimentacao que a causou, e a auditoria, o ato sem usuario."""
+    e = conn.execute("SELECT id, encerrado_em FROM siga_encerramentos WHERE processo_id=? AND reaberto_em IS NULL",
+                     (processo_id,)).fetchone()
+    if e is None:
+        return
+    movs = [dict(r) for r in conn.execute("SELECT data, evento FROM siga_movimentacoes WHERE processo_id=?",
+                                          (processo_id,))]
+    mov = movimentacao_depois(movs, e["encerrado_em"])
+    if mov is None:
+        return
+    conn.execute("UPDATE siga_encerramentos SET reaberto_em=?, reaberto_pela_movimentacao=? WHERE id=?",
+                 (_carimbo(tempo.agora_utc()), mov["data"], e["id"]))
+    auditoria.registrar(conn, None, "siga.reabertura", "siga_processo", processo_id, {"encerramento_id": e["id"]},
+                        {"pela_movimentacao": mov["data"], "evento": mov["evento"]})
 
 
 # --- link do SIGA colado na etapa 4 (issue #328) -----------------------------------------------------------
@@ -547,10 +650,11 @@ def o_que_e(categoria: str, complemento: str | None, medicao_titulo: str | None)
 
 
 def _categoria(p) -> str:
-    """Ligado a medicao ou a protocolo e' sempre Medicoes; "medicoes" gravado sem vinculo nenhum le como Outros."""
+    """Ligado a medicao ou a protocolo e' sempre Medicoes; senao, a gravada. "medicoes" gravado sem vinculo e' o
+    processo cujo vinculo alguem desfez (#841): continua em Medicoes, a' espera da medicao."""
     if p["medicao_id"] is not None or p["protocolo_id"] is not None:
         return "medicoes"
-    return p["categoria"] if p["categoria"] != "medicoes" else "outros"
+    return p["categoria"]
 
 
 # O robo manda o processo so' com o nome que ele tem na lista dele; o SIGA nao informa um tipo. Enquanto ninguem
@@ -603,7 +707,10 @@ def situacao_do_tempo(dias_sem_movimentacao: int | None, hoje: int) -> str | Non
 
 def parado(derivado: dict) -> str | None:
     """A leitura unica de "parado" de um processo (#840), sobre o que `derivar` devolve: a da linha da tela SIGA, da
-    faixa de numeros, do aviso `siga_parado`, da posicao na medicao e do protocolo. A tela nao calcula."""
+    faixa de numeros, do aviso `siga_parado`, da posicao na medicao e do protocolo. A tela nao calcula.
+    #841: o processo sobrestado (suspenso pelo orgao) le `sobrestado`: nao e' atraso, nao conta nos parados nem avisa."""
+    if derivado.get("sobrestado"):
+        return "sobrestado"
     return situacao_do_tempo(derivado["dias_sem_movimentacao"], derivado["hoje"])
 
 
@@ -709,7 +816,216 @@ def classificar(conn, usuario_id, processo_id: int, categoria: str | None, contr
         depois = dict(zip(campos, (categoria, contrato_id, medicao_id, complemento)))
         conn.execute("UPDATE siga_processos SET categoria=?, contrato_id=?, medicao_id=?, complemento=? WHERE id=?",
                      (categoria, contrato_id, medicao_id, complemento, processo_id))
+        # #841: a medicao escolhida aqui e' o mesmo vinculo da tela: quem e quando (sem medicao, nao ha' vinculo)
+        if medicao_id != p["medicao_id"]:
+            por, em = (usuario_id, _carimbo(tempo.agora_utc())) if medicao_id is not None else (None, None)
+            conn.execute("UPDATE siga_processos SET medicao_vinculada_por=?, medicao_vinculada_em=? WHERE id=?",
+                         (por, em, processo_id))
         auditoria.registrar(conn, usuario_id, "siga.classificacao", "siga_processo", processo_id, antes, depois)
+
+
+# --- vinculo com a medicao, encerramento a' mao e pendencia do protocolo novo (issue #841) --------------------
+
+MAX_MOTIVO_ENCERRAMENTO = 200
+MOTIVO_OBRIGATORIO = "Escreva o motivo do encerramento"
+MOTIVO_LONGO = f"Motivo com mais de {MAX_MOTIVO_ENCERRAMENTO} caracteres"
+JA_ENCERRADO = "Este processo já está encerrado"
+NAO_ENCERRADO_A_MAO = "Só o processo encerrado à mão se reabre por aqui"
+SEM_VINCULO = "Este processo não está ligado a uma medição"
+ROTULO_MOTIVO = {"recebida": "medição recebida", "arquivado": "arquivado", "juntado": "juntado a outro processo",
+                 "manual": "encerrado à mão"}
+
+
+def vincular_medicao(conn, usuario_id: int, processo_id: int, medicao_id: int) -> None:
+    """Liga o processo a' medicao pela tela (#841): o mesmo vinculo da #663 (`siga_processos.medicao_id`), com quem e
+    quando. A obra do processo passa a ser a da medicao e a categoria, Medicoes. Ligado a' medicao recebida, o processo
+    encerra sozinho (`_encerramento`). O processo de protocolo enviado pelo sistema ja' tem o vinculo dele e nao muda
+    por aqui."""
+    with db.mutacao(conn):
+        p = conn.execute("SELECT * FROM siga_processos WHERE id=?", (processo_id,)).fetchone()
+        if p is None:
+            raise LookupError(PROCESSO_INEXISTENTE)
+        if p["protocolo_id"] is not None:
+            raise ValueError(LIGADO_A_PROTOCOLO)
+        m = conn.execute("SELECT id, contrato_id FROM medicoes WHERE id=?", (medicao_id,)).fetchone()
+        if m is None:
+            raise ValueError(MEDICAO_NAO_ENCONTRADA)
+        antes = {"categoria": _categoria(p), "contrato_id": p["contrato_id"], "medicao_id": p["medicao_id"]}
+        conn.execute("UPDATE siga_processos SET medicao_id=?, contrato_id=?, categoria='medicoes', "
+                     "medicao_vinculada_por=?, medicao_vinculada_em=? WHERE id=?",
+                     (medicao_id, m["contrato_id"], usuario_id, _carimbo(tempo.agora_utc()), processo_id))
+        auditoria.registrar(conn, usuario_id, "siga.vinculo_medicao", "siga_processo", processo_id, antes,
+                            {"categoria": "medicoes", "contrato_id": m["contrato_id"], "medicao_id": medicao_id})
+
+
+def desfazer_vinculo(conn, usuario_id: int, processo_id: int) -> None:
+    """Desfaz o vinculo com a medicao (#841). O processo continua em Medicoes, com a obra, a' espera da medicao certa;
+    o robo nao o religa pelo numero igual (`_vincular`). O de protocolo enviado pelo sistema nao se desfaz por aqui."""
+    with db.mutacao(conn):
+        p = conn.execute("SELECT * FROM siga_processos WHERE id=?", (processo_id,)).fetchone()
+        if p is None:
+            raise LookupError(PROCESSO_INEXISTENTE)
+        if p["protocolo_id"] is not None:
+            raise ValueError(LIGADO_A_PROTOCOLO)
+        if p["medicao_id"] is None:
+            raise ValueError(SEM_VINCULO)
+        conn.execute("UPDATE siga_processos SET medicao_id=NULL, categoria='medicoes', medicao_vinculada_por=NULL, "
+                     "medicao_vinculada_em=NULL WHERE id=?", (processo_id,))
+        auditoria.registrar(conn, usuario_id, "siga.vinculo_desfeito", "siga_processo", processo_id,
+                            {"medicao_id": p["medicao_id"], "medicao_vinculada_por": p["medicao_vinculada_por"],
+                             "medicao_vinculada_em": p["medicao_vinculada_em"]}, {"medicao_id": None})
+
+
+def _motivo_do_processo(conn, processo_id: int) -> str | None:
+    p = conn.execute("SELECT m.estado FROM siga_processos sp LEFT JOIN medicoes m ON m.id=sp.medicao_id "
+                     "WHERE sp.id=?", (processo_id,)).fetchone()
+    movs = [dict(r) for r in conn.execute("SELECT data, evento FROM siga_movimentacoes WHERE processo_id=?",
+                                          (processo_id,))]
+    manual = _manuais(conn).get(processo_id)
+    return _encerramento(p["estado"], _situacoes(conn, [processo_id]).get(processo_id), movs,
+                         manual["encerrado_em"] if manual else None)
+
+
+def encerrar(conn, usuario_id: int, processo_id: int, motivo: str | None) -> None:
+    """"Encerrar processo" a' mao, com motivo curto (#841), para o que nao tem sinal automatico. Guarda quem, quando e
+    o motivo. O robo continua lendo o processo, que volta sozinho com movimentacao posterior."""
+    motivo = _texto(motivo)
+    if not motivo:
+        raise ValueError(MOTIVO_OBRIGATORIO)
+    if len(motivo) > MAX_MOTIVO_ENCERRAMENTO:
+        raise ValueError(MOTIVO_LONGO)
+    with db.mutacao(conn):
+        if conn.execute("SELECT 1 FROM siga_processos WHERE id=?", (processo_id,)).fetchone() is None:
+            raise LookupError(PROCESSO_INEXISTENTE)
+        if _motivo_do_processo(conn, processo_id) is not None:
+            raise JaEncerrado(JA_ENCERRADO)
+        # encerramento antigo em aberto que uma movimentacao ja' venceu: registra a volta antes de encerrar de novo
+        _reabrir_com_movimentacao(conn, processo_id)
+        agora = _carimbo(tempo.agora_utc())
+        eid = conn.execute("INSERT INTO siga_encerramentos (processo_id, motivo, encerrado_por, encerrado_em) "
+                           "VALUES (?,?,?,?)", (processo_id, motivo, usuario_id, agora)).lastrowid
+        auditoria.registrar(conn, usuario_id, "siga.encerramento", "siga_processo", processo_id, None,
+                            {"encerramento_id": eid, "motivo": motivo, "encerrado_em": agora})
+
+
+def reabrir(conn, usuario_id: int, processo_id: int) -> None:
+    """"Reabrir" na secao Encerrados (#841): so' o encerrado a' mao; o automatico segue a regra (a medicao recebida, o
+    arquivamento e a juntada so' se desfazem no proprio sinal)."""
+    with db.mutacao(conn):
+        if conn.execute("SELECT 1 FROM siga_processos WHERE id=?", (processo_id,)).fetchone() is None:
+            raise LookupError(PROCESSO_INEXISTENTE)
+        e = conn.execute("SELECT id FROM siga_encerramentos WHERE processo_id=? AND reaberto_em IS NULL",
+                         (processo_id,)).fetchone()
+        if e is None or _motivo_do_processo(conn, processo_id) != "manual":
+            raise NaoEncerradoAMao(NAO_ENCERRADO_A_MAO)
+        agora = _carimbo(tempo.agora_utc())
+        conn.execute("UPDATE siga_encerramentos SET reaberto_em=?, reaberto_por=? WHERE id=?", (agora, usuario_id, e["id"]))
+        auditoria.registrar(conn, usuario_id, "siga.reabertura", "siga_processo", processo_id,
+                            {"encerramento_id": e["id"]}, {"reaberto_em": agora})
+
+
+class JaEncerrado(ValueError):
+    """Encerrar o que ja' esta' encerrado (409)."""
+
+
+class NaoEncerradoAMao(ValueError):
+    """Reabrir o que nao foi encerrado a' mao (409)."""
+
+
+# A proposta de medicao (#841): pela obra e pelo numero que aparecem no nome do processo. "7ª Medição", "Reajuste da
+# 15ª Medição", "3ª Medição de Projeto"; a obra pelo nº do instrumento ("IC 082/2025" casa com "082/2025/00/00-...")
+# ou pelo nome curto escrito por inteiro. Sem obra unica ou sem medicao unica, nao ha' proposta: a pessoa escolhe.
+_NUMERO_MEDICAO = re.compile(r"(?:(reajuste)\s+d[ao]\s+)?(\d{1,3})\s*[ªºa°o]?\s*medi[cç][aã]o(\s+de\s+projeto)?", re.I)
+_INSTRUMENTO_NO_NOME = re.compile(r"(?<![\d/-])0*(\d{1,4})\s*/\s*(\d{4})(?!\d)")
+_INSTRUMENTO = re.compile(r"^\s*0*(\d{1,4})\s*/\s*(\d{4})(?!\d)")
+
+
+def _palavras(texto: str | None) -> str:
+    return " " + re.sub(r"[^a-z0-9]+", " ", _sem_acento(texto)).strip() + " "
+
+
+def _obras_do_nome(nome: str | None, contratos: list) -> set[int]:
+    instrumentos = {(int(n), a) for n, a in _INSTRUMENTO_NO_NOME.findall(nome or "")}
+    no_nome = _palavras(nome)
+    achadas = set()
+    for c in contratos:
+        i = _INSTRUMENTO.match(c["numero_instrumento"] or "")
+        if i and (int(i.group(1)), i.group(2)) in instrumentos:
+            achadas.add(c["id"])
+        curto = _palavras(c["nome_curto"]).strip()
+        if len(curto) >= 3 and f" {curto} " in no_nome:
+            achadas.add(c["id"])
+    return achadas
+
+
+def _medicao_do_nome(nome: str | None) -> tuple[int, str] | None:
+    """(numero, tipo) da primeira medicao escrita no nome; "7ª Medição/Reajuste" propoe a medicao (o reajuste vai no
+    mesmo processo, e o vinculo e' de uma medicao so')."""
+    achado = _NUMERO_MEDICAO.search(nome or "")
+    if not achado:
+        return None
+    tipo = "reajuste" if achado.group(1) else "projeto" if achado.group(3) else "execucao"
+    return int(achado.group(2)), tipo
+
+
+def propostas_de_medicao(conn, processos: list) -> dict[int, dict]:
+    """{processo: medicao proposta} para os processos de Medicoes sem medicao e sem protocolo (#841). `processos`: as
+    linhas com id, nome, contrato_id, medicao_id e protocolo_id. A proposta so' sai com obra unica e medicao unica."""
+    contratos = conn.execute("SELECT id, numero_instrumento, nome_curto FROM contratos").fetchall()
+    out = {}
+    for p in processos:
+        if p["medicao_id"] is not None or p["protocolo_id"] is not None:
+            continue
+        alvo = _medicao_do_nome(p["nome"])
+        if alvo is None:
+            continue
+        obras = {p["contrato_id"]} if p["contrato_id"] is not None else _obras_do_nome(p["nome"], contratos)
+        if len(obras) != 1:
+            continue
+        ms = conn.execute("SELECT m.id, m.numero, m.tipo, m.contrato_id, m.estado FROM medicoes m WHERE m.contrato_id=? "
+                          "AND m.numero=? AND m.tipo=? AND m.estado NOT IN ('cancelada', 'desistida')",
+                          (next(iter(obras)), *alvo)).fetchall()
+        if len(ms) == 1:
+            m = dict(ms[0])
+            out[p["id"]] = {"id": m["id"], "contrato_id": m["contrato_id"], "titulo": medicoes.titulo(m),
+                            "obra": _obra(conn, m["contrato_id"]), "estado": m["estado"]}
+    return out
+
+
+def protocolo_novo_pendente(conn, medicao_ids) -> set[int]:
+    """As medicoes que pedem o protocolo novo (#841): a medicao ainda nao recebida (nem cancelada ou desistida) cujos
+    processos do SIGA, todos, foram arquivados ou juntados. Em algumas superintendencias o pleito, curto, e' arquivado
+    quando o processo da medicao e' aberto, com outro codigo: o processo sai do quadro e a medicao pede o novo. Ligado
+    pela medicao ou pelo protocolo que a leva, como em `posicao_das_medicoes`."""
+    medicoes_de: dict[int, set[int]] = {}
+    estados = {}
+    for lote in _em_lotes(medicao_ids):
+        marcas = ",".join("?" * len(lote))
+        for r in conn.execute(f"SELECT id, estado FROM medicoes WHERE id IN ({marcas})", lote):
+            estados[r[0]] = r[1]
+        for r in conn.execute(
+                f"SELECT id, medicao_id FROM siga_processos WHERE medicao_id IN ({marcas}) "
+                "UNION SELECT sp.id, pm.medicao_id FROM siga_processos sp "
+                f"JOIN protocolo_medicoes pm ON pm.protocolo_id=sp.protocolo_id WHERE pm.medicao_id IN ({marcas})",
+                [*lote, *lote]):
+            medicoes_de.setdefault(r[0], set()).add(r[1])
+    if not medicoes_de:
+        return set()
+    situacoes, manuais = _situacoes(conn, medicoes_de), _manuais(conn)
+    movs_de: dict[int, list] = {}
+    for lote in _em_lotes(sorted(medicoes_de)):
+        for r in conn.execute(f"SELECT processo_id, data, evento FROM siga_movimentacoes "
+                              f"WHERE processo_id IN ({','.join('?' * len(lote))})", lote):
+            movs_de.setdefault(r["processo_id"], []).append(dict(r))
+    motivos_da: dict[int, list[str | None]] = {}
+    for pid, mids in medicoes_de.items():
+        manual = manuais.get(pid)
+        motivo = _encerramento(None, situacoes.get(pid), movs_de.get(pid, []), manual["encerrado_em"] if manual else None)
+        for mid in mids:
+            motivos_da.setdefault(mid, []).append(motivo)
+    return {mid for mid, motivos in motivos_da.items()
+            if estados.get(mid) not in ("recebida", "cancelada", "desistida")
+            and all(m in ("arquivado", "juntado") for m in motivos)}
 
 
 def registrado_em(conn, entidade: str, ids: list[int]) -> dict[int, str]:
@@ -739,7 +1055,8 @@ def do_protocolo(conn, protocolo_id: int, hoje: datetime.date | None = None) -> 
     if leitura is not None:
         movs = [dict(r) for r in conn.execute("SELECT data, evento, at_lotacao, at_pessoa FROM siga_movimentacoes "
                                               "WHERE processo_id=?", (p["id"],))]
-        d = derivar(leitura["situacao"], movs, hoje or tempo.hoje_local())
+        # a situacao e' a da ultima leitura que vale (#841: a leitura vazia nao conta); `lido_em`, a da ultima leitura
+        d = derivar(_situacoes(conn, [p["id"]]).get(p["id"]), movs, hoje or tempo.hoje_local())
         saida.update(setor=d["setor"] or None, com_quem=d["com_quem"] or None, dias_uteis=d["dias_uteis"],
                      dias_sem_movimentacao=d["dias_sem_movimentacao"], situacao_tempo=parado(d),
                      lido_em=tempo.iso_utc(leitura["lido_em"]))
@@ -754,9 +1071,11 @@ def _em_lotes(ids, tamanho: int = 500):
 
 def _mais_parado(posicao: dict) -> tuple:
     """Chave de ordem da tela SIGA (`ordenar` em siga.ts), pela leitura de "parado" (#840): mais dias uteis sem
-    movimentacao, depois a ultima movimentacao mais antiga; sem movimentacao nenhuma, no fim."""
+    movimentacao, depois a ultima movimentacao mais antiga; sem movimentacao nenhuma, no fim. #841: o sobrestado
+    nao esta' parado: vai depois dos outros."""
     dias = posicao["dias_sem_movimentacao"]
-    return (-(dias if dias is not None else -1), posicao["ultima_em"] or "9", posicao["processo_id"])
+    return (posicao.get("situacao_tempo") == "sobrestado", -(dias if dias is not None else -1),
+            posicao["ultima_em"] or "9", posicao["processo_id"])
 
 
 def mais_parado(posicoes: list[dict]) -> dict | None:
@@ -778,12 +1097,14 @@ def posicao_das_medicoes(conn, medicao_ids, hoje: datetime.date) -> dict[int, di
                 [*lote, *lote]):
             medicoes_de.setdefault(r[0], set()).add(r[1])
     lidos, movs_de = {}, {}
+    manuais = _manuais(conn)
     for lote in _em_lotes(sorted(medicoes_de)):
         marcas = ",".join("?" * len(lote))
+        # a situacao da ultima leitura que vale (#841: a leitura vazia nao conta)
         for r in conn.execute(
                 "SELECT sp.id, m.estado, l.situacao FROM siga_processos sp "
                 "JOIN siga_leituras l ON l.id=(SELECT u.id FROM siga_leituras u WHERE u.processo_id=sp.id "
-                "ORDER BY u.lido_em DESC, u.id DESC LIMIT 1) "
+                "AND u.sem_movimentacoes=0 ORDER BY u.lido_em DESC, u.id DESC LIMIT 1) "
                 f"LEFT JOIN medicoes m ON m.id=sp.medicao_id WHERE sp.id IN ({marcas})", lote):
             lidos[r["id"]] = (r["estado"], r["situacao"])
     for lote in _em_lotes(sorted(lidos)):
@@ -793,7 +1114,8 @@ def posicao_das_medicoes(conn, medicao_ids, hoje: datetime.date) -> dict[int, di
     candidatas: dict[int, list[dict]] = {}
     for pid, (estado, situacao) in lidos.items():
         movs = movs_de.get(pid, [])
-        if _encerramento(estado, situacao, movs):
+        manual = manuais.get(pid)
+        if _encerramento(estado, situacao, movs, manual["encerrado_em"] if manual else None):
             continue
         d = derivar(situacao, movs, hoje)
         if not d["setor"]:
@@ -811,8 +1133,8 @@ def posicao_das_medicoes(conn, medicao_ids, hoje: datetime.date) -> dict[int, di
 # --- leitura -----------------------------------------------------------------------------------------------
 
 def processos_para_o_robo(conn) -> list[dict]:
-    """O que o robo acompanha: os processos vivos. O encerrado (#657) sai da lista."""
-    fora = encerrados(conn)
+    """O que o robo acompanha: os processos vivos. O encerrado (#657) sai da lista; o encerrado a' mao fica (#841)."""
+    fora = fora_do_robo(conn)
     return [{k: r[k] for k in ("codigo", "numero", "nome")}
             for r in conn.execute("SELECT id, codigo, numero, nome FROM siga_processos ORDER BY id") if r["id"] not in fora]
 
@@ -833,19 +1155,22 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
     saida = []
     classificados = _classificados_por_pessoa(conn)
     obras = medicoes._obras_com_contratante(conn)
-    for p in conn.execute(
-            "SELECT sp.*, c.nome_curto, c.numero_instrumento, m.numero AS m_numero, m.tipo AS m_tipo, "
-            "m.estado AS m_estado "
-            "FROM siga_processos sp LEFT JOIN contratos c ON c.id=sp.contrato_id "
-            "LEFT JOIN medicoes m ON m.id=sp.medicao_id ORDER BY sp.id").fetchall():
-        leitura = conn.execute("SELECT situacao FROM siga_leituras WHERE processo_id=? ORDER BY lido_em DESC, id DESC "
-                               "LIMIT 1", (p["id"],)).fetchone()
-        situacao = leitura["situacao"] if leitura else None
+    situacoes, manuais = _situacoes(conn), _manuais(conn)
+    linhas = conn.execute(
+        "SELECT sp.*, c.nome_curto, c.numero_instrumento, m.numero AS m_numero, m.tipo AS m_tipo, "
+        "m.estado AS m_estado, u.nome AS vinculado_por "
+        "FROM siga_processos sp LEFT JOIN contratos c ON c.id=sp.contrato_id "
+        "LEFT JOIN medicoes m ON m.id=sp.medicao_id LEFT JOIN usuarios u ON u.id=sp.medicao_vinculada_por "
+        "ORDER BY sp.id").fetchall()
+    propostas = propostas_de_medicao(conn, linhas)
+    for p in linhas:
+        situacao = situacoes.get(p["id"])
         movs = [dict(r) for r in conn.execute(
             "SELECT data, evento, cad_lotacao, cad_pessoa, at_lotacao, at_pessoa FROM siga_movimentacoes "
             "WHERE processo_id=? ORDER BY data DESC, id DESC", (p["id"],))]
         derivado = derivar(situacao, movs, hoje)
-        encerrado = _encerramento(p["m_estado"], situacao, movs)
+        manual = manuais.get(p["id"])
+        encerrado = _encerramento(p["m_estado"], situacao, movs, manual["encerrado_em"] if manual else None)
         # Na resposta, todo instante com o fuso explicito: as datas do SIGA sao de Cuiaba, o lido_em e' UTC
         movs = [{**m, "data": tempo.iso_local(m["data"]), "tipo": tipo_da_movimentacao(m["evento"])} for m in movs]
         for campo in ("desde", "protocolado_em"):
@@ -876,6 +1201,13 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
                 assunto if p["contrato_id"] else p["complemento"] or p["nome"]),
             "o_que_e": assunto,
             "protocolo_id": p["protocolo_id"], "situacao": situacao, "encerrado": encerrado,
+            # #841: o encerrado a' mao diz o motivo, quem e quando; o vinculo pela tela, quem e quando; e o processo de
+            # Medicoes sem medicao traz a medicao que o nome indica (a pessoa confirma ou troca)
+            "encerramento": {"motivo": manual["motivo"], "por": manual["por"],
+                             "em": tempo.iso_utc(manual["encerrado_em"])} if encerrado == "manual" else None,
+            "vinculo": {"por": p["vinculado_por"], "em": tempo.iso_utc(p["medicao_vinculada_em"])}
+            if p["medicao_id"] is not None and p["medicao_vinculada_em"] else None,
+            "medicao_proposta": propostas.get(p["id"]) if categoria == "medicoes" else None,
             **derivado,
             # o encerrado (#657) nao esta' parado nem andando: sem leitura de tempo
             "situacao_tempo": None if encerrado else parado(derivado),
@@ -1021,7 +1353,7 @@ def iniciar_rodada(conn, agora: datetime.datetime | None = None, so_pedidos: boo
                                   "AND terminada_em IS NOT NULL").fetchone()[0]
             por_tempo = not so_pedidos and (ultima is None or agora - _instante(ultima) >= COMPLETA_A_CADA)
             completa = por_tempo or None in pedidos
-            fora = encerrados(conn) if completa else {}
+            fora = fora_do_robo(conn) if completa else {}
             chamados = pedidos | _novos(conn)
             processos = [p for p in todos if (completa and p["id"] not in fora) or p["id"] in chamados]
             if not processos:
@@ -1175,6 +1507,7 @@ def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) ->
     medicao (Outros processos) nao avisa: nao ha' obra nem ato da dashboard que o faca sumir."""
     agora = agora or tempo.agora_utc()
     out = []
+    situacoes, manuais = _situacoes(conn), _manuais(conn)
     for p in conn.execute(
             "SELECT sp.id, sp.numero, sp.contrato_id, sp.medicao_id FROM siga_processos sp "
             "JOIN medicoes m ON m.id=sp.medicao_id WHERE m.estado NOT IN ('cancelada','desistida','recebida') "
@@ -1182,12 +1515,13 @@ def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) ->
             "(COALESCE(novo.protocolo_id, -1) > COALESCE(sp.protocolo_id, -1) OR "
             "(COALESCE(novo.protocolo_id, -1) = COALESCE(sp.protocolo_id, -1) AND novo.id > sp.id))) "
             "ORDER BY sp.id").fetchall():
-        leitura = conn.execute("SELECT situacao FROM siga_leituras WHERE processo_id=? ORDER BY lido_em DESC, id DESC "
-                               "LIMIT 1", (p["id"],)).fetchone()
+        situacao = situacoes.get(p["id"])
         movs = [dict(r) for r in conn.execute(
             "SELECT data, evento, at_lotacao, at_pessoa FROM siga_movimentacoes WHERE processo_id=?", (p["id"],))]
-        d = derivar(leitura["situacao"] if leitura else None, movs, hoje)
-        if d["ultima"] is None or arquivado(leitura["situacao"] if leitura else None, movs):
+        d = derivar(situacao, movs, hoje)
+        # #841: o encerrado (arquivado, juntado ou a' mao) nao avisa; o sobrestado sai pela leitura de `parado`
+        manual = manuais.get(p["id"])
+        if d["ultima"] is None or _encerramento(None, situacao, movs, manual["encerrado_em"] if manual else None):
             continue
         situacao = parado(d)
         if situacao not in ("breve", "critico"):

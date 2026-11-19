@@ -69,7 +69,7 @@ def em_aberto(conn, chave: str, hoje: datetime.date | None = None) -> dict:
 
 
 def _mais_parado(p: dict) -> tuple:
-    return siga._mais_parado({"dias_sem_movimentacao": p["dias_sem_movimentacao"],
+    return siga._mais_parado({"dias_sem_movimentacao": p["dias_sem_movimentacao"], "situacao_tempo": p["situacao_tempo"],
                               "ultima_em": p["ultima"]["data"] if p["ultima"] else None, "processo_id": p["id"]})
 
 
