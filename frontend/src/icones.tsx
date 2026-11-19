@@ -200,10 +200,11 @@ export function IconeTraco(p: Props) {
 }
 
 /* Menu em areas (#814): as paginas que nasceram com ele. */
-/* A receber: o valor que ainda vai entrar (a seta que chega a' linha). */
+/* Em aberto (a pagina das notas que ainda nao foram pagas; o endereco segue /a-receber): a nota, com o pe' picotado.
+   Antes era uma seta descendo ate' uma linha, quase o IconeBaixar dos botoes de exportar (19/11/2026). */
 export function IconeAReceber(p: Props) {
   return <Svg {...p}>
-    <path d="M12 3v12" /><path d="M7 10.5l5 5 5-5" /><path d="M4 20.5h16" />
+    <path d="M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5-2 1.5z" /><path d="M9 8h6" /><path d="M9 12h6" /><path d="M9 16h3" />
   </Svg>;
 }
 

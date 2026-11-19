@@ -187,11 +187,26 @@ describe("o caminho de cada rota (#814)", () => {
     expect(de({ tela: "fechamento" }).map(t => [!!t.area, !!t.titulo])).toEqual([[true, false], [false, true]]);
   });
 
-  it("a área leva à primeira página que o perfil tem nela", () => {
+  it("a área leva à primeira página que o perfil tem nela; quando essa página é a própria, a área é só texto", () => {
     expect(enderecos(de({ tela: "resumo-medicoes" }, "engenharia"))).toEqual(["/medicoes", "/resumo-medicoes"]);
-    expect(enderecos(de({ tela: "resumo-medicoes" }, "diretoria"))).toEqual(["/resumo-medicoes", "/resumo-medicoes"]);
     expect(enderecos(de({ tela: "conta" }, "admin"))).toEqual(["/ancoras-docusign", "/conta"]);
-    expect(enderecos(de({ tela: "conta" }, "diretoria"))).toEqual(["/conta", "/conta"]);
+    // 19/11/2026: o trecho que levaria à própria página não é link
+    expect(enderecos(de({ tela: "resumo-medicoes" }, "diretoria"))).toEqual([null, "/resumo-medicoes"]);
+    expect(enderecos(de({ tela: "conta" }, "diretoria"))).toEqual([null, "/conta"]);
+    expect(enderecos(de({ tela: "fechamento" }))).toEqual([null, "/fechamento"]);
+    expect(enderecos(de({ tela: "inicio" }))).toEqual([null, "/inicio"]);
+    expect(enderecos(de({ tela: "ancoras-docusign" }, "engenharia"))).toEqual([null, "/ancoras-docusign"]);
+    // na vista de uma página, o trecho da página leva à vista padrão; a área, que levaria ao mesmo lugar, fica texto
+    expect(enderecos(de({ tela: "fechamento", aba: "contratantes" }))).toEqual([null, "/fechamento", "/fechamento/contratantes"]);
+  });
+
+  it("tela sem área no menu não derruba o topo: sai só o nome dela", () => {
+    const semArea = { tela: "tela-que-ainda-nao-existe" } as unknown as Rota;
+    expect(() => de(semArea)).not.toThrow();
+    const ts = de(semArea);
+    expect(ts).toHaveLength(1);
+    expect(ts[0].titulo).toBe(true);
+    expect(ts[0].rotulo.length).toBeGreaterThan(0);
   });
 
   it("a área que é a própria página aparece uma vez; a vista padrão não entra, as outras são o último trecho", () => {
@@ -215,7 +230,7 @@ describe("o caminho de cada rota (#814)", () => {
     expect(rotulos(trechosDe({ tela: "fechamento", aba: "contratantes" }, { nomes: vista }))).toEqual(["Financeiro", "Fechamento", "Por contratante"]);
     const comparacao = trechosDe({ tela: "fechamento", aba: "comparacao" }, { nomes: vista });
     expect(rotulos(comparacao)).toEqual(["Financeiro", "Fechamento", "2026 × 2025"]);
-    expect(enderecos(comparacao)).toEqual(["/fechamento", "/fechamento", "/fechamento/comparacao"]);
+    expect(enderecos(comparacao)).toEqual([null, "/fechamento", "/fechamento/comparacao"]);
     expect(comparacao.map(t => !!t.titulo)).toEqual([false, true, false]);
     // enquanto a página não diz os anos, o nome fixo
     expect(rotulos(de({ tela: "fechamento", aba: "comparacao" }))).toEqual(["Financeiro", "Fechamento", "Comparação"]);
@@ -267,7 +282,7 @@ describe("o caminho de cada rota (#814)", () => {
     const nomes = { empresa: "Construtora Alfa" };
     const certidoes = trechosDe({ tela: "documentos-empresa", id: 3 }, { nomes });
     expect(rotulos(certidoes)).toEqual(["Documentos", "Certidões", "Construtora Alfa"]);
-    expect(enderecos(certidoes)).toEqual(["/documentos", "/documentos", "/documentos/3"]);
+    expect(enderecos(certidoes)).toEqual([null, "/documentos", "/documentos/3"]);
     const garantia = trechosDe({ tela: "documentos-empresa", id: 3, aba: "garantia" }, { nomes });
     expect(rotulos(garantia)).toEqual(["Documentos", "Garantias", "Construtora Alfa"]);
     expect(enderecos(garantia)).toEqual(["/documentos", "/documentos/garantias", "/documentos/3/garantia"]);
@@ -279,6 +294,8 @@ describe("o caminho de cada rota (#814)", () => {
     expect(rotulos(historico)).toEqual(["Órgãos", "SIGA", "Obra Alfa · Aditivo de prazo"]);
     expect(enderecos(historico)).toEqual(["/siga", "/siga?categoria=aditivos", "/siga?categoria=aditivos&processo=21"]);
     expect(historico.map(t => !!t.titulo)).toEqual([false, false, true]);
+    // sem filtro além do processo, a área levaria ao mesmo lugar que o trecho "SIGA": fica texto (19/11/2026)
+    expect(enderecos(trechosDe({ tela: "siga" }, { busca: { processo: "21" } }))).toEqual([null, "/siga", "/siga?processo=21"]);
     // sem processo na busca (ou com lixo nela), é a lista
     expect(rotulos(trechosDe({ tela: "siga" }, { busca: { categoria: "aditivos" } }))).toEqual(["Órgãos", "SIGA"]);
     expect(rotulos(trechosDe({ tela: "siga" }, { busca: { processo: "x" } }))).toEqual(["Órgãos", "SIGA"]);

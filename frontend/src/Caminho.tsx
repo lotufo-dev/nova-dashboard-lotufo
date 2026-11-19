@@ -10,8 +10,9 @@ import { destinoDeHref } from "./Topo";
 // cada uma do seu jeito sairam. Os trechos vem de `trechosDe` (navegacao.ts); o nome do objeto, da pagina que ja' o
 // carregou (nomesDoCaminho.ts).
 //
-// O trecho da pagina (ou do objeto) e' o TITULO da barra: nas telas de lista ele e' o h1 da pagina; nas que tem o
-// proprio h1 (a obra, a medicao, o Inicio) e' so' texto, com a mesma cara. Depois dele so' pode vir a vista (a aba).
+// O trecho da pagina (ou do objeto) e' o TITULO da barra: nas telas de lista ele e' o h1 da pagina, na letra do titulo.
+// Nas que tem o proprio h1 (a obra, a medicao, o Inicio) ele e' so' texto, na letra dos outros trechos (decisao do dono
+// de 19/11/2026): o nome do objeto ja' esta' grande no h1 logo abaixo. Depois dele so' pode vir a vista (a aba).
 // O ultimo trecho e' onde se esta' (aria-current) e nao e' link.
 
 /** A mesma pagina, sem olhar a vista: a lista de Obras em qualquer vista, a pagina de Documentos do mesmo assunto, o
@@ -44,7 +45,7 @@ export default function Caminho({ rota, perfil, permissoes, busca, origem, ehH1 
             ? <Link para={volta?.para ?? t.para} busca={volta ? volta.busca : t.busca}>{t.rotulo}</Link>
             : <span>{t.rotulo}</span>;
           return (
-            <li key={`${t.rotulo}-${i}`} className={t.titulo ? "caminho__trecho caminho__trecho--titulo" : "caminho__trecho"}
+            <li key={`${t.rotulo}-${i}`} className={t.titulo && ehH1 ? "caminho__trecho caminho__trecho--titulo" : "caminho__trecho"}
               aria-current={ultimo ? "page" : undefined}>
               {t.titulo && ehH1 ? <h1 className="caminho__titulo">{texto}</h1> : texto}
             </li>

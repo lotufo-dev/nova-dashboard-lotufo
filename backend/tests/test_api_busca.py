@@ -75,8 +75,8 @@ def test_obra_por_nome_sem_acento_e_sem_caixa(client, cenario):
         obras = _q(client, q)["obras"]
         assert [o["id"] for o in obras["itens"]] == [cenario["cox"]] and obras["total"] == 1
     o = _q(client, "coxipo")["obras"]["itens"][0]
-    assert o == {"id": cenario["cox"], "nome": "Coxipó 3ª Etapa", "instrumento": "901/2024/PMC",
-                 "contratante": "Prefeitura de Cuiabá", "orgao_sub": None}
+    # so' o que a linha do resultado desenha: o instrumento nao sai (a tela nao o usa)
+    assert o == {"id": cenario["cox"], "nome": "Coxipó 3ª Etapa", "contratante": "Prefeitura de Cuiabá", "orgao_sub": None}
 
 
 def test_obra_pela_sigla_com_ou_sem_hifen_e_pelo_instrumento(client, cenario):
@@ -99,7 +99,7 @@ def test_numero_de_medicao_em_varias_obras(client, cenario):
         assert med["total"] == 3
     primeira = _q(client, "15")["medicoes"]["itens"][0]       # a competencia mais nova vem antes
     assert primeira == {"id": cenario["m15"], "contrato_id": cenario["mt"], "titulo": "15ª Medição",
-                        "competencia": "2026-10", "obra": "MT-388", "contratante": "SINFRA-MT"}
+                        "competencia": "2026-10", "obra": "MT-388", "contratante": "SINFRA-MT", "estado": "prevista"}   # recem-criada
 
 
 def test_numero_de_medicao_com_a_obra_e_o_tipo(client, cenario):
@@ -108,6 +108,22 @@ def test_numero_de_medicao_com_a_obra_e_o_tipo(client, cenario):
     assert [m["id"] for m in _q(client, "coxipo 15ª")["medicoes"]["itens"]] == [cenario["c15"]]
     assert [m["id"] for m in _q(client, "reajuste 15")["medicoes"]["itens"]] == [cenario["r15"]]
     assert _q(client, "MT-388 99")["medicoes"] == {"itens": [], "total": 0}
+
+
+def test_medicao_prevista_cancelada_ou_desistida_continua_no_resultado_com_o_estado(client, cenario):
+    """Revisao da #819 (ajuste 4): a medicao que nao anda aparece, com o estado na linha; a viva vem com nulo."""
+    _entrar(client, "engenharia")
+    conn = db.get_conn()
+    with db.mutacao(conn):
+        conn.execute("UPDATE medicoes SET estado='cancelada' WHERE id=?", (cenario["c15"],))
+        conn.execute("UPDATE medicoes SET estado='desistida' WHERE id=?", (cenario["r15"],))
+        conn.execute("UPDATE medicoes SET estado='boletim_recebido' WHERE id=?", (cenario["m15"],))
+    conn.close()
+    previsto = _medicao(cenario["mt"], 16, "2026-11")
+    estados = {m["id"]: m["estado"] for m in _q(client, "15")["medicoes"]["itens"]}
+    assert estados == {cenario["m15"]: None, cenario["r15"]: "desistida", cenario["c15"]: "cancelada"}
+    assert _q(client, "MT-388 16")["medicoes"]["itens"][0]["id"] == previsto
+    assert _q(client, "MT-388 16")["medicoes"]["itens"][0]["estado"] == "prevista"
 
 
 def test_processo_pelo_numero_e_pelo_assunto(client, cenario):

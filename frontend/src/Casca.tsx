@@ -202,7 +202,7 @@ function Conta({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
 
 /** Topo: o CAMINHO da pagina a' esquerda (#814), o lugar da busca unica e a conta a' direita. O trecho da pagina e' o
  *  titulo: nas telas de lista ele e' o h1; na obra, na medicao e no Inicio a pagina tem o proprio h1 (o objeto, ou o
- *  "Bom dia"), e a barra so' escreve o trecho, com a mesma cara. Quando o caminho nao cabe numa linha (celular, nome
+ *  "Bom dia"), e a barra so' escreve o trecho, na letra dos outros (19/11/2026). Quando o caminho nao cabe numa linha (celular, nome
  *  longo), ele quebra e a barra cresce; nada e' cortado. */
 export function BarraSuperior({ rota, busca, origem, ehH1, usuario, ir }: {
   rota: Rota; busca?: Filtros; origem?: Origem | null; ehH1: boolean; usuario: Usuario; ir: Ir;

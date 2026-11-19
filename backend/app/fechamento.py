@@ -579,12 +579,13 @@ def _contratantes(conn) -> dict[int, tuple[str, str | None]]:
             for i, o in medicoes._obras_com_contratante(conn).items()}
 
 
-def _linhas_por_contratante(grupos: dict[str, dict]) -> list[dict]:
+def _linhas_por_contratante(grupos: dict[tuple[str, str | None], dict]) -> list[dict]:
     """Issue #815: as linhas de um ano da aba "Por contratante", o de maior medido primeiro (empate, pelo nome), cada
     uma com a participacao do medido dela no medido do ano, em milesimos. A reparticao e' de
     `dinheiro.ratear_proporcional` (so' inteiros, o residuo nos maiores restos): as participacoes somam 1000. Sem
     medido no ano, ou com medido negativo em algum contratante, a participacao vem nula."""
-    linhas = sorted(grupos.values(), key=lambda g: (-g["medido_centavos"], medicoes._chave_nome(g["contratante"])))
+    linhas = sorted(grupos.values(), key=lambda g: (-g["medido_centavos"], medicoes._chave_nome(g["contratante"]),
+                                                    g["contratante_chave"] or ""))
     pesos = [g["medido_centavos"] for g in linhas]
     partes = (dinheiro.ratear_proporcional(1000, pesos) if pesos and min(pesos) >= 0 and sum(pesos) > 0
               else [None] * len(linhas))
@@ -653,7 +654,9 @@ def _fechamento(conn, hoje: datetime.date) -> dict:
     meses: dict[str, dict] = {}
     # issue #815: a mesma linha de medicao soma tambem no contratante da obra dela, no ano da competencia
     contratante_de = _contratantes(conn)
-    do_contratante: dict[str, dict[str, dict]] = {a: {} for a in ANOS}
+    # a linha e' o par (nome, chave), nao o nome: o contrato sem orgao no cadastro cujo texto e' igual a' sigla de um
+    # contratante ("SINFRA") fica na linha dele, sem chave, e nao dentro da do contratante (revisao da #815)
+    do_contratante: dict[str, dict[tuple[str, str | None], dict]] = {a: {} for a in ANOS}
     anteriores = {"quantidade": 0, "valor_centavos": 0}
     em_aberto, diferem = [], []
     for x in linhas:
@@ -675,7 +678,7 @@ def _fechamento(conn, hoje: datetime.date) -> dict:
         _somar(obra, x)
         _somar(mes, x)
         nome, chave = contratante_de[x["contrato_id"]]
-        _somar(do_contratante[ano].setdefault(nome, {"contratante": nome, "contratante_chave": chave, **_zero()}), x)
+        _somar(do_contratante[ano].setdefault((nome, chave), {"contratante": nome, "contratante_chave": chave, **_zero()}), x)
         em_aberto += abertas
         if difere:
             diferem.append({"contrato_id": x["contrato_id"], "obra": x["obra"], "medicao_id": x["medicao_id"],

@@ -503,6 +503,22 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     expect(aceso()).toEqual(["Certidões"]);
   });
 
+  it("o link salvo da tela antiga /documentos?empresa=N abre a página da empresa (o App troca, ao lado do ?aba=)", async () => {
+    entrar("engenharia");
+    window.history.replaceState(null, "", "/documentos?empresa=3#emp-3");
+    render(<App />);
+    await waitFor(() => expect(endereco()).toBe("/documentos/3"));
+    expect(window.location.hash).toBe("");
+    await waitFor(() => expect(trechos()).toEqual(["Documentos", "Certidões", "Beta Ltda"]));
+    expect(aceso()).toEqual(["Certidões"]);
+    // número que não é de empresa: fica a página Certidões
+    cleanup();
+    window.history.replaceState(null, "", "/documentos?empresa=abc");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Certidões" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/documentos");
+  });
+
   it.each([
     ["/documentos?aba=regularidade", "/documentos/regularidade", "Regularidade mensal"],
     ["/documentos?aba=garantias", "/documentos/garantias", "Garantias"],
@@ -635,10 +651,15 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     await screen.findByRole("navigation", { name: "Navegação principal" });
     await waitFor(() => expect(trechos()).toEqual(esperado));
     expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);
-    // o trecho da página é o título da barra; ele só não é o h1 onde a página tem o dela (o Início e Obras)
-    const titulo = topo().querySelector(".caminho__trecho--titulo")!;
-    expect(titulo.textContent).toBe(esperado[esperado.length - 1] === "Usuários" ? "Administração" : esperado[esperado.length - 1]);
-    expect(titulo.querySelector("h1") !== null).toBe(url !== "/inicio" && url !== "/obras");
+    // o trecho da página é o título da barra (o h1); onde a página tem o dela (o Início e Obras) ele fica na letra dos
+    // outros trechos, sem a classe do título (19/11/2026)
+    const titulo = topo().querySelector(".caminho__trecho--titulo");
+    if (url === "/inicio" || url === "/obras") {
+      expect(titulo).toBeNull();
+    } else {
+      expect(titulo!.textContent).toBe(esperado[esperado.length - 1] === "Usuários" ? "Administração" : esperado[esperado.length - 1]);
+      expect(titulo!.querySelector("h1")).not.toBeNull();
+    }
   });
 
   it("a Minha conta entra pelo menu (área Sistema) e pelo avatar, e fica acesa", async () => {

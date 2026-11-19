@@ -10,10 +10,10 @@ const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
 
 const CHEIA: RespostaBusca = {
-  obras: { itens: [{ id: 7, nome: "Obra Exemplo", instrumento: "001/2026", contratante: "SINFRA", orgao_sub: "SUEF II" }], total: 1 },
+  obras: { itens: [{ id: 7, nome: "Obra Exemplo", contratante: "SINFRA", orgao_sub: "SUEF II" }], total: 1 },
   medicoes: { itens: [
     { id: 70, contrato_id: 7, titulo: "15ª Medição", competencia: "2026-10", obra: "Obra Exemplo", contratante: "SINFRA" },
-    { id: 71, contrato_id: 8, titulo: "15ª Medição", competencia: "2026-09", obra: "Obra Beta", contratante: "MTPAR" },
+    { id: 71, contrato_id: 8, titulo: "15ª Medição", competencia: "2026-09", obra: "Obra Beta", contratante: "MTPAR", estado: "cancelada" },
   ], total: 12 },
   processos: { itens: [{ id: 3, numero: "ORGAO-PRO-2026/00001", assunto: "Obra Exemplo · 15ª Medição" }], total: 1 },
 };
@@ -70,7 +70,7 @@ describe("Busca", () => {
     expect(opcoes.map(o => o.textContent)).toEqual([
       "Obra ExemploSINFRA · SUEF II",
       "15ª Medição · Obra ExemploSINFRA · 10/2026",
-      "15ª Medição · Obra BetaMTPAR · 09/2026",
+      "15ª Medição · Obra BetaMTPAR · 09/2026 · cancelada",   // a medição que não anda diz o estado na linha
       "Obra Exemplo · 15ª MediçãoORGAO-PRO-2026/00001",
     ]);
     expect(opcoes.map(o => o.getAttribute("href"))).toEqual(["/obras/7", "/obras/7/medicoes/70", "/obras/8/medicoes/71", "/siga?processo=3"]);

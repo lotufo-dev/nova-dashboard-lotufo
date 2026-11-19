@@ -630,13 +630,20 @@ describe("Fechamento em abas (#815)", () => {
 
   it("?mes= abre a página no ano do mês, com ele aberto por obra; a obra abre a medição", async () => {
     api.mockResolvedValue(ABAS);
+    const rolou = vi.fn();
+    Element.prototype.scrollIntoView = rolou;
     abrirEm("/fechamento?mes=2025-03");
     render(<Fechamento ir={() => {}} />);
     const tabela = await screen.findByRole("table", { name: /por mês de competência de 2025/ });
     expect(screen.getByRole("button", { name: "2025" }).getAttribute("aria-pressed")).toBe("true");
     expect(within(tabela).getByRole("button", { name: /Março de 2025, por obra/ }).getAttribute("aria-expanded")).toBe("true");
+    // a vista vai até a linha do mês aberto (19/11/2026), uma vez, ao abrir
+    const linhaDoMes = within(tabela).getByRole("button", { name: /Março de 2025, por obra/ }).closest("tr")!;
+    expect(rolou).toHaveBeenCalledTimes(1);
+    expect(rolou.mock.contexts[0]).toBe(linhaDoMes);
     fireEvent.click(within(tabela).getByRole("button", { name: /Obra Alfa, medições de 03\/2025/ }));
     expect(within(tabela).getByRole("link", { name: "3ª Medição" }).getAttribute("href")).toBe("/obras/7/medicoes/1");
+    expect(rolou).toHaveBeenCalledTimes(1);
     // escolher o outro ano tira o mês do endereço
     fireEvent.click(screen.getByRole("button", { name: "2026" }));
     expect(endereco()).toBe("/fechamento");
@@ -651,6 +658,8 @@ describe("Fechamento em abas (#815)", () => {
       expect(t.querySelector('[aria-expanded="true"]')).toBeNull();
       cleanup();
     }
+    // sem mês aberto, a vista fica no alto
+    expect(rolou).toHaveBeenCalledTimes(1);
   });
 
   it("por contratante: os cinco números de cada um, a participação no medido e o total do ano na última linha", async () => {
