@@ -49,7 +49,10 @@ const ICONES: Record<ItemMenu, (p: { className?: string }) => React.ReactElement
   garantias: IconeEscudo, "ancoras-docusign": IconeArquivo, admin: IconeAjustes, conta: IconePessoa,
 };
 
-export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemMenu | null; ir: Ir }) {
+// `permissoes`: as que o servidor informou em /api/auth/eu; o item SIGA e' de quem tem `ver_siga` (#829)
+export function Trilho({ perfil, permissoes, marcado, ir }: {
+  perfil: string; permissoes?: readonly string[]; marcado: ItemMenu | null; ir: Ir;
+}) {
   const [estado, setEstado] = useState<"largo" | "recolhido">(estadoInicial);
   const largo = estado === "largo";
   const caixa = useRef<HTMLElement>(null);
@@ -97,7 +100,7 @@ export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemM
             navegador ganha "abrir em nova aba", copiar link e historico de graca. O item fica aceso tambem abaixo
             dele na hierarquia (navegacao.ts). */}
         <div className="menu__areas">
-          {menuDe(perfil).map(a => {
+          {menuDe(perfil, permissoes).map(a => {
             const sozinha = areaEhAPagina(a);
             const acesa = marcado !== null && a.paginas.includes(marcado);
             return (
@@ -206,7 +209,7 @@ export function BarraSuperior({ rota, busca, origem, ehH1, usuario, ir }: {
 }) {
   return (
     <header className="topo">
-      <Caminho rota={rota} perfil={usuario.perfil} busca={busca} origem={origem} ehH1={ehH1} />
+      <Caminho rota={rota} perfil={usuario.perfil} permissoes={usuario.permissoes} busca={busca} origem={origem} ehH1={ehH1} />
       <Busca perfil={usuario.perfil} ir={ir} />
       <Conta usuario={usuario} ir={ir} />
     </header>

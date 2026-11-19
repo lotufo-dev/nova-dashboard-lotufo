@@ -2,16 +2,15 @@
 `.../siga`, cada uma o recorte de uma tela que ja' existe (`app/contratante.py`). So' leitura, com sessao.
 
 Medicoes e A receber sao de quem ve os paineis (`ver_paineis`, os tres perfis), como a fila de Medicoes e a pagina A
-receber. Processos no SIGA e' de quem abre a tela SIGA (`busca.PERMISSAO_SIGA`: engenharia e administracao): a
-diretoria nao ve a aba nem recebe o dado dela (403). A rota `GET /api/siga` da tela continua como esta' (issue #829,
-decisao pendente do dono). Chave que nenhuma obra tem: 404."""
+receber. Processos no SIGA e' de quem abre a tela SIGA (`ver_siga`, issue #829: os tres perfis, a diretoria so' para
+ler); quem nao tem a permissao recebe 403. Chave que nenhuma obra tem: 404."""
 import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 
-from app import busca, contratante
+from app import contratante
 from app.api_auth import conexao
-from app.permissoes import exigir
+from app.permissoes import VER_SIGA, exigir
 
 router = APIRouter()
 
@@ -42,7 +41,7 @@ def a_receber_do_contratante(chave: str = CHAVE, _=Depends(exigir("ver_paineis",
 
 
 @router.get("/api/contratantes/{chave}/siga")
-def siga_do_contratante(chave: str = CHAVE, _=Depends(exigir(busca.PERMISSAO_SIGA, com_csrf=False)),
+def siga_do_contratante(chave: str = CHAVE, _=Depends(exigir(VER_SIGA, com_csrf=False)),
                         conn: sqlite3.Connection = Depends(conexao)):
-    """Os processos vivos das obras do contratante, do mais parado para o menos. A diretoria recebe 403."""
+    """Os processos vivos das obras do contratante, do mais parado para o menos. Sem `ver_siga`, 403."""
     return _recorte(contratante.processos_no_siga, conn, chave)

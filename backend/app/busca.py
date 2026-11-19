@@ -1,7 +1,7 @@
 """Busca unica do topo (issue #819; decisao do dono de 18/11/2026, #805): obra, numero de medicao e numero de processo.
 
-Uma consulta so', com o recorte do perfil aplicado AQUI: o perfil que nao abre o SIGA (a diretoria, como na tela:
-App.tsx manda para a entrada quem cola /siga com esse perfil) nao recebe o grupo de processos, nem a contagem dele.
+Uma consulta so', com o recorte do perfil aplicado AQUI: o perfil sem `ver_siga` (a mesma regra da tela SIGA, #829)
+nao recebe o grupo de processos, nem a contagem dele.
 
 Como a pergunta e' lida (sem acento e sem caixa: "Medição" = "medicao", "15ª" = "15a"):
 - Obras: cada palavra da pergunta aparece no apelido, no instrumento, no nome da obra, no contratante, no sub-orgao
@@ -18,18 +18,15 @@ import sqlite3
 import unicodedata
 
 from app import medicoes, siga
-from app.permissoes import tem
+from app.permissoes import VER_SIGA, tem
 
 LIMITE = 8
 MAX_PERGUNTA = 100
 
-# Quem abre o SIGA: as telas de quem edita cadastros (engenharia e administracao). A diretoria (so' `ver_paineis`)
-# nao tem o SIGA no menu nem na rota (navegacao.ts, App.tsx); a busca segue o mesmo recorte.
-PERMISSAO_SIGA = "editar_cadastros"
-
-
+# Quem abre o SIGA: a permissao unica `ver_siga` (issue #829), a mesma da rota da tela, da aba do contratante, do menu
+# e do App. Desde a decisao do dono de 19/11/2026 a diretoria tambem a tem (so' para ler).
 def ve_siga(perfil: str) -> bool:
-    return tem(perfil, PERMISSAO_SIGA)
+    return tem(perfil, VER_SIGA)
 
 
 def normalizar(texto: str | None) -> str:

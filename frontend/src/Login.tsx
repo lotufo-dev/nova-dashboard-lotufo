@@ -4,7 +4,8 @@ import Simbolo from "./Simbolo";
 import "./login.css";
 import Falha from "./Falha";
 
-export interface Usuario { id: number; nome: string; perfil: string; email: string; }   // /api/auth/eu
+// /api/auth/eu; `permissoes`: as do perfil, pela regra do servidor (#829, permissoes.ts)
+export interface Usuario { id: number; nome: string; perfil: string; email: string; permissoes?: readonly string[] }
 
 export default function Login({ aoEntrar }: { aoEntrar: (u: Usuario) => void }) {
   const [email, setEmail] = useState("");
