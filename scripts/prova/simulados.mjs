@@ -289,6 +289,44 @@ export const inicioComVariacoes = painel => {
       ano_anterior: { competencia: mesAntes(competencia, 12), valor_centavos: 400000003 } } };
 };
 
+// O que faltava apresentar a' diretoria na Inicio (#817): o cadastro de exemplo tem um orgao so' e poucas medicoes, e a
+// tela foi desenhada para varios contratantes com valores de dezenas de milhoes. Aqui o ciclo abre em cinco
+// contratantes ficticios (um de nome longo e um sem orgao no cadastro, que nao tem pagina), a faixa do ciclo e o a
+// receber saem da soma das linhas (como no servidor: a tela mostra os dois e eles tem de fechar), e o medido das 12
+// competencias ganha uma serie regular, com um mes sem medicao. Valores de tabela, em milhoes de reais: cada
+// contratante tem as cinco colunas em degraus de um milhao; o de nome longo tem duas colunas vazias ("—").
+const MI = 100000000;   // R$ 1.000.000,00 em centavos
+//                         contratante, chave, em analise, boletim, nota, protocolado, a receber (em milhoes)
+const INI_CONTRATANTES = [
+  ["Contratante Alfa", "contratante-alfa", 1, 2, 3, 4, 5],
+  ["Contratante Beta", "contratante-beta", 2, 3, 4, 5, 6],
+  ["Contratante Gama", "contratante-gama", 3, 4, 5, 6, 7],
+  ["Consórcio Intermunicipal de Desenvolvimento do Vale do Rio Exemplo", "consorcio-exemplo", 1, 0, 2, 0, 3],
+  ["sem órgão", null, 1, 1, 1, 1, 1],
+];
+const INI_ETAPAS = ["em_analise", "boletim", "nota", "protocolado"];
+// o medido de cada competencia, em milhoes: dois a mais por mes, e o setimo mes sem medicao
+const INI_MEDIDO = [2, 4, 6, 8, 10, 12, 0, 16, 18, 20, 22, 24];
+export const inicioPorContratante = painel => {
+  const linhas = INI_CONTRATANTES.map(([contratante, chave, ...valores]) => ({ contratante, chave,
+    ...Object.fromEntries(INI_ETAPAS.map((e, i) => [`${e}_centavos`, valores[i] * MI])), a_receber_centavos: valores[4] * MI }));
+  const soma = campo => linhas.reduce((s, l) => s + l[campo], 0);
+  return { ...painel,
+    ciclo: painel.ciclo.map(e => INI_ETAPAS.includes(e.etapa)
+      ? { ...e, valor_centavos: soma(`${e.etapa}_centavos`), quantidade: 2 * (INI_ETAPAS.indexOf(e.etapa) + 1),
+        mais_antigo_dias: 10 * (INI_ETAPAS.indexOf(e.etapa) + 1) }
+      : e),
+    a_receber: { liberado: true, valor_centavos: soma("a_receber_centavos"), mais_60_centavos: 2 * MI,
+      a_parte: painel.a_receber.a_parte ?? { ano_inicial: "2025", valor_centavos: 0, anterior_centavos: 0, sem_atualizacao_centavos: 0,
+        sem_atualizacao_desde: null } },
+    ciclo_por_contratante: linhas,
+    medido_12m: painel.medido_12m.map((m, i) => ({ ...m, valor_centavos: (INI_MEDIDO[i] ?? 0) * MI })) };
+};
+// Nada no ciclo nem a receber, e nenhuma competencia com medido: a linha curta no lugar da tabela e o grafico sem coluna.
+export const inicioSemCiclo = painel => ({ ...painel,
+  ciclo: painel.ciclo.map(e => ({ ...e, valor_centavos: 0, quantidade: 0, mais_antigo_dias: null })),
+  ciclo_por_contratante: [], medido_12m: painel.medido_12m.map(m => ({ ...m, valor_centavos: 0 })) });
+
 // As familias de valor no Fechamento (#805): dois anos, para o medido de cada mes ter o mesmo mes do ano anterior, e
 // as leituras da diferenca entre o aprovado e o pedido. Julho: um corte critico. Agosto: um corte que, no mes, fica
 // pequeno, ao lado de uma medicao dentro da tolerancia de arredondamento (R$ 0,03). Setembro: uma medicao com o pedido
@@ -831,3 +869,34 @@ export const cabecalhoDeNomeLongo = cabecalho => ({
 // conta no limite de tentativas por computador, e a prova ja' entra uma vez por perfil e largura.
 export const LOGIN_RECUSADO = { detail: "E-mail ou senha inválidos, ou usuário bloqueado" };
 export const LOGIN_NO_LIMITE = { detail: "Muitas tentativas de entrar a partir deste computador. Tente de novo em alguns minutos." };
+
+// ---- Documentos em tres paginas (#820): o painel sem empresa, sem obra e sem nada a renovar (cada pagina mostra o
+// estado vazio dela)
+export const DOCUMENTOS_VAZIO = { hoje: "2026-09-23", empresas: [], contratos: [], renovar_agora: [] };
+
+// ---- Busca unica do topo (#819): GET /api/busca com os tres grupos, nomes compridos e o grupo de medicoes cortado
+// (8 de 23), e a resposta sem nada. Obras, orgaos e numeros inventados. O perfil sem SIGA nao recebe `processos`: a
+// prova da diretoria usa o servidor de verdade (o recorte e' dele), nao esta resposta.
+const medicaoAchada = (id, contrato_id, titulo, competencia, obra, contratante) => ({ id, contrato_id, titulo, competencia, obra, contratante });
+const OBRA_LONGA = "Rodovia Exemplo, trecho do entroncamento ao distrito, lote 2";
+export const BUSCA_CHEIA = {
+  obras: { total: 2, itens: [
+    { id: 1, nome: OBRA_LONGA, instrumento: "900/2026", contratante: "SINFRA", orgao_sub: "SUEF II" },
+    { id: 2, nome: "Corredor Beta", instrumento: "901/2026", contratante: "Pref. Cuiabá", orgao_sub: null },
+  ] },
+  medicoes: { total: 23, itens: [
+    medicaoAchada(11, 1, "15ª Medição", "2026-10", OBRA_LONGA, "SINFRA"),
+    medicaoAchada(12, 1, "Reajuste da 15ª Medição", "2026-10", OBRA_LONGA, "SINFRA"),
+    medicaoAchada(13, 2, "15ª Medição", "2026-09", "Corredor Beta", "Pref. Cuiabá"),
+    medicaoAchada(14, 3, "15ª Medição de Projeto", "2026-07", "Trevo Eta", "MTPAR"),
+    medicaoAchada(15, 4, "15ª Medição", "2026-05", "Rodovia Capa", "SINFRA"),
+    medicaoAchada(16, 5, "15ª Medição", "2026-02", "Ponte Gama", "SES-MT"),
+    medicaoAchada(17, 6, "15ª Medição", "2025-12", "Escola Delta", "MTPAR"),
+    medicaoAchada(18, 7, "15ª Medição", "2025-09", "Anel Viário Zeta", "SINFRA"),
+  ] },
+  processos: { total: 2, itens: [
+    { id: 1, numero: "ORGAO-PRO-2026/00015", assunto: `${OBRA_LONGA} · 15ª Medição` },
+    { id: 2, numero: null, assunto: "Corredor Beta · Pedido de paralisação" },
+  ] },
+};
+export const BUSCA_VAZIA = { obras: { itens: [], total: 0 }, medicoes: { itens: [], total: 0 }, processos: { itens: [], total: 0 } };

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Aviso } from "./Alertas";
 import AvisosPagina from "./AvisosPagina";
 import Inicio, { saudacao, type PainelInicio } from "./Inicio";
+import MarcaEtapa from "./MarcaEtapa";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
@@ -15,6 +16,8 @@ const RECEBIDO: Record<string, number> = { "2025-11": 120_000_000, "2026-03": 35
 
 // #659: as 12 competencias da matriz terminam no mes anterior ao de hoje
 const MESES_MATRIZ = ["2025-10", ...MESES_12.slice(0, 11)];
+// #817: o medido das mesmas 12 competencias (valores de tabela: 10, 20 e 15 milhoes)
+const MEDIDO: Record<string, number> = { "2025-10": 1_000_000_000, "2026-08": 2_000_000_000, "2026-09": 1_500_000_000 };
 type Celula = PainelInicio["matriz"]["grupos"][number]["obras"][number]["celulas"][number];
 const celulas = (ultimas: Celula[]): Celula[] => [...Array<Celula>(12 - ultimas.length).fill(null), ...ultimas];
 
@@ -32,6 +35,9 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
     { etapa: "protocolado", valor_centavos: 1_586_677_904, quantidade: 6, mais_antigo_dias: 100 },
     { etapa: "recebido_mes", valor_centavos: 12_000_200, quantidade: 2, mais_antigo_dias: null },
   ],
+  // #817: o ciclo aberto por contratante entra nos testes dele (`comContratantes`)
+  ciclo_por_contratante: [],
+  medido_12m: MESES_MATRIZ.map(competencia => ({ competencia, valor_centavos: MEDIDO[competencia] ?? 0 })),
   recebido_12m: MESES_12.map(mes => ({ mes, valor_centavos: RECEBIDO[mes] ?? 0 })),
   previsao: {
     neste_mes: { valor_centavos: 500_000, quantidade: 2 },
@@ -53,6 +59,26 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   notas_mes: { mes: "2026-10", valor_centavos: 1_522_295_618, notas: 5, obras: 2, anterior: null },
   ...extra,
 });
+
+// #817: o ciclo aberto em dois contratantes, com valores de tabela (degraus de um milhao). A faixa do ciclo e o a
+// receber do painel sao a soma das linhas, como no servidor (a tela mostra os dois e eles tem de fechar); o B nao tem
+// pagina (chave nula) e tem duas etapas vazias
+const MI = 100_000_000;   // R$ 1.000.000,00 em centavos
+const LINHAS_POR_CONTRATANTE: PainelInicio["ciclo_por_contratante"] = [
+  { contratante: "Contratante A", chave: "contratante-a", em_analise_centavos: 1 * MI, boletim_centavos: 2 * MI, nota_centavos: 3 * MI,
+    protocolado_centavos: 4 * MI, a_receber_centavos: 5 * MI },
+  { contratante: "Contratante B", chave: null, em_analise_centavos: 0, boletim_centavos: 1 * MI, nota_centavos: 0,
+    protocolado_centavos: 2 * MI, a_receber_centavos: 3 * MI },
+];
+const comContratantes = (extra: Partial<PainelInicio> = {}): PainelInicio => {
+  const base = painel();
+  const soma = (campo: keyof PainelInicio["ciclo_por_contratante"][number]) =>
+    LINHAS_POR_CONTRATANTE.reduce((s, l) => s + Number(l[campo] ?? 0), 0);
+  return painel({
+    ciclo: base.ciclo.map(e => e.etapa === "recebido_mes" ? e : { ...e, valor_centavos: soma(`${e.etapa}_centavos`) }),
+    a_receber: { ...base.a_receber, valor_centavos: soma("a_receber_centavos") },
+    ciclo_por_contratante: LINHAS_POR_CONTRATANTE, ...extra });
+};
 
 /** O texto do elemento com espaco simples no lugar do espaco inseparavel do valor em reais. */
 const limpo = (el: Element | null | undefined) => (el?.textContent ?? "").replace(/\s/g, " ");
@@ -114,12 +140,22 @@ describe("Início", () => {
     servir();
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     await screen.findByRole("region", { name: CICLO });
-    expect(screen.getAllByRole("heading", { level: 2 }).map(limpo)).toEqual(
+    const titulos = screen.getAllByRole("heading", { level: 2 }).map(limpo);
+    const blocos = [...document.querySelector(".ini-grade")!.children].map(b => b.className);
+    // #817: os dois blocos novos entraram no grupo da cota; tirando eles, a tela e' a que o dono montou, na mesma ordem
+    const NOVOS = ["Ciclo por contratante", "Medido em 12 meses"];
+    const NOVAS = ["cartao ini-painel ini-orgaos", "cartao ini-painel ini-medido"];
+    expect(titulos.filter(t => !NOVOS.includes(t))).toEqual(
       ["Cota da Lotufo", "Ciclo da medição", "Previsão de entrada", "Recebido em 12 meses", "Avisos importantes", "Medições por obra e competência"]);
+    expect(blocos.filter(b => !NOVAS.includes(b))).toEqual(["ini-saudacao", "ini-numeros", "ini-cota", "cartao ini-painel ini-ciclo",
+      "cartao ini-painel ini-previsao", "cartao ini-painel ini-recebido", "cartao ini-painel ini-avisos", "cartao ini-painel ini-matriz"]);
+    // onde cada um entrou: o ciclo por contratante logo depois do ciclo e da previsao; o medido depois do recebido
+    expect(titulos).toEqual(["Cota da Lotufo", "Ciclo da medição", "Previsão de entrada", "Ciclo por contratante", "Recebido em 12 meses",
+      "Medido em 12 meses", "Avisos importantes", "Medições por obra e competência"]);
+    expect(blocos.slice(3, 8)).toEqual(["cartao ini-painel ini-ciclo", "cartao ini-painel ini-previsao", NOVAS[0],
+      "cartao ini-painel ini-recebido", NOVAS[1]]);
     // a saudacao com a legenda e os dois numeros do mes vem antes de tudo
     const grade = document.querySelector(".ini-grade")!;
-    expect([...grade.children].map(b => b.className)).toEqual(["ini-saudacao", "ini-numeros", "ini-cota", "cartao ini-painel ini-ciclo",
-      "cartao ini-painel ini-previsao", "cartao ini-painel ini-recebido", "cartao ini-painel ini-avisos", "cartao ini-painel ini-matriz"]);
     expect(grade.firstElementChild!.querySelector("h1")).not.toBeNull();
     expect(grade.firstElementChild!.querySelector(".legenda-cor")).not.toBeNull();
     // fora do que e' so' de leitor de tela (as legendas das tabelas equivalentes), "cota" aparece uma vez
@@ -589,6 +625,174 @@ describe("Início", () => {
     const comErro = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
     expect((await comErro.findByRole("alert")).textContent).toBe("Não foi possível verificar os avisos. Recarregue a página para tentar de novo.");
     expect(screen.getByRole("region", { name: "Números do mês" })).toBeTruthy();
+  });
+
+  // ---------------------------------------------------------------- #817: o que faltava apresentar a' diretoria
+  const POR_CONTRATANTE = "Ciclo por contratante";
+  const MEDIDO_12 = "Medido em 12 meses";
+  /** As linhas da tabela do ciclo por contratante: o nome e o valor de cada coluna (sem a copia do rotulo do celular). */
+  const linhasDaTabela = (tabela: HTMLElement) => within(tabela).getAllByRole("row").slice(1).map(l =>
+    [...l.children].map(c => limpo(c.querySelector(".ini-orgaos__valor") ?? c)));
+
+  it("#817: ciclo por contratante, uma linha por contratante e uma coluna por etapa com a marca dela, e o total", async () => {
+    api.mockResolvedValue(comContratantes());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: POR_CONTRATANTE });
+    const tabela = within(regiao).getByRole("table", { name: "Valor em cada etapa do ciclo por contratante, na cota da Lotufo" });
+    expect(tabela.className).toBe("tabela ini-orgaos__tabela");
+    expect(tabela.parentElement?.className).toBe("tabela-wrap");
+    const cabecalho = within(tabela).getAllByRole("columnheader");
+    expect(cabecalho.map(limpo)).toEqual(["Contratante", "Em análise", "Boletim", "Nota", "Protocolado", "A receber"]);
+    // a marca da etapa e' a peca MarcaEtapa, a mesma da legenda da matriz e do Fechamento
+    expect(cabecalho.slice(1).map(c => c.querySelector(".marca-etapa__cor")?.className)).toEqual([
+      "marca-etapa__cor marca-etapa__cor--em_analise", "marca-etapa__cor marca-etapa__cor--boletim", "marca-etapa__cor marca-etapa__cor--nota",
+      "marca-etapa__cor marca-etapa__cor--protocolado", "marca-etapa__cor marca-etapa__cor--em_aberto"]);
+    // etapa sem valor no contratante: tracinho
+    expect(linhasDaTabela(tabela)).toEqual([
+      ["Contratante A", "R$ 1.000.000,00", "R$ 2.000.000,00", "R$ 3.000.000,00", "R$ 4.000.000,00", "R$ 5.000.000,00"],
+      ["Contratante B", "—", "R$ 1.000.000,00", "—", "R$ 2.000.000,00", "R$ 3.000.000,00"],
+      ["Total", "R$ 1.000.000,00", "R$ 3.000.000,00", "R$ 3.000.000,00", "R$ 6.000.000,00", "R$ 8.000.000,00"],
+    ]);
+    // o nome do contratante e o "Total" sao o cabecalho da linha
+    expect(within(tabela).getAllByRole("rowheader").map(limpo)).toEqual(["Contratante A", "Contratante B", "Total"]);
+  });
+
+  it("#817: o a receber por contratante tem o rótulo da página do contratante, e não o \"Em aberto\" do Fechamento", async () => {
+    api.mockResolvedValue(comContratantes());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: POR_CONTRATANTE });
+    // o mesmo numero da pagina Contratantes e da pagina do contratante, com o mesmo rotulo e a mesma marca de la'
+    const coluna = within(regiao).getAllByRole("columnheader").at(-1)!;
+    expect(coluna.innerHTML).toBe(render(<MarcaEtapa etapa="em_aberto">A receber</MarcaEtapa>).container.innerHTML);
+    // a copia do rotulo que o celular mostra em cada celula diz o mesmo
+    const copias = [...regiao.querySelectorAll("tbody tr, tfoot tr")].map(l => limpo(l.lastElementChild!.querySelector(".ini-orgaos__rotulo")));
+    expect(copias).toEqual(["A receber", "A receber", "A receber"]);
+    expect(regiao.textContent).not.toMatch(/em aberto/i);
+  });
+
+  it("#817: a linha Total do ciclo por contratante são os números do painel do ciclo, e as linhas somam o total", async () => {
+    api.mockResolvedValue(comContratantes());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: POR_CONTRATANTE });
+    const linhas = linhasDaTabela(within(regiao).getByRole("table"));
+    const total = linhas.at(-1)!;
+    // os quatro valores do total sao os que o painel "Ciclo da medição" mostra, etapa a etapa
+    const doCiclo = [...document.querySelectorAll(".ini-etapa")].slice(0, 4).map(e => limpo(e.querySelector(".ini-etapa__valor")));
+    expect(total.slice(1, 5)).toEqual(doCiclo);
+    const centavos = (t: string) => Number(t.replace(/\D/g, ""));
+    for (let coluna = 1; coluna <= 5; coluna++)
+      expect(linhas.slice(0, -1).reduce((s, l) => s + centavos(l[coluna] ?? ""), 0)).toBe(centavos(total[coluna] ?? ""));
+  });
+
+  it("#817: o contratante e o a receber dele abrem a página do contratante; sem página, só o valor", async () => {
+    const ir = vi.fn();
+    api.mockResolvedValue(comContratantes());
+    render(<Inicio usuario={USUARIO} ir={ir} />);
+    const regiao = await screen.findByRole("region", { name: POR_CONTRATANTE });
+    // o contratante sem orgao no cadastro (chave nula) nao tem pagina, e o total tambem nao: fica so' o valor
+    expect(within(regiao).getAllByRole("link").map(a => [(a.getAttribute("aria-label") ?? limpo(a)).replace(/\s/g, " "),
+      a.getAttribute("href")])).toEqual([
+      ["Contratante A", "/obras/contratante/contratante-a"],
+      ["Contratante A: R$ 5.000.000,00 a receber", "/obras/contratante/contratante-a"],
+    ]);
+    expect(regiao.querySelector("a[href='/a-receber']")).toBeNull();
+    const [b, total] = [...regiao.querySelectorAll("tbody tr:nth-child(2), tfoot tr")];
+    expect([limpo(b.lastElementChild!.querySelector(".ini-orgaos__valor")), limpo(total.lastElementChild!.querySelector(".ini-orgaos__valor"))])
+      .toEqual(["R$ 3.000.000,00", "R$ 8.000.000,00"]);
+    expect([b, total].every(l => l.querySelector("a") === null)).toBe(true);
+    // o clique navega pelo roteador, para a pagina do contratante
+    await act(async () => { within(regiao).getByRole("link", { name: /a receber$/ }).click(); });
+    expect(ir).toHaveBeenCalledWith({ tela: "contratante", chave: "contratante-a" }, expect.anything());
+  });
+
+  it("#817: sem o total a receber liberado a coluna A receber não existe; sem contratante com valor, uma linha curta", async () => {
+    const base = comContratantes();
+    api.mockResolvedValue(comContratantes({ a_receber: { liberado: false, valor_centavos: null, mais_60_centavos: null, a_parte: null },
+      ciclo_por_contratante: base.ciclo_por_contratante.map(l => ({ ...l, a_receber_centavos: null })) }));
+    const { unmount } = render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: POR_CONTRATANTE });
+    expect(within(regiao).getAllByRole("columnheader").map(limpo)).toEqual(["Contratante", "Em análise", "Boletim", "Nota", "Protocolado"]);
+    expect(linhasDaTabela(within(regiao).getByRole("table")).map(l => l.length)).toEqual([5, 5, 5]);
+    expect(regiao.textContent).not.toContain("A receber");
+    unmount();
+    api.mockResolvedValue(painel({ ciclo_por_contratante: [] }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const vazia = await screen.findByRole("region", { name: POR_CONTRATANTE });
+    expect(within(vazia).getByText("Nenhum contratante com valor no ciclo.")).toBeTruthy();
+    expect(vazia.querySelector("table")).toBeNull();
+  });
+
+  it("#817: medido em 12 meses com a forma do recebido, uma coluna por competência fechada, proporcional à maior", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: MEDIDO_12 });
+    const meses = [...regiao.querySelectorAll<HTMLElement>(".ini-rec__mes")];
+    // as 12 competencias da matriz: terminam no mes anterior ao de hoje, um mes antes da serie do recebido
+    expect(meses.map(m => limpo(m.querySelector(".ini-rec__rotulo")))).toEqual(
+      ["out/25", "nov/25", "dez/25", "jan/26", "fev/26", "mar/26", "abr/26", "mai/26", "jun/26", "jul/26", "ago/26", "set/26"]);
+    expect(meses.map(m => limpo(m.querySelector(".ini-rec__valor")))).toEqual(
+      ["10 mi", "—", "—", "—", "—", "—", "—", "—", "—", "—", "20 mi", "15 mi"]);
+    expect(meses.map(m => m.style.getPropertyValue("--ini-rec-tamanho"))).toEqual(
+      ["50%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "0%", "100%", "75%"]);
+    // as mesmas pecas do desenho do recebido: o trilho com o valor e a coluna, e o mes
+    const doRecebido = screen.getByRole("region", { name: REGIAO_RECEBIDO }).querySelector(".ini-rec__mes")!;
+    expect([...meses[0].children].map(c => c.className)).toEqual([...doRecebido.children].map(c => c.className));
+    expect(regiao.querySelector(".ini-rec")?.tagName).toBe("OL");
+    const tabela = within(regiao).getByRole("table", { name: "Medido por mês de competência, na cota da Lotufo" });
+    expect(tabela.parentElement?.className).toBe("sr-only");
+    const linhas = within(tabela).getAllByRole("row").map(l => [...l.children].map(limpo));
+    expect(linhas).toHaveLength(13);
+    expect([linhas[0], linhas[1], linhas[2], linhas[12]]).toEqual(
+      [["Competência", "Medido"], ["10/2025", "R$ 10.000.000,00"], ["11/2025", "R$ 0,00"], ["09/2026", "R$ 15.000.000,00"]]);
+  });
+
+  it("#817: o medido de cada mês abre o mês no Fechamento; competência sem medido não é link", async () => {
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: MEDIDO_12 });
+    const links = within(regiao).getAllByRole("link");
+    expect(links.map(a => [a.getAttribute("aria-label")?.replace(/\s/g, " "), a.getAttribute("href")])).toEqual([
+      ["Medido em 10/2025: R$ 10.000.000,00", "/fechamento?mes=2025-10"],
+      ["Medido em 08/2026: R$ 20.000.000,00", "/fechamento?mes=2026-08"],
+      ["Medido em 09/2026: R$ 15.000.000,00", "/fechamento?mes=2026-09"],
+    ]);
+    expect(links.every(a => a.getAttribute("title") === a.getAttribute("aria-label"))).toBe(true);
+    const semMedido = [...regiao.querySelectorAll(".ini-rec__mes:not(a)")];
+    expect(semMedido).toHaveLength(9);
+    expect(semMedido.every(m => m.getAttribute("aria-hidden") === "true")).toBe(true);
+    // serie sem medido nenhum: nenhuma porta, sem dividir por zero
+    cleanup();
+    api.mockResolvedValue(painel({ medido_12m: MESES_MATRIZ.map(competencia => ({ competencia, valor_centavos: 0 })) }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const zerada = await screen.findByRole("region", { name: MEDIDO_12 });
+    expect(within(zerada).queryByRole("link")).toBeNull();
+    expect([...zerada.querySelectorAll<HTMLElement>(".ini-rec__mes")].map(m => m.style.getPropertyValue("--ini-rec-tamanho")))
+      .toEqual(Array<string>(12).fill("0%"));
+  });
+
+  it("#817: o endereço do mês no Fechamento é o que a página do Fechamento lê para abrir o mês", async () => {
+    const { parseRota, caminhoDe } = await import("./rota");
+    api.mockResolvedValue(painel());
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: MEDIDO_12 });
+    const href = within(regiao).getAllByRole("link").at(-1)!.getAttribute("href")!;
+    const url = new URL(href, "http://exemplo");
+    // a aba padrao do Fechamento (mes a mes), com a competencia em ?mes=AAAA-MM
+    expect(parseRota(url.pathname)).toEqual({ tela: "fechamento" });
+    expect(caminhoDe({ tela: "fechamento" })).toBe(url.pathname);
+    expect(url.searchParams.get("mes")).toBe("2026-09");
+  });
+
+  it("#817: os dois números do alto são portas: o medido abre o mês no Fechamento e as notas, o Resumo das medições", async () => {
+    const base = painel();
+    api.mockResolvedValue(painel({ medido: { ...base.medido, valor_centavos: 2_000_000_000 },
+      notas_mes: { ...base.notas_mes, valor_centavos: 1_000_000_000 } }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: "Números do mês" });
+    expect(within(regiao).getAllByRole("link").map(a => [limpo(a), a.getAttribute("href"), a.className, a.parentElement?.className])).toEqual([
+      ["R$ 10.000.000,00", "/resumo-medicoes", "ini-porta", "ini-numero__valor"],
+      ["R$ 20.000.000,00", "/fechamento?mes=2026-09", "ini-porta", "ini-numero__valor"],
+    ]);
   });
 
   it("saudação pela hora de Cuiabá", () => {

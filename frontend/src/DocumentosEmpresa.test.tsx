@@ -197,6 +197,22 @@ test("empresa que não existe no painel diz isso e volta para a lista", async ()
   render(<DocumentosEmpresa usuario={usuario} id={99} />);
   await screen.findByText("Nenhum documento exigido.");
   expect(screen.getByRole("link", { name: "Ver todas as empresas" }).getAttribute("href")).toBe("/documentos");
+  // #820: volta para a pagina de que a empresa e' filha, pela aba
+  cleanup();
+  render(<DocumentosEmpresa usuario={usuario} id={99} aba="garantia" />);
+  await screen.findByText("Nenhum documento exigido.");
+  expect(screen.getByRole("link", { name: "Ver todas as empresas" }).getAttribute("href")).toBe("/documentos/garantias");
+});
+
+test.each([
+  ["regularidade", "Regularidade mensal", "/documentos/regularidade"],
+  ["garantia", "Garantias", "/documentos/garantias"],
+] as const)("na aba %s a empresa é filha da página %s, e o caminho diz isso (#820)", async (aba, pagina, href) => {
+  render(<><Caminho rota={{ tela: "documentos-empresa", id: 1, aba }} ehH1={false} /><DocumentosEmpresa usuario={usuario} id={1} aba={aba} /></>);
+  await screen.findByRole("heading", { level: 1, name: "Lotufo" });
+  const caminho = screen.getByRole("navigation", { name: "Você está em" });
+  await waitFor(() => expect([...caminho.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Documentos", pagina, "Lotufo"]));
+  expect(within(caminho).getByRole("link", { name: pagina }).getAttribute("href")).toBe(href);
 });
 
 test("obra de empresa sem certidão exigida continua visível na aba Garantia por obra (revisor, rodada 1)", async () => {

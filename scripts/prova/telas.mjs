@@ -37,6 +37,8 @@ import { fechamentoEmAbas } from "./simulados.mjs";   // #815: em linha propria,
 
 import { carteiraSimulada, filaSimulada, painelDaCarteira } from "./simulados.mjs";
 import { cabecalhoDeNomeLongo } from "./simulados.mjs";
+// issue #817 (reestrutura 5c): a Inicio com o ciclo por contratante e o medido em 12 meses
+import { inicioPorContratante, inicioSemCiclo } from "./simulados.mjs";
 
 export const PERFIS = ["admin", "engenharia", "diretoria"];
 export const LARGURAS = [1440, 1024, 390];
@@ -125,6 +127,12 @@ export const TELAS = [
   // as familias de valor (#805): os dois numeros do alto com a variacao contra as referencias (subiu, caiu e estavel)
   { rota: "inicio", id: "inicio-variacoes", caminho: "/inicio", perfis: ["diretoria"], espera: ".ini-numero__variacoes .variacao",
     simular: [{ caminho: /^\/api\/inicio\/painel$/, ajustar: inicioComVariacoes }] },
+  // o que faltava apresentar a' diretoria (#817): o ciclo aberto por contratante e o medido em 12 meses, com o volume
+  // que o cadastro de exemplo nao tem; e a mesma tela sem nada no ciclo
+  { rota: "inicio", id: "inicio-por-contratante", caminho: "/inicio", perfis: TODOS, espera: ".ini-orgaos table tfoot",
+    simular: [{ caminho: /^\/api\/inicio\/painel$/, ajustar: inicioPorContratante }] },
+  { rota: "inicio", id: "inicio-sem-ciclo", caminho: "/inicio", perfis: ["diretoria"], espera: ".ini-orgaos .ini-vazio",
+    simular: [{ caminho: /^\/api\/inicio\/painel$/, ajustar: inicioSemCiclo }] },
   // a ultima rede: uma resposta que a tela nao sabe desenhar derruba o desenho e aparece "A tela parou de responder"
   { rota: "inicio", id: "tela-parou", caminho: "/inicio", perfis: TODOS, espera: ".falha", parou: true,
     simular: [{ caminho: /^\/api\/inicio\/painel$/, corpo: RESPOSTA_QUE_QUEBRA }] },
@@ -235,17 +243,29 @@ export const TELAS = [
   { rota: "siga", id: "siga-erro", caminho: "/siga", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/siga$/) },
 
-  // ---- Documentos: as tres abas, a fila do "Anexar PDF", a janela do ZIP e a pagina da empresa
-  { rota: "documentos", id: "documentos", caminho: "/documentos", perfis: TODOS, espera: ".doc-painel-aba" },
-  // #814: cada assunto tem o proprio endereco (e o proprio item no menu); antes eram abas de "/documentos"
+  // ---- Documentos: as tres paginas (#820: Certidoes, Regularidade mensal e Garantias, cada uma no proprio endereco e
+  // no proprio item do menu; antes eram abas de "/documentos"), a fila do "Anexar PDF", a janela do ZIP e a empresa
+  { rota: "documentos", id: "documentos", caminho: "/documentos", perfis: TODOS, espera: ".doc-certidoes .doc-corpo" },
   { rota: "documentos", id: "documentos-regularidade", caminho: "/documentos/regularidade", perfis: TODOS,
-    espera: '#aba-regularidade[aria-selected="true"]' },
-  { rota: "documentos", id: "documentos-garantias", caminho: "/documentos/garantias", perfis: TODOS, espera: '#aba-garantias[aria-selected="true"]' },
-  { rota: "documentos", id: "documentos-anexar", caminho: "/documentos", perfis: OPERA, antes: ".doc-painel-aba", espera: ".doc-fila form",
+    espera: ".doc-regularidade .doc-corpo" },
+  { rota: "documentos", id: "documentos-garantias", caminho: "/documentos/garantias", perfis: TODOS, espera: ".doc-garantias .doc-corpo" },
+  { rota: "documentos", id: "documentos-anexar", caminho: "/documentos", perfis: OPERA, antes: ".doc-certidoes .doc-corpo", espera: ".doc-fila form",
     simular: [{ metodo: "POST", caminho: /^\/api\/documentos\/anexar\/ler$/, corpo: PDF_ILEGIVEL }],
     passos: [{ arquivo: ['input[aria-label="Escolher PDFs para anexar"]', "certidao-de-prova.pdf"] }] },
-  { rota: "documentos", id: "documentos-zip", caminho: "/documentos", perfis: OPERA, antes: ".doc-painel-aba", espera: "dialog.doc-janela[open]",
+  // o "Anexar PDF" da Regularidade e' o mesmo das Certidoes (o servidor decide pelo conteudo)
+  { rota: "documentos", id: "documentos-regularidade-anexar", caminho: "/documentos/regularidade", perfis: SO_ADMIN,
+    antes: ".doc-regularidade .doc-corpo", espera: ".doc-fila form",
+    simular: [{ metodo: "POST", caminho: /^\/api\/documentos\/anexar\/ler$/, corpo: PDF_ILEGIVEL }],
+    passos: [{ arquivo: ['input[aria-label="Escolher PDFs para anexar"]', "certidao-de-prova.pdf"] }] },
+  { rota: "documentos", id: "documentos-zip", caminho: "/documentos", perfis: OPERA, antes: ".doc-certidoes .doc-corpo", espera: "dialog.doc-janela[open]",
     passos: [{ clicar: ".doc-linha__zip" }] },
+  // as tres paginas sem nada: uma linha curta no lugar da lista
+  { rota: "documentos", id: "documentos-vazio", caminho: "/documentos", perfis: ["diretoria"], espera: ".doc-certidoes .doc-corpo .vazio",
+    simular: [{ caminho: /^\/api\/documentos$/, corpo: DOCUMENTOS_VAZIO }] },
+  { rota: "documentos", id: "documentos-regularidade-vazio", caminho: "/documentos/regularidade", perfis: ["diretoria"],
+    espera: ".doc-regularidade .doc-corpo .vazio", simular: [{ caminho: /^\/api\/documentos$/, corpo: DOCUMENTOS_VAZIO }] },
+  { rota: "documentos", id: "documentos-garantias-vazio", caminho: "/documentos/garantias", perfis: ["diretoria"],
+    espera: ".doc-garantias .doc-corpo .vazio", simular: [{ caminho: /^\/api\/documentos$/, corpo: DOCUMENTOS_VAZIO }] },
   { rota: "documentos", id: "documentos-erro", caminho: "/documentos", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/documentos$/) },
   { rota: "documentos-empresa", id: "documentos-empresa", caminho: "/documentos/:empresa", perfis: TODOS, espera: ".doc-abas-cartao" },
@@ -424,9 +444,9 @@ export const TELAS = [
     espera: '#conteudo .vazio a[href="/a-receber"]' },
   // os enderecos de antes de Documentos: a aba na busca e "/documentos/certidoes" abrem a pagina do assunto
   { rota: "documentos", id: "documentos-endereco-de-antes", caminho: "/documentos?aba=garantias", destino: "/documentos/garantias",
-    perfis: SO_ADMIN, espera: '#aba-garantias[aria-selected="true"]' },
+    perfis: SO_ADMIN, espera: ".doc-garantias .doc-corpo" },
   { rota: "documentos", id: "documentos-certidoes-por-extenso", caminho: "/documentos/certidoes", destino: "/documentos", perfis: SO_ADMIN,
-    espera: ".doc-painel-aba" },
+    espera: ".doc-certidoes .doc-corpo" },
   // a aba do contratante ja' tem endereco; enquanto a #818 nao chega, ele abre a pagina do contratante
   { rota: "contratante", id: "contratante-aba", caminho: "/obras/contratante/sinfra/medicoes", destino: "/obras/contratante/sinfra",
     perfis: ["diretoria"], espera: ".obras-do-contratante" },
@@ -444,6 +464,16 @@ export const TELAS = [
     simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoDeNomeLongo }] },
   { rota: "obra", id: "caminho-longo-obra", caminho: "/obras/:obra/prazos", perfis: ["diretoria"], antes: OBRA_GRADE,
     espera: ".topo .caminho li:nth-child(4)", simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoDeNomeLongo }] },
+  // ---- Busca unica do topo (#819). No computador o campo esta' na barra; no celular, o botao da lupa abre o campo por
+  // cima dela: o primeiro passo clica o que estiver a' vista (a lupa ou o proprio campo). Os resultados abrem por cima
+  // da pagina. A diretoria entra com o servidor de verdade: o recorte do perfil e' dele, e nao ha' grupo Processos.
+  { rota: "inicio", id: "busca-fechada", caminho: "/inicio", perfis: TODOS, antes: ".ini", espera: ".topo .busca" },
+  { rota: "inicio", id: "busca-resultados", caminho: "/inicio", perfis: OPERA, antes: ".ini", espera: ".busca__opcao",
+    simular: [{ caminho: /^\/api\/busca$/, corpo: BUSCA_CHEIA }], passos: abrirBusca("15") },
+  { rota: "inicio", id: "busca-sem-resultado", caminho: "/inicio", perfis: OPERA, antes: ".ini", espera: ".busca__vazio",
+    simular: [{ caminho: /^\/api\/busca$/, corpo: BUSCA_VAZIA }], passos: abrirBusca("xyzw") },
+  { rota: "inicio", id: "busca-sem-siga", caminho: "/inicio", perfis: ["diretoria"], antes: ".ini", espera: ".busca__opcao",
+    passos: abrirBusca("1") },
 ];
 
 // Rotas do roteador que a prova nao abre, cada uma com o motivo.
@@ -485,3 +515,13 @@ export const ESTADOS_DO_LOGIN = [
   { id: "espera", simular: [{ metodo: "POST", caminho: ENTRAR, pendurar: true }],
     espera: 'form.entrar__form button[type="submit"]:disabled' },
 ];
+
+// ---- Documentos em tres paginas (#820): o painel vazio
+import { DOCUMENTOS_VAZIO } from "./simulados.mjs";
+
+// ---- Busca unica do topo (#819): os passos que abrem a busca e digitam a pergunta, nas tres larguras
+import { BUSCA_CHEIA, BUSCA_VAZIA } from "./simulados.mjs";
+
+function abrirBusca(texto) {
+  return [{ clicar: ".topo .busca__abrir:visible, .topo .busca__campo:visible" }, { preencher: [".topo .busca__campo", texto] }];
+}
