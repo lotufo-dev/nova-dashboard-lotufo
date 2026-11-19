@@ -361,8 +361,9 @@ describe("SigaPagina", () => {
     const largura = (col: string) => Number(new RegExp(`\\.sg__c-${col}\\s*\\{\\s*width:\\s*(\\d+)%`).exec(css)?.[1]);
     const colunas = ["proc", "contr", "onde", "quem", "setor", "parado", "ultima", "tipo", "seta"];
     expect(colunas.reduce((soma, c) => soma + largura(c), 0)).toBe(100);
-    expect(largura("parado")).toBeGreaterThanOrEqual(12);     // o selo "25 dias úteis" em duas linhas no painel de ~724 px
-    expect(largura("contr")).toBeGreaterThanOrEqual(11);      // a palavra "Contratante" do cabeçalho, sem encostar na vizinha
+    expect(largura("parado")).toBeGreaterThanOrEqual(14);     // o selo "25 dias úteis" em duas linhas no painel de ~724 px
+    expect(largura("contr")).toBeGreaterThanOrEqual(10);      // "Contratante" no cabeçalho, separada em sílabas, sem encostar na vizinha
+    expect(largura("quem")).toBeGreaterThanOrEqual(11);       // um nome sem partir a 1024 px
     mostrar(painel([ALFA]));
     const alfa = await screen.findByRole("row", { name: /Obra Alfa/ });
     expect(within(alfa).getByText("01/10/2026").className).toBe("num");
