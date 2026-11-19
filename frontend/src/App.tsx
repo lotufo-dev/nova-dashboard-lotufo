@@ -19,6 +19,7 @@ import MedicaoNova from "./MedicaoNova";
 import Fechamento from "./Fechamento";
 import ResumoDasMedicoes from "./ResumoDasMedicoes";
 import { entradaDe, itemDe, ROTULO, tituloDe, vistaDe } from "./navegacao";
+import { useVistaPublicada } from "./nomesDoCaminho";
 import SigaPagina from "./SigaPagina";
 import AncorasDocusign from "./AncorasDocusign";
 import AvisoRespostas from "./AvisoRespostas";
@@ -92,17 +93,19 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [usuario, rota, busca]);
 
+  // a vista que se chama pelo dado (a comparacao do Fechamento, "2026 × 2025") chega ao titulo quando a pagina a publica
+  const vistaPublicada = useVistaPublicada();
   useEffect(() => {
     // A obra e a medicao poem o proprio titulo ("MT-388 · Prazos"), quando o cabecalho delas chega.
     // O contratante tambem ("SINFRA · Obras"), quando a lista chega.
     if (rota.tela === "obra" || rota.tela === "medicao" || rota.tela === "documentos-empresa" || rota.tela === "contratante") return;
     // a vista entra no titulo ("Obras · QDOP", "Medições · Quadro do mês"), como a aba da obra ("MT-388 · Prazos"); as
     // tres paginas de Documentos dizem a pagina e a area ("Garantias · Documentos")
-    const aba = vistaDe(rota);
+    const aba = vistaDe(rota, { vista: vistaPublicada });
     const item = rota.tela === "documentos" ? itemDe(rota) : null;
     const nome = item ? `${ROTULO[item]} · ${tituloDe("documentos")}` : tituloDe(rota.tela);
     document.title = rota.tela === "raiz" ? tituloDe("raiz") : `${nome}${aba ? ` · ${aba}` : ""} · grupolotufo`;
-  }, [rota]);
+  }, [rota, vistaPublicada]);
 
   // #644: quem envia e-mail le as respostas do orgao ao entrar e a cada 5 minutos; quem so' consulta nao dispara leitura.
   useLeituraDasRespostas(!!usuario && usuario.perfil !== "diretoria");

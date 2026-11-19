@@ -139,6 +139,12 @@ describe("navegação por perfil", () => {
     expect(vistaDe({ tela: "medicoes", aba: "quadro" })).toBe("Quadro do mês");
     expect(vistaDe({ tela: "admin", aba: "usuarios" })).toBe("Usuários");
     expect(vistaDe({ tela: "admin", aba: "saude" })).toBeUndefined();
+    // as abas do Fechamento (#815): a de comparação se chama pelos anos que a página publica; sem eles, "Comparação"
+    expect(vistaDe({ tela: "fechamento" })).toBeUndefined();
+    expect(vistaDe({ tela: "fechamento", aba: "meses" })).toBeUndefined();
+    expect(vistaDe({ tela: "fechamento", aba: "contratantes" })).toBe("Por contratante");
+    expect(vistaDe({ tela: "fechamento", aba: "comparacao" })).toBe("Comparação");
+    expect(vistaDe({ tela: "fechamento", aba: "comparacao" }, { vista: "2026 × 2025" })).toBe("2026 × 2025");
   });
 });
 
@@ -182,6 +188,21 @@ describe("o caminho de cada rota (#814)", () => {
     expect(rotulos(de({ tela: "admin", aba: "usuarios" }))).toEqual(["Sistema", "Administração", "Usuários"]);
     // o título é a página, e a vista vem depois dele
     expect(de({ tela: "obras", aba: "qdop" }).map(t => !!t.titulo)).toEqual([true, false]);
+  });
+
+  it("as abas do Fechamento (#815): a padrão fora; as outras no fim, e a página leva à padrão", () => {
+    const vista = { vista: "2026 × 2025" };
+    expect(rotulos(trechosDe({ tela: "fechamento" }, { nomes: vista }))).toEqual(["Financeiro", "Fechamento"]);
+    expect(rotulos(trechosDe({ tela: "fechamento", aba: "contratantes" }, { nomes: vista }))).toEqual(["Financeiro", "Fechamento", "Por contratante"]);
+    const comparacao = trechosDe({ tela: "fechamento", aba: "comparacao" }, { nomes: vista });
+    expect(rotulos(comparacao)).toEqual(["Financeiro", "Fechamento", "2026 × 2025"]);
+    expect(enderecos(comparacao)).toEqual(["/fechamento", "/fechamento", "/fechamento/comparacao"]);
+    expect(comparacao.map(t => !!t.titulo)).toEqual([false, true, false]);
+    // enquanto a página não diz os anos, o nome fixo
+    expect(rotulos(de({ tela: "fechamento", aba: "comparacao" }))).toEqual(["Financeiro", "Fechamento", "Comparação"]);
+    // o nome publicado só vale para a vista que se chama pelo dado: noutra rota, cada uma diz o dela
+    expect(rotulos(trechosDe({ tela: "obras", aba: "qdop" }, { nomes: vista }))).toEqual(["Obras", "QDOP"]);
+    expect(rotulos(trechosDe({ tela: "medicoes" }, { nomes: vista }))).toEqual(["Medições"]);
   });
 
   it("Obras em níveis: contratante, obra e medição, cada trecho com o endereço dele", () => {

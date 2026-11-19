@@ -38,3 +38,9 @@ export function useNomesDoCaminho(nomes: NomesDoCaminho) {
 export function useNomesPublicados(): NomesDoCaminho {
   return useSyncExternalStore(assinar, () => atuais);
 }
+
+/** So' o nome da vista que a pagina publicou (o titulo da aba do navegador o usa): quem le so' ele nao redesenha
+ *  quando a pagina publica os outros nomes. */
+export function useVistaPublicada(): string | null | undefined {
+  return useSyncExternalStore(assinar, () => atuais.vista);
+}
