@@ -10,6 +10,7 @@ import type { ObraLista } from "./listaObras";
 import type { Parada } from "./parada";
 import { useRota } from "./rota";
 import type { ProcessoSiga } from "./siga";
+import { hojeLocal } from "./tempo";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
@@ -243,6 +244,37 @@ describe("Página do contratante (#805)", () => {
     for (const nome of ["Cavalaria", "Granito", "Trevo Novo"]) expect(limpo(situacao(nome).textContent)).toBe("Em dia");
   });
 
+  it("prazo no fim sem aviso: a Situação diz 'Prazo no fim · execução até dd/mm' no lugar de 'Em dia' (19/11)", async () => {
+    // decisao do dono de 19/11/2026: o aviso de execucao terminando e' so' da operacao, e a diretoria via "Em dia"
+    const fora = (extra: Parameters<typeof leituraDeTeste>[2]) => ({ ritmo_centavos: 10_00, necessario_centavos: 100_00, leitura: leituraDeTeste(10_00, 100_00, extra) });
+    const ano = hojeLocal().slice(0, 4);
+    const obras = [
+      obra(1, "Anel Viário", { andamento: fora({ motivo: "prazo_no_fim", execucao_fim: `${ano}-12-20` }) }),
+      obra(2, "Estações BRT", { andamento: fora({ motivo: "prazo_no_fim", prorrogacao_pedida: true, execucao_fim: `${Number(ano) + 1}-01-15` }) }),
+      obra(3, "5 Bairros", { andamento: fora({ motivo: "prazo_no_fim", execucao_fim: `${ano}-12-10` }) }),   // com aviso
+      obra(4, "Cavalaria", { andamento: fora({ motivo: "prorrogacao_pedida", prorrogacao_pedida: true }) }),
+    ];
+    const painel = { ...PAINEL, avisos: [], obras: [
+      noPainel(1, "Anel Viário", "verde"), noPainel(2, "Estações BRT", "verde"),
+      noPainel(3, "5 Bairros", "atencao", ["execução termina em 20 dias"]), noPainel(4, "Cavalaria", "verde")] };
+    api.mockImplementation(async (caminho: string) => (caminho === "/api/contratos" ? obras : painel));
+    abrir("/obras/contratante/sinfra");
+    const tabela = await screen.findByRole("table", { name: /Obras de SINFRA/ });
+    const situacao = (nome: string) =>
+      within(tabela).getByRole("link", { name: nome }).closest("tr")!.querySelector<HTMLElement>('td[data-rotulo="Situação"]')!;
+    await waitFor(() => expect(situacao("5 Bairros").querySelector(".selo")).toBeTruthy());
+    // no ano de hoje so' dia e mes; em outro ano, com o ano. Em tinta: sem selo, sem glifo, sem etiqueta de valor
+    expect(limpo(situacao("Anel Viário").textContent)).toBe("Prazo no fim · execução até 20/12");
+    expect(limpo(situacao("Estações BRT").textContent)).toBe(`Prazo no fim · execução até 15/01/${Number(ano) + 1}`);
+    for (const nome of ["Anel Viário", "Estações BRT"]) {
+      expect(situacao(nome).querySelector(".obras-situacao__prazo")).toBeTruthy();
+      expect(situacao(nome).querySelector(".selo, .glifo, .obras-etiqueta")).toBeNull();
+    }
+    // o aviso do farol continua ganhando; a prorrogacao pedida com prazo pela frente continua "Em dia"
+    expect(limpo(situacao("5 Bairros").textContent)).toBe("Atençãoexecução termina em 20 dias");
+    expect(limpo(situacao("Cavalaria").textContent)).toBe("Em dia");
+  });
+
   it("só as obras do contratante, em andamento; 'Ver todas' traz a encerrada sem mudar os números do alto", async () => {
     abrir("/obras/contratante/sinfra");
     await screen.findByRole("table", { name: /Obras de SINFRA/ });
@@ -331,9 +363,9 @@ describe("Página do contratante (#805)", () => {
     expect(limpo(andamento("Leblon").textContent)).toBe("Devagar · 40% do necessárioR$ 40/mês de R$ 100");
     expect(tabela.querySelectorAll(".andamento__trilho").length).toBe(1);
     expect(andamento("Estações BRT").querySelector(".andamento--fora")).toBeTruthy();
-    // a contagem só olha quem tem leitura: uma obra, e ela está devagar; a do prazo no fim vai ao lado, em tinta
+    // a contagem só olha quem tem leitura: uma obra, e ela está devagar; as três sem leitura vão ao lado, em tinta (19/11)
     const faixa = screen.getByLabelText("Números de SINFRA");
-    expect([...faixa.querySelectorAll(".obras-numero")].map(n => limpo(n.textContent))).toContain("Andamento1 de 1obra devagar1 com prazo no fim");
+    expect([...faixa.querySelectorAll(".obras-numero")].map(n => limpo(n.textContent))).toContain("Andamento1 de 1obra devagar3 sem leitura");
     expect([...document.querySelectorAll(".pagina > .obras-etiquetas .obras-etiqueta")].map(e => limpo(e.textContent))).toEqual(["1 devagar"]);
   });
 });

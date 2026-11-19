@@ -96,7 +96,7 @@ const comNecessario = noRitmo => [
   { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaComNecessario(noRitmo) },
   { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
 ];
-// issue #822: a pagina da obra fora da regua do andamento: o motivo no lugar da leitura, sem selo na conclusao.
+// issue #822: a pagina da obra fora da regua do andamento: o motivo no lugar da leitura; o selo da conclusao fica (19/11).
 // `noFim`: a execucao termina no mes que vem (duas competencias)
 import { cabecalhoNoFim, fichaForaDaRegua } from "./simulados.mjs";
 const foraDaRegua = (fora, noFim = false) => [
@@ -197,6 +197,10 @@ export const TELAS = [
     espera: ".obras-do-contratante .andamento", simular: comCarteira },
   { rota: "contratante", id: "contratante-sem-prazo", caminho: "/obras/contratante/mtpar", perfis: ["diretoria"],
     espera: ".obras-do-contratante .andamento", simular: comCarteira },
+  // decisao do dono de 19/11/2026: a obra com o prazo no fim e sem aviso no farol (Pref. Cuiabá, na carteira simulada)
+  // diz "Prazo no fim · execução até dd/mm" na Situação, no lugar de "Em dia"
+  { rota: "contratante", id: "contratante-prazo-no-fim", caminho: "/obras/contratante/pref-cuiaba", perfis: ["diretoria"],
+    espera: ".obras-do-contratante .obras-situacao__prazo", simular: comCarteira },
   { rota: "contratante", id: "contratante-nao-encontrado", caminho: "/obras/contratante/nao-existe", perfis: SO_ADMIN, espera: "#conteudo .vazio" },
   { rota: "contratante", id: "contratante-erro", caminho: "/obras/contratante/sinfra", perfis: SO_ADMIN, espera: "#conteudo [role=alert]",
     erro: true, simular: falha(/^\/api\/contratos$/) },
@@ -337,8 +341,8 @@ export const TELAS = [
   { rota: "obra", id: "obra-no-ritmo", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .selo--feito",
     simular: comNecessario(true) },
   // #822: fora da regua do andamento, o painel "Prazo" escreve o motivo (prazo no fim com a prorrogacao pedida; sem
-  // medicao ha' tres competencias) e a conclusao estimada fica sem selo
-  { rota: "obra", id: "obra-prazo-no-fim", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .andamento--fora",
+  // medicao ha' tres competencias); o selo da conclusao estimada continua (decisao do dono de 19/11/2026)
+  { rota: "obra", id: "obra-prazo-no-fim", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .selo--critico",
     simular: foraDaRegua({ motivo: "prazo_no_fim", prorrogacao_pedida: true }, true) },
   { rota: "obra", id: "obra-sem-medicao", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .andamento--fora",
     simular: foraDaRegua({ motivo: "sem_medicao", sem_medicao_desde: "2026-07" }) },

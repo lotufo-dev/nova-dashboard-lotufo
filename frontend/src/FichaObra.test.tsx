@@ -198,7 +198,7 @@ describe("Prazo da obra: os dias da execução, as linhas do tempo e o ritmo (#6
     expect(valor("Conclusão estimada").textContent).toBe("—");
   });
 
-  it("#822: fora da régua, o motivo em tinta no andamento e nenhum selo na conclusão; a data continua", () => {
+  it("#822: fora da régua, o motivo em tinta no andamento; a data e o selo da conclusão continuam (19/11)", () => {
     const fora: [Partial<typeof SEM_LEITURA>, string][] = [
       [{ motivo: "prazo_no_fim" }, "Prazo no fim"],
       [{ motivo: "prazo_no_fim", prorrogacao_pedida: true }, "Prazo no fim · prorrogação pedida"],
@@ -206,13 +206,14 @@ describe("Prazo da obra: os dias da execução, as linhas do tempo e o ritmo (#6
       [{ motivo: "sem_medicao", sem_medicao_desde: "2026-07" }, "Sem medição desde 07/2026"],
     ];
     for (const [extra, frase] of fora) {
-      // o servidor manda `situacao` e `dias_alem` nulos junto com o motivo
-      comRitmo({ situacao: null, dias_alem: null, leitura: { ...SEM_LEITURA, ...extra } });
+      // o servidor manda `situacao` e `dias_alem` também fora da régua (decisão do dono de 19/11/2026)
+      comRitmo({ situacao: "atrasa", dias_alem: 110, leitura: { ...SEM_LEITURA, ...extra } });
       expect(valor("Andamento").textContent!.replace(/\s/g, " ")).toBe(frase);
       expect(valor("Andamento").querySelector(".andamento--fora")).toBeTruthy();
       expect(valor("Andamento").querySelector(".andamento__trilho")).toBeNull();
-      expect(valor("Conclusão estimada").textContent).toBe("08/03/2027");
-      expect(regiao("Prazo").querySelector(".obra-ritmo .selo")).toBeNull();
+      const conclusao = valor("Conclusão estimada");
+      expect(conclusao.querySelector("span")!.textContent).toBe("08/03/2027");
+      expect(conclusao.querySelector(".selo--critico")!.textContent).toMatch(/^110.dias depois do fim da execução$/);
       cleanup();
     }
   });

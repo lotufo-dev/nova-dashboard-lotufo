@@ -181,7 +181,7 @@ export default function ContratantePagina({ chave, aba = "obras", perfil, busca 
                             <td data-rotulo={`Medido${mes ? ` em ${mes}` : " no mês"}`} className="col-num dinheiro"><MedidoNoMes mm={o.medido_mes} /></td>
                             <td data-rotulo="A receber" className="col-num dinheiro"><AReceber centavos={posicaoDe(o).a_receber_centavos} /></td>
                             <td data-rotulo="Situação" className="obras-do-contratante__situacao">
-                              {FORA.has(o.estado) ? (o.estado === "encerrado" ? "Encerrada" : "Rescindida") : <SituacaoDaObra obra={doPainel.get(o.id)} ir={ir} andamento={leitura} />}
+                              {FORA.has(o.estado) ? (o.estado === "encerrado" ? "Encerrada" : "Rescindida") : <SituacaoDaObra obra={doPainel.get(o.id)} ir={ir} andamento={leitura} leitura={o.andamento?.leitura} />}
                             </td>
                           </tr>
                         );

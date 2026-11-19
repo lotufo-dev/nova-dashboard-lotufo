@@ -316,6 +316,7 @@ _Avoid_: em andamento (é uma situação)
 A obra com até duas competências de prazo de execução pela frente, contadas a de hoje e a do fim. Fica fora da régua
 do andamento: o necessário por mês viraria o saldo inteiro em um ou dois meses. O pedido de prorrogação enviado e
 ainda sem resposta também tira a obra da régua, com qualquer prazo pela frente ("prorrogação pedida").
+Na obra sem aviso no farol, a Situação diz "Prazo no fim · execução até dd/mm" no lugar de "Em dia".
 _Avoid_: execução vencendo (é o aviso de prazo, a 60 e a 30 dias do fim)
 
 **Sem medição desde**:
