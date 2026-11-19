@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { abasDoPerfil, pronta, useLeitura, type AReceberDoContratante, type MedicoesDoContratante, type SigaDoContratante } from "./abasDoContratante";
+import { abasDe, pronta, useLeitura, type AReceberDoContratante, type MedicoesDoContratante, type SigaDoContratante } from "./abasDoContratante";
 import Andamento from "./Andamento";
 import { api, mensagemDeErro } from "./api";
 import Contador from "./Contador";
@@ -38,9 +38,10 @@ const ROTULO_DA_QUANTIDADE: Record<AbaContratante, (n: number) => string> = {
   siga: n => contar(n, "processo", "processos"), avisos: n => contar(n, "aviso", "avisos"),
 };
 
-// `aba`: a aba do endereco; a que o perfil nao tem (ou que a pagina ainda nao desenha) abre Obras.
-export default function ContratantePagina({ chave, aba = "obras", perfil, busca = {}, ir }: {
-  chave: string; aba?: AbaContratante; perfil: string; busca?: Busca; ir: Ir;
+// `aba`: a aba do endereco; a que o perfil nao tem (ou que a pagina ainda nao desenha) abre Obras. `permissoes`: as que
+// o servidor informou em /api/auth/eu (a aba do SIGA e' de quem tem `ver_siga`, #829).
+export default function ContratantePagina({ chave, aba = "obras", perfil, permissoes, busca = {}, ir }: {
+  chave: string; aba?: AbaContratante; perfil: string; permissoes?: readonly string[]; busca?: Busca; ir: Ir;
 }) {
   const [lista, setLista] = useState<ObraLista[] | null>(null);
   // o painel da diretoria: o farol com os motivos, os avisos e o prazo de pagamento; undefined = carregando; null = falhou
@@ -70,7 +71,7 @@ export default function ContratantePagina({ chave, aba = "obras", perfil, busca 
 
   // as abas do perfil e o dado de cada uma, pedidos juntos quando a lista diz que o contratante existe (o servidor
   // responde 404 a' chave que nenhuma obra tem): a faixa mostra a quantidade de todas
-  const abas = abasDoPerfil(perfil);
+  const abas = abasDe(permissoes);
   const atual: AbaContratante = abas.includes(aba) ? aba : "obras";
   const doServidor = nome ? `/api/contratantes/${encodeURIComponent(chave)}` : null;
   const medicoes = useLeitura<MedicoesDoContratante>(doServidor && `${doServidor}/medicoes`);
@@ -181,7 +182,7 @@ export default function ContratantePagina({ chave, aba = "obras", perfil, busca 
                             <td data-rotulo={`Medido${mes ? ` em ${mes}` : " no mês"}`} className="col-num dinheiro"><MedidoNoMes mm={o.medido_mes} /></td>
                             <td data-rotulo="A receber" className="col-num dinheiro"><AReceber centavos={posicaoDe(o).a_receber_centavos} /></td>
                             <td data-rotulo="Situação" className="obras-do-contratante__situacao">
-                              {FORA.has(o.estado) ? (o.estado === "encerrado" ? "Encerrada" : "Rescindida") : <SituacaoDaObra obra={doPainel.get(o.id)} ir={ir} andamento={leitura} />}
+                              {FORA.has(o.estado) ? (o.estado === "encerrado" ? "Encerrada" : "Rescindida") : <SituacaoDaObra obra={doPainel.get(o.id)} ir={ir} andamento={leitura} leitura={o.andamento?.leitura} />}
                             </td>
                           </tr>
                         );

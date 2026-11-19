@@ -401,7 +401,8 @@ def _ultima_medicao_de_execucao(conn, contrato_id: int) -> str | None:
 
 
 def leitura_do_andamento(ritmo: int | None, necessario: int | None, competencias: int | None,
-                         prorrogacao_pedida: bool, ultima_medicao: str | None, hoje: datetime.date) -> dict:
+                         prorrogacao_pedida: bool, ultima_medicao: str | None, hoje: datetime.date,
+                         execucao_fim: str | None = None) -> dict:
     """A leitura do andamento da obra, uma so' para a lista de Obras, a pagina do contratante e a pagina da obra
     (decisao do dono de 18/11/2026, issue #822). A tela so' escreve o que vem aqui; o corte nao se repete nela.
 
@@ -409,7 +410,8 @@ def leitura_do_andamento(ritmo: int | None, necessario: int | None, competencias
     ainda e' atencao). Sem `situacao`, `motivo` diz por que a obra com prazo a cumprir ficou fora da regua, nesta
     ordem:
     - "prazo_no_fim": restam ate' `COMPETENCIAS_PRAZO_NO_FIM` competencias (`prorrogacao_pedida` diz se ha' pedido
-      enviado e ainda sem resposta);
+      enviado e ainda sem resposta; `execucao_fim`, o fim da execucao vigente, AAAA-MM-DD, para a Situacao da obra
+      escrever "Prazo no fim · execucao ate' dd/mm" no lugar de "Em dia", decisao do dono de 19/11/2026);
     - "prorrogacao_pedida": ha' pedido de prorrogacao enviado e ainda sem resposta, com mais prazo que isso pela
       frente (o necessario conta contra um fim que a obra ja' pediu para mudar);
     - "sem_medicao": a ultima medicao de execucao (`sem_medicao_desde`, AAAA-MM) e' anterior as
@@ -417,11 +419,12 @@ def leitura_do_andamento(ritmo: int | None, necessario: int | None, competencias
     Sem `situacao` e sem `motivo` nao ha' leitura a escrever: sem prazo a cumprir (`necessario` nulo) ou obra que
     ainda nao mediu execucao. Os dois limites do corte vao junto, para o desenho da barra."""
     out = {"situacao": None, "pct": None, "motivo": None, "prorrogacao_pedida": False, "sem_medicao_desde": None,
-           "atencao_desde_pct": ATENCAO_DESDE_PCT, "adiantada_desde_pct": ADIANTADA_DESDE_PCT}
+           "execucao_fim": None, "atencao_desde_pct": ATENCAO_DESDE_PCT, "adiantada_desde_pct": ADIANTADA_DESDE_PCT}
     if necessario is None or necessario <= 0 or competencias is None:
         return out
     if competencias <= COMPETENCIAS_PRAZO_NO_FIM:
-        return {**out, "motivo": "prazo_no_fim", "prorrogacao_pedida": prorrogacao_pedida}
+        return {**out, "motivo": "prazo_no_fim", "prorrogacao_pedida": prorrogacao_pedida,
+                "execucao_fim": execucao_fim[:10] if execucao_fim else None}
     if prorrogacao_pedida:
         return {**out, "motivo": "prorrogacao_pedida", "prorrogacao_pedida": True}
     primeira_que_conta = _somar_meses(hoje.replace(day=1), -COMPETENCIAS_SEM_MEDICAO).strftime("%Y-%m")
@@ -445,9 +448,9 @@ def ritmo_na_cota(conn, contrato_id: int, hoje: datetime.date, percentual_bp: in
 
     `leitura` (#822): a leitura do andamento (`leitura_do_andamento`), sobre os dois valores na cota, os que a tela
     mostra. E' aqui que ela nasce, para as duas rotas a devolverem igual. Na obra fora da regua (prazo no fim,
-    prorrogacao pedida, sem medicao) o selo da conclusao estimada tambem se cala: `situacao` e `dias_alem` ficam None
-    e a data da conclusao continua, para a pagina da obra nao dizer "N dias depois do fim" em critico ao lado de
-    "prazo no fim"."""
+    prorrogacao pedida, sem medicao) o selo da conclusao estimada continua (decisao do dono de 19/11/2026): "Prazo no
+    fim" diz que a regua nao se aplica; `situacao` e `dias_alem` dizem quando a obra termina no ritmo de hoje, a
+    medida que separa justamente as obras perto do fim."""
     r = ritmo_e_prazo(conn, contrato_id, hoje)
     if r["ritmo_centavos"] is not None:
         r["ritmo_centavos"] = contratos.cota(r["ritmo_centavos"], percentual_bp)
@@ -458,9 +461,8 @@ def ritmo_na_cota(conn, contrato_id: int, hoje: datetime.date, percentual_bp: in
     r["leitura"] = leitura_do_andamento(
         r["ritmo_centavos"], r["necessario_centavos"], r["competencias_restantes"],
         com_prazo and _pedido_em_curso(conn, contrato_id) is not None,
-        _ultima_medicao_de_execucao(conn, contrato_id) if com_prazo else None, hoje)
-    if r["leitura"]["motivo"]:
-        r["situacao"] = r["dias_alem"] = None
+        _ultima_medicao_de_execucao(conn, contrato_id) if com_prazo else None, hoje,
+        contratos.vigente(conn, contrato_id).get("execucao_fim_vigente") if com_prazo else None)
     return r
 
 

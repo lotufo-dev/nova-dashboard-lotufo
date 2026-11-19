@@ -618,7 +618,7 @@ def test_necessario_nulo_sem_fim_sem_saldo_e_na_obra_parada_encerrada_ou_com_med
 # --- issue #822: a leitura do andamento, uma so', com o prazo no fim e a parada de fato fora da regua ------
 
 SEM_LEITURA = {"situacao": None, "pct": None, "motivo": None, "prorrogacao_pedida": False, "sem_medicao_desde": None,
-               "atencao_desde_pct": 70, "adiantada_desde_pct": 100}
+               "execucao_fim": None, "atencao_desde_pct": 70, "adiantada_desde_pct": 100}
 
 
 def _leitura(c, cid, hoje, bp=None):
@@ -657,9 +657,10 @@ def test_obra_com_duas_competencias_de_prazo_fica_sem_leitura_e_com_tres_tem(cen
     _medicao(c, cid, 2, "2026-10", atestado=300_00)        # ritmo 100,00; saldo 400,00
     _fim(c, cid, "2026-12-31")                             # novembro e dezembro: duas competencias
     assert prazos.ritmo_e_prazo(c, cid, hoje)["competencias_restantes"] == 2
-    assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "motivo": "prazo_no_fim"}
+    # o fim da execucao vai junto, para a Situacao escrever "Prazo no fim · execucao ate' dd/mm" (19/11/2026)
+    assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "motivo": "prazo_no_fim", "execucao_fim": "2026-12-31"}
     _fim(c, cid, "2026-11-18")                             # vence hoje: uma competencia
-    assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "motivo": "prazo_no_fim"}
+    assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "motivo": "prazo_no_fim", "execucao_fim": "2026-11-18"}
     _fim(c, cid, "2027-01-01")                             # novembro, dezembro e janeiro: tres competencias
     r = prazos.ritmo_e_prazo(c, cid, hoje)
     assert (r["competencias_restantes"], r["necessario_centavos"]) == (3, 133_33)
@@ -681,7 +682,8 @@ def test_prorrogacao_pedida_e_sem_resposta_tira_a_obra_da_regua(cenario):
     assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "motivo": "prorrogacao_pedida", "prorrogacao_pedida": True}
     # com o prazo no fim, o motivo e' o prazo, e o pedido vai junto
     _fim(c, cid, "2026-12-15")
-    assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "motivo": "prazo_no_fim", "prorrogacao_pedida": True}
+    assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "motivo": "prazo_no_fim", "prorrogacao_pedida": True,
+                                      "execucao_fim": "2026-12-15"}
     # o instrumento de prazo assinado no dia do envio ou depois responde o pedido: a leitura volta
     ids["aditivo"]("2026-11-10", "2027-03-31", "2027-06-30")
     assert _leitura(c, cid, hoje)["situacao"] == "adiantada"

@@ -410,8 +410,8 @@ def test_ficha_ritmo_e_prazo_na_cota(client_admin, monkeypatch):
     assert set(r) == {"ritmo_centavos", "necessario_centavos", "competencias_restantes", "conclusao", "situacao", "dias_alem",
                       "leitura"}
     # #822: as medicoes do cenario sao de abril e maio: em outubro a obra esta' ha' tres competencias sem medir, fora
-    # da regua. A conclusao estimada continua; o selo dela (situacao e dias) se cala junto com a leitura
-    assert (r["conclusao"], r["situacao"], r["dias_alem"]) == (cheio["conclusao"], None, None)
+    # da regua. A conclusao estimada e o selo dela (situacao e dias) continuam (decisao do dono de 19/11/2026)
+    assert (r["conclusao"], r["situacao"], r["dias_alem"]) == (cheio["conclusao"], "atrasa", cheio["dias_alem"])
     assert r["leitura"]["motivo"] == "sem_medicao"
     # #803: o necessario por mes vai na cota e fecha com o topo da tela: vigente - medido = saldo, e o saldo dividido
     # pelas competencias que restam (outubro, novembro e dezembro) e' o necessario mostrado, ao centavo
@@ -571,7 +571,7 @@ def test_listar_traz_o_andamento_na_cota_pela_conta_da_pagina_da_obra(client_adm
 
 
 SEM_LEITURA = {"situacao": None, "pct": None, "motivo": None, "prorrogacao_pedida": False, "sem_medicao_desde": None,
-               "atencao_desde_pct": 70, "adiantada_desde_pct": 100}
+               "execucao_fim": None, "atencao_desde_pct": 70, "adiantada_desde_pct": 100}
 
 
 def test_a_lista_e_a_pagina_da_obra_dao_a_mesma_leitura_do_andamento(client_admin, monkeypatch):
@@ -605,9 +605,10 @@ def test_a_lista_e_a_pagina_da_obra_dao_a_mesma_leitura_do_andamento(client_admi
     recentes = (("2026-09", 150_000_00), ("2026-10", 150_000_00))     # ritmo 50.000,00; saldo 700.000,00
     casos = {
         "tres competencias": (obra("IC 101/2025", "2027-01-31", recentes, bp=4900), {"situacao": "devagar", "pct": 21}),
-        "duas competencias": (obra("IC 102/2025", "2026-12-31", recentes), {"motivo": "prazo_no_fim"}),
+        "duas competencias": (obra("IC 102/2025", "2026-12-31", recentes),
+                              {"motivo": "prazo_no_fim", "execucao_fim": "2026-12-31"}),
         "duas, com pedido": (obra("IC 103/2025", "2026-12-31", recentes, pedido="2026-11-04"),
-                             {"motivo": "prazo_no_fim", "prorrogacao_pedida": True}),
+                             {"motivo": "prazo_no_fim", "prorrogacao_pedida": True, "execucao_fim": "2026-12-31"}),
         "prorrogacao pedida": (obra("IC 104/2025", "2027-06-30", recentes, pedido="2026-11-04"),
                                {"motivo": "prorrogacao_pedida", "prorrogacao_pedida": True}),
         "sem medicao": (obra("IC 105/2025", "2027-06-30", (("2026-07", 300_000_00),)),
@@ -632,14 +633,15 @@ def test_a_lista_e_a_pagina_da_obra_dao_a_mesma_leitura_do_andamento(client_admi
     # estimada, e a leitura agora e' a da lista
     ficha = ritmo_da_ficha("conclusao nao fecha")
     assert (ficha["conclusao"], ficha["situacao"]) == (None, None) and ficha["leitura"]["situacao"] == "devagar"
-    # o selo da conclusao estimada acompanha a leitura: com ela, diz os dias alem do fim (ou que esta' no ritmo); fora
-    # da regua se cala, e a data da conclusao fica
+    # o selo da conclusao estimada diz os dias alem do fim (ou que esta' no ritmo) com leitura e tambem fora da regua
+    # (decisao do dono de 19/11/2026): "Prazo no fim" diz que a regua nao vale; o selo, quando a obra termina no ritmo
     ficha = ritmo_da_ficha("tres competencias")
     assert ficha["situacao"] == "atrasa" and ficha["dias_alem"] > 0
     assert ritmo_da_ficha("adiantada")["situacao"] == "no_prazo"
     for nome in ("duas competencias", "duas, com pedido", "prorrogacao pedida", "sem medicao"):
         ficha = ritmo_da_ficha(nome)
-        assert ficha["conclusao"] and (ficha["situacao"], ficha["dias_alem"]) == (None, None), nome
+        assert ficha["leitura"]["motivo"], nome
+        assert ficha["conclusao"] and ficha["situacao"] == "atrasa" and ficha["dias_alem"] > 0, nome
 
 
 def test_listar_traz_o_medido_do_mes_fechado_igual_ao_do_fechamento(client_admin, monkeypatch):

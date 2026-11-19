@@ -14,7 +14,8 @@ import TempoParado from "./TempoParado";
 import { fmtCompetencia, fmtDataPura, fmtDiaNoAno } from "./tempo";
 import "./aReceber.css";
 
-// A RECEBER (#816; decisao do dono de 18/11/2026, #805): o em aberto do Fechamento nota a nota, na area Financeiro.
+// EM ABERTO (#816; decisao do dono de 18/11/2026, #805): o em aberto do Fechamento nota a nota, na area Financeiro.
+// Ate' 19/11/2026 a pagina se chamava "A receber"; o endereco `/a-receber` e a rota `/api/a-receber` ficaram.
 // A pergunta e' "o que esta' protocolado e ainda nao entrou, e ha' quanto tempo": um grupo por contratante (o cabecalho
 // de grupo forte, com quantas linhas, o prazo de pagamento do orgao e o subtotal) e, dentro dele, pela data do
 // protocolo, a mais antiga primeiro. Sem faixas de dias. Cada linha: a obra e a medicao, a nota, a data do protocolo,
@@ -24,15 +25,16 @@ import "./aReceber.css";
 // subtotal de cada contratante e' o dele na aba "Por contratante" do Fechamento, e o tempo parado e' a leitura do
 // servidor, com o prazo do orgao como limite. A tela nao soma, nao conta e nao le prazo nenhum.
 //
-// O total leva o rotulo do Fechamento ("Em aberto"), e uma frase diz o que ele soma: o "a receber" da Inicio e de
-// Obras e' outra conta (docs/adr/0006), e as duas paginas que levam o nome diferem.
+// A pagina e o total levam o rotulo do Fechamento ("Em aberto"; decisao do dono de 19/11/2026). O "a receber" da Inicio
+// e de Obras e' outra conta (docs/adr/0006) e continua com o nome dele; a frase que explicava a diferenca saiu.
 //
 // `?contratante=<chave>` mostra so' um contratante. A chave e' a da pagina dele em Obras ("/obras/contratante/<chave>");
 // a fileira de escolhas mantem os contratantes sem nada em aberto, com zero. Sem filtro, com mais de um contratante
 // com linhas, os grupos nascem recolhidos (so' o cabecalho, com o subtotal): com o volume da producao a pagina inteira
 // passava de uma tela e meia. Um clique no nome abre o grupo ali mesmo.
 //
-// A' parte, fora do total: a nota sem medicao ligada e o em aberto de antes de 2025. Com o total a receber ainda nao
+// A' parte, fora do total: a nota sem medicao ligada (a que esta' ligada a medicao ainda nao enviada leva o selo, pela
+// marca do servidor `ligada_a_medicao_nao_enviada`) e o em aberto de antes de 2025. Com o total a receber ainda nao
 // liberado (a trava do Fechamento), o servidor nao manda nada do em aberto e a pagina diz a trava em uma frase.
 
 /** (a) nota protocolada nao paga (a paga em parte, pelo que falta), (a') repasse sem baixa (o orgao pagou o
@@ -48,9 +50,10 @@ export type LinhaAReceber = {
   /** so' no repasse: o dia em que o orgao pagou (nulo na medicao recebida sem data) */
   orgao_pagou_em: string | null;
 };
-/** Nota de cobranca em aberto no RM sem medicao ligada: sem competencia, fora do total. */
+/** Nota de cobranca em aberto no RM sem medicao ligada: sem competencia, fora do total. `ligada_a_medicao_nao_enviada`:
+ *  o vinculo existe, mas com medicao que ainda nao foi ao orgao (prevista ou com a planilha/carta so' gerada). */
 export type NotaSemMedicao = { nota_id: number; numero: string; contrato_id: number; obra: string; emissao: string | null;
-  valor_centavos: number; paga_em_parte: boolean };
+  valor_centavos: number; paga_em_parte: boolean; ligada_a_medicao_nao_enviada: boolean };
 type Anteriores = { quantidade: number; valor_centavos: number };
 /** Um contratante: `chave` e' a da pagina dele em Obras (nula sem orgao no cadastro); `prazo_orgao_dias`, o prazo de
  *  pagamento (docs/adr/0007; nulo = sem previsao); `alem_do_prazo`, quantas linhas passaram da data esperada. */
@@ -72,8 +75,6 @@ export type Vista = { quantidade: number; em_aberto_centavos: number; por_ano: R
   grupos: ContratanteAReceber[]; soltas: NotaSemMedicao[]; soltas_centavos: number; anteriores: Anteriores };
 
 const AQUI = { tela: "a-receber" } as const;
-export const BASE = "O em aberto do Fechamento, na cota da Lotufo e pelo valor bruto da nota; o a receber da Início e de Obras "
-  + "também soma cobranças do RM sem medição em aberto.";
 export const TRAVA = "O total a receber ainda não está liberado: o em aberto fica sem valor.";
 
 function prazoDoOrgao(dias: number | null): string {
@@ -249,6 +250,7 @@ export function APartes({ v, anos, comSemNota }: { v: Vista; anos: string[]; com
                   <th scope="row" className="arc-a-medicao"><span className="arc-obra">{n.obra}</span></th>
                   <td className="arc-a-nota" data-rotulo="Nota">
                     <span className="arc-nota"><span className="num">{n.numero}</span>
+                      {n.ligada_a_medicao_nao_enviada && <Selo>ligada a medição ainda não enviada</Selo>}
                       {n.paga_em_parte && <Selo situacao="andamento">paga em parte</Selo>}</span>
                   </td>
                   <td className="arc-a-data" data-rotulo="Emissão">
@@ -284,7 +286,7 @@ export default function AReceber({ busca = {}, ir }: { busca?: Busca; ir: Ir }) 
     return () => { vivo = false; };
   }, []);
   const filtro = (busca.contratante ?? "").trim().slice(0, 80);
-  if (erro) return <Falha>Não foi possível carregar o a receber: {erro} Recarregue a página para tentar de novo.</Falha>;
+  if (erro) return <Falha>Não foi possível carregar o em aberto: {erro} Recarregue a página para tentar de novo.</Falha>;
   if (!r) return <p className="arc-carregando" role="status">Carregando…</p>;
   if (!r.total_a_receber_liberado) {
     return (
@@ -315,10 +317,7 @@ export default function AReceber({ busca = {}, ir }: { busca?: Busca; ir: Ir }) 
           ))}
         </nav>
       )}
-      {v.quantidade > 0 && <>
-        <Numeros v={v} anos={tudo.anos} />
-        <p className="arc-base">{BASE}</p>
-      </>}
+      {v.quantidade > 0 && <Numeros v={v} anos={tudo.anos} />}
       {v.grupos.length === 0 ? (
         <section className="cartao" aria-label={filtro ? `Em aberto de ${nome}` : "Em aberto"}>
           <div className="vazio vazio--curto">

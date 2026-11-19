@@ -10,6 +10,7 @@ import type { ObraLista } from "./listaObras";
 import type { Parada } from "./parada";
 import { useRota } from "./rota";
 import type { ProcessoSiga } from "./siga";
+import { hojeLocal } from "./tempo";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
@@ -101,15 +102,17 @@ const SIGA: SigaDoContratante = {
 };
 
 // o caminho é da barra do topo (#814): aqui ele entra ao lado da página, como a casca o desenha
-function Pagina({ perfil = "diretoria" }: { perfil?: string }) {
+// `permissoes`: as que /api/auth/eu informa; desde a #829 todo perfil tem `ver_siga` (a diretoria, so' para ler)
+function Pagina({ perfil = "diretoria", permissoes = ["ver_paineis", "ver_siga"] }: { perfil?: string; permissoes?: string[] }) {
   const { rota, busca, ir } = useRota();
   return rota.tela === "contratante"
-    ? <><Caminho rota={rota} perfil={perfil} ehH1={false} /><ContratantePagina chave={rota.chave} aba={rota.aba} perfil={perfil} busca={busca} ir={ir} /></>
+    ? <><Caminho rota={rota} perfil={perfil} permissoes={permissoes} ehH1={false} />
+      <ContratantePagina chave={rota.chave} aba={rota.aba} perfil={perfil} permissoes={permissoes} busca={busca} ir={ir} /></>
     : <p>outra tela</p>;
 }
-function abrir(url: string, perfil?: string) {
+function abrir(url: string, perfil?: string, permissoes?: string[]) {
   window.history.replaceState(null, "", url);
-  return render(<Pagina perfil={perfil} />);
+  return render(<Pagina perfil={perfil} permissoes={permissoes} />);
 }
 /** O servidor do teste: a lista, o painel e o recorte da SINFRA de cada aba; `troca` muda a resposta de um caminho
  *  (um Error vira falha). Outro contratante recebe o recorte vazio, como o servidor manda. */
@@ -153,7 +156,7 @@ describe("Página do contratante (#805)", () => {
     expect(document.querySelector(".topbar .caminho, .topbar__trilha")).toBeNull();
   });
 
-  it("#818: a página desenha Obras, Medições, A receber e Processos no SIGA; Avisos ainda leva à página dos Avisos", async () => {
+  it("#818: a página desenha Obras, Medições, Em aberto e Processos no SIGA; Avisos ainda leva à página dos Avisos", async () => {
     expect(ABAS_PRONTAS).toEqual(["obras", "medicoes", "a-receber", "siga"]);
   });
 
@@ -241,6 +244,37 @@ describe("Página do contratante (#805)", () => {
     // em dia: em atencao no andamento (so' o devagar vira motivo), adiantada e sem leitura
     expect(limpo(celula("Cavalaria", "Andamento").textContent)).toContain("Atenção · 70% do necessário");
     for (const nome of ["Cavalaria", "Granito", "Trevo Novo"]) expect(limpo(situacao(nome).textContent)).toBe("Em dia");
+  });
+
+  it("prazo no fim sem aviso: a Situação diz 'Prazo no fim · execução até dd/mm' no lugar de 'Em dia' (19/11)", async () => {
+    // decisao do dono de 19/11/2026: o aviso de execucao terminando e' so' da operacao, e a diretoria via "Em dia"
+    const fora = (extra: Parameters<typeof leituraDeTeste>[2]) => ({ ritmo_centavos: 10_00, necessario_centavos: 100_00, leitura: leituraDeTeste(10_00, 100_00, extra) });
+    const ano = hojeLocal().slice(0, 4);
+    const obras = [
+      obra(1, "Anel Viário", { andamento: fora({ motivo: "prazo_no_fim", execucao_fim: `${ano}-12-20` }) }),
+      obra(2, "Estações BRT", { andamento: fora({ motivo: "prazo_no_fim", prorrogacao_pedida: true, execucao_fim: `${Number(ano) + 1}-01-15` }) }),
+      obra(3, "5 Bairros", { andamento: fora({ motivo: "prazo_no_fim", execucao_fim: `${ano}-12-10` }) }),   // com aviso
+      obra(4, "Cavalaria", { andamento: fora({ motivo: "prorrogacao_pedida", prorrogacao_pedida: true }) }),
+    ];
+    const painel = { ...PAINEL, avisos: [], obras: [
+      noPainel(1, "Anel Viário", "verde"), noPainel(2, "Estações BRT", "verde"),
+      noPainel(3, "5 Bairros", "atencao", ["execução termina em 20 dias"]), noPainel(4, "Cavalaria", "verde")] };
+    api.mockImplementation(async (caminho: string) => (caminho === "/api/contratos" ? obras : painel));
+    abrir("/obras/contratante/sinfra");
+    const tabela = await screen.findByRole("table", { name: /Obras de SINFRA/ });
+    const situacao = (nome: string) =>
+      within(tabela).getByRole("link", { name: nome }).closest("tr")!.querySelector<HTMLElement>('td[data-rotulo="Situação"]')!;
+    await waitFor(() => expect(situacao("5 Bairros").querySelector(".selo")).toBeTruthy());
+    // no ano de hoje so' dia e mes; em outro ano, com o ano. Em tinta: sem selo, sem glifo, sem etiqueta de valor
+    expect(limpo(situacao("Anel Viário").textContent)).toBe("Prazo no fim · execução até 20/12");
+    expect(limpo(situacao("Estações BRT").textContent)).toBe(`Prazo no fim · execução até 15/01/${Number(ano) + 1}`);
+    for (const nome of ["Anel Viário", "Estações BRT"]) {
+      expect(situacao(nome).querySelector(".obras-situacao__prazo")).toBeTruthy();
+      expect(situacao(nome).querySelector(".selo, .glifo, .obras-etiqueta")).toBeNull();
+    }
+    // o aviso do farol continua ganhando; a prorrogacao pedida com prazo pela frente continua "Em dia"
+    expect(limpo(situacao("5 Bairros").textContent)).toBe("Atençãoexecução termina em 20 dias");
+    expect(limpo(situacao("Cavalaria").textContent)).toBe("Em dia");
   });
 
   it("só as obras do contratante, em andamento; 'Ver todas' traz a encerrada sem mudar os números do alto", async () => {
@@ -331,14 +365,14 @@ describe("Página do contratante (#805)", () => {
     expect(limpo(andamento("Leblon").textContent)).toBe("Devagar · 40% do necessárioR$ 40/mês de R$ 100");
     expect(tabela.querySelectorAll(".andamento__trilho").length).toBe(1);
     expect(andamento("Estações BRT").querySelector(".andamento--fora")).toBeTruthy();
-    // a contagem só olha quem tem leitura: uma obra, e ela está devagar; a do prazo no fim vai ao lado, em tinta
+    // a contagem só olha quem tem leitura: uma obra, e ela está devagar; as três sem leitura vão ao lado, em tinta (19/11)
     const faixa = screen.getByLabelText("Números de SINFRA");
-    expect([...faixa.querySelectorAll(".obras-numero")].map(n => limpo(n.textContent))).toContain("Andamento1 de 1obra devagar1 com prazo no fim");
+    expect([...faixa.querySelectorAll(".obras-numero")].map(n => limpo(n.textContent))).toContain("Andamento1 de 1obra devagar3 sem leitura");
     expect([...document.querySelectorAll(".pagina > .obras-etiquetas .obras-etiqueta")].map(e => limpo(e.textContent))).toEqual(["1 devagar"]);
   });
 });
 
-// #818: as abas Medições, A receber e Processos no SIGA, cada uma o recorte que o servidor manda de uma tela que já
+// #818: as abas Medições, Em aberto e Processos no SIGA, cada uma o recorte que o servidor manda de uma tela que já
 // existe, desenhado com as peças dela. A quantidade ao lado do nome é o número de linhas da aba.
 describe("Página do contratante: as abas (#818)", () => {
   beforeEach(() => { api.mockImplementation(servidor()); });
@@ -349,12 +383,12 @@ describe("Página do contratante: as abas (#818)", () => {
   const linhasEmAberto = () => [...document.querySelectorAll(".arc-tabela:not(.arc-tabela--soltas) tbody tr:not(.arc-grupo)")];
   const linhasDoSiga = () => [...document.querySelectorAll("tr.sg__linha")];
 
-  it("cada aba com endereço e a quantidade de linhas; a diretoria não tem a do SIGA e a página nem pede o dado dela", async () => {
+  it("cada aba com endereço e a quantidade de linhas; quem não tem `ver_siga` não tem a do SIGA e a página nem pede o dado dela", async () => {
     abrir("/obras/contratante/sinfra", "engenharia");
     await waitFor(() => expect(abas().map(a => a[1])).toEqual(["3", "4", "2", "3"]));
     expect(abas()).toEqual([
       ["Obras", "3", "/obras/contratante/sinfra"], ["Medições", "4", "/obras/contratante/sinfra/medicoes"],
-      ["A receber", "2", "/obras/contratante/sinfra/a-receber"], ["Processos no SIGA", "3", "/obras/contratante/sinfra/siga"]]);
+      ["Em aberto", "2", "/obras/contratante/sinfra/a-receber"], ["Processos no SIGA", "3", "/obras/contratante/sinfra/siga"]]);
     expect(abaAtual()).toEqual(["Obras"]);
     // o leitor de tela ouve a quantidade com o que ela conta
     expect([...document.querySelectorAll(".ct-abas .contador .sr-only")].map(s => s.textContent))
@@ -363,10 +397,15 @@ describe("Página do contratante: as abas (#818)", () => {
     expect(document.querySelectorAll("tr.linha--obra")).toHaveLength(3);
     cleanup();
 
-    api.mockClear();
+    // #829: a diretoria tem a aba do SIGA, como os outros perfis
     abrir("/obras/contratante/sinfra", "diretoria");
+    await waitFor(() => expect(abas().map(a => a[1])).toEqual(["3", "4", "2", "3"]));
+    cleanup();
+
+    api.mockClear();
+    abrir("/obras/contratante/sinfra", "diretoria", ["ver_paineis"]);
     await waitFor(() => expect(abas().map(a => a[1])).toEqual(["3", "4", "2"]));
-    expect(abas().map(a => a[0])).toEqual(["Obras", "Medições", "A receber"]);
+    expect(abas().map(a => a[0])).toEqual(["Obras", "Medições", "Em aberto"]);
     expect(api.mock.calls.map(c => String(c[0])).filter(c => c.endsWith("/siga"))).toEqual([]);
   });
 
@@ -410,10 +449,10 @@ describe("Página do contratante: as abas (#818)", () => {
     expect(abas()[1]).toEqual(["Medições", "0", "/obras/contratante/sinfra/medicoes"]);
   });
 
-  it("A receber: o subtotal e o prazo do órgão, e o total igual ao da página A receber filtrada pelo mesmo contratante", async () => {
+  it("Em aberto: o subtotal e o prazo do órgão, e o total igual ao da página Em aberto filtrada pelo mesmo contratante", async () => {
     abrir("/obras/contratante/sinfra/a-receber");
     const painel = await screen.findByRole("region", { name: "Em aberto de SINFRA" });
-    expect(abaAtual()).toEqual(["A receber"]);
+    expect(abaAtual()).toEqual(["Em aberto"]);
     const total = document.querySelector(".arc-numero__valor")!.textContent;
     const cabeca = painel.querySelector("tr.arc-grupo")!;
     const subtotal = cabeca.querySelector("td.dinheiro")!.textContent;
@@ -424,12 +463,12 @@ describe("Página do contratante: as abas (#818)", () => {
     expect(linhasEmAberto().map(l => l.querySelector(".arc-obra")!.textContent)).toEqual(["Estações BRT", "Cavalaria"]);
     expect(linhasEmAberto()).toHaveLength(Number(abas()[2][1]));
     expect(painel.querySelector("button")).toBeNull();
-    // a frase que diz o que o total soma (o a receber da faixa de cima é outra conta, docs/adr/0006)
-    expect(document.querySelector(".arc-base")!.textContent).toContain("O em aberto do Fechamento");
+    // a frase que explicava o total saiu com o nome novo da aba (decisão do dono de 19/11/2026)
+    expect(document.querySelector(".arc-base")).toBeNull();
     const daAba = { total, subtotal, linhas: linhasEmAberto().map(l => limpo(l.textContent)) };
     cleanup();
 
-    // a página A receber com o mesmo grupo, filtrada pela mesma chave: os mesmos números e as mesmas linhas
+    // a página Em aberto com o mesmo grupo, filtrada pela mesma chave: os mesmos números e as mesmas linhas
     api.mockImplementation(async (caminho: string) => {
       if (caminho !== "/api/a-receber") throw new Error(`chamada inesperada: ${caminho}`);
       return { anos: ["2025", "2026"], total_a_receber_liberado: true, em_aberto_centavos: 350_000_01, por_ano: { 2025: 0, 2026: 350_000_01 },
@@ -443,16 +482,16 @@ describe("Página do contratante: as abas (#818)", () => {
     expect(linhasEmAberto().map(l => limpo(l.textContent))).toEqual(daAba.linhas);
   });
 
-  it("A receber com a trava do total: a aba diz a trava, sem valor e sem quantidade", async () => {
+  it("Em aberto com a trava do total: a aba diz a trava, sem valor e sem quantidade", async () => {
     api.mockImplementation(servidor({ "/api/contratantes/sinfra/a-receber": { anos: ["2025", "2026"], total_a_receber_liberado: false } }));
     abrir("/obras/contratante/sinfra/a-receber");
     expect(await screen.findByText("O total a receber ainda não está liberado: o em aberto fica sem valor.")).toBeTruthy();
     expect(document.querySelector(".arc-numero__valor, .arc-tabela")).toBeNull();
     await waitFor(() => expect(abas()[1][1]).toBe("4"));
-    expect(abas()[2]).toEqual(["A receber", null, "/obras/contratante/sinfra/a-receber"]);
+    expect(abas()[2]).toEqual(["Em aberto", null, "/obras/contratante/sinfra/a-receber"]);
   });
 
-  it("A receber de contratante sem nota em aberto: a linha curta", async () => {
+  it("Em aberto de contratante sem nota em aberto: a linha curta", async () => {
     api.mockImplementation(servidor({ "/api/contratantes/sinfra/a-receber": { ...A_RECEBER, contratante: null, quantidade: 0 } }));
     abrir("/obras/contratante/sinfra/a-receber");
     expect(await screen.findByText("Nenhuma nota em aberto de SINFRA.")).toBeTruthy();
@@ -474,8 +513,15 @@ describe("Página do contratante: as abas (#818)", () => {
     expect(window.location.pathname + window.location.search).toBe("/siga?processo=3");
   });
 
-  it("Processos no SIGA para a diretoria: a aba não existe e o endereço dela mostra Obras", async () => {
+  it("Processos no SIGA para a diretoria (#829): a aba abre, só leitura, sem botão nenhum", async () => {
     abrir("/obras/contratante/sinfra/siga", "diretoria");
+    await waitFor(() => expect(linhasDoSiga()).toHaveLength(3));
+    expect(abaAtual()).toEqual(["Processos no SIGA"]);
+    expect(document.querySelectorAll(".ct-aba button")).toHaveLength(0);
+  });
+
+  it("Processos no SIGA para quem não tem `ver_siga`: a aba não existe e o endereço dela mostra Obras", async () => {
+    abrir("/obras/contratante/sinfra/siga", "diretoria", ["ver_paineis"]);
     await screen.findByRole("table", { name: /Obras de SINFRA/ });
     expect(abaAtual()).toEqual(["Obras"]);
     expect(abas().map(a => a[0])).not.toContain("Processos no SIGA");
@@ -488,7 +534,7 @@ describe("Página do contratante: as abas (#818)", () => {
     abrir("/obras/contratante/sinfra/medicoes", "engenharia");
     expect((await screen.findByRole("alert")).textContent).toContain("Não foi possível carregar as medições");
     await waitFor(() => expect(abas().map(a => a[1])).toEqual(["3", null, "2", "3"]));
-    fireEvent.click(screen.getByRole("link", { name: /^A receber/ }));
+    fireEvent.click(screen.getByRole("link", { name: /^Em aberto/ }));
     expect(window.location.pathname).toBe("/obras/contratante/sinfra/a-receber");
     await screen.findByRole("region", { name: "Em aberto de SINFRA" });
     expect(screen.queryByRole("alert")).toBeNull();

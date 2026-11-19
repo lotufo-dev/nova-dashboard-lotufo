@@ -41,7 +41,7 @@ const PREFEITURA = grupo({
       valor_centavos: 1_000_000, parada: parada("2026-10-20", 20, "andamento", null, null) }),
   ],
   notas_sem_medicao: [{ nota_id: 3003, numero: "3003", contrato_id: 9, obra: "Escola Gama", emissao: "2026-07-01", valor_centavos: 777_777,
-    paga_em_parte: false }],
+    paga_em_parte: false, ligada_a_medicao_nao_enviada: false }],
   notas_sem_medicao_centavos: 777_777, anteriores: { quantidade: 1, valor_centavos: 400_000 },
 });
 const SES = grupo({ contratante: "SES-MT", chave: "ses-mt" });
@@ -72,12 +72,12 @@ async function abrir(resposta: RespostaAReceber | Error, busca: Record<string, s
   await act(async () => {});
 }
 
-describe("A receber: o em aberto nota a nota (#816)", () => {
+describe("Em aberto: o em aberto nota a nota (#816)", () => {
   // so' a data e' falsa: o ano de hoje decide se a data prevista leva o ano
   beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-18T15:00:00Z")); });
   afterEach(() => { cleanup(); vi.useRealTimers(); api.mockReset(); });
 
-  it("no alto, o total em aberto com o de cada ano, as linhas além do prazo e o que ele soma", async () => {
+  it("no alto, o total em aberto com o de cada ano e as linhas além do prazo", async () => {
     await abrir(RESPOSTA);
     const numeros = document.querySelector(".arc-numeros")!;
     expect(texto(numeros.querySelector(".arc-numero__valor"))).toBe("R$ 1.310.333,33");
@@ -85,7 +85,6 @@ describe("A receber: o em aberto nota a nota (#816)", () => {
     expect(numeros.querySelector(".marca-etapa__cor--em_aberto")).toBeTruthy();
     expect(texto(numeros.querySelector(".arc-numero__apoio"))).toBe("2026: R$ 1.260.333,33 · 2025: R$ 50.000,00");
     expect(texto(within(numeros as HTMLElement).getByText(/além do prazo do órgão/))).toBe("1 além do prazo do órgão");
-    expect(texto(document.querySelector(".arc-base"))).toMatch(/^O em aberto do Fechamento, na cota da Lotufo e pelo valor bruto da nota; o a receber da Início e de Obras também soma/);
   });
 
   it("a fileira de contratantes: Todos e cada um com a quantidade, o sem nada em aberto com zero; o endereço leva a chave", async () => {
@@ -174,6 +173,28 @@ describe("A receber: o em aberto nota a nota (#816)", () => {
     expect(aparte.querySelector(".aviso")).toBeNull();
   });
 
+  it("à parte, a nota ligada a medição ainda não enviada leva o rótulo próprio; o subtotal e o total são os do servidor", async () => {
+    const ligada = { nota_id: 3004, numero: "3004", contrato_id: 9, obra: "Escola Gama", emissao: "2026-08-01", valor_centavos: 222_223,
+      paga_em_parte: true, ligada_a_medicao_nao_enviada: true };
+    const soltas = [...PREFEITURA.notas_sem_medicao, ligada];
+    await abrir({ ...RESPOSTA, notas_sem_medicao: soltas, notas_sem_medicao_centavos: 1_000_000,
+      contratantes: [SINFRA, { ...PREFEITURA, notas_sem_medicao: soltas, notas_sem_medicao_centavos: 1_000_000 }, SES] },
+    { contratante: "pref-exemplo" });
+    const aparte = screen.getByRole("region", { name: "À parte, fora do total" });
+    const [solta, daPrevista] = [...within(aparte).getByRole("table").querySelectorAll("tbody tr")];
+    expect(texto(solta)).toBe("Escola Gama 3003 01/07/2026 R$ 7.777,77");
+    expect(texto(daPrevista)).toBe("Escola Gama 3004 ligada a medição ainda não enviada paga em parte 01/08/2026 R$ 2.222,23");
+    expect(texto(within(aparte).getByRole("table").querySelector("tfoot"))).toBe("Subtotal à parte R$ 10.000,00");
+    // o total do alto continua o do servidor: a nota a' parte nao entra
+    expect(texto(document.querySelector(".arc-numero__valor"))).toBe("R$ 60.000,00");
+  });
+
+  it("a frase que explicava o total saiu: sob o número, só o de cada ano", async () => {
+    await abrir(RESPOSTA);
+    expect(document.querySelector(".arc-base")).toBeNull();
+    expect(screen.queryByText(/a receber da Início/)).toBeNull();
+  });
+
   it("sem filtro, com medição sem nota e nota sem medição na página, o aviso de que podem ser a mesma cobrança", async () => {
     await abrir(RESPOSTA);
     const aparte = screen.getByRole("region", { name: "À parte, fora do total" });
@@ -225,6 +246,6 @@ describe("A receber: o em aberto nota a nota (#816)", () => {
 
   it("a falha de leitura em palavras da pessoa", async () => {
     await abrir(new Error("o servidor não respondeu."));
-    expect(screen.getByRole("alert").textContent).toMatch(/^Não foi possível carregar o a receber: .*Recarregue a página para tentar de novo\.$/);
+    expect(screen.getByRole("alert").textContent).toMatch(/^Não foi possível carregar o em aberto: .*Recarregue a página para tentar de novo\.$/);
   });
 });

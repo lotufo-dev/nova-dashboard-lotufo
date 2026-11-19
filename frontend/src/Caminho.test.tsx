@@ -22,9 +22,9 @@ describe("Caminho", () => {
 
   it("cada trecho de antes é um link; o último é onde se está, sem link", () => {
     render(<Caminho rota={{ tela: "a-receber" }} ehH1 />);
-    expect(trechos()).toEqual(["Financeiro", "A receber"]);
+    expect(trechos()).toEqual(["Financeiro", "Em aberto"]);
     expect(link("Financeiro")).toBe("/fechamento");
-    expect(within(caminho()).queryByRole("link", { name: "A receber" })).toBeNull();
+    expect(within(caminho()).queryByRole("link", { name: "Em aberto" })).toBeNull();
     const itens = [...caminho().querySelectorAll("li")];
     expect(itens.map(li => li.getAttribute("aria-current"))).toEqual([null, "page"]);
   });

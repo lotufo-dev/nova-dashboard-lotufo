@@ -5,6 +5,14 @@ import App from "./App";
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
 
+// as permissoes que /api/auth/eu informa para cada perfil (backend/app/permissoes.py); desde a #829 os tres tem `ver_siga`
+const PERMISSOES: Record<string, string[]> = {
+  admin: ["administrar", "editar_cadastros", "editar_config_fiscal", "ver_paineis", "ver_siga"],
+  engenharia: ["editar_cadastros", "ver_paineis", "ver_siga"],
+  diretoria: ["ver_paineis", "ver_siga"],
+};
+const permissoesDe = (perfil: string) => PERMISSOES[perfil] ?? [];
+
 // a faixa de numeros e os limites do tempo parado que GET /api/siga manda sempre (#805)
 const SIGA_SEM_PROCESSO = { numeros: { acompanhados: 0, parados: 0, andaram_hoje: 0, nao_lidos: 0 }, limites: { dias_atencao: 5, dias_critico: 10 } };
 
@@ -17,7 +25,7 @@ const AVISO = { tipo: "execucao_vencendo", nivel: "critico", publico: ["operacao
 
 describe("App: os Avisos têm página própria (#805)", () => {
   const servir = (perfil: string) => api.mockImplementation(async (caminho: string) => {
-    if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa Exemplo", email: "a@lotufo.com", perfil, csrf: "x" };
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa Exemplo", email: "a@lotufo.com", perfil, permissoes: permissoesDe(perfil), csrf: "x" };
     if (caminho === "/api/contratos") return [OBRA];
     if (caminho === "/api/inicio") return { avisos: [AVISO] };
     return [];
@@ -89,8 +97,8 @@ const PAINEL_MINIMO = {
 };
 
 describe("App: a tela SIGA", () => {
-  const entrar = (perfil: string) => api.mockImplementation(async (caminho: string) => {
-    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, csrf: "x" };
+  const entrar = (perfil: string, permissoes = permissoesDe(perfil)) => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, permissoes, csrf: "x" };
     if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
       robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, ...SIGA_SEM_PROCESSO };
     // o Inicio (entrada da diretoria) le este painel: sem o corpo minimo ele quebra e derruba a casca
@@ -112,8 +120,20 @@ describe("App: a tela SIGA", () => {
     expect(window.location.pathname).toBe("/siga");
   });
 
-  it("a diretoria não tem o item e /siga cai na entrada do perfil", async () => {
+  it("a diretoria tem o item e abre a tela, sem botão de escrita (#829: só leitura)", async () => {
     entrar("diretoria");
+    window.history.replaceState(null, "", "/siga");
+    render(<App />);
+    expect(await screen.findByText("Nenhum processo acompanhado.")).toBeTruthy();
+    const trilho = within(screen.getByRole("navigation", { name: "Navegação principal" }));
+    expect(trilho.getByRole("link", { name: "SIGA" }).getAttribute("aria-current")).toBe("page");
+    expect(window.location.pathname).toBe("/siga");
+    expect(screen.queryByRole("button", { name: "Acompanhar processo" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pedir leitura" })).toBeNull();
+  });
+
+  it("quem não tem `ver_siga` não tem o item e /siga cai na entrada, qualquer que seja o perfil (#829)", async () => {
+    entrar("engenharia", ["editar_cadastros", "ver_paineis"]);
     window.history.replaceState(null, "", "/siga");
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: /^(Bom dia|Boa tarde|Boa noite)/ });      // o Início carregou
@@ -133,7 +153,7 @@ describe("App: instalação não autorizada", () => {
     }
     if (caminho === "/api/auth/eu") {
       if (!logado) throw new Error("sem sessão");
-      return { id: 1, nome: "Admin Exemplo", email: "a@lotufo.com", perfil: "admin", csrf: "x" };
+      return { id: 1, nome: "Admin Exemplo", email: "a@lotufo.com", perfil: "admin", permissoes: permissoesDe("admin"), csrf: "x" };
     }
     if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
     return [];
@@ -164,7 +184,7 @@ describe("App: instalação não autorizada", () => {
           if (falhar) throw new Error("servidor reiniciando");
           return { status: "ok", banco: "ok", instalacao: "nao-autorizada", instalacao_motivo: "ausente" };
         }
-        if (caminho === "/api/auth/eu") return { id: 1, nome: "Admin Exemplo", email: "a@lotufo.com", perfil: "admin", csrf: "x" };
+        if (caminho === "/api/auth/eu") return { id: 1, nome: "Admin Exemplo", email: "a@lotufo.com", perfil: "admin", permissoes: permissoesDe("admin"), csrf: "x" };
         if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
         return [];
       });
@@ -196,7 +216,7 @@ describe("App: instalação não autorizada", () => {
 
 describe("App: o menu lateral largo", () => {
   const entrar = () => api.mockImplementation(async (caminho: string) => {
-    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil: "admin", csrf: "x" };
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil: "admin", permissoes: permissoesDe("admin"), csrf: "x" };
     if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
       robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, ...SIGA_SEM_PROCESSO };
     if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
@@ -214,7 +234,7 @@ describe("App: o menu lateral largo", () => {
     const links = within(nav).getAllByRole("link");
     // #814: as páginas na ordem das áreas (Painel, Medições, Obras, Financeiro, Prazos e avisos, Órgãos, Documentos, Sistema)
     expect(links.map(l => l.textContent)).toEqual(
-      ["Início", "Medições", "Resumo das medições", "Obras", "Fechamento", "A receber", "Avisos", "SIGA", "Certidões", "Regularidade mensal",
+      ["Início", "Medições", "Resumo das medições", "Obras", "Fechamento", "Em aberto", "Avisos", "SIGA", "Certidões", "Regularidade mensal",
         "Garantias", "Âncoras DocuSign", "Administração", "Minha conta"]);
     for (const l of links) expect(l.querySelector("svg")).not.toBeNull();
     expect(within(nav).getByRole("link", { name: "SIGA" }).getAttribute("aria-current")).toBe("page");
@@ -252,7 +272,7 @@ describe("App: o menu lateral no celular (375 px)", () => {
       removeEventListener: (_: string, f: (ev: { matches: boolean }) => void) => { ouvintes = ouvintes.filter(o => o !== f); },
     }) });
     api.mockImplementation(async (caminho: string) => {
-      if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil: "admin", csrf: "x" };
+      if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil: "admin", permissoes: permissoesDe("admin"), csrf: "x" };
       if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
         robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, ...SIGA_SEM_PROCESSO };
       if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
@@ -324,7 +344,7 @@ describe("App: Medições abre na fila de trabalho, com as vistas no endereço (
   beforeEach(() => {
     try { localStorage.removeItem("menu-lateral"); } catch { /* sem armazenamento */ }
     api.mockImplementation(async (caminho: string) => {
-      if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa da Engenharia", email: "eng@lotufo.com", perfil: "engenharia", csrf: "x" };
+      if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa da Engenharia", email: "eng@lotufo.com", perfil: "engenharia", permissoes: permissoesDe("engenharia"), csrf: "x" };
       if (caminho.startsWith("/api/medicoes/fila")) {
         return { hoje: "2026-11-07", mes: caminho.split("mes=")[1], obras: [], limites: { dias_atencao: 5, dias_critico: 10, diferenca_critica_por_mil: 5 },
           numeros: { com: { lotufo: SEM, faturamento: SEM, orgao: SEM }, concluidas: 0, sem_medicao: 0, pedido_centavos: null, aprovado_centavos: null,
@@ -364,7 +384,7 @@ describe("App: aviso flutuante de resposta do órgão (issue #654)", () => {
   const NAO_VISTA = { medicao_id: 31, contrato_id: 7, orgao: "SINFRA", obra: "Granito", numero: 3, tipo: "execucao",
     respostas: 1, ate: 9, recebida_em: "2026-11-10T14:00:00Z" };
   const entrar = (perfil: string) => api.mockImplementation(async (caminho: string) => {
-    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, csrf: "x" };
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, permissoes: permissoesDe(perfil), csrf: "x" };
     if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
     if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
       robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, ...SIGA_SEM_PROCESSO };
@@ -397,8 +417,8 @@ describe("App: aviso flutuante de resposta do órgão (issue #654)", () => {
 // endereços de antes.
 describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", () => {
   const SEM = { quantidade: 0, criticas: 0, breves: 0, alem_do_prazo: 0 };
-  const entrar = (perfil: string) => api.mockImplementation(async (caminho: string) => {
-    if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa Exemplo", email: "p@lotufo.com", perfil, csrf: "x" };
+  const entrar = (perfil: string, permissoes = permissoesDe(perfil)) => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa Exemplo", email: "p@lotufo.com", perfil, permissoes, csrf: "x" };
     if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
     if (caminho === "/api/inicio") return { avisos: [] };
     if (caminho === "/api/contratos") return [{ ...OBRA, contratante_chave: "sinfra" }];
@@ -413,7 +433,7 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
         anteriores: { linhas: [], esperam_pagamento: 0, antes_do_ano_inicial: 0, ano_inicial: "2025" } };
     }
     if (caminho === "/api/health" || caminho.startsWith("/api/correio/respostas")) return [];
-    // #816: a página A receber sem nada em aberto, com a SINFRA na fileira (contrato ativo), com zero
+    // #816: a página Em aberto sem nada em aberto, com a SINFRA na fileira (contrato ativo), com zero
     if (caminho === "/api/a-receber") {
       return { anos: ["2025", "2026"], total_a_receber_liberado: true, em_aberto_centavos: 0, por_ano: { 2025: 0, 2026: 0 },
         quantidade: 0, alem_do_prazo: 0, notas_sem_medicao: [], notas_sem_medicao_centavos: 0, anteriores: { quantidade: 0, valor_centavos: 0 },
@@ -435,17 +455,17 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     .filter(l => l.getAttribute("aria-current") === "page").map(l => l.textContent);
   const endereco = () => window.location.pathname + window.location.search;
 
-  it("/a-receber abre a página A receber, com o caminho, o título e o estado vazio; o item fica aceso", async () => {
+  it("/a-receber abre a página Em aberto, com o caminho, o título e o estado vazio; o item fica aceso", async () => {
     entrar("diretoria");
     window.history.replaceState(null, "", "/a-receber");
     render(<App />);
-    expect(await screen.findByRole("heading", { level: 1, name: "A receber" })).toBeTruthy();
-    expect(trechos()).toEqual(["Financeiro", "A receber"]);
+    expect(await screen.findByRole("heading", { level: 1, name: "Em aberto" })).toBeTruthy();
+    expect(trechos()).toEqual(["Financeiro", "Em aberto"]);
     expect(within(caminho()).getByRole("link", { name: "Financeiro" }).getAttribute("href")).toBe("/fechamento");
     expect(await screen.findByText("Nenhuma nota em aberto.")).toBeTruthy();
     expect(endereco()).toBe("/a-receber");                    // da #748 até aqui o endereço levava ao Fechamento
-    expect(aceso()).toEqual(["A receber"]);
-    expect(document.title).toBe("A receber · grupolotufo");
+    expect(aceso()).toEqual(["Em aberto"]);
+    expect(document.title).toBe("Em aberto · grupolotufo");
   });
 
   it("/a-receber?contratante= mostra só o contratante do endereço, pela chave da página dele em Obras (#816)", async () => {
@@ -526,7 +546,7 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     expect(aceso()).toEqual(["Obras"]);
   });
 
-  it.each([["medicoes", "Medições"], ["a-receber", "A receber"], ["siga", "Processos no SIGA"]])(
+  it.each([["medicoes", "Medições"], ["a-receber", "Em aberto"], ["siga", "Processos no SIGA"]])(
     "a aba %s do contratante abre na página (#818): o endereço fica e a aba entra no caminho", async (aba, nome) => {
       entrar("engenharia");
       window.history.replaceState(null, "", `/obras/contratante/sinfra/${aba}`);
@@ -553,8 +573,8 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     expect(trechos()).toEqual(["Obras", "SINFRA"]);
   });
 
-  it("a aba do SIGA do contratante segue a tela SIGA: a diretoria cai na página do contratante", async () => {
-    entrar("diretoria");
+  it("a aba do SIGA do contratante segue a tela SIGA: quem não tem `ver_siga` cai na página do contratante (#829)", async () => {
+    entrar("diretoria", ["ver_paineis"]);
     window.history.replaceState(null, "", "/obras/contratante/sinfra/siga");
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
@@ -562,6 +582,15 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     expect(api).not.toHaveBeenCalledWith("/api/siga");
     // #818: nem o dado da aba (que o servidor nega a ela)
     expect(api.mock.calls.some(c => String(c[0]).endsWith("/siga"))).toBe(false);
+  });
+
+  it("a diretoria abre a aba do SIGA do contratante (#829: só leitura)", async () => {
+    entrar("diretoria");
+    window.history.replaceState(null, "", "/obras/contratante/sinfra/siga");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/contratantes/sinfra/siga"));
+    expect(endereco()).toBe("/obras/contratante/sinfra/siga");
   });
 
   it("a vista entra no caminho como último trecho, e no título da aba do navegador", async () => {

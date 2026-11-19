@@ -8,6 +8,7 @@ import { SeloFarol, type ObraPainel } from "./ObrasCarteira";
 import { type Ir } from "./rota";
 import Selo from "./Selo";
 import Variacao from "./Variacao";
+import { prazoNoFimNaSituacao, type AndamentoDoServidor } from "./valores";
 
 // As pecas que as vistas de Obras dividem (#805): a faixa de numeros (da carteira ou de um contratante), o medido do
 // mes com a variacao, as etiquetas do que pede atencao e a situacao da obra com o motivo escrito. Tudo na COTA da
@@ -91,9 +92,9 @@ export function NumerosDeObras({ r, rotulo, participacao, prazo }: {
               <span className={`obras-etiqueta${r.devagar > 0 ? " obras-etiqueta--devagar" : ""}`}>{r.devagar === 1 ? "obra devagar" : "obras devagar"}</span>
             </dd>
           )}
-          {/* #822: o "de M" so' conta quem tem leitura; as que sairam da regua pelo prazo no fim vao ao lado, em
-              tinta (e' contagem, nao aviso: o do prazo esta' nos Avisos) */}
-          {r.prazoNoFim > 0 && <dd className="obras-numero__apoio"><span className="num">{r.prazoNoFim}</span> com prazo no fim</dd>}
+          {/* #822: o "de M" so' conta quem tem leitura; as obras com prazo a cumprir e sem leitura (fora da regua ou
+              que ainda nao mediram) vao ao lado, em tinta: e' contagem, nao aviso. As duas somam a vista Andamento */}
+          {r.semLeitura > 0 && <dd className="obras-numero__apoio"><span className="num">{r.semLeitura}</span> sem leitura</dd>}
         </div>
       </dl>
       {/* fora do total "A receber": o em aberto antigo e o que o RM deixou de informar, das obras que a vista mostra */}
@@ -125,8 +126,13 @@ export function EtiquetasDeAtencao({ r, semAndamento = false }: { r: ResumoObras
  *  `andamento` (decisao do dono de 18/11/2026): a leitura do andamento da obra (`andamentoDaObra`, a regua unica),
  *  na tabela que tem a coluna Andamento ao lado. A obra sem aviso e com o andamento Devagar nao diz "Em dia", que
  *  contradiria a coluna vizinha: diz o motivo do andamento, com a palavra na etiqueta da familia (valor, sem glifo).
- *  Qualquer aviso do farol continua ganhando, e Atencao no andamento nao tira o "Em dia". */
-export function SituacaoDaObra({ obra, ir, andamento }: { obra: ObraPainel | undefined; ir: Ir; andamento?: LeituraDaObra | null }) {
+ *  Qualquer aviso do farol continua ganhando, e Atencao no andamento nao tira o "Em dia".
+ *  `leitura` (decisao do dono de 19/11/2026): a leitura do andamento como o servidor a manda. A obra sem aviso que o
+ *  servidor tirou da regua pelo prazo no fim tambem nao diz "Em dia": diz "Prazo no fim · execução até dd/mm", em
+ *  tinta (o aviso de execucao terminando e' so' da operacao; a diretoria nao o ve no farol). */
+export function SituacaoDaObra({ obra, ir, andamento, leitura }: {
+  obra: ObraPainel | undefined; ir: Ir; andamento?: LeituraDaObra | null; leitura?: AndamentoDoServidor | null;
+}) {
   if (!obra) return null;
   if (obra.farol === "verde" && andamento?.leitura === "devagar") {
     return (
@@ -137,6 +143,8 @@ export function SituacaoDaObra({ obra, ir, andamento }: { obra: ObraPainel | und
       </div>
     );
   }
+  const prazoNoFim = obra.farol === "verde" ? prazoNoFimNaSituacao(leitura) : null;
+  if (prazoNoFim) return <span className="obras-situacao__prazo">{prazoNoFim}</span>;
   if (obra.farol === "verde") return <span className="obras-situacao__emdia">Em dia</span>;
   const { visiveis, mais } = motivosDaLinha(obra.motivos, 1);
   return (

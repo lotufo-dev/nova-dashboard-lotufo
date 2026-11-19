@@ -27,7 +27,7 @@ export type Ficha = {
   // #655: a conta de `prazos.ritmo_e_prazo`, na mesma base do topo; `situacao` nula quando a conta nao fecha.
   // #803: o necessario por mes para terminar no prazo (saldo / competencias que restam); nulos sem prazo a cumprir
   // #822: `leitura`, o andamento ja' lido pelo servidor, o mesmo objeto que a lista de Obras recebe em
-  // `andamento.leitura`; fora da regua, `situacao` e `dias_alem` vem nulos (o selo da conclusao se cala junto)
+  // `andamento.leitura`; fora da regua o selo da conclusao continua (decisao do dono de 19/11/2026)
   ritmo: { ritmo_centavos: number | null; necessario_centavos: number | null; competencias_restantes: number | null;
     conclusao: string | null; situacao: "no_prazo" | "atrasa" | null; dias_alem: number | null;
     leitura?: AndamentoDoServidor | null };
@@ -123,7 +123,7 @@ export function estadoSemPrazo(p: PrazosDaObra): { texto: string; paralisada: bo
  *  necessario, "No ritmo do prazo"; abaixo, os dias da conclusao alem do fim da execucao. Sem conta, "—" e nenhum selo.
  *  #822: o andamento (o ritmo sobre o necessario) aparece com a peca e a leitura da lista de Obras, do servidor: a
  *  mesma palavra e o mesmo percentual nas duas telas. Fora da regua (prazo no fim, prorrogacao pedida, sem medicao)
- *  vai o motivo, e o selo da conclusao nao vem. */
+ *  vai o motivo, e o selo da conclusao continua: ele diz quando a obra termina no ritmo de hoje. */
 export function PrazoDaObra({ ficha, prazos }: { ficha: Ficha | null | undefined; prazos: PrazosDaObra }) {
   const r = ficha?.ritmo;
   const exec = ficha?.vencimentos.find(v => v.chave === "execucao") ?? null;

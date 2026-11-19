@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import type { ContratanteAReceber } from "./AReceber";
 import type { Concluida, GrupoFila, Limites, SemMedicao } from "./filaMedicoes";
+import { pode } from "./permissoes";
 import type { AbaContratante } from "./rota";
 import type { LimitesSiga, ProcessoSiga, Robo } from "./siga";
 
@@ -12,10 +13,10 @@ import type { LimitesSiga, ProcessoSiga, Robo } from "./siga";
 /** As abas que a pagina desenha, na ordem da faixa. */
 export const ABAS_PRONTAS: readonly AbaContratante[] = ["obras", "medicoes", "a-receber", "siga"];
 
-/** As abas do perfil: Processos no SIGA so' para quem abre a tela SIGA (a diretoria nao: App.tsx a manda para a
- *  entrada, e o servidor nega a ela o dado da aba). */
-export function abasDoPerfil(perfil: string): AbaContratante[] {
-  return ABAS_PRONTAS.filter(a => a !== "siga" || perfil !== "diretoria");
+/** As abas de quem esta' na tela: Processos no SIGA so' para quem tem `ver_siga` (#829: os tres perfis, a diretoria
+ *  so' para ler), pela lista que o servidor informa em /api/auth/eu; o servidor nega o dado a quem nao tem. */
+export function abasDe(permissoes: readonly string[] = []): AbaContratante[] {
+  return ABAS_PRONTAS.filter(a => a !== "siga" || pode({ permissoes }, "ver_siga"));
 }
 
 // O dado de cada aba: o recorte, pelas obras do contratante, de uma tela que ja' existe (`app/contratante.py`). A

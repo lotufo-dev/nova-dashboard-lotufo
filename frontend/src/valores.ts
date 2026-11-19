@@ -3,7 +3,7 @@
 // "Valores". Os valores comparados vem do servidor (a mesma conta nos dois lados); aqui so' a razao entre eles, para
 // a etiqueta. Limite em inteiros, sem arredondar antes de comparar. O andamento vem lido do servidor (#822).
 
-import { fmtCompetencia } from "./tempo";
+import { fmtCompetencia, fmtDiaNoAno } from "./tempo";
 
 // ---------------------------------------------------------------- etapa do dinheiro
 
@@ -78,6 +78,9 @@ export type MotivoForaDaRegua = "prazo_no_fim" | "prorrogacao_pedida" | "sem_med
 export type AndamentoDoServidor = {
   situacao: LeituraDoAndamento | null; pct: number | null;
   motivo: MotivoForaDaRegua | null; prorrogacao_pedida: boolean; sem_medicao_desde: string | null;
+  /** Com o prazo no fim, o fim da execucao vigente (AAAA-MM-DD), para a Situacao da obra (decisao do dono de
+   *  19/11/2026); nulo nos outros casos. */
+  execucao_fim?: string | null;
   atencao_desde_pct: number; adiantada_desde_pct: number;
 };
 
@@ -96,6 +99,15 @@ export function foraDaRegua(l: AndamentoDoServidor | null | undefined): { palavr
   if (l.motivo === "prorrogacao_pedida") return { palavra: "Prorrogação pedida", complemento: null };
   if (l.motivo === "sem_medicao" && l.sem_medicao_desde) return { palavra: `Sem medição desde ${fmtCompetencia(l.sem_medicao_desde)}`, complemento: null };
   return null;
+}
+
+/** O que a Situacao da obra escreve no lugar de "Em dia" quando o servidor tirou a obra da regua pelo prazo no fim
+ *  (decisao do dono de 19/11/2026): "Prazo no fim · execução até dd/mm", com o ano quando nao e' o de hoje. Nulo
+ *  fora desse caso. `hoje` ("AAAA-MM-DD") e' para o teste. */
+export function prazoNoFimNaSituacao(l: AndamentoDoServidor | null | undefined, hoje?: string): string | null {
+  if (!l || l.situacao !== null || l.motivo !== "prazo_no_fim") return null;
+  const ate = fmtDiaNoAno(l.execucao_fim, hoje);
+  return ate ? `Prazo no fim · execução até ${ate}` : "Prazo no fim";
 }
 
 /** A obra tem o que escrever no andamento? A leitura, ou o motivo de estar fora da regua. Sem um nem outro a peca
