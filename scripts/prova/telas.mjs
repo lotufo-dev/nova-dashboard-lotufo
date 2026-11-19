@@ -57,6 +57,8 @@ const JANELA = "dialog[open] .iniciar__caixa";
 const comCarteira = [
   { caminho: /^\/api\/contratos$/, corpo: carteiraSimulada },
   { caminho: /^\/api\/diretoria$/, ajustar: painelDaCarteira },
+  // #818: as abas da pagina dos contratantes da carteira que o cadastro de exemplo nao tem
+  ...ABAS_DA_CARTEIRA,
 ];
 // issue #805: o mes de Medicoes com medicao em cada grupo da fila (ver simulados.mjs)
 const comFila = [{ caminho: /^\/api\/medicoes\/fila$/, ajustar: filaSimulada }];
@@ -568,4 +570,4 @@ function abrirBusca(texto) {
 }
 
 // ---- As abas da pagina do contratante (#818): o recorte simulado de cada aba (ver simulados.mjs)
-import { aReceberDoContratante, medicoesDoContratante, SIGA_DO_CONTRATANTE } from "./simulados.mjs";
+import { ABAS_DA_CARTEIRA, aReceberDoContratante, medicoesDoContratante, SIGA_DO_CONTRATANTE } from "./simulados.mjs";
