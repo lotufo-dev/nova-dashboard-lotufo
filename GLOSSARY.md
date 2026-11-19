@@ -353,6 +353,21 @@ _Avoid_: atrasado (é o monitor sem leitura), vencido (o processo não tem prazo
 Aviso na linha do processo do SIGA quando o nome mostrado indica outra categoria que a escolhida por quem cadastrou
 ("Outros" com o complemento "Aditivo de prazo"). Nada muda sozinho: quem edita corrige no histórico do processo.
 
+**Encerrado (processo do SIGA)**:
+O processo que sai do quadro e vai para a seção Encerrados. Sozinho: ligado a uma medição recebida, arquivado ou
+juntado a outro processo (a situação do último volume ou via). À mão: "Encerrar processo", com motivo, quem e quando,
+para o que não tem sinal automático; o encerrado à mão continua sendo lido pelo robô e volta sozinho com movimentação
+posterior. Nunca por setor nem por tempo.
+_Avoid_: arquivado (é só um dos motivos), concluído
+
+**Sobrestado (processo do SIGA)**:
+O processo suspenso pelo órgão. Não é atraso: a tela diz "Sobrestado" no lugar dos dias sem movimentação, e ele não
+conta nos parados nem no aviso de processo parado.
+
+**Medição proposta (processo do SIGA)**:
+A medição que a tela propõe ligar ao processo de Medições que ainda não tem uma, pela obra e pelo número escritos no
+nome do processo. A pessoa confirma ou troca; o vínculo guarda quem e quando e pode ser desfeito.
+
 **Barra de passos**:
 Os passos do fluxo da medição de uma obra, em ordem: os feitos, o da vez e os que faltam. Na página da medição é a
 faixa de abas; na fila de trabalho, a miniatura na linha, do tamanho do fluxo da obra.

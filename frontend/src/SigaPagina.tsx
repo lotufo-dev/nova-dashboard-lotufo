@@ -12,7 +12,7 @@ import { useNomesDoCaminho } from "./nomesDoCaminho";
 import { ir, trocarBusca, type Busca } from "./rota";
 import {
   CATEGORIAS, categoriaDaBusca, contagemPorTipo, dataHoraCurta, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, naoLidoDe, nomeDoProcesso, ordenar,
-  periodoDe, porCategoria, roboAtivo, ROTULO_ENCERRADO, setorPessoa, situacaoDoBotao, tempoNoSetor, textoSemMovimentacao, tituloDoEvento, TIPOS, volumeDe,
+  periodoDe, porCategoria, roboAtivo, ROTULO_ENCERRADO, setorPessoa, situacaoDaLinha, situacaoDoBotao, tempoNoSetor, textoSemMovimentacao, tituloDoEvento, TIPOS, volumeDe,
   type Categoria, type LimitesSiga, type Movimentacao, type PainelSiga, type ProcessoSiga, type Robo, type TipoMovimentacao,
 } from "./siga";
 import Selo, { Glifo } from "./Selo";
@@ -39,10 +39,66 @@ const traco = <span className="sg__traco">—</span>;
 
 // Os dias sem movimentacao sao a situacao da linha (#840): o selo da situacao que o SERVIDOR leu (a regua do tempo
 // parado). O tempo no setor fica em texto comum, sem selo, sem cor e sem icone.
+// #841: o processo sobrestado (suspenso pelo orgao) diz "Sobrestado" no lugar dos dias, em tinta, sem selo de atraso.
 function SemMovimentacao({ p }: { p: ProcessoSiga }) {
   const texto = textoSemMovimentacao(p);
-  if (!p.situacao_tempo) return <span className="sg__traco">{texto}</span>;
-  return <Selo situacao={p.situacao_tempo} className="sg__dias">{texto}</Selo>;
+  if (p.situacao_tempo === "sobrestado") return <span className="sg__sobrestado">{texto}</span>;
+  const situacao = situacaoDaLinha(p);
+  if (!situacao) return <span className="sg__traco">{texto}</span>;
+  return <Selo situacao={situacao} className="sg__dias">{texto}</Selo>;
+}
+
+/** Uma escrita de um clique sobre o processo (#841: ligar a' medicao proposta, desfazer o vinculo, reabrir), com o
+ *  erro do servidor ao lado. */
+function BotaoDoProcesso({ rotulo, caminho, corpo, aoGravar }: {
+  rotulo: string; caminho: string; corpo?: unknown; aoGravar: () => Promise<void>;
+}) {
+  const [erro, setErro] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  async function gravar() {
+    setOcupado(true); setErro("");
+    try {
+      await api(caminho, { method: "POST", body: JSON.stringify(corpo ?? {}) });
+      await aoGravar();
+    } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
+  }
+  return (
+    <>
+      <button type="button" className="btn btn--pequeno" disabled={ocupado} onClick={() => void gravar()}>{rotulo}</button>
+      {erro && <Falha className="sg__erro">{erro}</Falha>}
+    </>
+  );
+}
+
+// "Encerrar processo" (#841), com motivo curto, para o que nao tem sinal automatico. O robo continua lendo o processo,
+// que volta sozinho com movimentacao nova.
+function EncerrarProcesso({ p, aoGravar }: { p: ProcessoSiga; aoGravar: () => Promise<void> }) {
+  const [aberto, setAberto] = useState(false);
+  const [motivo, setMotivo] = useState("");
+  const [erro, setErro] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  async function enviar(ev: FormEvent) {
+    ev.preventDefault();
+    setOcupado(true); setErro("");
+    try {
+      await api(`/api/siga/processos/${p.id}/encerrar`, { method: "POST", body: JSON.stringify({ motivo: motivo.trim() }) });
+      await aoGravar();
+      setAberto(false); setMotivo("");
+    } catch (e) { setErro(mensagemDeErro(e)); } finally { setOcupado(false); }
+  }
+  if (!aberto) return <button type="button" className="btn btn--pequeno" onClick={() => setAberto(true)}>Encerrar processo</button>;
+  return (
+    <form className="form-inline sg__novo" onSubmit={enviar} aria-label="Encerrar processo">
+      <div className="campo">
+        <label className="campo__rotulo" htmlFor="siga-motivo">Motivo</label>
+        <input id="siga-motivo" name="motivo" className="entrada--larga" autoComplete="off" maxLength={200}
+          placeholder="aditivo publicado, pedido respondido…" value={motivo} onChange={e => setMotivo(e.target.value)} />
+      </div>
+      <button type="submit" className="btn btn--primario" disabled={ocupado}>Encerrar</button>
+      <button type="button" className="btn" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
+      {erro && <Falha className="sg__erro">{erro}</Falha>}
+    </form>
+  );
 }
 
 const legendaDe = (l: LimitesSiga): ItemLegenda[] => [
@@ -66,7 +122,9 @@ const COLUNAS = (
   </colgroup>
 );
 
-function Linha({ p, agora, robo, categoria }: { p: ProcessoSiga; agora: Date; robo: Robo; categoria: Categoria | null }) {
+function Linha({ p, agora, robo, categoria, podeEditar = false, aoGravar }: {
+  p: ProcessoSiga; agora: Date; robo: Robo; categoria: Categoria | null; podeEditar?: boolean; aoGravar?: () => Promise<void>;
+}) {
   const volume = volumeDe(p.situacao);
   const ultima = p.ultima;
   const lendo = robo.rodada?.processos.includes(p.id) ?? false;
@@ -74,10 +132,11 @@ function Linha({ p, agora, robo, categoria }: { p: ProcessoSiga; agora: Date; ro
   // movimentação", a situacao
   const naoLido = p.encerrado ? null : naoLidoDe(robo, p.id);
   const abrir = () => abrirHistorico(p.id, categoria);
+  const situacao = situacaoDaLinha(p);
   return (
-    <tr className={`sg__linha${p.situacao_tempo ? ` sg__linha--${p.situacao_tempo}` : ""}`} tabIndex={0} aria-label={nomeDoProcesso(p)}
-      // o link da obra ou da medicao dentro da linha leva para la', sem abrir tambem o historico
-      onClick={ev => { if (!(ev.target as HTMLElement).closest("a")) abrir(); }}
+    <tr className={`sg__linha${situacao ? ` sg__linha--${situacao}` : ""}`} tabIndex={0} aria-label={nomeDoProcesso(p)}
+      // o link da obra ou da medicao (e o botao "Reabrir", #841) dentro da linha agem sozinhos, sem abrir o historico
+      onClick={ev => { if (!(ev.target as HTMLElement).closest("a, button, .aviso--falha")) abrir(); }}
       onKeyDown={ev => { if (ev.target === ev.currentTarget && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); abrir(); } }}>
       {/* sem obra nao ha' contratante: o nome que o robo mandou, que e' comprido, ocupa as duas colunas */}
       <td className="sg__proc" colSpan={p.contratante ? undefined : 2}>
@@ -98,6 +157,8 @@ function Linha({ p, agora, robo, categoria }: { p: ProcessoSiga; agora: Date; ro
           <span className="sg__etiqueta"><Selo situacao="breve">Não lido</Selo>{naoLido && <span className="sg__fraco">{naoLido}</span>}</span>
         )}
         {p.categoria_a_conferir && <span className="sg__fraco sg__conferir">categoria a conferir</span>}
+        {/* #841: processo de Medicoes sem medicao, com a medicao que o nome indica: quem edita liga no historico */}
+        {podeEditar && !p.encerrado && p.medicao_proposta && <span className="sg__fraco sg__conferir">medição a ligar</span>}
       </td>
       {p.contratante && (
         <td data-rotulo="Contratante">{p.contratante}{p.orgao_sub && <span className="sg__fraco">{p.orgao_sub}</span>}</td>
@@ -107,7 +168,16 @@ function Linha({ p, agora, robo, categoria }: { p: ProcessoSiga; agora: Date; ro
         {p.caixa_entrada && <span className="sg__fraco">caixa de entrada</span>}
         {volume && <span className="sg__fraco">{volume}</span>}
       </td>
-      {p.encerrado ? <td colSpan={3} data-rotulo="Situação">{ROTULO_ENCERRADO[p.encerrado]}</td> : (
+      {p.encerrado ? (
+        <td colSpan={3} data-rotulo="Situação">
+          <span className="sg__nome">{ROTULO_ENCERRADO[p.encerrado]}</span>
+          {/* #841: o encerrado a' mao diz o motivo e quem encerrou; quem edita reabre aqui */}
+          {p.encerramento && <span className="sg__fraco">{p.encerramento.motivo} · {p.encerramento.por}, <span className="num">{fmtData(p.encerramento.em)}</span></span>}
+          {podeEditar && aoGravar && p.encerrado === "manual" && (
+            <span className="sg__acao-linha"><BotaoDoProcesso rotulo="Reabrir" caminho={`/api/siga/processos/${p.id}/reabrir`} aoGravar={aoGravar} /></span>
+          )}
+        </td>
+      ) : (
         <>
           <td data-rotulo="Com quem">{p.com_quem || traco}</td>
           <td data-rotulo="No setor há">{p.desde === null ? traco : tempoNoSetor(p, agora)}</td>
@@ -123,9 +193,9 @@ function Linha({ p, agora, robo, categoria }: { p: ProcessoSiga; agora: Date; ro
 
 /** O painel de uma categoria (#805): o cabecalho de grupo forte, com quantos processos ela tem e quantos estao sem
  *  movimentacao alem do limite critico (#840), e as linhas do mais parado ao menos (a ordem de `porCategoria`). */
-export function PainelDaCategoria({ secao, limites, agora, robo, categoria }: {
+export function PainelDaCategoria({ secao, limites, agora, robo, categoria, podeEditar = false }: {
   secao: { categoria: Categoria; rotulo: string; processos: ProcessoSiga[] }; limites: LimitesSiga; agora: Date; robo: Robo;
-  categoria: Categoria | null;
+  categoria: Categoria | null; podeEditar?: boolean;
 }) {
   const id = `sg-grupo-${secao.categoria}`;
   const parados = secao.processos.filter(p => p.situacao_tempo === "critico").length;
@@ -155,7 +225,7 @@ export function PainelDaCategoria({ secao, limites, agora, robo, categoria }: {
           </tr>
         </thead>
         <tbody>
-          {secao.processos.map(p => <Linha key={p.id} p={p} agora={agora} robo={robo} categoria={categoria} />)}
+          {secao.processos.map(p => <Linha key={p.id} p={p} agora={agora} robo={robo} categoria={categoria} podeEditar={podeEditar} />)}
         </tbody>
       </table>
     </section>
@@ -244,9 +314,22 @@ function Historico({ p, dados, aoPedir, podeEditar, categoria }: {
         <h1>Histórico · {nome}</h1>
         <p className="sg__sub">
           {/* o aviso da linha continua aqui, onde quem edita corrige a categoria (#805) */}
-          {[p.numero, `${total} ${total === 1 ? "movimentação" : "movimentações"}`, periodo, p.categoria_a_conferir && "categoria a conferir"]
+          {[p.numero, `${total} ${total === 1 ? "movimentação" : "movimentações"}`, periodo, p.categoria_a_conferir && "categoria a conferir",
+            // #841: encerrado (o motivo; no encerrado a' mao, quem e quando) e sobrestado
+            p.encerrado && (p.encerramento
+              ? `encerrado: ${p.encerramento.motivo} (${p.encerramento.por}, ${fmtData(p.encerramento.em)})`
+              : ROTULO_ENCERRADO[p.encerrado].toLowerCase()),
+            !p.encerrado && p.situacao_tempo === "sobrestado" && "sobrestado"]
             .filter(Boolean).join(" · ")}
         </p>
+        {/* #841: a medicao que o nome indica; quem edita liga com um clique ou escolhe outra em "Confirmar categoria" */}
+        {podeEditar && !p.encerrado && p.medicao_proposta && p.medicao_id === null && p.protocolo_id === null && (
+          <div className="sg__proposta">
+            <span>Medição proposta: <strong>{p.medicao_proposta.obra} · {p.medicao_proposta.titulo}</strong></span>
+            <BotaoDoProcesso rotulo="Ligar à medição" caminho={`/api/siga/processos/${p.id}/vinculo`}
+              corpo={{ medicao_id: p.medicao_proposta.id }} aoGravar={aoPedir} />
+          </div>
+        )}
         <div className="sg__acoes">
           {p.link && (
             <a className="btn btn--pequeno sg__abrir" href={p.link} target="_blank" rel="noopener noreferrer">
@@ -259,6 +342,14 @@ function Historico({ p, dados, aoPedir, podeEditar, categoria }: {
           {dados.pode_atualizar && <Atualizar rotulo="Pedir leitura" processoId={p.id} robo={dados.robo} aoPedir={aoPedir} />}
           {/* o processo de protocolo enviado pelo sistema e' sempre Medicoes: nao ha' o que corrigir */}
           {podeEditar && p.protocolo_id === null && <CorrigirCategoria p={p} aoGravar={aoPedir} />}
+          {/* #841: o vinculo feito pela tela (ou pelo numero) se desfaz; o do protocolo enviado pelo sistema, nao */}
+          {podeEditar && p.protocolo_id === null && p.medicao_id !== null && (
+            <BotaoDoProcesso rotulo="Desfazer vínculo" caminho={`/api/siga/processos/${p.id}/vinculo/desfazer`} aoGravar={aoPedir} />
+          )}
+          {podeEditar && p.encerrado === null && <EncerrarProcesso p={p} aoGravar={aoPedir} />}
+          {podeEditar && p.encerrado === "manual" && (
+            <BotaoDoProcesso rotulo="Reabrir" caminho={`/api/siga/processos/${p.id}/reabrir`} aoGravar={aoPedir} />
+          )}
         </div>
       </header>
       <div className="sg__filtros">
@@ -337,8 +428,10 @@ function useObras(aberto: boolean, aoFalhar: (erro: string) => void) {
   return obras ?? [];
 }
 
-function CamposCategoria({ id, valor, mudar, obras, aoFalhar }: {
+function CamposCategoria({ id, valor, mudar, obras, aoFalhar, comRecebidas = false }: {
   id: string; valor: Classificacao; mudar: (v: Classificacao) => void; obras: ObraLista[]; aoFalhar: (erro: string) => void;
+  // #841: no processo que ja' esta' no quadro, a medicao recebida tambem se escolhe (ligado a ela, ele encerra)
+  comRecebidas?: boolean;
 }) {
   const [medicoes, setMedicoes] = useState<{ obra: string; lista: MedicaoDaObra[] } | null>(null);
   const pedeMedicao = valor.categoria === "medicoes" && valor.obra !== "";
@@ -355,7 +448,8 @@ function CamposCategoria({ id, valor, mudar, obras, aoFalhar }: {
     return () => { vale = false; };
   }, [pedeMedicao, obra, aoFalhar]);
   // as abertas da obra; a medicao ja' ligada ao processo continua na lista mesmo depois de recebida
-  const abertas = (medicoes?.obra === obra ? medicoes.lista : []).filter(m => !FINAIS.includes(m.estado) || String(m.id) === valor.medicao);
+  const fora = comRecebidas ? FINAIS.filter(e => e !== "recebida") : FINAIS;
+  const abertas = (medicoes?.obra === obra ? medicoes.lista : []).filter(m => !fora.includes(m.estado) || String(m.id) === valor.medicao);
   return (
     <>
       <div className="campo">
@@ -433,9 +527,13 @@ function AcompanharProcesso({ aoGravar }: { aoGravar: (id: number) => Promise<vo
 // Pagina do historico (#663): quem edita cadastros corrige categoria, obra e complemento do processo; passando a
 // Medicoes, liga o processo a uma medicao da obra.
 function CorrigirCategoria({ p, aoGravar }: { p: ProcessoSiga; aoGravar: () => Promise<void> }) {
-  const atual = (): Classificacao => ({
-    categoria: p.categoria, obra: p.contrato_id === null ? "" : String(p.contrato_id),
-    medicao: p.medicao_id === null ? "" : String(p.medicao_id), complemento: p.complemento ?? "" });
+  // #841: sem medicao ligada e com a proposta do servidor, o formulario abre em Medicoes com a obra e a medicao
+  // propostas; a pessoa confirma ou troca
+  const proposta = p.medicao_id === null ? p.medicao_proposta ?? null : null;
+  const atual = (): Classificacao => proposta
+    ? { categoria: "medicoes", obra: String(proposta.contrato_id), medicao: String(proposta.id), complemento: "" }
+    : { categoria: p.categoria, obra: p.contrato_id === null ? "" : String(p.contrato_id),
+        medicao: p.medicao_id === null ? "" : String(p.medicao_id), complemento: p.complemento ?? "" };
   const [aberto, setAberto] = useState(false);
   const [valor, setValor] = useState(atual);
   const [erro, setErro] = useState("");
@@ -464,7 +562,7 @@ function CorrigirCategoria({ p, aoGravar }: { p: ProcessoSiga; aoGravar: () => P
   }
   return (
     <form className="form-inline sg__novo" onSubmit={enviar} aria-label="Corrigir categoria">
-      <CamposCategoria id="siga-corrigir" valor={valor} mudar={setValor} obras={obras} aoFalhar={setErro} />
+      <CamposCategoria id="siga-corrigir" valor={valor} mudar={setValor} obras={obras} aoFalhar={setErro} comRecebidas />
       <button type="submit" className="btn btn--primario" disabled={ocupado}>Salvar</button>
       <button type="button" className="btn" onClick={() => { setAberto(false); setErro(""); }}>Cancelar</button>
       {erro && <Falha className="sg__erro">{erro}</Falha>}
@@ -579,13 +677,13 @@ export default function SigaPagina({ busca, agora, podeEditar = true }: { busca:
       {(n > 0 || categoria !== null) && categorias}
       {mostradas.length === 0 ? (
         <section className="cartao sg__quadro"><div className="sg__vazio"><IconeSiga className="icone" /><p>{vazio}</p></div></section>
-      ) : mostradas.map(s => <PainelDaCategoria key={s.categoria} secao={s} limites={dados.limites} agora={agoraDe} robo={robo} categoria={categoria} />)}
+      ) : mostradas.map(s => <PainelDaCategoria key={s.categoria} secao={s} limites={dados.limites} agora={agoraDe} robo={robo} categoria={categoria} podeEditar={podeEditar} />)}
       {encerrados.length > 0 && (
         <details className="sg__encerrados" aria-label="Encerrados">
           <summary>Encerrados <Contador>{encerrados.length}</Contador></summary>
           <section className="cartao sg__quadro">
             <table className="sg__tabela">
-              <caption className="sr-only">Processos encerrados: medição recebida ou processo arquivado. Escolha um para ver o histórico.</caption>
+              <caption className="sr-only">Processos encerrados: medição recebida, processo arquivado, juntado a outro ou encerrado à mão. Escolha um para ver o histórico.</caption>
               {COLUNAS}
               <thead>
                 <tr>
@@ -594,7 +692,7 @@ export default function SigaPagina({ busca, agora, podeEditar = true }: { busca:
                 </tr>
               </thead>
               <tbody>
-                {encerrados.map(p => <Linha key={p.id} p={p} agora={agoraDe} robo={robo} categoria={categoria} />)}
+                {encerrados.map(p => <Linha key={p.id} p={p} agora={agoraDe} robo={robo} categoria={categoria} podeEditar={podeEditar} aoGravar={carregar} />)}
               </tbody>
             </table>
           </section>

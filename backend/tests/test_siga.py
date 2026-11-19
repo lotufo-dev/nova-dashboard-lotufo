@@ -213,7 +213,8 @@ def test_ultima_movimentacao_nao_e_marcacao_nem_anotacao():
 def test_processo_sem_movimentacao_nao_quebra():
     d = siga.derivar(None, [], datetime.date(2026, 10, 2))
     assert d == {"setor": "", "caixa_entrada": False, "com_quem": "", "desde": None, "dias_uteis": None,
-                 "dias_sem_movimentacao": None, "hoje": 0, "ultima": None, "protocolado_em": None}
+                 "dias_sem_movimentacao": None, "hoje": 0, "ultima": None, "protocolado_em": None,
+                 "sobrestado": False}
     assert siga.parado(d) is None
 
 
@@ -1245,6 +1246,28 @@ def test_processo_arquivado_pelo_setor_ou_pela_ultima_movimentacao(conn, situaca
                                for i, e in enumerate(eventos)]}]
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), proc)
     assert _encerrado(conn) == esperado
+
+
+@pytest.mark.parametrize("situacao,eventos,esperado", [
+    ("1º Volume - Juntado [PROTOC, [X]]", ["Transferência"], "juntado"),
+    ("1º Volume - Aguardando Andamento [PROTOC, [X]] | 2º Volume - JUNTADO ao processo [GABIN, [X]]",
+     ["Transferência"], "juntado"),
+    ("1ª Via (Setor Competente) - Juntado [COFIN, [X]]", ["Recebimento"], "juntado"),
+    # o volume anterior juntado nao encerra o processo: vale o ultimo volume
+    ("1º Volume - Juntado [PROTOC, [Y]] | 2º Volume - Aguardando Andamento [COFIN, [X]]", ["Transferência"], None),
+    # a movimentacao "Juntada" e' um documento juntado a ESTE processo: nao encerra
+    ("1º Volume - Aguardando Andamento [COFIN, [X]]", ["Transferência", "Juntada | Despacho"], None),
+])
+def test_processo_juntado_a_outro_vai_para_encerrados_com_o_motivo(conn, situacao, eventos, esperado):
+    """Issue #841, criterio 1: a situacao do ultimo volume ou via "Juntado" encerra sozinho, com o motivo, e o processo
+    sai da lista do robo como o arquivado."""
+    proc = [{"codigo": "ABC123", "numero": None, "nome": "Processo Alfa", "situacao": situacao,
+             "movimentacoes": [{**_mov("", e, at_lotacao="COFIN/ORGAO"), "data": f"{20 + i}/10/2026 09:00:00"}
+                               for i, e in enumerate(eventos)]}]
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), proc)
+    assert _encerrado(conn) == esperado
+    assert siga.ROTULO_MOTIVO.get(esperado, None) in (None, "juntado a outro processo")
+    assert [p["codigo"] for p in siga.processos_para_o_robo(conn)] == ([] if esperado else ["ABC123"])
 
 
 def _ler(conn, processo_id, lido, situacao="1º Volume - Aguardando Andamento [COFIN, [X]]"):

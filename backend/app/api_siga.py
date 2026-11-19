@@ -10,6 +10,8 @@ categoria, obra, medicao e complemento (sem nome), e `POST /api/siga/processos/{
 Issue #342: `POST /api/siga/atualizar` (sessao, CSRF e, desde a #829, `editar_cadastros`: a diretoria le e nao pede
 leitura) grava o pedido de leitura e manda o Windows iniciar o robo; o robo conversa pelas rotas de servico `POST /api/siga/rodadas` ("comecei"),
 `POST /api/siga/rodadas/{id}/fim` ("terminei") e `POST /api/siga/rodadas/{id}/falha` ("cai"), com o mesmo token.
+Issue #841: ligar o processo a' medicao (`.../vinculo`), desfazer o vinculo (`.../vinculo/desfazer`), encerrar a' mao
+(`.../encerrar`, com motivo) e reabrir (`.../reabrir`), todas com sessao, CSRF e `editar_cadastros` (403 a' diretoria).
 """
 import hmac
 import logging
@@ -144,6 +146,56 @@ def classificar(processo_id: ID, dados: ClassificacaoIn, usuario: dict = Depends
         raise HTTPException(404, str(e)) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
+    return {"id": processo_id}
+
+
+# --- vinculo com a medicao e encerramento a' mao (issue #841): escritas de quem escreve no SIGA ------------
+
+class VinculoIn(BaseModel):
+    medicao_id: int = Field(ge=1, le=MAX_INT64)
+
+
+class EncerramentoIn(BaseModel):
+    motivo: str = Field(max_length=2000)                  # siga.encerrar confere o tamanho, em portugues
+
+
+def _escrita_do_processo(funcao, conn, *args) -> None:
+    try:
+        funcao(conn, *args)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from None
+    except (siga.JaEncerrado, siga.NaoEncerradoAMao) as e:
+        raise HTTPException(409, str(e)) from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+
+
+@router.post("/api/siga/processos/{processo_id}/vinculo")
+def vincular_medicao(processo_id: ID, dados: VinculoIn, usuario: dict = Depends(exigir(ESCREVER_SIGA)),
+                     conn: sqlite3.Connection = Depends(conexao)):
+    """Ligar o processo a' medicao (a proposta da tela ou outra): ligado a' medicao recebida, ele encerra."""
+    _escrita_do_processo(siga.vincular_medicao, conn, usuario["id"], processo_id, dados.medicao_id)
+    return {"id": processo_id}
+
+
+@router.post("/api/siga/processos/{processo_id}/vinculo/desfazer")
+def desfazer_vinculo(processo_id: ID, usuario: dict = Depends(exigir(ESCREVER_SIGA)),
+                     conn: sqlite3.Connection = Depends(conexao)):
+    _escrita_do_processo(siga.desfazer_vinculo, conn, usuario["id"], processo_id)
+    return {"id": processo_id}
+
+
+@router.post("/api/siga/processos/{processo_id}/encerrar")
+def encerrar(processo_id: ID, dados: EncerramentoIn, usuario: dict = Depends(exigir(ESCREVER_SIGA)),
+             conn: sqlite3.Connection = Depends(conexao)):
+    _escrita_do_processo(siga.encerrar, conn, usuario["id"], processo_id, dados.motivo)
+    return {"id": processo_id}
+
+
+@router.post("/api/siga/processos/{processo_id}/reabrir")
+def reabrir(processo_id: ID, usuario: dict = Depends(exigir(ESCREVER_SIGA)),
+            conn: sqlite3.Connection = Depends(conexao)):
+    _escrita_do_processo(siga.reabrir, conn, usuario["id"], processo_id)
     return {"id": processo_id}
 
 

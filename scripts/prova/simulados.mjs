@@ -1044,3 +1044,28 @@ export const matrizEmVolume = resposta => ({
   }) })),
 });
 export const matrizVazia = resposta => ({ competencias: resposta.competencias, grupos: [] });
+
+// ---- Criterio de encerramento do SIGA (#841): o processo sobrestado (a palavra no lugar dos dias, sem cor), o de
+// Medicoes sem medicao com a proposta do servidor ("medição a ligar"), e nos Encerrados o juntado e o encerrado a' mao
+// (motivo, quem e quando, com "Reabrir"). Obras, numeros e pessoa inventados.
+const PROCESSOS_DO_ENCERRAMENTO = [
+  ...PROCESSOS_DO_SIGA,
+  { ...processo({ id: 20, nome: "Processo Sobrestado", numero: "ORGAO-PRO-2026/00050", contrato_id: 2, obra: "Obra Própria", ...sinfra,
+    categoria: "aditivos", complemento: "de valor", o_que_e: "Aditivo de valor", dias_uteis: 30, dias_sem_movimentacao: 30,
+    situacao: "1º Volume - Aguardando Andamento [PROTOC, [Y]] | 2º Volume - Sobrestado [GEFOR, [X]]", setor: "GEFOR" }),
+  situacao_tempo: "sobrestado" },
+  processo({ id: 21, nome: "9ª Medição - Obra Consórcio - IC 001/2026 (ORGAO-PRO-2026/00051)", numero: "ORGAO-PRO-2026/00051",
+    categoria: "medicoes", categoria_sugerida: true, o_que_e: "Medição", dias_uteis: 4,
+    medicao_proposta: { id: 3, contrato_id: 1, titulo: "9ª Medição", obra: "Obra Consórcio", estado: "recebida" } }),
+  processo({ id: 22, nome: "Processo Juntado", numero: "ORGAO-PRO-2026/00052", contrato_id: 1, obra: "Obra Consórcio", ...sinfra,
+    categoria: "aditivos", complemento: "de prazo", o_que_e: "Aditivo de prazo", encerrado: "juntado", dias_uteis: 9,
+    situacao: "1º Volume - Juntado [PROTOC, [X]]", setor: "PROTOC" }),
+  processo({ id: 23, nome: "Processo Encerrado à Mão", numero: "ORGAO-PRO-2026/00053", contrato_id: 9012, obra: "Ponte Mi", ...sinfra,
+    categoria: "indenizatorios", o_que_e: "Indenizatório", encerrado: "manual", dias_uteis: 15,
+    encerramento: { motivo: "indenizatório pago", por: "Pessoa de teste", em: "2026-10-27T14:00:00+00:00" } }),
+];
+export const SIGA_ENCERRAMENTO = painelDoSiga(PROCESSOS_DO_ENCERRAMENTO);
+
+// a medicao da prova com o processo do SIGA arquivado (o pleito): a pendencia do protocolo novo no alto da pagina
+export const medicaoComProtocoloNovo = (medicoes, reg) => medicoes.map(m => (m.id === reg.medicao
+  ? { ...m, siga_protocolo_novo: true } : m));

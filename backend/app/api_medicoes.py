@@ -187,11 +187,14 @@ def listar(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
         passos_de = medicoes.passos_das_medicoes(conn)
         edicoes =medicoes.edicoes_valor(conn, [m["id"] for m in lista])   # B-02 (10/10/2026): a pagina da medicao le daqui
         sigas = siga.registrado_em(conn, "medicao", [m["id"] for m in lista])    # issue #328: link do SIGA do envio por fora
+        # issue #841: o processo do SIGA da medicao nao recebida foi arquivado ou juntado: pede o protocolo novo
+        protocolo_novo = siga.protocolo_novo_pendente(conn, [m["id"] for m in lista])
         # issue #290: os boletins do orgao, que a pagina da medicao le daqui (achado do gate Sol na PR #358)
         # issue #753: o modelo do boletim da obra (o da MT-PAR tem leitor e passo proprios) e a pendencia "boletim
         # não anexado" da medicao que seguiu sem ele
         modelo = medicoes.modelo_do_boletim(conn, contrato_id)
         return [{**m, "edicoes_valor": edicoes[m["id"]], "siga_registrado_em": sigas.get(m["id"]),
+                 "siga_protocolo_novo": m["id"] in protocolo_novo,
                  "boletins": medicoes.boletins(conn, m["id"]), **_envio_ao_orgao(conn, m),
                  "com_envio_planilha": com_envio, "passos": list(passos_de(m)),
                  "boletim_modelo": modelo, "boletim_pendente": medicoes.boletim_pendente(conn, m, passos_de(m)),
@@ -243,6 +246,7 @@ def detalhe(medicao_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_cs
         d["envio_planilha"] = planilha_envio.situacao(conn, medicao_id)
         d["envio_assinados"] = assinados_envio.situacao(conn, medicao_id)   # issue #627: SINFRA, depois do boletim
         d["siga_registrado_em"] = siga.registrado_em(conn, "medicao", [medicao_id]).get(medicao_id)
+        d["siga_protocolo_novo"] = medicao_id in siga.protocolo_novo_pendente(conn, [medicao_id])   # issue #841
         d["boletins"] = medicoes.boletins(conn, medicao_id)     # issue #284: os boletins do orgao, do 1o ao vigente
         # issue #753: o modelo do boletim da obra e a pendencia "boletim não anexado" (como na lista da obra)
         d["boletim_modelo"] = medicoes.modelo_do_boletim(conn, d["contrato_id"])

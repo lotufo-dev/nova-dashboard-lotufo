@@ -842,3 +842,86 @@ def test_diretoria_nao_cola_o_link_na_medicao(api, com_token):
     _diretoria(cl)
     assert _link_da_medicao(cl, mid).status_code == 403
     assert cl.get("/api/siga").json()["processos"] == []
+
+
+# --- criterio de encerramento (issue #841) -------------------------------------------------------------------
+
+def _processo_da_23(cl, situacao="2º Volume - Aguardando Andamento [COFIN, [X]]"):
+    """O robo manda um processo cujo nome diz a obra e a medicao da fixture `api`. -> o processo como a tela o le."""
+    corpo = {"lido_em": CORPO["lido_em"], "processos": [
+        {"codigo": "PRC2300", "numero": "MTPAR-PRO-2026/00023", "nome": "23ª Medição - Obra MTPAR (MTPAR-PRO-2026/00023)",
+         "situacao": situacao, "movimentacoes": CORPO["processos"][0]["movimentacoes"]}]}
+    assert cl.post("/api/siga/leituras", json=corpo, headers=_robo()).status_code == 200
+    return next(p for p in cl.get("/api/siga").json()["processos"] if p["codigo"] == "PRC2300")
+
+
+def test_vinculo_pela_tela_com_a_proposta_e_processo_de_medicao_recebida_encerra(api, com_token):
+    """Criterio 2, pela rota que a tela chama: a proposta vem no painel; ligar grava quem e quando; a medicao
+    recebida encerra o processo, que sai da lista do robo; desfazer devolve."""
+    cl, cid, mid = api
+    p = _processo_da_23(cl)
+    assert p["medicao_proposta"]["id"] == mid and p["medicao_proposta"]["contrato_id"] == cid
+    r = cl.post(f"/api/siga/processos/{p['id']}/vinculo", json={"medicao_id": p["medicao_proposta"]["id"]})
+    assert r.status_code == 200, r.text
+    p = next(x for x in cl.get("/api/siga").json()["processos"] if x["codigo"] == "PRC2300")
+    assert (p["medicao_id"], p["o_que_e"], p["encerrado"], p["vinculo"]["por"]) == (mid, "23ª Medição", None, "Admin")
+    c = db.get_conn()
+    c.execute("UPDATE medicoes SET estado='recebida' WHERE id=?", (mid,)); c.commit(); c.close()
+    p = next(x for x in cl.get("/api/siga").json()["processos"] if x["codigo"] == "PRC2300")
+    assert p["encerrado"] == "recebida"
+    assert cl.get("/api/siga/processos", headers=_robo()).json() == []
+    assert cl.post(f"/api/siga/processos/{p['id']}/vinculo/desfazer").status_code == 200
+    p = next(x for x in cl.get("/api/siga").json()["processos"] if x["codigo"] == "PRC2300")
+    assert (p["medicao_id"], p["encerrado"], p["categoria"]) == (None, None, "medicoes")
+
+
+def test_encerrar_e_reabrir_pela_tela_e_os_codigos_de_cada_recusa(api, com_token):
+    cl, _cid, mid = api
+    p = _processo_da_23(cl)
+    base = f"/api/siga/processos/{p['id']}"
+    assert cl.post(f"{base}/encerrar", json={"motivo": "  "}).json()["detail"] == "Escreva o motivo do encerramento"
+    assert cl.post(f"{base}/reabrir").status_code == 409
+    r = cl.post(f"{base}/encerrar", json={"motivo": "pedido respondido"})
+    assert r.status_code == 200, r.text
+    p = next(x for x in cl.get("/api/siga").json()["processos"] if x["codigo"] == "PRC2300")
+    assert p["encerrado"] == "manual" and p["encerramento"]["motivo"] == "pedido respondido"
+    assert p["encerramento"]["por"] == "Admin" and p["encerramento"]["em"]
+    r = cl.post(f"{base}/encerrar", json={"motivo": "outro"})
+    assert (r.status_code, r.json()["detail"]) == (409, "Este processo já está encerrado")
+    assert cl.post(f"{base}/reabrir").status_code == 200
+    assert next(x for x in cl.get("/api/siga").json()["processos"] if x["codigo"] == "PRC2300")["encerrado"] is None
+    assert cl.post("/api/siga/processos/9999/encerrar", json={"motivo": "x"}).status_code == 404
+    assert cl.post("/api/siga/processos/9999/vinculo", json={"medicao_id": mid}).status_code == 404
+    assert cl.post(f"{base}/vinculo", json={"medicao_id": 9999}).status_code == 422
+    assert cl.post(f"{base}/vinculo/desfazer").status_code == 422          # sem vinculo
+
+
+def test_diretoria_nao_liga_nao_desfaz_nao_encerra_nem_reabre(api, com_token):
+    """Issue #841 (risco de auth): as quatro escritas novas sao de quem escreve no SIGA; a diretoria recebe 403 e
+    nada muda."""
+    cl, _cid, mid = api
+    p = _processo_da_23(cl)
+    base = f"/api/siga/processos/{p['id']}"
+    assert cl.post(f"{base}/encerrar", json={"motivo": "aditivo publicado"}).status_code == 200
+    antes = cl.get("/api/siga").json()["processos"]
+    _diretoria(cl)
+    for caminho, corpo in ((f"{base}/vinculo", {"medicao_id": mid}), (f"{base}/vinculo/desfazer", None),
+                           (f"{base}/encerrar", {"motivo": "x"}), (f"{base}/reabrir", None)):
+        r = cl.post(caminho, json=corpo)
+        assert r.status_code == 403, (caminho, r.text)
+    assert cl.get("/api/siga").json()["processos"] == antes
+
+
+def test_medicao_com_o_processo_arquivado_pede_o_protocolo_novo(api, com_token):
+    """Criterio 4: a medicao nao recebida cujo processo foi arquivado diz a pendencia no detalhe e na lista da obra."""
+    cl, cid, mid = api
+    p = _processo_da_23(cl)
+    assert cl.post(f"/api/siga/processos/{p['id']}/vinculo", json={"medicao_id": mid}).status_code == 200
+    assert cl.get(f"/api/medicoes/{mid}").json()["siga_protocolo_novo"] is False
+    corpo = {"lido_em": "2026-10-28T11:30:00-04:00", "processos": [
+        {"codigo": "PRC2300", "numero": "MTPAR-PRO-2026/00023", "nome": "x",
+         "situacao": "2º Volume - Arquivado [PROTOC, [X]]", "movimentacoes": CORPO["processos"][0]["movimentacoes"]}]}
+    assert cl.post("/api/siga/leituras", json=corpo, headers=_robo()).status_code == 200
+    assert cl.get(f"/api/medicoes/{mid}").json()["siga_protocolo_novo"] is True
+    lista = cl.get(f"/api/contratos/{cid}/medicoes").json()
+    assert next(m for m in lista if m["id"] == mid)["siga_protocolo_novo"] is True

@@ -75,6 +75,8 @@ export type Medicao = {
   boletim_modelo?: string | null;
   /** #753: a medição seguiu sem o boletim e ainda não foi recebida (o passo do boletim não trava) */
   boletim_pendente?: boolean;
+  /** #841: o processo do SIGA da medição (ainda não recebida) foi arquivado ou juntado: falta o link do protocolo novo */
+  siga_protocolo_novo?: boolean;
   // #359: o aprovado mudou depois do espelho vigente (na nota emitida, o espelho nao se gera mais), ou o espelho
   // antigo nao se confere
   espelho_desatualizado?: "aprovado_mudou" | "nota_emitida" | "nao_conferido" | null;
