@@ -158,7 +158,11 @@ def derivar(situacao: str | None, movimentacoes: list[dict], hoje: datetime.date
     `desde` e' a entrada no setor atual (`_entrada_no_setor`): a Transferencia que levou o processo para la'; sem
     ela, o primeiro Recebimento. Sem nenhuma das duas: na caixa de entrada, a ultima Transferencia (senao a
     movimentacao mais recente); fora dela, a movimentacao mais antiga. "Com quem" e' quem fez o ultimo Recebimento
-    no setor (na caixa de entrada ninguem recebeu ainda). `ultima` nao considera Marcacao nem Anotacao."""
+    no setor (na caixa de entrada ninguem recebeu ainda). `ultima` nao considera Marcacao nem Anotacao.
+
+    O tempo parado (#840) conta da `ultima`, a mesma movimentacao que a coluna "Ultima movimentacao" mostra:
+    `dias_sem_movimentacao` sao os dias uteis desde ela e `hoje` quantas dessas movimentacoes (fora Marcacao e
+    Anotacao) sao de hoje. `dias_uteis` (desde a entrada no setor) continua so' como informacao."""
     validas = sorted((m for m in movimentacoes if "cancelad" not in (m["evento"] or "").lower()),
                      key=lambda m: m["data"])
     setor = _setor(situacao)
@@ -175,14 +179,16 @@ def derivar(situacao: str | None, movimentacoes: list[dict], hoje: datetime.date
         desde = entrada["data"] if entrada else (validas[0]["data"] if validas else None)
     hoje_iso = hoje.isoformat()
     andamentos = [m for m in validas if not _marcacao_ou_anotacao(m["evento"])]
+    ultima = andamentos[-1] if andamentos else None
     return {
         "setor": setor,
         "caixa_entrada": caixa_entrada,
         "com_quem": recebimento["at_pessoa"] if recebimento else "",
         "desde": desde,
         "dias_uteis": _dias_uteis(datetime.date.fromisoformat(desde[:10]), hoje) if desde else None,
-        "hoje": sum(m["data"][:10] == hoje_iso for m in validas),
-        "ultima": andamentos[-1] if andamentos else None,
+        "dias_sem_movimentacao": _dias_uteis(datetime.date.fromisoformat(ultima["data"][:10]), hoje) if ultima else None,
+        "hoje": sum(m["data"][:10] == hoje_iso for m in andamentos),
+        "ultima": ultima,
         "protocolado_em": validas[0]["data"] if validas else None,
     }
 
@@ -582,15 +588,23 @@ def categoria_a_conferir(categoria: str, escolhida: bool, ligado: bool, nome_mos
     return indicada if indicada and indicada != categoria else None
 
 
-def situacao_do_tempo(dias_uteis: int | None, hoje: int) -> str | None:
-    """A leitura do tempo no setor, na regua da familia "tempo parado" (docs/identidade-visual.md): andou hoje e'
-    `feito`; `critico` a partir de `DIAS_ACAO` dias uteis no setor; `breve` a partir de `DIAS_ATENCAO`; antes disso,
-    `andamento`. Sem a data de entrada no setor, None. A tela SIGA pinta a linha e conta os parados por aqui."""
+def situacao_do_tempo(dias_sem_movimentacao: int | None, hoje: int) -> str | None:
+    """A regua da familia "tempo parado" (docs/identidade-visual.md) sobre os dias uteis SEM MOVIMENTACAO de
+    `derivar` (#840; nao o tempo no setor): andou hoje e' `feito`; `critico` a partir de `DIAS_ACAO`; `breve` a
+    partir de `DIAS_ATENCAO`; antes disso, `andamento`. Sem movimentacao nenhuma, None."""
     if hoje > 0:
         return "feito"
-    if dias_uteis is None:
+    if dias_sem_movimentacao is None:
         return None
-    return "critico" if dias_uteis >= DIAS_ACAO else "breve" if dias_uteis >= DIAS_ATENCAO else "andamento"
+    if dias_sem_movimentacao >= DIAS_ACAO:
+        return "critico"
+    return "breve" if dias_sem_movimentacao >= DIAS_ATENCAO else "andamento"
+
+
+def parado(derivado: dict) -> str | None:
+    """A leitura unica de "parado" de um processo (#840), sobre o que `derivar` devolve: a da linha da tela SIGA, da
+    faixa de numeros, do aviso `siga_parado`, da posicao na medicao e do protocolo. A tela nao calcula."""
+    return situacao_do_tempo(derivado["dias_sem_movimentacao"], derivado["hoje"])
 
 
 def _titulo_das_medicoes(conn, medicao_id: int | None, protocolo_id: int | None) -> str | None:
@@ -718,7 +732,7 @@ def do_protocolo(conn, protocolo_id: int, hoje: datetime.date | None = None) -> 
     if p is None:
         return None
     saida = {"codigo": p["codigo"], "link": link_do_processo(p["codigo"]), "setor": None, "com_quem": None,
-             "dias_uteis": None, "lido_em": None,
+             "dias_uteis": None, "dias_sem_movimentacao": None, "situacao_tempo": None, "lido_em": None,
              "registrado_em": registrado_em(conn, "protocolo", [protocolo_id]).get(protocolo_id)}
     leitura = conn.execute("SELECT situacao, lido_em FROM siga_leituras WHERE processo_id=? "
                            "ORDER BY lido_em DESC, id DESC LIMIT 1", (p["id"],)).fetchone()
@@ -727,6 +741,7 @@ def do_protocolo(conn, protocolo_id: int, hoje: datetime.date | None = None) -> 
                                               "WHERE processo_id=?", (p["id"],))]
         d = derivar(leitura["situacao"], movs, hoje or tempo.hoje_local())
         saida.update(setor=d["setor"] or None, com_quem=d["com_quem"] or None, dias_uteis=d["dias_uteis"],
+                     dias_sem_movimentacao=d["dias_sem_movimentacao"], situacao_tempo=parado(d),
                      lido_em=tempo.iso_utc(leitura["lido_em"]))
     return saida
 
@@ -738,9 +753,10 @@ def _em_lotes(ids, tamanho: int = 500):
 
 
 def _mais_parado(posicao: dict) -> tuple:
-    """Chave de ordem da tela SIGA (`ordenar` em siga.ts): mais dias uteis no setor, depois o mais antigo nele."""
-    return (-(posicao["dias_uteis"] if posicao["dias_uteis"] is not None else -1), posicao["desde"] or "9",
-            posicao["processo_id"])
+    """Chave de ordem da tela SIGA (`ordenar` em siga.ts), pela leitura de "parado" (#840): mais dias uteis sem
+    movimentacao, depois a ultima movimentacao mais antiga; sem movimentacao nenhuma, no fim."""
+    dias = posicao["dias_sem_movimentacao"]
+    return (-(dias if dias is not None else -1), posicao["ultima_em"] or "9", posicao["processo_id"])
 
 
 def mais_parado(posicoes: list[dict]) -> dict | None:
@@ -751,7 +767,7 @@ def posicao_das_medicoes(conn, medicao_ids, hoje: datetime.date) -> dict[int, di
     """Issue #664: {medicao: posicao do processo vivo ligado a ela}, para o quadro do mes. Ligado pela medicao ou
     pelo protocolo que a leva. Fica de fora o processo encerrado (`_encerramento`), o que ainda nao foi lido e o que
     nao tem setor na situacao. Com mais de um processo vivo na medicao, o mais parado. Setor, entrada, dias uteis e
-    movimentacoes de hoje sao os de `derivar`, os mesmos da tela SIGA. Le as movimentacoes de todos os processos numa consulta por lote."""
+    movimentacoes de hoje sao os de `derivar`, os mesmos da tela SIGA; "mais parado" e' o de `_mais_parado` (#840). Le as movimentacoes de todos os processos numa consulta por lote."""
     medicoes_de: dict[int, set[int]] = {}
     for lote in _em_lotes(medicao_ids):
         marcas = ",".join("?" * len(lote))
@@ -783,7 +799,10 @@ def posicao_das_medicoes(conn, medicao_ids, hoje: datetime.date) -> dict[int, di
         if not d["setor"]:
             continue
         posicao = {"processo_id": pid, "setor": d["setor"], "dias_uteis": d["dias_uteis"],
-                   "desde": tempo.iso_local(d["desde"]) if d["desde"] else None, "hoje": d["hoje"]}
+                   "desde": tempo.iso_local(d["desde"]) if d["desde"] else None, "hoje": d["hoje"],
+                   "dias_sem_movimentacao": d["dias_sem_movimentacao"],
+                   "ultima_em": tempo.iso_local(d["ultima"]["data"]) if d["ultima"] else None,
+                   "situacao_tempo": parado(d)}
         for mid in medicoes_de[pid]:
             candidatas.setdefault(mid, []).append(posicao)
     return {mid: mais_parado(posicoes) for mid, posicoes in candidatas.items()}
@@ -859,7 +878,7 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
             "protocolo_id": p["protocolo_id"], "situacao": situacao, "encerrado": encerrado,
             **derivado,
             # o encerrado (#657) nao esta' parado nem andando: sem leitura de tempo
-            "situacao_tempo": None if encerrado else situacao_do_tempo(derivado["dias_uteis"], derivado["hoje"]),
+            "situacao_tempo": None if encerrado else parado(derivado),
             "movimentacoes": movs,
         })
     fora = {p["id"]: p["encerrado"] for p in saida if p["encerrado"]}
@@ -870,7 +889,7 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
             "atrasado": atrasado(_leitura_dos_vivos(conn, fora), agora),
             "processos": saida, "pode_atualizar": bool(tarefa_do_robo()), "robo": robo,
             # a faixa de numeros da tela (#805): so' os vivos, pela mesma leitura que pinta a linha. "Parados" sao os
-            # criticos (`DIAS_ACAO` dias uteis ou mais, sem andar hoje); "nao lidos", os que levam o aviso na linha
+            # criticos (`DIAS_ACAO` dias uteis ou mais sem movimentacao, #840); "nao lidos", os que levam o aviso na linha
             "numeros": {"acompanhados": len(vivos),
                         "parados": sum(p["situacao_tempo"] == "critico" for p in vivos),
                         "andaram_hoje": sum(p["hoje"] > 0 for p in vivos),
@@ -1149,8 +1168,8 @@ def saude(conn) -> dict:
 
 def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) -> list[dict]:
     """Avisos da fila (issue #330). `siga_parado`: processo ligado a medicao ainda nao recebida, 5 dias uteis ou
-    mais parado: os dias sao os do "No setor ha'" da tela (`derivar`, desde a entrada no setor atual, #650), e o nivel
-    segue `DIAS_ATENCAO` e `DIAS_ACAO`. Um so' por medicao: o do processo do protocolo mais recente (sem protocolo
+    mais sem movimentacao: os dias sao os da coluna "Dias sem movimentacao" da tela (`derivar`, desde a ultima
+    movimentacao fora Marcacao e Anotacao, #840), e o nivel e' o de `parado`. Um so' por medicao: o do processo do protocolo mais recente (sem protocolo
     vale menos que com; empate, o processo mais novo), porque o antigo fica arquivado no SIGA depois de uma
     devolucao; o arquivado (#657) nao avisa. `siga_sem_leitura`: um so', quando o robo passou do atraso nos processos vivos. Processo sem
     medicao (Outros processos) nao avisa: nao ha' obra nem ato da dashboard que o faca sumir."""
@@ -1168,15 +1187,16 @@ def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) ->
         movs = [dict(r) for r in conn.execute(
             "SELECT data, evento, at_lotacao, at_pessoa FROM siga_movimentacoes WHERE processo_id=?", (p["id"],))]
         d = derivar(leitura["situacao"] if leitura else None, movs, hoje)
-        if d["desde"] is None or arquivado(leitura["situacao"] if leitura else None, movs):
+        if d["ultima"] is None or arquivado(leitura["situacao"] if leitura else None, movs):
             continue
-        parado_desde, dias = d["desde"][:10], d["dias_uteis"]
-        if dias < DIAS_ATENCAO:
+        situacao = parado(d)
+        if situacao not in ("breve", "critico"):
             continue
+        parado_desde, dias = d["ultima"]["data"][:10], d["dias_sem_movimentacao"]
         onde = f" em {d['setor']}" if d["setor"] else ""
         out.append({**registro_avisos.aviso(
-            "siga_parado", "acao" if dias >= DIAS_ACAO else "atencao",
-            f"processo {p['numero']} parado{onde} há {texto.dias_uteis(dias)}", p["contrato_id"],
+            "siga_parado", "acao" if situacao == "critico" else "atencao",
+            f"processo {p['numero']}{onde} sem movimentação há {texto.dias_uteis(dias)}", p["contrato_id"],
             registro_avisos.obra(conn, p["contrato_id"]), dias=dias,
             destino={"tela": "siga", "processo": p["id"]}, data=parado_desde, sentido="desde"),
             "medicao_id": p["medicao_id"]})

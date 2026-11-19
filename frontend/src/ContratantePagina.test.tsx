@@ -89,7 +89,7 @@ const noSiga = (id: number, extra: Partial<ProcessoSiga>): ProcessoSiga => ({
   id, codigo: null, link: null, numero: `ORGAO-PRO-2026/0000${id}`, nome: null, categoria: "medicoes", complemento: null, o_que_e: "8ª Medição",
   categoria_a_conferir: null, contrato_id: 1, obra: "Estações BRT", medicao_id: null, medicao_titulo: null, contratante: "SINFRA", orgao_sub: "SUEF II",
   situacao_tempo: "andamento", protocolo_id: null, situacao: "1º Volume - Aguardando Andamento [COFIN, [X]]", setor: "COFIN", caixa_entrada: false,
-  com_quem: "Fulano", encerrado: null, desde: "2026-11-10T09:00:00-04:00", dias_uteis: 3, hoje: 0, ultima: null, protocolado_em: null,
+  com_quem: "Fulano", encerrado: null, desde: "2026-11-10T09:00:00-04:00", dias_uteis: 3, dias_sem_movimentacao: 3, hoje: 0, ultima: null, protocolado_em: null,
   movimentacoes: [], ...extra });
 const SIGA: SigaDoContratante = {
   lido_em: "2026-11-18T14:00:00+00:00", limites: { dias_atencao: 5, dias_critico: 10 },

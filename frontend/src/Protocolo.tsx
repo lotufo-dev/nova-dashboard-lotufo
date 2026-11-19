@@ -13,6 +13,7 @@ import { protocolosDa } from "./medicao";
 import { Link } from "./Link";
 import { fmtCompetencia, fmtDataHora } from "./tempo";
 import Selo from "./Selo";
+import type { Situacao } from "./situacao";
 import Pendencias from "./Pendencias";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import Falha from "./Falha";
@@ -38,8 +39,11 @@ export type ProtocoloDet = {
   enviado_em?: string | null; enviado_por?: string | null;   // A6: quando saiu e quem mandou
   siga?: SigaDoProtocolo | null;                              // issue #328: o processo no SIGA, quando o link foi gravado
 };
+// #840: dias_sem_movimentacao e situacao_tempo sao a leitura de "parado" do servidor (`siga.parado`); dias_uteis (no
+// setor) fica so' como informacao
 export type SigaDoProtocolo = { codigo: string; link: string | null; setor: string | null; com_quem: string | null;
-  dias_uteis: number | null; lido_em: string | null; registrado_em: string | null };
+  dias_uteis: number | null; dias_sem_movimentacao?: number | null; situacao_tempo?: Situacao | null;
+  lido_em: string | null; registrado_em: string | null };
 export type Lista = { familia: string; etapas: Etapa[]; pecas: PecaCfg[]; medicoes: Medicao[]; protocolos: ProtocoloDet[] };
 type Previa = { para: string[]; copia: string[]; assunto: string; corpo: string;
   anexos: { nome: string; tamanho: number }[]; total: number; limite: number; pendencias: Pendencia[];
@@ -189,18 +193,16 @@ function Cartao({ p, pecasCfg, podeEditar, aoMudar, marcado, aoMarcar }: {
   );
 }
 
-// Limites da issue #328: a partir de 5 dias uteis no setor o selo e' ambar; a partir de 10, vermelho.
-const DIAS_ATENCAO = 5;
-const DIAS_CRITICO = 10;
-
-/** "No SIGA: COFIN · com Fulano · há 6 dias úteis" + o link. Sem leitura do robo ainda, so' o link. */
+/** "No SIGA: COFIN · com Fulano · sem movimentação há 6 dias úteis" + o link. Sem leitura do robo ainda, so' o link.
+ *  #840: o tempo e o selo sao os dias sem movimentacao e a leitura de "parado" do servidor (a mesma da tela SIGA). */
 function NoSiga({ siga }: { siga?: SigaDoProtocolo | null }) {
-  if (!siga || (!siga.link && siga.dias_uteis === null && !siga.setor)) return null;
-  const dias = siga.dias_uteis;
+  const dias = siga?.dias_sem_movimentacao ?? null;
+  if (!siga || (!siga.link && dias === null && !siga.setor)) return null;
   const partes = [siga.setor, siga.com_quem && `com ${siga.com_quem}`,
-    dias === null ? null : dias === 0 ? "hoje" : `há ${dias} ${dias === 1 ? "dia útil" : "dias úteis"}`].filter(Boolean);
-  const selo = dias === null ? null : dias >= DIAS_CRITICO ? <Selo situacao="critico">Crítico</Selo>
-    : dias >= DIAS_ATENCAO ? <Selo situacao="breve">Atenção</Selo> : null;
+    siga.situacao_tempo === "feito" ? "andou hoje"
+      : dias === null ? null : `sem movimentação há ${dias} ${dias === 1 ? "dia útil" : "dias úteis"}`].filter(Boolean);
+  const selo = siga.situacao_tempo === "critico" ? <Selo situacao="critico">Crítico</Selo>
+    : siga.situacao_tempo === "breve" ? <Selo situacao="breve">Atenção</Selo> : null;
   return (
     <p className="form-inline">
       {partes.length > 0 && <span>No SIGA: {partes.join(" · ")}</span>}
