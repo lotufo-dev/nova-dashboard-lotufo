@@ -33,6 +33,7 @@ import { avisosEmVolume, semAvisos, cabecalhoCom, cabecalhoEmDia, CUSTO_DA_OBRA,
          PDF_ILEGIVEL,
          prazosEmEncerramento, prazosParalisada, PREVIA_DO_ESPELHO, PROTOCOLO_ID, RESPOSTA_QUE_QUEBRA, resumoEmQuadro, RM_EXCLUSAO_RECUSADA,
          SIGA_COM_NAO_LIDOS, SIGA_COM_PROCESSOS, SIGA_SO_MEDICOES } from "./simulados.mjs";
+import { fechamentoEmAbas } from "./simulados.mjs";   // #815: em linha propria, para nao mexer na lista de cima
 
 import { carteiraSimulada, filaSimulada, painelDaCarteira } from "./simulados.mjs";
 import { cabecalhoDeNomeLongo } from "./simulados.mjs";
@@ -88,6 +89,14 @@ const OBRA_GRADE = ".obra-grade";
 const comNecessario = noRitmo => [
   { caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoEmDia },
   { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaComNecessario(noRitmo) },
+  { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
+];
+// issue #822: a pagina da obra fora da regua do andamento: o motivo no lugar da leitura, sem selo na conclusao.
+// `noFim`: a execucao termina no mes que vem (duas competencias)
+import { cabecalhoNoFim, fichaForaDaRegua } from "./simulados.mjs";
+const foraDaRegua = (fora, noFim = false) => [
+  { caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: noFim ? cabecalhoNoFim : cabecalhoEmDia },
+  { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaForaDaRegua(fora, noFim) },
   { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
 ];
 // issue #805: a fila de avisos com o volume da producao (dezenas de vencidos em varias obras, um aviso de cada assunto
@@ -247,8 +256,8 @@ export const TELAS = [
 
   // ---- Fechamento e Ancoras
   { rota: "fechamento", id: "fechamento", caminho: "/fechamento", perfis: TODOS, espera: ".fch-numeros" },
-  { rota: "fechamento", id: "fechamento-2025", caminho: "/fechamento", perfis: TODOS, antes: ".fch-numeros", espera: ".fch-tabela--aberto",
-    passos: [{ clicar: '.escolha:has-text("2025")' }] },
+  { rota: "fechamento", id: "fechamento-2025", caminho: "/fechamento", perfis: TODOS, antes: ".fch-numeros",
+    espera: '.escolha[aria-pressed="true"]:has-text("2025")', passos: [{ clicar: '.escolha:has-text("2025")' }] },
   // as familias de valor (#805): a tabela do mes com dois anos (a variacao do medido), a diferenca entre o aprovado e
   // o pedido (so' o corte, no mes) e o em aberto; no segundo estado, tres meses abertos ate' a medicao: o corte
   // critico, o corte ao lado de um arredondamento, e o aprovado acima do pedido, que so' aparece na linha da medicao
@@ -261,6 +270,21 @@ export const TELAS = [
       { clicar: `.fch-abre[aria-label="Obra Exemplo, medições de 0${7 + i}/2026"]` }]) },
   { rota: "fechamento", id: "fechamento-erro", caminho: "/fechamento", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/fechamento$/) },
+  // Fechamento em abas (#815): cada aba pelo endereco dela, com o cadastro de exemplo (um contratante so') e com o
+  // simulado de quatro contratantes e dois anos (a variacao na comparacao, a participacao e o nome comprido); o ano
+  // pelo endereco; o mes aberto pelo endereco; e a pagina sem lancamento nas tres abas
+  { rota: "fechamento", id: "fechamento-comparacao", caminho: "/fechamento/comparacao", perfis: TODOS, espera: ".fch-tabela--comparacao" },
+  { rota: "fechamento", id: "fechamento-contratantes", caminho: "/fechamento/contratantes?ano=2025", perfis: TODOS,
+    espera: ".fch-tabela--contratantes" },   // o cadastro de exemplo so' mede em 2025: o ano vai no endereco
+  { rota: "fechamento", id: "fechamento-comparacao-valores", caminho: "/fechamento/comparacao", perfis: ["diretoria"],
+    espera: ".fch-tabela--comparacao .variacao", simular: [{ caminho: /^\/api\/fechamento$/, corpo: fechamentoEmAbas() }] },
+  { rota: "fechamento", id: "fechamento-contratantes-valores", caminho: "/fechamento/contratantes", perfis: TODOS,
+    espera: ".fch-tabela--contratantes .fch-parte", simular: [{ caminho: /^\/api\/fechamento$/, corpo: fechamentoEmAbas() }] },
+  { rota: "fechamento", id: "fechamento-mes-aberto", caminho: "/fechamento?mes=2026-08", perfis: ["diretoria"],
+    espera: ".fch-linha--obra", simular: [{ caminho: /^\/api\/fechamento$/, corpo: fechamentoEmAbas() }] },
+  ...[["", "meses"], ["/comparacao", "comparacao"], ["/contratantes", "contratantes"]].map(([aba, nome]) => (
+    { rota: "fechamento", id: `fechamento-${nome}-vazio`, caminho: `/fechamento${aba}`, perfis: ["diretoria"], espera: ".fch-painel .fch-vazio",
+      simular: [{ caminho: /^\/api\/fechamento$/, corpo: fechamentoEmAbas({ vazio: true }) }] })),
   { rota: "ancoras-docusign", id: "ancoras-docusign", caminho: "/ancoras-docusign", perfis: OPERA, espera: ".anc" },
 
   // ---- Pagina da obra: as seis abas e a falha
@@ -289,6 +313,12 @@ export const TELAS = [
     simular: comNecessario(false) },
   { rota: "obra", id: "obra-no-ritmo", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .selo--feito",
     simular: comNecessario(true) },
+  // #822: fora da regua do andamento, o painel "Prazo" escreve o motivo (prazo no fim com a prorrogacao pedida; sem
+  // medicao ha' tres competencias) e a conclusao estimada fica sem selo
+  { rota: "obra", id: "obra-prazo-no-fim", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .andamento--fora",
+    simular: foraDaRegua({ motivo: "prazo_no_fim", prorrogacao_pedida: true }, true) },
+  { rota: "obra", id: "obra-sem-medicao", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .andamento--fora",
+    simular: foraDaRegua({ motivo: "sem_medicao", sem_medicao_desde: "2026-07" }) },
   { rota: "obra", id: "obra-erro", caminho: "/obras/:obra", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/contratos\/\d+\/cabecalho$/) },
 

@@ -96,6 +96,17 @@ o aprovado e o pedido, e as duas referencias saem daqui, prontas:
 - Variacao do medido: `medido_ano_anterior_centavos`, em cada mes, e' o medido do mesmo mes do ano anterior. So' nos
   meses de competencia ja' encerrada (anteriores ao mes de hoje: o mes em curso ainda recebe medicao) e so' quando o
   ano anterior esta' na pagina e teve medido nesse mes; senao, nulo.
+
+Por contratante (issue #815, decisao do dono de 18/11/2026): `por_contratante`, por ano, uma linha por contratante com
+os mesmos numeros do ano (`SOMAS`). Nao ha' conta nova: cada medicao da pagina e' de UM contrato, e o contrato de UM
+contratante (`_contratantes`: a sigla da lista de Obras, a SINFRA inteira num grupo so'), entao a linha do contratante
+e' a soma das MESMAS linhas de medicao (`_linha_medicao`) que somam a obra, o mes e o ano, no mesmo laco. Por isso as
+linhas de um ano somam o total do ano (`por_ano`) em toda coluna, ao centavo: a nota de consorcio e a nota partilhada
+entre medicoes ja' entraram uma vez so' na linha da medicao. A participacao (`participacao_medido_por_mil`) e' a do
+medido do contratante no medido do ano, em milesimos, repartida por `dinheiro.ratear_proporcional` (as linhas somam
+1000); nula quando o ano nao tem medido ou algum contratante tem medido negativo (nao ha' parte de um total assim).
+A ordem e' a do medido, o maior primeiro. Com a trava do total a receber, o recebido e o em aberto das linhas vem
+nulos, como nos outros niveis.
 """
 import datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -560,6 +571,28 @@ def _cobertura(linhas: list[dict]) -> dict:
     return out
 
 
+def _contratantes(conn) -> dict[int, tuple[str, str | None]]:
+    """Issue #815: contrato -> (o contratante, a chave da pagina dele). A sigla e a chave sao as da lista de Obras
+    (`medicoes.contratante` e `diretoria.chave_do_contratante`, como em `api_contratos`): a SINFRA inteira e' um
+    contratante so', e o contrato sem orgao no cadastro fica com o texto do proprio contrato, sem chave."""
+    return {i: (o["contratante"], diretoria.chave_do_contratante(o["familia"], o["chave"]))
+            for i, o in medicoes._obras_com_contratante(conn).items()}
+
+
+def _linhas_por_contratante(grupos: dict[str, dict]) -> list[dict]:
+    """Issue #815: as linhas de um ano da aba "Por contratante", o de maior medido primeiro (empate, pelo nome), cada
+    uma com a participacao do medido dela no medido do ano, em milesimos. A reparticao e' de
+    `dinheiro.ratear_proporcional` (so' inteiros, o residuo nos maiores restos): as participacoes somam 1000. Sem
+    medido no ano, ou com medido negativo em algum contratante, a participacao vem nula."""
+    linhas = sorted(grupos.values(), key=lambda g: (-g["medido_centavos"], medicoes._chave_nome(g["contratante"])))
+    pesos = [g["medido_centavos"] for g in linhas]
+    partes = (dinheiro.ratear_proporcional(1000, pesos) if pesos and min(pesos) >= 0 and sum(pesos) > 0
+              else [None] * len(linhas))
+    for g, parte in zip(linhas, partes):
+        g["participacao_medido_por_mil"] = parte
+    return linhas
+
+
 def fechamento(conn, hoje: datetime.date | None = None) -> dict:
     with db.leitura(conn):
         return _fechamento(conn, hoje or tempo.hoje_local())
@@ -588,6 +621,9 @@ def _fechamento(conn, hoje: datetime.date) -> dict:
     mistos = _pares_mistos(linhas)
 
     meses: dict[str, dict] = {}
+    # issue #815: a mesma linha de medicao soma tambem no contratante da obra dela, no ano da competencia
+    contratante_de = _contratantes(conn)
+    do_contratante: dict[str, dict[str, dict]] = {a: {} for a in ANOS}
     anteriores = {"quantidade": 0, "valor_centavos": 0}
     em_aberto, diferem = [], []
     for x in linhas:
@@ -613,6 +649,8 @@ def _fechamento(conn, hoje: datetime.date) -> dict:
         obra["medicoes"].append(x)
         _somar(obra, x)
         _somar(mes, x)
+        nome, chave = contratante_de[x["contrato_id"]]
+        _somar(do_contratante[ano].setdefault(nome, {"contratante": nome, "contratante_chave": chave, **_zero()}), x)
         em_aberto += [{**e, "contrato_id": x["contrato_id"], "obra": x["obra"], "medicao_id": x["medicao_id"],
                        "medicao_numero": x["numero"], "tipo": x["tipo"], "competencia": x["competencia"],
                        "protocolo_em": x["protocolo_em"], "emitida_em": emitida_em} for e in abertas]
@@ -642,6 +680,7 @@ def _fechamento(conn, hoje: datetime.date) -> dict:
     # o em aberto (a) + (a') + (b), linha a linha; o total e as tres partes de cada ano estao em `por_ano` (a tela
     # mostra o painel do ano escolhido). (c) e o em aberto de antes de 2025 ficam a' parte, de qualquer ano.
     saida = {"anos": list(ANOS), "meses": lista, "por_ano": por_ano, "acumulado": {"ate_mes": ate, **acumulado},
+             "por_contratante": {a: _linhas_por_contratante(do_contratante[a]) for a in ANOS},
              "em_aberto": em_aberto, "em_aberto_anteriores": anteriores, "notas_sem_medicao": _notas_sem_medicao(conn),
              "cobertura": cobertura, "notas_diferem": diferem, "pares_mistos": mistos,
              "diferenca_critica_por_mil": avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL,
@@ -657,7 +696,8 @@ def _esconder_a_receber(f: dict) -> None:
     notas), a marca de recebida de cada nota, a de medicao sem nota ligada e as listas do em aberto. Como no Inicio,
     o bloco inteiro vem vazio, e a tela diz a trava em uma frase. Medido, aprovado e protocolado ficam, e os avisos
     `notas_diferem` e `pares_mistos` tambem (comparam nota com medicao; nada do recebido). O estado da medicao, que
-    tambem deixaria deduzir, nao esta' na resposta em caso nenhum (`_linha_medicao`)."""
+    tambem deixaria deduzir, nao esta' na resposta em caso nenhum (`_linha_medicao`). As linhas por contratante
+    (issue #815) perdem os mesmos numeros; a participacao fica, porque e' do medido."""
     def nulo(x):
         for k in ESCONDIDOS:
             x[k] = None
@@ -674,6 +714,8 @@ def _esconder_a_receber(f: dict) -> None:
     for a in f["anos"]:
         nulo(f["por_ano"][a])
         nulo(f["acumulado"][a])
+        for g in f["por_contratante"][a]:
+            nulo(g)
     f["em_aberto"] = []
     f["em_aberto_anteriores"] = {"quantidade": 0, "valor_centavos": None}
     f["notas_sem_medicao"] = {"em_aberto": [], "em_aberto_centavos": None, "pagas": {"quantidade": 0, "valor_centavos": None}}

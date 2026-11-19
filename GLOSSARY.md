@@ -236,6 +236,11 @@ A SINFRA conta inteira, não cada superintendência.
 **Custo lançado no RM**:
 O custo que o RM registra para uma obra. Não é margem nem lucro.
 
+**Participação do contratante**:
+Quanto do medido do ano, na cota, é de um contratante, em percentual com uma casa. As participações de um ano somam
+100%. Aparece na aba Por contratante do Fechamento. Sem medido no ano, não há participação.
+_Avoid_: fatia, share, peso
+
 ### Tela
 
 **Aviso**:
@@ -296,8 +301,21 @@ _Avoid_: variação
 
 **Andamento**:
 A leitura do ritmo contra o necessário para o prazo: Adiantada (100% ou mais), Atenção (de 70% a 99%) ou Devagar
-(abaixo de 70%).
+(abaixo de 70%). A leitura é uma só, do servidor: a mesma na lista de Obras, na página do contratante e na página
+da obra. A obra com o prazo no fim, com prorrogação pedida ou sem medição fica fora da régua, e a tela escreve o
+motivo no lugar.
 _Avoid_: em andamento (é uma situação)
+
+**Prazo no fim**:
+A obra com até duas competências de prazo de execução pela frente, contadas a de hoje e a do fim. Fica fora da régua
+do andamento: o necessário por mês viraria o saldo inteiro em um ou dois meses. O pedido de prorrogação enviado e
+ainda sem resposta também tira a obra da régua, com qualquer prazo pela frente ("prorrogação pedida").
+_Avoid_: execução vencendo (é o aviso de prazo, a 60 e a 30 dias do fim)
+
+**Sem medição desde**:
+O mês da última medição de execução da obra que fechou as três últimas competências sem medir. Fica fora da régua do
+andamento. A obra que nunca mediu execução não leva a frase.
+_Avoid_: paralisada (é a obra com ordem de paralisação)
 
 **Fila de trabalho**:
 A entrada da tela Medições: as medições abertas da competência, agrupadas por com quem estão e, em cada grupo, da

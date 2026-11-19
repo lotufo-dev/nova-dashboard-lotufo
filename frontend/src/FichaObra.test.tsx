@@ -1,5 +1,6 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { SEM_LEITURA } from "./andamentoTeste";
 import FichaObra, { MedicoesAgora, PrazoDaObra, mesAno, type Ficha } from "./FichaObra";
 
 // O alto da pagina da obra (#646, redesenhado na #774) nao le nada: a pagina unica (`ContratoPagina`) le a ficha e
@@ -125,7 +126,7 @@ describe("Prazo da obra: os dias da execução, as linhas do tempo e o ritmo (#6
     montar();
     const conta = within(regiao("Prazo")).getByLabelText("Ritmo e prazo");
     expect([...conta.querySelectorAll("dt")].map(dt => dt.textContent)).toEqual(
-      ["Ritmo mensal", "Necessário para terminar no prazo", "Conclusão estimada"]);
+      ["Ritmo mensal", "Necessário para terminar no prazo", "Andamento", "Conclusão estimada"]);
     expect(valor("Ritmo mensal").textContent).toMatch(/^R\$\s50\.000,00$/);
     // #803: o valor por mês e as competências que restam; o saldo do topo dividido por elas é o necessário
     const [porMes, restam] = [...valor("Necessário para terminar no prazo").querySelectorAll("span")].map(x => x.textContent);
@@ -173,10 +174,47 @@ describe("Prazo da obra: os dias da execução, as linhas do tempo e o ritmo (#6
     expect(regiao("Prazo").querySelector(".selo")).toBeNull();
   });
 
-  it("sem prazo a cumprir e sem ritmo: '—' nos três e nenhum selo", () => {
-    comRitmo({ ritmo_centavos: null, necessario_centavos: null, competencias_restantes: null, conclusao: null, situacao: null, dias_alem: null });
-    expect(["Ritmo mensal", "Necessário para terminar no prazo", "Conclusão estimada"].map(r => valor(r).textContent)).toEqual(["—", "—", "—"]);
+  it("sem prazo a cumprir e sem ritmo: '—' nos quatro e nenhum selo", () => {
+    comRitmo({ ritmo_centavos: null, necessario_centavos: null, competencias_restantes: null, conclusao: null, situacao: null, dias_alem: null,
+      leitura: SEM_LEITURA });
+    expect(["Ritmo mensal", "Necessário para terminar no prazo", "Andamento", "Conclusão estimada"].map(r => valor(r).textContent)).toEqual(["—", "—", "—", "—"]);
     expect(regiao("Prazo").querySelector(".selo")).toBeNull();
+  });
+
+  it("#822: o andamento é a leitura do servidor, com a peça da lista de Obras: a palavra, o percentual e a barra", () => {
+    comRitmo({ ritmo_centavos: 5000000, necessario_centavos: 6255145, competencias_restantes: 3, conclusao: "2027-03-08", situacao: "atrasa", dias_alem: 37,
+      leitura: { ...SEM_LEITURA, situacao: "atencao", pct: 79 } });
+    const andamento = valor("Andamento");
+    expect(andamento.textContent!.replace(/\s/g, " ")).toBe("Atenção · mede 79% do necessário");
+    expect(andamento.querySelector(".andamento--atencao .andamento__barra")).toBeTruthy();
+    // o selo da conclusão estimada continua ao lado da data
+    expect(valor("Conclusão estimada").querySelector(".selo--critico")!.textContent).toMatch(/^37.dias depois do fim da execução$/);
+  });
+
+  it("#822: a obra cuja conclusão estimada não fecha continua com a leitura da lista (a página calava a situação)", () => {
+    comRitmo({ ritmo_centavos: 100, necessario_centavos: 6255145, competencias_restantes: 3, conclusao: null, situacao: null, dias_alem: null,
+      leitura: { ...SEM_LEITURA, situacao: "devagar", pct: 0 } });
+    expect(valor("Andamento").textContent!.replace(/\s/g, " ")).toBe("Devagar · mede 0% do necessário");
+    expect(valor("Conclusão estimada").textContent).toBe("—");
+  });
+
+  it("#822: fora da régua, o motivo em tinta no andamento e nenhum selo na conclusão; a data continua", () => {
+    const fora: [Partial<typeof SEM_LEITURA>, string][] = [
+      [{ motivo: "prazo_no_fim" }, "Prazo no fim"],
+      [{ motivo: "prazo_no_fim", prorrogacao_pedida: true }, "Prazo no fim · prorrogação pedida"],
+      [{ motivo: "prorrogacao_pedida", prorrogacao_pedida: true }, "Prorrogação pedida"],
+      [{ motivo: "sem_medicao", sem_medicao_desde: "2026-07" }, "Sem medição desde 07/2026"],
+    ];
+    for (const [extra, frase] of fora) {
+      // o servidor manda `situacao` e `dias_alem` nulos junto com o motivo
+      comRitmo({ situacao: null, dias_alem: null, leitura: { ...SEM_LEITURA, ...extra } });
+      expect(valor("Andamento").textContent!.replace(/\s/g, " ")).toBe(frase);
+      expect(valor("Andamento").querySelector(".andamento--fora")).toBeTruthy();
+      expect(valor("Andamento").querySelector(".andamento__trilho")).toBeNull();
+      expect(valor("Conclusão estimada").textContent).toBe("08/03/2027");
+      expect(regiao("Prazo").querySelector(".obra-ritmo .selo")).toBeNull();
+      cleanup();
+    }
   });
 
   it("carregando e falha da ficha: sem número inventado e sem selo", () => {

@@ -407,8 +407,12 @@ def test_ficha_ritmo_e_prazo_na_cota(client_admin, monkeypatch):
     assert cheio["ritmo_centavos"] == 66_666_72 and cheio["situacao"] == "atrasa" and cheio["dias_alem"] > 0
     assert r["ritmo_centavos"] == contratos.cota(66_666_72, 4900) == 32_666_69
     assert f["topo"]["saldo_centavos"] == 391_999_84
-    assert set(r) == {"ritmo_centavos", "necessario_centavos", "competencias_restantes", "conclusao", "situacao", "dias_alem"}
-    assert (r["conclusao"], r["situacao"], r["dias_alem"]) == (cheio["conclusao"], "atrasa", cheio["dias_alem"])
+    assert set(r) == {"ritmo_centavos", "necessario_centavos", "competencias_restantes", "conclusao", "situacao", "dias_alem",
+                      "leitura"}
+    # #822: as medicoes do cenario sao de abril e maio: em outubro a obra esta' ha' tres competencias sem medir, fora
+    # da regua. A conclusao estimada continua; o selo dela (situacao e dias) se cala junto com a leitura
+    assert (r["conclusao"], r["situacao"], r["dias_alem"]) == (cheio["conclusao"], None, None)
+    assert r["leitura"]["motivo"] == "sem_medicao"
     # #803: o necessario por mes vai na cota e fecha com o topo da tela: vigente - medido = saldo, e o saldo dividido
     # pelas competencias que restam (outubro, novembro e dezembro) e' o necessario mostrado, ao centavo
     t = f["topo"]
@@ -545,16 +549,97 @@ def test_listar_traz_o_andamento_na_cota_pela_conta_da_pagina_da_obra(client_adm
     conn.commit()
     conn.close()
     lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
-    assert lista[cid]["andamento"] == {"ritmo_centavos": 32_666_69, "necessario_centavos": 130_666_61}
+
+    def valores(a):
+        return {k: a[k] for k in ("ritmo_centavos", "necessario_centavos")}
+
+    assert valores(lista[cid]["andamento"]) == {"ritmo_centavos": 32_666_69, "necessario_centavos": 130_666_61}
     ficha = client_admin.get(f"/api/contratos/{cid}/ficha").json()
-    assert lista[cid]["andamento"] == {k: ficha["ritmo"][k] for k in ("ritmo_centavos", "necessario_centavos")}
+    assert valores(lista[cid]["andamento"]) == valores(ficha["ritmo"])
     # o necessario fecha com o saldo que a propria lista mostra: saldo / competencias que restam
     assert lista[cid]["andamento"]["necessario_centavos"] == prazos.necessario_por_mes(lista[cid]["posicao"]["saldo_centavos"], 3)
-    # sem medicao na janela nao ha' ritmo; o necessario continua (9 competencias, de 10/2026 a 06/2027)
-    assert lista[sem_medicao]["andamento"] == {"ritmo_centavos": None,
+    # #822: a leitura vem pronta, e e' a da ficha. As medicoes do cenario sao de abril e maio: em outubro, julho,
+    # agosto e setembro fecharam sem medicao
+    assert lista[cid]["andamento"]["leitura"] == ficha["ritmo"]["leitura"] == {
+        **SEM_LEITURA, "motivo": "sem_medicao", "sem_medicao_desde": "2026-05"}
+    # sem medicao na janela nao ha' ritmo; o necessario continua (9 competencias, de 10/2026 a 06/2027). A obra que
+    # nunca mediu execucao nao tem leitura nem motivo
+    assert lista[sem_medicao]["andamento"] == {"ritmo_centavos": None, "leitura": SEM_LEITURA,
                                                "necessario_centavos": prazos.necessario_por_mes(100_000_000, 9)}
     # obra encerrada nao tem prazo a cumprir: sem necessario (a tela nao desenha o andamento)
-    assert lista[encerrada]["andamento"] == {"ritmo_centavos": 66_666_72, "necessario_centavos": None}
+    assert lista[encerrada]["andamento"] == {"ritmo_centavos": 66_666_72, "necessario_centavos": None, "leitura": SEM_LEITURA}
+
+
+SEM_LEITURA = {"situacao": None, "pct": None, "motivo": None, "prorrogacao_pedida": False, "sem_medicao_desde": None,
+               "atencao_desde_pct": 70, "adiantada_desde_pct": 100}
+
+
+def test_a_lista_e_a_pagina_da_obra_dao_a_mesma_leitura_do_andamento(client_admin, monkeypatch):
+    """#822: a leitura do andamento nasce numa funcao so' (`prazos.ritmo_na_cota`), e `GET /api/contratos` e
+    `GET /api/contratos/{id}/ficha` a devolvem igual para a mesma obra, em cada caso da regua: com leitura (tres
+    competencias), prazo no fim (duas), prorrogacao pedida, sem medicao ha' tres competencias, ritmo que nao fecha a
+    conclusao estimada (a pagina calava a situacao e a lista escrevia "Devagar") e obra sem prazo a cumprir."""
+    import datetime
+    from app import db, medicoes, tempo
+    hoje = datetime.date(2026, 11, 18)   # janela 05 a 10/2026
+    monkeypatch.setattr(tempo, "hoje_local", lambda: hoje)
+    conn = db.get_conn()
+
+    def obra(numero, execucao_fim, meds, bp=None, pedido=None, estado=None):
+        cid = novo_contrato({**NOVO, "numero_instrumento": numero, "execucao_fim": execucao_fim})
+        if bp is not None:
+            conn.execute("UPDATE contratos SET percentual_direito_bp=? WHERE id=?", (bp, cid))
+        if estado:
+            conn.execute("UPDATE contratos SET estado=? WHERE id=?", (estado, cid))
+        if pedido:
+            conn.execute("INSERT INTO pleitos (contrato_id, tipo, origem, numero_oficio, situacao, enviado_em) "
+                         "VALUES (?, 'prazo', 'cadastro', 'CT-001-LT-2026', 'enviado', ?)", (cid, pedido))
+        conn.commit()
+        for n, (competencia, valor) in enumerate(meds, start=1):
+            m = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": n, "tipo": "execucao", "competencia": competencia})
+            medicoes.definir_valor(conn, 1, m, "protocolado", valor, "manual")
+            conn.execute("UPDATE medicoes SET estado='protocolada' WHERE id=?", (m,))
+            conn.commit()
+        return cid
+
+    recentes = (("2026-09", 150_000_00), ("2026-10", 150_000_00))     # ritmo 50.000,00; saldo 700.000,00
+    casos = {
+        "tres competencias": (obra("IC 101/2025", "2027-01-31", recentes, bp=4900), {"situacao": "devagar", "pct": 21}),
+        "duas competencias": (obra("IC 102/2025", "2026-12-31", recentes), {"motivo": "prazo_no_fim"}),
+        "duas, com pedido": (obra("IC 103/2025", "2026-12-31", recentes, pedido="2026-11-04"),
+                             {"motivo": "prazo_no_fim", "prorrogacao_pedida": True}),
+        "prorrogacao pedida": (obra("IC 104/2025", "2027-06-30", recentes, pedido="2026-11-04"),
+                               {"motivo": "prorrogacao_pedida", "prorrogacao_pedida": True}),
+        "sem medicao": (obra("IC 105/2025", "2027-06-30", (("2026-07", 300_000_00),)),
+                        {"motivo": "sem_medicao", "sem_medicao_desde": "2026-07"}),
+        "conclusao nao fecha": (obra("IC 106/2025", "2027-06-30", (("2026-10", 6_00),)), {"situacao": "devagar", "pct": 0}),
+        "adiantada": (obra("IC 107/2025", "2027-06-30", (("2026-08", 300_000_00), ("2026-09", 300_000_00), ("2026-10", 300_000_00))),
+                      {"situacao": "adiantada", "pct": 1200}),
+        "encerrada": (obra("IC 108/2025", "2027-06-30", recentes, estado="encerrado"), {}),
+        "nunca mediu": (obra("IC 109/2025", "2027-06-30", ()), {}),
+    }
+    conn.close()
+    lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
+    for nome, (cid, esperado) in casos.items():
+        da_lista = lista[cid]["andamento"]["leitura"]
+        da_ficha = client_admin.get(f"/api/contratos/{cid}/ficha").json()["ritmo"]["leitura"]
+        assert da_lista == da_ficha == {**SEM_LEITURA, **esperado}, nome
+
+    def ritmo_da_ficha(nome):
+        return client_admin.get(f"/api/contratos/{casos[nome][0]}/ficha").json()["ritmo"]
+
+    # a pagina da obra calava a situacao deste caso (conclusao alem do teto do pedido): continua sem conclusao
+    # estimada, e a leitura agora e' a da lista
+    ficha = ritmo_da_ficha("conclusao nao fecha")
+    assert (ficha["conclusao"], ficha["situacao"]) == (None, None) and ficha["leitura"]["situacao"] == "devagar"
+    # o selo da conclusao estimada acompanha a leitura: com ela, diz os dias alem do fim (ou que esta' no ritmo); fora
+    # da regua se cala, e a data da conclusao fica
+    ficha = ritmo_da_ficha("tres competencias")
+    assert ficha["situacao"] == "atrasa" and ficha["dias_alem"] > 0
+    assert ritmo_da_ficha("adiantada")["situacao"] == "no_prazo"
+    for nome in ("duas competencias", "duas, com pedido", "prorrogacao pedida", "sem medicao"):
+        ficha = ritmo_da_ficha(nome)
+        assert ficha["conclusao"] and (ficha["situacao"], ficha["dias_alem"]) == (None, None), nome
 
 
 def test_listar_traz_o_medido_do_mes_fechado_igual_ao_do_fechamento(client_admin, monkeypatch):

@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Caminho from "./Caminho";
 import { ABAS_PRONTAS } from "./abasDoContratante";
+import { comLeitura, leituraDeTeste } from "./andamentoTeste";
 import ContratantePagina from "./ContratantePagina";
 import type { ObraLista } from "./listaObras";
 import { useRota } from "./rota";
@@ -13,7 +14,8 @@ vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api"
 // encerrada; a MTPAR com uma. O medido é o de agosto (a competência fechada) contra julho.
 const doMes = (valor: number, referencia: number) =>
   ({ competencia: "2026-08", valor_centavos: valor, referencia_competencia: "2026-07", referencia_centavos: referencia });
-const obra = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => ({
+// #822: a leitura do andamento vem do servidor; `comLeitura` põe em cada obra a que ele mandaria para o ritmo e o necessário dela
+const obra = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => comLeitura({
   id, orgao: "SINFRA - SUEF II", contratante: "SINFRA", contratante_chave: "sinfra", numero_instrumento: `IC ${id}/2026`, nome_curto: nome,
   estado: "ativo", percentual_direito_bp: 10000, execucao_fim_vigente: "2027-03-31", dias_execucao: 190,
   posicao: { vigente_centavos: 1000_00, medido_centavos: 250_00, saldo_centavos: 750_00, a_receber_centavos: 0 },
@@ -191,5 +193,30 @@ describe("Página do contratante (#805)", () => {
     await screen.findByRole("table", { name: /Obras de SINFRA/ });
     expect((await screen.findByRole("alert")).textContent).toContain("Não foi possível carregar a situação das obras e o prazo de pagamento.");
     expect(limpo(screen.getByLabelText("Números de SINFRA").textContent)).toContain("Prazo de pagamento—");
+  });
+
+  it("#822: a obra fora da régua leva o motivo no andamento, sem barra, e não conta em 'N devagar'", async () => {
+    // as três mediriam 10% do necessário; o servidor as tirou da régua
+    const fora = (motivo: Parameters<typeof leituraDeTeste>[2]) => ({ ritmo_centavos: 10_00, necessario_centavos: 100_00, leitura: leituraDeTeste(10_00, 100_00, motivo) });
+    const obras = [
+      obra(1, "Estações BRT", { andamento: fora({ motivo: "prazo_no_fim", prorrogacao_pedida: true }) }),
+      obra(2, "Cavalaria", { andamento: fora({ motivo: "sem_medicao", sem_medicao_desde: "2026-05" }) }),
+      obra(3, "5 Bairros", { andamento: fora({ motivo: "prorrogacao_pedida", prorrogacao_pedida: true }) }),
+      obra(4, "Leblon", { andamento: { ritmo_centavos: 27_00, necessario_centavos: 100_00 } }),
+    ];
+    api.mockImplementation(async (caminho: string) => caminho === "/api/contratos" ? obras : PAINEL);
+    abrir("/obras/contratante/sinfra");
+    const tabela = await screen.findByRole("table", { name: /Obras de SINFRA/ });
+    const andamento = (nome: string) => within(tabela).getByRole("link", { name: nome }).closest("tr")!.querySelector('td[data-rotulo="Andamento"]')!;
+    expect(limpo(andamento("Estações BRT").textContent)).toBe("Prazo no fim · prorrogação pedida");
+    expect(limpo(andamento("Cavalaria").textContent)).toBe("Sem medição desde 05/2026");
+    expect(limpo(andamento("5 Bairros").textContent)).toBe("Prorrogação pedida");
+    expect(limpo(andamento("Leblon").textContent)).toBe("Devagar · 27% do necessárioR$ 27/mês de R$ 100");
+    expect(tabela.querySelectorAll(".andamento__trilho").length).toBe(1);
+    expect(andamento("Estações BRT").querySelector(".andamento--fora")).toBeTruthy();
+    // a contagem só olha quem tem leitura: uma obra, e ela está devagar; a do prazo no fim vai ao lado, em tinta
+    const faixa = screen.getByLabelText("Números de SINFRA");
+    expect([...faixa.querySelectorAll(".obras-numero")].map(n => limpo(n.textContent))).toContain("Andamento1 de 1obra devagar1 com prazo no fim");
+    expect([...document.querySelectorAll(".pagina > .obras-etiquetas .obras-etiqueta")].map(e => limpo(e.textContent))).toEqual(["1 devagar"]);
   });
 });

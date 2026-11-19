@@ -1,9 +1,11 @@
+import Andamento from "./Andamento";
 import { LinhasDoTempo, type Nivel, type StatusDaObra } from "./ExecucaoContrato";
 import { brl, contar, fmtDias } from "./formato";
 import { pctPiso } from "./listaObras";
 import { Link } from "./Link";
 import Selo, { Glifo } from "./Selo";
 import { fmtDataPura } from "./tempo";
+import type { AndamentoDoServidor } from "./valores";
 import "./obra.css";
 import Falha from "./Falha";
 
@@ -24,8 +26,11 @@ export type Ficha = {
   contrato: { original_centavos: number; original_igual: boolean; tas: number; data_base: string | null };
   // #655: a conta de `prazos.ritmo_e_prazo`, na mesma base do topo; `situacao` nula quando a conta nao fecha.
   // #803: o necessario por mes para terminar no prazo (saldo / competencias que restam); nulos sem prazo a cumprir
+  // #822: `leitura`, o andamento ja' lido pelo servidor, o mesmo objeto que a lista de Obras recebe em
+  // `andamento.leitura`; fora da regua, `situacao` e `dias_alem` vem nulos (o selo da conclusao se cala junto)
   ritmo: { ritmo_centavos: number | null; necessario_centavos: number | null; competencias_restantes: number | null;
-    conclusao: string | null; situacao: "no_prazo" | "atrasa" | null; dias_alem: number | null };
+    conclusao: string | null; situacao: "no_prazo" | "atrasa" | null; dias_alem: number | null;
+    leitura?: AndamentoDoServidor | null };
   ultima_medicao: (Medicao & { recebida_em: string | null; dias_apos_nota: number | null }) | null;
   em_andamento: (Medicao & { etapa: string; desde: string | null }) | null;
   vencimentos: Vencimento[];
@@ -115,7 +120,10 @@ export function estadoSemPrazo(p: PrazosDaObra): { texto: string; paralisada: bo
  *  alem da cor), as linhas do tempo da execucao e da vigencia e, embaixo, a conta do ritmo (#655, #803): o ritmo das
  *  6 ultimas competencias fechadas, quanto a obra precisa medir por mes para terminar no prazo e a conclusao estimada
  *  no ritmo de hoje. O selo compara os dois primeiros (`situacao` vem do servidor): ritmo igual ou acima do
- *  necessario, "No ritmo do prazo"; abaixo, os dias da conclusao alem do fim da execucao. Sem conta, "—" e nenhum selo. */
+ *  necessario, "No ritmo do prazo"; abaixo, os dias da conclusao alem do fim da execucao. Sem conta, "—" e nenhum selo.
+ *  #822: o andamento (o ritmo sobre o necessario) aparece com a peca e a leitura da lista de Obras, do servidor: a
+ *  mesma palavra e o mesmo percentual nas duas telas. Fora da regua (prazo no fim, prorrogacao pedida, sem medicao)
+ *  vai o motivo, e o selo da conclusao nao vem. */
 export function PrazoDaObra({ ficha, prazos }: { ficha: Ficha | null | undefined; prazos: PrazosDaObra }) {
   const r = ficha?.ritmo;
   const exec = ficha?.vencimentos.find(v => v.chave === "execucao") ?? null;
@@ -159,6 +167,10 @@ export function PrazoDaObra({ ficha, prazos }: { ficha: Ficha | null | undefined
                 </>
               )}
             </dd>
+          </div>
+          <div className="obra-ritmo__linha-andamento">
+            <dt>Andamento</dt>
+            <dd className="obra-ritmo__andamento"><Andamento leitura={r.leitura} vazio="—" /></dd>
           </div>
           <div>
             <dt>Conclusão estimada</dt>

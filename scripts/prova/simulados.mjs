@@ -354,6 +354,28 @@ export const fechamentoComValores = reg => {
   };
 };
 
+// #815, Fechamento em abas: a aba Por contratante com o que o cadastro de exemplo nao tem (ele tem um orgao so'). O
+// total de cada ano de `fechamentoComValores` repartido entre quatro contratantes, o ultimo de nome comprido e sem
+// pagina (sem orgao no cadastro); cada coluna das linhas soma o total do ano, como no servidor, com o resto no
+// primeiro. `vazio` e' a pagina sem lancamento nenhum, nas tres abas. Valores inventados.
+const FCH_CONTRATANTES = [["SINFRA", "sinfra", 560], ["MTPAR", "mtpar", 250], ["Pref. Várzea Grande", "pref-vg", 120],
+  ["Secretaria Municipal de Infraestrutura e Obras de Exemplo do Norte", null, 70]];
+const fchPorContratante = total => {
+  const linhas = FCH_CONTRATANTES.map(([contratante, chave, porMil]) => ({ contratante, contratante_chave: chave,
+    ...Object.fromEntries(FCH_SOMAVEIS.map(k => [k, Math.floor(total[k] * porMil / 1000)])), participacao_medido_por_mil: porMil }));
+  for (const k of FCH_SOMAVEIS) linhas[0][k] += total[k] - linhas.reduce((t, x) => t + x[k], 0);
+  return linhas;
+};
+export const fechamentoEmAbas = ({ vazio = false } = {}) => reg => {
+  const f = fechamentoComValores(reg);
+  if (!vazio) return { ...f, por_contratante: { 2025: fchPorContratante(f.por_ano[2025]), 2026: fchPorContratante(f.por_ano[2026]) } };
+  const zero = fchSoma([]);
+  const semCobertura = { aprovado_centavos: 0, com_nota_centavos: 0, sem_nota_centavos: 0, medicoes_sem_nota: 0, percentual: null };
+  return { ...f, meses: [], por_ano: { 2025: { ...zero, meses: 0 }, 2026: { ...zero, meses: 0 } },
+    acumulado: { ate_mes: null, 2025: zero, 2026: zero }, por_contratante: { 2025: [], 2026: [] }, em_aberto: [],
+    cobertura: { 2025: semCobertura, 2026: semCobertura } };
+};
+
 export const obrasComAParte = obras => obras.map((o, i) => ({ ...o, posicao: { ...o.posicao, a_receber_ano_inicial: "2025",
   a_receber_anterior_centavos: i === 0 ? 70003 : 0, a_receber_sem_atualizacao_centavos: i === 0 ? 40001 : 0 } }));
 
@@ -473,7 +495,8 @@ const daCarteira = (id, nome, contratante, chave, x) => {
     vigencia_automatica: false, paralisada_desde: x.paralisada ?? null, pedido_prorrogacao: null,
     posicao: { vigente_centavos: vigente, medido_centavos: medido, saldo_centavos: vigente - medido, a_receber_centavos: (x.receber ?? 0) * REAIS,
       a_receber_ano_inicial: "2025", a_receber_anterior_centavos: 0, a_receber_sem_atualizacao_centavos: 0 },
-    andamento: { ritmo_centavos: x.ritmo == null ? null : x.ritmo * REAIS, necessario_centavos: x.necessario == null ? null : x.necessario * REAIS },
+    andamento: { ritmo_centavos: x.ritmo == null ? null : x.ritmo * REAIS, necessario_centavos: x.necessario == null ? null : x.necessario * REAIS,
+      leitura: leituraSimulada(x.ritmo, x.necessario, x.fora) },
     medido_mes: { competencia: competenciaHa(1), valor_centavos: (x.mes ?? 0) * REAIS, referencia_competencia: competenciaHa(2),
       referencia_centavos: (x.antes ?? 0) * REAIS },
   };
@@ -502,7 +525,7 @@ const CARTEIRA = () => [
   // SES-MT: uma obra adiantada, sem nada pendente e sem medicao no mes (o contratante fica "Em dia")
   daCarteira(9010, "Hospital Capa", "SES-MT", "ses-mt", { vigente: 168_300_000, medido: 156_519_000, ritmo: 5_000_000, necessario: 4_000_000, dias: 75 }),
 ];
-export const carteiraSimulada = () => CARTEIRA();
+export const carteiraSimulada = () => CARTEIRA_INTEIRA();
 
 const farolDaCarteira = (o, farol, motivos = []) => ({
   contrato_id: o.id, seq: o.id - 9000, obra: o.nome_curto, contratante: o.contratante, empreita: o.percentual_direito_bp === 10000 ? "PRÓPRIA" : "CONSÓRCIO",
@@ -519,7 +542,7 @@ const MOTIVOS = {
   9009: ["atencao", [["atencao", "obra paralisada há 100 dias"]]],
 };
 export const painelDaCarteira = painel => {
-  const emAndamento = CARTEIRA().filter(o => o.estado !== "encerrado");
+  const emAndamento = CARTEIRA_INTEIRA().filter(o => o.estado !== "encerrado");
   const obras = emAndamento.map(o => farolDaCarteira(o, ...(MOTIVOS[o.id] ?? ["verde", []])));
   return { ...painel, obras, prazo_pagamento: { SINFRA: 47, "Pref. Cuiabá": 62, "SES-MT": 38 },
     reajustes_apostilamento: { competencias: 3, valor_centavos: 41_250_000, obras: [
@@ -570,7 +593,55 @@ export const fichaComNecessario = noRitmo => ficha => {
   return { ...ficha,
     vencimentos: ficha.vencimentos.map(v => (v.chave === "execucao" ? { ...v, data: dataEm(fim), dias: diasAte(fim), nivel: "normal" } : v)),
     ritmo: { ritmo_centavos: Math.round(necessario * (noRitmo ? 5 : 3) / 4), necessario_centavos: necessario, competencias_restantes: 5,
-      conclusao: dataEm(fim, noRitmo ? -13 : 70), situacao: noRitmo ? "no_prazo" : "atrasa", dias_alem: noRitmo ? null : 70 } };
+      conclusao: dataEm(fim, noRitmo ? -13 : 70), situacao: noRitmo ? "no_prazo" : "atrasa", dias_alem: noRitmo ? null : 70,
+      leitura: leituraSimulada(noRitmo ? 5 : 3, 4) } };
+};
+
+// #822: a leitura do andamento como o servidor a manda (`prazos.leitura_do_andamento`): a palavra e o percentual pelo
+// corte dele (70% e 100%, por piso) ou, com `fora`, o motivo de a obra ficar fora da regua. A tela so' escreve o que
+// vem aqui. `FORA_DA_REGUA`: as obras que a carteira simulada nao tinha, uma de cada motivo (prazo no fim, com e sem
+// pedido de prorrogacao; prorrogacao pedida com prazo pela frente; sem medicao ha' tres competencias), com o aviso de
+// prazo que elas teriam. `fichaForaDaRegua`: a pagina da obra nesses estados (o selo da conclusao se cala junto).
+const SEM_LEITURA = { situacao: null, pct: null, motivo: null, prorrogacao_pedida: false, sem_medicao_desde: null,
+  atencao_desde_pct: 70, adiantada_desde_pct: 100 };
+const leituraSimulada = (ritmo, necessario, fora) => {
+  if (fora || ritmo == null || necessario == null || necessario <= 0) return { ...SEM_LEITURA, ...fora };
+  const pct = Math.floor(ritmo * 100 / necessario);
+  return { ...SEM_LEITURA, pct, situacao: pct >= 100 ? "adiantada" : pct >= 70 ? "atencao" : "devagar" };
+};
+const FORA_DA_REGUA = () => [
+  daCarteira(9011, "Viaduto Lambda", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", vigente: 64_000_000, medido: 55_040_000,
+    ritmo: 1_900_000, necessario: 8_960_000, mes: 2_100_000, antes: 1_700_000, dias: 12, fora: { motivo: "prazo_no_fim", prorrogacao_pedida: true } }),
+  daCarteira(9012, "Maternidade Mi", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 240_000_000, medido: 5_040_000,
+    ritmo: 840_000, necessario: 16_780_000, mes: 900_000, antes: 880_000, dias: 395, fora: { motivo: "prorrogacao_pedida", prorrogacao_pedida: true } }),
+  daCarteira(9013, "Complexo Ni", "MTPAR", "mtpar", { vigente: 52_000_000, medido: 47_476_000, ritmo: 750_000, necessario: 1_131_000,
+    dias: 110, fora: { motivo: "sem_medicao", sem_medicao_desde: competenciaHa(5) } }),
+  daCarteira(9014, "Praça Xi", "Pref. Cuiabá", "pref-cuiaba", { vigente: 9_500_000, medido: 6_650_000, ritmo: 410_000, necessario: 1_425_000,
+    mes: 380_000, antes: 400_000, dias: 43, fora: { motivo: "prazo_no_fim" } }),
+];
+// a carteira que as telas recebem: a de sempre e as obras fora da regua
+const CARTEIRA_INTEIRA = () => [...CARTEIRA(), ...FORA_DA_REGUA()];
+Object.assign(MOTIVOS, {
+  9011: ["vermelho", [["critico", "execução termina em 12 dias"], ["atencao", "prorrogação pedida há 14 dias"]]],
+  9012: ["atencao", [["atencao", "prorrogação pedida há 218 dias"]]],
+  9014: ["acao", [["acao", "execução termina em 43 dias"]]],
+});
+// a pagina da obra fora da regua. `noFim`: a execucao termina no ultimo dia do mes que vem (duas competencias, a de
+// hoje e a seguinte); senao, daqui a 4 meses (cinco), como em `fichaComNecessario`
+const fimNoFim = () => { const h = new Date(); return Date.UTC(h.getFullYear(), h.getMonth() + 2, 0); };
+const nivelDosDias = dias => (dias <= 30 ? "critico" : dias <= 60 ? "atencao" : "normal");
+export const cabecalhoNoFim = cabecalho => {
+  const fim = fimNoFim(), dias = diasAte(fim);
+  return { ...cabecalho, execucao_fim: dataEm(fim), dias_execucao: dias, execucao_sem_prazo: false, nivel_execucao: nivelDosDias(dias),
+    vigencia_fim: dataEm(fim, 90), dias_vigencia: dias + 90, nivel_vigencia: "normal" };
+};
+export const fichaForaDaRegua = (fora, noFim = false) => ficha => {
+  const fim = noFim ? fimNoFim() : fimEmDia(), competencias = noFim ? 2 : 5, dias = diasAte(fim);
+  const necessario = Math.round(ficha.topo.saldo_centavos / competencias);
+  return { ...ficha,
+    vencimentos: ficha.vencimentos.map(v => (v.chave === "execucao" ? { ...v, data: dataEm(fim), dias, nivel: nivelDosDias(dias) } : v)),
+    ritmo: { ritmo_centavos: Math.round(necessario / 4), necessario_centavos: necessario, competencias_restantes: competencias,
+      conclusao: dataEm(fim, 190), situacao: null, dias_alem: null, leitura: leituraSimulada(null, null, fora) } };
 };
 export const semAvisoDePrazo = inicio => ({
   ...inicio, avisos: inicio.avisos.filter(a => !["instrumento_pendente", "execucao_vencendo"].includes(a.tipo)) });

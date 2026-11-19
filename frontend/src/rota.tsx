@@ -41,6 +41,8 @@ export type PaginaDocumentos = "certidoes" | "regularidade" | "garantias";
 // Abas da pagina do contratante (#805): "Obras" e' a padrao e nao entra na URL ("/obras/contratante/sinfra");
 // "/obras/contratante/sinfra/medicoes", ".../a-receber", ".../siga" e ".../avisos".
 export type AbaContratante = "obras" | "medicoes" | "a-receber" | "siga" | "avisos";
+// Abas do Fechamento (#815). "Mes a mes" e' a padrao e nao entra na URL.
+export type AbaFechamento = "meses" | "comparacao" | "contratantes";
 
 export type Rota =
   | { tela: "raiz" }
@@ -56,7 +58,9 @@ export type Rota =
   | { tela: "contratante"; chave: string; aba?: AbaContratante }
   // A receber (#805): o em aberto nota a nota, na area Financeiro. O contratante vai na busca (?contratante=SINFRA)
   | { tela: "a-receber" }
-  | { tela: "fechamento" }
+  // Fechamento (#815): tres abas. "Mes a mes" e' a padrao e nao entra na URL ("/fechamento");
+  // "/fechamento/comparacao" (os dois anos lado a lado) e "/fechamento/contratantes". O ano vai na busca (?ano=2025).
+  | { tela: "fechamento"; aba?: AbaFechamento }
   | { tela: "notas-envio"; id: number }
   | { tela: "obra"; id: number; aba: AbaObra }
   | { tela: "medicao"; obra: number; id: number }
@@ -204,6 +208,10 @@ export function parseRota(pathname: string): Rota {
     if (ehAbaDocumentos(c)) return c === "certidoes" ? { tela: "documentos-empresa", id: Number(b) } : { tela: "documentos-empresa", id: Number(b), aba: c };
   }
   if (a === "admin" && partes.length === 2 && ehAbaAdmin(b)) return b === "saude" ? { tela: "admin" } : { tela: "admin", aba: b };
+  // As abas do Fechamento (#815): "/fechamento/comparacao" e "/fechamento/contratantes"; "Mes a mes" e' "/fechamento".
+  if (a === "fechamento" && partes.length === 2 && (b === "meses" || b === "comparacao" || b === "contratantes")) {
+    return b === "meses" ? { tela: "fechamento" } : { tela: "fechamento", aba: b };
+  }
   return { tela: "raiz" };
 }
 
@@ -224,6 +232,7 @@ export function caminhoDe(r: Rota): string {
     case "documentos": return r.pagina && r.pagina !== "certidoes" ? `/documentos/${r.pagina}` : "/documentos";
     case "admin": return r.aba && r.aba !== "saude" ? `/admin/${r.aba}` : "/admin";
     case "notas-envio": return `/notas/envio/${r.id}`;
+    case "fechamento": return r.aba && r.aba !== "meses" ? `/fechamento/${r.aba}` : "/fechamento";
     default: return `/${r.tela}`;
   }
 }
