@@ -175,11 +175,8 @@ def _notas_sem_pdf(conn, m: dict) -> list[dict]:
 def _itens(conn, c: dict, familia: str, ms: list[dict], hoje: datetime.date) -> tuple[list[dict], list[dict], list[str]]:
     """(itens, notas, avisos curtos). Estados: ok | aviso (<15 dias) | falta (justifica) | vencida (bloqueia)."""
     e = protocolo._etapa(familia, _etapa(familia))
-    ids = [m["id"] for m in ms]
-    docs = [dict(r) for r in conn.execute(
-        f"SELECT id, medicao_id, tipo_doc, nome, numero_nf, municipio, consorciada FROM medicao_documentos "
-        f"WHERE medicao_id IN ({','.join('?' * len(ids))}) AND tipo_doc IN ('nfs','nf','fatura') "
-        f"AND arquivo IS NOT NULL ORDER BY tipo_doc='fatura', id", ids)]
+    # issue #873: a mesma lista do envio (protocolo._docs_nota), para o passo contar so' a nota que vai ao orgao
+    docs = protocolo._docs_nota(conn, [m["id"] for m in ms])
     tipo_de = {m["id"]: m["tipo"] for m in ms}
     nfs = [d for d in docs if d["tipo_doc"] != "fatura"]
     # o numero da nota: o lido do PDF; sem ele (PDF que a leitura nao entendeu), o da nota ligada a este documento. Sem

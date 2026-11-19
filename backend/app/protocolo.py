@@ -186,17 +186,22 @@ def _periodo(conn, m: dict) -> str:
 
 
 def _docs_nota(conn, medicao_ids: list[int]) -> list[dict]:
+    """Os PDFs de nota e a FRC assinada que vao ao orgao, na ordem do envio: a unica lista de onde saem o PDF unico,
+    os anexos soltos, os numeros da carta, o corpo do e-mail e o passo de envio da tela."""
     if not medicao_ids:
         return []
     marcas = ",".join("?" * len(medicao_ids))
     docs = [dict(r) for r in conn.execute(
-        f"SELECT id, medicao_id, tipo_doc, nome, numero_nf, arquivo FROM medicao_documentos "
+        f"SELECT id, medicao_id, tipo_doc, nome, numero_nf, municipio, consorciada, arquivo FROM medicao_documentos "
         f"WHERE medicao_id IN ({marcas}) AND tipo_doc IN ('nfs','nf','fatura') AND arquivo IS NOT NULL "
         f"ORDER BY tipo_doc='fatura', id", medicao_ids)]
     # Issue #169: com a FRC gerada pela dashboard, so' a assinada da FRC vigente vai; a de FRC substituida fica.
     assinadas = {mid: frc.assinada(conn, mid) for mid in {d["medicao_id"] for d in docs if d["tipo_doc"] == "fatura"}}
-    return [d for d in docs if d["tipo_doc"] != "fatura" or not assinadas[d["medicao_id"]]["controla"]
-            or (assinadas[d["medicao_id"]]["documento"] or {}).get("id") == d["id"]]
+    # Issue #873 (docs/adr/0017): na obra de consorcio vai a nota que a FRC soma; a substituida fica na medicao.
+    fora = {i for mid in {d["medicao_id"] for d in docs if d["tipo_doc"] == "nfs"} for i in frc.fora_do_envio(conn, mid)}
+    return [d for d in docs if d["id"] not in fora
+            and (d["tipo_doc"] != "fatura" or not assinadas[d["medicao_id"]]["controla"]
+                 or (assinadas[d["medicao_id"]]["documento"] or {}).get("id") == d["id"])]
 
 
 def _pecas(conn, protocolo_id: int) -> list[dict]:

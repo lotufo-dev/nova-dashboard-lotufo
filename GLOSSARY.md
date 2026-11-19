@@ -177,6 +177,10 @@ Os comprovantes mensais de folha e encargos de uma entidade, por competência.
 Fatura de Recebimento de Consórcio: a página que soma as notas das consorciadas de uma medição e vai ao órgão
 com elas.
 
+**Nota substituída**:
+Na obra de consórcio, a nota anexada à medição que a FRC não soma mais, porque outra nota da mesma empresa e
+município foi anexada depois. Fica na medição como histórico e não vai ao órgão (`docs/adr/0017`).
+
 ### Dinheiro e conferência
 
 **Vínculo**:

@@ -168,6 +168,27 @@ def checklist(conn, m: dict) -> dict:
     return {"itens": itens, "nao_lidas": nao_lidas, "sobras": sobras, "tem_espelho": esp is not None}
 
 
+def fora_do_envio(conn, medicao_id: int) -> set[int]:
+    """Issue #873 (docs/adr/0017): os PDFs de nota da medicao (ids de `medicao_documentos`) que NAO vao ao orgao.
+
+    Obra de consorcio com espelho vigente que espera notas nesta natureza: vai ao orgao o que a FRC soma, e a FRC e' o
+    `checklist`. Fica fora o PDF lido que nao atende nenhuma nota esperada: a nota antiga, quando outra da mesma
+    empresa e municipio foi anexada depois, e a de quem o espelho nao espera. Com todas as esperadas atendidas, fica
+    fora tambem o PDF que nao foi lido (rascunho, leiaute desconhecido); enquanto falta alguma, ele pode ser a que
+    falta e continua indo. O documento nao se apaga nem se marca: continua na medicao, como historico.
+    Obra propria e medicao sem espelho: nada fica fora (a nota da propria empresa segue o vinculo, `notas.py`)."""
+    m, ent, _ = _contexto(conn, medicao_id)
+    if ent is None:
+        return set()
+    ck = checklist(conn, m)
+    if not ck["itens"]:
+        return set()
+    fora = {x["documento_id"] for x in ck["sobras"]}
+    if all(i["situacao"] == "anexada" for i in ck["itens"]):
+        fora |= {x["documento_id"] for x in ck["nao_lidas"]}
+    return fora
+
+
 def _bloqueio(ck: dict) -> str | None:
     if not ck["itens"]:
         return ("A medição não tem espelho vigente com as notas esperadas." if not ck["tem_espelho"]
