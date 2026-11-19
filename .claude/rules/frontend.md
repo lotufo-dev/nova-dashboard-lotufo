@@ -53,7 +53,7 @@ montadas pelo dono: onde outra tela divergir delas, valem elas.
 | formulário ou ação fora do fluxo da página | `Janela` |
 | bloco com título | painel (`.cartao`) |
 | lista de valores | `.tabela` dentro de `.tabela-wrap`; valor em `.col-num` |
-| escolha entre opções (filtro, vista, ano) | `.escolha` dentro de `.escolhas`; a quantidade em `.escolha__n` |
+| escolha entre opções (filtro, ano) | `.escolha` dentro de `.escolhas`; a quantidade em `.escolha__n` |
 | vistas de uma página, cada uma com endereço (abas) | `.aba` dentro de `nav.abas`, como link, com `aria-current="page"` |
 | dizer onde a página está (o caminho no alto) | nada na página: a casca desenha o `Caminho` na barra do topo. A página que carrega um objeto só diz o nome dele com `useNomesDoCaminho` (`nomesDoCaminho.ts`); o caminho de uma rota nova entra em `trechosDe` (`navegacao.ts`) |
 | voltar para a tela de onde se veio | `VoltarOrigem` (`Topo.tsx`), só quando ela não é um trecho do caminho (`temOrigem`) |

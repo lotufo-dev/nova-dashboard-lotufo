@@ -16,6 +16,7 @@ paths:
   - "backend/app/sincronizacao_rm.py"
   - "backend/app/inicio.py"
   - "backend/app/fechamento.py"
+  - "backend/app/a_receber.py"
   - "frontend/src/Medic*.tsx"
   - "frontend/src/Notas*.tsx"
   - "frontend/src/Espelho.tsx"

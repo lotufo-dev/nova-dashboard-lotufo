@@ -62,6 +62,7 @@ def test_cabecalho_de_regra_com_e_sem_lista():
     ("frontend/src/MedicaoPagina.tsx", "dinheiro"),      # frontend/src/Medic*.tsx
     ("backend/app/inicio.py", "dinheiro"),               # somas que a diretoria le
     ("backend/app/fechamento.py", "dinheiro"),
+    ("backend/app/a_receber.py", "dinheiro"),            # abre nota a nota o em aberto do Fechamento
     ("backend/app/correio.py", "envio"),
     ("backend/migrations/999_nova.sql", "banco"),        # backend/migrations/**
     ("cadastro-exemplo/orgaos/alfa/orgao.yaml", "banco"),  # cadastro-exemplo/**, com subpasta
