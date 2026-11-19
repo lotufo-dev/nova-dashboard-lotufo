@@ -49,7 +49,7 @@ def _processo(numero, nome, contrato_id=None, complemento=None, codigo=None):
 def cenario():
     mt = _obra("MT-388", "900/2025/00/00-SINFRA")
     cox = _obra("Coxipó 3ª Etapa", "901/2024/PMC", orgao="Prefeitura de Cuiabá")
-    _obra("Deciolândia", "902/2022/00/00-SINFRA")
+    _obra("Deciolândia", "915/2022/00/00-SINFRA")
     m15 = _medicao(mt, 15, "2026-10")
     r15 = _medicao(mt, 15, "2026-10", "reajuste")
     c15 = _medicao(cox, 15, "2026-02")
@@ -83,6 +83,12 @@ def test_obra_pela_sigla_com_ou_sem_hifen_e_pelo_instrumento(client, cenario):
     _entrar(client, "engenharia")
     for q in ("MT-388", "mt388", "mt 388", "900/2025"):
         assert [o["id"] for o in _q(client, q)["obras"]["itens"]] == [cenario["mt"]], q
+
+
+def test_so_o_numero_nao_acha_obra_pelo_instrumento(client, cenario):
+    _entrar(client, "engenharia")
+    assert _q(client, "15")["obras"]["total"] == 0              # "915/2022" nao e' a 15ª
+    assert [o["nome"] for o in _q(client, "915/2022")["obras"]["itens"]] == ["Deciolândia"]
 
 
 def test_numero_de_medicao_em_varias_obras(client, cenario):

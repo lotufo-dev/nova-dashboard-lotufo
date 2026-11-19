@@ -5,7 +5,8 @@ App.tsx manda para a entrada quem cola /siga com esse perfil) nao recebe o grupo
 
 Como a pergunta e' lida (sem acento e sem caixa: "Medição" = "medicao", "15ª" = "15a"):
 - Obras: cada palavra da pergunta aparece no apelido, no instrumento, no nome da obra, no contratante, no sub-orgao
-  ou no municipio. O hifen e a barra nao atrapalham: "mt388" acha "MT-388".
+  ou no municipio. O hifen e a barra nao atrapalham: "mt388" acha "MT-388". A pergunta que e' so' um numero de
+  medicao ("15") acha obra so' pelo nome, nao pelo instrumento.
 - Medicoes: a pergunta tem um numero solto ("15", "15ª", "15a"); as outras palavras, se houver, filtram a obra
   ("MT-388 15"). "medicao", "reajuste" e "projeto" escolhem o tipo ou somem da conta.
 - Processos: cada palavra aparece no numero do SIGA, no codigo, no nome que o robo leu, no complemento ou no nome
@@ -111,7 +112,9 @@ def buscar(conn: sqlite3.Connection, pergunta: str, perfil: str) -> dict:
         return grupos
 
     obras = _obras(conn)
-    casadas = sorted((o for o in obras if _todas(q["palavras"], o["_alvo"])),
+    # so' o numero da medicao ("15", "15ª"): a obra casa pelo nome, nao pelo instrumento ("155/2022" nao e' a 15ª)
+    so_numero = q["numero"] is not None and not q["da_obra"]
+    casadas = sorted((o for o in obras if _todas(q["palavras"], o["_nome"] if so_numero else o["_alvo"])),
                      key=lambda o: _ordem_da_obra(o, q["palavras"]))
     grupos["obras"] = {"itens": [_publica(o) for o in casadas[:LIMITE]], "total": len(casadas)}
 
