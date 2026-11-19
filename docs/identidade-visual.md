@@ -238,7 +238,7 @@ A casca é o que fica igual em toda tela: o menu à esquerda e o topo (decisões
   páginas dela: Painel, Medições, Obras, Financeiro, Prazos e avisos, Órgãos, Documentos e Sistema. A área que é a
   própria página (Obras) é um item só, sem o nome repetido. A área da página aberta fica com o nome aceso. Cada
   perfil vê as páginas que já via; área sem página do perfil não aparece. Motivo: dez itens soltos não diziam onde
-  cada página mora, e as páginas novas (A receber, as três de Documentos) não cabiam numa lista só (decisão do dono
+  cada página mora, e as páginas novas (Em aberto, então chamada A receber, e as três de Documentos) não cabiam numa lista só (decisão do dono
   de 18/11/2026, #805; #814). Substitui o menu de 09/10/2026, uma lista sem nome de grupo.
 - **Item de 36 px no menu**, e não os 40 px do botão: com 14 páginas o menu inteiro tem de caber numa janela de
   900 px de altura. Em janela mais baixa o menu rola por dentro e o botão de recolher fica preso ao pé.

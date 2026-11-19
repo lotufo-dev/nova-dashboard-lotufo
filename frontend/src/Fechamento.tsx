@@ -156,7 +156,7 @@ function NumerosDoAno({ f, ano }: { f: RespostaFechamento; ano: string }) {
           <dd className="fch-numero__valor">{t ? valor(t[c.chave]) : "—"}</dd>
           {c.chave === "em_aberto_centavos" && f.total_a_receber_liberado && (
             <dd className="fch-numero__porta">
-              <a className="link" href={A_RECEBER} aria-label="Em aberto nota a nota, na página A receber"
+              <a className="link" href={A_RECEBER} aria-label="Em aberto nota a nota, na página Em aberto"
                 onClick={ev => { if (cliqueSimples(ev)) { ev.preventDefault(); irHref(A_RECEBER); } }}>
                 nota a nota
               </a>

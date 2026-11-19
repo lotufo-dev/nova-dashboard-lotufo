@@ -28,7 +28,7 @@ const VISTAS: { id: AbaMedicoes; rotulo: string }[] = [
 ];
 
 /** Meses anteriores: os mesmos painéis da fila, com a competência em cada linha, e o que só espera o pagamento (ou é
- *  de antes do primeiro ano que as telas contam) numa linha de resumo que leva à página A receber (#816), onde o em
+ *  de antes do primeiro ano que as telas contam) numa linha de resumo que leva à página Em aberto (#816), onde o em
  *  aberto está nota a nota. */
 function MesesAnteriores({ a, limites, opera }: { a: Anteriores; limites: Limites; opera: boolean }) {
   const resto = [
@@ -43,7 +43,7 @@ function MesesAnteriores({ a, limites, opera }: { a: Anteriores; limites: Limite
       {resto.length > 0 && (
         <p className="fila-resumo">
           <span className="num">{resto.join(" · ")}</span>
-          <Link para={{ tela: "a-receber" }}>Ver em A receber</Link>
+          <Link para={{ tela: "a-receber" }}>Ver na página Em aberto</Link>
         </p>
       )}
     </>

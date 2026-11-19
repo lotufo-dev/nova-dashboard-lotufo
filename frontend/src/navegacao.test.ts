@@ -18,7 +18,7 @@ describe("navegação por perfil", () => {
       ["Painel", ["Início"]],
       ["Medições", ["Medições", "Resumo das medições"]],
       ["Obras", ["Obras"]],
-      ["Financeiro", ["Fechamento", "A receber"]],
+      ["Financeiro", ["Fechamento", "Em aberto"]],
       ["Prazos e avisos", ["Avisos"]],
       ["Órgãos", ["SIGA"]],
       ["Documentos", ["Certidões", "Regularidade mensal", "Garantias"]],
@@ -59,7 +59,7 @@ describe("navegação por perfil", () => {
       diretoria: ["inicio", "resumo-medicoes", "obras", "avisos", "documentos", "fechamento"],
       admin: ["inicio", "medicoes", "resumo-medicoes", "obras", "avisos", "siga", "documentos", "fechamento", "ancoras-docusign", "admin"],
     };
-    // de onde vem cada página que nasceu com as áreas: A receber é de quem vê o Fechamento; as três de Documentos eram
+    // de onde vem cada página que nasceu com as áreas: Em aberto é de quem vê o Fechamento; as três de Documentos eram
     // as abas da tela Documentos; a Minha conta sempre foi de todos (pelo avatar do topo)
     const VEM_DE: Partial<Record<ItemMenu, string | null>> = {
       "a-receber": "fechamento", certidoes: "documentos", regularidade: "documentos", garantias: "documentos", conta: null };
@@ -129,7 +129,7 @@ describe("navegação por perfil", () => {
 
   it("o nome da tela, para a aba do navegador e o “← origem”", () => {
     expect(tituloDe("siga")).toBe("SIGA");
-    expect(tituloDe("a-receber")).toBe("A receber");
+    expect(tituloDe("a-receber")).toBe("Em aberto");
     expect(tituloDe("documentos")).toBe("Documentos");
     expect(tituloDe("contratante")).toBe("Obras");
     expect(tituloDe("conta")).toBe("Minha conta");
@@ -154,7 +154,7 @@ describe("o caminho de cada rota (#814)", () => {
   it("página do menu: a área e a página; a área leva à primeira página dela", () => {
     expect(rotulos(de({ tela: "inicio" }))).toEqual(["Painel", "Início"]);
     expect(rotulos(de({ tela: "fechamento" }))).toEqual(["Financeiro", "Fechamento"]);
-    expect(rotulos(de({ tela: "a-receber" }))).toEqual(["Financeiro", "A receber"]);
+    expect(rotulos(de({ tela: "a-receber" }))).toEqual(["Financeiro", "Em aberto"]);
     expect(enderecos(de({ tela: "a-receber" }))).toEqual(["/fechamento", "/a-receber"]);
     expect(rotulos(de({ tela: "avisos" }))).toEqual(["Prazos e avisos", "Avisos"]);
     expect(rotulos(de({ tela: "siga" }))).toEqual(["Órgãos", "SIGA"]);
@@ -210,7 +210,7 @@ describe("o caminho de cada rota (#814)", () => {
     const contratante = trechosDe({ tela: "contratante", chave: "sinfra" }, { nomes });
     expect(rotulos(contratante)).toEqual(["Obras", "SINFRA"]);
     expect(enderecos(contratante)).toEqual(["/obras", "/obras/contratante/sinfra"]);
-    expect(rotulos(trechosDe({ tela: "contratante", chave: "sinfra", aba: "a-receber" }, { nomes }))).toEqual(["Obras", "SINFRA", "A receber"]);
+    expect(rotulos(trechosDe({ tela: "contratante", chave: "sinfra", aba: "a-receber" }, { nomes }))).toEqual(["Obras", "SINFRA", "Em aberto"]);
     expect(rotulos(trechosDe({ tela: "contratante", chave: "sinfra", aba: "siga" }, { nomes }))).toEqual(["Obras", "SINFRA", "Processos no SIGA"]);
 
     const obra = trechosDe({ tela: "obra", id: 7, aba: "ficha" }, { nomes });
