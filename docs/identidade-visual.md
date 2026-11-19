@@ -151,7 +151,7 @@ do rótulo, na etiqueta sob o valor ou na barra.
   fechou três competências sem medição de execução ("Sem medição desde 07/2026", o mês da última). O motivo vai em
   tinta, sem barra e sem tom de valor: é a razão de não haver leitura, e o aviso de prazo já está nos Avisos. Na
   página da obra, fora da régua, a conclusão estimada fica sem selo. Só quem tem leitura entra nas contagens por
-  leitura; na faixa de números, as obras com o prazo no fim vão contadas ao lado, em tinta ("9 com prazo no fim")
+  leitura; na faixa de números, as obras com o prazo no fim vão contadas ao lado, em tinta ("N com prazo no fim")
   (#822, decisão do dono de 18/11/2026).
   A contagem de obras por leitura ("3 devagar", "2 em atenção") vai numa etiqueta do tom da leitura, sem glifo:
   é valor, não situação (#805).

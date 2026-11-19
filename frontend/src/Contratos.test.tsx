@@ -23,8 +23,8 @@ const doMes = (valor: number, referencia: number) =>
   ({ competencia: "2026-08", valor_centavos: valor, referencia_competencia: "2026-07", referencia_centavos: referencia });
 
 const OBRAS: ObraLista[] = [
-  // mede 27% do necessário: devagar
-  obra(1, "Estações BRT", { andamento: { ritmo_centavos: 27_00, necessario_centavos: 100_00 }, medido_mes: doMes(80_00, 100_00) }),
+  // mede 40% do necessário: devagar
+  obra(1, "Estações BRT", { andamento: { ritmo_centavos: 40_00, necessario_centavos: 100_00 }, medido_mes: doMes(80_00, 100_00) }),
   // consórcio a 49%: cheio 3.000,01 / 1.500,00; na cota 1.470,00 / 735,00. Mede 120% do necessário: adiantada
   obra(2, "MT-388", { orgao: "SINFRA - SUPU", orgao_sub: "SUPU", percentual_direito_bp: 4900, valor_vigente_centavos: 3000_01, medido_centavos: 1500_00, saldo_centavos: 1500_01,
     posicao: posicao(1470_00, 735_00, 49_01), andamento: { ritmo_centavos: 120_00, necessario_centavos: 100_00 }, medido_mes: doMes(60_00, 20_00) }),
@@ -224,7 +224,7 @@ describe("Obras: posição financeira na cota da Lotufo, por contratante", () =>
     const linha = (nome: string) => within(tabela).getByRole("link", { name: nome }).closest("tr")!;
     const andamento = (nome: string) => limpo(linha(nome).querySelector('td[data-rotulo="Andamento"]')!.textContent);
     // a palavra e a razão; os valores por mês ficam na página do contratante e na vista Andamento
-    expect(andamento("Estações BRT")).toBe("Devagar · mede 27% do necessário");
+    expect(andamento("Estações BRT")).toBe("Devagar · mede 40% do necessário");
     expect(linha("Estações BRT").querySelector(".andamento--devagar")).toBeTruthy();
     expect(andamento("MT-388")).toBe("Adiantada · mede 120% do necessário");
     expect(andamento("Granito")).toBe("—");                                    // paralisada: sem necessário, sem leitura
@@ -503,7 +503,7 @@ describe("Obras em níveis (#805): Por contratante, Todas as obras, Andamento e 
     const linhas = [...tabela.querySelectorAll("tbody tr")].map(tr => [...tr.querySelectorAll("td")].map(td => limpo(td.textContent)));
     // a paralisada (sem necessário) não tem prazo a cumprir e fica fora
     expect(linhas).toEqual([
-      ["Estações BRTSINFRA", "27%", "Devagar", "R$ 27,00", "R$ 100,00", "31/03/2027"],
+      ["Estações BRTSINFRA", "40%", "Devagar", "R$ 40,00", "R$ 100,00", "31/03/2027"],
       ["MT-388SINFRA", "120%", "Adiantada", "R$ 120,00", "R$ 100,00", "31/03/2027"],
     ]);
     expect(tabela.querySelector(".andamento--devagar .andamento__barra")).toBeTruthy();
@@ -515,7 +515,7 @@ describe("Obras em níveis (#805): Por contratante, Todas as obras, Andamento e 
     // as três mediriam 10% do necessário (devagar); o servidor as tirou da régua
     const fora = (motivo: Parameters<typeof leituraDeTeste>[2]) => ({ ritmo_centavos: 10_00, necessario_centavos: 100_00, leitura: leituraDeTeste(10_00, 100_00, motivo) });
     const obras = [
-      obra(1, "Estações BRT", { andamento: { ritmo_centavos: 27_00, necessario_centavos: 100_00 } }),
+      obra(1, "Estações BRT", { andamento: { ritmo_centavos: 40_00, necessario_centavos: 100_00 } }),
       obra(5, "Cavalaria", { execucao_fim_vigente: "2026-12-20", andamento: fora({ motivo: "prazo_no_fim", prorrogacao_pedida: true }) }),
       obra(6, "Leblon", { execucao_fim_vigente: "2026-11-30", andamento: fora({ motivo: "prazo_no_fim" }) }),
       obra(7, "Maternidade", { execucao_fim_vigente: "2027-12-31", andamento: fora({ motivo: "prorrogacao_pedida", prorrogacao_pedida: true }) }),
@@ -528,7 +528,7 @@ describe("Obras em níveis (#805): Por contratante, Todas as obras, Andamento e 
     const linhas = [...tabela.querySelectorAll("tbody tr")].map(tr => [...tr.querySelectorAll("td")].map(td => limpo(td.textContent)));
     // primeiro quem tem leitura; depois a sem medição, e as de prazo no fim ou prorrogação pedida pela que termina antes
     expect(linhas).toEqual([
-      ["Estações BRTSINFRA", "27%", "Devagar", "R$ 27,00", "R$ 100,00", "31/03/2027"],
+      ["Estações BRTSINFRA", "40%", "Devagar", "R$ 40,00", "R$ 100,00", "31/03/2027"],
       ["OrlaSINFRA", "—", "Sem medição desde 07/2026", "R$ 10,00", "R$ 100,00", "31/03/2027"],
       ["LeblonSINFRA", "—", "Prazo no fim", "R$ 10,00", "R$ 100,00", "30/11/2026"],
       ["CavalariaSINFRA", "—", "Prazo no fim · prorrogação pedida", "R$ 10,00", "R$ 100,00", "20/12/2026"],
@@ -547,7 +547,7 @@ describe("Obras em níveis (#805): Por contratante, Todas as obras, Andamento e 
     const andamento = (nome: string) => within(todas).getByRole("link", { name: nome }).closest("tr")!.querySelector('td[data-rotulo="Andamento"]')!;
     expect(limpo(andamento("Cavalaria").textContent)).toBe("Prazo no fim · prorrogação pedida");
     expect(limpo(andamento("Orla").textContent)).toBe("Sem medição desde 07/2026");
-    expect(limpo(andamento("Estações BRT").textContent)).toBe("Devagar · mede 27% do necessário");
+    expect(limpo(andamento("Estações BRT").textContent)).toBe("Devagar · mede 40% do necessário");
     // a célula com o motivo não é a "sem leitura" que a faixa média esconde
     expect(andamento("Cavalaria").className).toBe("obras-posicao__andamento");
   });

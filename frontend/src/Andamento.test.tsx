@@ -14,8 +14,8 @@ describe("Andamento (#805, #822)", () => {
   afterEach(cleanup);
 
   it("escreve a palavra e o percentual que o servidor mandou: Adiantada, Atenção e Devagar", () => {
-    for (const [situacao, pct, frase] of [["adiantada", 115, "Adiantada · mede 115% do necessário"],
-      ["atencao", 81, "Atenção · mede 81% do necessário"], ["devagar", 27, "Devagar · mede 27% do necessário"]] as const) {
+    for (const [situacao, pct, frase] of [["adiantada", 120, "Adiantada · mede 120% do necessário"],
+      ["atencao", 85, "Atenção · mede 85% do necessário"], ["devagar", 40, "Devagar · mede 40% do necessário"]] as const) {
       const { container } = render(<Andamento leitura={lida(situacao, pct)} />);
       expect(texto(container)).toBe(frase);
       expect(classe(container)).toBe(`andamento andamento--${situacao}`);
@@ -46,21 +46,21 @@ describe("Andamento (#805, #822)", () => {
   });
 
   it("com os valores: a palavra, a razão e o ritmo por mês contra o necessário, abreviados", () => {
-    // R$ 2.400.000,00 por mês de R$ 8.800.000,00 necessários
-    const { container } = render(<Andamento leitura={lida("devagar", 27)} ritmo={240_000_000} necessario={880_000_000} detalhe="valores" />);
+    // R$ 1.000.000,00 por mês de R$ 2.500.000,00 necessários
+    const { container } = render(<Andamento leitura={lida("devagar", 40)} ritmo={100_000_000} necessario={250_000_000} detalhe="valores" />);
     const linhas = [...container.querySelectorAll(".andamento__texto")].map(p => (p.textContent ?? "").replace(/\s/g, " "));
-    expect(linhas).toEqual(["Devagar · 27% do necessário", "R$ 2,4 mi/mês de R$ 8,8 mi"]);
+    expect(linhas).toEqual(["Devagar · 40% do necessário", "R$ 1 mi/mês de R$ 2,5 mi"]);
     cleanup();
     // abaixo do milhão e abaixo do milhar
-    const menor = render(<Andamento leitura={lida("adiantada", 35714)} ritmo={35_000_000} necessario={98_000} detalhe="valores" />).container;
-    expect((menor.querySelector(".andamento__valores")?.textContent ?? "").replace(/\s/g, " ")).toBe("R$ 350 mil/mês de R$ 980");
+    const menor = render(<Andamento leitura={lida("adiantada", 55555)} ritmo={50_000_000} necessario={90_000} detalhe="valores" />).container;
+    expect((menor.querySelector(".andamento__valores")?.textContent ?? "").replace(/\s/g, " ")).toBe("R$ 500 mil/mês de R$ 900");
   });
 
   it("só a palavra, na tabela que já traz o percentual e os valores em colunas", () => {
-    const { container } = render(<Andamento leitura={lida("atencao", 81)} detalhe="palavra" />);
+    const { container } = render(<Andamento leitura={lida("atencao", 85)} detalhe="palavra" />);
     expect(texto(container)).toBe("Atenção");
     expect(container.querySelector(".andamento__valores")).toBeNull();
-    expect(largura(container)).toMatch(/^62\.3/);
+    expect(largura(container)).toMatch(/^65\.38/);
   });
 
   it("fora da régua: o motivo escrito, em tinta e sem barra", () => {
@@ -72,7 +72,7 @@ describe("Andamento (#805, #822)", () => {
     ];
     for (const [extra, frase] of casos) {
       // os valores existem (a obra tem ritmo e necessário), mas a leitura do servidor é o motivo
-      const { container } = render(<Andamento leitura={{ ...SEM_LEITURA, ...extra }} ritmo={27_000} necessario={100_000} detalhe="valores" vazio="—" />);
+      const { container } = render(<Andamento leitura={{ ...SEM_LEITURA, ...extra }} ritmo={40_000} necessario={100_000} detalhe="valores" vazio="—" />);
       expect(texto(container)).toBe(frase);
       expect(classe(container)).toBe("andamento andamento--fora");
       expect(container.querySelector(".andamento__trilho")).toBeNull();

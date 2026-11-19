@@ -284,9 +284,9 @@ export const inicioComVariacoes = painel => {
   return { ...painel,
     notas_mes: { ...painel.notas_mes, valor_centavos: 1124000001, notas: 6, obras: 4,
       anterior: { mes: mesAntes(mesDeHoje, 1), ate_dia: Number(painel.hoje.slice(8, 10)), valor_centavos: 1000000001 } },
-    medido: { ...painel.medido, valor_centavos: 2428000007, quantidade: 9,
-      anterior: { competencia: mesAntes(competencia, 1), valor_centavos: 2642000005 },
-      ano_anterior: { competencia: mesAntes(competencia, 12), valor_centavos: 2410000003 } } };
+    medido: { ...painel.medido, valor_centavos: 400000007, quantidade: 9,
+      anterior: { competencia: mesAntes(competencia, 1), valor_centavos: 500000005 },
+      ano_anterior: { competencia: mesAntes(competencia, 12), valor_centavos: 400000003 } } };
 };
 
 // As familias de valor no Fechamento (#805): dois anos, para o medido de cada mes ter o mesmo mes do ano anterior, e
@@ -414,7 +414,7 @@ export const resumoEmQuadro = ({ contratante = null, vazio = false } = {}) => re
   const comPedido = (pedido, abaixo = 0, acima = 0) => ({ pedido_do_aprovado_centavos: pedido * REAIS,
     abaixo_do_pedido_centavos: abaixo * REAIS, acima_do_pedido_centavos: acima * REAIS });
   const doMes = vazio ? [] : [
-    linha(9001, "Avenida Alfa", "SINFRA", "29ª Medição", "em_analise", 553_000, 12, 9),
+    linha(9001, "Avenida Alfa", "SINFRA", "29ª Medição", "em_analise", 500_000, 12, 9),
     linha(9010, "Hospital Capa", "SES-MT", "5ª Medição", "em_analise", 169_000, 16, 11),
     linha(9005, "Bairros Épsilon", "SINFRA", "12ª Medição", "boletim", 412_000, 0, 0, comPedido(414_000, 2_000)),
     linha(9002, "Corredor Beta", "SINFRA", "16ª Medição", "nota", 3_270_000, 1, 1, comPedido(3_270_000)),
@@ -426,8 +426,8 @@ export const resumoEmQuadro = ({ contratante = null, vazio = false } = {}) => re
     linha(9004, "Quartel Delta", "SINFRA", "35ª Medição", "protocolado", 209_000, 12, 8, { prazo: [47, 35] }),
     linha(9015, "Viaduto Ômicron", "SES-MT", "3ª Medição", "protocolado", 240_000, 16, 11, { prazo: [14, -2] }),
     linha(9003, "Estações Gama", "SINFRA", "8ª Medição", "recebido", 14_629_000, 5, null, { ...comPedido(14_629_000), dias_da_nota_ao_recebimento: 4 }),
-    linha(9001, "Avenida Alfa", "SINFRA", "Reajuste da 28ª Medição", "recebido", 1_607_000, 9, null,
-      { tipo: "reajuste", ...comPedido(1_977_000, 370_000), dias_da_nota_ao_recebimento: 31 }),
+    linha(9001, "Avenida Alfa", "SINFRA", "Reajuste da 28ª Medição", "recebido", 1_500_000, 9, null,
+      { tipo: "reajuste", ...comPedido(2_000_000, 500_000), dias_da_nota_ao_recebimento: 31 }),
     // a planilha/carta gerada e ainda nao enviada: existe, sem valor e sem etapa
     { ...linha(9004, "Quartel Delta", "SINFRA", "1ª de Projeto", "antes", 0, 4, 3), tipo: "projeto", valor_centavos: null,
       etapas: ETAPAS_DO_RESUMO.map(e => ({ etapa: e, situacao: "futuro", data: null })) },
@@ -506,9 +506,9 @@ const daCarteira = (id, nome, contratante, chave, x) => {
   };
 };
 const CARTEIRA = () => [
-  // SINFRA: devagar (27% e 18% do necessario), adiantada, em atencao, em encerramento e uma encerrada
-  daCarteira(9001, "Avenida Alfa", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 120_000_000, medido: 44_400_000,
-    ritmo: 2_400_000, necessario: 8_800_000, mes: 1_600_000, antes: 1_760_000 }),
+  // SINFRA: devagar (40% e 18% do necessario), adiantada, em atencao, em encerramento e uma encerrada
+  daCarteira(9001, "Avenida Alfa", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 120_000_000, medido: 60_000_000,
+    ritmo: 1_000_000, necessario: 2_500_000, mes: 1_600_000, antes: 1_760_000 }),
   daCarteira(9002, "Corredor Beta", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", bp: 4900, vigente: 210_000_000, medido: 178_500_000,
     ritmo: 4_100_000, necessario: 3_600_000, mes: 3_300_000, antes: 2_790_000, receber: 3_900_000, dias: 96 }),
   daCarteira(9003, "Estações Gama", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", vigente: 180_000_000, medido: 63_000_000,

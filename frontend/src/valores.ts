@@ -104,8 +104,8 @@ export function temAndamento(l: AndamentoDoServidor | null | undefined): boolean
   return andamento(l) !== null || foraDaRegua(l) !== null;
 }
 
-/** Valor em reais abreviado, so' para a frase do andamento ("R$ 2,4 mi/mês de R$ 8,8 mi"): "R$ 2,4 mi", "R$ 350 mil",
- *  "R$ 980". E' leitura de ordem de grandeza ao lado do percentual; o valor exato fica na coluna propria ou na pagina
+/** Valor em reais abreviado, so' para a frase do andamento ("R$ 1 mi/mês de R$ 2,5 mi"): "R$ 2,5 mi", "R$ 500 mil",
+ *  "R$ 900". E' leitura de ordem de grandeza ao lado do percentual; o valor exato fica na coluna propria ou na pagina
  *  da obra, com `brl`. */
 export function reaisCurtos(centavos: number): string {
   return `R$ ${(centavos / 100).toLocaleString("pt-BR", { notation: "compact", maximumFractionDigits: 1 })}`;
