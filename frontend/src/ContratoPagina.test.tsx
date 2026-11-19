@@ -146,7 +146,8 @@ describe("Página da obra: o desenho novo", () => {
     expect([voltar().textContent!.trim(), voltar().getAttribute("href")]).toEqual(["SES-MT", "/obras/contratante/ses-mt?situacao=todas"]);
     expect(document.querySelectorAll(".topbar__trilha > a.btn--voltar")).toHaveLength(1);      // sem um segundo "voltar" para o mesmo lugar
     const caminho = screen.getByRole("navigation", { name: "Você está em" });
-    expect(within(caminho).getByRole("link", { name: "SES-MT" }).getAttribute("href")).toBe("/obras/contratante/ses-mt?situacao=todas");
+    // o nome do contratante chega ao caminho pelo efeito da página, depois do h1 (#862): espera
+    expect((await within(caminho).findByRole("link", { name: "SES-MT" })).getAttribute("href")).toBe("/obras/contratante/ses-mt?situacao=todas");
   });
 
   // o caminho é da barra do topo (#814): aqui ele entra ao lado da página, como a casca o desenha, com os nomes que
@@ -158,7 +159,7 @@ describe("Página da obra: o desenho novo", () => {
     await screen.findByRole("heading", { level: 1, name: "Hospital" });
     expect(document.querySelector(".topbar__meta")!.textContent).toBe("SES · Contrato CT 1/2026");
     const caminho = screen.getByRole("navigation", { name: "Você está em" });
-    expect([...caminho.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Obras", "SES-MT", "Hospital", "Medições"]);
+    await waitFor(() => expect([...caminho.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Obras", "SES-MT", "Hospital", "Medições"]));
     expect(within(caminho).getByRole("link", { name: "Obras" }).getAttribute("href")).toBe("/obras");
     expect(within(caminho).getByRole("link", { name: "SES-MT" }).getAttribute("href")).toBe("/obras/contratante/ses-mt");
     expect(within(caminho).getByRole("link", { name: "Hospital" }).getAttribute("href")).toBe("/obras/1");
@@ -174,7 +175,7 @@ describe("Página da obra: o desenho novo", () => {
     await screen.findByRole("heading", { level: 1, name: "Hospital" });
     expect([voltar().textContent!.trim(), voltar().getAttribute("href")]).toEqual(["Obras", "/obras"]);
     const caminho = screen.getByRole("navigation", { name: "Você está em" });
-    expect([...caminho.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Obras", "SES", "Hospital"]);
+    await waitFor(() => expect([...caminho.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Obras", "SES", "Hospital"]));
     expect(within(caminho).queryByRole("link", { name: "SES" })).toBeNull();
   });
 

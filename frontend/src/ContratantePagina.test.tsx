@@ -146,7 +146,8 @@ describe("Página do contratante (#805)", () => {
     abrir("/obras/contratante/sinfra");
     await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
     const caminho = screen.getByRole("navigation", { name: "Você está em" });
-    expect([...caminho.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Obras", "SINFRA"]);
+    // o nome chega ao caminho pelo efeito da página, depois do h1 (#862): espera
+    await waitFor(() => expect([...caminho.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Obras", "SINFRA"]));
     expect(within(caminho).getByRole("link", { name: "Obras" }).getAttribute("href")).toBe("/obras");
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("SINFRA cota da Lotufo");
     expect(document.querySelector(".topbar__meta")!.textContent).toBe("3 obras em andamento");
