@@ -1,17 +1,25 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { api } from "./api";
-import { IconeAjustes, IconeArquivo, IconeCifrao, IconeDocumento, IconeGrade, IconeInicio, IconeMedicoes, IconeObras, IconeSiga,
-  IconeSeta, IconeSino, IconeVoltar } from "./icones";
+import Busca from "./Busca";
+import Caminho from "./Caminho";
+import { IconeAjustes, IconeAReceber, IconeArquivo, IconeCifrao, IconeDocumento, IconeDocumentoVisto, IconeEscudo, IconeGrade, IconeInicio,
+  IconeMedicoes, IconeObras, IconePessoa, IconeSiga, IconeSeta, IconeSino, IconeVoltar } from "./icones";
 import type { Usuario } from "./Login";
-import { menuDe, ROTULO, rotaDoItem, type ItemMenu } from "./navegacao";
-import { type Ir } from "./rota";
+import { areaEhAPagina, menuDe, ROTULO, rotaDoItem, type ItemMenu } from "./navegacao";
+// `Busca` aqui e' a peca da busca unica; os filtros do endereco (o tipo `Busca` do roteador) entram como `Filtros`
+import { type Busca as Filtros, type Ir, type Origem, type Rota } from "./rota";
 import { Link } from "./Link";
 import Simbolo from "./Simbolo";
 import Falha from "./Falha";
 
 // Casca de todas as telas logadas (#720, a casca da fundacao): o MENU LATERAL escuro a' esquerda (o simbolo e o nome
 // da marca em dois pesos; icone e nome em cada item; o item ativo com fundo realcado e o icone no laranja da marca;
-// recolhivel para so' icones) e o TOPO sobre o papel, com o titulo da secao e a conta.
+// recolhivel para so' icones) e o TOPO sobre o papel, com o caminho da pagina, o lugar da busca e a conta.
+//
+// MENU EM AREAS (decisao do dono de 18/11/2026, #805; issue #814): os itens ficam agrupados por area, com o nome da
+// area escrito em cima das paginas dela (navegacao.ts). A area que e' a propria pagina (Obras) e' um item so', sem o
+// nome repetido. A area da pagina aberta fica com o nome aceso. Recolhido, some o nome da area e fica um fio entre
+// uma area e a outra; o nome continua sendo o nome da lista para o leitor de tela.
 //
 // Estado: `largo` ou `recolhido`, no atributo `data-estado` da <nav>. No computador a escolha da pessoa fica
 // guardada no navegador (padrao largo); no celular (< 768px) o menu nasce recolhido, abre POR CIMA da tela e fecha
@@ -36,14 +44,19 @@ function estadoInicial(): "largo" | "recolhido" {
 }
 
 const ICONES: Record<ItemMenu, (p: { className?: string }) => React.ReactElement> = {
-  inicio: IconeInicio, medicoes: IconeMedicoes, "resumo-medicoes": IconeGrade, obras: IconeObras, avisos: IconeSino, siga: IconeSiga, documentos: IconeDocumento,
-  fechamento: IconeCifrao, "ancoras-docusign": IconeArquivo, admin: IconeAjustes,
+  inicio: IconeInicio, medicoes: IconeMedicoes, "resumo-medicoes": IconeGrade, obras: IconeObras, fechamento: IconeCifrao,
+  "a-receber": IconeAReceber, avisos: IconeSino, siga: IconeSiga, certidoes: IconeDocumento, regularidade: IconeDocumentoVisto,
+  garantias: IconeEscudo, "ancoras-docusign": IconeArquivo, admin: IconeAjustes, conta: IconePessoa,
 };
 
-export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemMenu | "conta" | null; ir: Ir }) {
+// `permissoes`: as que o servidor informou em /api/auth/eu; o item SIGA e' de quem tem `ver_siga` (#829)
+export function Trilho({ perfil, permissoes, marcado, ir }: {
+  perfil: string; permissoes?: readonly string[]; marcado: ItemMenu | null; ir: Ir;
+}) {
   const [estado, setEstado] = useState<"largo" | "recolhido">(estadoInicial);
   const largo = estado === "largo";
   const caixa = useRef<HTMLElement>(null);
+  const id = useId();
 
   // Ao estreitar a janela para o celular o menu largo (que ali cobre a tela) recolhe sozinho. Ao alargar de volta,
   // vale de novo a escolha guardada: sem isso o menu ficava recolhido ate' recarregar a pagina, sem ninguem ter
@@ -83,22 +96,34 @@ export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemM
           <Simbolo className="menu__simbolo" />
           <span className="menu__rotulo menu__nome"><span className="menu__nome-apoio">grupo</span>lotufo</span>
         </span>
-        {/* Links de verdade (<a href>): a URL e' o endereco da tela, e o navegador ganha "abrir em nova aba",
-            copiar link e historico de graca. O item fica aceso tambem abaixo dele na hierarquia (navegacao.ts). */}
-        <ul className="menu__lista">
-          {menuDe(perfil).map(i => {
-            const Icone = ICONES[i];
+        {/* Uma lista por area, com o nome dela em cima. Links de verdade (<a href>): a URL e' o endereco da tela, e o
+            navegador ganha "abrir em nova aba", copiar link e historico de graca. O item fica aceso tambem abaixo
+            dele na hierarquia (navegacao.ts). */}
+        <div className="menu__areas">
+          {menuDe(perfil, permissoes).map(a => {
+            const sozinha = areaEhAPagina(a);
+            const acesa = marcado !== null && a.paginas.includes(marcado);
             return (
-              <li key={i}>
-                <Link className="menu__item" para={rotaDoItem(i)} menu ir={ir} title={largo ? undefined : ROTULO[i]}
-                  aria-current={marcado === i ? "page" : undefined}>
-                  <Icone className="icone menu__icone" />
-                  <span className="menu__rotulo">{ROTULO[i]}</span>
-                </Link>
-              </li>
+              <div key={a.id} className={acesa ? "menu__area menu__area--acesa" : "menu__area"}>
+                {!sozinha && <p className="menu__area-nome" id={`${id}-${a.id}`}>{a.rotulo}</p>}
+                <ul className="menu__lista" aria-labelledby={sozinha ? undefined : `${id}-${a.id}`}>
+                  {a.paginas.map(i => {
+                    const Icone = ICONES[i];
+                    return (
+                      <li key={i}>
+                        <Link className="menu__item" para={rotaDoItem(i)} menu ir={ir} title={largo ? undefined : ROTULO[i]}
+                          aria-current={marcado === i ? "page" : undefined}>
+                          <Icone className="icone menu__icone" />
+                          <span className="menu__rotulo">{ROTULO[i]}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
             );
           })}
-        </ul>
+        </div>
         <button type="button" className="menu__recolher" aria-expanded={largo}
           aria-label={largo ? "Recolher o menu" : "Expandir o menu"} onClick={alternar}>
           <IconeVoltar className="icone menu__icone menu__seta" />
@@ -175,13 +200,17 @@ function Conta({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
   );
 }
 
-/** Topo (56px): o titulo da SECAO a' esquerda e a conta a' direita. Nas telas de lista o titulo e'
- *  o h1 da pagina; na obra, na medicao, no envio da nota e no Inicio a pagina tem o proprio h1 (o objeto, ou o "Bom
- *  dia"), e a barra so' diz a secao. */
-export function BarraSuperior({ titulo, ehH1, usuario, ir }: { titulo: string; ehH1: boolean; usuario: Usuario; ir: Ir }) {
+/** Topo: o CAMINHO da pagina a' esquerda (#814), o lugar da busca unica e a conta a' direita. O trecho da pagina e' o
+ *  titulo: nas telas de lista ele e' o h1; na obra, na medicao e no Inicio a pagina tem o proprio h1 (o objeto, ou o
+ *  "Bom dia"), e a barra so' escreve o trecho, na letra dos outros (19/11/2026). Quando o caminho nao cabe numa linha (celular, nome
+ *  longo), ele quebra e a barra cresce; nada e' cortado. */
+export function BarraSuperior({ rota, busca, origem, ehH1, usuario, ir }: {
+  rota: Rota; busca?: Filtros; origem?: Origem | null; ehH1: boolean; usuario: Usuario; ir: Ir;
+}) {
   return (
     <header className="topo">
-      {ehH1 ? <h1 className="topo__titulo">{titulo}</h1> : <p className="topo__titulo">{titulo}</p>}
+      <Caminho rota={rota} perfil={usuario.perfil} permissoes={usuario.permissoes} busca={busca} origem={origem} ehH1={ehH1} />
+      <Busca perfil={usuario.perfil} ir={ir} />
       <Conta usuario={usuario} ir={ir} />
     </header>
   );

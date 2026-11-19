@@ -42,6 +42,7 @@ ROTAS = (
     "/api/inicio/painel",
     "/api/medicoes/andamento",
     "/api/medicoes/resumo",
+    "/api/medicoes/fila",
     "/api/contratos",
     "/api/contratos/{contrato}",
     "/api/contratos/{contrato}/cabecalho",
@@ -76,7 +77,9 @@ ROTAS = (
     "/api/espelhos/{espelho}/envio",
     "/api/diretoria",
     "/api/fechamento",
+    "/api/a-receber",
     "/api/resumo-medicoes",
+    "/api/resumo-medicoes/matriz",      # 19/11/2026 (#805): a matriz obra por competencia, que saiu do painel da Inicio
     "/api/documentos",
     "/api/entidades",
     "/api/certidoes/tipos",
@@ -105,6 +108,7 @@ _ARQUIVO = "devolve arquivo (PDF, planilha, zip), não JSON"
 _SESSAO = "muda a cada sessão ou a cada minuto (acesso, auditoria, saúde): só faria ruído na comparação"
 _CORREIO = "estado da caixa de e-mail de quem está logado; no servidor de prova é o simulador"
 _PARAMETRO = "só responde com os parâmetros que a tela manda (número, competência, período)"
+_RECORTE = "recorte por contratante de rota que já está no retrato (/api/medicoes/fila, /api/a-receber, /api/siga)"
 FORA = {
     "/api/health": _SESSAO,
     "/api/auth/eu": _SESSAO,
@@ -121,6 +125,7 @@ FORA = {
     "/api/correio/respostas/nao-vistas": _CORREIO,
     "/api/contratos/{contrato_id}/reajuste/sugestao": _PARAMETRO,
     "/api/contratos/{contrato_id}/planilhas/avisos": _PARAMETRO,
+    "/api/busca": _PARAMETRO,    # busca unica do topo (#819): so' responde a' pergunta (?q=) que a tela manda
     "/api/contratos/{contrato_id}/medicoes.csv": _ARQUIVO,
     "/api/resumo-medicoes.csv": _ARQUIVO,
     "/api/certidoes/{certidao_id}/arquivo": _ARQUIVO,
@@ -137,6 +142,10 @@ FORA = {
     "/api/protocolos/{pid}/pacote": _ARQUIVO,
     "/api/protocolos/{pid}/assinado": _ARQUIVO,
     "/api/protocolos/{pid}/comprovante": _ARQUIVO,
+    # as abas da pagina do contratante (#818): o recorte por contratante de rotas que ja' estao no retrato
+    "/api/contratantes/{chave}/medicoes": _RECORTE,
+    "/api/contratantes/{chave}/a-receber": _RECORTE,
+    "/api/contratantes/{chave}/siga": _RECORTE,
 }
 
 _MARCADOR = re.compile(r"\{([^}]+)\}")

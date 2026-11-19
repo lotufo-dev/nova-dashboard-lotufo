@@ -13,7 +13,8 @@ import Reajuste from "./Reajuste";
 import { NovoProtocolo } from "./Protocolo";
 import { ir, medicaoDaBusca, type AbaObra as Aba, type Busca, type Origem } from "./rota";
 import { Link } from "./Link";
-import { Abas, destinoDeHref, Migalhas, VoltarOrigem } from "./Topo";
+import { useNomesDoCaminho } from "./nomesDoCaminho";
+import { Abas, destinoDeHref, VoltarOrigem } from "./Topo";
 import { baseDosValores } from "./formato";
 import Selo from "./Selo";
 import { situacaoDoNivel } from "./situacao";
@@ -23,6 +24,8 @@ import Falha from "./Falha";
 // Bloco 6 (spec §10.3): cabecalho da obra, montado no servidor (`contratos.cabecalho`).
 type Cabecalho = {
   id: number; obra: string; orgao: string; instrumento: string;
+  // #805: a sigla do contratante e a chave da pagina dele, para o caminho "Obras › contratante › obra"
+  contratante?: string | null; contratante_chave?: string | null;
   percentual_lotufo_bp: number;
   // os inicios alimentam as linhas do tempo (#160); nulos quando o cadastro nao os tem
   execucao_inicio?: string | null; vigencia_inicio?: string | null;
@@ -127,23 +130,28 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
     document.title = `${c ? c.obra : "Obra"}${rotulo ? ` · ${rotulo}` : ""} · grupolotufo`;
   }, [c, aba]);
 
-  // "Todas as obras" volta a lista; se foi dela que se chegou, com os filtros que ela tinha.
-  const lista = origem?.tela === "obras" ? destinoDeHref(origem.href) : { para: { tela: "obras" as const }, busca: undefined };
+  // O caminho e' Obras › contratante › obra (#805), e o "voltar" segue o caminho: sobe um nivel, para a pagina do
+  // contratante. Se foi de uma vista de Obras que se chegou (a tabela filtrada, o Andamento, o QDOP) ou da pagina do
+  // contratante com filtro, volta a ela, como estava. A obra sem orgao no cadastro nao tem pagina de contratante.
+  const doContratante = c?.contratante_chave ? { tela: "contratante" as const, chave: c.contratante_chave } : null;
+  const nomeContratante = c ? c.contratante ?? c.orgao : null;
+  const volta = origem?.tela === "obras" ? { ...destinoDeHref(origem.href), rotulo: "Obras" }
+    : origem?.tela === "contratante" ? { ...destinoDeHref(origem.href), rotulo: nomeContratante ?? "Contratante" }
+      : doContratante ? { para: doContratante, busca: undefined, rotulo: nomeContratante ?? "Contratante" }
+        : { para: { tela: "obras" as const }, busca: undefined, rotulo: "Obras" };
+  // O caminho em si ("Obras › SINFRA › MT-388") e' da barra do topo (#814): a pagina diz os nomes que ja' carregou. O
+  // contratante leva a' pagina dele; o orgao sem chave no cadastro aparece so' com o nome.
+  useNomesDoCaminho({ obra: c?.obra, contratante: nomeContratante ? { nome: nomeContratante, chave: c?.contratante_chave } : null });
 
   return (
     <>
       <header className="topbar topbar--detalhe topbar--obra">
         <div className="topbar__linha topbar__linha--quebra">
           <div className="topbar__trilha">
-            <Link className="btn--voltar" para={lista.para} busca={lista.busca}>
-              <IconeVoltar className="icone icone--p" /> Todas as obras
+            <Link className="btn--voltar" para={volta.para} busca={volta.busca}>
+              <IconeVoltar className="icone icone--p" /> {volta.rotulo}
             </Link>
-            <VoltarOrigem origem={origem} alemDe={["obras"]} />
-            {/* Obras › contratante › obra. O contratante e' o orgao do contrato; o link dele abre a lista de Obras
-                daquele orgao (a lista ja' filtra por ?orgao=) e nao a origem de onde se chegou. */}
-            <Migalhas origem={origem} itens={[{ rotulo: "Obras", para: { tela: "obras" } },
-              ...(c ? [{ rotulo: c.orgao, para: { tela: "obras" as const }, busca: { orgao: c.orgao }, fixa: true }] : []),
-              { rotulo: c?.obra ?? "Obra" }]} />
+            <VoltarOrigem origem={origem} alemDe={["obras", "contratante"]} />
           </div>
         </div>
         <div className="topbar__linha topbar__linha--quebra">

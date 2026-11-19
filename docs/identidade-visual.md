@@ -25,8 +25,12 @@ valem elas.
   PR #723). Um teste confere que `--cor-marca` não aparece em nenhuma outra regra (`pecasBase.test.tsx`).
 - **Ação é tinta.** O botão principal é preto cheio; o secundário tem a borda grossa preta. Link tem a cor do texto
   em volta e é sublinhado. Motivo: sobra uma cor só para o que pede atenção, a da situação (PR #725).
-- **Número e data são tinta por padrão.** Só leva cor o que tem situação. Percentual executado é número, não
-  situação: 14% executado não é "feito", e fica em tinta (PR #776).
+- **Valor que se compara leva cor e forma; o que não se compara fica em tinta.** Valor de contrato, data e número
+  de documento são tinta. O valor que tem etapa, variação, diferença, andamento ou tempo parado diz isso por uma
+  das cinco famílias da seção "Valores". Percentual executado continua número, não situação: 14% executado não é
+  "feito", e fica em tinta (PR #776). Motivo: com todo número em preto não dava para saber se o faturamento ou a
+  medição protocolada estava melhor ou pior que no mês passado, nem ver a diferença entre o aprovado e o pedido
+  (decisão do dono de 18/11/2026, #805). Antes a regra era "número e data são tinta por padrão".
 - **Superfície igual ao papel.** O painel tem o mesmo fundo da página e se separa pela moldura e pela sombra.
 - **Etapas do ciclo e previsão têm tons próprios**, que não são situação: do azul claro (em análise) ao azul escuro
   (protocolado), verde no recebido; a previsão vai da tinta (neste mês) ao cinza claro (sem previsão). O atrasado é
@@ -67,7 +71,10 @@ valem elas.
 - **Falta que trava é crítico; falta que não trava é vence em breve.** Certidão vencida ou item que o servidor
   marca como bloqueio é crítico; documento que falta sem impedir o envio é o triângulo (PR #739).
 - **Tempo parado** (SIGA): andou hoje é feito; menos de 5 dias úteis, em andamento; 5 ou mais, vence em breve; 10 ou
-  mais, crítico (PR #771).
+  mais, crítico (PR #771). A leitura é do servidor, e "parado", na faixa de números e no cabeçalho do painel, é só o
+  crítico (#805).
+- **Não lido** (SIGA): o processo que o robô não leu na última rodada leva a etiqueta no tom de "vence em breve":
+  falta sem travar, e se acompanha (#805).
 
 ### Aviso, trava, falha e justificativa
 
@@ -80,6 +87,95 @@ Quatro caixas que se distinguem de relance (decisões 4, 10 e 17 da página da m
 - **Justificativa:** caixa de moldura grossa preta com o campo obrigatório dentro, junto do botão que a exige.
 - **Falha** (de leitura ou de ação) é sempre a faixa de crítico com o octógono. Motivo: o triângulo é a forma de
   "vence em breve", e uma falha com triângulo se confundiria com aviso de prazo (PRs #773, #781).
+
+## Valores
+
+Cinco famílias dizem o que um valor é e como ele vai. Decisão do dono de 18/11/2026 (#805): os avisos tinham
+categorização por cor e forma, e os números não. O número continua em tinta; a família aparece na marca ao lado
+do rótulo, na etiqueta sob o valor ou na barra.
+
+| Família | Responde | Forma | Peça |
+|---|---|---|---|
+| Etapa do dinheiro | o que o valor é | quadradinho no tom da etapa, ao lado do rótulo | `MarcaEtapa` |
+| Variação | está melhor ou pior que antes | seta para cima, seta para baixo ou ponto, com o percentual e a referência | `Variacao` |
+| Diferença | quanto dois valores que deveriam ser iguais se afastam | sinal de igual, ou a diferença em reais e em percentual | `Diferenca` |
+| Andamento | o ritmo contra o necessário para o prazo | barra com um risco preto no necessário, e a palavra | `Andamento` |
+| Tempo parado | há quantos dias está numa etapa ou num setor | o selo da situação | `Selo` |
+
+- **Valor não é situação.** As formas das famílias (seta, ponto, sinal de igual, barra) são outras que as dos
+  quatro glifos, de propósito: a seta para cima não pode ser lida como o triângulo de "vence em breve".
+- **Não há cor nova.** Melhor é o verde do feito, pior é o vermelho do crítico, atenção é o amarelo de "vence em
+  breve", e o estável é neutro. Motivo: "melhor" e "pior" se leem como "feito" e "crítico", e uma segunda paleta
+  disputaria com a das situações. A cor da marca continua fora.
+- **A conta é do servidor.** A referência da variação e os dois lados da diferença chegam prontos, com a mesma
+  definição do número; a tela só desenha. Sem referência, nada aparece.
+
+### Quando usar cada uma
+
+- **Etapa do dinheiro:** em análise, boletim, nota, protocolado e recebido, nos tons que a Início já usa. A marca
+  acompanha o rótulo e o cabeçalho da coluna. O aprovado é o valor do boletim e leva a marca dele. O em aberto não é
+  etapa do ciclo: leva um triângulo no tom de "vence em breve", e o valor dele sai nesse tom. O medido junta etapas
+  (o aprovado e, sem boletim, o pedido) e fica sem marca.
+- **Variação:** só contra uma referência escrita ao lado ("× set", "× out/25"). A seta diz a direção e a cor diz
+  se é bom: no em aberto, cair é bom. Até 2% para cima ou para baixo é estável. O mês em curso compara com o mês
+  anterior até o mesmo dia, e o rótulo diz ("× out até o dia 18"). Motivo: mês pela metade contra mês inteiro diria
+  sempre "caiu". O valor de uma etapa do ciclo (o protocolado, o recebido de uma competência) compara com a mesma
+  altura do mês anterior, pelo acumulado (abaixo), até o mesmo dia um mês antes ("× set até 18/10"). A medição da
+  referência que não dá para situar no dia de corte apaga a variação. Período sem valor, ou anterior ao primeiro ano que as telas da diretoria contam, não serve de
+  referência.
+  No protocolado a comparação é pelo acumulado (decisão do dono de 18/11/2026): tudo o que a competência já
+  protocolou até hoje, recebido depois ou não, contra o que a anterior tinha protocolado até o mesmo dia. Motivo: o
+  que está na etapa cai quando o órgão paga mais rápido, e a variação saía vermelha por um fato bom. Como o valor da
+  coluna continua sendo o que está na etapa, a linha da variação mostra o número de que a seta fala ("acumulado
+  R$ 150.000,00 ▲ +20,0% × set até 16/10"), separada da contagem de medições por um fio, para não ler como legenda
+  do valor de cima. O número não se parte; na coluna estreita, a palavra fica na linha de cima dele. Abaixo de
+  1050 px de conteúdo a faixa dos números vai em duas linhas de três, para o valor de oito dígitos caber na coluna
+  sem encostar no vizinho. Sem lastro num dos lados, somem o número e a variação. O
+  recebimento prova o protocolo até a data dele: a medição recebida sem protocolo registrado conta desde o dia em que
+  foi recebida. No recebido, que encerra o ciclo, o valor da etapa já é o acumulado.
+- **Diferença:** entre dois valores que deveriam ser iguais (o aprovado e o pedido). Igual leva o sinal de igual.
+  Diferente mostra os reais e o percentual: até 0,5% da base, no tom de "vence em breve"; acima, no tom do crítico.
+  É o limite do aviso "aprovado abaixo do pedido" (#741), um número só no sistema. Só entre medições que têm os
+  dois valores: medição em análise não é diferença, é etapa não alcançada, e pintá-la de vermelho enganaria quem lê.
+  Falta de nota ou de pagamento também não é diferença de valor. Na linha que soma (mês, obra, ano) a diferença é
+  só o corte: o que ficou abaixo do pedido, sobre o pedido de todas as medições comparadas. O aprovado acima do
+  pedido aparece só na linha da medição, escrito ("+ R$ … acima do pedido") e sempre no tom de "vence em breve":
+  quase sempre é o pedido gravado errado, e somado no mês anulava o corte de outra obra. Até R$ 0,05 por medição é
+  arredondamento do órgão e conta como igual (decisão do dono de 10/11/2026).
+- **Andamento:** a partir de 100% do necessário, "Adiantada", no tom do feito; de 70% a 99%, "Atenção", no tom de
+  "vence em breve"; abaixo de 70%, "Devagar", no tom do crítico. Sem necessário ou sem ritmo, nada aparece.
+  A leitura é uma só, do servidor: a mesma palavra e o mesmo percentual na lista de Obras, na página do
+  contratante e na página da obra. A tela não repete o corte. Fica fora da régua, com o motivo escrito no lugar da
+  leitura, a obra com até duas competências de prazo ("Prazo no fim"; com pedido enviado e sem resposta,
+  "Prazo no fim · prorrogação pedida"), a que tem pedido de prorrogação sem resposta ("Prorrogação pedida") e a que
+  fechou três competências sem medição de execução ("Sem medição desde 07/2026", o mês da última). O motivo vai em
+  tinta, sem barra e sem tom de valor: o motivo não é aviso, é a razão de não haver leitura. Na página da obra, fora
+  da régua, a conclusão estimada continua com o selo ("N dias depois do fim da execução"): "Prazo no fim" diz que a
+  régua não vale; o selo diz quando a obra termina no ritmo de hoje (decisão do dono de 19/11/2026). Só quem tem
+  leitura entra nas contagens por leitura; na faixa de números, as obras com prazo a cumprir e sem leitura (fora da
+  régua ou que ainda não mediram) vão contadas ao lado, em tinta ("N sem leitura"), e as duas contagens somam as
+  linhas da vista Andamento (#822, decisões do dono de 18 e 19/11/2026).
+  A contagem de obras por leitura ("3 devagar", "2 em atenção") vai numa etiqueta do tom da leitura, sem glifo:
+  é valor, não situação (#805).
+  Na tabela que traz a coluna Andamento ao lado da Situação (a página do contratante), a obra devagar e sem aviso
+  não diz "Em dia": a Situação leva a etiqueta "Devagar" e o motivo ("mede N% do necessário"), pela mesma leitura da
+  coluna. Qualquer aviso do farol continua ganhando, e "Atenção" no andamento não tira o "Em dia" (decisão do dono
+  de 18/11/2026). Motivo: "Devagar" numa coluna e "Em dia" na outra se contradiziam.
+  A obra sem aviso no farol e com o prazo no fim também não diz "Em dia": a Situação escreve "Prazo no fim ·
+  execução até 20/12" (com o ano quando não é o de hoje), em tinta, sem selo. O aviso de execução terminando é só
+  da operação; para a diretoria, é a Situação que diz o prazo no fim. Qualquer aviso do farol continua ganhando
+  (decisão do dono de 19/11/2026).
+- **Tempo parado:** os dias numa etapa ou num setor, com o selo da situação e os limites do SIGA (seção "Quando
+  usar cada uma" das situações). Na medição, são os dias úteis desde o evento que abriu o passo da vez. No passo
+  Pagamento a régua é o prazo do órgão (`docs/adr/0007`): crítico só depois da data esperada do recebimento; antes
+  dela, ou sem prazo, em andamento. Motivo: o órgão leva semanas para pagar, e dez dias úteis de espera não são
+  atraso (#805). A leitura é uma só, do servidor: a mesma medição tem o mesmo selo na fila de trabalho e no cartão
+  do Resumo das medições. A recebida não está parada: leva o selo do feito com a data.
+- **No repasse sem baixa não há tempo parado com o órgão.** A medição já foi paga pelo órgão: a linha leva o selo do
+  feito com o dia do pagamento ("órgão pagou em 04/11") e a nota leva o selo de em andamento "repasse sem baixa".
+  O tempo parado com o prazo do órgão é só da nota que o órgão ainda não pagou e da medição protocolada sem nota.
+- **Fica em tinta:** valor de contrato, data, número de documento e o próprio número ao lado da marca ou da
+  etiqueta.
 
 ## Letras e tamanhos
 
@@ -101,10 +197,28 @@ Quatro caixas que se distinguem de relance (decisões 4, 10 e 17 da página da m
 - **Régua de grupo:** linha preta de 2 px acima do título de um grupo de blocos e no alto da página. **Régua de
   seção:** linha preta de 1 px sob o cabeçalho da tabela, acima de subtítulo dentro de painel e na base de gráfico.
   Linhas de uma tabela se separam por um fio cinza, sem zebra.
+- **Cabeçalho de grupo forte:** faixa de tinta cheia com a letra clara, que abre um grupo de linhas de tabela ou um
+  bloco (o contratante, em Obras e no quadro do mês; quem tem de agir, na fila de trabalho; a categoria, no SIGA),
+  com o subtotal do grupo nas colunas. Motivo: na linha cinza o contratante sumia
+  entre as obras, e a página parecia uma lista só (decisão do dono de 18/11/2026, #805).
+- **Borda do tempo parado:** no SIGA, a borda esquerda da linha leva a cor da situação dos dias sem movimentação (#840), a mesma
+  do selo da linha; o encerrado não leva. Motivo: com tudo em tinta não dava para ver o que estava travado antes de
+  ler (decisão do dono de 18/11/2026, #805).
+- **Barra de passos:** o fluxo da medição de uma obra em miniatura, na linha da tabela: um segmento por passo que
+  a obra tem, os feitos no tom do feito, o da vez no tom do em andamento e os que faltam no papel escuro, com o nome
+  do passo da vez e a posição escritos ("Espelhos · 3 de 5"). Motivo: na fila de trabalho a linha diz onde a
+  medição está sem abrir a matriz (decisão do dono de 18/11/2026, #805).
 - **Painel:** moldura preta de 2 px e sombra dura (deslocada 8 px, sem desfoque), com o título dentro e sem régua
   embaixo dele. A janela de diálogo é um painel por cima de um véu; menu suspenso, lista de sugestões e a janela do
   e-mail levam a mesma sombra, e não há sombra com desfoque. Motivo: a moldura separa o painel do papel sem
   mudar a cor do fundo (decisão 6 da Início; PRs #725, #772).
+- **Quadro por etapa:** uma coluna por etapa do ciclo, com a barra no tom dela, a marca, a quantidade e o valor no
+  cabeçalho, e um cartão por medição embaixo, o de maior valor primeiro. Coluna vazia diz "nenhuma medição". É a
+  forma do Resumo das medições, que responde "onde está o dinheiro do mês"; a tabela continua como segunda vista,
+  para comparar valores entre linhas (decisão do dono de 18/11/2026, #805).
+- **Cartão de medição:** moldura fina com a borda esquerda no tom da etapa; dentro, a obra, o contratante com a
+  medição, o valor em tinta e as etiquetas das famílias de valor (o tempo parado e a diferença). Menor que o
+  painel: sem título, sem sombra e sem a moldura grossa. Só no quadro por etapa.
 - **Abas ficam direto na página, sem caixa em volta dos painéis da aba.** Motivo: caixa dentro de caixa perdia
   40 px de largura e cortava as tabelas da página da obra (PR #776).
 - **Selo:** fundo claro da situação, glifo e palavra, com maiúscula inicial. **Contador:** a quantidade ao lado de
@@ -127,20 +241,56 @@ Quatro caixas que se distinguem de relance (decisões 4, 10 e 17 da página da m
 
 A casca é o que fica igual em toda tela: o menu à esquerda e o topo (decisões 8, 9 e 10 da Início; PR #725).
 
-- **Menu lateral escuro**, de 232 px, com o símbolo L e o nome da marca em dois pesos, um item por tela e o botão de
-  recolher no pé. O item da tela atual tem fundo realçado, texto claro e forte e o ícone em laranja.
-- **Recolhido** fica só a coluna dos ícones (64 px). A escolha é guardada no navegador.
-- **Topo** de 56 px sobre o papel, com o título da tela e a conta (avatar redondo com as iniciais).
+- **Menu lateral escuro**, de 232 px, com o símbolo L e o nome da marca em dois pesos, um item por página e o botão
+  de recolher no pé. O item da página atual tem fundo realçado, texto claro e forte e o ícone em laranja.
+- **Menu em áreas:** os itens ficam agrupados por área, com o nome da área em letra pequena de título em cima das
+  páginas dela: Painel, Medições, Obras, Financeiro, Prazos e avisos, Órgãos, Documentos e Sistema. A área que é a
+  própria página (Obras) é um item só, sem o nome repetido. A área da página aberta fica com o nome aceso. Cada
+  perfil vê as páginas que já via; área sem página do perfil não aparece. Motivo: dez itens soltos não diziam onde
+  cada página mora, e as páginas novas (Em aberto, então chamada A receber, e as três de Documentos) não cabiam numa lista só (decisão do dono
+  de 18/11/2026, #805; #814). Substitui o menu de 09/10/2026, uma lista sem nome de grupo.
+- **Item de 36 px no menu**, e não os 40 px do botão: com 14 páginas o menu inteiro tem de caber numa janela de
+  900 px de altura. Em janela mais baixa o menu rola por dentro e o botão de recolher fica preso ao pé. É exceção
+  ao alvo mínimo de 40 px, aceita pelo dono em 19/11/2026.
+- **Recolhido** fica só a coluna dos ícones (64 px), com um fio entre uma área e a outra. A escolha é guardada no
+  navegador.
+- **Topo** sobre o papel, com o caminho da página, o lugar da busca e a conta (avatar redondo com as iniciais). Tem
+  56 px, ou mais quando o caminho ocupa mais de uma linha.
+- **Caminho:** onde se está, da área até o objeto, cada trecho um link: "Obras › SINFRA › MT-388 › Medições ›
+  15ª Medição". É uma peça só, na barra do topo; nenhuma página desenha trilha própria. O trecho da página ou do
+  objeto é o título da barra (maior e forte); os de antes são links sublinhados na cor do texto de apoio; depois do
+  título só vem a vista (a aba), quando não é a padrão. Nada é cortado: o que não cabe desce para a linha de baixo.
+  Motivo: com mais páginas e três níveis em Obras, a página precisa dizer onde está e dar o caminho de volta
+  (decisão do dono de 18/11/2026, #805; #814). Na página que tem título próprio (a obra, a medição, o contratante,
+  o Início, Obras) o trecho final fica na letra dos outros trechos, porque o nome já está grande no título logo
+  abaixo; e o trecho que levaria à própria página (a área cuja primeira página é a aberta) é texto, não link
+  (decisões do dono de 19/11/2026).
+- **O menu aceso e o caminho respondem a perguntas diferentes na página da medição.** O menu acende Medições, a
+  área de quem opera; o caminho diz onde a medição mora (dentro da obra, dentro do contratante). Para o perfil sem
+  Medições no menu (diretoria), a medição acende Obras.
 - **Página** com largura máxima de 1320 px e margem lateral de 32 px.
 
 ## Larguras
 
 - **1440 px:** a disposição cheia. Na página da medição, a Linha do tempo fica ao lado do passo.
 - **1024 px:** menu aberto e 792 px de conteúdo. A página não rola de lado. Colunas ao lado descem para baixo;
-  tabela que não cabe rola dentro da própria caixa.
-- **390 px (celular):** o menu nasce recolhido (64 px), abre por cima da tela e fecha ao navegar; no topo fica só o
-  avatar. As telas de leitura da diretoria (Início, Obras, página da obra, Fechamento, Resumo das medições) são
+  tabela que não cabe rola dentro da própria caixa. O quadro por etapa vira uma etapa embaixo da outra, com os
+  cartões lado a lado; no celular, um cartão embaixo do outro.
+- **390 px (celular):** o menu nasce recolhido (64 px), abre por cima da tela, com os nomes das áreas, e fecha ao
+  navegar; no topo ficam o caminho e o avatar. O caminho vai em duas alturas: os trechos de antes numa linha de letra
+  pequena e o título na linha de baixo. As telas de leitura da diretoria (Início, Obras, página da obra, Fechamento, Resumo das medições) são
   desenhadas para essa largura: uma coluna, e a tabela vira um bloco por linha. As telas de operação são de
   computador; no celular nada se sobrepõe, e o que não cabe rola dentro da área da tela.
 - **Na Início e na página da medição, o bloco que muda de disposição mede o próprio painel**, não a janela, porque
   a largura útil depende de o menu estar aberto ou recolhido (PR #729).
+
+## Tela de entrada
+
+A única tela fora da casca (#821).
+
+- **Duas metades iguais: a marca no lado escuro, o formulário no papel.** O lado escuro tem a cor do menu e só a
+  marca: o símbolo L e o nome em dois pesos, as mesmas peças do menu, um em cima do outro. O símbolo cresce na
+  proporção do menu e o nome vai no maior passo da escala de letra. Motivo: dois terços da tela eram um fundo preto
+  com linhas finas, sem marca nem texto, e o formulário ficava num canto (decisão do dono de 18/11/2026, #805).
+- **Nada se move.** O desenho animado saiu, com a biblioteca de 3D que só ele usava.
+- **No celular** o formulário vem primeiro e a marca fica embaixo, no que sobra da altura.

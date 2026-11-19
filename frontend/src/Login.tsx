@@ -1,35 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiErro, setCsrf } from "./api";
 import Simbolo from "./Simbolo";
 import "./login.css";
 import Falha from "./Falha";
 
-export interface Usuario { id: number; nome: string; perfil: string; email: string; }   // /api/auth/eu
+// /api/auth/eu; `permissoes`: as do perfil, pela regra do servidor (#829, permissoes.ts)
+export interface Usuario { id: number; nome: string; perfil: string; email: string; permissoes?: readonly string[] }
 
 export default function Login({ aoEntrar }: { aoEntrar: (u: Usuario) => void }) {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
   const [enviando, setEnviando] = useState(false);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [sem3d, setSem3d] = useState(false);
 
   // O App so' titula as telas depois do login; sem isto a aba herdava "Início".
   useEffect(() => { document.title = "Entrar · grupolotufo"; }, []);
-
-  // Fundo 3D em import() dinamico: o Three so' baixa nesta tela. Sem WebGL (ou erro num quadro)
-  // fica o fundo estatico do CSS, sem aviso — o formulario nao depende dele.
-  useEffect(() => {
-    let limpar: (() => void) | undefined;
-    let cancelado = false;
-    const parado = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    import("./LoginFundo3D").then(({ iniciarFundo }) => {
-      if (cancelado || !canvasRef.current) return;
-      try { limpar = iniciarFundo(canvasRef.current, parado, () => setSem3d(true)); }
-      catch { setSem3d(true); }
-    }).catch(() => { if (!cancelado) setSem3d(true); });
-    return () => { cancelado = true; limpar?.(); };
-  }, []);
 
   async function entrar(e: React.FormEvent) {
     e.preventDefault();
@@ -56,39 +41,32 @@ export default function Login({ aoEntrar }: { aoEntrar: (u: Usuario) => void }) 
 
   return (
     <main className="entrar">
-      <div className="entrar__visual">
-        <canvas ref={canvasRef} className="entrar__canvas" aria-hidden="true" hidden={sem3d} />
+      {/* o lado escuro e' da marca, parada: o L em vetor e o nome em dois pesos, as mesmas pecas do menu (#821) */}
+      <div className="entrar__marca">
+        <Simbolo className="entrar__simbolo" />
+        <span className="entrar__nome"><span className="entrar__nome-apoio">grupo</span>lotufo</span>
       </div>
-      <aside className="entrar__painel">
-        <div className="entrar__topo">
-          {/* a marca como no menu: o L em vetor e o nome em dois pesos */}
-          <div className="entrar__marca">
-            <Simbolo className="entrar__simbolo" />
-            <span className="entrar__nome"><span className="entrar__nome-apoio">grupo</span>lotufo</span>
-          </div>
-          <div className="entrar__bloco">
-            <div className="entrar__cabeca">
-              <h1 className="entrar__titulo">Entrar</h1>
-            </div>
-            <form className="entrar__form" onSubmit={entrar}>
-              <label className="entrar__campo">
-                E-mail
-                <input type="email" name="email" autoComplete="username" spellCheck={false} required
-                       value={email} onChange={e => setEmail(e.target.value)} />
-              </label>
-              <label className="entrar__campo">
-                Senha
-                <input type="password" name="senha" autoComplete="current-password" required
-                       placeholder="••••••••"
-                       value={senha} onChange={e => setSenha(e.target.value)} />
-              </label>
-              {/* o papel de alerta fica no texto: a caixa acrescenta a palavra do nivel para o leitor de tela */}
-              {erro && <Falha>{erro}</Falha>}
-              <button type="submit" className="btn btn--primario entrar__botao" disabled={enviando}>{enviando ? "Entrando…" : "Entrar"}</button>
-            </form>
-          </div>
+      <div className="entrar__painel">
+        <div className="entrar__bloco">
+          <h1 className="entrar__titulo">Entrar</h1>
+          <form className="entrar__form" onSubmit={entrar}>
+            <label className="entrar__campo">
+              E-mail
+              <input type="email" name="email" autoComplete="username" spellCheck={false} required
+                     value={email} onChange={e => setEmail(e.target.value)} />
+            </label>
+            <label className="entrar__campo">
+              Senha
+              <input type="password" name="senha" autoComplete="current-password" required
+                     placeholder="••••••••"
+                     value={senha} onChange={e => setSenha(e.target.value)} />
+            </label>
+            {/* o papel de alerta fica no texto: a caixa acrescenta a palavra do nivel para o leitor de tela */}
+            {erro && <Falha>{erro}</Falha>}
+            <button type="submit" className="btn btn--primario entrar__botao" disabled={enviando}>{enviando ? "Entrando…" : "Entrar"}</button>
+          </form>
         </div>
-      </aside>
+      </div>
     </main>
   );
 }

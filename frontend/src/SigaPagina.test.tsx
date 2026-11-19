@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import Caminho from "./Caminho";
 import SigaPagina from "./SigaPagina";
 import type { Movimentacao, PainelSiga, ProcessoSiga, Robo, TipoMovimentacao } from "./siga";
 
@@ -18,13 +19,23 @@ const tipoDe = (evento: string): TipoMovimentacao => {
 const AGORA = new Date("2026-10-28T15:30:00Z");
 const mov = (data: string, evento: string, extra: Partial<Movimentacao> = {}): Movimentacao => ({
   data, evento, tipo: tipoDe(evento), cad_lotacao: "PROTOC/ORGAO", cad_pessoa: "Beltrano", at_lotacao: "COFIN/ORGAO", at_pessoa: "Fulano", ...extra });
-const processo = (extra: Partial<ProcessoSiga>): ProcessoSiga => ({
-  id: 1, codigo: null, link: null, numero: null, nome: null, contrato_id: null, obra: null, medicao_id: null,
-  categoria: extra.medicao_id ? "medicoes" : "outros", complemento: null, o_que_e: extra.medicao_titulo ?? "Outro",
-  medicao_titulo: null, protocolo_id: null, situacao: "1º Volume - Aguardando Andamento [COFIN, [X]]", encerrado: null, setor: "COFIN",
-  caixa_entrada: false, com_quem: "Fulano", desde: "2026-10-20T10:00:00-04:00", dias_uteis: 6, hoje: 0,
-  ultima: mov("2026-10-20T10:00:00-04:00", "Recebimento"), protocolado_em: "2026-10-01T08:00:00-04:00",
-  movimentacoes: [mov("2026-10-20T10:00:00-04:00", "Recebimento")], ...extra });
+// a leitura de "parado" como o servidor a manda (`siga.parado`, #840: sobre os dias sem movimentacao); o encerrado nao tem
+const tempoDe = (p: Pick<ProcessoSiga, "encerrado" | "hoje" | "dias_sem_movimentacao">): ProcessoSiga["situacao_tempo"] => {
+  const d = p.dias_sem_movimentacao;
+  return p.encerrado ? null : p.hoje > 0 ? "feito" : d === null ? null : d >= 10 ? "critico" : d >= 5 ? "breve" : "andamento";
+};
+const processo = (extra: Partial<ProcessoSiga>): ProcessoSiga => {
+  const p: ProcessoSiga = {
+    id: 1, codigo: null, link: null, numero: null, nome: null, contrato_id: null, obra: null, contratante: null, orgao_sub: null, medicao_id: null,
+    categoria: extra.medicao_id ? "medicoes" : "outros", categoria_a_conferir: null, complemento: null, o_que_e: extra.medicao_titulo ?? "Outro",
+    medicao_titulo: null, protocolo_id: null, situacao: "1º Volume - Aguardando Andamento [COFIN, [X]]", encerrado: null, setor: "COFIN",
+    caixa_entrada: false, com_quem: "Fulano", desde: "2026-10-20T10:00:00-04:00", dias_uteis: 6, dias_sem_movimentacao: null, hoje: 0, situacao_tempo: null,
+    ultima: mov("2026-10-20T10:00:00-04:00", "Recebimento"), protocolado_em: "2026-10-01T08:00:00-04:00",
+    movimentacoes: [mov("2026-10-20T10:00:00-04:00", "Recebimento")], ...extra };
+  // sem dizer, os dias sem movimentacao sao os do setor (o processo nao andou desde que entrou)
+  if (extra.dias_sem_movimentacao === undefined) p.dias_sem_movimentacao = p.dias_uteis;
+  return { ...p, situacao_tempo: extra.situacao_tempo !== undefined ? extra.situacao_tempo : tempoDe(p) };
+};
 
 const ALFA = processo({
   id: 1, codigo: "ABC123", link: "https://siga.exemplo.com.br/acompanhar?n=ABC123", numero: "ORGAO-PRO-2026/00001",
@@ -60,11 +71,30 @@ const MUITOS = processo({
   ] });
 
 const PARADO: Robo = { estado: "parado", rodada: null, pedidos: [], avisos: [] };
-const painel = (processos: ProcessoSiga[], extra: Partial<PainelSiga> = {}): PainelSiga =>
-  ({ lido_em: "2026-10-28T15:00:00+00:00", atrasado: false, processos, pode_atualizar: false, robo: PARADO, ...extra });
+// a faixa de numeros contada como o servidor conta: so' os vivos; parado e' o critico; nao lido e' o que leva o aviso
+const painel = (processos: ProcessoSiga[], extra: Partial<PainelSiga> = {}): PainelSiga => {
+  const vivos = processos.filter(p => p.encerrado === null);
+  const naoLidos = new Set((extra.robo ?? PARADO).avisos.filter(a => a.tipo === "nao_lido").map(a => a.processo_id));
+  return { lido_em: "2026-10-28T15:00:00+00:00", atrasado: false, processos, pode_atualizar: false, robo: PARADO,
+    numeros: { acompanhados: vivos.length, parados: vivos.filter(p => p.situacao_tempo === "critico").length,
+      andaram_hoje: vivos.filter(p => p.hoje > 0).length, nao_lidos: vivos.filter(p => naoLidos.has(p.id)).length },
+    limites: { dias_atencao: 5, dias_critico: 10 }, ...extra };
+};
+// a tela carregou: ha' pelo menos um painel de categoria (cada um tem a propria tabela)
+const carregada = async () => (await screen.findAllByRole("grid"))[0];
+const paineis = () => screen.getAllByRole("region").filter(s => s.classList.contains("sg-grupo"));
+const tituloDe = (s: HTMLElement) => within(s).getByRole("heading", { level: 2 }).textContent;
+const numerosDaFaixa = () => [...screen.getByLabelText("Processos no SIGA").querySelectorAll(".sg-numero")].map(n => [
+  n.querySelector("dt")?.textContent, n.querySelector(".sg-numero__valor")?.textContent, n.querySelector("dt .glifo")?.className ?? null]);
+const escolhas = () => within(screen.getByRole("navigation", { name: "Categoria dos processos" })).getAllByRole("link");
 const mostrar = (dados: PainelSiga, busca: Record<string, string> = {}) => {
   api.mockResolvedValue(dados);
   return render(<SigaPagina busca={busca} agora={AGORA} />);
+};
+// com o caminho da barra do topo ao lado da página, como a casca o desenha (#814)
+const mostrarComCaminho = (dados: PainelSiga, busca: Record<string, string> = {}) => {
+  api.mockResolvedValue(dados);
+  return render(<><Caminho rota={{ tela: "siga" }} busca={busca} ehH1={false} /><SigaPagina busca={busca} agora={AGORA} /></>);
 };
 const linhasDe = (onde: HTMLElement) => within(onde).getAllByRole("row").filter(l => l.classList.contains("sg__linha"));
 const nomesEm = (onde: HTMLElement) => linhasDe(onde).map(l => l.getAttribute("aria-label"));
@@ -77,104 +107,279 @@ const INDENIZATORIO = processo({ id: 23, contrato_id: 8, obra: "Obra Épsilon", 
 describe("SigaPagina", () => {
   afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
 
-  it("uma tabela só, com uma seção por categoria na ordem fixa, cada uma do mais parado ao menos; sem coluna Hoje nem painel lateral (#663)", async () => {
+  it("um painel por categoria, na ordem fixa, com o cabeçalho de grupo forte; dentro de cada um, do mais parado ao menos (#805)", async () => {
     mostrar(painel([ALFA, ADITIVO, INDENIZATORIO, DELTA, EPSILON, BETA, GAMA, ADITIVO_PARADO]));
-    const grade = await screen.findByRole("grid");
-    expect(screen.getAllByRole("grid")).toHaveLength(1);
-    const secoes = within(grade).getAllByRole("rowgroup").filter(g => g.tagName === "TBODY");
-    expect(secoes.map(s => s.getAttribute("aria-label"))).toEqual(["Medições", "Aditivos", "Indenizatórios", "Outros"]);
-    expect(secoes.map(s => s.querySelector(".sg__secao th")?.textContent)).toEqual(["Medições", "Aditivos", "Indenizatórios", "Outros"]);
-    expect(secoes.map(nomesEm)).toEqual([
+    await carregada();
+    expect(paineis().map(tituloDe)).toEqual(["Medições", "Aditivos", "Indenizatórios", "Outros"]);
+    expect(paineis().map(nomesEm)).toEqual([
       ["Obra Delta · 4ª Medição", "Obra Alfa · 7ª Medição", "Obra Épsilon · 2ª Medição"],
       ["Obra Delta · Aditivo", "Obra Alfa · Aditivo de prazo"],
       ["Obra Épsilon · Indenizatório"],
       ["Processo Gama", "Processo Beta"]]);
-    expect(within(grade.querySelector("thead") as HTMLElement).getAllByRole("columnheader").map(c => c.textContent)).toEqual(
-      ["Processo", "Onde está", "Com quem", "No setor há", "Última movimentação", "Protocolado em", "Abrir"]);
+    // cada painel tem a propria tabela, com as mesmas colunas, sob o cabecalho em tinta
+    expect(screen.getAllByRole("grid")).toHaveLength(4);
+    for (const s of paineis()) {
+      // #840: os nomes e a ordem das colunas
+      expect(within(s).getAllByRole("columnheader").map(c => c.textContent)).toEqual(
+        ["Processo", "Contratante", "Setor", "Com quem", "No setor há", "Dias sem movimentação", "Última movimentação", "Tipo de movimentação", "Abrir"]);
+      expect(s.firstElementChild?.className).toBe("sg-grupo__cabeca");
+      expect(s.querySelectorAll("colgroup col")).toHaveLength(9);
+    }
+    // o cabecalho diz quantos processos o grupo tem e, no selo do critico, quantos estao parados alem do limite
+    const cabeca = (i: number) => paineis()[i].querySelector(".sg-grupo__n") as HTMLElement;
+    expect(cabeca(0).textContent).toBe("3 processos");
+    expect(cabeca(0).querySelector(".selo")).toBeNull();
+    expect(cabeca(2).querySelector(".num")?.textContent).toBe("1 processo");
+    expect(cabeca(2).querySelector(".selo")?.className).toBe("selo selo--critico");
+    expect(within(cabeca(2)).getByText("1 sem movimentação há 10 dias úteis ou mais").className).toBe("sr-only");
+    expect(within(cabeca(3)).getByText("1 sem movimentação há 10+ dias úteis").getAttribute("aria-hidden")).toBe("true");
     expect(screen.queryByRole("complementary")).toBeNull();
   });
 
-  it("seção vazia não aparece (#663)", async () => {
+  it("categoria sem processo não tem painel e continua nas escolhas, com zero (#805)", async () => {
     mostrar(painel([ALFA, GAMA]));
-    const grade = await screen.findByRole("grid");
-    expect(within(grade).getAllByRole("rowgroup").filter(g => g.tagName === "TBODY").map(s => s.getAttribute("aria-label"))).toEqual(["Medições", "Outros"]);
-    expect(screen.queryByText("Aditivos")).toBeNull();
-    expect(screen.queryByText("Indenizatórios")).toBeNull();
+    await carregada();
+    expect(paineis().map(tituloDe)).toEqual(["Medições", "Outros"]);
+    expect(escolhas().map(e => e.textContent)).toEqual(["Todos 2", "Medições 1", "Aditivos 0", "Indenizatórios 0", "Outros 1"]);
+    expect(escolhas().map(e => e.getAttribute("href"))).toEqual(
+      ["/siga", "/siga?categoria=medicoes", "/siga?categoria=aditivos", "/siga?categoria=indenizatorios", "/siga?categoria=outros"]);
+    expect(escolhas().map(e => e.getAttribute("aria-current"))).toEqual(["true", null, null, null, null]);
+    expect(escolhas().every(e => e.className === "escolha")).toBe(true);
   });
 
-  it("subtítulo com o número de processos e a hora da última leitura; legenda da cor", async () => {
-    mostrar(painel([ALFA, BETA]));
-    await screen.findByRole("grid");
-    expect(screen.getByText("2 processos · última leitura 11:00")).toBeTruthy();
+  it("a categoria escolhida na URL mostra só o painel dela e os encerrados dela (#805)", async () => {
+    const todos = [ALFA, ADITIVO, GAMA, RECEBIDO, ARQUIVADO];
+    const { unmount } = mostrar(painel(todos), { categoria: "outros" });
+    await carregada();
+    expect(paineis().map(tituloDe)).toEqual(["Outros"]);
+    expect(nomesEm(paineis()[0])).toEqual(["Processo Gama"]);
+    expect(escolhas().map(e => e.getAttribute("aria-current"))).toEqual([null, null, null, null, "true"]);
+    // as quantidades das escolhas e a faixa de numeros continuam sendo as de todos os processos vivos
+    expect(escolhas().map(e => e.textContent)).toEqual(["Todos 3", "Medições 1", "Aditivos 1", "Indenizatórios 0", "Outros 1"]);
+    expect(numerosDaFaixa()[0].slice(0, 2)).toEqual(["Processos acompanhados", "3"]);
+    expect(nomesEm(encerrados())).toEqual(["Processo Eta"]);          // o arquivado e' de Outros; a medicao recebida, nao
+    unmount();
+    mostrar(painel(todos), { categoria: "aditivos" });
+    await carregada();
+    expect(nomesNaTabela()).toEqual(["Obra Alfa · Aditivo de prazo"]);
+    expect(screen.queryByRole("group", { name: "Encerrados" })).toBeNull();
+  });
+
+  it("categoria escolhida sem processo em andamento: uma linha no lugar do painel; categoria que não existe mostra todos (#805)", async () => {
+    const { unmount } = mostrar(painel([ALFA, GAMA]), { categoria: "indenizatorios" });
+    expect(await screen.findByText("Nenhum processo em andamento em Indenizatórios.")).toBeTruthy();
+    expect(screen.queryByRole("grid")).toBeNull();
+    expect(escolhas().map(e => e.getAttribute("aria-current"))).toEqual([null, null, null, "true", null]);
+    unmount();
+    mostrar(painel([ALFA, GAMA]), { categoria: "reajustes" });
+    await carregada();
+    expect(paineis().map(tituloDe)).toEqual(["Medições", "Outros"]);
+    expect(escolhas()[0].getAttribute("aria-current")).toBe("true");
+  });
+
+  it("clicar na linha dentro de uma categoria guarda a categoria no endereço, e a trilha do histórico volta para ela (#805)", async () => {
+    window.history.replaceState(null, "", "/siga?categoria=aditivos");
+    const { unmount } = mostrar(painel([ALFA, ADITIVO]), { categoria: "aditivos" });
+    fireEvent.click(await screen.findByRole("row", { name: "Obra Alfa · Aditivo de prazo" }));
+    expect(window.location.pathname + window.location.search).toBe("/siga?categoria=aditivos&processo=21");
+    unmount();
+    mostrarComCaminho(painel([ALFA, ADITIVO]), { categoria: "aditivos", processo: "21" });
+    await screen.findByRole("heading", { level: 1 });
+    expect(within(screen.getByRole("navigation", { name: "Você está em" })).getByRole("link", { name: "SIGA" }).getAttribute("href"))
+      .toBe("/siga?categoria=aditivos");
+  });
+
+  it("faixa de números no alto: acompanhados, parados, andaram hoje e não lidos, do servidor, com a hora da última leitura; legenda da cor (#805)", async () => {
+    const avisos = [{ tipo: "nao_lido", processo_id: BETA.id, texto: "não lido às 11:00: página não abriu" }];
+    mostrar(painel([ALFA, EPSILON, BETA, GAMA, INDENIZATORIO, RECEBIDO], { robo: { ...PARADO, avisos } }));
+    await carregada();
+    // o numero em tinta; a situacao no simbolo ao lado do rotulo
+    expect(numerosDaFaixa()).toEqual([
+      ["Processos acompanhados", "5", null],
+      ["Sem movimentação há 10 dias úteis ou mais", "2", "glifo glifo--critico"],
+      ["Andaram hoje", "2", "glifo glifo--feito"],
+      ["Não lidos na última rodada", "1", "glifo glifo--breve"]]);
+    expect(screen.getByLabelText("Processos no SIGA").querySelector(".sg-numero__apoio")?.textContent).toBe("última leitura 11:00");
     const legenda = screen.getByRole("list", { name: "Legenda das cores" });
     expect(within(legenda).getAllByRole("listitem").map(li => li.textContent)).toEqual(
-      ["andou hoje", "menos de 5 dias úteis no setor", "parado há 5 dias úteis ou mais", "10 dias úteis ou mais"]);
+      ["andou hoje", "sem movimentação há menos de 5 dias úteis", "sem movimentação há 5 dias úteis ou mais", "10 dias úteis ou mais"]);
     // cada situacao da legenda tem a forma dela (o glifo), alem da cor
     expect(within(legenda).getAllByRole("listitem").map(li => li.querySelector(".glifo")?.className)).toEqual(
       ["glifo glifo--feito", "glifo glifo--andamento", "glifo glifo--breve", "glifo glifo--critico"]);
   });
 
-  it("Processo: obra em negrito e o que é embaixo (título da medição, 'Aditivo de prazo'); o nome do robô só sem obra; o número não entra no nome (#663)", async () => {
+  it("a faixa mostra o que o servidor contou, com os limites dele, e o zero fica sem símbolo (#805)", async () => {
+    mostrar(painel([ALFA, GAMA], { numeros: { acompanhados: 7, parados: 0, andaram_hoje: 0, nao_lidos: 0 }, limites: { dias_atencao: 3, dias_critico: 8 } }));
+    await carregada();
+    expect(numerosDaFaixa()).toEqual([
+      ["Processos acompanhados", "7", null], ["Sem movimentação há 8 dias úteis ou mais", "0", null],
+      ["Andaram hoje", "0", null], ["Não lidos na última rodada", "0", null]]);
+    expect(within(screen.getByRole("list", { name: "Legenda das cores" })).getAllByRole("listitem").map(li => li.textContent)).toEqual(
+      ["andou hoje", "sem movimentação há menos de 3 dias úteis", "sem movimentação há 3 dias úteis ou mais", "8 dias úteis ou mais"]);
+    expect(within(paineis()[1]).getByText("1 sem movimentação há 8 dias úteis ou mais")).toBeTruthy();
+  });
+
+  it("Processo: obra e assunto em negrito, com link para a obra e, no processo de medição, para a medição; o nome do robô só sem obra; o número não entra no nome (#663, #805)", async () => {
     mostrar(painel([ALFA, BETA, ADITIVO]));
     const alfa = await screen.findByRole("row", { name: "Obra Alfa · 7ª Medição" });
-    expect(within(alfa).getByText("Obra Alfa").className).toContain("sg__nome");
-    expect(within(alfa).getByText("7ª Medição").className).toContain("sg__fraco");
-    expect(within(alfa).queryByRole("link")).toBeNull();
+    expect(alfa.querySelector(".sg__nome")?.textContent).toBe("Obra Alfa · 7ª Medição");
+    expect(within(alfa).getByRole("link", { name: "Obra Alfa" }).getAttribute("href")).toBe("/obras/7");
+    expect(within(alfa).getByRole("link", { name: "7ª Medição" }).getAttribute("href")).toBe("/obras/7/medicoes/31#passo-5");
     expect(alfa.textContent).not.toContain("ORGAO-PRO-2026/00001");
     const aditivo = screen.getByRole("row", { name: "Obra Alfa · Aditivo de prazo" });
-    expect(within(aditivo).getByText("Aditivo de prazo").className).toContain("sg__fraco");
+    expect(aditivo.querySelector(".sg__nome")?.textContent).toBe("Obra Alfa · Aditivo de prazo");
+    expect(within(aditivo).getAllByRole("link").map(l => l.textContent)).toEqual(["Obra Alfa"]);   // sem medicao, so' a obra
     expect(aditivo.textContent).not.toContain("Nome do robô");
     const beta = screen.getByRole("row", { name: "Processo Beta" });
     expect(within(beta).getByText("Processo Beta").className).toContain("sg__nome");
+    expect(within(beta).queryByRole("link")).toBeNull();
   });
 
-  it("tempo no setor nas quatro situações, com o glifo: crítico a partir de 10 dias úteis, vence em breve a partir de 5, em andamento antes; feito quando andou hoje", async () => {
-    mostrar(painel([ALFA, DELTA, BETA, GAMA]));
-    await screen.findByRole("grid");
-    const selo = (texto: string) => screen.getByText(texto).closest(".sg__dias")!;
-    const situacao = (texto: string) => [selo(texto).className, selo(texto).querySelector(".glifo")?.className];
-    expect(situacao("12 dias úteis")).toEqual(["selo selo--critico sg__dias sg__dias--critico", "glifo glifo--critico"]);
-    expect(situacao("6 dias úteis")).toEqual(["selo selo--breve sg__dias sg__dias--breve", "glifo glifo--breve"]);
-    expect(situacao("3 dias úteis")).toEqual(["selo selo--andamento sg__dias sg__dias--andamento", "glifo glifo--andamento"]);
-    expect(situacao("hoje")).toEqual(["selo selo--feito sg__dias sg__dias--feito", "glifo glifo--feito"]);
-    expect(within(screen.getByRole("row", { name: /Obra Alfa/ })).getByText("hoje")).toBe(screen.getByText("hoje"));
+  it("o link da obra dentro da linha leva à obra, sem abrir também o histórico (#805)", async () => {
+    window.history.replaceState(null, "", "/siga");
+    mostrar(painel([ALFA]));
+    const alfa = await screen.findByRole("row", { name: "Obra Alfa · 7ª Medição" });
+    fireEvent.click(within(alfa).getByRole("link", { name: "Obra Alfa" }));
+    expect(window.location.pathname + window.location.search).toBe("/obras/7");
+  });
+
+  it("Contratante: o da obra do processo, com a superintendência embaixo; sem obra, o nome do processo ocupa as duas colunas (#805)", async () => {
+    mostrar(painel([{ ...ADITIVO, contratante: "SINFRA", orgao_sub: "SUEF II" }, { ...INDENIZATORIO, contratante: "MTPAR" }, BETA]));
+    const celula = (nome: RegExp) => screen.getByRole("row", { name: nome }).querySelector('td[data-rotulo="Contratante"]') as HTMLElement | null;
+    const colunasDe = (nome: RegExp) => [...screen.getByRole("row", { name: nome }).querySelectorAll("td")].reduce((n, td) => n + td.colSpan, 0);
+    await carregada();
+    expect(celula(/Aditivo de prazo/)?.textContent).toBe("SINFRASUEF II");
+    expect(within(celula(/Aditivo de prazo/) as HTMLElement).getByText("SUEF II").className).toBe("sg__fraco");
+    expect(celula(/Indenizatório/)?.textContent).toBe("MTPAR");
+    expect(celula(/Processo Beta/)).toBeNull();
+    expect((screen.getByRole("row", { name: /Processo Beta/ }).querySelector("td.sg__proc") as HTMLTableCellElement).colSpan).toBe(2);
+    // com ou sem contratante, a linha fecha as mesmas nove colunas
+    expect([colunasDe(/Aditivo de prazo/), colunasDe(/Indenizatório/), colunasDe(/Processo Beta/)]).toEqual([9, 9, 9]);
+  });
+
+  it("categoria a conferir: aviso discreto na linha quando o servidor diz que o nome indica outra categoria; nas demais, nada (#805)", async () => {
+    const A_CONFERIR = processo({ id: 40, contrato_id: 7, obra: "Obra Alfa", complemento: "Aditivo de prazo", o_que_e: "Aditivo de prazo",
+      categoria_a_conferir: "aditivos", dias_uteis: 8 });
+    mostrar(painel([A_CONFERIR, BETA, ADITIVO]));
+    await carregada();
+    // continua em Outros, onde quem cadastrou o pos: a tela so' avisa
+    expect(nomesEm(paineis()[1])).toEqual(["Obra Alfa · Aditivo de prazo", "Processo Beta"]);
+    const aviso = within(paineis()[1]).getByText("categoria a conferir");
+    expect(aviso.className).toBe("sg__fraco sg__conferir");
+    expect(aviso.closest("tr")?.getAttribute("aria-label")).toBe("Obra Alfa · Aditivo de prazo");
+    expect(screen.getAllByText("categoria a conferir")).toHaveLength(1);
+    // no histórico, onde quem edita corrige, o aviso continua ao lado do número do processo
+    cleanup();
+    mostrar(painel([A_CONFERIR, BETA]), { processo: "40" });
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.getByText(/· categoria a conferir$/).className).toBe("sg__sub");
+    expect(screen.getByRole("button", { name: "Corrigir categoria" })).toBeTruthy();
+  });
+
+  it("tempo no setor na situação que o servidor leu, com o glifo, e a borda da linha na mesma cor; sem leitura, sem selo nem borda (#805)", async () => {
+    const SEM_DATA = processo({ id: 9, nome: "Processo Sem Data", desde: null, dias_uteis: null });
+    mostrar(painel([ALFA, DELTA, BETA, GAMA, SEM_DATA]));
+    await carregada();
+    // "andou hoje" tambem esta' na legenda: aqui vale o selo da linha
+    const selo = (texto: string) => screen.getAllByText(texto).map(e => e.closest(".sg__dias")).find(Boolean)!;
+    const situacao = (texto: string) => [selo(texto).className, selo(texto).querySelector(".glifo")?.className, selo(texto).closest("tr")?.className];
+    expect(situacao("12 dias úteis")).toEqual(["selo selo--critico sg__dias", "glifo glifo--critico", "sg__linha sg__linha--critico"]);
+    expect(situacao("6 dias úteis")).toEqual(["selo selo--breve sg__dias", "glifo glifo--breve", "sg__linha sg__linha--breve"]);
+    expect(situacao("3 dias úteis")).toEqual(["selo selo--andamento sg__dias", "glifo glifo--andamento", "sg__linha sg__linha--andamento"]);
+    expect(situacao("andou hoje")).toEqual(["selo selo--feito sg__dias", "glifo glifo--feito", "sg__linha sg__linha--feito"]);
+    expect(screen.getByRole("row", { name: /Obra Alfa/ }).contains(selo("andou hoje"))).toBe(true);
+    const semData = screen.getByRole("row", { name: "Processo Sem Data" });
+    expect(semData.className).toBe("sg__linha");
+    expect(semData.querySelector(".selo")).toBeNull();
+  });
+
+  it("a cor da linha é a que o servidor manda, não uma conta da tela (#805)", async () => {
+    // 12 dias uteis lidos pelo servidor como "em andamento": a tela desenha o que veio
+    mostrar(painel([processo({ id: 5, nome: "Processo Gama", dias_uteis: 2, dias_sem_movimentacao: 12, situacao_tempo: "andamento" })]));
+    await carregada();
+    expect(screen.getByRole("row", { name: "Processo Gama" }).className).toBe("sg__linha sg__linha--andamento");
+    expect(screen.getByText("12 dias úteis").closest(".selo")?.className).toBe("selo selo--andamento sg__dias");
+  });
+
+  it("entrou no setor há 5 dias úteis e andou ontem: 'No setor há' em texto comum, 'Dias sem movimentação' 1 dia útil sem atenção (#840)", async () => {
+    const ONTEM = processo({ id: 30, nome: "Processo Ontem", desde: "2026-10-21T09:00:00-04:00", dias_uteis: 5, dias_sem_movimentacao: 1,
+      ultima: mov("2026-10-27T16:20:00-04:00", "Recebimento") });
+    mostrar(painel([ONTEM]));
+    const linha = await screen.findByRole("row", { name: "Processo Ontem" });
+    const noSetor = linha.querySelector('td[data-rotulo="No setor há"]') as HTMLElement;
+    expect(noSetor.textContent).toBe("5 dias úteis");
+    expect(noSetor.querySelector(".selo, .glifo, .icone, [class*='--']")).toBeNull();
+    const semMov = linha.querySelector('td[data-rotulo="Dias sem movimentação"]') as HTMLElement;
+    expect(semMov.textContent).toBe("1 dia útil");
+    expect(semMov.querySelector(".selo")?.className).toBe("selo selo--andamento sg__dias");
+    expect(linha.className).toBe("sg__linha sg__linha--andamento");
+    expect(linha.querySelector('td[data-rotulo="Última movimentação"]')?.textContent).toBe("27/10 16:20");
+  });
+
+  it("sem movimentação há 10 dias úteis ou mais: o destaque de ação só na coluna 'Dias sem movimentação' (#840)", async () => {
+    const PARADO_10 = processo({ id: 31, nome: "Processo Parado", desde: "2026-09-01T09:00:00-04:00", dias_uteis: 40, dias_sem_movimentacao: 10,
+      ultima: mov("2025-12-30T08:00:00-04:00", "Juntada | documento DOC-1") });
+    mostrar(painel([PARADO_10]));
+    const linha = await screen.findByRole("row", { name: "Processo Parado" });
+    expect(linha.querySelectorAll(".selo--critico")).toHaveLength(1);
+    expect(linha.querySelector(".selo--critico")?.closest("td")?.getAttribute("data-rotulo")).toBe("Dias sem movimentação");
+    expect(linha.querySelector('td[data-rotulo="No setor há"]')?.textContent).toBe("40 dias úteis");
+    // o ano aparece quando nao e' o de hoje; o tipo sai sem o texto depois de " |"
+    expect(linha.querySelector('td[data-rotulo="Última movimentação"]')?.textContent).toBe("30/12/2025 08:00");
+    expect(linha.querySelector('td[data-rotulo="Tipo de movimentação"]')?.textContent).toBe("Juntada");
   });
 
   it("No setor há: minutos e horas antes de um dia útil, para quem não andou hoje", async () => {
     mostrar(painel([processo({ id: 7, nome: "Mi", dias_uteis: 0, hoje: 0, desde: "2026-10-28T11:00:00-04:00" }),
       processo({ id: 8, nome: "Ho", dias_uteis: 0, hoje: 0, desde: "2026-10-28T08:00:00-04:00" })]));
-    await screen.findByRole("grid");
+    await carregada();
     expect(screen.getByText("3 h")).toBeTruthy();       // desde 08h00, agora 11h30
     expect(screen.getByText("30 min")).toBeTruthy();    // desde 11h00
   });
 
-  it("Onde está: setor, caixa de entrada e volume; Última movimentação com dia/mês e o evento sem o texto depois de ' |'; Protocolado em", async () => {
+  it("Setor: setor, caixa de entrada e volume; Última movimentação em data e hora e o Tipo sem o texto depois de ' |'; protocolado em, sob o nome (#840)", async () => {
     mostrar(painel([ALFA, BETA]));
     const beta = await screen.findByRole("row", { name: /Processo Beta/ });
     expect(within(beta).getByText("GABIN")).toBeTruthy();
     expect(within(beta).getByText("caixa de entrada")).toBeTruthy();
     expect(within(beta).getByText("(2º Volume)")).toBeTruthy();
     const alfa = screen.getByRole("row", { name: /Obra Alfa/ });
-    expect(within(alfa).getByText("28/10")).toBeTruthy();
-    expect(within(alfa).getByText("Recebimento")).toBeTruthy();
+    expect(within(beta).getByText("GABIN").closest("td")?.getAttribute("data-rotulo")).toBe("Setor");
+    expect(alfa.querySelector('td[data-rotulo="Última movimentação"]')?.textContent).toBe("28/10 09:30");
+    expect(alfa.querySelector('td[data-rotulo="Tipo de movimentação"]')?.textContent).toBe("Recebimento");
     expect(within(alfa).queryByText(/texto do órgão/)).toBeNull();
     expect(within(alfa).getByText("Fulano")).toBeTruthy();                // Com quem
-    expect(within(alfa).getByText("01/10/2026")).toBeTruthy();            // Protocolado em
+    expect(within(alfa).getByText("01/10/2026").closest(".sg__fraco")?.textContent).toBe("protocolado em 01/10/2026");
+    expect(within(alfa).getByText("01/10/2026").closest("td")?.className).toBe("sg__proc");
   });
 
-  it("a 1024 px o cabeçalho quebra entre palavras em vez de invadir a coluna vizinha e a data não quebra (#650)", async () => {
+  it("a 1024 px as nove colunas cabem na largura do painel: o cabeçalho quebra entre palavras e a tabela não passa da caixa (#650, #805, #840)", async () => {
     // o jsdom nao mede layout: aqui so' a presenca das regras e das classes; a medida foi conferida no navegador
-    const css = readFileSync(join(process.cwd(), "src", "siga.css"), "utf8").split("@media")[0];
+    const css = readFileSync(join(process.cwd(), "src", "siga.css"), "utf8").split("@container")[0];
     expect(css).not.toMatch(/\.sg__tabela th\s*\{[^}]*white-space:\s*nowrap/);
-    expect(css).toMatch(/\.sg__tabela td\.num\s*\{[^}]*white-space:\s*nowrap/);
+    expect(css).toMatch(/\.sg__tabela\s*\{[^}]*width:\s*100%;\s*table-layout:\s*fixed/);
     const largura = (col: string) => Number(new RegExp(`\\.sg__c-${col}\\s*\\{\\s*width:\\s*(\\d+)%`).exec(css)?.[1]);
-    const colunas = ["proc", "onde", "quem", "setor", "ultima", "prot", "seta"];
+    const colunas = ["proc", "contr", "onde", "quem", "setor", "parado", "ultima", "tipo", "seta"];
     expect(colunas.reduce((soma, c) => soma + largura(c), 0)).toBe(100);
-    expect(largura("prot")).toBeGreaterThanOrEqual(16);       // "DD/MM/AAAA" numa linha na tabela de ~718 px
+    expect(largura("parado")).toBeGreaterThanOrEqual(14);     // o selo "25 dias úteis" em duas linhas no painel de ~724 px
+    expect(largura("contr")).toBeGreaterThanOrEqual(10);      // "Contratante" no cabeçalho, separada em sílabas, sem encostar na vizinha
+    expect(largura("quem")).toBeGreaterThanOrEqual(11);       // um nome sem partir a 1024 px
     mostrar(painel([ALFA]));
     const alfa = await screen.findByRole("row", { name: /Obra Alfa/ });
     expect(within(alfa).getByText("01/10/2026").className).toBe("num");
-    expect(document.querySelectorAll("colgroup col")).toHaveLength(7);
+    expect(document.querySelectorAll("colgroup col")).toHaveLength(9);
+  });
+
+  it("na página estreita a linha vira bloco e a cor do tempo parado passa para o bloco (#805)", () => {
+    const css = readFileSync(join(process.cwd(), "src", "siga.css"), "utf8");
+    expect(css).toMatch(/\.siga\s*\{[^}]*container:\s*sg-pagina\s*\/\s*inline-size/);
+    const estreita = css.slice(css.indexOf("@container sg-pagina (max-width: 640px)"));
+    expect(estreita).toMatch(/\.sg__tabela, \.sg__tabela tbody, \.sg__tabela tr, \.sg__tabela td\s*\{\s*display:\s*block/);
+    expect(estreita).toMatch(/\.sg__linha\[class\*="sg__linha--"\]\s*\{\s*box-shadow:\s*inset var\(--espaco-mini\) 0 0 var\(--sg-tempo\)/);
+    // as quatro situacoes pintam a borda pela variavel, com a cor da situacao da fundacao
+    for (const s of ["feito", "andamento", "breve", "critico"]) {
+      expect(css).toContain(`.sg__linha--${s} { --sg-tempo: var(--situacao-${s}-ponto); }`);
+    }
   });
 
   it("clicar na linha, ou Enter nela, abre o histórico do processo (?processo=)", async () => {
@@ -193,24 +398,27 @@ describe("SigaPagina", () => {
     unmount();
     window.history.replaceState(null, "", "/siga?processo=999");
     mostrar(painel([ALFA, DELTA]), { processo: "999" });
-    expect(await screen.findByRole("grid")).toBeTruthy();
+    expect(await carregada()).toBeTruthy();
     expect(window.location.search).toBe("");   // sai o ?processo= que nao existe
   });
 
   it("sem nenhum processo: só a linha 'Nenhum processo acompanhado.'", async () => {
     mostrar(painel([], { lido_em: null }));
     expect(await screen.findByText("Nenhum processo acompanhado.")).toBeTruthy();
-    expect(screen.getByText("0 processos")).toBeTruthy();
+    expect(numerosDaFaixa().map(n => n[1])).toEqual(["0", "0", "0", "0"]);
+    expect(screen.queryByText(/última leitura/)).toBeNull();
     expect(screen.queryByRole("grid")).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Categoria dos processos" })).toBeNull();   // sem processo nao ha' o que escolher
   });
 
   it("atrasado avisa desde quando; em dia não avisa", async () => {
     const { unmount } = mostrar(painel([ALFA], { atrasado: true, lido_em: "2026-10-28T12:00:00+00:00" }));
-    expect(await screen.findByText("1 processo · última leitura 08:00")).toBeTruthy();
+    await carregada();
+    expect(screen.getByLabelText("Processos no SIGA").querySelector(".sg-numero__apoio")?.textContent).toBe("última leitura 08:00");
     expect(screen.getByText("O monitor do SIGA não lê desde 28/10 08:00.")).toBeTruthy();
     unmount();
     mostrar(painel([ALFA]));
-    await screen.findByRole("grid");
+    await carregada();
     expect(screen.queryByText(/O monitor do SIGA não lê/)).toBeNull();
   });
 
@@ -218,7 +426,7 @@ describe("SigaPagina", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       mostrar(painel([ALFA, BETA]));
-      await screen.findByRole("grid");
+      await carregada();
       expect(api).toHaveBeenCalledTimes(1);
       expect(screen.queryByText(/O monitor do SIGA não lê/)).toBeNull();
       api.mockResolvedValue(painel([ALFA, BETA], { atrasado: true, lido_em: "2026-10-28T12:00:00+00:00" }));
@@ -237,17 +445,39 @@ describe("SigaPagina", () => {
   const chipsDe = () => within(screen.getByRole("group", { name: "Tipo de movimentação" })).getAllByRole("button").map(b => b.textContent);
   const linhasDoHistorico = () => within(screen.getByRole("table")).getAllByRole("row").slice(1);
 
-  it("histórico: trilha, título, número, total e período, Abrir no SIGA e a medição", async () => {
-    mostrar(painel([ALFA]), { processo: "1" });
+  it("histórico: caminho, título, número, total e período, Abrir no SIGA e a medição", async () => {
+    mostrarComCaminho(painel([ALFA]), { processo: "1" });
     const h1 = await screen.findByRole("heading", { level: 1 });
     expect(h1.textContent).toBe("Histórico · Obra Alfa · 7ª Medição");
+    // o caminho é da barra do topo (#814): o processo é o último trecho, com o nome que a página diz
     const trilha = screen.getByRole("navigation", { name: "Você está em" });
+    // o nome chega ao caminho pelo efeito da página, depois do h1 (#862): espera
+    await vi.waitFor(() => expect([...trilha.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Órgãos", "SIGA", "Obra Alfa · 7ª Medição"]));
     expect(within(trilha).getByRole("link", { name: "SIGA" }).getAttribute("href")).toBe("/siga");
-    expect(trilha.textContent).toContain("Obra Alfa · 7ª Medição");
-    expect(within(trilha).getByText("Histórico").getAttribute("aria-current")).toBe("page");
+    expect(within(trilha).getByText("Obra Alfa · 7ª Medição").closest("li")!.getAttribute("aria-current")).toBe("page");
+    expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);   // a página não desenha trilha própria
     expect(screen.getByText("ORGAO-PRO-2026/00001 · 5 movimentações · 20/10/2026 a 28/10/2026")).toBeTruthy();
     expect(screen.getByRole("link", { name: /Abrir no SIGA/ }).getAttribute("href")).toBe("https://siga.exemplo.com.br/acompanhar?n=ABC123");
     expect(screen.getByRole("link", { name: "Ver a medição" }).getAttribute("href")).toBe("/obras/7/medicoes/31#passo-5");
+  });
+
+  it("histórico: o botão '‹ SIGA' no alto volta ao quadro, com a categoria de onde se veio; o caminho continua (#840)", async () => {
+    window.history.replaceState(null, "", "/siga?categoria=aditivos&processo=21");
+    mostrarComCaminho(painel([ALFA, ADITIVO]), { categoria: "aditivos", processo: "21" });
+    const h1 = await screen.findByRole("heading", { level: 1 });
+    const voltar = h1.closest("header")!.querySelector("a.sg__voltar") as HTMLAnchorElement;
+    expect(voltar.textContent?.trim()).toBe("SIGA");
+    expect(voltar.className).toBe("btn--voltar sg__voltar");
+    expect(voltar.getAttribute("href")).toBe("/siga?categoria=aditivos");
+    expect(voltar.compareDocumentPosition(h1) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();   // no alto, antes do título
+    expect(screen.getByRole("navigation", { name: "Você está em" })).toBeTruthy();
+    fireEvent.click(voltar);
+    expect(window.location.pathname + window.location.search).toBe("/siga?categoria=aditivos");
+    cleanup();
+    // sem categoria, volta ao quadro inteiro
+    mostrar(painel([ALFA]), { processo: "1" });
+    await screen.findByRole("heading", { level: 1 });
+    expect(document.querySelector("a.sg__voltar")?.getAttribute("href")).toBe("/siga");
   });
 
   it("histórico: tabela De/Para, a mais recente primeiro, documento na juntada", async () => {
@@ -371,7 +601,7 @@ describe("SigaPagina", () => {
     expect(Array.from(form.querySelectorAll("#siga-categoria option")).map(o => o.textContent)).toEqual(
       ["Escolha", "Medições", "Aditivos", "Indenizatórios", "Outros"]);
     const linha = await screen.findByRole("row", { name: "Obra Alfa · Aditivo de prazo" });
-    expect(linha.closest("tbody")?.getAttribute("aria-label")).toBe("Aditivos");
+    expect(tituloDe(linha.closest(".sg-grupo") as HTMLElement)).toBe("Aditivos");
     expect(screen.queryByRole("form", { name: "Acompanhar processo" })).toBeNull();
     const envio = chamadas.find(c => c.caminho === "/api/siga/processos-avulsos");
     expect(envio?.opts?.method).toBe("POST");
@@ -455,10 +685,9 @@ describe("SigaPagina", () => {
     const SUGERIDO = processo({ id: 30, nome: "CT-901 - Aditivo de prazo - Obra Alfa", categoria: "aditivos", categoria_sugerida: true, o_que_e: "Aditivo" });
     api.mockImplementation(async (caminho: string) => caminho === "/api/contratos" ? OBRAS : painel([SUGERIDO, BETA]));
     const { unmount } = render(<SigaPagina busca={{}} agora={AGORA} />);
-    const grade = await screen.findByRole("grid");
-    const secoes = within(grade).getAllByRole("rowgroup").filter(g => g.tagName === "TBODY");
-    expect(secoes.map(s => s.getAttribute("aria-label"))).toEqual(["Aditivos", "Outros"]);
-    expect(nomesEm(secoes[0])).toEqual(["CT-901 - Aditivo de prazo - Obra Alfa"]);
+    await carregada();
+    expect(paineis().map(tituloDe)).toEqual(["Aditivos", "Outros"]);
+    expect(nomesEm(paineis()[0])).toEqual(["CT-901 - Aditivo de prazo - Obra Alfa"]);
     unmount();
     render(<SigaPagina busca={{ processo: "30" }} agora={AGORA} />);
     fireEvent.click(await screen.findByRole("button", { name: "Confirmar categoria" }));
@@ -473,7 +702,7 @@ describe("SigaPagina", () => {
     expect(screen.queryByRole("button", { name: "Corrigir categoria" })).toBeNull();
     unmount();
     const tabela = render(<SigaPagina busca={{}} agora={AGORA} podeEditar={false} />);
-    await screen.findByRole("grid");
+    await carregada();
     expect(screen.queryByRole("button", { name: "Acompanhar processo" })).toBeNull();
     tabela.unmount();
     render(<SigaPagina busca={{ processo: String(ALFA.id) }} agora={AGORA} />);   // ALFA tem protocolo_id
@@ -512,7 +741,7 @@ describe("SigaPagina", () => {
     expect(alerta.textContent).not.toContain("Failed to fetch");
     api.mockResolvedValue(painel([ALFA]));
     fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
-    expect(await screen.findByRole("grid")).toBeTruthy();
+    expect(await carregada()).toBeTruthy();
   });
 
   // issue #343: botoes de atualizar e robo em andamento
@@ -525,11 +754,11 @@ describe("SigaPagina", () => {
   
   it("sem o servidor configurado, nenhum botão de atualizar; configurado, 'Pedir leitura' no topo e no histórico do processo", async () => {
     const { unmount } = mostrar(painel([ALFA]));
-    await screen.findByRole("grid");
+    await carregada();
     expect(screen.queryByRole("button", { name: /Atualizar/ })).toBeNull();
     unmount();
     mostrar(painel([ALFA], { pode_atualizar: true }));
-    await screen.findByRole("grid");
+    await carregada();
     expect(botao("Pedir leitura").disabled).toBe(false);
     cleanup();
     mostrar(painel([ALFA], { pode_atualizar: true }), { processo: "1" });
@@ -552,7 +781,7 @@ describe("SigaPagina", () => {
 
   it("pedido na fila: o botão vira 'Na fila' desabilitado e o topo mostra a hora do pedido", async () => {
     mostrar(painel([ALFA, DELTA], { pode_atualizar: true, robo: NA_FILA(ALFA.id) }));
-    await screen.findByRole("grid");
+    await carregada();
     expect(botao("Pedir leitura").disabled).toBe(false);           // pedido de um processo nao cobre todos
     expect(screen.getByText((_, el) => el?.tagName === "P" && el.textContent === "Pedido de atualização às 11:25, aguardando o robô")).toBeTruthy();
     cleanup();
@@ -565,7 +794,7 @@ describe("SigaPagina", () => {
 
   it("pedido de todos na fila: os dois botões ficam 'Na fila'", async () => {
     mostrar(painel([ALFA], { pode_atualizar: true, robo: NA_FILA(null) }));
-    await screen.findByRole("grid");
+    await carregada();
     expect(screen.getByRole("button", { name: "Na fila" })).toBeTruthy();
     cleanup();
     mostrar(painel([ALFA], { pode_atualizar: true, robo: NA_FILA(null) }), { processo: "1" });
@@ -574,7 +803,7 @@ describe("SigaPagina", () => {
 
   it("rodada pedida na tela: indicador no topo, 'lendo...' só nas linhas da rodada e 'Lendo...' nos botões que ela cobre", async () => {
     mostrar(painel([ALFA, DELTA], { pode_atualizar: true, robo: RODADA("pedido", [ALFA.id]) }));
-    await screen.findByRole("grid");
+    await carregada();
     expect(screen.getByText((_, el) => el?.tagName === "P" && el.textContent === "Robô lendo agora · começou às 11:20 · pedido feito na tela")).toBeTruthy();
     expect(within(screen.getByRole("row", { name: /Obra Alfa/ })).getByText("lendo...")).toBeTruthy();
     expect(within(screen.getByRole("row", { name: /Obra Delta/ })).queryByText("lendo...")).toBeNull();
@@ -590,13 +819,13 @@ describe("SigaPagina", () => {
 
   it("rodada automática: o topo diz 'rodada automática' e 'Pedir leitura' fica 'Lendo...'", async () => {
     mostrar(painel([ALFA], { pode_atualizar: true, robo: RODADA("automatica", [ALFA.id]) }));
-    await screen.findByRole("grid");
+    await carregada();
     expect(screen.getByText(/rodada automática/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Pedir leitura" })).toBeNull();
     expect(screen.getAllByRole("button", { name: "Lendo..." }).every(b => b.hasAttribute("disabled"))).toBe(true);
   });
 
-  it("avisos do robô: os gerais em vermelho no topo, o de processo na linha dele", async () => {
+  it("avisos do robô: os gerais em vermelho no topo; o não lido vira etiqueta na linha do processo, com a hora e o motivo (#805)", async () => {
     const avisos = [
       { tipo: "disparo", processo_id: null, texto: "O Windows não iniciou o robô: acesso negado" },
       { tipo: "sem_inicio", processo_id: null, texto: "O robô não começou. O usuário dele pode estar desconectado do servidor." },
@@ -606,14 +835,18 @@ describe("SigaPagina", () => {
       { tipo: "nao_terminou", processo_id: null, texto: "A rodada das 10:40 não terminou." },
     ];
     mostrar(painel([ALFA, DELTA], { robo: { ...PARADO, avisos } }));
-    await screen.findByRole("grid");
+    await carregada();
     const topo = screen.getAllByRole("alert").map(a => a.textContent ?? "");
     expect(topo.every(t => t.startsWith("Crítico: "))).toBe(true);
     expect(topo.map(t => t.replace("Crítico: ", ""))).toEqual([
       "O Windows não iniciou o robô: acesso negado", "O robô não começou. O usuário dele pode estar desconectado do servidor.",
       "A rodada das 11:00 falhou: SIGA fora do ar", "1 de 2 processos não foram lidos", "A rodada das 10:40 não terminou."]);
-    expect(within(screen.getByRole("row", { name: /Obra Delta/ })).getByText("não lido às 11:00: página não abriu")).toBeTruthy();
-    expect(within(screen.getByRole("row", { name: /Obra Alfa/ })).queryByText(/não lido/)).toBeNull();
+    const etiqueta = screen.getByRole("row", { name: /Obra Delta/ }).querySelector(".sg__etiqueta") as HTMLElement;
+    expect(within(etiqueta).getByText("Não lido").closest(".selo")?.className).toBe("selo selo--breve");   // o tom do "vence em breve"
+    expect(etiqueta.querySelector(".selo .glifo")?.className).toBe("glifo glifo--breve");
+    expect(within(etiqueta).getByText("às 11:00: página não abriu").className).toBe("sg__fraco");
+    expect(within(screen.getByRole("row", { name: /Obra Alfa/ })).queryByText(/não lido/i)).toBeNull();
+    expect(numerosDaFaixa()[3]).toEqual(["Não lidos na última rodada", "1", "glifo glifo--breve"]);
   });
 
   it("erro do clique aparece em português ao lado do botão", async () => {
@@ -649,7 +882,7 @@ describe("SigaPagina", () => {
       expect(api).toHaveBeenCalledTimes(2);
       api.mockResolvedValue(painel([ALFA], { lido_em: "2026-10-28T15:28:00+00:00" }));
       await vi.advanceTimersByTimeAsync(5_000);
-      expect(await screen.findByText("1 processo · última leitura 11:28")).toBeTruthy();
+      expect(await screen.findByText((_, el) => el?.className === "sg-numero__apoio" && el.textContent === "última leitura 11:28")).toBeTruthy();
       const depois = api.mock.calls.length;
       await vi.advanceTimersByTimeAsync(60_000);
       expect(api).toHaveBeenCalledTimes(depois);
@@ -669,17 +902,18 @@ describe("SigaPagina", () => {
 
   it("encerrados: fora da tabela principal e do contador, na seção 'Encerrados', recolhida, no fim da página", async () => {
     const { container } = mostrar(painel([RECEBIDO, GAMA, ARQUIVADO, DELTA]));
-    const grade = await screen.findByRole("grid");
-    expect(nomesEm(grade)).toEqual(["Obra Delta · 4ª Medição", "Processo Gama"]);
-    // os encerrados continuam numa secao so', sem categoria
-    expect(encerrados().querySelector(".sg__secao")).toBeNull();
-    expect(screen.getByText("2 processos · última leitura 11:00")).toBeTruthy();
+    const grade = await carregada();
+    expect(paineis().flatMap(nomesEm)).toEqual(["Obra Delta · 4ª Medição", "Processo Gama"]);
+    // os encerrados continuam numa secao so', sem painel por categoria
+    expect(encerrados().querySelector(".sg-grupo")).toBeNull();
+    expect(numerosDaFaixa()[0].slice(0, 2)).toEqual(["Processos acompanhados", "2"]);
+    expect(escolhas()[0].textContent).toBe("Todos 2");
     const secao = encerrados();
     expect(secao.open).toBe(false);
     expect(secao.querySelector("summary")?.textContent).toBe("Encerrados 2");
     expect(within(secao).getAllByRole("row").slice(1).map(l => l.getAttribute("aria-label"))).toEqual(["Obra Zeta · 5ª Medição", "Processo Eta"]);
     expect(within(secao).getAllByRole("columnheader").map(c => c.textContent)).toEqual(
-      ["Processo", "Onde está", "Situação", "Última movimentação", "Protocolado em", "Abrir"]);
+      ["Processo", "Contratante", "Setor", "Situação", "Última movimentação", "Tipo de movimentação", "Abrir"]);
     expect(within(within(secao).getByRole("row", { name: /Obra Zeta/ })).getByText("Medição recebida")).toBeTruthy();
     expect(within(within(secao).getByRole("row", { name: "Processo Eta" })).getByText("Arquivado")).toBeTruthy();
     // no fim da página: depois da tabela principal
@@ -690,27 +924,28 @@ describe("SigaPagina", () => {
   it("encerrado nunca fica vermelho, âmbar nem verde, e não mostra 'não lido'", async () => {
     const avisos = [{ tipo: "nao_lido", processo_id: ARQUIVADO.id, texto: "não lido às 11:00: página não abriu" }];
     mostrar(painel([RECEBIDO, ARQUIVADO, GAMA], { robo: { ...PARADO, avisos } }));
-    await screen.findByRole("grid");
+    await carregada();
     const secao = encerrados();
-    expect(secao.querySelector(".sg__dias, .sg__nao-lido, .selo, .glifo, [class*='--critico'], [class*='--breve'], [class*='--feito']")).toBeNull();
-    expect(within(secao).queryByText(/não lido|dias úteis|hoje/)).toBeNull();
+    expect(secao.querySelector(".sg__dias, .sg__etiqueta, .selo, .glifo, [class*='--critico'], [class*='--breve'], [class*='--feito'], [class*='--andamento']")).toBeNull();
+    expect(within(secao).queryByText(/não lido|dias úteis|hoje/i)).toBeNull();
+    expect(within(secao).getAllByRole("row").slice(1).every(l => l.className === "sg__linha")).toBe(true);   // sem a borda do tempo parado
   });
 
   it("só encerrados: 'Nenhum processo em andamento.' no lugar da tabela, e a seção Encerrados", async () => {
     mostrar(painel([RECEBIDO]));
     expect(await screen.findByText("Nenhum processo em andamento.")).toBeTruthy();
     expect(screen.queryByRole("grid")).toBeNull();
-    expect(screen.getByText("0 processos · última leitura 11:00")).toBeTruthy();
+    expect(numerosDaFaixa()[0].slice(0, 2)).toEqual(["Processos acompanhados", "0"]);
     expect(within(encerrados()).getByRole("row", { name: /Obra Zeta/ })).toBeTruthy();
   });
 
   it("sem encerrado não há seção Encerrados; a linha do encerrado abre o histórico dele", async () => {
     const { unmount } = mostrar(painel([GAMA]));
-    await screen.findByRole("grid");
+    await carregada();
     expect(screen.queryByRole("group", { name: "Encerrados" })).toBeNull();
     unmount();
     mostrar(painel([GAMA, ARQUIVADO]));
-    await screen.findByRole("grid");
+    await carregada();
     fireEvent.click(within(encerrados()).getByRole("row", { name: "Processo Eta" }));
     expect(window.location.search).toBe("?processo=8");
   });

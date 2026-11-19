@@ -13,7 +13,7 @@
 //            obra com medicao, a primeira medicao dela e a primeira empresa com certidao exigida (ver `capturar.mjs`)
 //   perfis   quem abre a tela na prova (o menu de cada perfil esta' em frontend/src/navegacao.ts)
 //   espera   seletor do conteudo principal: sem ele visivel, a tela nao carregou
-//   menu     so' quando o link do menu e' outro endereco que leva a esta tela (Avisos: `/avisos` abre Obras)
+//   menu     so' quando o link do menu e' outro endereco que leva a esta tela (hoje nenhuma: todo item abre o proprio)
 //   passos   o que fazer depois de a tela abrir, para chegar ao ESTADO a conferir (janela, formulario, aba):
 //            { clicar: seletor }, { preencher: [seletor, texto] } ou { arquivo: [seletor do campo, nome do PDF] }.
 //            Com passos, `espera` e' o seletor do estado ja' aberto
@@ -26,13 +26,23 @@
 //   destino  o caminho em que a tela termina, quando ela so' leva a outra (`/notas/envio/:id` abre a pagina da medicao)
 //
 // Todo item do menu de um perfil precisa de uma tela aqui para esse perfil: a prova reprova o item sem tela.
-import { cabecalhoCom, cabecalhoEmDia, CUSTO_DA_OBRA, detalheDoEnvio, espelhoEnviadoPorFora, espelhoGerado, falha,
-         fichaComNecessario, inicioComAParte, semAvisoDePrazo,
+import { avisosEmVolume, semAvisos, cabecalhoCom, cabecalhoEmDia, CUSTO_DA_OBRA, detalheDoEnvio, espelhoEnviadoPorFora, espelhoGerado, falha,
+         fechamentoComValores, fichaComNecessario, inicioComAParte, inicioComVariacoes, semAvisoDePrazo,
          medicaoComEspelhoEnviadoPorFora, medicaoComEspelhoGerado, medicaoComExcluidosNoRm, obrasComAParte, reconciliacaoComBaixados,
          medicaoComNotaDivergente, medicaoComNotaEmitida, medicaoDaMtpar, NOTAS_COM_DIVERGENCIA, notasAEnviar, notasComEnvioAberto,
          PDF_ILEGIVEL,
-         prazosEmEncerramento, prazosParalisada, PREVIA_DO_ESPELHO, PROTOCOLO_ID, RESPOSTA_QUE_QUEBRA, RM_EXCLUSAO_RECUSADA,
-         SIGA_COM_PROCESSOS } from "./simulados.mjs";
+         prazosEmEncerramento, prazosParalisada, PREVIA_DO_ESPELHO, PROTOCOLO_ID, RESPOSTA_QUE_QUEBRA, resumoEmQuadro, RM_EXCLUSAO_RECUSADA,
+         SIGA_COM_NAO_LIDOS, SIGA_COM_PROCESSOS, SIGA_SO_MEDICOES } from "./simulados.mjs";
+import { fechamentoEmAbas } from "./simulados.mjs";   // #815: em linha propria, para nao mexer na lista de cima
+
+import { carteiraSimulada, filaSimulada, painelDaCarteira } from "./simulados.mjs";
+import { cabecalhoDeNomeLongo } from "./simulados.mjs";
+import { aReceberComNotas } from "./simulados.mjs";   // #816: em linha propria, para nao mexer nas listas de cima
+// issue #817 (reestrutura 5c): a Inicio com o ciclo por contratante e o medido em 12 meses
+import { inicioPorContratante, inicioSemCiclo } from "./simulados.mjs";
+// peca "inicio" (19/11/2026, #805): a matriz obra por competencia no Resumo das medicoes
+import { matrizEmVolume, matrizVazia } from "./simulados.mjs";
+import { LOGIN_NO_LIMITE, LOGIN_RECUSADO } from "./simulados.mjs";   // #821: os estados do login (ESTADOS_DO_LOGIN)
 
 export const PERFIS = ["admin", "engenharia", "diretoria"];
 export const LARGURAS = [1440, 1024, 390];
@@ -46,6 +56,15 @@ const SO_ADMIN = ["admin"];
 
 const MEDICAO = "/obras/:obra/medicoes/:medicao";
 const JANELA = "dialog[open] .iniciar__caixa";
+// issue #805: a carteira de quatro contratantes no lugar do cadastro de exemplo (ver simulados.mjs)
+const comCarteira = [
+  { caminho: /^\/api\/contratos$/, corpo: carteiraSimulada },
+  { caminho: /^\/api\/diretoria$/, ajustar: painelDaCarteira },
+  // #818: as abas da pagina dos contratantes da carteira que o cadastro de exemplo nao tem
+  ...ABAS_DA_CARTEIRA,
+];
+// issue #805: o mes de Medicoes com medicao em cada grupo da fila (ver simulados.mjs)
+const comFila = [{ caminho: /^\/api\/medicoes\/fila$/, ajustar: filaSimulada }];
 const maisAcoes = item => [{ clicar: '#conteudo button:has-text("Mais ações")' }, { clicar: `#conteudo button:has-text("${item}")` }];
 const passo = nome => [{ clicar: `nav.passos button:has-text("${nome}")` }];
 // a medicao com a nota emitida e o envio ao orgao por fazer (ver simulados.mjs)
@@ -80,6 +99,26 @@ const comNecessario = noRitmo => [
   { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaComNecessario(noRitmo) },
   { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
 ];
+// issue #822: a pagina da obra fora da regua do andamento: o motivo no lugar da leitura; o selo da conclusao fica (19/11).
+// `noFim`: a execucao termina no mes que vem (duas competencias)
+import { cabecalhoNoFim, fichaForaDaRegua } from "./simulados.mjs";
+const foraDaRegua = (fora, noFim = false) => [
+  { caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: noFim ? cabecalhoNoFim : cabecalhoEmDia },
+  { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaForaDaRegua(fora, noFim) },
+  { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
+];
+// issue #805: a fila de avisos com o volume da producao (dezenas de vencidos em varias obras, um aviso de cada assunto
+// pelo menos; ver simulados.mjs). O servidor recorta a fila pelo perfil, e a simulada tambem: a tela entra duas vezes
+// na lista com o mesmo id, uma para quem opera (com certidao, prazo a vencer, nota e SIGA) e outra para a diretoria
+const comAvisosEmVolume = tela => [
+  { ...tela, perfis: OPERA, simular: [{ caminho: /^\/api\/inicio$/, ajustar: avisosEmVolume("operacao") }] },
+  { ...tela, perfis: ["diretoria"], simular: [{ caminho: /^\/api\/inicio$/, ajustar: avisosEmVolume("diretoria") }] },
+];
+
+// issue #805: o SIGA com processos, que o cadastro de exemplo nao tem (ver simulados.mjs)
+const comSiga = corpo => [{ caminho: /^\/api\/siga$/, corpo }];
+// issue #805: o mes do Resumo das medicoes com medicao em cada etapa (ver simulados.mjs)
+const comResumo = opcoes => [{ caminho: /^\/api\/resumo-medicoes$/, ajustar: resumoEmQuadro(opcoes) }];
 
 export const TELAS = [
   // ---- Inicio
@@ -91,57 +130,162 @@ export const TELAS = [
   // o a receber antigo e o sem atualizacao do RM, na linha a' parte do painel do ciclo (docs/adr/0006)
   { rota: "inicio", id: "inicio-a-parte", caminho: "/inicio", perfis: ["diretoria"], espera: ".ini-ciclo .em-aberto-a-parte",
     simular: [{ caminho: /^\/api\/inicio\/painel$/, ajustar: inicioComAParte }] },
+  // as familias de valor (#805): os dois numeros do alto com a variacao contra as referencias (subiu, caiu e estavel)
+  { rota: "inicio", id: "inicio-variacoes", caminho: "/inicio", perfis: ["diretoria"], espera: ".ini-numero__variacoes .variacao",
+    simular: [{ caminho: /^\/api\/inicio\/painel$/, ajustar: inicioComVariacoes }] },
+  // o que faltava apresentar a' diretoria (#817): o ciclo aberto por contratante e o medido em 12 meses, com o volume
+  // que o cadastro de exemplo nao tem; e a mesma tela sem nada no ciclo
+  { rota: "inicio", id: "inicio-por-contratante", caminho: "/inicio", perfis: TODOS, espera: ".ini-orgaos table tfoot",
+    simular: [{ caminho: /^\/api\/inicio\/painel$/, ajustar: inicioPorContratante }] },
+  { rota: "inicio", id: "inicio-sem-ciclo", caminho: "/inicio", perfis: ["diretoria"], espera: ".ini-orgaos .ini-vazio",
+    simular: [{ caminho: /^\/api\/inicio\/painel$/, ajustar: inicioSemCiclo }] },
   // a ultima rede: uma resposta que a tela nao sabe desenhar derruba o desenho e aparece "A tela parou de responder"
   { rota: "inicio", id: "tela-parou", caminho: "/inicio", perfis: TODOS, espera: ".falha", parou: true,
     simular: [{ caminho: /^\/api\/inicio\/painel$/, corpo: RESPOSTA_QUE_QUEBRA }] },
 
-  // ---- Medicoes: o quadro do mes, a janela de iniciar, o quadro vazio e a falha de leitura
-  // a diretoria nao tem Medicoes no menu, mas o link abre o quadro para leitura
-  { rota: "medicoes", id: "medicoes", caminho: "/medicoes", perfis: TODOS, espera: ".quadro__tabela" },
-  { rota: "medicoes", id: "medicoes-iniciar", caminho: "/medicoes", perfis: OPERA, antes: ".quadro__tabela", espera: JANELA,
-    passos: [{ clicar: '.quadro__tabela button:has-text("Iniciar")' }] },
+  // ---- Medicoes (#805): a fila de trabalho (a entrada), o quadro do mes e os meses anteriores; a janela de iniciar e
+  // a falha de leitura. As telas `-cheia` trocam o cadastro de exemplo (sem medicao no mes) por um mes com medicao em
+  // cada grupo, parada ha' pouco e ha' muito, com o aprovado abaixo, acima e igual ao pedido (ver simulados.mjs).
+  // A diretoria nao tem Medicoes no menu, mas o link abre a tela para leitura, sem botao de escrita
+  { rota: "medicoes", id: "medicoes", caminho: "/medicoes", perfis: TODOS, espera: ".fila-numeros" },
+  { rota: "medicoes", id: "medicoes-cheia", caminho: "/medicoes", perfis: TODOS, espera: ".fila-grupo .fila__tabela", simular: comFila },
+  { rota: "medicoes", id: "medicoes-quadro", caminho: "/medicoes/quadro", perfis: TODOS, espera: ".medicoes__painel" },
+  { rota: "medicoes", id: "medicoes-quadro-cheio", caminho: "/medicoes/quadro", perfis: TODOS, espera: ".quadro__tabela .quadro__grupo",
+    simular: comFila },
+  { rota: "medicoes", id: "medicoes-anteriores", caminho: "/medicoes/anteriores", perfis: TODOS, espera: ".medicoes__vistas" },
+  { rota: "medicoes", id: "medicoes-anteriores-cheia", caminho: "/medicoes/anteriores", perfis: TODOS, espera: ".fila-resumo",
+    simular: comFila },
+  { rota: "medicoes", id: "medicoes-iniciar", caminho: "/medicoes", perfis: OPERA, antes: ".fila-bloco", espera: JANELA,
+    passos: [{ clicar: '.fila-bloco button:has-text("Iniciar")' }] },
   { rota: "medicoes", id: "medicoes-erro", caminho: "/medicoes", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
-    simular: falha(/^\/api\/medicoes\/resumo$/) },
-  { rota: "resumo-medicoes", id: "resumo-medicoes", caminho: "/resumo-medicoes", perfis: TODOS, espera: ".rdm-faixa" },
+    simular: falha(/^\/api\/medicoes\/fila$/) },
+  // ---- Resumo das medicoes em quadro por etapa (#805): o cadastro de exemplo, e o mes simulado (ver simulados.mjs)
+  // com medicao em cada etapa, as diferencas para o pedido, as obras sem medicao e os meses anteriores, nas duas
+  // vistas, na aba dos meses anteriores, com o filtro por contratante (etapas vazias) e no mes sem medicao
+  { rota: "resumo-medicoes", id: "resumo-medicoes", caminho: "/resumo-medicoes", perfis: TODOS, espera: ".rdm-abas" },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-quadro", caminho: "/resumo-medicoes", perfis: TODOS, espera: ".rdm-quadro .rdm-cartao .diferenca",
+    simular: comResumo() },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-tabela", caminho: "/resumo-medicoes?vista=tabela", perfis: ["diretoria"],
+    espera: ".rdm-tabela--etapas .rdm-grupo", simular: comResumo() },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-anteriores", caminho: "/resumo-medicoes?aba=anteriores", perfis: ["diretoria"],
+    espera: ".rdm-tabela--etapas .rdm-grupo", simular: comResumo() },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-contratante", caminho: "/resumo-medicoes?contratante=MTPAR", perfis: ["diretoria"],
+    espera: ".rdm-quadro .rdm-coluna__vazia", simular: comResumo({ contratante: "MTPAR" }) },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-vazio", caminho: "/resumo-medicoes", perfis: ["diretoria"], espera: ".rdm-vazio",
+    simular: comResumo({ vazio: true }) },
   { rota: "resumo-medicoes", id: "resumo-medicoes-erro", caminho: "/resumo-medicoes", perfis: SO_ADMIN, espera: "#conteudo [role=alert]",
     erro: true, simular: falha(/^\/api\/resumo-medicoes$/) },
+  // peca "inicio" (19/11/2026, #805): a matriz obra por competencia, que saiu da Inicio, na aba "Últimos 12 meses":
+  // com o cadastro de exemplo (os tres perfis, que viam a matriz na Inicio), com o volume da carteira, sem obra ativa
+  // e com a leitura da matriz falhando
+  { rota: "resumo-medicoes", id: "resumo-medicoes-12-meses", caminho: "/resumo-medicoes?aba=12-meses", perfis: TODOS, espera: ".rdm-matriz" },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-12-meses-cheia", caminho: "/resumo-medicoes?aba=12-meses", perfis: ["diretoria"],
+    espera: ".rdm-matriz .rdm-matriz__celula--atrasado", simular: [{ caminho: /^\/api\/resumo-medicoes\/matriz$/, ajustar: matrizEmVolume }] },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-12-meses-vazia", caminho: "/resumo-medicoes?aba=12-meses", perfis: ["diretoria"],
+    espera: ".rdm-matriz .rdm-vazio", simular: [{ caminho: /^\/api\/resumo-medicoes\/matriz$/, ajustar: matrizVazia }] },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-12-meses-erro", caminho: "/resumo-medicoes?aba=12-meses", perfis: SO_ADMIN,
+    espera: "#conteudo [role=alert]", erro: true, simular: falha(/^\/api\/resumo-medicoes\/matriz$/) },
 
-  // ---- Obras: a lista (Posicao), o QDOP, a lista vazia e a falha
-  { rota: "obras", id: "obras", caminho: "/obras", perfis: TODOS, espera: ".obras-numeros" },
+  // ---- Obras em niveis (#805): "Por contratante" (a entrada), "Todas as obras", "Andamento" e o QDOP; a pagina de
+  // um contratante; a lista vazia e a falha. As telas `-carteira` trocam o cadastro de exemplo (um orgao, duas obras)
+  // por uma carteira de quatro contratantes, com obra devagar, em atencao, adiantada, paralisada e vencida
+  { rota: "obras", id: "obras", caminho: "/obras", perfis: TODOS, espera: ".obras-contratantes" },
+  { rota: "obras", id: "obras-carteira", caminho: "/obras", perfis: TODOS, espera: ".obras-contratantes .obras-etiquetas .selo",
+    simular: comCarteira },
+  { rota: "obras", id: "obras-todas", caminho: "/obras/todas", perfis: TODOS, espera: ".obras-posicao" },
+  { rota: "obras", id: "obras-todas-carteira", caminho: "/obras/todas", perfis: TODOS, espera: ".obras-posicao .andamento",
+    simular: comCarteira },
+  { rota: "obras", id: "obras-todas-reajustes", caminho: "/obras/todas", perfis: ["diretoria"], antes: ".obras-reajustes",
+    espera: ".obras-reajustes[open] table", simular: comCarteira, passos: [{ clicar: ".obras-reajustes > summary" }] },
+  { rota: "obras", id: "obras-andamento", caminho: "/obras/andamento", perfis: TODOS, espera: ".obras-painel" },
+  { rota: "obras", id: "obras-andamento-carteira", caminho: "/obras/andamento", perfis: TODOS, espera: ".obras-andamento .andamento",
+    simular: comCarteira },
   { rota: "obras", id: "obras-qdop", caminho: "/obras/qdop", perfis: TODOS, espera: "#conteudo .cartao" },
+  // a pagina do contratante: o do cadastro de exemplo (a familia "sinfra"); da carteira simulada, um com prazo de
+  // pagamento e de tudo um pouco (SINFRA, com as encerradas a' vista) e um sem prazo no sistema (MTPAR)
+  { rota: "contratante", id: "contratante", caminho: "/obras/contratante/sinfra", perfis: TODOS, espera: ".obras-do-contratante" },
+  { rota: "contratante", id: "contratante-carteira", caminho: "/obras/contratante/sinfra", perfis: TODOS,
+    espera: ".obras-do-contratante .andamento", simular: comCarteira },
+  { rota: "contratante", id: "contratante-todas", caminho: "/obras/contratante/sinfra?situacao=todas", perfis: ["diretoria"],
+    espera: ".obras-do-contratante .andamento", simular: comCarteira },
+  { rota: "contratante", id: "contratante-sem-prazo", caminho: "/obras/contratante/mtpar", perfis: ["diretoria"],
+    espera: ".obras-do-contratante .andamento", simular: comCarteira },
+  // decisao do dono de 19/11/2026: a obra com o prazo no fim e sem aviso no farol (Pref. Cuiabá, na carteira simulada)
+  // diz "Prazo no fim · execução até dd/mm" na Situação, no lugar de "Em dia"
+  { rota: "contratante", id: "contratante-prazo-no-fim", caminho: "/obras/contratante/pref-cuiaba", perfis: ["diretoria"],
+    espera: ".obras-do-contratante .obras-situacao__prazo", simular: comCarteira },
+  { rota: "contratante", id: "contratante-nao-encontrado", caminho: "/obras/contratante/nao-existe", perfis: SO_ADMIN, espera: "#conteudo .vazio" },
+  { rota: "contratante", id: "contratante-erro", caminho: "/obras/contratante/sinfra", perfis: SO_ADMIN, espera: "#conteudo [role=alert]",
+    erro: true, simular: falha(/^\/api\/contratos$/) },
   { rota: "obras", id: "obras-a-parte", caminho: "/obras", perfis: ["diretoria"], espera: ".em-aberto-a-parte",
     simular: [{ caminho: /^\/api\/contratos$/, ajustar: obrasComAParte }] },
-  { rota: "obras", id: "obras-vazia", caminho: "/obras", perfis: SO_ADMIN, espera: ".obras-painel .vazio",
+  { rota: "obras", id: "obras-vazia", caminho: "/obras/todas", perfis: SO_ADMIN, espera: ".obras-painel .vazio",
     simular: [{ caminho: /^\/api\/contratos$/, corpo: [] }] },
   { rota: "obras", id: "obras-erro", caminho: "/obras", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/contratos$/) },
-  { rota: "avisos", id: "avisos", caminho: "/obras?avisos=1", menu: "/avisos", perfis: TODOS, espera: ".avs" },
 
-  // ---- SIGA: sem processo (o cadastro de exemplo), com processos, o historico de um e os dois formularios
-  { rota: "siga", id: "siga", caminho: "/siga", perfis: OPERA, espera: ".sg__quadro" },
-  { rota: "siga", id: "siga-acompanhar", caminho: "/siga", perfis: OPERA, antes: ".sg__quadro", espera: 'form[aria-label="Acompanhar processo"]',
+  // ---- Avisos (#805): a pagina propria com o cadastro de exemplo; com o volume da producao (dezenas de vencidos em
+  // varias obras, todos os assuntos), fechada e com uma obra aberta; filtrada por uma obra e por um assunto (o
+  // endereco de antes, `?familia=nota`, abre a aba Medicoes); vazia; a falha; e o endereco de antes, de quando os
+  // Avisos abriam dentro de Obras
+  { rota: "avisos", id: "avisos", caminho: "/avisos", perfis: TODOS, espera: ".avs-numeros" },
+  ...comAvisosEmVolume({ rota: "avisos", id: "avisos-volume", caminho: "/avisos", espera: ".avs-vencidos" }),
+  ...comAvisosEmVolume({ rota: "avisos", id: "avisos-volume-aberta", caminho: "/avisos", antes: ".avs-vencidos", espera: ".avs-vencido__itens",
+    passos: [{ clicar: ".avs-vencido:nth-child(1) .avs-abre" }] }),
+  ...comAvisosEmVolume({ rota: "avisos", id: "avisos-obra", caminho: "/avisos?obra=:obra", espera: ".avs-recorte + .avs-numeros" }),
+  ...comAvisosEmVolume({ rota: "avisos", id: "avisos-assunto", caminho: "/avisos?familia=nota", espera: ".avs-vencidos" }),
+  { rota: "avisos", id: "avisos-vazia", caminho: "/avisos", perfis: SO_ADMIN, espera: ".avs-barra + .avs-vazio",
+    simular: [{ caminho: /^\/api\/inicio$/, ajustar: semAvisos }] },
+  { rota: "avisos", id: "avisos-erro", caminho: "/avisos", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
+    simular: falha(/^\/api\/inicio$/) },
+  { rota: "avisos", id: "avisos-endereco-de-antes", caminho: "/obras?c=todas&avisos=1", destino: "/avisos", perfis: SO_ADMIN,
+    espera: ".avs-numeros" },
+
+  // ---- SIGA (#805, um painel por categoria): sem processo (o cadastro de exemplo); todos, com processo em cada
+  // categoria e em cada faixa do tempo parado; uma categoria; a categoria sem processo; com nao lidos; o historico de
+  // um processo e os dois formularios
+  // a faixa de numeros existe com ou sem processo: a tela abre tambem sobre uma copia do banco, que tem processos
+  { rota: "siga", id: "siga", caminho: "/siga", perfis: OPERA, espera: ".sg-numeros" },
+  { rota: "siga", id: "siga-acompanhar", caminho: "/siga", perfis: OPERA, antes: ".sg-numeros", espera: 'form[aria-label="Acompanhar processo"]',
     passos: [{ clicar: '#conteudo button:has-text("Acompanhar processo")' }] },
-  { rota: "siga", id: "siga-processos", caminho: "/siga", perfis: OPERA, espera: ".sg__quadro table",
-    simular: [{ caminho: /^\/api\/siga$/, corpo: SIGA_COM_PROCESSOS }] },
-  { rota: "siga", id: "siga-historico", caminho: "/siga?processo=1", perfis: OPERA, espera: ".sg__quadro table",
-    simular: [{ caminho: /^\/api\/siga$/, corpo: SIGA_COM_PROCESSOS }] },
+  { rota: "siga", id: "siga-processos", caminho: "/siga", perfis: OPERA, espera: ".sg-grupo table", simular: comSiga(SIGA_COM_PROCESSOS) },
+  { rota: "siga", id: "siga-categoria", caminho: "/siga?categoria=medicoes", perfis: OPERA, espera: ".sg-grupo table",
+    simular: comSiga(SIGA_COM_PROCESSOS) },
+  { rota: "siga", id: "siga-categoria-vazia", caminho: "/siga?categoria=aditivos", perfis: OPERA, espera: ".sg__barra + .sg__quadro",
+    simular: comSiga(SIGA_SO_MEDICOES) },
+  { rota: "siga", id: "siga-nao-lidos", caminho: "/siga", perfis: OPERA, espera: ".sg__etiqueta", simular: comSiga(SIGA_COM_NAO_LIDOS) },
+  { rota: "siga", id: "siga-encerrados", caminho: "/siga", perfis: OPERA, antes: ".sg-grupo table", espera: ".sg__encerrados[open] table",
+    simular: comSiga(SIGA_COM_PROCESSOS), passos: [{ clicar: ".sg__encerrados > summary" }] },
+  { rota: "siga", id: "siga-historico", caminho: "/siga?processo=1", perfis: OPERA, espera: ".sg__quadro table", simular: comSiga(SIGA_COM_PROCESSOS) },
   { rota: "siga", id: "siga-corrigir", caminho: "/siga?processo=2", perfis: OPERA, antes: ".sg__quadro",
-    espera: 'form[aria-label="Corrigir categoria"]', simular: [{ caminho: /^\/api\/siga$/, corpo: SIGA_COM_PROCESSOS }],
+    espera: 'form[aria-label="Corrigir categoria"]', simular: comSiga(SIGA_COM_PROCESSOS),
     passos: [{ clicar: '#conteudo button:has-text("Corrigir categoria")' }] },
   { rota: "siga", id: "siga-erro", caminho: "/siga", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/siga$/) },
 
-  // ---- Documentos: as tres abas, a fila do "Anexar PDF", a janela do ZIP e a pagina da empresa
-  { rota: "documentos", id: "documentos", caminho: "/documentos", perfis: TODOS, espera: ".doc-painel-aba" },
-  { rota: "documentos", id: "documentos-regularidade", caminho: "/documentos", perfis: TODOS, antes: ".doc-painel-aba", espera: ".doc-painel-aba",
-    passos: [{ clicar: '.escolha:has-text("Regularidade")' }] },
-  { rota: "documentos", id: "documentos-garantias", caminho: "/documentos", perfis: TODOS, antes: ".doc-painel-aba", espera: ".doc-painel-aba",
-    passos: [{ clicar: '.escolha:has-text("Garantias")' }] },
-  { rota: "documentos", id: "documentos-anexar", caminho: "/documentos", perfis: OPERA, antes: ".doc-painel-aba", espera: ".doc-fila form",
+  // ---- Documentos: as tres paginas (#820: Certidoes, Regularidade mensal e Garantias, cada uma no proprio endereco e
+  // no proprio item do menu; antes eram abas de "/documentos"), a fila do "Anexar PDF", a janela do ZIP e a empresa
+  { rota: "documentos", id: "documentos", caminho: "/documentos", perfis: TODOS, espera: ".doc-certidoes .doc-corpo" },
+  { rota: "documentos", id: "documentos-regularidade", caminho: "/documentos/regularidade", perfis: TODOS,
+    espera: ".doc-regularidade .doc-corpo" },
+  { rota: "documentos", id: "documentos-garantias", caminho: "/documentos/garantias", perfis: TODOS, espera: ".doc-garantias .doc-corpo" },
+  { rota: "documentos", id: "documentos-anexar", caminho: "/documentos", perfis: OPERA, antes: ".doc-certidoes .doc-corpo", espera: ".doc-fila form",
     simular: [{ metodo: "POST", caminho: /^\/api\/documentos\/anexar\/ler$/, corpo: PDF_ILEGIVEL }],
     passos: [{ arquivo: ['input[aria-label="Escolher PDFs para anexar"]', "certidao-de-prova.pdf"] }] },
-  { rota: "documentos", id: "documentos-zip", caminho: "/documentos", perfis: OPERA, antes: ".doc-painel-aba", espera: "dialog.doc-janela[open]",
+  // o "Anexar PDF" da Regularidade e' o mesmo das Certidoes (o servidor decide pelo conteudo)
+  { rota: "documentos", id: "documentos-regularidade-anexar", caminho: "/documentos/regularidade", perfis: SO_ADMIN,
+    antes: ".doc-regularidade .doc-corpo", espera: ".doc-fila form",
+    simular: [{ metodo: "POST", caminho: /^\/api\/documentos\/anexar\/ler$/, corpo: PDF_ILEGIVEL }],
+    passos: [{ arquivo: ['input[aria-label="Escolher PDFs para anexar"]', "certidao-de-prova.pdf"] }] },
+  { rota: "documentos", id: "documentos-zip", caminho: "/documentos", perfis: OPERA, antes: ".doc-certidoes .doc-corpo", espera: "dialog.doc-janela[open]",
     passos: [{ clicar: ".doc-linha__zip" }] },
+  // as tres paginas sem nada: uma linha curta no lugar da lista
+  { rota: "documentos", id: "documentos-vazio", caminho: "/documentos", perfis: ["diretoria"], espera: ".doc-certidoes .doc-corpo .vazio",
+    simular: [{ caminho: /^\/api\/documentos$/, corpo: DOCUMENTOS_VAZIO }] },
+  { rota: "documentos", id: "documentos-regularidade-vazio", caminho: "/documentos/regularidade", perfis: ["diretoria"],
+    espera: ".doc-regularidade .doc-corpo .vazio", simular: [{ caminho: /^\/api\/documentos$/, corpo: DOCUMENTOS_VAZIO }] },
+  { rota: "documentos", id: "documentos-garantias-vazio", caminho: "/documentos/garantias", perfis: ["diretoria"],
+    espera: ".doc-garantias .doc-corpo .vazio", simular: [{ caminho: /^\/api\/documentos$/, corpo: DOCUMENTOS_VAZIO }] },
   { rota: "documentos", id: "documentos-erro", caminho: "/documentos", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/documentos$/) },
   { rota: "documentos-empresa", id: "documentos-empresa", caminho: "/documentos/:empresa", perfis: TODOS, espera: ".doc-abas-cartao" },
@@ -152,10 +296,35 @@ export const TELAS = [
 
   // ---- Fechamento e Ancoras
   { rota: "fechamento", id: "fechamento", caminho: "/fechamento", perfis: TODOS, espera: ".fch-numeros" },
-  { rota: "fechamento", id: "fechamento-2025", caminho: "/fechamento", perfis: TODOS, antes: ".fch-numeros", espera: ".fch-tabela--aberto",
-    passos: [{ clicar: '.escolha:has-text("2025")' }] },
+  { rota: "fechamento", id: "fechamento-2025", caminho: "/fechamento", perfis: TODOS, antes: ".fch-numeros",
+    espera: '.escolha[aria-pressed="true"]:has-text("2025")', passos: [{ clicar: '.escolha:has-text("2025")' }] },
+  // as familias de valor (#805): a tabela do mes com dois anos (a variacao do medido), a diferenca entre o aprovado e
+  // o pedido (so' o corte, no mes) e o em aberto; no segundo estado, tres meses abertos ate' a medicao: o corte
+  // critico, o corte ao lado de um arredondamento, e o aprovado acima do pedido, que so' aparece na linha da medicao
+  { rota: "fechamento", id: "fechamento-valores", caminho: "/fechamento", perfis: ["diretoria"], espera: ".fch-tabela--meses .variacao",
+    simular: [{ caminho: /^\/api\/fechamento$/, corpo: fechamentoComValores }] },
+  { rota: "fechamento", id: "fechamento-valores-medicao", caminho: "/fechamento", perfis: ["diretoria"], antes: ".fch-tabela--meses .variacao",
+    espera: ".fch-linha--medicao", simular: [{ caminho: /^\/api\/fechamento$/, corpo: fechamentoComValores }],
+    passos: ["Julho", "Agosto", "Setembro"].flatMap((mes, i) => [
+      { clicar: `.fch-abre[aria-label^="${mes} de 2026"]` },
+      { clicar: `.fch-abre[aria-label="Obra Exemplo, medições de 0${7 + i}/2026"]` }]) },
   { rota: "fechamento", id: "fechamento-erro", caminho: "/fechamento", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/fechamento$/) },
+  // Fechamento em abas (#815): cada aba pelo endereco dela, com o cadastro de exemplo (um contratante so') e com o
+  // simulado de quatro contratantes e dois anos (a variacao na comparacao, a participacao e o nome comprido); o ano
+  // pelo endereco; o mes aberto pelo endereco; e a pagina sem lancamento nas tres abas
+  { rota: "fechamento", id: "fechamento-comparacao", caminho: "/fechamento/comparacao", perfis: TODOS, espera: ".fch-tabela--comparacao" },
+  { rota: "fechamento", id: "fechamento-contratantes", caminho: "/fechamento/contratantes?ano=2025", perfis: TODOS,
+    espera: ".fch-tabela--contratantes" },   // o cadastro de exemplo so' mede em 2025: o ano vai no endereco
+  { rota: "fechamento", id: "fechamento-comparacao-valores", caminho: "/fechamento/comparacao", perfis: ["diretoria"],
+    espera: ".fch-tabela--comparacao .variacao", simular: [{ caminho: /^\/api\/fechamento$/, corpo: fechamentoEmAbas() }] },
+  { rota: "fechamento", id: "fechamento-contratantes-valores", caminho: "/fechamento/contratantes", perfis: TODOS,
+    espera: ".fch-tabela--contratantes .fch-parte", simular: [{ caminho: /^\/api\/fechamento$/, corpo: fechamentoEmAbas() }] },
+  { rota: "fechamento", id: "fechamento-mes-aberto", caminho: "/fechamento?mes=2026-08", perfis: ["diretoria"],
+    espera: ".fch-linha--obra", simular: [{ caminho: /^\/api\/fechamento$/, corpo: fechamentoEmAbas() }] },
+  ...[["", "meses"], ["/comparacao", "comparacao"], ["/contratantes", "contratantes"]].map(([aba, nome]) => (
+    { rota: "fechamento", id: `fechamento-${nome}-vazio`, caminho: `/fechamento${aba}`, perfis: ["diretoria"], espera: ".fch-painel .fch-vazio",
+      simular: [{ caminho: /^\/api\/fechamento$/, corpo: fechamentoEmAbas({ vazio: true }) }] })),
   { rota: "ancoras-docusign", id: "ancoras-docusign", caminho: "/ancoras-docusign", perfis: OPERA, espera: ".anc" },
 
   // ---- Pagina da obra: as seis abas e a falha
@@ -184,6 +353,12 @@ export const TELAS = [
     simular: comNecessario(false) },
   { rota: "obra", id: "obra-no-ritmo", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .selo--feito",
     simular: comNecessario(true) },
+  // #822: fora da regua do andamento, o painel "Prazo" escreve o motivo (prazo no fim com a prorrogacao pedida; sem
+  // medicao ha' tres competencias); o selo da conclusao estimada continua (decisao do dono de 19/11/2026)
+  { rota: "obra", id: "obra-prazo-no-fim", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .selo--critico",
+    simular: foraDaRegua({ motivo: "prazo_no_fim", prorrogacao_pedida: true }, true) },
+  { rota: "obra", id: "obra-sem-medicao", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .andamento--fora",
+    simular: foraDaRegua({ motivo: "sem_medicao", sem_medicao_desde: "2026-07" }) },
   { rota: "obra", id: "obra-erro", caminho: "/obras/:obra", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/contratos\/\d+\/cabecalho$/) },
 
@@ -281,6 +456,95 @@ export const TELAS = [
 
   // ---- Minha conta
   { rota: "conta", id: "conta", caminho: "/conta", perfis: TODOS, espera: ".conta-eu" },
+
+  // ---- Menu em areas, caminho no alto e as rotas das paginas novas (#814)
+  // A receber (#816): o em aberto nota a nota. A do cadastro de exemplo; com notas (os grupos recolhidos e um aberto),
+  // filtrada por contratante, o contratante sem nada em aberto, a pagina vazia, a trava e a falha (ver simulados.mjs)
+  { rota: "a-receber", id: "a-receber", caminho: "/a-receber", perfis: TODOS, espera: "#conteudo .arc" },
+  { rota: "a-receber", id: "a-receber-notas", caminho: "/a-receber", perfis: TODOS, espera: "#conteudo tr.arc-grupo",
+    simular: [{ caminho: /^\/api\/a-receber$/, corpo: aReceberComNotas() }] },
+  { rota: "a-receber", id: "a-receber-grupo-aberto", caminho: "/a-receber", perfis: ["diretoria"], antes: "#conteudo tr.arc-grupo",
+    espera: "#conteudo .arc-a-parada", passos: [{ clicar: "#conteudo .arc-grupo__abre" }],
+    simular: [{ caminho: /^\/api\/a-receber$/, corpo: aReceberComNotas() }] },
+  { rota: "a-receber", id: "a-receber-contratante", caminho: "/a-receber?contratante=sinfra", perfis: TODOS, espera: "#conteudo .arc-a-parada",
+    simular: [{ caminho: /^\/api\/a-receber$/, corpo: aReceberComNotas() }] },
+  { rota: "a-receber", id: "a-receber-contratante-a-parte", caminho: "/a-receber?contratante=pref-vg", perfis: ["diretoria"],
+    espera: "#conteudo .arc-antigo", simular: [{ caminho: /^\/api\/a-receber$/, corpo: aReceberComNotas() }] },
+  { rota: "a-receber", id: "a-receber-contratante-vazio", caminho: "/a-receber?contratante=ses-mt", perfis: ["diretoria"],
+    espera: '#conteudo .vazio a[href="/a-receber"]', simular: [{ caminho: /^\/api\/a-receber$/, corpo: aReceberComNotas() }] },
+  { rota: "a-receber", id: "a-receber-vazia", caminho: "/a-receber", perfis: ["diretoria"], espera: "#conteudo .vazio",
+    simular: [{ caminho: /^\/api\/a-receber$/, corpo: aReceberComNotas({ vazio: true }) }] },
+  { rota: "a-receber", id: "a-receber-trava", caminho: "/a-receber", perfis: ["diretoria"], espera: "#conteudo .arc .aviso",
+    simular: [{ caminho: /^\/api\/a-receber$/, corpo: aReceberComNotas({ trava: true }) }] },
+  { rota: "a-receber", id: "a-receber-erro", caminho: "/a-receber", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
+    simular: falha(/^\/api\/a-receber$/) },
+  // os enderecos de antes de Documentos: a aba na busca e "/documentos/certidoes" abrem a pagina do assunto
+  { rota: "documentos", id: "documentos-endereco-de-antes", caminho: "/documentos?aba=garantias", destino: "/documentos/garantias",
+    perfis: SO_ADMIN, espera: ".doc-garantias .doc-corpo" },
+  { rota: "documentos", id: "documentos-certidoes-por-extenso", caminho: "/documentos/certidoes", destino: "/documentos", perfis: SO_ADMIN,
+    espera: ".doc-certidoes .doc-corpo" },
+  // a aba Avisos do contratante ja' tem endereco; enquanto a pagina nao a desenha, ele abre a pagina do contratante
+  { rota: "contratante", id: "contratante-aba", caminho: "/obras/contratante/sinfra/avisos", destino: "/obras/contratante/sinfra",
+    perfis: ["diretoria"], espera: ".obras-do-contratante" },
+  // O menu no estado que as outras telas nao mostram: um clique no botao do pe' o recolhe no computador (so' os
+  // icones, com o fio entre as areas) e o abre por cima da tela no celular (onde ele nasce recolhido). No computador a
+  // escolha fica guardada no navegador: a segunda tela desfaz o clique, e as telas seguintes voltam ao menu aberto.
+  // As duas ficam JUNTAS e nesta ordem.
+  { rota: "inicio", id: "menu-alternado", caminho: "/inicio", perfis: TODOS, antes: ".ini", espera: "nav.menu .menu__recolher",
+    passos: [{ clicar: "nav.menu .menu__recolher" }] },
+  { rota: "inicio", id: "menu-de-volta", caminho: "/inicio", perfis: TODOS, antes: ".ini", espera: "nav.menu .menu__recolher",
+    passos: [{ clicar: "nav.menu .menu__recolher" }] },
+  // o caminho com os cinco trechos e nomes compridos (o contratante por extenso, a obra de nome longo): a barra do
+  // topo quebra em linhas em vez de cortar ou de alargar a pagina
+  { rota: "medicao", id: "caminho-longo", caminho: MEDICAO, perfis: TODOS, antes: "nav.passos", espera: ".topo .caminho li:nth-child(5)",
+    simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoDeNomeLongo }] },
+  { rota: "obra", id: "caminho-longo-obra", caminho: "/obras/:obra/prazos", perfis: ["diretoria"], antes: OBRA_GRADE,
+    espera: ".topo .caminho li:nth-child(4)", simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoDeNomeLongo }] },
+  // ---- Busca unica do topo (#819). No computador o campo esta' na barra; no celular, o botao da lupa abre o campo por
+  // cima dela: o primeiro passo clica o que estiver a' vista (a lupa ou o proprio campo). Os resultados abrem por cima
+  // da pagina. A diretoria entra com o servidor de verdade: o recorte do perfil e' dele (desde a #829 ela tem `ver_siga`
+  // e recebe o grupo Processos; o perfil sem a permissao e' coberto pelo teste do servidor, test_api_busca.py).
+  { rota: "inicio", id: "busca-fechada", caminho: "/inicio", perfis: TODOS, antes: ".ini", espera: ".topo .busca" },
+  { rota: "inicio", id: "busca-resultados", caminho: "/inicio", perfis: OPERA, antes: ".ini", espera: ".busca__opcao",
+    simular: [{ caminho: /^\/api\/busca$/, corpo: BUSCA_CHEIA }], passos: abrirBusca("15") },
+  { rota: "inicio", id: "busca-sem-resultado", caminho: "/inicio", perfis: OPERA, antes: ".ini", espera: ".busca__vazio",
+    simular: [{ caminho: /^\/api\/busca$/, corpo: BUSCA_VAZIA }], passos: abrirBusca("xyzw") },
+  { rota: "inicio", id: "busca-sem-siga", caminho: "/inicio", perfis: ["diretoria"], antes: ".ini", espera: ".busca__opcao",
+    passos: abrirBusca("1") },
+  // ---- As abas Medicoes, A receber e Processos no SIGA da pagina do contratante (#818). Cada uma com o servidor de
+  // verdade (o cadastro de exemplo: um contratante so', quase nada em cada aba) e com o recorte simulado da carteira de
+  // quatro contratantes (ver simulados.mjs); a trava do a receber, o contratante so' com o que fica a' parte, a aba sem
+  // linha e a falha. A aba do SIGA e' de quem tem `ver_siga` (#829: os tres perfis; a diretoria, so' para ler).
+  { rota: "contratante", id: "contratante-medicoes", caminho: "/obras/contratante/sinfra/medicoes", perfis: TODOS, espera: ".ct-aba.medicoes" },
+  { rota: "contratante", id: "contratante-medicoes-fila", caminho: "/obras/contratante/sinfra/medicoes", perfis: TODOS,
+    espera: ".ct-aba .fila__tabela", simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/medicoes$/, ajustar: medicoesDoContratante }] },
+  { rota: "contratante", id: "contratante-medicoes-vazia", caminho: "/obras/contratante/mtpar/medicoes", perfis: ["diretoria"],
+    espera: ".ct-aba .medicoes__vazio", simular: comCarteira },
+  { rota: "contratante", id: "contratante-medicoes-erro", caminho: "/obras/contratante/sinfra/medicoes", perfis: SO_ADMIN,
+    espera: "#conteudo [role=alert]", erro: true, simular: falha(/^\/api\/contratantes\/sinfra\/medicoes$/) },
+  { rota: "contratante", id: "contratante-a-receber", caminho: "/obras/contratante/sinfra/a-receber", perfis: TODOS, espera: ".ct-aba.arc" },
+  { rota: "contratante", id: "contratante-a-receber-notas", caminho: "/obras/contratante/sinfra/a-receber", perfis: TODOS,
+    espera: ".ct-aba tr.arc-grupo", simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/a-receber$/, corpo: aReceberDoContratante() }] },
+  { rota: "contratante", id: "contratante-a-receber-a-parte", caminho: "/obras/contratante/pref-cuiaba/a-receber", perfis: ["diretoria"],
+    espera: ".ct-aba .arc-antigo",
+    simular: [...comCarteira, { caminho: /^\/api\/contratantes\/pref-cuiaba\/a-receber$/, corpo: aReceberDoContratante({ de: "pref-vg", como: ["Pref. Cuiabá", "pref-cuiaba"] }) }] },
+  { rota: "contratante", id: "contratante-a-receber-trava", caminho: "/obras/contratante/sinfra/a-receber", perfis: ["diretoria"],
+    espera: ".ct-aba.arc .aviso", simular: [{ caminho: /^\/api\/contratantes\/sinfra\/a-receber$/, corpo: aReceberDoContratante({ trava: true }) }] },
+  { rota: "contratante", id: "contratante-siga", caminho: "/obras/contratante/sinfra/siga", perfis: OPERA, espera: ".ct-aba.siga" },
+  { rota: "contratante", id: "contratante-siga-processos", caminho: "/obras/contratante/sinfra/siga", perfis: OPERA, espera: ".ct-aba .sg-grupo",
+    simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/siga$/, corpo: SIGA_DO_CONTRATANTE }] },
+  // #829 (decisao do dono de 19/11/2026): a diretoria tem a aba do SIGA, so' para ler (a aba nao tem botao)
+  { rota: "contratante", id: "contratante-siga-diretoria", caminho: "/obras/contratante/sinfra/siga", perfis: ["diretoria"],
+    espera: ".ct-aba .sg-grupo", simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/siga$/, corpo: SIGA_DO_CONTRATANTE }] },
+
+  // ---- SIGA para a diretoria, so' leitura (#829): a permissao `ver_siga` lhe da' o item do menu e a tela; os botoes
+  // que gravam (acompanhar processo, corrigir categoria, pedir leitura) nao aparecem, e o servidor os nega (403). O
+  // quadro vazio (o cadastro de exemplo), o quadro com processos e o historico de um processo.
+  { rota: "siga", id: "siga-diretoria", caminho: "/siga", perfis: ["diretoria"], espera: ".sg-numeros" },
+  { rota: "siga", id: "siga-processos-diretoria", caminho: "/siga", perfis: ["diretoria"], espera: ".sg-grupo table",
+    simular: comSiga(SIGA_COM_PROCESSOS) },
+  { rota: "siga", id: "siga-historico-diretoria", caminho: "/siga?processo=2", perfis: ["diretoria"], espera: ".sg__quadro table",
+    simular: comSiga(SIGA_COM_PROCESSOS) },
 ];
 
 // Rotas do roteador que a prova nao abre, cada uma com o motivo.
@@ -305,3 +569,32 @@ export const RESPOSTAS_ESPERADAS = [
 export function telasDoPerfil(perfil) {
   return TELAS.filter(t => t.perfis.includes(perfil));
 }
+
+// ---- Tela de login (#821): os estados alem da tela parada. A prova abre cada um antes de entrar, uma vez por
+// largura, preenche e-mail e senha de mentira e aperta "Entrar", com a resposta do servidor simulada.
+//   id       vira o nome da captura: `login-<id>-<largura>.png`
+//   simular  como nas telas; `pendurar: true` deixa o pedido sem resposta, e o botao fica em "Entrando…"
+//   espera   seletor do estado ja' na tela
+
+const ENTRAR = /^\/api\/auth\/login$/;
+export const ESTADOS_DO_LOGIN = [
+  { id: "recusa", simular: [{ metodo: "POST", caminho: ENTRAR, status: 401, corpo: LOGIN_RECUSADO }],
+    espera: "form.entrar__form .aviso--falha [role=alert]" },
+  { id: "limite", simular: [{ metodo: "POST", caminho: ENTRAR, status: 429, corpo: LOGIN_NO_LIMITE }],
+    espera: "form.entrar__form .aviso--falha [role=alert]" },
+  { id: "espera", simular: [{ metodo: "POST", caminho: ENTRAR, pendurar: true }],
+    espera: 'form.entrar__form button[type="submit"]:disabled' },
+];
+
+// ---- Documentos em tres paginas (#820): o painel vazio
+import { DOCUMENTOS_VAZIO } from "./simulados.mjs";
+
+// ---- Busca unica do topo (#819): os passos que abrem a busca e digitam a pergunta, nas tres larguras
+import { BUSCA_CHEIA, BUSCA_VAZIA } from "./simulados.mjs";
+
+function abrirBusca(texto) {
+  return [{ clicar: ".topo .busca__abrir:visible, .topo .busca__campo:visible" }, { preencher: [".topo .busca__campo", texto] }];
+}
+
+// ---- As abas da pagina do contratante (#818): o recorte simulado de cada aba (ver simulados.mjs)
+import { ABAS_DA_CARTEIRA, aReceberDoContratante, medicoesDoContratante, SIGA_DO_CONTRATANTE } from "./simulados.mjs";

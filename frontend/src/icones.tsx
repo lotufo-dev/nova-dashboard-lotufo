@@ -198,3 +198,33 @@ export function IconeCheck(p: Props) {
 export function IconeTraco(p: Props) {
   return <Svg {...p}><path d="M6 12h12" /></Svg>;
 }
+
+/* Menu em areas (#814): as paginas que nasceram com ele. */
+/* Em aberto (a pagina das notas que ainda nao foram pagas; o endereco segue /a-receber): a nota, com o pe' picotado.
+   Antes era uma seta descendo ate' uma linha, quase o IconeBaixar dos botoes de exportar (19/11/2026). */
+export function IconeAReceber(p: Props) {
+  return <Svg {...p}>
+    <path d="M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5-2 1.5z" /><path d="M9 8h6" /><path d="M9 12h6" /><path d="M9 16h3" />
+  </Svg>;
+}
+
+/* Regularidade mensal: o documento conferido. */
+export function IconeDocumentoVisto(p: Props) {
+  return <Svg {...p}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8.5 14.5l2.5 2.5 4.5-5" />
+  </Svg>;
+}
+
+/* Garantias: o escudo. */
+export function IconeEscudo(p: Props) {
+  return <Svg {...p}>
+    <path d="M12 2.5l8 3v6c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10v-6z" />
+  </Svg>;
+}
+
+/* Minha conta: a pessoa. */
+export function IconePessoa(p: Props) {
+  return <Svg {...p}>
+    <circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" />
+  </Svg>;
+}

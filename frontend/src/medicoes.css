@@ -1,6 +1,7 @@
-/* Medicoes (redesenho 4a): o quadro do mes (MedicoesPagina.tsx), os meses anteriores e a janela de dialogo
-   (Janela.tsx). A moldura do painel (.cartao), a tabela (.tabela), o botao (.btn), o selo, o glifo, o contador e a
-   caixa de aviso sao pecas de base de tokens.css. Cor, familia, tamanho, espaco e borda so' por variavel. */
+/* Medicoes (redesenho 4a; #805): as tres vistas da pagina (MedicoesPagina.tsx): a fila de trabalho (MedicoesFila.tsx),
+   o quadro do mes (MedicoesQuadro.tsx) e os meses anteriores; e a janela de dialogo (Janela.tsx). A moldura do painel
+   (.cartao), a tabela (.tabela), o botao (.btn), a aba, o selo, o glifo, o contador e a caixa de aviso sao pecas de
+   base de tokens.css. Cor, familia, tamanho, espaco e borda so' por variavel. */
 
 /* A pagina e' o container: o quadro muda de forma pela largura que sobra para o conteudo (com o menu lateral aberto
    ou recolhido), e nao pela largura da janela. Tres faixas: larga, media (ate' 900 px: a 1024 com o menu aberto) e
@@ -44,9 +45,10 @@
    Uma linha por obra, uma coluna por passo, pedido e aprovado. Largura fixa em porcentagem, sem largura minima: a
    1024 px cabe sem rolagem lateral. */
 .quadro__tabela { table-layout: fixed; }
-.quadro__c-obra { width: 22%; }
+.quadro__c-obra { width: 19%; }
 .quadro__c-passo { width: 9%; }
 .quadro__c-valor { width: 12%; }
+.quadro__c-aprovado { width: 15%; }     /* #805: o aprovado leva a diferenca contra o pedido embaixo */
 .medicoes .quadro__tabela thead th { white-space: normal; }
 .medicoes .quadro__tabela thead th.quadro__th-passo, .medicoes .quadro__tabela tbody td.quadro__passo {
   padding-left: var(--espaco-mini); padding-right: var(--espaco-mini);
@@ -79,9 +81,84 @@
 .medicoes .quadro__tabela .col-num { text-align: right; white-space: nowrap; }
 .medicoes .quadro__tabela td.col-num { font-weight: var(--peso-numero); }
 
-/* meses anteriores */
-.quadro__anteriores td:not(.quadro__anterior-obra) { white-space: nowrap; }
 .quadro__acao { text-align: right; }
+/* #805: o passo da vez diz ha' quantos dias uteis a medicao esta' nele, sob o selo (que leva a situacao do tempo) */
+.quadro__da-vez { display: inline-grid; justify-items: start; gap: var(--espaco-traco); max-width: 100%; }
+.quadro__dias { color: var(--cor-texto-secundario); font-size: var(--texto-mini); line-height: var(--entrelinha-justa); white-space: normal; }
+/* #805: o contratante abre o grupo de obras no CABECALHO DE GRUPO FORTE (tinta cheia, letra clara), com o pedido e o
+   aprovado do grupo nas colunas (docs/identidade-visual.md, "Formas") */
+.medicoes .quadro__tabela tbody tr.quadro__grupo > th, .medicoes .quadro__tabela tbody tr.quadro__grupo > td {
+  padding-top: var(--espaco-pp); padding-bottom: var(--espaco-pp); border-bottom: 0;
+  background: var(--cor-tinta); color: var(--cor-papel); font-weight: var(--peso-forte); vertical-align: middle;
+}
+.medicoes .quadro__tabela tbody tr.quadro__grupo > th { text-align: left; font-size: var(--texto-corpo); }
+.medicoes .tabela tbody tr.quadro__grupo:hover > * { background: var(--cor-tinta); }
+.quadro__grupo-n { margin-left: var(--espaco-pp); color: var(--cor-papel-escuro); font-size: var(--texto-mini); font-weight: var(--peso-normal); white-space: nowrap; }
+
+/* ------------------------------------------------------------------- vistas e fila de trabalho (#805) */
+/* as vistas: abas com endereco proprio; a quantidade dos meses anteriores que pedem acao vai no contador */
+.medicoes__vistas .aba { gap: var(--espaco-pp); }
+
+/* a faixa de numeros: rotulo, numero e, embaixo, o que chama atencao (o selo do tempo parado, a diferenca) */
+.fila-numeros {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1.3fr)) minmax(0, 0.9fr) minmax(0, 0.8fr) minmax(0, 1.5fr);
+  gap: var(--espaco-m) var(--espaco-g); margin: 0;
+}
+.fila-numero { min-width: 0; }
+.fila-numero dt { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.fila-numero dd {
+  margin: 0; white-space: nowrap;
+  font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
+  font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-valor-menor); line-height: var(--entrelinha-numero);
+}
+.fila-numero dd.fila-numero__apoio { margin-top: var(--espaco-mini); white-space: normal; font-size: var(--texto-mini); line-height: var(--entrelinha-titulo); }
+.fila-numero__apoio:empty { display: none; }
+
+/* o grupo de quem tem de agir: um painel com o cabecalho de grupo forte e a tabela dentro */
+.fila-grupo { min-width: 0; border: var(--borda-painel); background: var(--cor-superficie); box-shadow: var(--sombra-painel); }
+.fila-grupo__cabeca {
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--espaco-mini) var(--espaco-pp);
+  padding: var(--espaco-pp) var(--espaco-g); background: var(--cor-tinta); color: var(--cor-papel);
+}
+.fila-grupo__nome { margin: 0; color: inherit; font-size: var(--texto-titulo-bloco); }
+.fila-grupo__n { flex: none; color: var(--cor-papel-escuro); font-size: var(--texto-meta); }
+/* largura fixa por coluna, a mesma nos tres grupos: os valores de um painel alinham com os do outro; a obra fica com
+   o que sobra */
+.fila__tabela { table-layout: fixed; }
+.fila__c-passo { width: calc(var(--alvo-minimo) * 4.25); }
+.fila__c-parada { width: calc(var(--alvo-minimo) * 4); }
+.fila__c-valor { width: calc(var(--alvo-minimo) * 3.5); }
+.fila__c-aprovado { width: calc(var(--alvo-minimo) * 4.75); }
+.fila__c-acao { width: calc(var(--alvo-minimo) * 4.5); }
+.medicoes .fila__tabela tbody th.fila__obra {
+  padding-top: var(--espaco-p); padding-bottom: var(--espaco-p); border-bottom: var(--borda-linha);
+  text-align: left; font-weight: var(--peso-normal); vertical-align: middle;
+}
+.medicoes .fila__tabela tbody td { padding-top: var(--espaco-p); padding-bottom: var(--espaco-p); vertical-align: middle; }
+.medicoes .fila__tabela tbody tr:last-child > th { border-bottom: 0; }
+.medicoes .fila__tabela td.col-num { font-weight: var(--peso-numero); }
+.medicoes .fila__tabela td.quadro__acao { white-space: nowrap; }
+.fila__medicao { display: block; margin-top: var(--espaco-traco); color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
+.fila__medicao a { color: inherit; }
+.fila__medicao a:hover { color: var(--cor-tinta); }
+/* o aprovado e, embaixo, a diferenca contra o pedido */
+.fila__cel { display: inline-grid; justify-items: end; gap: var(--espaco-traco); max-width: 100%; }
+
+/* embaixo da fila: as concluidas no mes e as obras sem medicao, em listas curtas */
+.fila-blocos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--espaco-entre-blocos); }
+.fila-lista { list-style: none; margin: 0; padding: 0 var(--espaco-g); }
+.fila-lista__item {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--espaco-mini) var(--espaco-p);
+  min-height: var(--alvo-minimo); padding: var(--espaco-mini) 0; border-top: var(--borda-linha); font-size: var(--texto-meta);
+}
+.fila-lista__item:first-child { border-top: 0; }
+.fila-lista__feita { display: inline-flex; align-items: center; gap: var(--espaco-pp); min-width: 0; }
+.fila-lista__apoio { color: var(--cor-texto-secundario); font-size: var(--texto-mini); white-space: nowrap; }
+/* meses anteriores: o que so' espera pagamento vira uma linha, com o link para o Fechamento */
+.fila-resumo {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-mini) var(--espaco-m); margin: 0; max-width: none;
+  border-top: var(--regua-secao); padding-top: var(--regua-secao-respiro); font-size: var(--texto-meta);
+}
 
 /* faixa media: letra de apoio nos passos e nos valores, para as nove colunas caberem */
 @container medicoes-pagina (max-width: 900px) {
@@ -90,14 +167,29 @@
   .medicoes .tabela th:first-child, .medicoes .tabela td:first-child, .medicoes .tabela tbody th[scope="row"]:first-child { padding-left: var(--espaco-m); }
   .medicoes .tabela th:last-child, .medicoes .tabela td:last-child { padding-right: var(--espaco-m); }
   /* o nome da obra com a largura que sobra: a 1024 px quebrava em ate cinco linhas (#779) */
-  .quadro__c-obra { width: 21.8%; }
+  .quadro__c-obra { width: 19.8%; }
   .quadro__c-passo { width: 8.2%; }
-  .quadro__c-valor { width: 14.5%; }
+  .quadro__c-valor { width: 14%; }
+  .quadro__c-aprovado { width: 17%; }
   .medicoes .quadro__tabela thead th { font-size: var(--texto-mini); }
   .medicoes .quadro__tabela thead th.quadro__th-passo, .medicoes .quadro__tabela tbody td.quadro__passo,
   .medicoes .quadro__tabela .col-num { padding-left: var(--espaco-traco); padding-right: var(--espaco-traco); font-size: var(--texto-mini); }
   .medicoes .quadro__tabela td.col-num:last-child, .medicoes .quadro__tabela th.col-num:last-child { padding-right: var(--espaco-p); }
   .quadro__passo .selo { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); font-size: var(--texto-mini); }
+  /* #805: os numeros em 3 + 3; a tabela da fila com as colunas mais juntas e os valores na letra de apoio */
+  .fila-numeros { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fila-grupo__cabeca, .fila-lista { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
+  .medicoes .fila__tabela th, .medicoes .fila__tabela td { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
+  .medicoes .fila__tabela .col-num { font-size: var(--texto-mini); }
+  .fila__c-passo { width: calc(var(--alvo-minimo) * 2.75); }
+  .fila__c-parada { width: calc(var(--alvo-minimo) * 3); }
+  .fila__c-valor { width: calc(var(--alvo-minimo) * 2.4); }
+  .fila__c-aprovado { width: calc(var(--alvo-minimo) * 2.75); }
+  .fila__c-acao { width: calc(var(--alvo-minimo) * 4); }
+  .medicoes .fila__tabela .selo { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); font-size: var(--texto-mini); }
+  .medicoes .fila__tabela .btn--pequeno { padding: 0 var(--espaco-pp); }
+  .medicoes .barra-passos__passo { width: var(--espaco-p); }
+  .fila-blocos { gap: var(--espaco-m); }
 }
 
 /* faixa estreita: cada obra (e cada medicao anterior) vira um bloco, com o nome do passo ao lado da situacao */
@@ -123,6 +215,25 @@
   .quadro__siga-setor { display: inline; overflow-wrap: normal; }
   .quadro__siga-tempo { margin-top: 0; align-items: center; }
   .medicoes .tabela tbody td.quadro__acao { justify-content: flex-end; padding-top: var(--espaco-pp); }
+  /* #805: os numeros viram lista (rotulo a' esquerda, numero a' direita, o destaque embaixo) e os blocos descem */
+  .fila-numeros { grid-template-columns: minmax(0, 1fr); gap: var(--espaco-pp); }
+  .fila-numero { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--espaco-m); }
+  .fila-numero dd { font-size: var(--texto-corpo); }
+  .fila-numero dd.fila-numero__apoio { flex-basis: 100%; margin-top: 0; text-align: right; }
+  .fila-blocos { grid-template-columns: minmax(0, 1fr); }
+  /* as tres vistas cabem em duas linhas: a faixa de abas quebra em vez de rolar de lado */
+  .medicoes .medicoes__vistas { flex-wrap: wrap; overflow-x: visible; }
+  .medicoes .fila__tabela tbody tr > th.fila__obra { display: block; padding: 0 0 var(--espaco-pp); border: 0; text-align: left; }
+  .medicoes .fila__tabela .col-num { font-size: var(--texto-meta); }
+  .medicoes .fila__tabela tbody td { align-items: flex-start; }
+  .medicoes .barra-passos, .medicoes .tempo-parado { justify-items: end; text-align: right; }
+  /* o cabecalho do contratante no quadro: o bloco inteiro em tinta, com os rotulos claros */
+  .medicoes .quadro__tabela tbody tr.quadro__grupo { background: var(--cor-tinta); }
+  .medicoes .quadro__tabela tbody tr.quadro__grupo > th, .medicoes .quadro__tabela tbody tr.quadro__grupo > td { font-size: var(--texto-meta); }
+  .medicoes .quadro__tabela tbody tr.quadro__grupo td[data-rotulo]::before { color: var(--cor-papel-escuro); }
+  .medicoes .quadro__tabela tbody td.quadro__passo[aria-current="step"] { flex-wrap: wrap; justify-content: flex-end; }
+  .medicoes .quadro__tabela td.quadro__passo[aria-current="step"]::before { margin-right: auto; }
+  .quadro__da-vez { justify-items: end; }
 }
 
 /* ------------------------------------------------------------------- janela de dialogo (Janela.tsx)

@@ -407,8 +407,12 @@ def test_ficha_ritmo_e_prazo_na_cota(client_admin, monkeypatch):
     assert cheio["ritmo_centavos"] == 66_666_72 and cheio["situacao"] == "atrasa" and cheio["dias_alem"] > 0
     assert r["ritmo_centavos"] == contratos.cota(66_666_72, 4900) == 32_666_69
     assert f["topo"]["saldo_centavos"] == 391_999_84
-    assert set(r) == {"ritmo_centavos", "necessario_centavos", "competencias_restantes", "conclusao", "situacao", "dias_alem"}
+    assert set(r) == {"ritmo_centavos", "necessario_centavos", "competencias_restantes", "conclusao", "situacao", "dias_alem",
+                      "leitura"}
+    # #822: as medicoes do cenario sao de abril e maio: em outubro a obra esta' ha' tres competencias sem medir, fora
+    # da regua. A conclusao estimada e o selo dela (situacao e dias) continuam (decisao do dono de 19/11/2026)
     assert (r["conclusao"], r["situacao"], r["dias_alem"]) == (cheio["conclusao"], "atrasa", cheio["dias_alem"])
+    assert r["leitura"]["motivo"] == "sem_medicao"
     # #803: o necessario por mes vai na cota e fecha com o topo da tela: vigente - medido = saldo, e o saldo dividido
     # pelas competencias que restam (outubro, novembro e dezembro) e' o necessario mostrado, ao centavo
     t = f["topo"]
@@ -527,3 +531,171 @@ def test_cabecalho_da_obra_encerrada_pelo_cadastro_traz_a_data_do_encerramento(c
     cab = client_admin.get(f"/api/contratos/{ids['Obra Encerrada']}/cabecalho").json()
     assert (cab["status"], cab["status_desde"]) == ("encerrado", "2023-11-17")
     assert client_admin.get(f"/api/contratos/{ids['Obra Própria']}/cabecalho").json()["status_desde"] is None
+
+
+def test_listar_traz_o_andamento_na_cota_pela_conta_da_pagina_da_obra(client_admin, monkeypatch):
+    """#805: a coluna Andamento da lista de Obras le o ritmo e o necessario por mes de `andamento`, na cota, pela mesma
+    conta do painel "Prazo" da pagina da obra (`prazos.ritmo_na_cota`): os dois numeros sao os da ficha, ao centavo."""
+    import datetime
+    from app import db, prazos, tempo
+    hoje = datetime.date(2026, 10, 15)   # janela 04 a 09/2026; restam outubro, novembro e dezembro
+    monkeypatch.setattr(tempo, "hoje_local", lambda: hoje)
+    cid = _obra_com_reajuste_e_medicoes(bp=4900)
+    sem_medicao = novo_contrato({**NOVO, "numero_instrumento": "IC 083/2025"})      # execucao ate' 30/06/2027
+    encerrada = _obra_com_reajuste_e_medicoes()
+    conn = db.get_conn()
+    conn.execute("UPDATE contratos SET execucao_fim='2026-12-20' WHERE id IN (?, ?)", (cid, encerrada))
+    conn.execute("UPDATE contratos SET estado='encerrado' WHERE id=?", (encerrada,))
+    conn.commit()
+    conn.close()
+    lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
+
+    def valores(a):
+        return {k: a[k] for k in ("ritmo_centavos", "necessario_centavos")}
+
+    assert valores(lista[cid]["andamento"]) == {"ritmo_centavos": 32_666_69, "necessario_centavos": 130_666_61}
+    ficha = client_admin.get(f"/api/contratos/{cid}/ficha").json()
+    assert valores(lista[cid]["andamento"]) == valores(ficha["ritmo"])
+    # o necessario fecha com o saldo que a propria lista mostra: saldo / competencias que restam
+    assert lista[cid]["andamento"]["necessario_centavos"] == prazos.necessario_por_mes(lista[cid]["posicao"]["saldo_centavos"], 3)
+    # #822: a leitura vem pronta, e e' a da ficha. As medicoes do cenario sao de abril e maio: em outubro, julho,
+    # agosto e setembro fecharam sem medicao
+    assert lista[cid]["andamento"]["leitura"] == ficha["ritmo"]["leitura"] == {
+        **SEM_LEITURA, "motivo": "sem_medicao", "sem_medicao_desde": "2026-05"}
+    # sem medicao na janela nao ha' ritmo; o necessario continua (9 competencias, de 10/2026 a 06/2027). A obra que
+    # nunca mediu execucao nao tem leitura nem motivo
+    assert lista[sem_medicao]["andamento"] == {"ritmo_centavos": None, "leitura": SEM_LEITURA,
+                                               "necessario_centavos": prazos.necessario_por_mes(100_000_000, 9)}
+    # obra encerrada nao tem prazo a cumprir: sem necessario (a tela nao desenha o andamento)
+    assert lista[encerrada]["andamento"] == {"ritmo_centavos": 66_666_72, "necessario_centavos": None, "leitura": SEM_LEITURA}
+
+
+SEM_LEITURA = {"situacao": None, "pct": None, "motivo": None, "prorrogacao_pedida": False, "sem_medicao_desde": None,
+               "execucao_fim": None, "atencao_desde_pct": 70, "adiantada_desde_pct": 100}
+
+
+def test_a_lista_e_a_pagina_da_obra_dao_a_mesma_leitura_do_andamento(client_admin, monkeypatch):
+    """#822: a leitura do andamento nasce numa funcao so' (`prazos.ritmo_na_cota`), e `GET /api/contratos` e
+    `GET /api/contratos/{id}/ficha` a devolvem igual para a mesma obra, em cada caso da regua: com leitura (tres
+    competencias), prazo no fim (duas), prorrogacao pedida, sem medicao ha' tres competencias, ritmo que nao fecha a
+    conclusao estimada (a pagina calava a situacao e a lista escrevia "Devagar") e obra sem prazo a cumprir."""
+    import datetime
+    from app import db, medicoes, tempo
+    hoje = datetime.date(2026, 11, 18)   # janela 05 a 10/2026
+    monkeypatch.setattr(tempo, "hoje_local", lambda: hoje)
+    conn = db.get_conn()
+
+    def obra(numero, execucao_fim, meds, bp=None, pedido=None, estado=None):
+        cid = novo_contrato({**NOVO, "numero_instrumento": numero, "execucao_fim": execucao_fim})
+        if bp is not None:
+            conn.execute("UPDATE contratos SET percentual_direito_bp=? WHERE id=?", (bp, cid))
+        if estado:
+            conn.execute("UPDATE contratos SET estado=? WHERE id=?", (estado, cid))
+        if pedido:
+            conn.execute("INSERT INTO pleitos (contrato_id, tipo, origem, numero_oficio, situacao, enviado_em) "
+                         "VALUES (?, 'prazo', 'cadastro', 'CT-001-LT-2026', 'enviado', ?)", (cid, pedido))
+        conn.commit()
+        for n, (competencia, valor) in enumerate(meds, start=1):
+            m = medicoes.criar(conn, 1, {"contrato_id": cid, "numero": n, "tipo": "execucao", "competencia": competencia})
+            medicoes.definir_valor(conn, 1, m, "protocolado", valor, "manual")
+            conn.execute("UPDATE medicoes SET estado='protocolada' WHERE id=?", (m,))
+            conn.commit()
+        return cid
+
+    recentes = (("2026-09", 150_000_00), ("2026-10", 150_000_00))     # ritmo 50.000,00; saldo 700.000,00
+    casos = {
+        "tres competencias": (obra("IC 101/2025", "2027-01-31", recentes, bp=4900), {"situacao": "devagar", "pct": 21}),
+        "duas competencias": (obra("IC 102/2025", "2026-12-31", recentes),
+                              {"motivo": "prazo_no_fim", "execucao_fim": "2026-12-31"}),
+        "duas, com pedido": (obra("IC 103/2025", "2026-12-31", recentes, pedido="2026-11-04"),
+                             {"motivo": "prazo_no_fim", "prorrogacao_pedida": True, "execucao_fim": "2026-12-31"}),
+        "prorrogacao pedida": (obra("IC 104/2025", "2027-06-30", recentes, pedido="2026-11-04"),
+                               {"motivo": "prorrogacao_pedida", "prorrogacao_pedida": True}),
+        "sem medicao": (obra("IC 105/2025", "2027-06-30", (("2026-07", 300_000_00),)),
+                        {"motivo": "sem_medicao", "sem_medicao_desde": "2026-07"}),
+        "conclusao nao fecha": (obra("IC 106/2025", "2027-06-30", (("2026-10", 6_00),)), {"situacao": "devagar", "pct": 0}),
+        "adiantada": (obra("IC 107/2025", "2027-06-30", (("2026-08", 300_000_00), ("2026-09", 300_000_00), ("2026-10", 300_000_00))),
+                      {"situacao": "adiantada", "pct": 1200}),
+        "encerrada": (obra("IC 108/2025", "2027-06-30", recentes, estado="encerrado"), {}),
+        "nunca mediu": (obra("IC 109/2025", "2027-06-30", ()), {}),
+    }
+    conn.close()
+    lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
+    for nome, (cid, esperado) in casos.items():
+        da_lista = lista[cid]["andamento"]["leitura"]
+        da_ficha = client_admin.get(f"/api/contratos/{cid}/ficha").json()["ritmo"]["leitura"]
+        assert da_lista == da_ficha == {**SEM_LEITURA, **esperado}, nome
+
+    def ritmo_da_ficha(nome):
+        return client_admin.get(f"/api/contratos/{casos[nome][0]}/ficha").json()["ritmo"]
+
+    # a pagina da obra calava a situacao deste caso (conclusao alem do teto do pedido): continua sem conclusao
+    # estimada, e a leitura agora e' a da lista
+    ficha = ritmo_da_ficha("conclusao nao fecha")
+    assert (ficha["conclusao"], ficha["situacao"]) == (None, None) and ficha["leitura"]["situacao"] == "devagar"
+    # o selo da conclusao estimada diz os dias alem do fim (ou que esta' no ritmo) com leitura e tambem fora da regua
+    # (decisao do dono de 19/11/2026): "Prazo no fim" diz que a regua nao vale; o selo, quando a obra termina no ritmo
+    ficha = ritmo_da_ficha("tres competencias")
+    assert ficha["situacao"] == "atrasa" and ficha["dias_alem"] > 0
+    assert ritmo_da_ficha("adiantada")["situacao"] == "no_prazo"
+    for nome in ("duas competencias", "duas, com pedido", "prorrogacao pedida", "sem medicao"):
+        ficha = ritmo_da_ficha(nome)
+        assert ficha["leitura"]["motivo"], nome
+        assert ficha["conclusao"] and ficha["situacao"] == "atrasa" and ficha["dias_alem"] > 0, nome
+
+
+def test_listar_traz_o_medido_do_mes_fechado_igual_ao_do_fechamento(client_admin, monkeypatch):
+    """#805: `medido_mes` e' o medido da obra na ultima competencia fechada (o mes anterior ao de hoje) e, como
+    referencia da variacao, o da competencia antes dela; na cota, o mesmo numero do Fechamento para a obra no mes."""
+    import datetime
+    from app import contratos, db, fechamento, tempo
+    hoje = datetime.date(2026, 10, 15)
+    monkeypatch.setattr(tempo, "hoje_local", lambda: hoje)
+    cid = novo_contrato(NOVO)
+    parada = novo_contrato({**NOVO, "numero_instrumento": "IC 083/2025"})
+    conn = db.get_conn()
+    conn.execute("UPDATE contratos SET percentual_direito_bp=4900 WHERE id=?", (cid,))
+    ins = ("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, "
+           "valor_atestado_centavos) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    conn.execute(ins, (cid, 1, "execucao", "2026-08", "recebida", 50_000_01, None))
+    conn.execute(ins, (cid, 2, "execucao", "2026-09", "boletim_recebido", 100_000_01, 90_000_03))   # o aprovado vale
+    conn.execute(ins, (cid, 2, "reajuste", "2026-09", "planilha_enviada", 7_000_01, None))          # em analise: o pedido
+    conn.execute(ins, (cid, 3, "execucao", "2026-10", "planilha_enviada", 1_000_00, None))          # o mes em curso fica fora
+    conn.commit()
+    lista = {c["id"]: c for c in client_admin.get("/api/contratos").json()}
+    assert lista[cid]["medido_mes"] == {
+        "competencia": "2026-09", "valor_centavos": contratos.cota(90_000_03, 4900) + contratos.cota(7_000_01, 4900),
+        "referencia_competencia": "2026-08", "referencia_centavos": contratos.cota(50_000_01, 4900)}
+    assert lista[cid]["medido_mes"]["valor_centavos"] == 44_100_01 + 3_430_00
+    assert lista[parada]["medido_mes"] == {"competencia": "2026-09", "valor_centavos": 0,
+                                           "referencia_competencia": "2026-08", "referencia_centavos": 0}
+    f = fechamento.fechamento(conn, hoje)
+    conn.close()
+    do_fechamento = {m["competencia"]: {o["contrato_id"]: o["medido_centavos"] for o in m["obras"]} for m in f["meses"]}
+    assert lista[cid]["medido_mes"]["valor_centavos"] == do_fechamento["2026-09"][cid]
+    assert lista[cid]["medido_mes"]["referencia_centavos"] == do_fechamento["2026-08"][cid]
+
+
+def test_listar_traz_a_chave_do_contratante_pelo_que_o_servidor_agrupa(client_admin):
+    """#805: a pagina do contratante tem endereco pela `contratante_chave`: "sinfra" para a familia toda (um
+    contratante so'), a chave do orgao no cadastro nos outros, e nula no contrato sem orgao no cadastro."""
+    from app import db
+    a = novo_contrato(NOVO)
+    b = novo_contrato({**NOVO, "numero_instrumento": "IC 083/2025"})
+    c = novo_contrato({**NOVO, "numero_instrumento": "IC 084/2025", "orgao": "texto livre"})
+    d = novo_contrato({**NOVO, "numero_instrumento": "IC 085/2025", "orgao": "sem cadastro"})
+    conn = db.get_conn()
+    conn.execute("INSERT INTO orgaos (chave, nome, familia, regras) VALUES ('sinfra-suef2', 'SINFRA - SUEF II', 'sinfra', '{}')")
+    conn.execute("INSERT INTO orgaos (chave, nome, familia, regras) VALUES ('sinfra-supu', 'SINFRA - SUPU', 'sinfra', '{}')")
+    conn.execute("INSERT INTO orgaos (chave, nome, familia, regras) VALUES ('pref-cuiaba', 'Prefeitura de Cuiabá', 'prefeitura', '{}')")
+    conn.execute("UPDATE contratos SET orgao_id=(SELECT id FROM orgaos WHERE chave='sinfra-suef2') WHERE id=?", (a,))
+    conn.execute("UPDATE contratos SET orgao_id=(SELECT id FROM orgaos WHERE chave='sinfra-supu') WHERE id=?", (b,))
+    conn.execute("UPDATE contratos SET orgao_id=(SELECT id FROM orgaos WHERE chave='pref-cuiaba') WHERE id=?", (c,))
+    conn.commit(); conn.close()
+    lista = {x["id"]: x for x in client_admin.get("/api/contratos").json()}
+    assert [(lista[i]["contratante"], lista[i]["contratante_chave"]) for i in (a, b, c, d)] == [
+        ("SINFRA", "sinfra"), ("SINFRA", "sinfra"), ("Pref. Cuiabá", "pref-cuiaba"), ("sem cadastro", None)]
+    # a pagina da obra recebe os mesmos dois, para o caminho "Obras > contratante > obra"
+    for i in (a, c, d):
+        cab = client_admin.get(f"/api/contratos/{i}/cabecalho").json()
+        assert (cab["contratante"], cab["contratante_chave"]) == (lista[i]["contratante"], lista[i]["contratante_chave"])

@@ -8,51 +8,68 @@ Nada e' calculado de novo aqui: cada numero vem do modulo que ja' o calcula para
   `diretoria._pct_do_recebido` (em consorcio com a nota da propria empresa ligada, a baixa dela: docs/adr/0006);
 - previsao de entrada (#652): `_previsao`, as protocoladas da faixa do ciclo pela data esperada (protocolo + prazo
   do orgao, o terceiro quartil de `diretoria.prazos_do_orgao`, docs/adr/0007);
-- matriz obra por competencia (#659): `_matriz`, a etapa da medicao de cada mes pelo estado dela; a atrasada e' a da
-  previsao de entrada (`diretoria.esperada`).
+- a matriz obra por competencia (#659) saiu daqui em 19/11/2026 (decisao do dono, #805): mora no Resumo das
+  medicoes (`resumo_medicoes.matriz`), com a mesma conta.
 
-Medido no mes: B-01 (10/10/2026) -- a regra da Carteira: medicoes pela COMPETENCIA do mes INTEIRO, em valor CHEIO
-(atestado, senao protocolado), como a pagina da medicao mostra. A data de
-lancamento fazia a carga do legado virar "setembro R$ 765 mi". Cancelada, desistida e prevista nao contam (a
-mesma exclusao do "medido" da Carteira).
+Medido do mes (decisao do dono de 19/11/2026, #805): a conta do Fechamento, na cota, na ultima competencia fechada
+(`_medido_das_competencias`). Uma definicao so': o numero do alto, o ponto do grafico daquela competencia e o medido do
+mes na pagina Fechamento sao o mesmo valor, lido da mesma funcao. Ate' 19/11/2026 o numero do alto era valor cheio, com
+o complemento das notas do RM sem medicao lancada (B-01, 10/10/2026).
+
+Referencias dos dois numeros do alto (issue #805, decisao do dono de 18/11/2026: o valor diz se esta' melhor ou pior
+que antes). Cada referencia e' a MESMA conta do numero, em outro periodo; a tela so' desenha a variacao:
+- medido: a competencia anterior (`anterior`) e a mesma competencia do ano anterior (`ano_anterior`);
+- notas protocoladas no mes: o mes anterior ate' o mesmo dia do mes (`anterior`, com `ate_dia`).
+A referencia vem nula quando nao ha' com o que comparar: periodo anterior a `diretoria.ANO_INICIAL` ou sem valor.
+
+Issue #817 (reestrutura 5c, o que faltava apresentar a' diretoria): dois blocos novos, cada um com a conta de quem ja'
+a faz; nada do que existia mudou de conta.
+- ciclo por contratante: `_ciclo_por_contratante`, as MESMAS medicoes de cada etapa da faixa do ciclo (`_da_etapa`, a
+  selecao unica das duas) e as mesmas linhas do a receber (`diretoria.a_receber_na_cota`), agrupadas pelo contratante
+  (`diretoria._contratante`). Em cada etapa, a soma dos contratantes e' o numero da faixa; a do a receber e' o total
+  do a receber (`_a_receber`). E' o a receber da lista de Obras e da pagina do contratante, e NAO o em aberto do
+  Fechamento, que e' outra conta (docs/adr/0006);
+- medido em 12 meses: `_medido_12m`, o medido de cada competencia pela conta do Fechamento
+  (`fechamento.medido_das_competencias`), na cota. Desde 19/11/2026 e' tambem a conta do numero do alto (acima).
 """
+import calendar
 import datetime
 
-from app import avisos, diretoria, tempo
+from app import avisos, diretoria, fechamento, tempo
 
-FORA = diretoria.FORA
 MAIS_DE_DIAS = 60       # a faixa "ha' mais de 60 dias" do a receber (as outras faixas sairam com a tela A receber, #748)
 
 
-def _dia_local(utc: str | None) -> datetime.date | None:
-    if not utc:
-        return None
-    try:
-        return tempo.para_local(datetime.datetime.fromisoformat(utc.replace("Z", ""))).date()
-    except ValueError:
-        return None
+def _medido_das_competencias(conn, hoje: datetime.date) -> dict[str, int]:
+    """Decisao do dono de 19/11/2026 (#805): o medido do Inicio tem uma definicao so', a do Fechamento
+    (`fechamento.medido_das_competencias`: as medicoes enviadas ao orgao, o aprovado e, sem boletim, o pedido, na cota,
+    medicao a medicao). Uma leitura serve ao numero do alto, as duas referencias dele e ao grafico de 12 meses: as 12
+    ultimas competencias fechadas (`_ultimas_12_competencias`) e a do ano anterior a' do numero, que fica fora delas."""
+    return fechamento.medido_das_competencias(conn, [diretoria._mes(hoje, -13), *_ultimas_12_competencias(hoje)])
 
 
-def _medido(conn, hoje: datetime.date) -> dict:
-    """06/11/2026: o mes do cartao e' a ULTIMA COMPETENCIA FECHADA (o mes anterior a hoje): a medicao de um mes so' e'
-    lancada no seguinte, entao o mes corrente ficava sempre zerado. Entra tambem o que o RM mostra e ainda nao tem
-    medicao lancada (`diretoria.complemento_rm`), em valor cheio, como as medicoes daqui. Issue #642: a comparacao
-    com a competencia anterior e a quebra por contratante sairam da tela e daqui."""
+def _referencia_do_medido(medido: dict[str, int], mes: str) -> dict | None:
+    """O medido de outra competencia, para a variacao do numero do alto (issue #805), com a MESMA conta dele. Nulo
+    quando a competencia e' anterior a `diretoria.ANO_INICIAL` (o que as telas da diretoria nao contam) ou nao tem
+    valor: sem lastro, nao se compara."""
+    if mes[:4] < diretoria.ANO_INICIAL or medido[mes] <= 0:
+        return None
+    return {"competencia": mes, "valor_centavos": medido[mes]}
+
+
+def _medido(medido: dict[str, int], hoje: datetime.date) -> dict:
+    """O numero "Medido em <mes>" do alto. 06/11/2026: o mes e' a ULTIMA COMPETENCIA FECHADA (o mes anterior a hoje): a
+    medicao de um mes so' e' lancada no seguinte, entao o mes corrente ficava sempre zerado.
+    Decisao do dono de 19/11/2026 (#805): o numero passou para a cota, pela conta do Fechamento
+    (`_medido_das_competencias`). E' o mesmo valor do ultimo ponto do grafico de 12 meses (`_medido_12m`) e do medido
+    daquele mes na pagina Fechamento, para onde o numero leva. Antes era valor cheio e levava o complemento das notas do
+    RM sem medicao lancada (B-01); os dois "medidos" na mesma tela diferiam em obra de consorcio.
+    As referencias da variacao (#805, decisao de 18/11/2026) sao a mesma conta na competencia anterior (`anterior`) e
+    na mesma competencia do ano anterior (`ano_anterior`)."""
     mes = diretoria._mes(hoje, -1)
-    linhas = conn.execute(
-        "SELECT criado_em, competencia, COALESCE(valor_atestado_centavos, valor_protocolado_centavos, 0) AS valor "
-        f"FROM medicoes WHERE estado NOT IN ({','.join('?' * len(FORA))})", FORA).fetchall()
-    atual = quantidade = 0
-    ultimo = None
-    for r in linhas:
-        d = _dia_local(r["criado_em"])
-        if d is not None and d <= hoje:
-            ultimo = max(ultimo, d) if ultimo else d
-        if r["competencia"] == mes:
-            atual += r["valor"]; quantidade += 1
-    atual += sum(por_comp.get(mes, 0) for por_comp in diretoria.complemento_rm(conn).values())
-    return {"competencia": mes, "valor_centavos": atual, "quantidade": quantidade,
-            "ultimo_lancamento": ultimo.isoformat() if ultimo else None}
+    return {"competencia": mes, "valor_centavos": medido[mes],
+            "anterior": _referencia_do_medido(medido, diretoria._mes(hoje, -2)),
+            "ano_anterior": _referencia_do_medido(medido, diretoria._mes(hoje, -13))}
 
 
 # Issue #642: a faixa do ciclo. Cada etapa com os estados dela e a coluna da data do evento que e' a evidencia (envio
@@ -63,25 +80,39 @@ CICLO = (("em_analise", ("planilha_enviada",), "planilha_enviada_em"),
          ("protocolado", diretoria.PROTOCOLADAS, "protocolo_em"))
 
 
-def _ciclo(conn, hoje: datetime.date) -> list[dict]:
+def _medicoes_do_ciclo(conn) -> list[dict]:
+    """As medicoes que a faixa do ciclo e a abertura dela por contratante leem: as de `diretoria._medicoes`, com a
+    marca da pendencia a' parte (`diretoria.marcar_a_parte`, docs/adr/0006)."""
+    return diretoria.marcar_a_parte(conn, diretoria._medicoes(conn))
+
+
+def _da_etapa(ms: list[dict], etapa: str, estados: tuple, campo: str) -> list[tuple[dict, datetime.date]]:
+    """As medicoes de UMA etapa do ciclo, cada uma com a data do evento da etapa: a UNICA selecao da faixa do ciclo
+    (`_ciclo`) e da abertura dela por contratante (`_ciclo_por_contratante`, issue #817). Medicao no estado e sem a
+    data do evento fica fora."""
+    if etapa == "protocolado":
+        # #743: na obra sem o passo "Envio da nota", a nota emitida ja' e' a cobranca; a medicao esta' aqui, com
+        # a data da emissao da nota (`diretoria.cobrada_em`), e nao na etapa "Nota", que espera o protocolo
+        # 17/11/2026 (docs/adr/0006): a pendencia a' parte (competencia anterior a 2025, ou nota sem atualizacao
+        # do RM) fica fora da etapa; a tela a mostra numa linha propria (`_a_receber`, `a_parte`)
+        datadas = [(m, diretoria._d(diretoria.cobrada_em(m))) for m in ms
+                   if diretoria.espera_pagamento(m) and not m["a_parte"]]
+    else:
+        datadas = [(m, diretoria._d(m[campo])) for m in ms if m["estado"] in estados and not m["sem_protocolo"]]
+    return [(m, d) for m, d in datadas if d]
+
+
+def _ciclo(conn, hoje: datetime.date, ms: list[dict] | None = None) -> list[dict]:
     """Quanto dinheiro esta' em cada etapa do ciclo da medicao, na COTA da Lotufo (`diretoria._cota`: o aprovado,
     senao o pedido, medicao a medicao com o arredondamento unico), quantas medicoes e a idade, em dias, da mais
-    antiga. So' entra a medicao que tem a data do evento da etapa: a idade conta dessa data ate' hoje, nunca da
-    competencia; medicao no estado e sem a data fica fora do valor e da quantidade. "Recebido no mes" sao as baixas
-    do RM com data no mes de hoje (`diretoria.recebido_rm_no_mes`); a quantidade dele e' de notas, e nao tem idade."""
-    ms = diretoria.marcar_a_parte(conn, diretoria._medicoes(conn))
+    antiga. So' entra a medicao que tem a data do evento da etapa (`_da_etapa`): a idade conta dessa data ate' hoje,
+    nunca da competencia; medicao no estado e sem a data fica fora do valor e da quantidade. "Recebido no mes" sao as
+    baixas do RM com data no mes de hoje (`diretoria.recebido_rm_no_mes`); a quantidade dele e' de notas, e nao tem
+    idade. `ms`: as medicoes ja' lidas (`_medicoes_do_ciclo`), para o painel le-las uma vez so'."""
+    ms = _medicoes_do_ciclo(conn) if ms is None else ms
     out = []
     for etapa, estados, campo in CICLO:
-        if etapa == "protocolado":
-            # #743: na obra sem o passo "Envio da nota", a nota emitida ja' e' a cobranca; a medicao esta' aqui, com
-            # a data da emissao da nota (`diretoria.cobrada_em`), e nao na etapa "Nota", que espera o protocolo
-            # 17/11/2026 (docs/adr/0006): a pendencia a' parte (competencia anterior a 2025, ou nota sem atualizacao
-            # do RM) fica fora da etapa; a tela a mostra numa linha propria (`_a_receber`, `a_parte`)
-            datadas = [(m, diretoria._d(diretoria.cobrada_em(m))) for m in ms
-                       if diretoria.espera_pagamento(m) and not m["a_parte"]]
-        else:
-            datadas = [(m, diretoria._d(m[campo])) for m in ms if m["estado"] in estados and not m["sem_protocolo"]]
-        com_data = [(m, d) for m, d in datadas if d]
+        com_data = _da_etapa(ms, etapa, estados, campo)
         out.append({"etapa": etapa, "valor_centavos": sum(diretoria._cota(m) for m, _ in com_data),
                     "quantidade": len(com_data),
                     "mais_antigo_dias": max(0, max((hoje - d).days for _, d in com_data)) if com_data else None})
@@ -91,8 +122,55 @@ def _ciclo(conn, hoje: datetime.date) -> list[dict]:
     return out
 
 
+def _ciclo_por_contratante(ms: list[dict], a_receber: list[dict] | None) -> list[dict]:
+    """Issue #817: onde o dinheiro esta' parado, por contratante. Uma linha por contratante (`diretoria._contratante`:
+    a SINFRA inteira, sem separar a superintendencia) com o valor de cada etapa do ciclo, na cota, e o a receber.
+    - As etapas: as MESMAS medicoes de `_ciclo` (`_da_etapa`), com o mesmo valor por medicao (`diretoria._cota`). A
+      cota arredonda medicao a medicao, entao a soma dos contratantes em cada etapa e' o numero da faixa, ao centavo.
+    - O a receber: as linhas do a receber que entram no total (`a_receber`: as de `diretoria.a_receber_na_cota` fora
+      da pendencia a' parte, as mesmas de `_a_receber`), pelo valor de cada uma (`diretoria._a_receber_cota`). A soma
+      dos contratantes e' `a_receber.valor_centavos`. E' o a receber da lista de Obras e da pagina do contratante, NAO
+      o em aberto do Fechamento (outra conta, docs/adr/0006). Sem o total liberado (`a_receber` nulo), vem nulo em
+      toda linha.
+    "Recebido no mes" nao abre por contratante: nenhuma tela o mostra assim.
+    `chave` e' a do endereco da pagina do contratante (`diretoria.chave_do_contratante`, a mesma da lista de Obras);
+    nula no contrato sem orgao no cadastro. So' sai o contratante com valor em alguma coluna, do que tem mais dinheiro
+    nas quatro etapas para o que tem menos (empate: mais a receber, depois o nome)."""
+    etapas = [etapa for etapa, _, _ in CICLO]
+    linhas: dict[str, dict] = {}
+
+    def do(x: dict) -> dict:
+        nome = diretoria._contratante(x)
+        chave = diretoria.chave_do_contratante(x.get("orgao_familia"), x.get("orgao_chave")) if x.get("orgao_nome") else None
+        return linhas.setdefault(nome, {"contratante": nome, "chave": chave, **{f"{e}_centavos": 0 for e in etapas},
+                                        "a_receber_centavos": None if a_receber is None else 0})
+    for etapa, estados, campo in CICLO:
+        for m, _ in _da_etapa(ms, etapa, estados, campo):
+            do(m)[f"{etapa}_centavos"] += diretoria._cota(m)
+    for x in a_receber or []:
+        do(x)["a_receber_centavos"] += diretoria._a_receber_cota(x)
+    no_ciclo = lambda linha: sum(linha[f"{e}_centavos"] for e in etapas)
+    com_valor = [x for x in linhas.values() if no_ciclo(x) or x["a_receber_centavos"]]
+    return sorted(com_valor, key=lambda x: (-no_ciclo(x), -(x["a_receber_centavos"] or 0), x["contratante"]))
+
+
 def _ultimos_12_meses(hoje: datetime.date) -> list[str]:
     return [diretoria._mes(hoje, -n) for n in range(11, -1, -1)]
+
+
+def _ultimas_12_competencias(hoje: datetime.date) -> list[str]:
+    """As 12 ultimas competencias FECHADAS, terminando no mes anterior a hoje: as do medido em 12 meses (#817) e da
+    matriz do Resumo das medicoes (#659, `resumo_medicoes.matriz`). A competencia de hoje fica fora, como no numero do
+    medido: a medicao dela so' e' lancada no mes seguinte (decisao do dono de 06/11/2026)."""
+    return [diretoria._mes(hoje, -n) for n in range(12, 0, -1)]
+
+
+def _medido_12m(medido: dict[str, int], hoje: datetime.date) -> list[dict]:
+    """Issue #817: o medido de cada uma das 12 ultimas competencias fechadas, na cota. E' a conta do Fechamento
+    (`_medido_das_competencias`: as mesmas medicoes e o mesmo valor por medicao do `medido_centavos` de cada mes
+    daquela pagina), e o mes e' a competencia da medicao, como la'. Competencia sem medicao vem com zero. O ultimo
+    ponto e' o numero do alto (`_medido`)."""
+    return [{"competencia": c, "valor_centavos": medido[c]} for c in _ultimas_12_competencias(hoje)]
 
 
 def _recebido_12m(conn, hoje: datetime.date) -> list[dict]:
@@ -129,47 +207,13 @@ def _previsao(conn, hoje: datetime.date) -> dict:
     return out
 
 
-# Issue #659: a etapa de cada estado na matriz, na ordem da menos para a mais adiantada. A protocolada atrasada vem
-# antes da protocolada no prazo: na mesma competencia, a celula e' a atrasada.
-ETAPAS_MATRIZ = ("em_analise", "boletim", "nota", "atrasado", "protocolado", "recebida")
-_ETAPA_DO_ESTADO = {**{estado: etapa for etapa, estados, _ in CICLO for estado in estados}, "recebida": "recebida"}
+def _no_total_do_a_receber(todas: list[dict]) -> list[dict]:
+    """Das linhas de `diretoria.a_receber_na_cota`, as que entram no total do a receber: fora a pendencia a' parte
+    (docs/adr/0006). A UNICA escolha do total (`_a_receber`) e do a receber por contratante (issue #817)."""
+    return [x for x in todas if not x["a_parte"]]
 
 
-def _matriz(conn, hoje: datetime.date) -> dict:
-    """Issue #659: uma linha por obra ativa, agrupadas pelo contratante (`diretoria._contratante`), e uma celula por
-    competencia, as 12 ultimas terminando no mes anterior a hoje. A celula traz a etapa da medicao daquela competencia,
-    pelo estado dela (os estados de `CICLO`, mais `recebida`), e a medicao para o link; a protocolada com a data
-    esperada (`diretoria.esperada`) anterior a hoje e' `atrasado`. Com mais de uma medicao na competencia (execucao e reajuste),
-    vale a menos adiantada. Cancelada, desistida, prevista e planilha so' gerada nao pintam: a celula fica nula."""
-    competencias = [diretoria._mes(hoje, -n) for n in range(12, 0, -1)]
-    ms = diretoria._medicoes(conn)
-    prazos_ = diretoria.prazos_do_orgao(ms, hoje)
-    celulas: dict[tuple[int, str], tuple[int, int]] = {}      # (obra, competencia) -> (ordem da etapa, medicao)
-    for m in ms:
-        etapa = _ETAPA_DO_ESTADO.get(m["estado"])
-        if etapa is None or m["competencia"] not in competencias:
-            continue
-        if m["sem_protocolo"]:
-            etapa = "protocolado"       # #743: a nota emitida da obra sem o passo "Envio da nota" espera o pagamento
-        elif etapa == "protocolado":
-            esperada = diretoria.esperada(m, prazos_)
-            etapa = "atrasado" if esperada is not None and esperada < hoje else etapa
-        chave, nova = (m["contrato_id"], m["competencia"]), (ETAPAS_MATRIZ.index(etapa), m["id"])
-        celulas[chave] = min(celulas.get(chave, nova), nova)
-    grupos: dict[str, list[dict]] = {}
-    for c in conn.execute("SELECT c.id, COALESCE(c.nome_curto, c.numero_instrumento) AS obra, o.nome AS orgao_nome, "
-                          "o.familia AS orgao_familia, o.chave AS orgao_chave FROM contratos c "
-                          "LEFT JOIN orgaos o ON o.id=c.orgao_id WHERE c.estado='ativo'"):
-        linha = [celulas.get((c["id"], comp)) for comp in competencias]
-        grupos.setdefault(diretoria._contratante(dict(c)), []).append({
-            "contrato_id": c["id"], "obra": c["obra"],
-            "celulas": [x and {"etapa": ETAPAS_MATRIZ[x[0]], "medicao_id": x[1]} for x in linha]})
-    return {"competencias": competencias,
-            "grupos": [{"contratante": k, "obras": sorted(v, key=lambda o: (o["obra"] or "", o["contrato_id"]))}
-                       for k, v in sorted(grupos.items())]}
-
-
-def _a_receber(conn, hoje: datetime.date) -> dict:
+def _a_receber(conn, hoje: datetime.date, todas: list[dict] | None = None) -> dict:
     """O a receber, na cota, com a faixa de mais de 60 dias: a lista unica de `diretoria.a_receber_na_cota` (as
     medicoes que esperam o pagamento, as cobrancas do RM em aberto e, em consorcio com a nota da propria empresa
     ligada, o em aberto dela, #756), a mesma da lista de Obras. A idade conta do protocolo; na medicao sem protocolo
@@ -180,12 +224,13 @@ def _a_receber(conn, hoje: datetime.date) -> dict:
     fora dos dois: `anterior_centavos` (competencia anterior ao ano inicial) e `sem_atualizacao_centavos` (nota que
     saiu da janela de 24 meses da sincronizacao com o RM e ficou em aberto: a dashboard nao sabe se foi paga), com o
     dia mais antigo em que o RM informou uma delas (`sem_atualizacao_desde`). A linha que e' as duas coisas conta em
-    "sem atualizacao". As tres somas fecham com a lista inteira (`diretoria.a_receber_na_cota`)."""
+    "sem atualizacao". As tres somas fecham com a lista inteira (`diretoria.a_receber_na_cota`).
+    `todas`: essa lista ja' lida, para o painel le-la uma vez so' (issue #817)."""
     liberado = diretoria._liberado(conn)
     if not liberado:
         return {"liberado": False, "valor_centavos": None, "mais_60_centavos": None, "a_parte": None}
-    todas = diretoria.a_receber_na_cota(conn)
-    no_total = [x for x in todas if not x["a_parte"]]
+    todas = diretoria.a_receber_na_cota(conn) if todas is None else todas
+    no_total = _no_total_do_a_receber(todas)
     sem = [x for x in todas if x["sem_atualizacao_desde"]]
     anteriores = [x for x in todas if x["a_parte"] and not x["sem_atualizacao_desde"]]
     soma = lambda xs: sum(diretoria._a_receber_cota(x) for x in xs)
@@ -207,44 +252,70 @@ def _protocoladas_dia(conn) -> list[dict]:
         "WHERE m.estado NOT IN ('cancelada','desistida') GROUP BY m.id")]
 
 
-def _notas_mes(conn, hoje: datetime.date, linhas: list[dict] | None = None) -> dict:
-    """Notas fiscais ativas alocadas (alocacao nao desfeita) as medicoes protocoladas no mes de hoje: valor da nota
-    (cada nota uma vez), quantidade de notas e de obras distintas. Issue #642: o acumulado por dia saiu com o
-    minigrafico do cartao."""
-    mes = hoje.strftime("%Y-%m")
-    linhas = _protocoladas_dia(conn) if linhas is None else linhas
-    do_mes = {r["id"]: r for r in linhas if (r["data"] or "")[:7] == mes}
+def _soma_das_notas(alocacoes: list, medicoes_: dict[int, dict]) -> dict:
+    """A unica conta das "notas fiscais protocoladas" do Inicio, para o mes e para a referencia dele: das notas ativas
+    alocadas (`alocacoes`), as que estao ligadas a alguma das medicoes dadas, cada nota UMA vez, pelo valor da nota."""
     notas: dict[int, dict] = {}
-    for a in conn.execute("SELECT a.medicao_id, a.nota_id, n.valor_centavos FROM nf_alocacoes a "
-                          "JOIN notas_fiscais n ON n.id=a.nota_id "
-                          "WHERE a.desfeita_em IS NULL AND n.situacao='ativa'"):
-        m = do_mes.get(a["medicao_id"])
+    for a in alocacoes:
+        m = medicoes_.get(a["medicao_id"])
         if m is None:
             continue
         n = notas.setdefault(a["nota_id"], {"valor": a["valor_centavos"], "obras": set()})
         n["obras"].add(m["contrato_id"])
-    return {"mes": mes, "valor_centavos": sum(n["valor"] for n in notas.values()), "notas": len(notas),
+    return {"valor_centavos": sum(n["valor"] for n in notas.values()), "notas": len(notas),
             "obras": len({o for n in notas.values() for o in n["obras"]})}
+
+
+def _notas_mes(conn, hoje: datetime.date, linhas: list[dict] | None = None) -> dict:
+    """Notas fiscais ativas alocadas (alocacao nao desfeita) as medicoes protocoladas no mes de hoje: valor da nota
+    (cada nota uma vez), quantidade de notas e de obras distintas. Issue #642: o acumulado por dia saiu com o
+    minigrafico do cartao.
+    Issue #805: `anterior` e' a mesma conta no mes anterior ATE' O MESMO DIA do mes (hoje e' dia N: as medicoes
+    protocoladas do dia 1 ao dia N do mes anterior; se ele nao tem o dia N, ate' o ultimo dia dele, que vai em
+    `ate_dia`). Comparar o mes corrente, que esta' pela metade, com o mes anterior inteiro diria sempre "caiu". Nulo
+    quando o mes anterior e' de antes de `diretoria.ANO_INICIAL` ou nao teve nota protocolada ate' esse dia."""
+    mes = hoje.strftime("%Y-%m")
+    linhas = _protocoladas_dia(conn) if linhas is None else linhas
+    alocacoes = conn.execute("SELECT a.medicao_id, a.nota_id, n.valor_centavos FROM nf_alocacoes a "
+                             "JOIN notas_fiscais n ON n.id=a.nota_id "
+                             "WHERE a.desfeita_em IS NULL AND n.situacao='ativa'").fetchall()
+    do_mes = {r["id"]: r for r in linhas if (r["data"] or "")[:7] == mes}
+    mes_anterior = diretoria._mes(hoje, -1)
+    ate_dia = min(hoje.day, calendar.monthrange(int(mes_anterior[:4]), int(mes_anterior[5:7]))[1])
+    limite = f"{mes_anterior}-{ate_dia:02d}"
+    ate_o_dia = {r["id"]: r for r in linhas if (r["data"] or "")[:7] == mes_anterior and (r["data"] or "")[:10] <= limite}
+    referencia = _soma_das_notas(alocacoes, ate_o_dia)["valor_centavos"]
+    return {"mes": mes, **_soma_das_notas(alocacoes, do_mes),
+            "anterior": {"mes": mes_anterior, "ate_dia": ate_dia, "valor_centavos": referencia}
+            if referencia > 0 and mes_anterior[:4] >= diretoria.ANO_INICIAL else None}
 
 
 def painel(conn, hoje: datetime.date | None = None) -> dict:
     """O painel e' o mesmo para todo perfil. Issue #666: a caixa "Avisos importantes" saiu daqui; a tela le a fila da
     tela Avisos (GET /api/inicio, `avisos.listar`, com o recorte do perfil) e a divide pelo tempo. Issue #699: sairam
     as chaves dos cartoes antigos, que nenhuma tela lia (notas a enviar, certidoes, reajustes, recebido no ano, prazos,
-    espelhos)."""
+    espelhos). Issue #817: `ciclo_por_contratante` e `medido_12m`. 19/11/2026 (#805): a `matriz` foi para o Resumo das
+    medicoes, e o `medido` do alto perdeu `quantidade` e `ultimo_lancamento`, que nenhuma tela lia.
+    As medicoes do ciclo e as linhas do a receber sao lidas uma vez e servem ao total e a' abertura por contratante:
+    os dois saem da mesma lista."""
     hoje = hoje or tempo.hoje_local()
+    ms = _medicoes_do_ciclo(conn)
+    # sem o total liberado o a receber nao sai do servidor, nem aberto por contratante
+    a_receber = diretoria.a_receber_na_cota(conn) if diretoria._liberado(conn) else None
     resumo = avisos.resumo_mes(conn, hoje)
+    medido = _medido_das_competencias(conn, hoje)
     ultima = conn.execute("SELECT MAX(mp.data) FROM medicao_protocolos mp JOIN medicoes m ON m.id=mp.medicao_id "
                           "WHERE mp.etapa='nota' AND mp.desfeita_em IS NULL AND m.estado NOT IN ('cancelada','desistida')").fetchone()[0]
     return {
         "hoje": hoje.isoformat(),
         "protocoladas": {"obras_protocoladas": resumo["obras_protocoladas"], "obras_ativas": resumo["obras_ativas"],
                          "ultima": ultima[:10] if ultima else None},
-        "medido": _medido(conn, hoje),
-        "a_receber": _a_receber(conn, hoje),
-        "ciclo": _ciclo(conn, hoje),
+        "medido": _medido(medido, hoje),
+        "a_receber": _a_receber(conn, hoje, a_receber),
+        "ciclo": _ciclo(conn, hoje, ms),
+        "ciclo_por_contratante": _ciclo_por_contratante(ms, None if a_receber is None else _no_total_do_a_receber(a_receber)),
         "recebido_12m": _recebido_12m(conn, hoje),
+        "medido_12m": _medido_12m(medido, hoje),
         "previsao": _previsao(conn, hoje),
-        "matriz": _matriz(conn, hoje),
         "notas_mes": _notas_mes(conn, hoje),
     }

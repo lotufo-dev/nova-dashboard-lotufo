@@ -9,7 +9,13 @@ recebimento. Cada termo tem um significado só, usado na tela, nas issues, nos t
 
 **Órgão**:
 Quem contrata a obra, aprova a medição e paga.
-_Avoid_: cliente, contratante (salvo em relatório oficial que use a palavra)
+_Avoid_: cliente; contratante para um órgão só (ver Contratante; em relatório oficial que use a palavra, vale)
+
+**Contratante**:
+O órgão como as telas de leitura o agrupam: "SINFRA" reúne todas as superintendências; os outros órgãos são, cada
+um, um contratante. É o primeiro nível de Obras: cada contratante tem página própria, com as obras dele, e é dele o
+prazo de pagamento (`docs/adr/0007`).
+_Avoid_: órgão (é quem assina o contrato: "SINFRA - SUEF II"), cliente
 
 **Entidade**:
 Empresa ou consórcio que assina contrato ou emite nota: a construtora, um consórcio ou uma consorciada.
@@ -230,6 +236,11 @@ A SINFRA conta inteira, não cada superintendência.
 **Custo lançado no RM**:
 O custo que o RM registra para uma obra. Não é margem nem lucro.
 
+**Participação do contratante**:
+Quanto do medido do ano, na cota, é de um contratante, em percentual com uma casa. As participações de um ano somam
+100%. Aparece na aba Por contratante do Fechamento. Sem medido no ano, não há participação.
+_Avoid_: fatia, share, peso
+
 ### Tela
 
 **Aviso**:
@@ -273,9 +284,88 @@ _Avoid_: pílula, chip, badge
 **Contador**:
 A quantidade ao lado de um título. Com situação, leva o glifo dela.
 
+**Variação**:
+O quanto um valor subiu ou caiu contra uma referência escrita ao lado: o mês anterior, o mesmo mês do ano anterior
+ou a mesma altura do mês anterior. Até 2% para cima ou para baixo é estável.
+_Avoid_: diferença (é entre dois valores que deveriam ser iguais)
+
+**Mesma altura do mês anterior**:
+A referência da variação do protocolado e do recebido no Resumo das medições: o que as medições da competência
+anterior já tinham protocolado e já tinham recebido até o mesmo dia de hoje, um mês antes, pelas datas dos eventos.
+
+**Protocolado acumulado**:
+Tudo o que a competência já protocolou até um dia, tenha ou não sido recebido depois, pela data do primeiro protocolo
+da nota ou, sem ele, pela data do recebimento (o recebimento prova o protocolo até aquele dia). É o que a variação do
+protocolado compara no Resumo das medições, para o órgão que paga mais rápido não fazer o número cair, e vai escrito
+ao lado dela ("acumulado R$ …"). O valor da etapa Protocolado é outro: só o que está parado nela agora.
+
+**Diferença**:
+O quanto dois valores que deveriam ser iguais se afastam: o aprovado e o pedido. No mês, na obra e no ano é só o
+corte (o aprovado abaixo do pedido), em reais e em percentual do pedido; acima de 0,5% é crítica. Até R$ 0,05 por
+medição é arredondamento do órgão e conta como igual.
+_Avoid_: variação
+
+**Andamento**:
+A leitura do ritmo contra o necessário para o prazo: Adiantada (100% ou mais), Atenção (de 70% a 99%) ou Devagar
+(abaixo de 70%). A leitura é uma só, do servidor: a mesma na lista de Obras, na página do contratante e na página
+da obra. A obra com o prazo no fim, com prorrogação pedida ou sem medição fica fora da régua, e a tela escreve o
+motivo no lugar.
+_Avoid_: em andamento (é uma situação)
+
+**Prazo no fim**:
+A obra com até duas competências de prazo de execução pela frente, contadas a de hoje e a do fim. Fica fora da régua
+do andamento: o necessário por mês viraria o saldo inteiro em um ou dois meses. O pedido de prorrogação enviado e
+ainda sem resposta também tira a obra da régua, com qualquer prazo pela frente ("prorrogação pedida").
+Na obra sem aviso no farol, a Situação diz "Prazo no fim · execução até dd/mm" no lugar de "Em dia".
+_Avoid_: execução vencendo (é o aviso de prazo, a 60 e a 30 dias do fim)
+
+**Sem medição desde**:
+O mês da última medição de execução da obra que fechou as três últimas competências sem medir. Fica fora da régua do
+andamento. A obra que nunca mediu execução não leva a frase.
+_Avoid_: paralisada (é a obra com ordem de paralisação)
+
+**Fila de trabalho**:
+A entrada da tela Medições: as medições abertas da competência, agrupadas por com quem estão e, em cada grupo, da
+mais parada para a menos.
+_Avoid_: lista de pendências (pendência é outra coisa), em andamento como nome de tela
+
+**Com quem está**:
+Quem tem de agir na medição, pelo passo da vez: a Lotufo (planilha e carta, espelhos, envio da nota), o faturamento
+(emissão da nota) ou o órgão (análise e pagamento). Na MT-PAR, o passo do boletim fica com a Lotufo enquanto nada foi
+ao órgão.
+_Avoid_: responsável (é uma pessoa; aqui é a Lotufo, o faturamento ou o órgão)
+
+**Parada há**:
+Os dias úteis desde o evento que abriu o passo da vez da medição (o envio, o boletim, o espelho, a nota, o
+protocolo). Nunca conta da competência nem do lançamento. É a mesma leitura na fila de trabalho e no cartão de
+medição do Resumo das medições.
+
+**Parado (processo do SIGA)**:
+O processo que está há 10 dias úteis ou mais no mesmo setor do órgão e não andou hoje. É o que a faixa de números e
+o cabeçalho do painel da categoria contam na tela SIGA.
+_Avoid_: atrasado (é o monitor sem leitura), vencido (o processo não tem prazo)
+
+**Categoria a conferir**:
+Aviso na linha do processo do SIGA quando o nome mostrado indica outra categoria que a escolhida por quem cadastrou
+("Outros" com o complemento "Aditivo de prazo"). Nada muda sozinho: quem edita corrige no histórico do processo.
+
+**Barra de passos**:
+Os passos do fluxo da medição de uma obra, em ordem: os feitos, o da vez e os que faltam. Na página da medição é a
+faixa de abas; na fila de trabalho, a miniatura na linha, do tamanho do fluxo da obra.
+
 **Painel**:
 O bloco com moldura preta e sombra dura, com o título dentro. É peça de tela, não um tipo de tela.
 _Avoid_: cartão, card; painel como nome de tela (ver Tela de leitura)
+
+**Quadro por etapa**:
+A vista do Resumo das medições com uma coluna por etapa do ciclo e um cartão por medição na coluna da etapa em que
+ela está.
+_Avoid_: kanban; quadro do mês (é a matriz de obra por passo da tela Medições)
+
+**Cartão de medição**:
+A caixa de uma medição numa coluna do quadro por etapa: obra, contratante, medição, valor, parada há e, quando o
+aprovado difere do pedido, a diferença.
+_Avoid_: painel (o painel tem título e moldura grossa); cartão para outro bloco
 
 **Tela de leitura**:
 A tela de números que a diretoria abre para ler, sem operar: Início, Obras, página da obra, Fechamento e Resumo das
@@ -288,6 +378,28 @@ A linha preta acima de um título: a de grupo, grossa, e a de seção, fina.
 **Casca**:
 O que fica igual em toda tela: o menu lateral e o topo.
 _Avoid_: trilho, layout
+
+**Área**:
+O grupo de páginas do menu, com o nome escrito em cima delas: Painel, Medições, Obras, Financeiro, Prazos e avisos,
+Órgãos, Documentos e Sistema. A área não é página: o nome dela leva à primeira página que o perfil tem nela.
+_Avoid_: seção, módulo, grupo; área como nome de setor do órgão
+
+**Página (do menu)**:
+O item do menu, com endereço próprio: Início, Medições, Resumo das medições, Obras, Fechamento, Em aberto, Avisos,
+SIGA, Certidões, Regularidade mensal, Garantias, Âncoras DocuSign, Administração e Minha conta.
+_Avoid_: aba (a aba é uma vista dentro da página)
+
+**Caminho**:
+A linha no alto de toda página que diz onde se está, da área até o objeto, cada trecho um link: "Obras › SINFRA ›
+MT-388 › Medições › 15ª Medição". É uma peça só, na barra do topo.
+_Avoid_: trilha, migalhas, breadcrumb; caminho como o endereço da página (esse é o endereço, ou URL)
+
+**Trecho**:
+Cada nome do caminho. O trecho da página ou do objeto é o título da barra do topo; depois dele só vem a vista.
+
+**Vista**:
+O recorte de uma página que tem endereço próprio e se escolhe por aba: o Quadro do mês em Medições, Todas as obras
+em Obras, Prazos na página da obra. A vista padrão não entra no endereço nem no caminho.
 
 **Janela**:
 O painel que abre por cima da página para um formulário ou uma ação fora do fluxo dela.
@@ -305,3 +417,15 @@ O perfil de quem só lê.
 
 **Administrador**:
 O perfil que cuida de usuários, auditoria, pendências de cadastro e exceções registradas.
+
+**Em aberto**:
+O que foi cobrado e ainda não entrou, pela competência da medição e pelo valor bruto da nota: a nota protocolada não
+paga (a paga em parte, pelo que falta nos títulos), o repasse sem baixa e a medição protocolada sem nota ligada. É o
+número do Fechamento e o total da página Em aberto, que o mostra nota a nota. A nota sem medição ligada e a competência
+anterior a 2025 ficam à parte, fora do total (`docs/adr/0006`).
+_Avoid_: a receber para este número (é outra conta)
+
+**A receber (o número)**:
+O da Início e da lista de Obras: a medição que espera o pagamento, pelo valor dela na cota, e as cobranças do RM que
+nenhuma medição em aberto representa, pelo que falta nos títulos. A conta que o liga ao em aberto está no
+`docs/adr/0006`. Não é o total da página Em aberto, que soma o em aberto.

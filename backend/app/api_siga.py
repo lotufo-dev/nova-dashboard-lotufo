@@ -3,11 +3,12 @@
 Duas rotas de SERVICO, para o robo: `POST /api/siga/leituras` e `GET /api/siga/processos`. Nao usam sessao nem
 CSRF; exigem `Authorization: Bearer <token>`, com o token lido do arquivo apontado por `DASH_SIGA_TOKEN_ARQUIVO`
 (fora do repositorio; lido a cada pedido, entao trocar o token nao pede reinicio). Sem a variavel, 503.
-Uma rota para as telas: `GET /api/siga`, com sessao e `ver_paineis`. E uma de escrita, `POST /api/siga/processos-avulsos`
+Uma rota para as telas: `GET /api/siga`, com sessao e `ver_siga` (issue #829: a regra unica de quem le o SIGA, que
+inclui a diretoria, so' para ler). E uma de escrita, `POST /api/siga/processos-avulsos`
 (issue #339): link colado na tela SIGA, com sessao, CSRF e `editar_cadastros`. Issue #663: o formulario manda
 categoria, obra, medicao e complemento (sem nome), e `POST /api/siga/processos/{id}/classificacao` corrige os tres.
-Issue #342: `POST /api/siga/atualizar` (sessao, CSRF e `ver_paineis`) grava o pedido de leitura e manda o Windows
-iniciar o robo; o robo conversa pelas rotas de servico `POST /api/siga/rodadas` ("comecei"),
+Issue #342: `POST /api/siga/atualizar` (sessao, CSRF e, desde a #829, `editar_cadastros`: a diretoria le e nao pede
+leitura) grava o pedido de leitura e manda o Windows iniciar o robo; o robo conversa pelas rotas de servico `POST /api/siga/rodadas` ("comecei"),
 `POST /api/siga/rodadas/{id}/fim` ("terminei") e `POST /api/siga/rodadas/{id}/falha` ("cai"), com o mesmo token.
 """
 import hmac
@@ -22,10 +23,13 @@ from pydantic import AwareDatetime, BaseModel, Field
 from app import siga
 from app.api_auth import conexao
 from app.api_medicoes import ID
-from app.permissoes import exigir
+from app.permissoes import VER_SIGA, exigir, tem
 
 router = APIRouter()
 log = logging.getLogger("app.siga")
+
+# quem escreve no SIGA pela tela: colar link, corrigir a categoria e pedir leitura ao robo (issue #829)
+ESCREVER_SIGA = "editar_cadastros"
 
 MAX_INT64 = 9223372036854775807
 NAO_CONFIGURADO = "Monitor do SIGA não configurado"
@@ -94,9 +98,10 @@ def processos_do_robo(conn: sqlite3.Connection = Depends(conexao)):
 
 
 @router.get("/api/siga")
-def painel(conn: sqlite3.Connection = Depends(conexao), _usuario: dict = Depends(exigir("ver_paineis",
-                                                                                         com_csrf=False))):
-    return siga.painel(conn)
+def painel(conn: sqlite3.Connection = Depends(conexao), usuario: dict = Depends(exigir(VER_SIGA, com_csrf=False))):
+    dados = siga.painel(conn)
+    # `pode_atualizar` diz se a tela mostra "Pedir leitura": o robo configurado E quem pode pedir (a diretoria nao)
+    return {**dados, "pode_atualizar": dados["pode_atualizar"] and tem(usuario["perfil"], ESCREVER_SIGA)}
 
 
 class AvulsoIn(BaseModel):
@@ -109,7 +114,7 @@ class AvulsoIn(BaseModel):
 
 
 @router.post("/api/siga/processos-avulsos")
-def acompanhar_avulso(dados: AvulsoIn, usuario: dict = Depends(exigir("editar_cadastros")),
+def acompanhar_avulso(dados: AvulsoIn, usuario: dict = Depends(exigir(ESCREVER_SIGA)),
                       conn: sqlite3.Connection = Depends(conexao)):
     try:
         pid = siga.acompanhar_avulso(conn, usuario["id"], dados.link, dados.numero, dados.categoria,
@@ -129,7 +134,7 @@ class ClassificacaoIn(BaseModel):
 
 
 @router.post("/api/siga/processos/{processo_id}/classificacao")
-def classificar(processo_id: ID, dados: ClassificacaoIn, usuario: dict = Depends(exigir("editar_cadastros")),
+def classificar(processo_id: ID, dados: ClassificacaoIn, usuario: dict = Depends(exigir(ESCREVER_SIGA)),
                 conn: sqlite3.Connection = Depends(conexao)):
     """Corrigir categoria, obra e complemento na pagina do historico (issue #663)."""
     try:
@@ -148,7 +153,7 @@ class LinkDaMedicaoIn(BaseModel):
 
 @router.post("/api/siga/medicoes/{medicao_id}/link")
 def acompanhar_link_da_medicao(medicao_id: ID, dados: LinkDaMedicaoIn,
-                               usuario: dict = Depends(exigir("editar_cadastros")),
+                               usuario: dict = Depends(exigir(ESCREVER_SIGA)),
                                conn: sqlite3.Connection = Depends(conexao)):
     """Link de acompanhamento colado no passo de analise da medicao (issue #668)."""
     try:
@@ -167,9 +172,10 @@ class AtualizarIn(BaseModel):
 
 
 @router.post("/api/siga/atualizar")
-def atualizar(dados: AtualizarIn, usuario: dict = Depends(exigir("ver_paineis")),
+def atualizar(dados: AtualizarIn, usuario: dict = Depends(exigir(ESCREVER_SIGA)),
               conn: sqlite3.Connection = Depends(conexao)):
-    """"Atualizar processo" e "Atualizar todos": pedir uma leitura nao muda dado nenhum, entao basta ver a tela."""
+    """"Pedir leitura": grava o pedido e dispara o robo, entao e' de quem escreve no SIGA. Ate' a #829 bastava ver a
+    tela; com a diretoria lendo o SIGA so' para ler (decisao do dono de 19/11/2026), o servidor nega a ela (403)."""
     tarefa = siga.tarefa_do_robo()
     if not tarefa:
         raise HTTPException(503, TAREFA_NAO_CONFIGURADA)

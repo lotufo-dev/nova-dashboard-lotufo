@@ -1,0 +1,61 @@
+/* ================================================================ MEDICOES POR OBRA E COMPETENCIA (#659)
+   Ate' 19/11/2026 na Inicio (inicio.css, .ini-matriz); desde a decisao do dono de 19/11/2026 (#805), na aba "Últimos
+   12 meses" do Resumo das medicoes, com a mesma forma. Uma linha por obra, agrupada por contratante, e uma celula por
+   competencia na cor da etapa; a celula atrasada leva tambem a marca "!". Cada linha e' uma grade com as mesmas
+   colunas, que encolhem: nenhuma largura fixa empurra a pagina. O painel e' o container: em painel estreito (celular) o
+   nome da obra sobe para uma linha propria e as 12 celulas ocupam a largura. Cor e letra so' por variavel de tokens.css. */
+.rdm .rdm-matriz { min-width: 0; container-type: inline-size; padding: var(--espaco-g); }
+.rdm-matriz__cab {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-pp) var(--espaco-p); margin-bottom: var(--titulo-margem-base);
+}
+.rdm-matriz__cab h3 { margin: 0; font-size: var(--texto-titulo-sub); }
+.rdm-matriz__legenda {
+  display: flex; flex-wrap: wrap; gap: var(--espaco-mini) var(--espaco-m); margin: 0 0 0 auto; padding: 0; list-style: none;
+  font-size: var(--texto-meta); color: var(--cor-texto-secundario);
+}
+/* a chave de cor de cada item e' a peca MarcaEtapa (tokens.css) */
+.rdm-matriz__legenda li { white-space: nowrap; }
+.rdm-matriz__grade { min-width: 0; }
+.rdm-matriz__linha {
+  display: grid; grid-template-columns: minmax(0, var(--largura-nome-obra)) repeat(12, minmax(0, 1fr)); column-gap: var(--espaco-grade);
+  align-items: center; min-width: 0;
+}
+.rdm-matriz__linha--meses { padding-bottom: var(--espaco-mini); }
+.rdm-matriz__linha--meses > :first-child { grid-column-start: 2; }
+.rdm-matriz__linha--obra { padding: var(--espaco-grade) 0; }
+.rdm-matriz__mes {
+  min-width: 0; display: flex; flex-direction: column; align-items: center;
+  font-size: var(--texto-mini); line-height: var(--entrelinha-titulo); color: var(--cor-texto-secundario);
+}
+.rdm-matriz__ano { color: var(--cor-texto-terciario); }
+.rdm-matriz__grupo {
+  margin: var(--espaco-p) 0 0; border-top: var(--regua-secao); padding: var(--espaco-mini) 0;
+  font-size: var(--texto-mini); overflow-wrap: anywhere;
+}
+.rdm-matriz__obra { min-width: 0; padding-right: var(--espaco-p); overflow-wrap: anywhere; }
+.rdm-matriz__celula {
+  display: grid; place-items: center; min-width: 0; height: var(--altura-celula); border-radius: var(--raio-canto);
+  background: var(--etapa-vazia); text-decoration: none;
+}
+a.rdm-matriz__celula:hover { outline: var(--borda-grossa) solid var(--cor-tinta); outline-offset: var(--espaco-fio); }
+.rdm-matriz__celula--atrasado::after {
+  content: var(--etapa-atrasado-marca); font-size: var(--texto-meta); font-weight: var(--peso-sinal);
+  line-height: var(--entrelinha-justa); color: var(--cor-sobre-ponto);
+}
+.rdm-matriz__celula--em_analise { background: var(--etapa-analise); box-shadow: inset 0 0 0 var(--etapa-borda-largura) var(--etapa-analise-borda); }
+.rdm-matriz__celula--boletim { background: var(--etapa-boletim); }
+.rdm-matriz__celula--nota { background: var(--etapa-nota); }
+.rdm-matriz__celula--protocolado { background: var(--etapa-protocolado); }
+.rdm-matriz__celula--recebida { background: var(--etapa-recebido); }
+.rdm-matriz__celula--atrasado { background: var(--etapa-atrasado); }
+@container (max-width: 520px) {
+  .rdm-matriz__linha { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+  .rdm-matriz__linha--meses > :first-child { grid-column-start: 1; }
+  .rdm-matriz__linha--obra { padding: 0 0 var(--espaco-mini); }
+  .rdm-matriz__obra { grid-column: 1 / -1; padding: var(--espaco-pp) 0 var(--espaco-mini); }
+  .rdm-matriz__legenda { margin-left: 0; flex-basis: 100%; }
+}
+/* em tela estreita o painel perde a sombra e aperta o respiro, como na Inicio */
+@media (max-width: 640px) {
+  .rdm .rdm-matriz { padding: var(--espaco-m); box-shadow: none; }
+}

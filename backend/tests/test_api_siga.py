@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app import auth, db, siga, tempo
+from app import auth, db, permissoes, siga, tempo
 from tests.test_api_protocolos import LINK_SIGA, _enviado, api  # noqa: F401  (a fixture `api` vem de la')
 
 # Gera PDF (a carta, por protocolo.criar) com a fonte da producao (Arial no Windows): a CI roda este modulo nos dois
@@ -667,17 +667,54 @@ def test_rotas_do_robo_recusam_sem_token(client_admin, com_token, schtasks):
     assert _conta_rodadas() == 0
 
 
-def test_atualizar_recusa_sem_login_e_aceita_a_diretoria(api, com_token, schtasks):
+def test_atualizar_recusa_sem_login_e_nega_a_diretoria(api, com_token, schtasks):
+    """Issue #829 (decisao do dono de 19/11/2026): a diretoria le o SIGA e nao pede leitura ao robo. Ate' ali o pedido
+    bastava ver a tela (#342); agora e' de quem escreve no SIGA, e a tela dela nao mostra o botao."""
     cl, _cid, _mid = api
     alfa, _beta = _com_processos(cl)
+    assert cl.get("/api/siga").json()["pode_atualizar"] is True          # o admin, com o robo configurado
     cl.cookies.clear()
     assert cl.post("/api/siga/atualizar", json={"processo_id": alfa}).status_code == 401
     _diretoria(cl)
-    r = cl.post("/api/siga/atualizar", json={"processo_id": alfa})
-    assert r.status_code == 200, r.text
-    assert _robo_painel(cl)["pedidos"][0]["usuario"] == "Diretoria"
+    for corpo in ({"processo_id": alfa}, {}):
+        r = cl.post("/api/siga/atualizar", json=corpo)
+        assert r.status_code == 403 and "editar_cadastros" in r.json()["detail"], r.text
+    painel = cl.get("/api/siga").json()
+    assert painel["pode_atualizar"] is False
+    assert painel["robo"]["pedidos"] == [] and schtasks.chamadas == []        # nada gravado, robo nao disparado
     del cl.headers["X-CSRF-Token"]
     assert cl.post("/api/siga/atualizar", json={}).status_code == 403
+
+
+def test_perfil_sem_ver_siga_nao_le_o_siga(api, com_token, monkeypatch):
+    """Issue #829: a leitura do SIGA e' de quem tem `ver_siga`. Nenhum perfil fica sem ela hoje; o perfil sem a
+    permissao e' simulado tirando-a da diretoria: 403, sem processo no corpo."""
+    cl, _cid, _mid = api
+    _com_processos(cl)
+    _diretoria(cl)
+    monkeypatch.setitem(permissoes.PERFIS, "diretoria", permissoes.PERFIS["diretoria"] - {permissoes.VER_SIGA})
+    r = cl.get("/api/siga")
+    assert r.status_code == 403 and "ver_siga" in r.json()["detail"] and "processos" not in r.json()
+
+
+def test_diretoria_le_o_siga_e_toda_rota_que_grava_nega_ela(api, com_token, schtasks):
+    """Issue #829: a diretoria abre a tela (200, com os processos) e cada rota de escrita do SIGA pela tela responde 403,
+    sem gravar nada: colar link, corrigir a categoria, ligar o link a' medicao e pedir leitura."""
+    cl, _cid, mid = api
+    alfa, _beta = _com_processos(cl)
+    antes = cl.get("/api/siga").json()["processos"]
+    _diretoria(cl)
+    r = cl.get("/api/siga")
+    assert r.status_code == 200 and r.json()["processos"] == antes
+    escritas = (("/api/siga/processos-avulsos", {"link": "XyZ98765", "categoria": "outros"}),
+                (f"/api/siga/processos/{alfa}/classificacao", {"categoria": "outros", "complemento": "X"}),
+                (f"/api/siga/medicoes/{mid}/link", {"link": "XyZ98765"}),
+                ("/api/siga/atualizar", {"processo_id": alfa}))
+    for caminho, corpo in escritas:
+        r = cl.post(caminho, json=corpo)
+        assert r.status_code == 403, (caminho, r.text)
+    depois = cl.get("/api/siga").json()
+    assert depois["processos"] == antes and depois["robo"]["pedidos"] == []
 
 
 # --- processo encerrado (issue #657) ----------------------------------------------------------------------

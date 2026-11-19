@@ -1,0 +1,26 @@
+/* A pagina do contratante (#805, #818): a faixa de abas e o invólucro das abas Medicoes, A receber e Processos no
+   SIGA (ContratanteAbas.tsx). A aba, o contador e as pecas de cada aba sao de tokens.css, medicoes.css, aReceber.css e
+   siga.css; aqui so' a disposicao. Cor, letra, espaco e borda so' por variavel. */
+
+/* a faixa: as abas (o nome e a quantidade de linhas ao lado) e, a' direita, o link para os Avisos do contratante. O
+   fio de baixo e' o da faixa inteira, nao so' o das abas */
+.ct-faixa {
+  display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 0 var(--espaco-g);
+  border-bottom: var(--borda-linha);
+}
+.ct-abas { flex-wrap: wrap; border-bottom: 0; }
+.ct-abas .aba { flex: none; gap: var(--espaco-pp); margin-bottom: -1px; white-space: nowrap; }
+.ct-atalhos { padding: var(--espaco-pp) 0; }
+/* no celular as abas ficam juntas, sem o respiro lateral, como as do Fechamento: as tres da diretoria numa linha */
+@container obras-pagina (max-width: 620px) {
+  .ct-abas { column-gap: var(--espaco-p); }
+  .ct-abas .aba { gap: var(--espaco-mini); padding: 0; }
+}
+
+/* a aba: os blocos um embaixo do outro, com o respiro da pagina. O invólucro leva tambem a classe da pagina de onde as
+   pecas vem, que e' o container pelo qual elas mudam de forma */
+.ct-aba { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: var(--espaco-entre-blocos); min-width: 0; }
+.ct-aba > * { min-width: 0; }
+/* Medicoes: a competencia e a base dos valores numa linha so' */
+.ct-aba__cab { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-mini) var(--espaco-p); }
+.ct-aba__cab .medicoes__cab-rotulo, .ct-aba__cab .medicoes__mes { margin: 0; }

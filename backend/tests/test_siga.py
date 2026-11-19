@@ -45,7 +45,42 @@ def test_derivacoes_do_processo_com_recebimento_no_setor():
     assert d["dias_uteis"] == 17                 # 02/10 a 27/10, sem o feriado de 12/10
     assert d["hoje"] == 1                        # o cancelado de hoje tambem nao conta
     assert d["ultima"]["evento"] == "Despacho"
+    assert d["dias_sem_movimentacao"] == 0       # o despacho e' de hoje
     assert d["protocolado_em"] == "2026-10-01 08:10:00"
+
+
+def test_dias_sem_movimentacao_contam_da_ultima_movimentacao_fora_marcacao_e_anotacao():
+    """#840: no setor ha' 17 dias uteis, mas a ultima movimentacao (o Despacho de 28/10) e' a mesma da coluna "Ultima
+    movimentacao"; Marcacao e Anotacao depois dela nao contam, nem como "andou hoje"."""
+    movs = [*MOVS, _mov("2026-11-05 15:00:00", "Marcação", at_lotacao="COFIN/ORGAO"),
+            _mov("2026-11-12 08:00:00", "Anotação", at_lotacao="COFIN/ORGAO")]
+    d = siga.derivar(SITUACAO_COFIN, movs, datetime.date(2026, 11, 12))
+    assert d["ultima"]["evento"] == "Despacho" and d["hoje"] == 0
+    assert d["dias_uteis"] == 27                 # no setor desde 02/10: so' informacao
+    assert d["dias_sem_movimentacao"] == 10      # 28, 29, 30/10, 3 a 6/11, 9, 10 e 11/11 (02/11 e' feriado)
+    assert siga.parado(d) == "critico"
+    assert siga.parado(siga.derivar(SITUACAO_COFIN, movs, datetime.date(2026, 11, 11))) == "breve"
+
+
+def test_mais_parado_e_o_de_mais_dias_sem_movimentacao_nao_o_de_mais_tempo_no_setor():
+    """#840: a ordem da tela, da aba do contratante e a posicao na medicao seguem os dias sem movimentacao; empate,
+    a ultima movimentacao mais antiga; sem movimentacao nenhuma, no fim."""
+    antigo_no_setor = {"processo_id": 1, "dias_uteis": 30, "dias_sem_movimentacao": 1, "ultima_em": "2026-10-27"}
+    parado = {"processo_id": 2, "dias_uteis": 6, "dias_sem_movimentacao": 6, "ultima_em": "2026-10-20"}
+    empate = {"processo_id": 3, "dias_uteis": 6, "dias_sem_movimentacao": 6, "ultima_em": "2026-10-19"}
+    sem = {"processo_id": 4, "dias_uteis": None, "dias_sem_movimentacao": None, "ultima_em": None}
+    ordem = sorted([sem, antigo_no_setor, parado, empate], key=siga._mais_parado)
+    assert [p["processo_id"] for p in ordem] == [3, 2, 1, 4]
+    assert siga.mais_parado([antigo_no_setor, parado]) is parado
+
+
+def test_processo_que_entrou_no_setor_ha_5_dias_e_andou_ontem_nao_esta_parado():
+    """#840, primeiro criterio: entrou no setor ha' 5 dias uteis, recebimento ontem: 1 dia util sem movimentacao, em
+    andamento, sem aviso de atencao."""
+    movs = [_mov("2026-10-20 09:00:00", "Transferência", at_lotacao="COFIN/ORGAO"),
+            _mov("2026-10-26 14:00:00", "Recebimento", at_lotacao="COFIN/ORGAO", at_pessoa="Fulano")]
+    d = siga.derivar(SITUACAO_COFIN, movs, datetime.date(2026, 10, 27))
+    assert (d["dias_uteis"], d["dias_sem_movimentacao"], siga.parado(d)) == (5, 1, "andamento")
 
 
 def test_dias_uteis_descontam_o_feriado_nacional():
@@ -178,7 +213,8 @@ def test_ultima_movimentacao_nao_e_marcacao_nem_anotacao():
 def test_processo_sem_movimentacao_nao_quebra():
     d = siga.derivar(None, [], datetime.date(2026, 10, 2))
     assert d == {"setor": "", "caixa_entrada": False, "com_quem": "", "desde": None, "dias_uteis": None,
-                 "hoje": 0, "ultima": None, "protocolado_em": None}
+                 "dias_sem_movimentacao": None, "hoje": 0, "ultima": None, "protocolado_em": None}
+    assert siga.parado(d) is None
 
 
 # --- atraso -----------------------------------------------------------------------------------------------
@@ -471,19 +507,31 @@ def test_link_colado_na_medicao_nao_cede_ao_processo_da_nota(conn):
     assert _ligados(conn) == [("SINFRA-PRO-2026/00111", 7, 31), ("SINFRA-PRO-2026/00222", None, None)]
 
 
-def test_aviso_de_processo_parado_usa_a_data_de_entrada_no_setor(conn):
-    # issue #650: o aviso conta os mesmos dias da tela; recebimento ou despacho seguinte no setor nao recomeca
-    _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+def test_aviso_de_processo_parado_conta_os_dias_sem_movimentacao_da_tela(conn):
+    # #840: o aviso conta os mesmos dias da coluna "Dias sem movimentação" (nao o tempo no setor, #650); Marcacao e
+    # Anotacao depois da ultima movimentacao nao recomecam a conta
+    protocolo_id = _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
     proc = _leitura(numero="SINFRA-PRO-2026/00001")[:1]
     proc[0]["movimentacoes"] += [
-        {**_mov("", "Recebimento", at_lotacao="COFIN/ORGAO", at_pessoa="Sicrana"), "data": "26/10/2026 09:00:00"}]
+        {**_mov("", "Marcação", at_lotacao="COFIN/ORGAO"), "data": "05/11/2026 15:00:00"},
+        {**_mov("", "Anotação", at_lotacao="COFIN/ORGAO"), "data": "11/11/2026 09:00:00"}]
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), proc)
-    hoje = datetime.date(2026, 10, 28)
-    p = next(x for x in siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"] if x["codigo"] == "ABC123")
+    hoje = datetime.date(2026, 11, 12)
+    p = next(x for x in siga.painel(conn, _cuiaba(2026, 11, 12, 11))["processos"] if x["codigo"] == "ABC123")
     [a] = [x for x in siga.avisos(conn, hoje) if x["tipo"] == "siga_parado"]
-    assert p["desde"] == "2026-10-02T09:00:00-04:00" and p["dias_uteis"] == 17
-    assert (a["dias"], a["data"], a["nivel"]) == (17, "2026-10-02", "acao")
-    assert a["mensagem"] == "processo SINFRA-PRO-2026/00001 parado em COFIN há 17 dias úteis"
+    assert p["desde"] == "2026-10-02T09:00:00-04:00" and p["dias_uteis"] == 27
+    assert p["ultima"]["data"] == "2026-10-28T09:30:00-04:00" and p["dias_sem_movimentacao"] == 10
+    assert p["situacao_tempo"] == "critico"
+    assert (a["dias"], a["data"], a["nivel"]) == (10, "2026-10-28", "acao")
+    assert a["mensagem"] == "processo SINFRA-PRO-2026/00001 em COFIN sem movimentação há 10 dias úteis"
+    # o passo do protocolo (etapa 4) recebe a mesma leitura
+    no_protocolo = siga.do_protocolo(conn, protocolo_id, hoje)
+    assert (no_protocolo["dias_uteis"], no_protocolo["dias_sem_movimentacao"], no_protocolo["situacao_tempo"]) == (
+        27, 10, "critico")
+    # um dia antes, 9 dias uteis: atencao; com o despacho de hoje (28/10), nenhum aviso, embora no setor ha' 17
+    assert [x["nivel"] for x in siga.avisos(conn, datetime.date(2026, 11, 11)) if x["tipo"] == "siga_parado"] == [
+        "atencao"]
+    assert [x for x in siga.avisos(conn, datetime.date(2026, 10, 28)) if x["tipo"] == "siga_parado"] == []
 
 
 def test_vinculo_chega_na_rodada_seguinte_ao_numero_registrado(conn):
@@ -665,6 +713,122 @@ def test_classificar_troca_categoria_obra_e_complemento_sem_tocar_no_nome_do_rob
         siga.classificar(conn, None, pid, "medicoes", 7, 999, None)
     with pytest.raises(LookupError, match="Processo do SIGA não encontrado"):
         siga.classificar(conn, None, 999, "outros", None, None, None)
+
+
+# --- a tela com um painel por categoria (issue #805) --------------------------------------------------------
+
+def test_situacao_do_tempo_segue_a_regua_do_tempo_parado():
+    """Uma regua so': andou hoje e' feito; critico a partir de 10 dias uteis no setor, vence em breve a partir de 5,
+    em andamento antes disso; sem a data de entrada no setor, nenhuma."""
+    assert siga.situacao_do_tempo(12, 1) == "feito"                      # andou hoje vale mais que os dias
+    assert [siga.situacao_do_tempo(d, 0) for d in (0, 4, 5, 9, 10, 40)] == [
+        "andamento", "andamento", "breve", "breve", "critico", "critico"]
+    assert siga.situacao_do_tempo(None, 0) is None
+    assert (siga.DIAS_ATENCAO, siga.DIAS_ACAO) == (5, 10)
+
+
+def test_painel_traz_os_numeros_da_faixa_os_limites_e_a_leitura_do_tempo_de_cada_processo(conn, robo):
+    """A faixa de numeros nasce no servidor, pela mesma leitura que pinta a linha: so' os vivos; parado e' o critico;
+    nao lido e' o processo vivo que leva o aviso na linha."""
+    agora = _cuiaba(2026, 10, 28, 11)
+    alfa, beta, gama = robo.ids
+    with db.mutacao(conn):
+        # Alfa andou hoje; Beta entrou no setor em 05/10 (16 dias uteis); Gama foi arquivado (encerrado)
+        conn.execute("INSERT INTO siga_leituras (processo_id, lido_em, situacao) VALUES (?, '2026-10-28 14:55:00', ?)",
+                     (alfa, "1º Volume - Aguardando Andamento [COFIN, [X]]"))
+        conn.execute("INSERT INTO siga_movimentacoes (processo_id, data, evento, at_lotacao, at_pessoa) "
+                     "VALUES (?, '2026-10-28 09:00:00', 'Recebimento', 'COFIN/ORGAO', 'Fulano')", (alfa,))
+        conn.execute("INSERT INTO siga_movimentacoes (processo_id, data, evento, at_lotacao, at_pessoa) "
+                     "VALUES (?, '2026-10-05 09:00:00', 'Recebimento', 'GABIN/ORGAO', 'Sicrana')", (beta,))
+    _ler(conn, beta, _cuiaba(2026, 10, 28, 8, 30))
+    conn.execute("UPDATE siga_leituras SET situacao='1º Volume - Aguardando Andamento [GABIN, [X]]' WHERE processo_id=?",
+                 (beta,))
+    conn.commit()
+    _arquivar(conn, gama, _cuiaba(2026, 10, 27, 9))
+    r = siga.iniciar_rodada(conn, agora)
+    siga.terminar_rodada(conn, r["rodada_id"], [{"codigo": "DEF456", "numero": None, "motivo": "Não abriu"}],
+                         agora + _min(1))
+    d = siga.painel(conn, agora + _min(1))
+    por_id = {p["id"]: p for p in d["processos"]}
+    assert (por_id[alfa]["situacao_tempo"], por_id[beta]["situacao_tempo"], por_id[gama]["situacao_tempo"]) == (
+        "feito", "critico", None)
+    assert por_id[beta]["dias_uteis"] == 16 and por_id[gama]["encerrado"] == "arquivado"
+    assert d["numeros"] == {"acompanhados": 2, "parados": 1, "andaram_hoje": 1, "nao_lidos": 1}
+    assert d["limites"] == {"dias_atencao": 5, "dias_critico": 10}
+    # o mesmo processo que a faixa conta leva o aviso na linha
+    assert [a["processo_id"] for a in d["robo"]["avisos"] if a["tipo"] == "nao_lido"] == [beta]
+
+
+def test_painel_sem_processo_tem_a_faixa_zerada(conn):
+    d = siga.painel(conn, _cuiaba(2026, 10, 28, 11))
+    assert d["numeros"] == {"acompanhados": 0, "parados": 0, "andaram_hoje": 0, "nao_lidos": 0}
+
+
+def test_painel_diz_o_contratante_da_obra_do_processo(conn):
+    _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+    conn.execute("INSERT INTO orgaos (chave, nome, familia, regras) VALUES ('sinfra-suef2', 'SINFRA - SUEF II', 'sinfra', '{}')")
+    conn.execute("UPDATE contratos SET orgao_id=(SELECT id FROM orgaos WHERE chave='sinfra-suef2') WHERE id=7")
+    conn.commit()
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura(numero="SINFRA-PRO-2026/00001"))
+    alfa, beta = siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"]
+    assert (alfa["obra"], alfa["contratante"], alfa["orgao_sub"]) == ("Obra Alfa", "SINFRA", "SUEF II")
+    assert (beta["obra"], beta["contratante"], beta["orgao_sub"]) == (None, None, None)   # sem obra, sem contratante
+
+
+def test_categoria_a_conferir_quando_o_nome_mostrado_indica_outra_que_a_escolhida():
+    # a pessoa escolheu Outros e escreveu o que e' outra categoria
+    assert siga.categoria_a_conferir("outros", True, False, "Aditivo de prazo") == "aditivos"
+    assert siga.categoria_a_conferir("outros", True, False, "7ª Medição - Obra Alfa") == "medicoes"
+    assert siga.categoria_a_conferir("aditivos", True, False, "Indenizatório 2025") == "indenizatorios"
+    # o nome nao indica outra: nada a conferir
+    assert siga.categoria_a_conferir("aditivos", True, False, "Aditivo de prazo") is None
+    assert siga.categoria_a_conferir("aditivos", True, False, "Aditivo da 7ª medição") is None
+    assert siga.categoria_a_conferir("outros", True, False, "Pedido de paralisação") is None
+    assert siga.categoria_a_conferir("outros", True, False, None) is None
+    # ligado a medicao (a categoria vem do vinculo) e ainda sem escolha de ninguem (vale a sugestao): nunca avisa
+    assert siga.categoria_a_conferir("medicoes", True, True, "Aditivo de prazo") is None
+    assert siga.categoria_a_conferir("aditivos", False, False, "Indenizatório") is None
+
+
+def test_painel_avisa_a_categoria_a_conferir_sem_gravar_nem_trocar_de_secao(conn):
+    """Outros so' com o que nao e' de nenhuma categoria (#805): a categoria que alguem escolheu nao muda sozinha; quando
+    o nome mostrado diz outra, a linha leva o aviso e a correcao e' de quem edita, no historico."""
+    _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+    outro = siga.acompanhar_avulso(conn, None, "AbCdEf1234", None, "outros", None, complemento="Aditivo de prazo")
+    com_obra = siga.acompanhar_avulso(conn, None, "XyZ9876543", None, "outros", 7, complemento="Reajuste de preços")
+    certo = siga.acompanhar_avulso(conn, None, "QwErTy4567", None, "outros", None, complemento="Pedido de paralisação")
+    antes = _categorias(conn)
+
+    def lidos():
+        por_id = {p["id"]: p for p in siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"]}
+        return [(por_id[i]["categoria"], por_id[i]["categoria_sugerida"], por_id[i]["categoria_a_conferir"])
+                for i in (outro, com_obra, certo)]
+    assert lidos() == [("outros", False, "aditivos"), ("outros", False, "medicoes"), ("outros", False, None)]
+    assert _categorias(conn) == antes                                   # a leitura nao grava
+    # quem edita corrige um a um: a categoria certa (ou o complemento) tira o aviso
+    siga.classificar(conn, None, outro, "aditivos", 7, None, "de prazo")
+    siga.classificar(conn, None, com_obra, "outros", 7, None, "Pedido de reequilíbrio")
+    assert lidos() == [("aditivos", False, None), ("outros", False, None), ("outros", False, None)]
+
+
+def test_link_colado_antes_das_categorias_nao_conta_como_categoria_escolhida(conn):
+    """O "Acompanhar processo" de antes da #663 gravava o registro `protocolo.siga` so' com o nome digitado. A migracao
+    pos esses processos em Outros sem ninguem escolher: eles seguem o nome, como o que o robo manda, ate' alguem
+    confirmar. O registro que traz a categoria (o formulario de hoje) continua valendo, mesmo sendo Outros."""
+    from app import auditoria
+    with db.mutacao(conn):
+        antigo = conn.execute("INSERT INTO siga_processos (codigo, nome) VALUES ('ANTIGO1234', 'Aditivo de prazo - Obra Alfa')"
+                              ).lastrowid
+        auditoria.registrar(conn, None, "protocolo.siga", "siga_processo", antigo, None,
+                            {"codigo": "ANTIGO1234", "numero": None, "nome": "Aditivo de prazo - Obra Alfa",
+                             "contrato_id": None})
+    novo = siga.acompanhar_avulso(conn, None, "NOVO123456", None, "outros", None, complemento="Aditivo de valor")
+    por_id = {p["id"]: p for p in siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"]}
+    assert (por_id[antigo]["categoria"], por_id[antigo]["categoria_sugerida"], por_id[antigo]["categoria_a_conferir"]) == (
+        "aditivos", True, None)
+    assert (por_id[novo]["categoria"], por_id[novo]["categoria_sugerida"], por_id[novo]["categoria_a_conferir"]) == (
+        "outros", False, "aditivos")
+    assert {c for _, c in _categorias(conn)} == {"outros"}              # nada gravado pela leitura
 
 
 # --- pedidos de leitura e rodadas do robo (issue #342) -------------------------------------------------------
@@ -1179,7 +1343,7 @@ def test_processo_arquivado_nao_avisa_parado(conn):
     _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
     proc = _leitura(numero="SINFRA-PRO-2026/00001")[:1]
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), proc)
-    hoje = datetime.date(2026, 10, 28)
+    hoje = datetime.date(2026, 11, 12)                                  # 10 dias uteis sem movimentacao
 
     def parados():
         return [a["tipo"] for a in siga.avisos(conn, hoje) if a["tipo"] == "siga_parado"]

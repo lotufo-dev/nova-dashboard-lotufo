@@ -1,17 +1,42 @@
-/* Tela SIGA (#329, #512; fundacao do redesenho na #767): a tabela dos processos e a pagina do historico de um
-   processo. A moldura do painel (.cartao), o botao (.btn), o selo, o glifo, o contador, a legenda e a caixa de aviso
-   sao pecas de base de tokens.css. Cor, familia, tamanho, espaco e borda so' por variavel; tudo debaixo de `.sg__*`. */
+/* Tela SIGA (#329, #512; fundacao do redesenho na #767; um painel por categoria na #805): a faixa de numeros, as
+   categorias, o painel de cada uma e a pagina do historico de um processo. A moldura do painel (.cartao), o botao
+   (.btn), a escolha (.escolha), o selo, o glifo, o contador, a legenda e a caixa de aviso sao pecas de base de
+   tokens.css. Cor, familia, tamanho, espaco e borda so' por variavel; tudo debaixo de `.sg__*` e `.sg-*`. */
+
+/* a pagina mede a propria largura (o menu aberto ou recolhido muda o que sobra): a linha vira bloco pela pagina */
+.siga { container: sg-pagina / inline-size; }
 
 /* ---------------------------------------------------------------- alto da pagina */
+/* a faixa de numeros (#805): rotulo e numero sob a regua de grupo, sem moldura (como os dos Avisos e de Obras). A
+   situacao vai no simbolo ao lado do rotulo; o numero fica em tinta. */
+.sg-numeros {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--espaco-m) var(--espaco-g);
+  margin: 0; border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro);
+}
+/* rotulo, numero e apoio em tres linhas divididas pelos quatro: o rotulo que quebra nao tira o numero do alinhamento */
+.sg-numero { display: grid; grid-row: span 3; grid-template-rows: subgrid; gap: 0; min-width: 0; }
+.sg-numero dt { display: flex; align-items: center; align-self: end; gap: var(--espaco-mini); color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.sg-numero dt .glifo { flex: none; }
+.sg-numero dd { margin: 0; }
+.sg-numero__valor {
+  font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
+  font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-valor); line-height: var(--entrelinha-numero);
+}
+.sg-numero__apoio { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+/* as categorias, com a quantidade, e a legenda do tempo parado */
+.sg__barra { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--espaco-p) var(--espaco-g); }
+.sg__categorias .escolha { white-space: nowrap; }
+
 .sg__cabeca { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-mini) var(--espaco-g); }
 .sg__cabeca--regua { border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro); }
-.sg__cabeca--principal { justify-content: space-between; align-items: center; }
+/* #840: o "‹ SIGA" do historico, com contorno, como o voltar da barra do topo */
+.sg__voltar { flex: none; border: var(--borda-campo); background: var(--cor-superficie); }
+.sg__voltar:hover:not(:disabled) { border-color: var(--cor-texto-secundario); }
 .sg__cabeca h1 { flex-basis: 100%; margin: 0; font-size: var(--texto-numero); line-height: var(--entrelinha-titulo); overflow-wrap: anywhere; }
 .sg__sub { margin: 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .sg__cabeca > .sg__sub { flex-basis: 100%; }
-.sg__cabeca--principal > .sg__sub { flex-basis: auto; color: var(--cor-tinta); font-size: var(--texto-corpo); font-weight: var(--peso-forte); }
 
-.sg__topo { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-p); margin-top: calc(var(--espaco-pp) * -1); }
+.sg__topo { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-p); }
 .sg__topo:empty { display: none; }
 .sg__lido { margin: 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .sg__topo > .sg__novo { flex-basis: 100%; }
@@ -41,21 +66,39 @@
 /* #650: a 1024 px com o menu aberto a tabela tem ~718 px. O cabecalho quebra entre palavras (nunca invade a coluna
    vizinha) e a data fica numa linha so': "Protocolado em" precisa de 16% para caber "DD/MM/AAAA". */
 .sg__tabela td.num { white-space: nowrap; overflow-wrap: normal; }
-.sg__c-proc { width: 21%; } .sg__c-onde { width: 13%; } .sg__c-quem { width: 11%; } .sg__c-setor { width: 20%; }
-.sg__c-ultima { width: 15%; } .sg__c-prot { width: 16%; } .sg__c-seta { width: 4%; }
-.sg__c-proc-enc { width: 26%; } .sg__c-onde-enc { width: 18%; } .sg__c-sit { width: 18%; } .sg__c-ultima-enc { width: 19%; }
+/* #805: as mesmas sete colunas em todo painel (e nos encerrados). "Protocolado em" desceu para baixo do nome do
+   processo e deu lugar ao contratante, com a largura da palavra "Contratante" no painel de ~724 px (a 1024 px);
+   "No setor há" fica com a largura do selo de duas palavras numa linha, e "Com quem", com a de um nome sem partir. */
+/* #840: nove colunas. "No setor há" virou texto comum (estreita); "Dias sem movimentação" leva o selo, com a largura
+   dele em duas linhas; "Última movimentação" e' "dd/mm hh:mm" (quebra entre a data e a hora) e o tipo, uma palavra
+   ("Recebimento" numa linha a 1024 px). No cabecalho, "movimentação" nao cabe inteira a 1024 px: separa em silabas
+   (`hyphens`, a pagina e' pt-BR) em vez de invadir a coluna vizinha. */
+.sg__c-proc { width: 18%; } .sg__c-contr { width: 10%; } .sg__c-onde { width: 10%; } .sg__c-quem { width: 11%; }
+.sg__c-setor { width: 8%; } .sg__c-parado { width: 14%; } .sg__c-ultima { width: 11%; } .sg__c-tipo { width: 14%; }
+.sg__c-seta { width: 4%; }
+.sg__tabela thead th, .sg__tabela td[data-rotulo="Tipo de movimentação"] { hyphens: auto; }
+.sg__tabela thead th { overflow-wrap: anywhere; }
 .sg__tabela td.sg__seta { text-align: right; color: var(--cor-texto-secundario); }
 .sg__seta .icone { width: var(--tamanho-icone); height: var(--tamanho-icone); }
 
-/* #663: uma secao por categoria dentro da mesma tabela: titulo condensado sobre a regua de secao */
-.sg__tabela .sg__secao th {
-  padding-top: var(--espaco-m); padding-bottom: var(--espaco-mini); border-bottom: var(--regua-secao); color: var(--cor-tinta);
-  font-family: var(--fonte-titulo); font-stretch: var(--largura-titulo); font-weight: var(--peso-titulo);
-  font-size: var(--texto-mini); text-transform: var(--caixa-titulo); letter-spacing: var(--espacamento-titulo);
+/* #805: o painel de uma categoria. O CABECALHO DE GRUPO FORTE da fundacao (tinta cheia, letra clara) abre o grupo com
+   o nome, quantos processos ele tem e quantos estao parados; a tabela vem dentro (docs/identidade-visual.md, "Formas") */
+.sg-grupo { min-width: 0; border: var(--borda-painel); background: var(--cor-superficie); box-shadow: var(--sombra-painel); }
+.sg-grupo__cabeca {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--espaco-mini) var(--espaco-p);
+  padding: var(--espaco-pp) var(--espaco-g); background: var(--cor-tinta); color: var(--cor-papel);
 }
-.sg__tabela tbody:not(:last-child) tr:last-child td { border-bottom: 0; }
+.sg-grupo__nome { margin: 0; color: inherit; font-size: var(--texto-titulo-bloco); }
+.sg-grupo__n { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-p); color: var(--cor-papel-escuro); font-size: var(--texto-meta); }
+.sg-grupo .sg__tabela thead th { padding-top: var(--espaco-p); }
 
 .sg__linha { cursor: pointer; }
+/* a borda esquerda da linha na cor do tempo parado (a situacao que o servidor leu); o encerrado nao leva */
+.sg__linha--feito { --sg-tempo: var(--situacao-feito-ponto); }
+.sg__linha--andamento { --sg-tempo: var(--situacao-andamento-ponto); }
+.sg__linha--breve { --sg-tempo: var(--situacao-breve-ponto); }
+.sg__linha--critico { --sg-tempo: var(--situacao-critico-ponto); }
+.sg__linha[class*="sg__linha--"] > td:first-child { box-shadow: inset var(--espaco-mini) 0 0 var(--sg-tempo); }
 .sg__linha:hover td { background: var(--cor-papel-sombreado); }
 .sg__linha:focus-visible { outline: var(--largura-foco) solid var(--cor-foco); outline-offset: calc(var(--largura-foco) * -1); }
 .sg__nome { color: var(--cor-tinta); font-weight: var(--peso-forte); }
@@ -63,15 +106,19 @@
 .sg__traco { color: var(--cor-texto-terciario); }
 .sg__link { color: var(--cor-tinta); font-weight: var(--peso-medio); }
 .sg__link:hover { text-decoration: underline; text-underline-offset: var(--afastamento-sublinhado); }
+/* obra e assunto na linha: links com o peso do nome, sublinhados so' ao passar (a linha inteira ja' e' clicavel) */
+.sg__nome .sg__link { font-weight: inherit; text-decoration: none; }
+.sg__nome .sg__link:hover { text-decoration: underline; text-underline-offset: var(--afastamento-sublinhado); }
 .sg__lendo { color: var(--cor-tinta); }
-.sg__nao-lido { color: var(--situacao-critico-texto); }
+/* "nao lido" (#805): a etiqueta no tom de "vence em breve" e, ao lado, a hora e o motivo que o servidor escreve */
+.sg__etiqueta { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-traco) var(--espaco-pp); margin-top: var(--espaco-mini); }
+.sg__etiqueta .selo { flex: none; }
+.sg__etiqueta .sg__fraco { min-width: 0; }
 /* o selo do tempo no setor: o glifo fica no alto quando o texto quebra */
 .sg__dias { align-items: flex-start; }
 .sg__dias .glifo { margin-top: var(--espaco-grade); }
 
 /* ---------------------------------------------------------------- historico */
-.sg__trilha { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini); color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
-.sg__trilha .icone { flex: none; }
 .sg__filtros { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--espaco-p); }
 .sg__busca { width: calc(var(--alvo-minimo) * 8); max-width: 100%; }
 .sg__abrir { display: inline-flex; align-items: center; gap: var(--espaco-pp); }
@@ -104,20 +151,30 @@
 @keyframes sg-pulsar { 50% { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .sg__pulsa { animation: none; } }
 
-/* celular: a tabela vira blocos, um por processo */
-@media (max-width: 767px) {
+/* pagina media: a faixa de numeros em duas colunas quando os quatro rotulos nao cabem lado a lado */
+@container sg-pagina (max-width: 620px) {
+  .sg-numeros { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sg__barra .legenda-cor { justify-content: flex-start; }
+}
+
+/* pagina estreita (o celular; o computador com a janela pela metade): a tabela vira blocos, um por processo */
+@container sg-pagina (max-width: 640px) {
   .sg__tabela, .sg__tabela tbody, .sg__tabela tr, .sg__tabela td { display: block; width: 100%; }
   .sg__tabela colgroup, .sg__tabela thead { display: none; }
   .sg__tabela tr.sg__linha, .sg__tabela--hist tbody tr { padding: var(--espaco-p) var(--espaco-m); border-bottom: var(--borda-linha); }
   .sg__tabela tbody:last-child tr:last-child { border-bottom: 0; }
   .sg__tabela .sg__seta { display: none; }
-  .sg__tabela .sg__secao, .sg__tabela .sg__secao th { display: block; }
-  .sg__tabela .sg__secao th { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
   .sg__busca { width: 100%; }
   .sg__tabela--hist td:first-child { font-weight: var(--peso-forte); }
   .sg__tabela td, .sg__tabela td:first-child, .sg__tabela td:last-child { padding: 0; border: 0; }
   .sg__tabela td + td { margin-top: var(--espaco-mini); }
   .sg__tabela td[data-rotulo]::before { content: attr(data-rotulo) " "; margin-right: var(--espaco-mini); color: var(--cor-texto-secundario); font-size: var(--texto-mini); font-family: var(--fonte-texto); font-weight: var(--peso-normal); }
+  /* a superintendencia segue o contratante na mesma linha do bloco */
+  .sg__tabela td[data-rotulo="Contratante"] .sg__fraco { display: inline; margin-left: var(--espaco-mini); }
+  /* a cor do tempo parado passa da primeira celula para o bloco inteiro */
+  .sg__linha[class*="sg__linha--"] { box-shadow: inset var(--espaco-mini) 0 0 var(--sg-tempo); }
+  .sg__linha[class*="sg__linha--"] > td:first-child { box-shadow: none; }
+  .sg-grupo__cabeca { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
   .sg__mov--atual { background: var(--cor-papel-sombreado); box-shadow: inset var(--borda-grossa) 0 0 var(--cor-tinta); }
   .sg__mov--atual td, .sg__mov--atual td:first-child { background: none; box-shadow: none; }
   .sg__rodape { padding: var(--espaco-p) var(--espaco-m); }

@@ -23,15 +23,17 @@ def test_painel_e_qdop_para_a_diretoria_e_401_sem_sessao(client):
     c.close()
     _login(client, "dir@l.com")
     r = client.get("/api/diretoria")
-    # #748: so' o que o Resumo e o QDOP da lista de Obras mostram; #802: a curva do previsto e do medido saiu
-    assert r.status_code == 200 and set(r.json()) == {"hoje", "medido_ano", "obras", "avisos", "reajustes_apostilamento"}
+    # #748: so' o que o Resumo e o QDOP da lista de Obras mostram; #802: a curva do previsto e do medido saiu;
+    # #805: o prazo de pagamento por contratante, que os blocos e a pagina do contratante mostram
+    assert r.status_code == 200 and set(r.json()) == {"hoje", "medido_ano", "obras", "avisos", "reajustes_apostilamento",
+                                                      "prazo_pagamento"}
     x = client.get("/api/diretoria/qdop.xlsx")
     assert x.status_code == 200 and "QDOP" in x.headers["content-disposition"]
     assert openpyxl.load_workbook(io.BytesIO(x.content)).active["S1"].value == "FRM.EXEMPLO.001"
 
 
-def test_fechamento_so_leitura_e_401_sem_sessao_e_a_receber_saiu(client, monkeypatch):
-    """Issue #748: a pagina Fechamento no lugar de A receber (a rota antiga nao existe mais) e da Carteira."""
+def test_fechamento_so_leitura_e_401_sem_sessao(client, monkeypatch):
+    """Issue #748: a pagina Fechamento no lugar da Carteira. A rota de A receber voltou com a pagina nova (#816)."""
     from app import permissoes
     assert client.get("/api/fechamento").status_code == 401
     c = db.get_conn()
@@ -41,13 +43,102 @@ def test_fechamento_so_leitura_e_401_sem_sessao_e_a_receber_saiu(client, monkeyp
     r = client.get("/api/fechamento")
     assert r.status_code == 200 and set(r.json()) == {"anos", "meses", "por_ano", "acumulado", "em_aberto",
                                                       "em_aberto_anteriores", "notas_sem_medicao", "cobertura",
-                                                      "notas_diferem", "pares_mistos", "total_a_receber_liberado"}
+                                                      "notas_diferem", "pares_mistos", "total_a_receber_liberado",
+                                                      "diferenca_critica_por_mil",       # #805: o limite da diferenca
+                                                      "por_contratante"}                 # #815: a aba Por contratante
     assert r.json()["anos"] == ["2025", "2026"] and r.json()["meses"] == []
-    assert client.get("/api/a-receber").status_code == 404
+    assert r.json()["por_contratante"] == {"2025": [], "2026": []}
+    assert r.json()["diferenca_critica_por_mil"] == 5
     assert client.get("/api/diretoria/custo").status_code == 404
     assert client.post("/api/fechamento").status_code == 405
     monkeypatch.setitem(permissoes.PERFIS, "diretoria", frozenset())
     assert client.get("/api/fechamento").status_code == 403
+
+
+def test_a_receber_para_quem_ve_o_fechamento_e_so_a_trava_sem_o_total_liberado(client, monkeypatch):
+    """Issue #816: a pagina A receber e' de quem ve o Fechamento (`ver_paineis`: os tres perfis), so' leitura. Sem o
+    total a receber liberado, a resposta e' so' a trava; liberado, o total e os contratantes."""
+    from app import permissoes
+    assert client.get("/api/a-receber").status_code == 401
+    c = db.get_conn()
+    for perfil in ("diretoria", "engenharia", "admin"):
+        auth.criar_usuario(c, perfil, f"{perfil}@l.com", "senha-forte-123", perfil)
+    c.close()
+    for perfil in ("diretoria", "engenharia", "admin"):
+        _login(client, f"{perfil}@l.com")
+        r = client.get("/api/a-receber")
+        assert r.status_code == 200 and r.json() == {"anos": ["2025", "2026"], "total_a_receber_liberado": False}, perfil
+        assert client.get("/api/fechamento").json()["total_a_receber_liberado"] is False
+    c = db.get_conn()
+    cadastro_aplicar.aplicar(c, 1, {"orgaos": [], "entidades": [], "contratos": [], "avisos": [],
+                                    "geral": {"qdop": {"modelo_caminho": str(MODELO)}, "diretoria": {"total_a_receber_liberado": True}}})
+    c.close()
+    r = client.get("/api/a-receber").json()
+    assert set(r) == {"anos", "total_a_receber_liberado", "em_aberto_centavos", "por_ano", "quantidade", "alem_do_prazo",
+                      "notas_sem_medicao", "notas_sem_medicao_centavos", "anteriores", "contratantes"}
+    assert (r["em_aberto_centavos"], r["quantidade"], r["contratantes"]) == (0, 0, [])
+    assert client.post("/api/a-receber").status_code == 405
+    monkeypatch.setitem(permissoes.PERFIS, "admin", frozenset())
+    assert client.get("/api/a-receber").status_code == 403
+
+
+def test_inicio_por_contratante_e_medido_fecham_com_as_outras_telas(client, monkeypatch):
+    """Issue #817: os dois blocos novos do Inicio, lidos pela diretoria nas rotas, fecham com o que ja' existia. O
+    ciclo por contratante soma, em cada etapa, o numero da faixa do ciclo; o a receber de cada contratante e' o da
+    pagina dele (a soma do a receber das obras dele na lista de Obras), e o total e' o a receber do Inicio; a serie
+    do medido em 12 meses e' a do Fechamento, competencia a competencia. Consorcio a 50% com centavo impar."""
+    import datetime
+    from app import cadastro_arquivos, tempo
+    from tests.conftest import CADASTRO_EXEMPLO
+    monkeypatch.setattr(tempo, "hoje_local", lambda: datetime.date(2026, 10, 15))
+    c = db.get_conn()
+    auth.criar_usuario(c, "Dir", "dir5@exemplo.com.br", "senha-forte-123", "diretoria")
+    cadastro_aplicar.aplicar(c, 1, cadastro_arquivos.preparar(CADASTRO_EXEMPLO))
+    propria, consorcio = (c.execute("SELECT id FROM contratos WHERE nome_curto=?", (nome,)).fetchone()[0]
+                          for nome in ("Obra Própria", "Obra Consórcio"))
+
+    def medicao(cid, numero, competencia, estado, pedido, aprovado=None, protocolo=None, **datas):
+        campos = {"contrato_id": cid, "numero": numero, "tipo": "execucao", "competencia": competencia, "estado": estado,
+                  "valor_protocolado_centavos": pedido, "valor_atestado_centavos": aprovado, **datas}
+        mid = c.execute(f"INSERT INTO medicoes ({', '.join(campos)}) VALUES ({', '.join('?' * len(campos))})",
+                        tuple(campos.values())).lastrowid
+        if protocolo:
+            c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem, etapa) VALUES (?, ?, 'manual', 'nota')",
+                      (mid, protocolo))
+    medicao(consorcio, 1, "2026-09", "planilha_enviada", 100_001, planilha_enviada_em="2026-10-05")   # 50.001 na cota
+    medicao(consorcio, 2, "2026-09", "planilha_enviada", 100_001, planilha_enviada_em="2026-10-06")   # mais 50.001
+    medicao(consorcio, 3, "2026-08", "nota_emitida", 9, aprovado=300_003, atestado_em="2026-09-20",
+            nota_emitida_em="2026-10-02")                                                             # 150.002
+    medicao(propria, 4, "2026-09", "protocolada", 70_007, protocolo="2026-10-08")
+    medicao(propria, 5, "2025-12", "recebida", 20_001)
+    c.commit(); c.close()
+    _login(client, "dir5@exemplo.com.br")
+    p = client.get("/api/inicio/painel").json()
+    f = client.get("/api/fechamento").json()
+    obras = [o for o in client.get("/api/contratos").json()]
+
+    faixa = {e["etapa"]: e["valor_centavos"] for e in p["ciclo"]}
+    linhas = p["ciclo_por_contratante"]
+    assert (faixa["em_analise"], faixa["boletim"], faixa["nota"], faixa["protocolado"]) == (100_002, 0, 150_002, 70_007)
+    for etapa in ("em_analise", "boletim", "nota", "protocolado"):
+        assert sum(x[f"{etapa}_centavos"] for x in linhas) == faixa[etapa], etapa
+    assert p["a_receber"]["liberado"] is True
+    assert sum(x["a_receber_centavos"] for x in linhas) == p["a_receber"]["valor_centavos"] == 70_007
+    assert p["a_receber"]["valor_centavos"] == sum(o["posicao"]["a_receber_centavos"] for o in obras)
+    # o orgao do exemplo e' da familia SINFRA: uma linha, com a chave da pagina do contratante da lista de Obras
+    assert [(x["contratante"], x["chave"]) for x in linhas] == [("SINFRA", "sinfra")]
+    assert {o["contratante_chave"] for o in obras if o["id"] in (propria, consorcio)} == {"sinfra"}
+    # o a receber da linha e' o numero que a pagina do contratante mostra como "A receber": a soma das obras dele
+    for x in linhas:
+        assert x["a_receber_centavos"] == sum(o["posicao"]["a_receber_centavos"] for o in obras
+                                              if o["contratante_chave"] == x["chave"]), x["contratante"]
+
+    do_fechamento = {m["competencia"]: m["medido_centavos"] for m in f["meses"]}
+    serie = {x["competencia"]: x["valor_centavos"] for x in p["medido_12m"]}
+    assert list(serie) == [f"2025-{m:02d}" for m in (10, 11, 12)] + [f"2026-{m:02d}" for m in range(1, 10)]
+    assert serie == {comp: do_fechamento.get(comp, 0) for comp in serie}
+    assert (serie["2026-09"], serie["2026-08"], serie["2025-12"]) == (100_002 + 70_007, 150_002, 20_001)
+    assert sum(serie.values()) == sum(do_fechamento.values()) == f["por_ano"]["2025"]["medido_centavos"] + f["por_ano"]["2026"]["medido_centavos"]
 
 
 def test_custo_da_obra_404_sem_cadastro_e_403_sem_ver_paineis(client, monkeypatch):

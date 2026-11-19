@@ -613,3 +613,149 @@ def test_necessario_nulo_sem_fim_sem_saldo_e_na_obra_parada_encerrada_ou_com_med
     assert necessario() == (None, None)
     r = prazos.ritmo_e_prazo(c, cid, hoje)                   # o ritmo continua; situacao, nao
     assert (r["ritmo_centavos"], r["situacao"], r["dias_alem"]) == (100_00, None, None)
+
+
+# --- issue #822: a leitura do andamento, uma so', com o prazo no fim e a parada de fato fora da regua ------
+
+SEM_LEITURA = {"situacao": None, "pct": None, "motivo": None, "prorrogacao_pedida": False, "sem_medicao_desde": None,
+               "execucao_fim": None, "atencao_desde_pct": 70, "adiantada_desde_pct": 100}
+
+
+def _leitura(c, cid, hoje, bp=None):
+    """A leitura como as duas rotas a pedem: `ritmo_na_cota` sobre o saldo de `paineis.posicao_na_cota`."""
+    from app import paineis
+    s = paineis.saldo(c, cid)
+    posicao = paineis.posicao_na_cota(s["vigente_execucao_centavos"], s["medido_centavos"], bp)
+    return prazos.ritmo_na_cota(c, cid, hoje, bp, posicao["saldo_centavos"])["leitura"]
+
+
+def test_leitura_do_andamento_o_corte_70_100_e_o_percentual_por_piso():
+    hoje = D(2026, 11, 18)
+
+    def lida(ritmo, necessario=100_000):
+        r = prazos.leitura_do_andamento(ritmo, necessario, 5, False, "2026-10", hoje)
+        assert (r["motivo"], r["atencao_desde_pct"], r["adiantada_desde_pct"]) == (None, 70, 100)
+        return r["situacao"], r["pct"]
+
+    assert lida(115_000) == ("adiantada", 115)
+    assert lida(100_000) == ("adiantada", 100)
+    assert lida(99_999) == ("atencao", 99)       # 99,999% nao vira 100%
+    assert lida(70_000) == ("atencao", 70)
+    assert lida(69_999) == ("devagar", 69)
+    assert lida(0) == ("devagar", 0)
+    # sem prazo a cumprir (sem necessario) ou sem ritmo nao ha' leitura nem motivo
+    for ritmo, necessario, competencias in ((100, None, None), (100, 0, 5), (100, 100, None), (None, 100, 5)):
+        assert prazos.leitura_do_andamento(ritmo, necessario, competencias, False, None, hoje) == SEM_LEITURA
+
+
+def test_obra_com_duas_competencias_de_prazo_fica_sem_leitura_e_com_tres_tem(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    hoje = D(2026, 11, 18)
+    _valor(c, cid, 1_000_00)
+    _medicao(c, cid, 1, "2026-09", atestado=300_00)
+    _medicao(c, cid, 2, "2026-10", atestado=300_00)        # ritmo 100,00; saldo 400,00
+    _fim(c, cid, "2026-12-31")                             # novembro e dezembro: duas competencias
+    assert prazos.ritmo_e_prazo(c, cid, hoje)["competencias_restantes"] == 2
+    # o fim da execucao vai junto, para a Situacao escrever "Prazo no fim · execucao ate' dd/mm" (19/11/2026)
+    assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "motivo": "prazo_no_fim", "execucao_fim": "2026-12-31"}
+    _fim(c, cid, "2026-11-18")                             # vence hoje: uma competencia
+    assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "motivo": "prazo_no_fim", "execucao_fim": "2026-11-18"}
+    _fim(c, cid, "2027-01-01")                             # novembro, dezembro e janeiro: tres competencias
+    r = prazos.ritmo_e_prazo(c, cid, hoje)
+    assert (r["competencias_restantes"], r["necessario_centavos"]) == (3, 133_33)
+    assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "situacao": "atencao", "pct": 75}
+    # o necessario nao muda com a leitura: com duas competencias continua o saldo dividido por elas
+    _fim(c, cid, "2026-12-31")
+    assert prazos.ritmo_e_prazo(c, cid, hoje)["necessario_centavos"] == 200_00
+
+
+def test_prorrogacao_pedida_e_sem_resposta_tira_a_obra_da_regua(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    hoje = D(2026, 11, 18)
+    _valor(c, cid, 1_000_00); _fim(c, cid, "2027-03-31")   # cinco competencias
+    _medicao(c, cid, 1, "2026-09", atestado=300_00)
+    _medicao(c, cid, 2, "2026-10", atestado=300_00)
+    assert _leitura(c, cid, hoje)["situacao"] == "adiantada"
+    ids["pleito"]("prazo", "2026-11-04")
+    assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "motivo": "prorrogacao_pedida", "prorrogacao_pedida": True}
+    # com o prazo no fim, o motivo e' o prazo, e o pedido vai junto
+    _fim(c, cid, "2026-12-15")
+    assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "motivo": "prazo_no_fim", "prorrogacao_pedida": True,
+                                      "execucao_fim": "2026-12-15"}
+    # o instrumento de prazo assinado no dia do envio ou depois responde o pedido: a leitura volta
+    ids["aditivo"]("2026-11-10", "2027-03-31", "2027-06-30")
+    assert _leitura(c, cid, hoje)["situacao"] == "adiantada"
+
+
+def test_sem_medicao_ha_tres_competencias_leva_o_mes_da_ultima(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    hoje = D(2026, 11, 18)                                 # fechadas: agosto, setembro e outubro
+    _valor(c, cid, 1_000_00); _fim(c, cid, "2027-03-31")
+    _medicao(c, cid, 1, "2026-07", atestado=600_00)        # ritmo 100,00, na janela de maio a outubro
+    assert prazos.ritmo_e_prazo(c, cid, hoje)["ritmo_centavos"] == 100_00
+    assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "motivo": "sem_medicao", "sem_medicao_desde": "2026-07"}
+    # medicao que nao conta no ritmo tambem nao conta aqui: cancelada, projeto, reajuste e a sem valor
+    _medicao(c, cid, 2, "2026-09", protocolado=50_00, estado="cancelada")
+    _medicao(c, cid, 3, "2026-09", atestado=50_00, tipo="projeto")
+    _medicao(c, cid, 4, "2026-10", protocolado=50_00, tipo="reajuste")
+    _medicao(c, cid, 5, "2026-10", atestado=0)
+    assert _leitura(c, cid, hoje)["sem_medicao_desde"] == "2026-07"
+    # mediu em agosto: so' duas competencias fechadas sem medicao, a regua vale
+    _medicao(c, cid, 6, "2026-08", atestado=10_00)
+    r = _leitura(c, cid, hoje)
+    assert (r["situacao"], r["motivo"], r["sem_medicao_desde"]) == ("adiantada", None, None)
+
+
+def test_sem_medicao_fora_da_janela_do_ritmo_tambem_leva_o_mes_e_quem_nunca_mediu_fica_sem_leitura(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    hoje = D(2026, 11, 18)
+    _valor(c, cid, 1_000_00); _fim(c, cid, "2027-10-31")
+    assert _leitura(c, cid, hoje) == SEM_LEITURA           # nunca mediu execucao: nao ha' mes a escrever
+    _medicao(c, cid, 1, "2026-02", atestado=100_00)        # fora da janela: sem ritmo
+    assert prazos.ritmo_e_prazo(c, cid, hoje)["ritmo_centavos"] is None
+    assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "motivo": "sem_medicao", "sem_medicao_desde": "2026-02"}
+
+
+def test_ritmo_que_nao_fecha_a_conclusao_continua_com_leitura(cenario):
+    """A pagina da obra calava a situacao (conclusao alem do teto do pedido) e a lista escrevia "Devagar": a leitura
+    agora e' uma so', e a obra que mede quase nada do necessario e' devagar nas duas."""
+    c, ids = cenario
+    cid = ids["contrato"]
+    hoje = D(2026, 11, 18)
+    _valor(c, cid, 10_000_000_00); _fim(c, cid, "2027-03-31")
+    _medicao(c, cid, 1, "2026-10", atestado=6_00)          # ritmo 1,00 contra um saldo de quase 10 milhoes
+    r = prazos.ritmo_e_prazo(c, cid, hoje)
+    assert (r["conclusao"], r["situacao"], r["dias_alem"]) == (None, None, None)
+    assert _leitura(c, cid, hoje) == {**SEM_LEITURA, "situacao": "devagar", "pct": 0}
+
+
+def test_leitura_sai_dos_valores_na_cota_que_a_tela_mostra(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    hoje = D(2026, 11, 18)
+    _valor(c, cid, 1_000_01); _fim(c, cid, "2027-01-31")   # tres competencias
+    _medicao(c, cid, 1, "2026-10", atestado=600_00)        # ritmo 100,00; saldo 400,01
+    from app import paineis
+    s = paineis.saldo(c, cid)
+    posicao = paineis.posicao_na_cota(s["vigente_execucao_centavos"], s["medido_centavos"], 4900)
+    r = prazos.ritmo_na_cota(c, cid, hoje, 4900, posicao["saldo_centavos"])
+    assert (r["ritmo_centavos"], r["necessario_centavos"]) == (49_00, 65_33)   # a cota do ritmo; o saldo da tela / 3
+    assert r["leitura"]["pct"] == r["ritmo_centavos"] * 100 // r["necessario_centavos"] == 75
+    assert r["leitura"]["situacao"] == "atencao"
+
+
+def test_obra_sem_prazo_a_cumprir_nao_tem_leitura_nem_motivo(cenario):
+    c, ids = cenario
+    cid = ids["contrato"]
+    hoje = D(2026, 11, 18)
+    _valor(c, cid, 1_000_00); _fim(c, cid, "2026-11-17")   # venceu ontem
+    _medicao(c, cid, 1, "2026-06", atestado=600_00)
+    ids["pleito"]("prazo", "2026-11-04")
+    assert _leitura(c, cid, hoje) == SEM_LEITURA
+    _fim(c, cid, "2026-12-15")
+    ids["instrumento"]("paralisacao", "2026-11-01")        # paralisada
+    assert _leitura(c, cid, hoje) == SEM_LEITURA

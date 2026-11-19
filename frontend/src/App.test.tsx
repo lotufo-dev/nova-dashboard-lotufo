@@ -1,9 +1,20 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
+
+// as permissoes que /api/auth/eu informa para cada perfil (backend/app/permissoes.py); desde a #829 os tres tem `ver_siga`
+const PERMISSOES: Record<string, string[]> = {
+  admin: ["administrar", "editar_cadastros", "editar_config_fiscal", "ver_paineis", "ver_siga"],
+  engenharia: ["editar_cadastros", "ver_paineis", "ver_siga"],
+  diretoria: ["ver_paineis", "ver_siga"],
+};
+const permissoesDe = (perfil: string) => PERMISSOES[perfil] ?? [];
+
+// a faixa de numeros e os limites do tempo parado que GET /api/siga manda sempre (#805)
+const SIGA_SEM_PROCESSO = { numeros: { acompanhados: 0, parados: 0, andaram_hoje: 0, nao_lidos: 0 }, limites: { dias_atencao: 5, dias_critico: 10 } };
 
 const OBRA = { id: 7, orgao: "SINFRA - SUEF II", contratante: "SINFRA", numero_instrumento: "IC 7/2026", nome_curto: "Granito",
   estado: "ativo", entidade_id: 1, valor_vigente_centavos: 1000_00, medido_centavos: 250_00, saldo_centavos: 750_00,
@@ -12,47 +23,84 @@ const AVISO = { tipo: "execucao_vencendo", nivel: "critico", publico: ["operacao
   valor_centavos: null, mensagem: "Granito: execução termina em 5 dias (04/11/2026)", destino: { tela: "contrato", id: 7, aba: "prazos" },
   data: "2026-11-04", sentido: "prazo" };
 
-describe("App: a rota antiga /avisos", () => {
-  beforeEach(() => {
-    api.mockImplementation(async (caminho: string) => {
-      if (caminho === "/api/auth/eu") return { id: 1, nome: "Admin Exemplo", email: "a@lotufo.com", perfil: "admin", csrf: "x" };
-      if (caminho === "/api/contratos") return [OBRA];
-      if (caminho === "/api/entidades") return [];
-      if (caminho === "/api/inicio") return { avisos: [AVISO] };
-      return [];
-    });
+describe("App: os Avisos têm página própria (#805)", () => {
+  const servir = (perfil: string) => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa Exemplo", email: "a@lotufo.com", perfil, permissoes: permissoesDe(perfil), csrf: "x" };
+    if (caminho === "/api/contratos") return [OBRA];
+    if (caminho === "/api/inicio") return { avisos: [AVISO] };
+    return [];
   });
+  beforeEach(() => { servir("admin"); });
   afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
 
-  it("abre Obras com os Avisos de todas as obras abertos, mantendo o filtro do link, e acende o item Avisos", async () => {
-    window.history.replaceState(null, "", "/avisos?obra=7");
+  const trilho = () => within(screen.getByRole("navigation", { name: "Navegação principal" }));
+
+  it("/avisos abre a página Avisos: o título do topo e o da aba do navegador dizem Avisos, e o item do menu fica aceso", async () => {
+    window.history.replaceState(null, "", "/avisos");
     render(<App />);
-    expect(await screen.findByRole("heading", { name: "Avisos · Todas as obras" })).toBeTruthy();
-    expect(window.location.pathname + window.location.search).toBe("/obras?c=todas&avisos=1&obra=7");
-    const trilho = within(screen.getByRole("navigation", { name: "Navegação principal" }));
-    expect(trilho.getByRole("link", { name: "Avisos" }).getAttribute("aria-current")).toBe("page");
-    expect(trilho.getByRole("link", { name: "Obras" }).getAttribute("aria-current")).toBeNull();
+    expect(await screen.findByRole("heading", { level: 1, name: "Avisos" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 2, name: "Agenda" })).toBeTruthy();
+    expect(window.location.pathname + window.location.search).toBe("/avisos");
+    expect(document.title).toBe("Avisos · grupolotufo");
+    expect(trilho().getByRole("link", { name: "Avisos" }).getAttribute("aria-current")).toBe("page");
+    expect(trilho().getByRole("link", { name: "Obras" }).getAttribute("aria-current")).toBeNull();
+    // não é mais a lista de Obras com os avisos em cima
+    expect(screen.queryByRole("heading", { name: /^Obras/ })).toBeNull();
+    expect(screen.queryByRole("table", { name: "Obras, posição financeira" })).toBeNull();
+  });
+
+  it("o endereço de antes (/obras?avisos=1, com os filtros) leva para /avisos com os filtros equivalentes", async () => {
+    window.history.replaceState(null, "", "/obras?c=todas&avisos=1&obra=7&familia=prazos&nivel=critico");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 2, name: "Avisos · Granito" })).toBeTruthy();
+    expect(window.location.pathname + window.location.search).toBe("/avisos?familia=prazos&obra=7");
+    expect(screen.getByRole("heading", { level: 1, name: "Avisos" })).toBeTruthy();
+    expect(trilho().getByRole("link", { name: "Avisos" }).getAttribute("aria-current")).toBe("page");
+    expect(trilho().getByRole("link", { name: "Obras" }).getAttribute("aria-current")).toBeNull();
+  });
+
+  it("quem só consulta (diretoria) abre a mesma página", async () => {
+    servir("diretoria");
+    window.history.replaceState(null, "", "/avisos");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 2, name: "Agenda" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/avisos");
+    expect(trilho().getByRole("link", { name: "Avisos" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("/obras sem ?avisos=1 continua sendo a lista de Obras", async () => {
+    window.history.replaceState(null, "", "/obras?c=SINFRA");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: /^Obras/ })).toBeTruthy();
+    // O filtro de antes da #805 (?c=) abre a tabela de todas as obras, com o filtro, quando a lista chega
+    // (Contratos.tsx). O teste espera esse endereco final: conferir o endereco logo que o titulo aparece dependia de a
+    // lista ja' ter chegado ou nao, e o teste passava ou falhava conforme a maquina.
+    await waitFor(() => expect(window.location.pathname + window.location.search).toBe("/obras/todas?c=SINFRA"));
+    expect(screen.getByRole("heading", { level: 1, name: /^Obras/ })).toBeTruthy();
+    expect(trilho().getByRole("link", { name: "Obras" }).getAttribute("aria-current")).toBe("page");
+    expect(trilho().getByRole("link", { name: "Avisos" }).getAttribute("aria-current")).toBeNull();
   });
 });
 
 const PAINEL_MINIMO = {
   hoje: "2026-10-28",
   protocoladas: { obras_protocoladas: 0, obras_ativas: 0, ultima: null },
-  medido: { competencia: "2026-10", valor_centavos: 0, quantidade: 0, ultimo_lancamento: null },
+  medido: { competencia: "2026-10", valor_centavos: 0 },
   a_receber: { liberado: false, valor_centavos: null, mais_60_centavos: null },
   ciclo: ["em_analise", "boletim", "nota", "protocolado", "recebido_mes"].map(
     etapa => ({ etapa, valor_centavos: 0, quantidade: 0, mais_antigo_dias: null })),
-  recebido_12m: [], matriz: { competencias: [], grupos: [] },
+  recebido_12m: [],
   previsao: Object.fromEntries(["neste_mes", "proximo_mes", "atrasado", "sem_previsao", "depois"].map(
     k => [k, { valor_centavos: 0, quantidade: 0 }])),
   notas_mes: { mes: "2026-10", valor_centavos: 0, notas: 0, obras: 0 },
+  ciclo_por_contratante: [], medido_12m: [],       // #817: os blocos novos da Inicio
 };
 
 describe("App: a tela SIGA", () => {
-  const entrar = (perfil: string) => api.mockImplementation(async (caminho: string) => {
-    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, csrf: "x" };
+  const entrar = (perfil: string, permissoes = permissoesDe(perfil)) => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, permissoes, csrf: "x" };
     if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
-      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] } };
+      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, ...SIGA_SEM_PROCESSO };
     // o Inicio (entrada da diretoria) le este painel: sem o corpo minimo ele quebra e derruba a casca
     if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
     return [];
@@ -72,8 +120,20 @@ describe("App: a tela SIGA", () => {
     expect(window.location.pathname).toBe("/siga");
   });
 
-  it("a diretoria não tem o item e /siga cai na entrada do perfil", async () => {
+  it("a diretoria tem o item e abre a tela, sem botão de escrita (#829: só leitura)", async () => {
     entrar("diretoria");
+    window.history.replaceState(null, "", "/siga");
+    render(<App />);
+    expect(await screen.findByText("Nenhum processo acompanhado.")).toBeTruthy();
+    const trilho = within(screen.getByRole("navigation", { name: "Navegação principal" }));
+    expect(trilho.getByRole("link", { name: "SIGA" }).getAttribute("aria-current")).toBe("page");
+    expect(window.location.pathname).toBe("/siga");
+    expect(screen.queryByRole("button", { name: "Acompanhar processo" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pedir leitura" })).toBeNull();
+  });
+
+  it("quem não tem `ver_siga` não tem o item e /siga cai na entrada, qualquer que seja o perfil (#829)", async () => {
+    entrar("engenharia", ["editar_cadastros", "ver_paineis"]);
     window.history.replaceState(null, "", "/siga");
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: /^(Bom dia|Boa tarde|Boa noite)/ });      // o Início carregou
@@ -93,7 +153,7 @@ describe("App: instalação não autorizada", () => {
     }
     if (caminho === "/api/auth/eu") {
       if (!logado) throw new Error("sem sessão");
-      return { id: 1, nome: "Admin Exemplo", email: "a@lotufo.com", perfil: "admin", csrf: "x" };
+      return { id: 1, nome: "Admin Exemplo", email: "a@lotufo.com", perfil: "admin", permissoes: permissoesDe("admin"), csrf: "x" };
     }
     if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
     return [];
@@ -124,7 +184,7 @@ describe("App: instalação não autorizada", () => {
           if (falhar) throw new Error("servidor reiniciando");
           return { status: "ok", banco: "ok", instalacao: "nao-autorizada", instalacao_motivo: "ausente" };
         }
-        if (caminho === "/api/auth/eu") return { id: 1, nome: "Admin Exemplo", email: "a@lotufo.com", perfil: "admin", csrf: "x" };
+        if (caminho === "/api/auth/eu") return { id: 1, nome: "Admin Exemplo", email: "a@lotufo.com", perfil: "admin", permissoes: permissoesDe("admin"), csrf: "x" };
         if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
         return [];
       });
@@ -156,9 +216,9 @@ describe("App: instalação não autorizada", () => {
 
 describe("App: o menu lateral largo", () => {
   const entrar = () => api.mockImplementation(async (caminho: string) => {
-    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil: "admin", csrf: "x" };
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil: "admin", permissoes: permissoesDe("admin"), csrf: "x" };
     if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
-      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] } };
+      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, ...SIGA_SEM_PROCESSO };
     if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
     return [];
   });
@@ -172,11 +232,15 @@ describe("App: o menu lateral largo", () => {
     const nav = await screen.findByRole("navigation", { name: "Navegação principal" });
     expect(nav.getAttribute("data-estado")).toBe("largo");
     const links = within(nav).getAllByRole("link");
+    // #814: as páginas na ordem das áreas (Painel, Medições, Obras, Financeiro, Prazos e avisos, Órgãos, Documentos, Sistema)
     expect(links.map(l => l.textContent)).toEqual(
-      ["Início", "Medições", "Resumo das medições", "Obras", "Avisos", "SIGA", "Documentos", "Fechamento", "Âncoras DocuSign", "Administração"]);
+      ["Início", "Medições", "Resumo das medições", "Obras", "Fechamento", "Em aberto", "Avisos", "SIGA", "Certidões", "Regularidade mensal",
+        "Garantias", "Âncoras DocuSign", "Administração", "Minha conta"]);
     for (const l of links) expect(l.querySelector("svg")).not.toBeNull();
     expect(within(nav).getByRole("link", { name: "SIGA" }).getAttribute("aria-current")).toBe("page");
     expect(links.filter(l => l.getAttribute("aria-current") === "page")).toHaveLength(1);
+    // a área da página aberta fica com o nome aceso
+    expect([...nav.querySelectorAll(".menu__area--acesa .menu__area-nome")].map(n => n.textContent)).toEqual(["Órgãos"]);
   });
 
   it("recolhe pelo botão (só ícones, nome continua acessível) e lembra a escolha", async () => {
@@ -208,9 +272,9 @@ describe("App: o menu lateral no celular (375 px)", () => {
       removeEventListener: (_: string, f: (ev: { matches: boolean }) => void) => { ouvintes = ouvintes.filter(o => o !== f); },
     }) });
     api.mockImplementation(async (caminho: string) => {
-      if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil: "admin", csrf: "x" };
+      if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil: "admin", permissoes: permissoesDe("admin"), csrf: "x" };
       if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
-        robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] } };
+        robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, ...SIGA_SEM_PROCESSO };
       if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
       return [];
     });
@@ -275,21 +339,38 @@ describe("App: o menu lateral no celular (375 px)", () => {
   });
 });
 
-describe("App: Medições é o quadro do mês (#643)", () => {
+describe("App: Medições abre na fila de trabalho, com as vistas no endereço (#643, #805)", () => {
+  const SEM = { quantidade: 0, criticas: 0, breves: 0, alem_do_prazo: 0 };
   beforeEach(() => {
     try { localStorage.removeItem("menu-lateral"); } catch { /* sem armazenamento */ }
     api.mockImplementation(async (caminho: string) => {
-      if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa da Engenharia", email: "eng@lotufo.com", perfil: "engenharia", csrf: "x" };
-      if (caminho.startsWith("/api/medicoes/resumo")) return { hoje: "2026-11-07", mes: caminho.split("mes=")[1], obras: [], quadro: [], anteriores: [] };
+      if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa da Engenharia", email: "eng@lotufo.com", perfil: "engenharia", permissoes: permissoesDe("engenharia"), csrf: "x" };
+      if (caminho.startsWith("/api/medicoes/fila")) {
+        return { hoje: "2026-11-07", mes: caminho.split("mes=")[1], obras: [], limites: { dias_atencao: 5, dias_critico: 10, diferenca_critica_por_mil: 5 },
+          numeros: { com: { lotufo: SEM, faturamento: SEM, orgao: SEM }, concluidas: 0, sem_medicao: 0, pedido_centavos: null, aprovado_centavos: null,
+            aprovado_com_pedido_centavos: null, pedido_do_aprovado_centavos: null, abaixo_do_pedido_centavos: null },
+          grupos: [], concluidas: [], sem_medicao: [], quadro: [],
+          anteriores: { linhas: [], esperam_pagamento: 0, antes_do_ano_inicial: 0, ano_inicial: "2025" } };
+      }
       return [];
     });
   });
   afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
 
-  it.each(["/medicoes/em-andamento", "/medicoes/iniciar", "/notas"])("o endereço antigo %s leva ao quadro e o menu tem só o item Medições", async (antigo) => {
-    window.history.replaceState(null, "", antigo);
+  it("o endereço /medicoes/quadro abre o quadro do mês, e /medicoes/anteriores, os meses anteriores", async () => {
+    window.history.replaceState(null, "", "/medicoes/quadro");
     render(<App />);
     expect(await screen.findByRole("heading", { name: "Quadro do mês" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/medicoes/quadro");
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Vistas de Medições" })).getByRole("link", { name: "Meses anteriores" }));
+    expect(await screen.findByText("Nenhuma medição de meses anteriores pede ação.")).toBeTruthy();
+    expect(window.location.pathname).toBe("/medicoes/anteriores");
+  });
+
+  it.each(["/medicoes/em-andamento", "/medicoes/iniciar", "/notas"])("o endereço antigo %s leva à fila e o menu tem só o item Medições", async (antigo) => {
+    window.history.replaceState(null, "", antigo);
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Concluídas no mês" })).toBeTruthy();
     expect(window.location.pathname).toBe("/medicoes");
     const nav = within(screen.getByRole("navigation", { name: "Navegação principal" }));
     expect(nav.getByRole("link", { name: "Medições" }).getAttribute("aria-current")).toBe("page");
@@ -303,10 +384,10 @@ describe("App: aviso flutuante de resposta do órgão (issue #654)", () => {
   const NAO_VISTA = { medicao_id: 31, contrato_id: 7, orgao: "SINFRA", obra: "Granito", numero: 3, tipo: "execucao",
     respostas: 1, ate: 9, recebida_em: "2026-11-10T14:00:00Z" };
   const entrar = (perfil: string) => api.mockImplementation(async (caminho: string) => {
-    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, csrf: "x" };
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, permissoes: permissoesDe(perfil), csrf: "x" };
     if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
     if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
-      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] } };
+      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, ...SIGA_SEM_PROCESSO };
     if (caminho === "/api/correio/respostas/nao-vistas") return [NAO_VISTA];
     if (caminho === "/api/correio/respostas/ler") return { novas: [] };
     return [];
@@ -329,5 +410,267 @@ describe("App: aviso flutuante de resposta do órgão (issue #654)", () => {
     await act(async () => {});
     expect(screen.queryByText("SINFRA respondeu:")).toBeNull();
     expect(api.mock.calls.some(c => String(c[0]).startsWith("/api/correio/respostas"))).toBe(false);
+  });
+});
+
+// #814 (decisão do dono de 18/11/2026, #805): o caminho no alto de toda página, as rotas das páginas novas e os
+// endereços de antes.
+describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", () => {
+  const SEM = { quantidade: 0, criticas: 0, breves: 0, alem_do_prazo: 0 };
+  const entrar = (perfil: string, permissoes = permissoesDe(perfil)) => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Pessoa Exemplo", email: "p@lotufo.com", perfil, permissoes, csrf: "x" };
+    if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
+    if (caminho === "/api/inicio") return { avisos: [] };
+    if (caminho === "/api/contratos") return [{ ...OBRA, contratante_chave: "sinfra" }];
+    if (caminho === "/api/documentos") return (await import("./documentosTeste")).PAINEL;
+    if (caminho === "/api/siga") return { lido_em: null, atrasado: false, processos: [], pode_atualizar: false,
+      robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, ...SIGA_SEM_PROCESSO };
+    if (caminho.startsWith("/api/medicoes/fila")) {
+      return { hoje: "2026-11-07", mes: "2026-11", obras: [], limites: { dias_atencao: 5, dias_critico: 10, diferenca_critica_por_mil: 5 },
+        numeros: { com: { lotufo: SEM, faturamento: SEM, orgao: SEM }, concluidas: 0, sem_medicao: 0, pedido_centavos: null, aprovado_centavos: null,
+          aprovado_com_pedido_centavos: null, pedido_do_aprovado_centavos: null, abaixo_do_pedido_centavos: null },
+        grupos: [], concluidas: [], sem_medicao: [], quadro: [],
+        anteriores: { linhas: [], esperam_pagamento: 0, antes_do_ano_inicial: 0, ano_inicial: "2025" } };
+    }
+    if (caminho === "/api/health" || caminho.startsWith("/api/correio/respostas")) return [];
+    // #816: a página Em aberto sem nada em aberto, com a SINFRA na fileira (contrato ativo), com zero
+    if (caminho === "/api/a-receber") {
+      return { anos: ["2025", "2026"], total_a_receber_liberado: true, em_aberto_centavos: 0, por_ano: { 2025: 0, 2026: 0 },
+        quantidade: 0, alem_do_prazo: 0, notas_sem_medicao: [], notas_sem_medicao_centavos: 0, anteriores: { quantidade: 0, valor_centavos: 0 },
+        contratantes: [{ contratante: "SINFRA", chave: "sinfra", prazo_orgao_dias: null, quantidade: 0, em_aberto_centavos: 0,
+          por_ano: { 2025: 0, 2026: 0 }, alem_do_prazo: 0, linhas: [], notas_sem_medicao: [], notas_sem_medicao_centavos: 0,
+          anteriores: { quantidade: 0, valor_centavos: 0 } }] };
+    }
+    // o que a página pedir além disso falha: ela mostra a falha de leitura dela, e a casca continua de pé
+    throw new Error("sem dado neste teste");
+  });
+  beforeEach(() => { try { localStorage.clear(); } catch { /* sem armazenamento: o menu abre largo */ } });
+  afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
+
+  // a barra do topo (as páginas de detalhe têm o próprio <header>, que não é ela)
+  const topo = () => document.querySelector<HTMLElement>("header.topo")!;
+  const caminho = () => within(topo()).getByRole("navigation", { name: "Você está em" });
+  const trechos = () => [...caminho().querySelectorAll("li")].map(li => li.textContent);
+  const aceso = () => within(screen.getByRole("navigation", { name: "Navegação principal" })).getAllByRole("link")
+    .filter(l => l.getAttribute("aria-current") === "page").map(l => l.textContent);
+  const endereco = () => window.location.pathname + window.location.search;
+
+  it("/a-receber abre a página Em aberto, com o caminho, o título e o estado vazio; o item fica aceso", async () => {
+    entrar("diretoria");
+    window.history.replaceState(null, "", "/a-receber");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Em aberto" })).toBeTruthy();
+    expect(trechos()).toEqual(["Financeiro", "Em aberto"]);
+    expect(within(caminho()).getByRole("link", { name: "Financeiro" }).getAttribute("href")).toBe("/fechamento");
+    expect(await screen.findByText("Nenhuma nota em aberto.")).toBeTruthy();
+    expect(endereco()).toBe("/a-receber");                    // da #748 até aqui o endereço levava ao Fechamento
+    expect(aceso()).toEqual(["Em aberto"]);
+    expect(document.title).toBe("Em aberto · grupolotufo");
+  });
+
+  it("/a-receber?contratante= mostra só o contratante do endereço, pela chave da página dele em Obras (#816)", async () => {
+    entrar("admin");
+    window.history.replaceState(null, "", "/a-receber?contratante=sinfra");
+    render(<App />);
+    expect(await screen.findByText("Nenhuma nota em aberto de SINFRA.")).toBeTruthy();
+    expect(endereco()).toBe("/a-receber?contratante=sinfra");
+    await act(async () => { fireEvent.click(screen.getByRole("link", { name: "Ver todos os contratantes" })); });
+    expect(endereco()).toBe("/a-receber");
+    expect(screen.getByText("Nenhuma nota em aberto.")).toBeTruthy();
+  });
+
+  it("Documentos tem três endereços, cada um com a página acesa, o caminho e o título dele", async () => {
+    entrar("diretoria");
+    window.history.replaceState(null, "", "/documentos/garantias");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Garantias" })).toBeTruthy();
+    expect(trechos()).toEqual(["Documentos", "Garantias"]);
+    expect(aceso()).toEqual(["Garantias"]);
+    expect(document.title).toBe("Garantias · Documentos · grupolotufo");
+    await screen.findAllByRole("region", { name: /^Garantias de / });
+    // do menu para a Regularidade mensal: outro endereço, outra página acesa
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole("navigation", { name: "Navegação principal" })).getByRole("link", { name: "Regularidade mensal" }));
+    });
+    expect(endereco()).toBe("/documentos/regularidade");
+    expect(await screen.findByRole("list", { name: "Regularidade mensal por empresa" })).toBeTruthy();
+    expect(trechos()).toEqual(["Documentos", "Regularidade mensal"]);
+    expect(aceso()).toEqual(["Regularidade mensal"]);
+    // e pelo trecho da área, de volta à primeira página dela
+    await act(async () => { fireEvent.click(within(caminho()).getByRole("link", { name: "Documentos" })); });
+    expect(endereco()).toBe("/documentos");
+    expect(await screen.findByRole("heading", { level: 1, name: "Certidões" })).toBeTruthy();
+    expect(aceso()).toEqual(["Certidões"]);
+  });
+
+  it("o link salvo da tela antiga /documentos?empresa=N abre a página da empresa (o App troca, ao lado do ?aba=)", async () => {
+    entrar("engenharia");
+    window.history.replaceState(null, "", "/documentos?empresa=3#emp-3");
+    render(<App />);
+    await waitFor(() => expect(endereco()).toBe("/documentos/3"));
+    expect(window.location.hash).toBe("");
+    await waitFor(() => expect(trechos()).toEqual(["Documentos", "Certidões", "Beta Ltda"]));
+    expect(aceso()).toEqual(["Certidões"]);
+    // número que não é de empresa: fica a página Certidões
+    cleanup();
+    window.history.replaceState(null, "", "/documentos?empresa=abc");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Certidões" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/documentos");
+  });
+
+  it.each([
+    ["/documentos?aba=regularidade", "/documentos/regularidade", "Regularidade mensal"],
+    ["/documentos?aba=garantias", "/documentos/garantias", "Garantias"],
+    ["/documentos?aba=certidoes", "/documentos", "Certidões"],
+    ["/documentos/certidoes", "/documentos", "Certidões"],
+    ["/certidoes", "/documentos", "Certidões"],
+  ])("o endereço de antes %s abre %s", async (antigo, novo, titulo) => {
+    entrar("engenharia");
+    window.history.replaceState(null, "", antigo);
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: titulo })).toBeTruthy();
+    expect(endereco()).toBe(novo);
+    expect(aceso()).toEqual([titulo]);
+  });
+
+  it("a página do contratante diz o nome ao caminho do topo quando a lista chega; a obra não ganha trilha na página", async () => {
+    entrar("diretoria");
+    window.history.replaceState(null, "", "/obras/contratante/sinfra");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
+    await waitFor(() => expect(trechos()).toEqual(["Obras", "SINFRA"]));
+    expect(within(caminho()).getByRole("link", { name: "Obras" }).getAttribute("href")).toBe("/obras");
+    expect(within(topo()).queryByRole("heading")).toBeNull();                            // o h1 é o da página
+    expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);  // uma trilha só, a do topo
+    expect(aceso()).toEqual(["Obras"]);
+  });
+
+  it.each([["medicoes", "Medições"], ["a-receber", "Em aberto"], ["siga", "Processos no SIGA"]])(
+    "a aba %s do contratante abre na página (#818): o endereço fica e a aba entra no caminho", async (aba, nome) => {
+      entrar("engenharia");
+      window.history.replaceState(null, "", `/obras/contratante/sinfra/${aba}`);
+      render(<App />);
+      await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
+      await waitFor(() => expect(trechos()).toEqual(["Obras", "SINFRA", nome]));
+      await act(async () => {});
+      expect(endereco()).toBe(`/obras/contratante/sinfra/${aba}`);
+      const abas = screen.getByRole("navigation", { name: "Seções de SINFRA" });
+      expect(within(abas).getAllByRole("link").filter(l => l.getAttribute("aria-current") === "page").map(l => l.getAttribute("href")))
+        .toEqual([`/obras/contratante/sinfra/${aba}`]);
+    });
+
+  it("a aba Avisos do contratante já tem endereço; enquanto a página não a desenha, ele abre a página", async () => {
+    const aba = "avisos";
+    entrar("engenharia");
+    window.history.replaceState(null, "", `/obras/contratante/sinfra/${aba}?situacao=todas`);
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
+    await waitFor(() => expect(endereco()).toBe("/obras/contratante/sinfra?situacao=todas"));
+    // e fica lá: a troca do endereço não briga com a do endereço canônico
+    await act(async () => {});
+    expect(endereco()).toBe("/obras/contratante/sinfra?situacao=todas");
+    expect(trechos()).toEqual(["Obras", "SINFRA"]);
+  });
+
+  it("a aba do SIGA do contratante segue a tela SIGA: quem não tem `ver_siga` cai na página do contratante (#829)", async () => {
+    entrar("diretoria", ["ver_paineis"]);
+    window.history.replaceState(null, "", "/obras/contratante/sinfra/siga");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
+    await waitFor(() => expect(endereco()).toBe("/obras/contratante/sinfra"));
+    expect(api).not.toHaveBeenCalledWith("/api/siga");
+    // #818: nem o dado da aba (que o servidor nega a ela)
+    expect(api.mock.calls.some(c => String(c[0]).endsWith("/siga"))).toBe(false);
+  });
+
+  it("a diretoria abre a aba do SIGA do contratante (#829: só leitura)", async () => {
+    entrar("diretoria");
+    window.history.replaceState(null, "", "/obras/contratante/sinfra/siga");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/contratantes/sinfra/siga"));
+    expect(endereco()).toBe("/obras/contratante/sinfra/siga");
+  });
+
+  it("a vista entra no caminho como último trecho, e no título da aba do navegador", async () => {
+    entrar("engenharia");
+    window.history.replaceState(null, "", "/medicoes/quadro");
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Quadro do mês" })).toBeTruthy();
+    expect(trechos()).toEqual(["Medições", "Quadro do mês"]);
+    expect(within(topo()).getByRole("heading", { level: 1 }).textContent).toBe("Medições");
+    expect(document.title).toBe("Medições · Quadro do mês · grupolotufo");
+    await act(async () => { fireEvent.click(within(caminho()).getByRole("link", { name: "Medições" })); });
+    expect(endereco()).toBe("/medicoes");
+    expect(trechos()).toEqual(["Medições"]);
+  });
+
+  it("as abas do Fechamento entram no caminho e no título; a de comparação com os anos que a página diz", async () => {
+    // sem lançamento: só os anos importam aqui
+    const FECHAMENTO = { anos: ["2025", "2026"], meses: [], por_ano: {}, acumulado: { ate_mes: null }, em_aberto: [],
+      em_aberto_anteriores: { quantidade: 0, valor_centavos: 0 },
+      notas_sem_medicao: { em_aberto: [], em_aberto_centavos: 0, pagas: { quantidade: 0, valor_centavos: 0 } },
+      cobertura: {}, total_a_receber_liberado: true };
+    entrar("diretoria");
+    const resto = api.getMockImplementation()!;
+    api.mockImplementation(async (c: string) => (c === "/api/fechamento" ? FECHAMENTO : resto(c)));
+    window.history.replaceState(null, "", "/fechamento/comparacao");
+    render(<App />);
+    await waitFor(() => expect(trechos()).toEqual(["Financeiro", "Fechamento", "2026 × 2025"]));
+    expect(document.title).toBe("Fechamento · 2026 × 2025 · grupolotufo");
+    expect(within(topo()).getByRole("heading", { level: 1 }).textContent).toBe("Fechamento");
+    expect(within(caminho()).getByRole("link", { name: "Fechamento" }).getAttribute("href")).toBe("/fechamento");
+    // pela aba da página, a outra vista
+    await act(async () => { fireEvent.click(screen.getByRole("link", { name: "Por contratante" })); });
+    expect(endereco()).toBe("/fechamento/contratantes");
+    await waitFor(() => expect(trechos()).toEqual(["Financeiro", "Fechamento", "Por contratante"]));
+    expect(document.title).toBe("Fechamento · Por contratante · grupolotufo");
+    // e pelo trecho da página, a vista padrão, que não entra no caminho
+    await act(async () => { fireEvent.click(within(caminho()).getByRole("link", { name: "Fechamento" })); });
+    expect(endereco()).toBe("/fechamento");
+    await waitFor(() => expect(trechos()).toEqual(["Financeiro", "Fechamento"]));
+    expect(document.title).toBe("Fechamento · grupolotufo");
+  });
+
+  it.each([
+    ["/inicio", ["Painel", "Início"]],
+    ["/resumo-medicoes", ["Medições", "Resumo das medições"]],
+    ["/obras", ["Obras"]],
+    ["/fechamento", ["Financeiro", "Fechamento"]],
+    ["/avisos", ["Prazos e avisos", "Avisos"]],
+    ["/siga", ["Órgãos", "SIGA"]],
+    ["/ancoras-docusign", ["Sistema", "Âncoras DocuSign"]],
+    ["/admin", ["Sistema", "Administração"]],
+    ["/admin/usuarios", ["Sistema", "Administração", "Usuários"]],
+    ["/conta", ["Sistema", "Minha conta"]],
+  ])("toda página tem o caminho no alto: %s", async (url, esperado) => {
+    entrar("admin");
+    window.history.replaceState(null, "", url);
+    render(<App />);
+    await screen.findByRole("navigation", { name: "Navegação principal" });
+    await waitFor(() => expect(trechos()).toEqual(esperado));
+    expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);
+    // o trecho da página é o título da barra (o h1); onde a página tem o dela (o Início e Obras) ele fica na letra dos
+    // outros trechos, sem a classe do título (19/11/2026)
+    const titulo = topo().querySelector(".caminho__trecho--titulo");
+    if (url === "/inicio" || url === "/obras") {
+      expect(titulo).toBeNull();
+    } else {
+      expect(titulo!.textContent).toBe(esperado[esperado.length - 1] === "Usuários" ? "Administração" : esperado[esperado.length - 1]);
+      expect(titulo!.querySelector("h1")).not.toBeNull();
+    }
+  });
+
+  it("a Minha conta entra pelo menu (área Sistema) e pelo avatar, e fica acesa", async () => {
+    entrar("diretoria");
+    window.history.replaceState(null, "", "/conta");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Minha conta" })).toBeTruthy();
+    expect(aceso()).toEqual(["Minha conta"]);
+    const nav = screen.getByRole("navigation", { name: "Navegação principal" });
+    expect([...nav.querySelectorAll(".menu__area--acesa .menu__area-nome")].map(n => n.textContent)).toEqual(["Sistema"]);
+    // a diretoria não ganhou nada da área Sistema além da própria conta
+    expect(within(within(nav).getByRole("list", { name: "Sistema" })).getAllByRole("link").map(l => l.textContent)).toEqual(["Minha conta"]);
   });
 });

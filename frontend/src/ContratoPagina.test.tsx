@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import Caminho from "./Caminho";
 import ContratoPagina from "./ContratoPagina";
 import type { Usuario } from "./Login";
 
@@ -118,23 +119,64 @@ describe("Página da obra: o desenho novo", () => {
     await waitFor(() => expect(document.title).toBe("Hospital · Prazos · grupolotufo"));
   });
 
-  it("há um link para voltar a todas as obras; vindo da lista filtrada, ele volta com os filtros (#646)", async () => {
+  // #805: o servidor manda a sigla do contratante e a chave da página dele no cabeçalho da obra
+  const doContratante = () => {
     responderCompleto();
+    const base = api.getMockImplementation()!;
+    api.mockImplementation(async (url: string, opcoes?: { method?: string }) =>
+      url.endsWith("/cabecalho") ? { ...CABECALHO_COMPLETO, contratante: "SES-MT", contratante_chave: "ses-mt" } : base(url, opcoes));
+  };
+  const voltar = () => document.querySelector<HTMLAnchorElement>(".topbar__trilha > a.btn--voltar")!;
+
+  it("#805: o voltar sobe um nível, para a página do contratante; vindo de uma vista de Obras, volta a ela com os filtros", async () => {
+    doContratante();
     const { unmount } = render(<ContratoPagina contratoId={1} usuario={usuario} aba="ficha" origem={null} busca={{}} />);
-    expect(screen.getByRole("link", { name: "Todas as obras" }).getAttribute("href")).toBe("/obras");
+    await screen.findByRole("heading", { level: 1, name: "Hospital" });
+    expect([voltar().textContent!.trim(), voltar().getAttribute("href")]).toEqual(["SES-MT", "/obras/contratante/ses-mt"]);
     unmount();
-    render(<ContratoPagina contratoId={1} usuario={usuario} aba="contrato" origem={{ tela: "obras", href: "/obras?orgao=SES" }} busca={{}} />);
-    expect(screen.getByRole("link", { name: "Todas as obras" }).getAttribute("href")).toBe("/obras?orgao=SES");
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="contrato" origem={{ tela: "obras", href: "/obras/todas?q=hosp" }} busca={{}} />);
+    await screen.findByRole("heading", { level: 1, name: "Hospital" });
+    expect([voltar().textContent!.trim(), voltar().getAttribute("href")]).toEqual(["Obras", "/obras/todas?q=hosp"]);
+    cleanup();
+    // da página do contratante com as encerradas à vista: volta a ela como estava, e o caminho também
+    const origem = { tela: "contratante" as const, href: "/obras/contratante/ses-mt?situacao=todas" };
+    render(<><Caminho rota={{ tela: "obra", id: 1, aba: "ficha" }} origem={origem} ehH1={false} />
+      <ContratoPagina contratoId={1} usuario={usuario} aba="ficha" origem={origem} busca={{}} /></>);
+    await screen.findByRole("heading", { level: 1, name: "Hospital" });
+    expect([voltar().textContent!.trim(), voltar().getAttribute("href")]).toEqual(["SES-MT", "/obras/contratante/ses-mt?situacao=todas"]);
+    expect(document.querySelectorAll(".topbar__trilha > a.btn--voltar")).toHaveLength(1);      // sem um segundo "voltar" para o mesmo lugar
+    const caminho = screen.getByRole("navigation", { name: "Você está em" });
+    // o nome do contratante chega ao caminho pelo efeito da página, depois do h1 (#862): espera
+    expect((await within(caminho).findByRole("link", { name: "SES-MT" })).getAttribute("href")).toBe("/obras/contratante/ses-mt?situacao=todas");
   });
 
-  it("o caminho traz o contratante e o cabeçalho de quem tem 100% não fala de cota", async () => {
-    responderCompleto();
-    render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+  // o caminho é da barra do topo (#814): aqui ele entra ao lado da página, como a casca o desenha, com os nomes que
+  // a página diz quando o cabeçalho da obra chega
+  it("#805: o caminho é Obras › contratante › obra, com a aba; o cabeçalho de quem tem 100% não fala de cota", async () => {
+    doContratante();
+    render(<><Caminho rota={{ tela: "obra", id: 1, aba: "medicoes" }} ehH1={false} />
+      <ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} /></>);
     await screen.findByRole("heading", { level: 1, name: "Hospital" });
     expect(document.querySelector(".topbar__meta")!.textContent).toBe("SES · Contrato CT 1/2026");
     const caminho = screen.getByRole("navigation", { name: "Você está em" });
+    await waitFor(() => expect([...caminho.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Obras", "SES-MT", "Hospital", "Medições"]));
     expect(within(caminho).getByRole("link", { name: "Obras" }).getAttribute("href")).toBe("/obras");
-    expect(within(caminho).getByRole("link", { name: "SES" }).getAttribute("href")).toBe("/obras?orgao=SES");
+    expect(within(caminho).getByRole("link", { name: "SES-MT" }).getAttribute("href")).toBe("/obras/contratante/ses-mt");
+    expect(within(caminho).getByRole("link", { name: "Hospital" }).getAttribute("href")).toBe("/obras/1");
+    // a página não desenha trilha própria: a única é a da barra do topo
+    expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);
+    expect(document.querySelector(".topbar .caminho")).toBeNull();
+  });
+
+  it("obra sem órgão no cadastro: o caminho diz o órgão sem link e o voltar leva a Obras", async () => {
+    responderCompleto();       // o cabeçalho sem `contratante_chave`
+    render(<><Caminho rota={{ tela: "obra", id: 1, aba: "ficha" }} ehH1={false} />
+      <ContratoPagina contratoId={1} usuario={usuario} aba="ficha" origem={null} busca={{}} /></>);
+    await screen.findByRole("heading", { level: 1, name: "Hospital" });
+    expect([voltar().textContent!.trim(), voltar().getAttribute("href")]).toEqual(["Obras", "/obras"]);
+    const caminho = screen.getByRole("navigation", { name: "Você está em" });
+    await waitFor(() => expect([...caminho.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Obras", "SES", "Hospital"]));
+    expect(within(caminho).queryByRole("link", { name: "SES" })).toBeNull();
   });
 
   it("em consórcio, o cabeçalho diz a cota uma vez: é a base dos números do resumo (#646)", async () => {

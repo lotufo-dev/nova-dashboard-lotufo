@@ -99,10 +99,19 @@ def test_painel_do_inicio(client_admin):
     assert r.status_code == 200
     # #699: so' o que a tela le; as chaves dos cartoes antigos (notas a enviar, certidoes, reajustes, recebido no ano,
     # prazos, espelhos) sairam
+    # #817: mais o ciclo por contratante e o medido em 12 meses. 19/11/2026 (#805): a matriz foi para o Resumo das
+    # medicoes (GET /api/resumo-medicoes/matriz)
     assert set(r.json()) == {"hoje", "protocoladas", "medido", "a_receber", "ciclo", "notas_mes",
-                             "recebido_12m", "previsao", "matriz"}
+                             "recebido_12m", "previsao", "ciclo_por_contratante", "medido_12m"}
+    # a obra criada sem orgao do cadastro: sem pagina de contratante (chave nula)
+    assert [(x["contratante"], x["chave"]) for x in r.json()["ciclo_por_contratante"]] == [("sem órgão", None)]
+    assert len(r.json()["medido_12m"]) == 12
     assert [e["etapa"] for e in r.json()["ciclo"]] == ["em_analise", "boletim", "nota", "protocolado", "recebido_mes"]
     assert r.json()["protocoladas"]["obras_ativas"] == 1
+    # #805: os dois numeros do alto saem com as referencias da variacao (nulas quando nao ha' com o que comparar)
+    # 19/11/2026 (#805): o medido do alto e' a conta do Fechamento; `quantidade` e `ultimo_lancamento` sairam
+    assert set(r.json()["medido"]) == {"competencia", "valor_centavos", "anterior", "ano_anterior"}
+    assert set(r.json()["notas_mes"]) == {"mes", "valor_centavos", "notas", "obras", "anterior"}
 
 
 def test_faixa_do_ciclo_e_a_mesma_para_admin_diretoria_e_engenharia(client_admin):
@@ -124,6 +133,29 @@ def test_faixa_do_ciclo_e_a_mesma_para_admin_diretoria_e_engenharia(client_admin
 
 def test_painel_do_inicio_exige_login(client):
     assert client.get("/api/inicio/painel").status_code == 401
+    assert client.get("/api/resumo-medicoes/matriz").status_code == 401
+
+
+def test_matriz_do_resumo_das_medicoes_para_quem_via_a_inicio(client_admin):
+    """19/11/2026 (decisao do dono, #805): a matriz obra por competencia (#659) saiu do painel da Inicio para o Resumo
+    das medicoes. O publico e' o mesmo das duas paginas (`ver_paineis`: admin, diretoria e engenharia), e a resposta e'
+    a mesma para os tres."""
+    from app import auth, db
+    _obra(client_admin)
+    r = client_admin.get("/api/resumo-medicoes/matriz")
+    assert r.status_code == 200
+    assert set(r.json()) == {"competencias", "grupos"} and len(r.json()["competencias"]) == 12
+    assert [(g["contratante"], len(g["obras"])) for g in r.json()["grupos"]] == [("sem órgão", 1)]
+    matriz = r.json()
+    c = db.get_conn()
+    for perfil in ("diretoria", "engenharia"):
+        auth.criar_usuario(c, perfil.capitalize(), f"{perfil}@lotufo.com", "senha-forte-123", perfil)
+    c.close()
+    for perfil in ("diretoria", "engenharia"):
+        r = client_admin.post("/api/auth/login", json={"email": f"{perfil}@lotufo.com", "senha": "senha-forte-123"})
+        client_admin.cookies.set("sessao", r.cookies.get("sessao") or client_admin.cookies.get("sessao"))
+        assert client_admin.get("/api/resumo-medicoes/matriz").json() == matriz
+        assert client_admin.get("/api/resumo-medicoes").status_code == 200
 
 
 def test_obras_ativas_tem_uma_definicao_nas_tres_rotas(client_admin):

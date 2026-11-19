@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from app import db, inicio, tempo
+from app import db, inicio, resumo_medicoes, tempo
 
 D = datetime.date
 HOJE = D(2026, 10, 9)
@@ -37,9 +37,9 @@ def _medicao(c, cid, numero, criado_em, valor, estado="espelho_gerado", competen
 
 
 def test_medido_da_ultima_competencia_fechada(cenario):
-    # B-01 (10/10/2026): a regra da Carteira -- competencia, valor cheio, mes inteiro. 06/11/2026: o mes do cartao e' a
-    # ULTIMA COMPETENCIA FECHADA (em outubro, setembro), porque a medicao de um mes so' e' lancada no seguinte.
-    # #642: a comparacao com o mes anterior e as barras por contratante sairam da tela e do calculo
+    # 06/11/2026: o mes do numero e' a ULTIMA COMPETENCIA FECHADA (em outubro, setembro), porque a medicao de um mes so'
+    # e' lancada no seguinte. Decisao do dono de 19/11/2026 (#805): a conta e' a do Fechamento, na cota, pela
+    # competencia da medicao, qualquer que seja o dia do lancamento
     c, cid = cenario
     _medicao(c, cid, 1, "2026-10-05 12:00:00", 1_000_000, competencia="2026-09")
     _medicao(c, cid, 2, "2026-10-08 12:00:00", 5, competencia="2026-09")
@@ -47,33 +47,106 @@ def test_medido_da_ultima_competencia_fechada(cenario):
     _medicao(c, cid, 4, "2026-09-28 12:00:00", 999, competencia="2026-08")
     _medicao(c, cid, 5, "2026-10-02 12:00:00", 777, estado="cancelada", competencia="2026-09")
     _medicao(c, cid, 6, "2026-10-09 12:00:00", 50_000, competencia="2026-08")  # lancada hoje, competencia passada
-    _medicao(c, cid, 7, "2026-10-09 13:00:00", 3, competencia="2025-09")       # carga do legado lancada hoje: fora
-    _medicao(c, cid, 8, "2026-10-09 14:00:00", 9, competencia="2026-10")       # o mes corrente nao entra no cartao
+    _medicao(c, cid, 7, "2026-10-09 13:00:00", 3, competencia="2025-09")       # a mesma competencia do ano anterior
+    _medicao(c, cid, 8, "2026-10-09 14:00:00", 9, competencia="2026-10")       # o mes corrente nao entra no numero
     p = inicio.painel(c, HOJE)
-    m = p["medido"]
-    assert m == {"competencia": "2026-09", "valor_centavos": 1_000_005, "quantidade": 2, "ultimo_lancamento": "2026-10-09"}
+    # #805: as duas referencias da variacao, cada uma com a mesma conta do numero; sem `quantidade` e
+    # `ultimo_lancamento`, que nenhuma tela lia
+    assert p["medido"] == {"competencia": "2026-09", "valor_centavos": 1_000_005,
+                           "anterior": {"competencia": "2026-08", "valor_centavos": 450_999},
+                           "ano_anterior": {"competencia": "2025-09", "valor_centavos": 3}}
     assert "por_contratante" not in p and "protocolado_mes" not in p
+
+
+def test_medido_do_alto_e_o_ponto_do_grafico_e_o_mes_do_fechamento(cenario):
+    """Decisao do dono de 19/11/2026 (#805): uma definicao so'. O numero do alto, o ponto do grafico de 12 meses
+    daquela competencia e o medido do mes na pagina Fechamento sao o mesmo valor. Consorcio com centavo impar (a cota
+    arredonda medicao a medicao), o aprovado no lugar do pedido, e as que nao medem (cancelada, prevista, planilha so'
+    gerada) fora dos tres."""
+    from app import fechamento
+    c, cid = cenario
+    c.execute("UPDATE contratos SET percentual_direito_bp=3333 WHERE id=?", (cid,))
+    outra = _obra_de(c, "sinfra_a", "SINFRA - SUEF II", "sinfra", "CT 3/2025")
+    _medicao(c, cid, 1, "2026-10-05 12:00:00", 100_001, competencia="2026-09")                     # 33.330,33 -> 33.330
+    _medicao(c, cid, 2, "2026-10-05 12:00:00", 200_003, estado="recebida", competencia="2026-09")  # 66.661,0 -> 66.661
+    m3 = _medicao(c, cid, 3, "2026-10-05 12:00:00", 999_999, competencia="2026-09")
+    c.execute("UPDATE medicoes SET valor_atestado_centavos=300_007 WHERE id=?", (m3,))             # aprovado: 99.992
+    _medicao(c, outra, 4, "2026-10-06 12:00:00", 70_007, estado="protocolada", competencia="2026-09")
+    for n, estado in ((5, "cancelada"), (6, "prevista"), (7, "planilha_gerada")):
+        _medicao(c, outra, n, "2026-10-06 12:00:00", 5_000_000, estado=estado, competencia="2026-09")
+    c.commit()
+    esperado = 33_330 + 66_661 + 99_992 + 70_007
+    p = inicio.painel(c, HOJE)
+    do_fechamento = {x["competencia"]: x["medido_centavos"] for x in fechamento.fechamento(c, HOJE)["meses"]}
+    assert p["medido"]["competencia"] == p["medido_12m"][-1]["competencia"] == "2026-09"
+    assert p["medido"]["valor_centavos"] == p["medido_12m"][-1]["valor_centavos"] == do_fechamento["2026-09"] == esperado
+
+
+def test_referencias_do_medido_so_com_lastro(cenario):
+    # #805: sem medicao na competencia de referencia nao ha' com o que comparar, e a referencia vem nula; a
+    # cancelada nao conta na referencia, como nao conta no numero
+    c, cid = cenario
+    _medicao(c, cid, 1, "2026-10-05 12:00:00", 300_001, competencia="2026-09")
+    _medicao(c, cid, 2, "2026-09-05 12:00:00", 999, estado="cancelada", competencia="2026-08")
+    m = inicio.painel(c, HOJE)["medido"]
+    assert (m["valor_centavos"], m["anterior"], m["ano_anterior"]) == (300_001, None, None)
+
+
+def test_referencias_do_medido_sao_as_do_fechamento(cenario):
+    # #805: as referencias sao a mesma conta do numero, entao fecham com o medido daquele mes no Fechamento
+    from app import fechamento
+    c, cid = cenario
+    c.execute("UPDATE contratos SET percentual_direito_bp=5000 WHERE id=?", (cid,))
+    _medicao(c, cid, 1, "2026-10-05 12:00:00", 400_001, competencia="2026-09")
+    _medicao(c, cid, 2, "2026-09-05 12:00:00", 200_003, competencia="2026-08")
+    _medicao(c, cid, 3, "2025-10-05 12:00:00", 100_005, estado="recebida", competencia="2025-09")
+    m = inicio.painel(c, HOJE)["medido"]
+    do_fechamento = {x["competencia"]: x["medido_centavos"] for x in fechamento.fechamento(c, HOJE)["meses"]}
+    assert m["anterior"] == {"competencia": "2026-08", "valor_centavos": do_fechamento["2026-08"]}
+    assert m["ano_anterior"] == {"competencia": "2025-09", "valor_centavos": do_fechamento["2025-09"]}
+    assert (m["valor_centavos"], m["anterior"]["valor_centavos"], m["ano_anterior"]["valor_centavos"]) == (
+        200_001, 100_002, 50_003)
+
+
+def test_referencia_do_medido_anterior_ao_ano_inicial_fica_nula(cenario):
+    # #805: as telas da diretoria contam de `diretoria.ANO_INICIAL` em diante. Em fevereiro de 2026 o numero e' de
+    # janeiro: a competencia anterior (12/2025) compara, e a do ano anterior (01/2025) tambem; em fevereiro de 2025, o
+    # numero e' de janeiro de 2025 e as duas referencias (12/2024 e 01/2024) ficam fora, mesmo com medicao lancada
+    c, cid = cenario
+    _medicao(c, cid, 1, "2025-01-10 12:00:00", 70_001, competencia="2024-12")
+    _medicao(c, cid, 2, "2025-02-05 12:00:00", 80_001, competencia="2025-01")
+    _medicao(c, cid, 3, "2024-02-05 12:00:00", 60_001, competencia="2024-01")
+    _medicao(c, cid, 4, "2026-01-05 12:00:00", 90_001, competencia="2025-12")
+    _medicao(c, cid, 5, "2026-02-05 12:00:00", 100_001, competencia="2026-01")
+    m = inicio.painel(c, D(2025, 2, 10))["medido"]
+    assert (m["competencia"], m["valor_centavos"], m["anterior"], m["ano_anterior"]) == ("2025-01", 80_001, None, None)
+    m = inicio.painel(c, D(2026, 2, 10))["medido"]
+    assert m["anterior"] == {"competencia": "2025-12", "valor_centavos": 90_001}
+    assert m["ano_anterior"] == {"competencia": "2025-01", "valor_centavos": 80_001}
 
 
 def test_mes_sem_medicao_da_competencia(cenario):
     c, cid = cenario
     _medicao(c, cid, 1, "2026-08-30 12:00:00", 10, competencia="2026-08")
     m = inicio.painel(c, HOJE)["medido"]
-    assert (m["quantidade"], m["valor_centavos"], m["ultimo_lancamento"]) == (0, 0, "2026-08-30")
+    assert (m["competencia"], m["valor_centavos"], m["anterior"]) == (
+        "2026-09", 0, {"competencia": "2026-08", "valor_centavos": 10})
 
 
-def test_nota_do_rm_sem_medicao_lancada_entra_no_medido_do_inicio(cenario):
-    # 06/11/2026: a competencia sem medicao lancada vale pela nota do RM emitida no mes seguinte (valor cheio)
+def test_nota_do_rm_sem_medicao_lancada_nao_entra_mais_no_medido_do_inicio(cenario):
+    # Decisao do dono de 19/11/2026 (#805): o numero do alto e' a conta do Fechamento, que nao tem a nota do RM sem
+    # medicao lancada (o complemento de `diretoria.complemento_rm`, B-01, entrava ate' entao). Nem no numero, nem na
+    # referencia: em novembro, o numero e' de outubro e a competencia anterior (setembro) so' tem a nota do RM
     c, cid = cenario
-    _medicao(c, cid, 1, "2026-09-03 12:00:00", 400_000, competencia="2026-08")
+    _medicao(c, cid, 1, "2026-11-03 12:00:00", 500_001, competencia="2026-10")
     col = c.execute("SELECT e.coligada_rm FROM contratos k JOIN entidades e ON e.id=COALESCE(k.entidade_id, 1) WHERE k.id=?",
                     (cid,)).fetchone()[0]
     c.execute("UPDATE contratos SET centro_custo_rm='9.001.002' WHERE id=?", (cid,))
     c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo, codtmv) "
               "VALUES (?, 501, '501', '2026-10-06', 700001, 'ativa', '9.001.002', '2.2.01')", (col,))
     c.commit()
-    p = inicio.painel(c, HOJE)
-    assert p["medido"]["valor_centavos"] == 700_001
+    m = inicio.painel(c, D(2026, 11, 18))["medido"]
+    assert (m["valor_centavos"], m["anterior"]) == (500_001, None)
 
 
 def test_a_receber_so_com_total_liberado_e_na_cota(cenario):
@@ -133,7 +206,67 @@ def test_notas_protocoladas_no_mes_contam_notas_e_obras_distintas(cenario):
               "VALUES (?, ?, 1, 'manual', '2026-10-07')", (m1, nota[4]))   # alocacao desfeita nao conta
     c.commit()
     n = inicio.painel(c, HOJE)["notas_mes"]
-    assert n == {"mes": "2026-10", "valor_centavos": 7_000, "notas": 2, "obras": 2}
+    # #805: hoje e' dia 9; a medicao protocolada em 20/09 fica depois do dia 9 de setembro, entao nao ha' referencia
+    assert n == {"mes": "2026-10", "valor_centavos": 7_000, "notas": 2, "obras": 2, "anterior": None}
+
+
+def _nota_da_medicao(c, mid, idmov, valor, situacao="ativa"):
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, codtmv) "
+                    "VALUES (1, ?, ?, '2026-09-01', ?, ?, '2.2.01')", (idmov, str(idmov), valor, situacao)).lastrowid
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem) VALUES (?, ?, 1, 'manual')",
+              (mid, nid))
+    c.commit()
+    return nid
+
+
+def test_notas_do_mes_anterior_ate_o_mesmo_dia(cenario):
+    # #805: a referencia das notas protocoladas no mes e' o mes anterior ATE' O MESMO DIA (hoje e' dia 9: de 1 a 9 de
+    # setembro, o dia 9 incluido), com a mesma conta do numero: nota ativa, cada nota uma vez, reprotocolo nao conta
+    c, cid = cenario
+    ate_o_dia = _medicao(c, cid, 1, "2026-09-01 10:00:00", 100, estado="protocolada")
+    no_dia = _medicao(c, cid, 2, "2026-09-01 10:00:00", 100, estado="protocolada")
+    depois = _medicao(c, cid, 3, "2026-09-01 10:00:00", 100, estado="protocolada")
+    reprotocolada = _medicao(c, cid, 4, "2026-08-01 10:00:00", 100, estado="protocolada")
+    do_mes = _medicao(c, cid, 5, "2026-10-01 10:00:00", 100, estado="protocolada")
+    for m, d in ((ate_o_dia, "2026-09-03"), (no_dia, "2026-09-09"), (depois, "2026-09-10"),
+                 (reprotocolada, "2026-08-20"), (reprotocolada, "2026-09-05"),      # a primeira data e' de agosto
+                 (do_mes, "2026-10-02")):
+        _protocolar(c, m, d)
+    partilhada = _nota_da_medicao(c, ate_o_dia, 1, 300_001)
+    c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem) VALUES (?, ?, 1, 'manual')",
+              (no_dia, partilhada))                                               # a mesma nota: conta uma vez
+    _nota_da_medicao(c, no_dia, 2, 200_002)
+    _nota_da_medicao(c, no_dia, 3, 999, situacao="cancelada")
+    _nota_da_medicao(c, depois, 4, 70_000)
+    _nota_da_medicao(c, reprotocolada, 5, 60_000)
+    _nota_da_medicao(c, do_mes, 6, 400_003)
+    n = inicio.painel(c, HOJE)["notas_mes"]
+    assert (n["valor_centavos"], n["anterior"]) == (400_003, {"mes": "2026-09", "ate_dia": 9, "valor_centavos": 500_003})
+
+
+def test_notas_do_mes_anterior_quando_ele_nao_tem_o_dia_de_hoje(cenario):
+    # #805: em 31 de marco, fevereiro vai ate' o ultimo dia dele (28 em 2026), e a resposta diz o dia usado
+    c, cid = cenario
+    fim = _medicao(c, cid, 1, "2026-02-01 10:00:00", 100, estado="protocolada")
+    _protocolar(c, fim, "2026-02-28")
+    _nota_da_medicao(c, fim, 1, 150_001)
+    n = inicio.painel(c, D(2026, 3, 31))["notas_mes"]
+    assert n["anterior"] == {"mes": "2026-02", "ate_dia": 28, "valor_centavos": 150_001}
+    assert inicio.painel(c, D(2026, 3, 27))["notas_mes"]["anterior"] is None      # dia 27: o protocolo do dia 28 fica fora
+    # em 30 de marco de 2028 (bissexto), fevereiro vai ate' o dia 29
+    bissexto = _medicao(c, cid, 2, "2028-02-01 10:00:00", 100, estado="protocolada")
+    _protocolar(c, bissexto, "2028-02-29")
+    _nota_da_medicao(c, bissexto, 2, 90_001)
+    assert inicio.painel(c, D(2028, 3, 30))["notas_mes"]["anterior"] == {"mes": "2028-02", "ate_dia": 29, "valor_centavos": 90_001}
+
+
+def test_notas_do_mes_anterior_antes_do_ano_inicial_ficam_sem_referencia(cenario):
+    # #805: em janeiro de 2025 o mes anterior e' dezembro de 2024, antes de `diretoria.ANO_INICIAL`
+    c, cid = cenario
+    velha = _medicao(c, cid, 1, "2024-12-01 10:00:00", 100, estado="protocolada")
+    _protocolar(c, velha, "2024-12-05")
+    _nota_da_medicao(c, velha, 1, 150_001)
+    assert inicio.painel(c, D(2025, 1, 20))["notas_mes"]["anterior"] is None
 
 
 def test_painel_sem_as_chaves_que_nenhuma_tela_le(cenario):
@@ -141,8 +274,10 @@ def test_painel_sem_as_chaves_que_nenhuma_tela_le(cenario):
     c, _ = cenario
     p = inicio.painel(c, HOJE)
     assert not {"notas_a_enviar", "certidoes", "reajustes", "recebido_ano", "prazos", "espelhos"} & set(p)
-    assert set(p) == {"hoje", "protocoladas", "medido", "a_receber", "ciclo", "recebido_12m", "previsao", "matriz",
-                      "notas_mes"}
+    # #817: o ciclo por contratante e o medido em 12 meses, que a tela mostra. 19/11/2026 (#805): a matriz foi para o
+    # Resumo das medicoes
+    assert set(p) == {"hoje", "protocoladas", "medido", "a_receber", "ciclo", "recebido_12m", "previsao",
+                      "notas_mes", "ciclo_por_contratante", "medido_12m"}
 
 
 def test_painel_nao_monta_mais_a_caixa_de_avisos(cenario):
@@ -465,7 +600,9 @@ def test_previsao_na_cota_da_lotufo_com_centavo_impar(cenario):
     assert _etapas(c)["protocolado"][0] == 100_002
 
 
-# --- matriz obra por competencia (#659): a etapa da medicao de cada mes, obra a obra ---
+# --- matriz obra por competencia (#659): a etapa da medicao de cada mes, obra a obra. Desde 19/11/2026 (decisao do
+# dono, #805) mora no Resumo das medicoes (`resumo_medicoes.matriz`), com a mesma conta; os casos ficam aqui, ao lado
+# da previsao de entrada, cuja regra do atrasado ela segue ---
 
 def _na_matriz(c, cid, numero, estado, competencia, tipo="execucao", protocolo=None):
     c.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos, criado_em) "
@@ -478,7 +615,7 @@ def _na_matriz(c, cid, numero, estado, competencia, tipo="execucao", protocolo=N
 
 
 def _matriz(c, hoje=HOJE):
-    return inicio.painel(c, hoje)["matriz"]
+    return resumo_medicoes.matriz(c, hoje)
 
 
 def _celulas(c, cid, hoje=HOJE):
@@ -552,3 +689,141 @@ def test_matriz_protocolada_alem_do_prazo_do_contratante_e_atrasada_como_na_prev
     assert _celulas(c, sem) == {"2026-07": ("protocolado", sem_prazo)}
     # a mesma regra da previsao de entrada: as atrasadas da matriz sao as da linha "Atrasado"
     assert inicio.painel(c, HOJE)["previsao"]["atrasado"]["quantidade"] == 2
+
+
+# --- issue #817: ciclo por contratante e medido em 12 meses ---
+
+ETAPAS_DO_CICLO = ("em_analise", "boletim", "nota", "protocolado")
+
+
+def _liberar_a_receber(c):
+    c.execute("INSERT INTO cadastro_geral (chave, valor) VALUES ('diretoria', ?)",
+              (json.dumps({"total_a_receber_liberado": True}),))
+    c.commit()
+
+
+def _por_contratante(p):
+    return {x["contratante"]: tuple(x[f"{e}_centavos"] for e in ETAPAS_DO_CICLO) + (x["a_receber_centavos"],)
+            for x in p["ciclo_por_contratante"]}
+
+
+def _fecha_com_a_faixa(p):
+    """Em cada etapa, a soma dos contratantes e' o numero da faixa do ciclo; a do a receber, o total do a receber."""
+    faixa = {e["etapa"]: e["valor_centavos"] for e in p["ciclo"]}
+    for etapa in ETAPAS_DO_CICLO:
+        assert sum(x[f"{etapa}_centavos"] for x in p["ciclo_por_contratante"]) == faixa[etapa], etapa
+    if p["a_receber"]["liberado"]:
+        assert sum(x["a_receber_centavos"] for x in p["ciclo_por_contratante"]) == p["a_receber"]["valor_centavos"]
+    else:
+        assert all(x["a_receber_centavos"] is None for x in p["ciclo_por_contratante"])
+
+
+def test_ciclo_por_contratante_fecha_com_a_faixa_em_cada_etapa_e_com_o_a_receber(cenario):
+    """A soma por contratante, em cada etapa, e' o total que o Inicio ja' mostra; a do a receber e' o total dele. Cota
+    com centavo impar em consorcio (50% e um terco), a SINFRA numa linha so', medicao sem a data do evento, pendencia
+    a' parte e nota do RM sem medicao."""
+    from app import diretoria
+    c, mtpar = cenario
+    c.execute("UPDATE contratos SET percentual_direito_bp=5000 WHERE id=?", (mtpar,))
+    suef = _obra_de(c, "sinfra_a", "SINFRA - SUEF II", "sinfra", "CT 3/2025")
+    supu = _obra_de(c, "sinfra_b", "SINFRA - SUPU (Pavimentação Urbana)", "sinfra", "CT 4/2025")
+    alfa = _obra_de(c, "prefeitura_alfa", "Prefeitura Alfa", "prefeitura", "CT 2/2025")
+    c.execute("UPDATE contratos SET percentual_direito_bp=3333 WHERE id=?", (alfa,))
+    c.execute("UPDATE contratos SET centro_custo_rm='9.001.003' WHERE id=?", (supu,))
+    _liberar_a_receber(c)
+    # em analise: duas no consorcio a 50% (100.001 -> 50.001 cada: 100.002, e nao a cota da soma) e uma na SINFRA
+    _no_ciclo(c, mtpar, 1, "planilha_enviada", 100_001, planilha_enviada_em="2026-10-08")
+    _no_ciclo(c, mtpar, 2, "planilha_enviada", 100_001, planilha_enviada_em="2026-10-07")
+    _no_ciclo(c, suef, 3, "planilha_enviada", 70_007, planilha_enviada_em="2026-10-01")
+    _no_ciclo(c, supu, 4, "planilha_enviada", 999)                                     # sem a data do envio: fora
+    # boletim: so' na Prefeitura Alfa, a um terco (100.000 x 33,33% = 33.330)
+    _no_ciclo(c, alfa, 5, "espelho_gerado", 999_999, aprovado=100_000, atestado_em="2026-10-02")
+    # nota: as duas superintendencias da SINFRA somam numa linha
+    _no_ciclo(c, suef, 6, "nota_emitida", 9, aprovado=20_001, nota_emitida_em="2026-10-03")
+    _no_ciclo(c, supu, 7, "nota_emitida", 9, aprovado=30_002, nota_emitida_em="2026-10-04")
+    # protocolado: uma com a data do protocolo em cada contratante; a sem data fica fora da etapa e dentro do a receber
+    _protocolada(c, mtpar, 8, "2026-09-10", 300_003)                                   # 150.001,5 -> 150.002
+    _protocolada(c, supu, 9, "2026-09-11", 40_000)
+    _protocolada(c, alfa, 10, None, 90_000)                                            # 90.000 x 33,33% = 29.997
+    # a' parte (competencia anterior a 2025): fora da etapa, do a receber e da linha do contratante
+    velha = _medicao(c, suef, 11, "2024-12-20 10:00:00", 555_555, estado="protocolada", competencia="2024-11")
+    _protocolar(c, velha, "2024-12-22")
+    # nota do RM em aberto sem medicao, na obra da SUPU pelo centro de custo: entra so' no a receber
+    col = c.execute("SELECT e.coligada_rm FROM contratos k JOIN entidades e ON e.id=COALESCE(k.entidade_id, 1) WHERE k.id=?",
+                    (supu,)).fetchone()[0]
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo, "
+                    "codtmv) VALUES (?, 71, '71', '2026-09-05', 60001, 'ativa', '9.001.003', '2.2.01')", (col,)).lastrowid
+    c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
+              "status_lan) VALUES (?, 71, ?, 71, 60001, 0, 0)", (col, nid))
+    c.commit()
+    p = inicio.painel(c, HOJE)
+    _fecha_com_a_faixa(p)
+    assert {e["etapa"]: e["valor_centavos"] for e in p["ciclo"]} == {
+        "em_analise": 170_009, "boletim": 33_330, "nota": 50_003, "protocolado": 190_002, "recebido_mes": 0}
+    assert p["a_receber"]["valor_centavos"] == 150_002 + 40_000 + 60_001 + 29_997
+    assert p["a_receber"]["a_parte"]["anterior_centavos"] == 555_555
+    #                                         em analise, boletim, nota, protocolado, a receber
+    assert _por_contratante(p) == {"SINFRA": (70_007, 0, 50_003, 40_000, 100_001),
+                                   "MTPAR": (100_002, 0, 0, 150_002, 150_002),
+                                   "Prefeitura Alfa": (0, 33_330, 0, 0, 29_997)}
+    # do que tem mais dinheiro nas quatro etapas para o que tem menos; a chave e' a da pagina do contratante
+    assert [(x["contratante"], x["chave"]) for x in p["ciclo_por_contratante"]] == [
+        ("MTPAR", "mtpar"), ("SINFRA", "sinfra"), ("Prefeitura Alfa", "prefeitura_alfa")]
+    assert {x["chave"] for x in p["ciclo_por_contratante"]} == {
+        diretoria.contratante_da_obra(c, cid)["contratante_chave"] for cid in (mtpar, suef, supu, alfa)}
+
+
+def test_ciclo_por_contratante_sem_o_total_liberado_nao_traz_o_a_receber(cenario):
+    c, cid = cenario
+    _no_ciclo(c, cid, 1, "planilha_enviada", 1_001, planilha_enviada_em="2026-10-08")
+    _protocolada(c, cid, 2, "2026-09-10", 2_003)
+    p = inicio.painel(c, HOJE)
+    assert p["a_receber"]["liberado"] is False
+    _fecha_com_a_faixa(p)
+    assert _por_contratante(p) == {"MTPAR": (1_001, 0, 0, 2_003, None)}
+
+
+def test_ciclo_por_contratante_vazio_sem_medicao_e_obra_sem_orgao_sem_chave(cenario):
+    c, _ = cenario
+    _liberar_a_receber(c)
+    assert inicio.painel(c, HOJE)["ciclo_por_contratante"] == []
+    c.execute("INSERT INTO contratos (orgao, numero_instrumento, nome_curto, objeto, valor_original_centavos) "
+              "VALUES ('texto livre', 'CT 9/2025', 'Obra sem órgão', 'obra', 100)")
+    solta = c.execute("SELECT MAX(id) FROM contratos").fetchone()[0]
+    _no_ciclo(c, solta, 1, "planilha_enviada", 4_004, planilha_enviada_em="2026-10-08")
+    p = inicio.painel(c, HOJE)
+    _fecha_com_a_faixa(p)
+    assert p["ciclo_por_contratante"] == [{"contratante": "sem órgão", "chave": None, "em_analise_centavos": 4_004,
+                                           "boletim_centavos": 0, "nota_centavos": 0, "protocolado_centavos": 0,
+                                           "a_receber_centavos": 0}]
+
+
+def test_medido_12_meses_sao_as_competencias_fechadas_com_a_conta_do_fechamento(cenario):
+    """A serie do medido e' a do Fechamento, competencia a competencia, na cota: as 12 ultimas fechadas (as da matriz),
+    sem o mes de hoje. Consorcio com centavo impar; cancelada, prevista e planilha so' gerada nao medem."""
+    from app import fechamento
+    c, cid = cenario
+    c.execute("UPDATE contratos SET percentual_direito_bp=5000 WHERE id=?", (cid,))
+    propria = _obra_de(c, "sinfra_a", "SINFRA - SUEF II", "sinfra", "CT 3/2025")
+    _no_ciclo(c, cid, 1, "planilha_enviada", 100_001)                       # so' o pedido: 50.001 na cota
+    _no_ciclo(c, cid, 2, "espelho_gerado", 999_999, aprovado=100_001)       # o aprovado vale: mais 50.001
+    _no_ciclo(c, propria, 3, "recebida", 7_007)
+    for numero, estado in ((4, "cancelada"), (5, "prevista"), (6, "planilha_gerada")):
+        _no_ciclo(c, propria, numero, estado, 1_000_000)
+    _medicao(c, propria, 7, "2025-11-05 10:00:00", 30_003, estado="recebida", competencia="2025-10")
+    _medicao(c, propria, 8, "2025-10-05 10:00:00", 9_999, estado="recebida", competencia="2025-09")   # 13a para tras
+    _medicao(c, propria, 9, "2026-10-08 10:00:00", 8_888, estado="planilha_enviada", competencia="2026-10")  # mes de hoje
+    p = inicio.painel(c, HOJE)
+    serie = p["medido_12m"]
+    assert [x["competencia"] for x in serie] == resumo_medicoes.matriz(c, HOJE)["competencias"]
+    assert (serie[0]["competencia"], serie[-1]["competencia"]) == ("2025-10", "2026-09")
+    do_fechamento = {m["competencia"]: m["medido_centavos"] for m in fechamento.fechamento(c, HOJE)["meses"]}
+    assert do_fechamento["2026-10"] == 8_888 and do_fechamento["2025-09"] == 9_999       # o Fechamento os tem; a serie nao
+    assert {x["competencia"]: x["valor_centavos"] for x in serie} == {
+        x["competencia"]: do_fechamento.get(x["competencia"], 0) for x in serie}
+    valores = {x["competencia"]: x["valor_centavos"] for x in serie}
+    assert valores["2026-09"] == 50_001 + 50_001 + 7_007 and valores["2025-10"] == 30_003
+    assert sum(valores.values()) == 137_012 and valores["2026-08"] == 0
+    # decisao do dono de 19/11/2026 (#805): o numero do alto e' o ultimo ponto da serie, tambem em consorcio
+    assert p["medido"]["valor_centavos"] == valores["2026-09"]
+

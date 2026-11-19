@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buscaDosAvisosEmObras, caminhoDe, hrefDe, origemPara, parseRota, substituir, type Rota } from "./rota";
+import { buscaDosAvisos, caminhoDe, hrefDe, origemPara, parseRota, substituir, type Rota } from "./rota";
 
 describe("rota", () => {
   it("toda rota tem um caminho canônico e volta igual", () => {
     const rotas: Rota[] = [
       { tela: "inicio" }, { tela: "medicoes" }, { tela: "resumo-medicoes" }, { tela: "fechamento" }, { tela: "obras" },
-      { tela: "obras", aba: "resumo" }, { tela: "obras", aba: "qdop" },
+      { tela: "obras", aba: "todas" }, { tela: "obras", aba: "andamento" }, { tela: "obras", aba: "qdop" },
+      { tela: "contratante", chave: "sinfra" }, { tela: "contratante", chave: "pref-cuiaba" },
       { tela: "documentos" }, { tela: "admin" }, { tela: "conta" }, { tela: "avisos" }, { tela: "siga" },
       { tela: "obra", id: 7, aba: "ficha" },
       { tela: "medicao", obra: 7, id: 723 },
@@ -36,21 +37,40 @@ describe("rota", () => {
     expect(parseRota("/contratos")).toEqual({ tela: "obras" });
     expect(parseRota("/contratos/7")).toEqual({ tela: "obra", id: 7, aba: "ficha" });
     expect(parseRota("/contratos/7/prazos")).toEqual({ tela: "obra", id: 7, aba: "prazos" });
-    expect(parseRota("/diretoria")).toEqual({ tela: "obras", aba: "resumo" });
-    expect(parseRota("/painel")).toEqual({ tela: "obras", aba: "resumo" });
+    // #805: o Resumo da Carteira (os totais por contratante) e' a vista "Por contratante", a entrada de Obras
+    expect(parseRota("/diretoria")).toEqual({ tela: "obras" });
+    expect(parseRota("/painel")).toEqual({ tela: "obras" });
     expect(parseRota("/certidoes")).toEqual({ tela: "documentos" });
     expect(caminhoDe(parseRota("/contratos/7/prazos"))).toBe("/obras/7/prazos");
   });
 
-  it("A receber e Carteira saíram (#748): os links antigos abrem o Fechamento ou a vista de Obras que as absorveu", () => {
-    expect(parseRota("/a-receber")).toEqual({ tela: "fechamento" });
-    expect(parseRota("/carteira")).toEqual({ tela: "obras", aba: "resumo" });
-    expect(parseRota("/carteira/resumo")).toEqual({ tela: "obras", aba: "resumo" });
+  it("a Carteira saiu (#748): os links antigos abrem o Fechamento ou a vista de Obras que a absorveu", () => {
+    expect(parseRota("/carteira")).toEqual({ tela: "obras" });
+    expect(parseRota("/carteira/resumo")).toEqual({ tela: "obras" });
     expect(parseRota("/carteira/qdop")).toEqual({ tela: "obras", aba: "qdop" });
     expect(parseRota("/carteira/producao")).toEqual({ tela: "fechamento" });
     expect(parseRota("/carteira/custo")).toEqual({ tela: "obras" });
     expect(caminhoDe(parseRota("/carteira/qdop"))).toBe("/obras/qdop");
     expect(parseRota("/obras/x")).toEqual({ tela: "raiz" });
+  });
+
+  it("Obras em níveis (#805): as quatro vistas, a página do contratante e os endereços de antes", () => {
+    expect(caminhoDe({ tela: "obras" })).toBe("/obras");                                  // "Por contratante", a entrada
+    expect(caminhoDe({ tela: "obras", aba: "todas" })).toBe("/obras/todas");
+    expect(caminhoDe({ tela: "obras", aba: "andamento" })).toBe("/obras/andamento");
+    expect(caminhoDe({ tela: "contratante", chave: "sinfra" })).toBe("/obras/contratante/sinfra");
+    expect(parseRota("/obras/contratante/pref-cuiaba")).toEqual({ tela: "contratante", chave: "pref-cuiaba" });
+    // a Posição era a tabela de todas as obras; o Resumo, os totais por contratante
+    expect(parseRota("/obras/posicao")).toEqual({ tela: "obras", aba: "todas" });
+    expect(caminhoDe(parseRota("/obras/posicao"))).toBe("/obras/todas");
+    expect(parseRota("/obras/resumo")).toEqual({ tela: "obras" });
+    // sem chave, com chave que não é chave ou com sobra no caminho: caminho desconhecido
+    for (const c of ["/obras/contratante", "/obras/contratante/", "/obras/contratante/a%20b", "/obras/contratante/sinfra/x", "/obras/todas/x"]) {
+      expect(parseRota(c)).toEqual({ tela: "raiz" });
+    }
+    // a página do contratante não é detalhe com origem: a obra aberta a partir dela guarda a página como origem
+    expect(origemPara({ tela: "contratante", chave: "sinfra" }, "/obras/contratante/sinfra", { tela: "obra", id: 7, aba: "ficha" }, undefined))
+      .toEqual({ tela: "contratante", href: "/obras/contratante/sinfra" });
   });
 
   it("as telas que saíram no bloco 9 caem na entrada do perfil", () => {
@@ -71,23 +91,34 @@ describe("rota", () => {
     expect(caminhoDe({ tela: "obra", id: 7, aba: "medicoes" })).toBe("/obras/7/medicoes");
     expect(parseRota("/obras/7")).toEqual({ tela: "obra", id: 7, aba: "ficha" });
     expect(parseRota("/obras/7/medicoes")).toEqual({ tela: "obra", id: 7, aba: "medicoes" });
-    expect(caminhoDe({ tela: "obras", aba: "posicao" })).toBe("/obras");
-    expect(parseRota("/obras/posicao")).toEqual({ tela: "obras" });
+    expect(caminhoDe({ tela: "obras", aba: "contratantes" })).toBe("/obras");
+    expect(parseRota("/obras/contratantes")).toEqual({ tela: "obras" });
     expect(caminhoDe({ tela: "obras", aba: "qdop" })).toBe("/obras/qdop");
     expect(parseRota("/admin/saude")).toEqual({ tela: "admin" });
     expect(hrefDe({ tela: "documentos" }, { pendentes: "1", vazio: "" }, "emp-3")).toBe("/documentos?pendentes=1#emp-3");
     expect(hrefDe({ tela: "avisos" }, { familia: "prazo", obra: "7" })).toBe("/avisos?familia=prazo&obra=7");
   });
 
-  it("Medições é uma tela só, o quadro do mês; Iniciar medição e Em andamento levam a ela (#643)", () => {
+  it("Medições abre na fila de trabalho; Iniciar medição e Em andamento levam a ela (#643, #805)", () => {
     expect(caminhoDe({ tela: "medicoes" })).toBe("/medicoes");
     expect(parseRota("/medicoes")).toEqual({ tela: "medicoes" });
     expect(parseRota("/medicoes/iniciar")).toEqual({ tela: "medicoes" });
     expect(parseRota("/medicoes/em-andamento")).toEqual({ tela: "medicoes" });
-    for (const c of ["/medicoes/x", "/medicoes/enviar-nota/1", "/medicoes/em-andamento/1"]) expect(parseRota(c)).toEqual({ tela: "raiz" });
+    for (const c of ["/medicoes/x", "/medicoes/enviar-nota/1", "/medicoes/em-andamento/1", "/medicoes/quadro/1"]) expect(parseRota(c)).toEqual({ tela: "raiz" });
   });
 
-  it("as abas antigas de Medições levam ao quadro", () => {
+  it("as vistas de Medições têm endereço: o quadro do mês e os meses anteriores; a fila é a padrão e não entra na URL (#805)", () => {
+    expect(parseRota("/medicoes/quadro")).toEqual({ tela: "medicoes", aba: "quadro" });
+    expect(parseRota("/medicoes/anteriores")).toEqual({ tela: "medicoes", aba: "anteriores" });
+    expect(caminhoDe({ tela: "medicoes", aba: "quadro" })).toBe("/medicoes/quadro");
+    expect(caminhoDe({ tela: "medicoes", aba: "anteriores" })).toBe("/medicoes/anteriores");
+    expect(parseRota("/medicoes/fila")).toEqual({ tela: "medicoes" });
+    expect(caminhoDe({ tela: "medicoes", aba: "fila" })).toBe("/medicoes");
+    // a competência vai na busca, em qualquer vista
+    expect(hrefDe({ tela: "medicoes", aba: "quadro" }, { mes: "2026-09" })).toBe("/medicoes/quadro?mes=2026-09");
+  });
+
+  it("as abas antigas de Medições levam à fila", () => {
     for (const a of ["resumo", "sem-medicao", "planilha-gerada", "planilha-enviada", "boletim-recebido", "faturamento",
       "aguardando-nota", "enviar-nota", "aguardando-pagamento"]) {
       expect(parseRota(`/medicoes/${a}`)).toEqual({ tela: "medicoes" });
@@ -117,15 +148,79 @@ describe("rota", () => {
     expect(origemPara(obra, "/obras/7", { tela: "documentos" }, vinda)).toBeUndefined();
   });
 
-  it("/avisos abre Obras com os Avisos abertos, de todas as obras, mantendo os filtros do link (#159)", () => {
+  it("/avisos é a página Avisos; o endereço de antes (/obras?avisos=1) leva para ela com os filtros equivalentes (#805)", () => {
     expect(parseRota("/avisos")).toEqual({ tela: "avisos" });
-    expect(buscaDosAvisosEmObras({})).toEqual({ c: "todas", avisos: "1" });
-    expect(buscaDosAvisosEmObras({ obra: "7", familia: "prazos" })).toEqual({ c: "todas", avisos: "1", obra: "7", familia: "prazos" });
-    window.history.replaceState(null, "", "/avisos?obra=7#x");
-    substituir({ tela: "obras" }, { busca: buscaDosAvisosEmObras({ obra: "7" }) });
-    expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe("/obras?c=todas&avisos=1&obra=7#x");
+    expect(caminhoDe({ tela: "avisos" })).toBe("/avisos");
+    // `c=todas` era o padrão; `avisos`, `nivel`, `agrupar` e os filtros da lista de Obras ficam para trás
+    expect(buscaDosAvisos({ c: "todas", avisos: "1" })).toEqual({});
+    expect(buscaDosAvisos({ c: "todas", avisos: "1", obra: "7", familia: "prazos", nivel: "critico", agrupar: "obra", q: "granito" }))
+      .toEqual({ familia: "prazos", obra: "7" });
+    // o contratante do link continua valendo, também no `?orgao=` mais antigo
+    expect(buscaDosAvisos({ c: "SINFRA", avisos: "1" })).toEqual({ c: "SINFRA" });
+    expect(buscaDosAvisos({ orgao: "SINFRA - SUEF II", avisos: "1" })).toEqual({ c: "SINFRA - SUEF II" });
+    window.history.replaceState(null, "", "/obras?c=todas&avisos=1&obra=7#x");
+    substituir({ tela: "avisos" }, { busca: buscaDosAvisos({ c: "todas", avisos: "1", obra: "7" }) });
+    expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe("/avisos?obra=7#x");
     window.history.replaceState(null, "", "/contratos?q=x");
     substituir({ tela: "obras" });
     expect(window.location.pathname + window.location.search).toBe("/obras?q=x");
+  });
+});
+
+// As rotas que nasceram com o menu em áreas (#814): A receber, as três páginas de Documentos e as abas do contratante.
+describe("rota: as páginas novas do menu em áreas (#814)", () => {
+  it("cada rota nova tem um caminho canônico e volta igual", () => {
+    const rotas: Rota[] = [
+      { tela: "a-receber" },
+      { tela: "documentos" }, { tela: "documentos", pagina: "regularidade" }, { tela: "documentos", pagina: "garantias" },
+      { tela: "contratante", chave: "sinfra", aba: "medicoes" }, { tela: "contratante", chave: "sinfra", aba: "a-receber" },
+      { tela: "contratante", chave: "sinfra", aba: "siga" }, { tela: "contratante", chave: "pref-cuiaba", aba: "avisos" },
+    ];
+    for (const r of rotas) expect(parseRota(caminhoDe(r))).toEqual(r);
+  });
+
+  it("A receber voltou a ser página (/a-receber); o contratante vai na busca", () => {
+    expect(parseRota("/a-receber")).toEqual({ tela: "a-receber" });      // da #748 até aqui o endereço abria o Fechamento
+    expect(caminhoDe({ tela: "a-receber" })).toBe("/a-receber");
+    expect(hrefDe({ tela: "a-receber" }, { contratante: "SINFRA" })).toBe("/a-receber?contratante=SINFRA");
+    expect(parseRota("/a-receber/x")).toEqual({ tela: "raiz" });
+    // o Fechamento continua no endereço dele
+    expect(parseRota("/fechamento")).toEqual({ tela: "fechamento" });
+  });
+
+  it("Documentos tem três endereços; as Certidões ficam no que a tela sempre teve (/documentos)", () => {
+    expect(caminhoDe({ tela: "documentos" })).toBe("/documentos");
+    expect(caminhoDe({ tela: "documentos", pagina: "certidoes" })).toBe("/documentos");
+    expect(caminhoDe({ tela: "documentos", pagina: "regularidade" })).toBe("/documentos/regularidade");
+    expect(caminhoDe({ tela: "documentos", pagina: "garantias" })).toBe("/documentos/garantias");
+    expect(parseRota("/documentos")).toEqual({ tela: "documentos" });
+    expect(parseRota("/documentos/regularidade")).toEqual({ tela: "documentos", pagina: "regularidade" });
+    expect(parseRota("/documentos/garantias")).toEqual({ tela: "documentos", pagina: "garantias" });
+    // "/documentos/certidoes" e o "/certidoes" de antes abrem as Certidões, e a URL vira a canônica
+    expect(parseRota("/documentos/certidoes")).toEqual({ tela: "documentos" });
+    expect(caminhoDe(parseRota("/documentos/certidoes"))).toBe("/documentos");
+    expect(caminhoDe(parseRota("/certidoes"))).toBe("/documentos");
+    // a página da empresa continua no endereço dela ("garantia", no singular, é a aba da empresa)
+    expect(parseRota("/documentos/3")).toEqual({ tela: "documentos-empresa", id: 3 });
+    expect(parseRota("/documentos/3/garantia")).toEqual({ tela: "documentos-empresa", id: 3, aba: "garantia" });
+    for (const c of ["/documentos/garantia", "/documentos/outra", "/documentos/garantias/x", "/documentos/certidoes/3"]) {
+      expect(parseRota(c)).toEqual({ tela: "raiz" });
+    }
+  });
+
+  it("as abas da página do contratante têm endereço; Obras é a padrão e não entra na URL", () => {
+    expect(caminhoDe({ tela: "contratante", chave: "sinfra", aba: "medicoes" })).toBe("/obras/contratante/sinfra/medicoes");
+    expect(caminhoDe({ tela: "contratante", chave: "sinfra", aba: "a-receber" })).toBe("/obras/contratante/sinfra/a-receber");
+    expect(caminhoDe({ tela: "contratante", chave: "sinfra", aba: "siga" })).toBe("/obras/contratante/sinfra/siga");
+    expect(caminhoDe({ tela: "contratante", chave: "sinfra", aba: "avisos" })).toBe("/obras/contratante/sinfra/avisos");
+    expect(caminhoDe({ tela: "contratante", chave: "sinfra", aba: "obras" })).toBe("/obras/contratante/sinfra");
+    expect(parseRota("/obras/contratante/sinfra/obras")).toEqual({ tela: "contratante", chave: "sinfra" });
+    expect(parseRota("/obras/contratante/sinfra/siga")).toEqual({ tela: "contratante", chave: "sinfra", aba: "siga" });
+    for (const c of ["/obras/contratante/sinfra/outra", "/obras/contratante/sinfra/medicoes/x", "/obras/contratante/a%20b/medicoes"]) {
+      expect(parseRota(c)).toEqual({ tela: "raiz" });
+    }
+    // a aba não muda de quem a obra aberta guarda a origem: a página do contratante, como estava
+    expect(origemPara({ tela: "contratante", chave: "sinfra", aba: "medicoes" }, "/obras/contratante/sinfra/medicoes",
+      { tela: "medicao", obra: 7, id: 1 }, undefined)).toEqual({ tela: "contratante", href: "/obras/contratante/sinfra/medicoes" });
   });
 });

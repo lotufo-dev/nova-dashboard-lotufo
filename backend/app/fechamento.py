@@ -75,10 +75,44 @@ recebido, nem na falta.
 
 So' aparece o que tem lancamento: mes sem medicao nao vira linha, e nada e' estimado. O em aberto de competencias
 anteriores a 2025 fica contado a' parte.
+
+Familias de valor (issue #805, decisao do dono de 18/11/2026): a tela mostra a variacao do medido e a diferenca entre
+o aprovado e o pedido, e as duas referencias saem daqui, prontas:
+- Diferenca aprovado x pedido: `aprovado_com_pedido_centavos` e `pedido_do_aprovado_centavos`, na cota, somados so'
+  das medicoes que tem o valor do boletim gravado E o pedido (`_linha_medicao`). A medicao ainda em analise nao entra:
+  nela nao ha' diferenca, ha' etapa nao alcancada, e somar o pedido dela faria o mes parecer aprovado a menor. A
+  medicao com nota emitida e sem o valor do boletim (o pedido conta como aprovado, `_aprovado`) tambem nao: nao ha'
+  dois valores para comparar. Por isso a diferenca NAO e' medido - aprovado. Os dois numeros somam como os outros
+  (medicao, obra, mes, ano) e sao a base do percentual. O limite que separa a diferenca pequena da critica vai em
+  `diferenca_critica_por_mil` e e' o do aviso "aprovado abaixo do pedido" (`avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL`,
+  issue #741): um numero so'.
+  O que a tela mostra como diferenca do mes, da obra e do ano e' so' o CORTE: `abaixo_do_pedido_centavos`, a soma de
+  (pedido - aprovado), na cota, das medicoes com o aprovado ABAIXO do pedido; tambem soma como os outros. O aprovado
+  ACIMA do pedido nao entra nessa soma (revisao da PR #806 sobre a copia da producao): quase sempre e' pedido gravado
+  errado, e somado no mes anulava o corte real de outra obra. Ele sai so' na linha da medicao
+  (`acima_do_pedido_centavos`), onde se confere o pedido (issue #807).
+  Diferenca de ate' `TOLERANCIA_DO_PEDIDO_CENTAVOS` por medicao, no valor cheio, e' arredondamento do orgao (decisao
+  do dono de 10/11/2026) e conta como igual: nao entra no corte nem no acima.
+- Variacao do medido: `medido_ano_anterior_centavos`, em cada mes, e' o medido do mesmo mes do ano anterior. So' nos
+  meses de competencia ja' encerrada (anteriores ao mes de hoje: o mes em curso ainda recebe medicao) e so' quando o
+  ano anterior esta' na pagina e teve medido nesse mes; senao, nulo.
+
+Por contratante (issue #815, decisao do dono de 18/11/2026): `por_contratante`, por ano, uma linha por contratante com
+os mesmos numeros do ano (`SOMAS`). Nao ha' conta nova: cada medicao da pagina e' de UM contrato, e o contrato de UM
+contratante (`_contratantes`: a sigla da lista de Obras, a SINFRA inteira num grupo so'), entao a linha do contratante
+e' a soma das MESMAS linhas de medicao (`_linha_medicao`) que somam a obra, o mes e o ano, no mesmo laco. Por isso as
+linhas de um ano somam o total do ano (`por_ano`) em toda coluna, ao centavo: a nota de consorcio e a nota partilhada
+entre medicoes ja' entraram uma vez so' na linha da medicao. A participacao (`participacao_medido_por_mil`) e' a do
+medido do contratante no medido do ano, em milesimos, repartida por `dinheiro.ratear_proporcional` (as linhas somam
+1000); nula quando o ano nao tem medido ou algum contratante tem medido negativo (nao ha' parte de um total assim).
+A ordem e' a do medido, o maior primeiro. Com a trava do total a receber, o recebido e o em aberto das linhas vem
+nulos, como nos outros niveis.
 """
+import datetime
 from decimal import ROUND_HALF_UP, Decimal
 
-from app import cobranca_orgao, contratos, db, diretoria, dinheiro, medicoes, notas as notas_fiscais, sincronizacao_rm
+from app import (avisos_medicao, cobranca_orgao, contratos, db, diretoria, dinheiro, medicoes, notas as notas_fiscais,
+                 sincronizacao_rm, tempo)
 
 # o primeiro ano e' `diretoria.ANO_INICIAL`: a UNICA definicao de "anterior", a mesma do a receber do Inicio (adr 0006)
 ANOS = (diretoria.ANO_INICIAL, "2026")
@@ -91,7 +125,13 @@ ESTADOS_EM_COBRANCA = ("protocolada", "nf_emitida")       # protocolada e ainda 
 NUMEROS = ("medido_centavos", "aprovado_centavos", "protocolado_centavos", "recebido_centavos", "em_aberto_centavos")
 # as tres partes que somam o em aberto: (a) `em_aberto_notas`, (a') `em_aberto_repasse` e (b) `sem_nota`
 PARTES_DO_ABERTO = ("em_aberto_notas_centavos", "em_aberto_repasse_centavos", "sem_nota_centavos")
-SOMAS = NUMEROS + PARTES_DO_ABERTO
+# issue #805: os dois lados da diferenca aprovado x pedido, so' das medicoes que tem os dois valores, e o corte (a
+# soma do que o orgao aprovou abaixo do pedido); ver o cabecalho
+COMPARAVEIS = ("aprovado_com_pedido_centavos", "pedido_do_aprovado_centavos", "abaixo_do_pedido_centavos")
+# Decisao do dono de 10/11/2026: "ate' R$ 0,05 e' arredondamento do orgao". O aprovado que difere do pedido por ate'
+# cinco centavos, no valor cheio da medicao (o valor em que o orgao arredonda), conta como igual ao pedido.
+TOLERANCIA_DO_PEDIDO_CENTAVOS = 5
+SOMAS = NUMEROS + PARTES_DO_ABERTO + COMPARAVEIS
 ESCONDIDOS = ("recebido_centavos", "em_aberto_centavos") + PARTES_DO_ABERTO                               # pela trava
 PAR = ("execucao", "reajuste")                           # os tipos que a fatura unica do consorcio cobre juntos
 
@@ -380,13 +420,78 @@ def _pares_mistos(linhas: list[dict]) -> list[dict]:
     return sorted(out, key=lambda e: (e["competencia"], e["obra"], e["contrato_id"], e["medicao_numero"], e["tipo"]))
 
 
+def medido_na_cota(m: dict) -> int:
+    """O medido de UMA medicao de `_medicoes`, na cota: o aprovado e, sem boletim, o pedido (`GLOSSARY.md`, Medido);
+    sem valor nenhum, zero. A UNICA conta do medido por competencia: a desta pagina (`_linha_medicao`) e a do "medido
+    no mes" da lista de Obras (`medido_do_mes_fechado`)."""
+    valor = m["aprovado"] if m["aprovado"] is not None else m["pedido"]
+    return (contratos.cota(valor, m["pct"]) or 0) if valor is not None else 0
+
+
+def medido_das_competencias(conn, competencias, contratos_ids=None) -> dict[str, int]:
+    """Issue #805 (Resumo das medicoes em quadro): o medido de cada competencia pedida, na cota. E' o `medido_centavos`
+    que esta pagina mostra no mes: as mesmas medicoes (`_medicoes`) e a mesma conta por medicao (`medido_na_cota`),
+    sem montar o fechamento inteiro. `contratos_ids` recorta as obras (o filtro por contratante do Resumo das
+    medicoes); sem ele, todas. Competencia sem medicao vem com zero."""
+    soma = dict.fromkeys(competencias, 0)
+    for m in _medicoes(conn):
+        if m["competencia"] in soma and (contratos_ids is None or m["contrato_id"] in contratos_ids):
+            soma[m["competencia"]] += medido_na_cota(m)
+    return soma
+
+
+def medido_do_mes_fechado(conn, hoje: datetime.date) -> dict:
+    """Issue #805 (Obras por contratante): o medido de cada obra na ultima competencia FECHADA (o mes anterior ao de
+    `hoje`; o mes em curso ainda recebe medicao, como em `_medido_do_ano_anterior`) e na competencia anterior a ela, a
+    referencia da variacao. E' o `medido_centavos` que esta pagina mostra para a obra naquele mes: as mesmas medicoes
+    (`_medicoes`) e a mesma conta por medicao (`medido_na_cota`), sem montar o fechamento inteiro (notas e titulos).
+    `referencia_competencia` e' nula quando o mes de referencia e' anterior ao primeiro ano que as telas da diretoria
+    contam (`ANOS`): nao serve de referencia. Obra sem medicao no mes fica fora de `por_obra`."""
+    mes, anterior = diretoria._mes(hoje, -1), diretoria._mes(hoje, -2)
+    por_obra: dict[str, dict[int, int]] = {mes: {}, anterior: {}}
+    for m in _medicoes(conn):
+        da_competencia = por_obra.get(m["competencia"])
+        if da_competencia is not None:
+            da_competencia[m["contrato_id"]] = da_competencia.get(m["contrato_id"], 0) + medido_na_cota(m)
+    com_referencia = anterior[:4] >= ANOS[0]
+    return {"competencia": mes, "por_obra": por_obra[mes],
+            "referencia_competencia": anterior if com_referencia else None,
+            "referencia_por_obra": por_obra[anterior] if com_referencia else {}}
+
+
+def aprovado_contra_o_pedido(estado: str, pedido: int | None, aprovado: int | None, pct: int | None = None) -> dict | None:
+    """A diferenca aprovado x pedido de UMA medicao (cabecalho, "Diferenca aprovado x pedido"), a UNICA conta dela: a
+    do Fechamento (`_linha_medicao`, na cota) e a da tela Medicoes (`fila_medicoes`, no valor cheio, sem `pct`).
+    `pedido` e `aprovado` sao o valor cheio gravado na medicao (o pedido e o valor do boletim); `pct`, a cota do
+    contrato (`percentual_direito_bp`). So' ha' o que comparar a partir do boletim (`ESTADOS_APROVADO`) e com os dois
+    valores gravados: senao, None. Devolve os tres `COMPARAVEIS` (os dois lados e o corte) e
+    `acima_do_pedido_centavos`, que nao soma em mes, obra nem ano. A tolerancia de arredondamento e' do valor cheio
+    (o do orgao); o corte e o acima saem na base pedida, como os outros numeros."""
+    if estado not in ESTADOS_APROVADO or aprovado is None or pedido is None:
+        return None
+    n = {"aprovado_com_pedido_centavos": contratos.cota(aprovado, pct) or 0,
+         "pedido_do_aprovado_centavos": contratos.cota(pedido, pct) or 0,
+         "abaixo_do_pedido_centavos": 0, "acima_do_pedido_centavos": 0}
+    falta = pedido - aprovado
+    if falta > TOLERANCIA_DO_PEDIDO_CENTAVOS:
+        n["abaixo_do_pedido_centavos"] = max(0, n["pedido_do_aprovado_centavos"] - n["aprovado_com_pedido_centavos"])
+    elif -falta > TOLERANCIA_DO_PEDIDO_CENTAVOS:
+        n["acima_do_pedido_centavos"] = max(0, n["aprovado_com_pedido_centavos"] - n["pedido_do_aprovado_centavos"])
+    return n
+
+
 def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
     cota = lambda v: contratos.cota(v, m["pct"]) or 0
     valor = m["aprovado"] if m["aprovado"] is not None else m["pedido"]
     aprovado = _aprovado(m)
     n = _zero()
-    n["medido_centavos"] = cota(valor) if valor is not None else 0
+    n["medido_centavos"] = medido_na_cota(m)
     n["aprovado_centavos"] = cota(aprovado) if aprovado is not None else 0
+    # issue #805: a diferenca aprovado x pedido so' existe com o valor do boletim gravado e o pedido; a medicao em
+    # analise e a de nota emitida sem o valor do boletim ficam fora dos dois lados
+    comparada = aprovado_contra_o_pedido(m["estado"], m["pedido"], m["aprovado"], m["pct"])
+    acima = comparada.pop("acima_do_pedido_centavos") if comparada else 0
+    n.update(comparada or {})
     ligadas, fora = _notas_da_conta(m, notas)
     saida, saida_fora = [], []
     if _cobrada(m):
@@ -411,6 +516,8 @@ def _linha_medicao(conn, m: dict, notas: list[dict]) -> dict:
     return {"medicao_id": m["id"], "contrato_id": m["contrato_id"], "obra": m["obra"], "numero": m["numero"],
             "tipo": m["tipo"], "competencia": m["competencia"],
             "protocolo_em": (m["protocolo_em"] or "")[:10] or None, **n, "notas": saida,
+            # so' na medicao (nao soma): o aprovado acima do pedido, que e' pedido a conferir, e nao corte
+            "acima_do_pedido_centavos": acima,
             # so' para a linha do em aberto (`_fechamento`): de onde a espera conta na medicao sem protocolo
             "_emitida_em": ((m["nota_emitida_em"] or "")[:10] or None) if m["sem_protocolo"] else None,
             "notas_fora_da_conta": saida_fora, "sem_nota": sem_nota,
@@ -464,19 +571,92 @@ def _cobertura(linhas: list[dict]) -> dict:
     return out
 
 
-def fechamento(conn) -> dict:
+def _contratantes(conn) -> dict[int, tuple[str, str | None]]:
+    """Issue #815: contrato -> (o contratante, a chave da pagina dele). A sigla e a chave sao as da lista de Obras
+    (`medicoes.contratante` e `diretoria.chave_do_contratante`, como em `api_contratos`): a SINFRA inteira e' um
+    contratante so', e o contrato sem orgao no cadastro fica com o texto do proprio contrato, sem chave."""
+    return {i: (o["contratante"], diretoria.chave_do_contratante(o["familia"], o["chave"]))
+            for i, o in medicoes._obras_com_contratante(conn).items()}
+
+
+def _linhas_por_contratante(grupos: dict[tuple[str, str | None], dict]) -> list[dict]:
+    """Issue #815: as linhas de um ano da aba "Por contratante", o de maior medido primeiro (empate, pelo nome), cada
+    uma com a participacao do medido dela no medido do ano, em milesimos. A reparticao e' de
+    `dinheiro.ratear_proporcional` (so' inteiros, o residuo nos maiores restos): as participacoes somam 1000. Sem
+    medido no ano, ou com medido negativo em algum contratante, a participacao vem nula."""
+    linhas = sorted(grupos.values(), key=lambda g: (-g["medido_centavos"], medicoes._chave_nome(g["contratante"]),
+                                                    g["contratante_chave"] or ""))
+    pesos = [g["medido_centavos"] for g in linhas]
+    partes = (dinheiro.ratear_proporcional(1000, pesos) if pesos and min(pesos) >= 0 and sum(pesos) > 0
+              else [None] * len(linhas))
+    for g, parte in zip(linhas, partes):
+        g["participacao_medido_por_mil"] = parte
+    return linhas
+
+
+def fechamento(conn, hoje: datetime.date | None = None) -> dict:
     with db.leitura(conn):
-        return _fechamento(conn)
+        return _fechamento(conn, hoje or tempo.hoje_local())
 
 
-def _fechamento(conn) -> dict:
+def _medido_do_ano_anterior(lista: list[dict], hoje: datetime.date) -> None:
+    """Issue #805: em cada mes, o medido do mesmo mes do ano anterior (`medido_ano_anterior_centavos`), a referencia
+    da variacao da coluna Medido. E' o proprio `medido_centavos` daquele mes, a mesma origem da tabela que compara os
+    dois anos. Nulo no mes de hoje e nos seguintes (competencia ainda aberta), e quando o ano anterior nao esta' na
+    pagina ou nao teve medido no mes."""
+    por_competencia = {m["competencia"]: m for m in lista}
+    corrente = hoje.strftime("%Y-%m")
+    for m in lista:
+        comp = m["competencia"]
+        anterior = por_competencia.get(f"{int(comp[:4]) - 1:04d}{comp[4:]}")
+        encerrada = comp < corrente
+        m["medido_ano_anterior_centavos"] = (anterior["medido_centavos"]
+                                             if encerrada and anterior and anterior["medido_centavos"] > 0 else None)
+
+
+def _linhas_das_medicoes(conn) -> list[dict]:
+    """A linha (`_linha_medicao`) de cada medicao que mede, com as notas dela: a base de toda soma desta pagina e da
+    pagina A receber (`a_receber.py`, issue #816), que le o em aberto daqui sem refazer a conta. As chaves que comecam
+    com `_` sao internas e saem antes da resposta (`_fechamento`)."""
     ms = _medicoes(conn)
     notas = _notas_por_medicao(conn, {m["id"] for m in ms})
-    linhas = [_linha_medicao(conn, m, notas.get(m["id"], [])) for m in ms]
+    return [_linha_medicao(conn, m, notas.get(m["id"], [])) for m in ms]
+
+
+def _em_aberto_da_medicao(x: dict, emitida_em: str | None) -> list[dict]:
+    """As linhas do em aberto de UMA medicao (`_linha_medicao`), a UNICA definicao delas: (a) e (a') nota a nota, pelo
+    que falta de cada nota que conta e nao esta' recebida, e (b) a medicao sem nota ligada, pelo valor dela. Cada uma
+    leva a obra, a medicao, a competencia e de quando a espera conta (`protocolo_em`; na medicao sem protocolo da obra
+    sem o passo "Envio da nota", `emitida_em`). O em aberto do Fechamento (`_fechamento`, o do ano e o anterior a
+    `ANOS`) e o da pagina A receber (issue #816) saem daqui."""
+    abertas = [{"tipo_aberto": "repasse" if nt["aguarda_repasse"] else "nota", "nota_id": nt["nota_id"], "numero": nt["numero"],
+                "valor_centavos": nt["em_aberto_centavos"], "paga_em_parte": nt["paga_em_parte"]}
+               for nt in x["notas"] if not nt["recebida"]]
+    if x["sem_nota_centavos"]:
+        abertas.append({"tipo_aberto": "sem_nota", "nota_id": None, "numero": None,
+                        "valor_centavos": x["sem_nota_centavos"], "paga_em_parte": False})
+    return [{**e, "contrato_id": x["contrato_id"], "obra": x["obra"], "medicao_id": x["medicao_id"],
+             "medicao_numero": x["numero"], "tipo": x["tipo"], "competencia": x["competencia"],
+             "protocolo_em": x["protocolo_em"], "emitida_em": emitida_em} for e in abertas]
+
+
+def ordem_do_em_aberto(e: dict) -> tuple:
+    """A ordem das linhas do em aberto: de onde a espera conta (o protocolo; sem ele, a emissao da nota), a mais antiga
+    primeiro, e a sem data no fim; depois a obra, a competencia e o numero da nota."""
+    return (e["protocolo_em"] or e["emitida_em"] or "9999", e["obra"], e["competencia"], e["numero"] or "")
+
+
+def _fechamento(conn, hoje: datetime.date) -> dict:
+    linhas = _linhas_das_medicoes(conn)
     cobertura = _cobertura(linhas)
     mistos = _pares_mistos(linhas)
 
     meses: dict[str, dict] = {}
+    # issue #815: a mesma linha de medicao soma tambem no contratante da obra dela, no ano da competencia
+    contratante_de = _contratantes(conn)
+    # a linha e' o par (nome, chave), nao o nome: o contrato sem orgao no cadastro cujo texto e' igual a' sigla de um
+    # contratante ("SINFRA") fica na linha dele, sem chave, e nao dentro da do contratante (revisao da #815)
+    do_contratante: dict[str, dict[tuple[str, str | None], dict]] = {a: {} for a in ANOS}
     anteriores = {"quantidade": 0, "valor_centavos": 0}
     em_aberto, diferem = [], []
     for x in linhas:
@@ -484,12 +664,7 @@ def _fechamento(conn) -> dict:
         difere = x.pop("_difere")
         emitida_em = x.pop("_emitida_em")
         ano = x["competencia"][:4]
-        abertas = [{"tipo_aberto": "repasse" if nt["aguarda_repasse"] else "nota", "nota_id": nt["nota_id"], "numero": nt["numero"],
-                    "valor_centavos": nt["em_aberto_centavos"], "paga_em_parte": nt["paga_em_parte"]}
-                   for nt in x["notas"] if not nt["recebida"]]
-        if x["sem_nota_centavos"]:
-            abertas.append({"tipo_aberto": "sem_nota", "nota_id": None, "numero": None,
-                            "valor_centavos": x["sem_nota_centavos"], "paga_em_parte": False})
+        abertas = _em_aberto_da_medicao(x, emitida_em)
         if ano < ANOS[0]:
             anteriores["quantidade"] += len(abertas)
             anteriores["valor_centavos"] += sum(e["valor_centavos"] for e in abertas)
@@ -502,9 +677,9 @@ def _fechamento(conn) -> dict:
         obra["medicoes"].append(x)
         _somar(obra, x)
         _somar(mes, x)
-        em_aberto += [{**e, "contrato_id": x["contrato_id"], "obra": x["obra"], "medicao_id": x["medicao_id"],
-                       "medicao_numero": x["numero"], "tipo": x["tipo"], "competencia": x["competencia"],
-                       "protocolo_em": x["protocolo_em"], "emitida_em": emitida_em} for e in abertas]
+        nome, chave = contratante_de[x["contrato_id"]]
+        _somar(do_contratante[ano].setdefault((nome, chave), {"contratante": nome, "contratante_chave": chave, **_zero()}), x)
+        em_aberto += abertas
         if difere:
             diferem.append({"contrato_id": x["contrato_id"], "obra": x["obra"], "medicao_id": x["medicao_id"],
                             "medicao_numero": x["numero"], "tipo": x["tipo"], "competencia": x["competencia"], **difere})
@@ -514,6 +689,7 @@ def _fechamento(conn) -> dict:
         m = meses[comp]
         m["obras"] = sorted(m["obras"].values(), key=lambda o: (o["obra"], o["contrato_id"]))
         lista.append(m)
+    _medido_do_ano_anterior(lista, hoje)
     por_ano = {a: {**_zero(), "meses": 0} for a in ANOS}
     for m in lista:
         _somar(por_ano[m["competencia"][:4]], m)
@@ -526,12 +702,14 @@ def _fechamento(conn) -> dict:
         for m in lista:
             if m["competencia"][5:7] <= ate:
                 _somar(acumulado[m["competencia"][:4]], m)
-    em_aberto.sort(key=lambda e: (e["protocolo_em"] or e["emitida_em"] or "9999", e["obra"], e["competencia"], e["numero"] or ""))
+    em_aberto.sort(key=ordem_do_em_aberto)
     # o em aberto (a) + (a') + (b), linha a linha; o total e as tres partes de cada ano estao em `por_ano` (a tela
     # mostra o painel do ano escolhido). (c) e o em aberto de antes de 2025 ficam a' parte, de qualquer ano.
     saida = {"anos": list(ANOS), "meses": lista, "por_ano": por_ano, "acumulado": {"ate_mes": ate, **acumulado},
+             "por_contratante": {a: _linhas_por_contratante(do_contratante[a]) for a in ANOS},
              "em_aberto": em_aberto, "em_aberto_anteriores": anteriores, "notas_sem_medicao": _notas_sem_medicao(conn),
              "cobertura": cobertura, "notas_diferem": diferem, "pares_mistos": mistos,
+             "diferenca_critica_por_mil": avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL,
              "total_a_receber_liberado": diretoria._liberado(conn)}
     if not saida["total_a_receber_liberado"]:
         _esconder_a_receber(saida)
@@ -544,7 +722,8 @@ def _esconder_a_receber(f: dict) -> None:
     notas), a marca de recebida de cada nota, a de medicao sem nota ligada e as listas do em aberto. Como no Inicio,
     o bloco inteiro vem vazio, e a tela diz a trava em uma frase. Medido, aprovado e protocolado ficam, e os avisos
     `notas_diferem` e `pares_mistos` tambem (comparam nota com medicao; nada do recebido). O estado da medicao, que
-    tambem deixaria deduzir, nao esta' na resposta em caso nenhum (`_linha_medicao`)."""
+    tambem deixaria deduzir, nao esta' na resposta em caso nenhum (`_linha_medicao`). As linhas por contratante
+    (issue #815) perdem os mesmos numeros; a participacao fica, porque e' do medido."""
     def nulo(x):
         for k in ESCONDIDOS:
             x[k] = None
@@ -561,6 +740,8 @@ def _esconder_a_receber(f: dict) -> None:
     for a in f["anos"]:
         nulo(f["por_ano"][a])
         nulo(f["acumulado"][a])
+        for g in f["por_contratante"][a]:
+            nulo(g)
     f["em_aberto"] = []
     f["em_aberto_anteriores"] = {"quantidade": 0, "valor_centavos": None}
     f["notas_sem_medicao"] = {"em_aberto": [], "em_aberto_centavos": None, "pagas": {"quantidade": 0, "valor_centavos": None}}

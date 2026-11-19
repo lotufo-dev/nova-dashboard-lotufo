@@ -11,8 +11,6 @@
 /* ---------------------------------------------------------------- pagina */
 .med { font-size: var(--texto-corpo); line-height: var(--entrelinha); }
 .med-trilha + .pagina.med { padding-top: var(--espaco-pp); }
-.med-trilha .migalhas a { text-decoration: underline; }
-.med-trilha .migalhas li[aria-current="page"] { font-weight: var(--peso-medio); }
 
 /* identificacao: a obra, a linha da medicao e, a' direita, o valor grande com o rotulo dele e "Mais ações" */
 .med-topo { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--espaco-m) var(--espaco-g); }

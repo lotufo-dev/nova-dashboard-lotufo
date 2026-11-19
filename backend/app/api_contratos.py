@@ -4,7 +4,7 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app import contratos, custo_obra, diretoria, ficha_obra, medicoes, notas, paineis, prazos, tempo
+from app import contratos, custo_obra, diretoria, fechamento, ficha_obra, medicoes, notas, paineis, prazos, tempo
 from app.api_auth import conexao
 from app.api_medicoes import ID
 from app.permissoes import exigir
@@ -41,18 +41,36 @@ def listar(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
     # `a_receber_sem_atualizacao_centavos`, fora do total
     par = diretoria.a_receber_na_cota_por_obra(conn)
     a_receber, a_parte = par if par is not None else (None, None)
+    # #805 (Obras por contratante), tudo na cota:
+    # - `contratante_chave`: a chave estavel do contratante, para o endereco da pagina dele;
+    # - `andamento`: o ritmo e o necessario por mes, pela conta do painel "Prazo" da pagina da obra
+    #   (`prazos.ritmo_na_cota`), sobre o saldo de `posicao`, e a `leitura` pronta (#822: adiantada, atencao, devagar,
+    #   ou o motivo de a obra ficar fora da regua), a mesma que `/ficha` devolve em `ritmo.leitura`;
+    # - `medido_mes`: o medido da ultima competencia fechada e o da anterior a ela (a referencia da variacao), o
+    #   mesmo numero que o Fechamento mostra para a obra naquele mes (`fechamento.medido_do_mes_fechado`).
+    do_mes = fechamento.medido_do_mes_fechado(conn, hoje)
     saida = []
     for c in contratos.listar(conn):
         o = orgaos[c["id"]]
         contratante, orgao_sub = medicoes.contratante(o["familia"], o["chave"], o["nome"], o["orgao_texto"])
         feito = medido.get(c["id"], 0)
+        posicao = paineis.posicao_na_cota(c["valor_vigente_execucao_centavos"], feito, c["percentual_direito_bp"])
+        ritmo = prazos.ritmo_na_cota(conn, c["id"], hoje, c["percentual_direito_bp"], posicao["saldo_centavos"])
         saida.append({**c, **prazos.resumo(conn, c["id"], hoje), "contratante": contratante, "orgao_sub": orgao_sub,
+                      "contratante_chave": diretoria.chave_do_contratante(o["familia"], o["chave"]),
                       "medido_centavos": feito, "saldo_centavos": c["valor_vigente_execucao_centavos"] - feito,
-                      "posicao": {**paineis.posicao_na_cota(c["valor_vigente_execucao_centavos"], feito, c["percentual_direito_bp"]),
+                      "posicao": {**posicao,
                                   "a_receber_centavos": None if a_receber is None else a_receber.get(c["id"], 0),
                                   "a_receber_ano_inicial": diretoria.ANO_INICIAL,
                                   **{k: None if a_parte is None else a_parte.get(c["id"], {}).get(k.removeprefix("a_receber_"), 0)
-                                     for k in ("a_receber_anterior_centavos", "a_receber_sem_atualizacao_centavos")}}})
+                                     for k in ("a_receber_anterior_centavos", "a_receber_sem_atualizacao_centavos")}},
+                      "andamento": {"ritmo_centavos": ritmo["ritmo_centavos"], "necessario_centavos": ritmo["necessario_centavos"],
+                                    "leitura": ritmo["leitura"]},
+                      "medido_mes": {"competencia": do_mes["competencia"],
+                                     "valor_centavos": do_mes["por_obra"].get(c["id"], 0),
+                                     "referencia_competencia": do_mes["referencia_competencia"],
+                                     "referencia_centavos": (do_mes["referencia_por_obra"].get(c["id"], 0)
+                                                             if do_mes["referencia_competencia"] else None)}})
     return saida
 
 
@@ -83,7 +101,9 @@ def cabecalho(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
               conn: sqlite3.Connection = Depends(conexao)):
     _existe(conn, contrato_id)
     # A3: faturado e a receber da obra, em valor cheio, ao lado do valor vigente.
-    return {**contratos.cabecalho(conn, contrato_id), **diretoria.da_obra(conn, contrato_id)}
+    # #805: o contratante e a chave da pagina dele, para o caminho "Obras > contratante > obra".
+    return {**contratos.cabecalho(conn, contrato_id), **diretoria.da_obra(conn, contrato_id),
+            **diretoria.contratante_da_obra(conn, contrato_id)}
 
 
 @router.get("/{contrato_id}/ficha")
