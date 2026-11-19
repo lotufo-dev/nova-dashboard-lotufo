@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import CaixaAviso from "./CaixaAviso";
 import Diferenca from "./Diferenca";
@@ -312,9 +312,16 @@ function LinhasDoMes({ m, ab, ir, limite }: { m: Mes; ab: Abertos; ir: Ir; limit
   );
 }
 
-/** `mesAberto` (#815): a competencia que o endereco pede aberta por obra (?mes=2026-10), quando e' do ano mostrado. */
+/** `mesAberto` (#815): a competencia que o endereco pede aberta por obra (?mes=2026-10), quando e' do ano mostrado. A
+ *  vista vai ate' a linha dele ao abrir (19/11/2026): o mes do fim do ano ficava abaixo da primeira tela, e quem vinha
+ *  do numero do mes nao o via aberto sem rolar. */
 function TabelaDoAno({ f, ano, ir, mesAberto }: { f: RespostaFechamento; ano: string; ir: Ir; mesAberto?: string | null }) {
   const [abertos, setAbertos] = useState<Set<string>>(() => new Set(mesAberto ? [mesAberto] : []));
+  const linhaDoMesAberto = useRef<HTMLTableRowElement>(null);
+  useEffect(() => {
+    // so' na montagem (a `key` da tabela leva o mes): abrir e fechar meses depois nao mexe na rolagem
+    linhaDoMesAberto.current?.scrollIntoView?.({ block: "start" });
+  }, []);
   const ab: Abertos = {
     tem: k => abertos.has(k),
     trocar: k => setAbertos(s => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; }),
@@ -330,7 +337,7 @@ function TabelaDoAno({ f, ano, ir, mesAberto }: { f: RespostaFechamento; ano: st
         <tbody>
           {meses.map(m => (
             <Fragment key={m.competencia}>
-              <tr className="fch-linha fch-linha--mes">
+              <tr className="fch-linha fch-linha--mes" ref={m.competencia === mesAberto ? linhaDoMesAberto : undefined}>
                 <th scope="row" className="fch-primeira">
                   <BotaoAbre aberto={ab.tem(m.competencia)} controla={`fch-mes-${m.competencia}`}
                     rotulo={`${nomeMes(m.competencia)} de ${ano}, por obra`} onClick={() => ab.trocar(m.competencia)}>
@@ -438,7 +445,7 @@ function PorContratante({ f, ano, ir }: { f: RespostaFechamento; ano: string; ir
         <Cabecalho primeira="Contratante" />
         <tbody>
           {linhas.map(g => (
-            <tr key={g.contratante} className="fch-linha fch-linha--contratante">
+            <tr key={`${g.contratante}:${g.contratante_chave ?? ""}`} className="fch-linha fch-linha--contratante">
               <th scope="row" className="fch-primeira">
                 {g.contratante_chave
                   ? <Link className="link" para={{ tela: "contratante", chave: g.contratante_chave }} ir={ir}>{g.contratante}</Link>
