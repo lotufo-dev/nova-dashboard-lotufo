@@ -72,10 +72,11 @@ def test_medicoes_sao_as_linhas_da_fila_do_mes_em_trabalho_so_das_obras_do_contr
     assert sorted(_ids_das_linhas(r) + _ids_das_linhas(m)) == sorted(x["medicao_id"] for g in fila["grupos"] for x in g["linhas"])
 
 
-def test_medicoes_chave_sem_diferenca_de_maiuscula_e_chave_desconhecida_da_vazio(conn, cenario):
+def test_chave_sem_diferenca_de_maiuscula_e_chave_que_nenhuma_obra_tem_e_desconhecida(conn, cenario):
     assert contratante.medicoes(conn, "SINFRA", HOJE) == contratante.medicoes(conn, "sinfra", HOJE)
-    vazio = contratante.medicoes(conn, "orgao-que-nao-existe", HOJE)
-    assert (vazio["grupos"], vazio["concluidas"], vazio["sem_medicao"], vazio["quantidade"]) == ([], [], [], 0)
+    for ler in (contratante.medicoes, contratante.em_aberto, contratante.processos_no_siga):
+        with pytest.raises(contratante.ContratanteDesconhecido):
+            ler(conn, "orgao-que-nao-existe")
 
 
 # --- A receber ---------------------------------------------------------------------------------------------------
@@ -107,11 +108,15 @@ def test_a_receber_e_o_grupo_da_pagina_a_receber_filtrada_ao_centavo(contratante
     assert contratante.em_aberto(c, "SINFRA", HOJE) == contratante.em_aberto(c, "sinfra", HOJE)
 
 
-def test_a_receber_sem_o_total_liberado_so_a_trava_e_chave_desconhecida_sem_grupo(contratantes):
+def test_a_receber_sem_o_total_liberado_so_a_trava_e_contratante_sem_grupo(contratantes):
     c, ids = contratantes
     _lancar_dois_anos(c, ids)
-    assert contratante.em_aberto(c, "nao-existe", HOJE) == {"anos": ["2025", "2026"], "total_a_receber_liberado": True,
-                                                            "contratante": None, "quantidade": 0}
+    # o contratante cujas obras estao todas encerradas e sem nada em aberto nao tem grupo na pagina A receber
+    c.execute("UPDATE contratos SET estado='encerrado' WHERE id=?", (ids["Galpão"],))
+    c.commit()
+    assert all(g["chave"] != "companhia-y" for g in a_receber.a_receber(c, HOJE)["contratantes"])
+    assert contratante.em_aberto(c, "companhia-y", HOJE) == {"anos": ["2025", "2026"], "total_a_receber_liberado": True,
+                                                             "contratante": None, "quantidade": 0}
     c.execute("UPDATE cadastro_geral SET valor=? WHERE chave='diretoria'", (json.dumps({"total_a_receber_liberado": False}),))
     c.commit()
     # nem valor, nem linha, nem contagem: a contagem de notas em aberto deixaria deduzir quais foram pagas
@@ -227,6 +232,7 @@ def test_rota_do_siga_nega_a_diretoria_e_as_outras_abas_nao(processos, monkeypat
             assert r.status_code == 200, r.text
             assert [x["id"] for x in r.json()["processos"]] == [p["sete"], p["dois"], p["nunca"]]
             assert r.json()["quantidade"] == 3
+            assert cliente.get("/api/contratantes/orgao-que-nao-existe/siga").status_code == 404
 
 
 def test_rota_das_medicoes_e_a_chave_invalida(conn, cenario, monkeypatch):
@@ -240,6 +246,9 @@ def test_rota_das_medicoes_e_a_chave_invalida(conn, cenario, monkeypatch):
         assert set(r.json()) == {"hoje", "mes", "limites", "grupos", "concluidas", "sem_medicao", "quantidade"}
         assert r.json()["mes"] == "2026-10" and r.json()["quantidade"] == 8
         assert r.json() == contratante.medicoes(conn, "sinfra", HOJE)
-        # a chave e' a do endereco da pagina (letras, digitos, ponto, traco e sublinhado)
+        # a chave e' a do endereco da pagina (letras, digitos, ponto, traco e sublinhado); a que nenhuma obra tem, 404
         for ruim in ("-sinfra", "sin%20fra", "a" * 81):
             assert cliente.get(f"/api/contratantes/{ruim}/medicoes").status_code == 422
+        for aba in ("medicoes", "a-receber"):
+            r = cliente.get(f"/api/contratantes/orgao-que-nao-existe/{aba}")
+            assert r.status_code == 404 and r.json()["detail"] == "Contratante não encontrado"

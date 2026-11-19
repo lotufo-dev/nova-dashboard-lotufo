@@ -68,13 +68,14 @@ export default function ContratantePagina({ chave, aba = "obras", perfil, busca 
   const mes = r.medidoMes ? mesesDoMedido(r.medidoMes).curto : null;
   const aqui = { tela: "contratante" as const, chave };
 
-  // as abas do perfil e o dado de cada uma, pedidos juntos ao abrir a pagina: a faixa mostra a quantidade de todas
+  // as abas do perfil e o dado de cada uma, pedidos juntos quando a lista diz que o contratante existe (o servidor
+  // responde 404 a' chave que nenhuma obra tem): a faixa mostra a quantidade de todas
   const abas = abasDoPerfil(perfil);
   const atual: AbaContratante = abas.includes(aba) ? aba : "obras";
-  const doServidor = `/api/contratantes/${encodeURIComponent(chave)}`;
-  const medicoes = useLeitura<MedicoesDoContratante>(`${doServidor}/medicoes`);
-  const aReceber = useLeitura<AReceberDoContratante>(`${doServidor}/a-receber`);
-  const siga = useLeitura<SigaDoContratante>(abas.includes("siga") ? `${doServidor}/siga` : null);
+  const doServidor = nome ? `/api/contratantes/${encodeURIComponent(chave)}` : null;
+  const medicoes = useLeitura<MedicoesDoContratante>(doServidor && `${doServidor}/medicoes`);
+  const aReceber = useLeitura<AReceberDoContratante>(doServidor && `${doServidor}/a-receber`);
+  const siga = useLeitura<SigaDoContratante>(doServidor && abas.includes("siga") ? `${doServidor}/siga` : null);
   // a quantidade e' o numero de linhas da aba: na de Obras, as da tabela; nas outras, a do servidor. Sem o dado (lendo,
   // falhou, ou a receber ainda nao liberado), a aba fica so' com o nome.
   const quantidade: Partial<Record<AbaContratante, number>> = {

@@ -121,9 +121,10 @@ function servidor(troca: Record<string, unknown> = {}) {
     } as Record<string, unknown>)[caminho];
     if (r instanceof Error) throw r;
     if (r !== undefined) return r;
-    if (/^\/api\/contratantes\/[^/]+\/medicoes$/.test(caminho)) return { ...MEDICOES, grupos: [], concluidas: [], sem_medicao: [], quantidade: 0 };
-    if (/^\/api\/contratantes\/[^/]+\/a-receber$/.test(caminho)) return { ...A_RECEBER, contratante: null, quantidade: 0 };
-    if (/^\/api\/contratantes\/[^/]+\/siga$/.test(caminho)) return { ...SIGA, processos: [], quantidade: 0 };
+    // outro contratante da lista (a MTPAR, com a obra Granito): sem nada em cada aba
+    if (/^\/api\/contratantes\/mtpar\/medicoes$/.test(caminho)) return { ...MEDICOES, grupos: [], concluidas: [], sem_medicao: [], quantidade: 0 };
+    if (/^\/api\/contratantes\/mtpar\/a-receber$/.test(caminho)) return { ...A_RECEBER, contratante: null, quantidade: 0 };
+    if (/^\/api\/contratantes\/mtpar\/siga$/.test(caminho)) return { ...SIGA, processos: [], quantidade: 0 };
     throw new Error(`chamada inesperada: ${caminho}`);
   };
 }
@@ -292,6 +293,8 @@ describe("Página do contratante (#805)", () => {
     expect(await screen.findByText("Contratante não encontrado.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Ver os contratantes" }).getAttribute("href")).toBe("/obras");
     expect(screen.queryByRole("table")).toBeNull();
+    // #818: nem pede as abas (o servidor responde 404 à chave que nenhuma obra tem)
+    expect(api.mock.calls.map(c => String(c[0])).filter(c => c.startsWith("/api/contratantes/"))).toEqual([]);
   });
 
   it("falha ao ler as obras vira o aviso; sem o painel da diretoria a tabela continua e diz o que faltou", async () => {
