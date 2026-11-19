@@ -291,7 +291,13 @@ _Avoid_: diferença (é entre dois valores que deveriam ser iguais)
 
 **Mesma altura do mês anterior**:
 A referência da variação do protocolado e do recebido no Resumo das medições: o que as medições da competência
-anterior tinham na etapa no mesmo dia de hoje, um mês antes, pelas datas dos eventos.
+anterior já tinham protocolado e já tinham recebido até o mesmo dia de hoje, um mês antes, pelas datas dos eventos.
+
+**Protocolado acumulado**:
+Tudo o que a competência já protocolou até um dia, tenha ou não sido recebido depois, pela data do primeiro protocolo
+da nota ou, sem ele, pela data do recebimento (o recebimento prova o protocolo até aquele dia). É o que a variação do
+protocolado compara no Resumo das medições, para o órgão que paga mais rápido não fazer o número cair, e vai escrito
+ao lado dela ("acumulado R$ …"). O valor da etapa Protocolado é outro: só o que está parado nela agora.
 
 **Diferença**:
 O quanto dois valores que deveriam ser iguais se afastam: o aprovado e o pedido. No mês, na obra e no ano é só o
