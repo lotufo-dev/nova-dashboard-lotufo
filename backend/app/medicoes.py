@@ -238,6 +238,7 @@ def _eventos_atesto(conn: sqlite3.Connection, ids: list[int], out: dict[int, lis
             "SELECT e.*, u.nome FROM medicao_atestos e LEFT JOIN usuarios u ON u.id=e.usuario_id "
             f"WHERE e.medicao_id IN ({','.join('?' * len(lote))})", lote).fetchall()
     anterior: dict[int, tuple] = {}
+    corrigidos = pedidos_corrigidos(conn, ids)
     for r in sorted(linhas, key=lambda r: r["id"]):
         mid = r["medicao_id"]
         valor_ant, dia_ant, origem_ant = anterior.get(mid, (None, None, None))
@@ -249,7 +250,7 @@ def _eventos_atesto(conn: sqlite3.Connection, ids: list[int], out: dict[int, lis
             # do historico, sem PDF, segue como "Atestado alterado") e' uma linha so', com o aprovado, o pedido e a
             # diferenca, e o id para a tela ligar o PDF. A data do evento e' a do boletim (como a assinatura usa a dela):
             # registrado depois da assinatura ou do protocolo, ele nao pode aparecer depois deles (revisor, rodada 1)
-            texto = _texto_boletim(r, dia)
+            texto = _texto_boletim(r, dia, corrigidos.get(mid, []))
             out[mid].append({"data": dia or r["criado_em"], "boletim_id": r["id"],
                              "texto": f"{texto} por {r['nome']}" if r["nome"] else f"{texto} pelo sistema"})
             continue
@@ -275,15 +276,41 @@ def _eventos_atesto(conn: sqlite3.Connection, ids: list[int], out: dict[int, lis
 _MEIO_BOLETIM = {"smo": "SMO", "oficio": "ofício", "email": "e-mail", "carimbo": "carimbo", "ci": "CI", "outro": "outro"}
 
 
-def _texto_boletim(r, dia: str | None) -> str:
+def pedidos_corrigidos(conn: sqlite3.Connection, ids: list[int]) -> dict[int, list[tuple]]:
+    """Issue #863: as correcoes do pedido pela correcao de cadastro (`corrigir_pedido`), por medicao e em ordem, como
+    (pedido de antes, pedido de depois). O evento de atesto guarda o pedido de quando o boletim entrou (070) e nao se
+    altera (trigger da 039): a leitura troca o pedido gravado errado pelo corrigido, sem marca na tela."""
+    out: dict[int, list[tuple]] = {}
+    for i in range(0, len(ids), LOTE_AUDITORIA):
+        lote = [str(x) for x in ids[i:i + LOTE_AUDITORIA]]
+        for r in conn.execute(
+                "SELECT entidade_id, json_extract(depois, '$.pedido_antes_centavos') AS antes, "
+                "json_extract(depois, '$.pedido_depois_centavos') AS depois FROM audit_log "
+                "WHERE entidade='medicao' AND acao='medicao.correcao_cadastro' "
+                f"AND entidade_id IN ({','.join('?' * len(lote))}) "
+                "AND json_extract(depois, '$.operacao')='corrigir_pedido' ORDER BY id", lote):
+            out.setdefault(int(r["entidade_id"]), []).append((r["antes"], r["depois"]))
+    return out
+
+
+def pedido_como_corrigido(pedido: int | None, correcoes: list[tuple]) -> int | None:
+    """O pedido de um registro antigo depois das correcoes de `pedidos_corrigidos` que o alcancam."""
+    for antes, depois in correcoes:
+        if pedido is not None and pedido == antes:
+            pedido = depois
+    return pedido
+
+
+def _texto_boletim(r, dia: str | None, correcoes: list[tuple] = ()) -> str:
     """"Boletim nº X (SMO) de 10/08/2026: aprovado R$ A, pedido R$ P, diferença R$ D". O pedido e' o congelado no
-    evento (070); sem ele (boletim sem pedido, ou anterior a 070) nao ha' pedido nem diferenca (gate Sol, rodada 1)."""
+    evento (070); sem ele (boletim sem pedido, ou anterior a 070) nao ha' pedido nem diferenca (gate Sol, rodada 1).
+    O pedido que a correcao de cadastro corrigiu depois sai corrigido (issue #863)."""
     from app.dinheiro import format_brl
     texto = "Boletim" + (f" nº {r['numero_orgao']}" if r["numero_orgao"] else "")
     texto += f" ({_MEIO_BOLETIM.get(r['meio'], r['meio'])})" if r["meio"] else ""
     texto += f" de {_data_br(dia)}" if dia else ""
     texto += f": aprovado {format_brl(r['valor_centavos'])}"
-    pedido = r["pedido_centavos"] if "pedido_centavos" in r.keys() else None
+    pedido = pedido_como_corrigido(r["pedido_centavos"] if "pedido_centavos" in r.keys() else None, correcoes)
     if pedido is not None:
         texto += f", pedido {format_brl(pedido)}, diferença {format_brl(r['valor_centavos'] - pedido)}"
     return texto
