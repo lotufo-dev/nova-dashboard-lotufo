@@ -51,6 +51,14 @@ def resumo_das_medicoes(mes: str | None = Query(None, pattern=MES), contratante:
     return resumo_medicoes.resumo(conn, mes=mes, contratante=contratante)
 
 
+@router.get("/api/resumo-medicoes/matriz")
+def resumo_das_medicoes_matriz(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
+    """Issue #659: a matriz obra por competencia, com a etapa da medicao de cada mes (`resumo_medicoes.matriz`). Ate'
+    19/11/2026 vinha no painel da Inicio; a decisao do dono de 19/11/2026 (#805) a trouxe para o Resumo das medicoes,
+    numa aba propria, lida so' quando a aba abre. O mesmo publico das duas paginas (`ver_paineis`)."""
+    return resumo_medicoes.matriz(conn)
+
+
 @router.get("/api/resumo-medicoes.csv")
 def resumo_das_medicoes_csv(mes: str | None = Query(None, pattern=MES), contratante: str | None = CONTRATANTE,
                             _=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):

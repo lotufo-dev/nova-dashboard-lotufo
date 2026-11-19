@@ -8,7 +8,9 @@
    saudacao e os numeros do mes dividem a primeira linha.
    #817: entram o ciclo por contratante (`orgaos`, logo abaixo do ciclo e da previsao) e o medido em 12 meses (`medido`,
    depois do recebido; de 1200px, ao lado dele: abaixo disso cada painel teria menos que os 520px de que as colunas em
-   pe' precisam, e as barras deitariam). O que ja' existia segue na mesma ordem. */
+   pe' precisam, e as barras deitariam). O que ja' existia segue na mesma ordem.
+   19/11/2026 (decisao do dono, #805): a matriz obra por competencia saiu para o Resumo das medicoes (resumoMatriz.css),
+   e os avisos ficam so' com a contagem. */
 .ini {
   min-width: 0; container: ini-pagina / inline-size;
   color: var(--cor-tinta); font-family: var(--fonte-texto); font-size: var(--texto-corpo); line-height: var(--entrelinha);
@@ -19,7 +21,7 @@
 
 .ini-grade {
   display: grid; grid-template-columns: minmax(0, 1fr); row-gap: var(--espaco-entre-blocos);
-  grid-template-areas: "saud" "numeros" "cota" "ciclo" "previsao" "orgaos" "recebido" "medido" "avisos" "matriz";
+  grid-template-areas: "saud" "numeros" "cota" "ciclo" "previsao" "orgaos" "recebido" "medido" "avisos";
 }
 .ini-saudacao { grid-area: saud; min-width: 0; }
 .ini-numeros { grid-area: numeros; min-width: 0; }
@@ -29,29 +31,26 @@
 .ini-orgaos { grid-area: orgaos; }
 .ini-recebido { grid-area: recebido; }
 .ini-medido { grid-area: medido; }
-.ini-avisos { grid-area: avisos; }
-.ini-matriz { grid-area: matriz; }
-.ini-avisos, .ini-matriz { margin-top: calc(var(--espaco-entre-blocos) * 0.2); }
+.ini-avisos { grid-area: avisos; margin-top: calc(var(--espaco-entre-blocos) * 0.2); }
 @container ini-pagina (min-width: 680px) {
   .ini-grade {
     grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--espaco-entre-colunas);
     grid-template-areas: "saud saud" "numeros numeros" "cota cota" "ciclo previsao" "orgaos orgaos" "recebido recebido"
-      "medido medido" "avisos avisos" "matriz matriz";
+      "medido medido" "avisos avisos";
   }
   .ini-numeros { justify-self: start; }
 }
 @container ini-pagina (min-width: 900px) {
   .ini-grade {
     grid-template-areas: "saud numeros" "cota cota" "ciclo previsao" "orgaos orgaos" "recebido recebido" "medido medido"
-      "avisos avisos" "matriz matriz";
+      "avisos avisos";
   }
   .ini-saudacao { align-self: end; }
   .ini-numeros { align-self: end; justify-self: end; }
 }
 @container ini-pagina (min-width: 1200px) {
   .ini-grade {
-    grid-template-areas: "saud numeros" "cota cota" "ciclo previsao" "orgaos orgaos" "recebido medido" "avisos avisos"
-      "matriz matriz";
+    grid-template-areas: "saud numeros" "cota cota" "ciclo previsao" "orgaos orgaos" "recebido medido" "avisos avisos";
   }
 }
 
@@ -234,82 +233,17 @@
 }
 
 /* ================================================================ AVISOS IMPORTANTES (#666)
-   Tres secoes pelo tempo, lado a lado em painel largo, cada uma com regua fina de tinta, o contador (peca Contador) e
-   os primeiros itens. O item inteiro e' o link: a obra em destaque, a mensagem e o selo de dias (peca Selo). */
+   Tres secoes pelo tempo, lado a lado em painel largo, cada uma com regua fina de tinta e o contador (peca Contador).
+   Decisao do dono de 19/11/2026 (#805): so' a contagem; os itens ficam na tela Avisos, aberta pelo "Ver todos". */
 .ini-ver-todos { margin-left: auto; font-size: var(--texto-corpo); font-weight: var(--peso-medio); }
-.ini-avisos__secoes { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-g) var(--espaco-gg); }
+.ini-avisos__secoes { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-p) var(--espaco-gg); margin: 0; }
 @container (min-width: 640px) { .ini-avisos__secoes { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-.ini-aviso { min-width: 0; }
-.ini-aviso__topo {
-  display: flex; align-items: center; gap: var(--espaco-pp);
-  border-top: var(--regua-secao); padding-top: var(--regua-secao-respiro); margin-bottom: var(--espaco-mini);
+.ini-aviso {
+  display: flex; align-items: center; gap: var(--espaco-pp); min-width: 0;
+  border-top: var(--regua-secao); padding-top: var(--regua-secao-respiro);
 }
-.ini-aviso__topo h3 { margin: 0; font-size: var(--texto-titulo-sub); }
-.ini-aviso__lista { list-style: none; margin: 0; padding: 0; }
-.ini-aviso__lista li { border-bottom: var(--borda-linha); }
-.ini-aviso__linha {
-  display: grid; gap: var(--espaco-mini); justify-items: start;
-  padding: var(--espaco-p) var(--espaco-pp); margin: 0 calc(-1 * var(--espaco-pp));
-  border-radius: var(--raio-canto); text-decoration: none; color: var(--cor-tinta);
-}
-a.ini-aviso__linha:hover { background: var(--cor-papel-sombreado); }
-.ini-aviso__nome { display: grid; gap: var(--espaco-mini); min-width: 0; }
-.ini-aviso__obra { font-weight: var(--peso-forte); overflow-wrap: anywhere; }
-.ini-aviso__msg { color: var(--cor-texto-secundario); text-wrap: pretty; overflow-wrap: anywhere; }
-.ini-aviso__linha .selo { margin-top: var(--espaco-mini); }
-/* o selo de dias e' uma frase de tempo ("há 64 dias", "hoje"), nao um rotulo de estado: fica como esta' escrita */
-.ini-aviso__linha .selo__texto::first-letter { text-transform: none; }
-
-/* ================================================================ MEDICOES POR OBRA E COMPETENCIA (#659)
-   Uma linha por obra, agrupada por contratante, e uma celula por competencia na cor da etapa; a celula atrasada leva
-   tambem a marca "!". Cada linha e' uma grade com as mesmas colunas, que encolhem: nenhuma largura fixa empurra a
-   pagina. Em painel estreito (celular) o nome da obra sobe para uma linha propria e as 12 celulas ocupam a largura. */
-.ini-matriz__legenda {
-  display: flex; flex-wrap: wrap; gap: var(--espaco-mini) var(--espaco-m); margin: 0 0 0 auto; padding: 0; list-style: none;
-  font-size: var(--texto-meta); color: var(--cor-texto-secundario);
-}
-/* a chave de cor de cada item e' a peca MarcaEtapa (tokens.css) */
-.ini-matriz__legenda li { white-space: nowrap; }
-.ini-matriz__grade { min-width: 0; }
-.ini-matriz__linha {
-  display: grid; grid-template-columns: minmax(0, var(--largura-nome-obra)) repeat(12, minmax(0, 1fr)); column-gap: var(--espaco-grade);
-  align-items: center; min-width: 0;
-}
-.ini-matriz__linha--meses { padding-bottom: var(--espaco-mini); }
-.ini-matriz__linha--meses > :first-child { grid-column-start: 2; }
-.ini-matriz__linha--obra { padding: var(--espaco-grade) 0; }
-.ini-matriz__mes {
-  min-width: 0; display: flex; flex-direction: column; align-items: center;
-  font-size: var(--texto-mini); line-height: var(--entrelinha-titulo); color: var(--cor-texto-secundario);
-}
-.ini-matriz__ano { color: var(--cor-texto-terciario); }
-.ini-matriz__grupo {
-  margin: var(--espaco-p) 0 0; border-top: var(--regua-secao); padding: var(--espaco-mini) 0;
-  font-size: var(--texto-mini); overflow-wrap: anywhere;
-}
-.ini-matriz__obra { min-width: 0; padding-right: var(--espaco-p); overflow-wrap: anywhere; }
-.ini-matriz__celula {
-  display: grid; place-items: center; min-width: 0; height: var(--altura-celula); border-radius: var(--raio-canto);
-  background: var(--etapa-vazia); text-decoration: none;
-}
-a.ini-matriz__celula:hover { outline: var(--borda-grossa) solid var(--cor-tinta); outline-offset: var(--espaco-fio); }
-.ini-matriz__celula--atrasado::after {
-  content: var(--etapa-atrasado-marca); font-size: var(--texto-meta); font-weight: var(--peso-sinal);
-  line-height: var(--entrelinha-justa); color: var(--cor-sobre-ponto);
-}
-.ini-matriz__celula--em_analise { background: var(--etapa-analise); box-shadow: inset 0 0 0 var(--etapa-borda-largura) var(--etapa-analise-borda); }
-.ini-matriz__celula--boletim { background: var(--etapa-boletim); }
-.ini-matriz__celula--nota { background: var(--etapa-nota); }
-.ini-matriz__celula--protocolado { background: var(--etapa-protocolado); }
-.ini-matriz__celula--recebida { background: var(--etapa-recebido); }
-.ini-matriz__celula--atrasado { background: var(--etapa-atrasado); }
-@container (max-width: 520px) {
-  .ini-matriz__linha { grid-template-columns: repeat(12, minmax(0, 1fr)); }
-  .ini-matriz__linha--meses > :first-child { grid-column-start: 1; }
-  .ini-matriz__linha--obra { padding: 0 0 var(--espaco-mini); }
-  .ini-matriz__obra { grid-column: 1 / -1; padding: var(--espaco-pp) 0 var(--espaco-mini); }
-  .ini-matriz__legenda { margin-left: 0; flex-basis: 100%; }
-}
+.ini-aviso dt { margin: 0; font-size: var(--texto-titulo-sub); font-weight: var(--peso-forte); }
+.ini-aviso dd { margin: 0; }
 
 /* ================================================================ CELULAR
    Em tela estreita o painel perde a sombra e aperta o respiro, os blocos ficam mais proximos e o titulo desce um
@@ -319,7 +253,7 @@ a.ini-matriz__celula:hover { outline: var(--borda-grossa) solid var(--cor-tinta)
   .ini-grade { row-gap: var(--espaco-m); }
   .ini .ini-painel { padding: var(--espaco-m); box-shadow: none; }
   .ini-cota { margin-top: calc(var(--espaco-topo-grupo) - var(--espaco-m)); margin-bottom: calc(var(--titulo-margem-base) - var(--espaco-m)); }
-  .ini-avisos, .ini-matriz { margin-top: calc(var(--espaco-m) * 0.2); }
+  .ini-avisos { margin-top: calc(var(--espaco-m) * 0.2); }
 }
 /* no celular o valor grande fica numa linha so', com a letra acompanhando a largura da tela (11% da largura util) */
 @media (max-width: 420px) {

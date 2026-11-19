@@ -288,7 +288,7 @@ export const inicioComVariacoes = painel => {
   return { ...painel,
     notas_mes: { ...painel.notas_mes, valor_centavos: 1124000001, notas: 6, obras: 4,
       anterior: { mes: mesAntes(mesDeHoje, 1), ate_dia: Number(painel.hoje.slice(8, 10)), valor_centavos: 1000000001 } },
-    medido: { ...painel.medido, valor_centavos: 400000007, quantidade: 9,
+    medido: { ...painel.medido, valor_centavos: 400000007,
       anterior: { competencia: mesAntes(competencia, 1), valor_centavos: 500000005 },
       ano_anterior: { competencia: mesAntes(competencia, 12), valor_centavos: 400000003 } } };
 };
@@ -1020,3 +1020,27 @@ export const SIGA_DO_CONTRATANTE = {
   robo: { ...SIGA_COM_NAO_LIDOS.robo, avisos: SIGA_COM_NAO_LIDOS.robo.avisos.filter(a => PROCESSOS_DA_SINFRA.some(p => p.id === a.processo_id)) },
   processos: PROCESSOS_DA_SINFRA, quantidade: PROCESSOS_DA_SINFRA.length,
 };
+
+// ---- Peca "inicio" da reestrutura (19/11/2026, decisao do dono na #805): a matriz obra por competencia (#659) saiu
+// da Inicio para a aba "Últimos 12 meses" do Resumo das medicoes (GET /api/resumo-medicoes/matriz). O cadastro de
+// exemplo tem poucas obras e quase nenhuma medicao; aqui a matriz ganha o volume da carteira: cinco contratantes
+// ficticios (um de nome longo), cinco obras cada (uma de nome longo), e as etapas em rodizio fixo, com meses vazios.
+// Nao tem valor: so' a etapa de cada mes. As competencias sao as da resposta do servidor (as 12 ultimas fechadas).
+const MATRIZ_CONTRATANTES = ["Autarquia Beta", "MTPAR", "Prefeitura Alfa", "SINFRA",
+  "Secretaria de Estado de Infraestrutura e Logística de Exemplo"];
+const MATRIZ_RODIZIO = ["recebida", "recebida", "protocolado", "atrasado", null, "nota", "boletim", "em_analise"];
+export const matrizEmVolume = resposta => ({
+  competencias: resposta.competencias,
+  grupos: MATRIZ_CONTRATANTES.map((contratante, g) => ({ contratante, obras: [0, 1, 2, 3, 4].map(o => {
+    const id = 9500 + g * 10 + o;
+    return { contrato_id: id,
+      obra: o === 4 ? `Restauração e Pavimentação da Rodovia de Exemplo, Trecho ${g + 1}` : `Obra ${String.fromCharCode(65 + g)}${o + 1}`,
+      celulas: resposta.competencias.map((_, i) => {
+        // as obras mais novas comecam no meio da janela; a ultima competencia fica mais atras no ciclo
+        if (i < o * 2) return null;
+        const etapa = i === 11 ? ["em_analise", "boletim", "nota", null, "protocolado"][o] : MATRIZ_RODIZIO[(i + g + o) % MATRIZ_RODIZIO.length];
+        return etapa && { etapa, medicao_id: id * 100 + i };
+      }) };
+  }) })),
+});
+export const matrizVazia = resposta => ({ competencias: resposta.competencias, grupos: [] });

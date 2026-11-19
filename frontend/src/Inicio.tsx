@@ -1,7 +1,7 @@
-import { Fragment, useEffect, useState } from "react";
-import { destinoDoAviso, semEmpresa, semObra, type Aviso } from "./Alertas";
+import { useEffect, useState } from "react";
+import type { Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
-import { daAgenda, diasAteOAviso, porSecao, semRSOrfao, type Secao } from "./avisos";
+import { daAgenda, porSecao, type Secao } from "./avisos";
 import Contador from "./Contador";
 import EmAbertoAParte from "./EmAbertoAParte";
 import Falha from "./Falha";
@@ -12,7 +12,7 @@ import MarcaEtapa from "./MarcaEtapa";
 import Rolagem from "./Rolagem";
 import { type Ir } from "./rota";
 import { Link } from "./Link";
-import Selo, { Glifo } from "./Selo";
+import { Glifo } from "./Selo";
 import type { Situacao } from "./situacao";
 import { fmtCompetencia, fmtMesCurto, fmtMesExtenso } from "./tempo";
 import type { Etapa } from "./valores";
@@ -30,6 +30,9 @@ import "./inicio.css";
 // o ciclo e a previsao lado a lado e o recebido embaixo; depois os avisos e a matriz, na largura toda.
 // #805 (decisao do dono de 18/11/2026): os dois numeros do alto dizem se estao melhor ou pior que antes, com a peca
 // Variacao. As referencias vem do servidor, com a mesma conta do numero em outro periodo; a tela so' desenha.
+// 19/11/2026 (decisoes do dono, #805): o "Medido" do alto passou para a conta do Fechamento (na cota, o mesmo valor do
+// ultimo mes do grafico do medido); a matriz obra por competencia foi para o Resumo das medicoes (ResumoMatriz); os
+// avisos ficam so' com a contagem.
 // #817 (reestrutura 5c): o que faltava apresentar a' diretoria, acrescentado sem mexer no que o dono montou. No grupo da
 // cota entram o ciclo aberto por contratante (logo abaixo do ciclo e da previsao) e o medido em 12 meses (ao lado do
 // recebido, com a mesma forma). Todo numero novo e' uma porta: o contratante e o a receber dele abrem a pagina do
@@ -42,11 +45,6 @@ type EtapaCiclo = { etapa: ChaveEtapa; valor_centavos: number; quantidade: numbe
 // #652: o recebido de um mes (baixas do RM, na cota) e uma linha da previsao de entrada
 type MesRecebido = { mes: string; valor_centavos: number };
 type GrupoPrevisao = { valor_centavos: number; quantidade: number };
-// #659: a etapa da medicao de uma competencia; `atrasado` = protocolada alem do prazo do contratante (a regra da
-// previsao de entrada). Celula nula = sem medicao na competencia
-type EtapaMatriz = "em_analise" | "boletim" | "nota" | "protocolado" | "atrasado" | "recebida";
-type CelulaMatriz = { etapa: EtapaMatriz; medicao_id: number } | null;
-type ObraMatriz = { contrato_id: number; obra: string; celulas: CelulaMatriz[] };
 /** #805: o medido de outra competencia, a referencia da variacao; nulo sem com o que comparar */
 type ReferenciaMedido = { competencia: string; valor_centavos: number } | null;
 // #817: as quatro etapas do ciclo que abrem por contratante (o recebido no mes nao abre)
@@ -61,9 +59,9 @@ type MesMedido = { competencia: string; valor_centavos: number };
 export type PainelInicio = {
   hoje: string;
   protocoladas: { obras_protocoladas: number; obras_ativas: number; ultima: string | null };
-  // #805: `anterior` e' a competencia anterior e `ano_anterior` a mesma competencia do ano anterior
-  medido: { competencia: string; valor_centavos: number; quantidade: number; ultimo_lancamento: string | null;
-    anterior: ReferenciaMedido; ano_anterior: ReferenciaMedido };
+  // #805: `anterior` e' a competencia anterior e `ano_anterior` a mesma competencia do ano anterior. 19/11/2026
+  // (decisao do dono): o medido do Fechamento, na cota; o mesmo valor do ultimo mes de `medido_12m`
+  medido: { competencia: string; valor_centavos: number; anterior: ReferenciaMedido; ano_anterior: ReferenciaMedido };
   // 17/11/2026 (docs/adr/0006): o total soma so' a competencia de `ano_inicial` em diante que o RM ainda informa; o
   // resto vem em `a_parte` (nulo sem o total liberado) e a tela o mostra numa linha propria, fora do total
   a_receber: { liberado: boolean; valor_centavos: number | null; mais_60_centavos: number | null;
@@ -72,12 +70,11 @@ export type PainelInicio = {
   ciclo: EtapaCiclo[];
   // #817: em cada etapa, a soma das linhas e' o valor da etapa em `ciclo`; a do a receber, `a_receber.valor_centavos`
   ciclo_por_contratante: LinhaContratante[];
-  // #817: as 12 ultimas competencias fechadas (as da matriz), na cota, pela conta do Fechamento
+  // #817: as 12 ultimas competencias fechadas, na cota, pela conta do Fechamento
   medido_12m: MesMedido[];
   recebido_12m: MesRecebido[];
   // #652: `depois` = data esperada alem do proximo mes
   previsao: Record<"neste_mes" | "proximo_mes" | "atrasado" | "sem_previsao" | "depois", GrupoPrevisao>;
-  matriz: { competencias: string[]; grupos: { contratante: string; obras: ObraMatriz[] }[] };
   // #805: `anterior` e' o mes anterior ate' o mesmo dia do mes (`ate_dia`: o dia de hoje, ou o ultimo dia do mes
   // anterior quando ele e' mais curto); nulo sem com o que comparar
   notas_mes: { mes: string; valor_centavos: number; notas: number; obras: number;
@@ -349,109 +346,15 @@ function PrevisaoEntrada({ previsao }: { previsao: PainelInicio["previsao"] }) {
   );
 }
 
-// #659: as etapas da matriz na ordem da legenda: do azul mais claro ao mais escuro, o verde do recebido e o vermelho
-// da protocolada alem do prazo, que leva tambem a marca "!" dentro da celula (#721; inicio.css)
-const ETAPAS_MATRIZ: { chave: EtapaMatriz; rotulo: string }[] = [
-  { chave: "em_analise", rotulo: "Em análise" },
-  { chave: "boletim", rotulo: "Boletim" },
-  { chave: "nota", rotulo: "Nota" },
-  { chave: "protocolado", rotulo: "Protocolado" },
-  { chave: "recebida", rotulo: "Recebido" },
-  { chave: "atrasado", rotulo: "Atrasado" },
-];
-const ROTULO_MATRIZ = Object.fromEntries(ETAPAS_MATRIZ.map(e => [e.chave, e.rotulo])) as Record<EtapaMatriz, string>;
-// a marca da legenda e' a peca MarcaEtapa (#805); a matriz chama de "recebida" a etapa que a peca chama de "recebido"
-const marcaDaMatriz = (e: EtapaMatriz): Etapa => (e === "recebida" ? "recebido" : e);
-
-/** Matriz obra por competencia (#659): uma linha por obra ativa, agrupada por contratante, e uma celula por competencia
- *  com a cor da etapa da medicao. A celula pintada e' o link para a medicao, com o nome (obra, competencia, etapa) no
- *  `aria-label` e na dica; a tabela equivalente fica para o leitor de tela. */
-function MatrizObras({ matriz }: { matriz: PainelInicio["matriz"] }) {
-  const { competencias, grupos } = matriz;
-  return (
-    <section aria-labelledby="ini-matriz" className="cartao ini-painel ini-matriz">
-      <div className="ini-painel__cab">
-        <h2 id="ini-matriz">Medições por obra e competência</h2>
-        <ul className="ini-matriz__legenda" aria-label="Legenda das etapas">
-          {ETAPAS_MATRIZ.map(e => <li key={e.chave}><MarcaEtapa etapa={marcaDaMatriz(e.chave)}>{e.rotulo}</MarcaEtapa></li>)}
-        </ul>
-      </div>
-      {grupos.length === 0 ? <p className="ini-vazio">Nenhuma obra ativa.</p> : <>
-        <div className="ini-matriz__grade">
-          <div className="ini-matriz__linha ini-matriz__linha--meses" aria-hidden="true">
-            {competencias.map((c, i) => {
-              const [mes, ano] = fmtMesCurto(c).split("/");
-              return (
-                <span key={c} className="ini-matriz__mes">
-                  <span>{mes}</span>{(i === 0 || c.endsWith("-01")) && <span className="ini-matriz__ano">{ano}</span>}
-                </span>);
-            })}
-          </div>
-          {grupos.map(g => (
-            <Fragment key={g.contratante}>
-              <h3 className="ini-matriz__grupo">{g.contratante}</h3>
-              {g.obras.map(o => (
-                <div key={o.contrato_id} className="ini-matriz__linha ini-matriz__linha--obra">
-                  <span className="ini-matriz__obra">{o.obra}</span>
-                  {competencias.map((c, i) => {
-                    const cel = o.celulas[i];
-                    if (!cel) return <span key={c} className="ini-matriz__celula" aria-hidden="true" />;
-                    const nome = `${o.obra}, ${fmtCompetencia(c)}: ${ROTULO_MATRIZ[cel.etapa]}`;
-                    return <Link key={c} para={{ tela: "medicao", obra: o.contrato_id, id: cel.medicao_id }}
-                      className={`ini-matriz__celula ini-matriz__celula--${cel.etapa}`} aria-label={nome} title={nome}>{null}</Link>;
-                  })}
-                </div>))}
-            </Fragment>))}
-        </div>
-        <div className="sr-only"><table>
-          <caption>Etapa da medição de cada obra por competência</caption>
-          <thead><tr><th scope="col">Obra</th><th scope="col">Contratante</th>
-            {competencias.map(c => <th key={c} scope="col">{fmtCompetencia(c)}</th>)}</tr></thead>
-          <tbody>
-            {grupos.flatMap(g => g.obras.map(o => (
-              <tr key={o.contrato_id}>
-                <th scope="row">{o.obra}</th><td>{g.contratante}</td>
-                {competencias.map((c, i) => { const cel = o.celulas[i]; return <td key={c}>{cel ? ROTULO_MATRIZ[cel.etapa] : "—"}</td>; })}
-              </tr>)))}
-          </tbody>
-        </table></div>
-      </>}
-    </section>
-  );
-}
-
 // #666: as secoes da caixa, na ordem da tela Avisos; "Depois" (31 a 90 dias) fica so' la'. A situacao vem da secao (o
 // tempo), nao do `nivel` do aviso: vencido = critico; o que vence na semana ou no mes = vence em breve. #721: sao as
 // situacoes das pecas Contador e Selo, ditas direto. Nao passam por `situacaoDoNivel`: la' "acao" e' critico, e o
 // nome antigo daqui ("acao" no vencido, "atencao" no que vence) so' confundia.
 const SECOES_DA_CAIXA: Partial<Record<Secao, Situacao>> = { vencido: "critico", semana: "breve", mes: "breve" };
-const AVISOS_VISIVEIS = 3;
 
-/** O selo de dias do item: "há N dias" no vencido; "hoje" ou "em N dias" no que vence. */
-function seloDeDias(a: Aviso, secao: Secao): string {
-  const n = Math.abs(diasAteOAviso(a) ?? 0), d = `${n.toLocaleString("pt-BR")} ${n === 1 ? "dia" : "dias"}`;
-  return secao === "vencido" ? `há ${d}` : n === 0 ? "hoje" : `em ${d}`;
-}
-
-function ItemAviso({ a, secao, situacao, ir }: { a: Aviso; secao: Secao; situacao: Situacao; ir: Ir }) {
-  const d = destinoDoAviso(a);
-  // a obra (ou a empresa) abre o item, em destaque: a mensagem perde o "Nome: " do comeco, como na tela Avisos. Na tela
-  // a obra e a mensagem ficam em linhas separadas; o " · " entre as duas e' so' para o leitor de tela
-  const quem = a.obra ?? a.entidade ?? "";
-  const texto = semRSOrfao((a.obra ? semObra(a) : semEmpresa(a)).mensagem);
-  const corpo = <>
-    <span className="ini-aviso__nome">
-      {quem && <><span className="ini-aviso__obra">{quem}</span><span className="sr-only"> · </span></>}
-      <span className="ini-aviso__msg">{texto}</span>
-    </span>
-    <Selo situacao={situacao}>{seloDeDias(a, secao)}</Selo>
-  </>;
-  return <li>{d ? <Link para={d.para} busca={d.busca} secao={d.secao} ir={ir} className="ini-aviso__linha">{corpo}</Link>
-    : <span className="ini-aviso__linha">{corpo}</span>}</li>;
-}
-
-/** Caixa "Avisos importantes" (#666): so' o que esta' na agenda da tela Avisos, em tres secoes pelo tempo, cada uma
- *  com a contagem e os primeiros itens. `avisos`: `undefined` carregando, `null` falhou (como em AvisosPagina). */
+/** Caixa "Avisos importantes" (#666): so' o que esta' na agenda da tela Avisos, em tres secoes pelo tempo. Decisao do
+ *  dono de 19/11/2026 (#805): so' a contagem de cada secao e o total; os itens ficam na tela Avisos ("Ver todos").
+ *  `avisos`: `undefined` carregando, `null` falhou (como em AvisosPagina). */
 function CaixaAvisos({ avisos, ir }: { avisos: Aviso[] | null | undefined; ir: Ir }) {
   const secoes = porSecao(daAgenda(avisos ?? [])).filter(s => SECOES_DA_CAIXA[s.id]);
   const total = secoes.reduce((n, s) => n + s.itens.length, 0);
@@ -466,24 +369,17 @@ function CaixaAvisos({ avisos, ir }: { avisos: Aviso[] | null | undefined; ir: I
       {avisos === null && <Falha>Não foi possível verificar os avisos. Recarregue a página para tentar de novo.</Falha>}
       {avisos && total === 0 && <p className="ini-vazio">Nenhum aviso.</p>}
       {avisos && total > 0 && (
-        <div className="ini-avisos__secoes">
+        <dl className="ini-avisos__secoes">
           {secoes.map(s => {
-            const situacao = SECOES_DA_CAIXA[s.id] ?? "breve", id = `ini-av-${s.id}`;
+            const situacao = SECOES_DA_CAIXA[s.id] ?? "breve", n = s.itens.length;
             return (
-              <section key={s.id} aria-labelledby={id} className="ini-aviso">
-                <header className="ini-aviso__topo">
-                  <h3 id={id}>{s.rotulo}</h3>
-                  {/* secao sem aviso: contador neutro, sem o simbolo da situacao */}
-                  <Contador situacao={s.itens.length > 0 ? situacao : undefined}>{s.itens.length.toLocaleString("pt-BR")}</Contador>
-                </header>
-                {s.itens.length > 0 && (
-                  <ul className="ini-aviso__lista">
-                    {s.itens.slice(0, AVISOS_VISIVEIS).map((a, i) =>
-                      <ItemAviso key={`${a.tipo}-${a.contrato_id}-${a.entidade_id ?? ""}-${a.medicao_id ?? ""}-${i}`} a={a} secao={s.id} situacao={situacao} ir={ir} />)}
-                  </ul>)}
-              </section>);
+              <div key={s.id} className="ini-aviso">
+                <dt>{s.rotulo}</dt>
+                {/* secao sem aviso: contador neutro, sem o simbolo da situacao */}
+                <dd><Contador situacao={n > 0 ? situacao : undefined} rotulo={contar(n, "aviso", "avisos")}>{n.toLocaleString("pt-BR")}</Contador></dd>
+              </div>);
           })}
-        </div>)}
+        </dl>)}
     </aside>
   );
 }
@@ -544,8 +440,11 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
                 </dd>)}
             </div>
             <div className="ini-numero">
-              <dt className="ini-numero__rotulo">Medido em {fmtMesExtenso(m.competencia)}</dt>
-              {/* #817: o medido do mes abre o mes no Fechamento */}
+              {/* 19/11/2026 (decisao do dono, #805): o medido do Fechamento daquela competencia, na cota. O rotulo diz
+                  que o mes e' a competencia (a da medicao, nao o mes do lancamento); a base fica dita uma vez, no
+                  titulo "Cota da Lotufo" (#721), e o numero leva ao Fechamento, que e' todo na cota */}
+              <dt className="ini-numero__rotulo">Medido na competência de {fmtMesExtenso(m.competencia)}</dt>
+              {/* #817: o medido do mes abre o mes no Fechamento, que mostra o mesmo valor */}
               <dd className="ini-numero__valor">
                 <Link para={{ tela: "fechamento" }} busca={{ mes: m.competencia }} ir={ir} className="ini-porta">{brl(m.valor_centavos)}</Link>
               </dd>
@@ -567,7 +466,6 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
         <Recebido12Meses meses={p.recebido_12m} />
         <Medido12Meses meses={p.medido_12m} ir={ir} />
         <CaixaAvisos avisos={avisos} ir={ir} />
-        <MatrizObras matriz={p.matriz} />
       </div>
     </div>
   );

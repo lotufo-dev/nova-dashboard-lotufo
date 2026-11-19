@@ -14,18 +14,16 @@ const MESES_12 = ["2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-0
   "2026-09", "2026-10"];
 const RECEBIDO: Record<string, number> = { "2025-11": 120_000_000, "2026-03": 35_000_000, "2026-09": 240_000_000, "2026-10": 60_000_050 };
 
-// #659: as 12 competencias da matriz terminam no mes anterior ao de hoje
-const MESES_MATRIZ = ["2025-10", ...MESES_12.slice(0, 11)];
+// #817: as 12 competencias fechadas terminam no mes anterior ao de hoje
+const MESES_FECHADOS = ["2025-10", ...MESES_12.slice(0, 11)];
 // #817: o medido das mesmas 12 competencias (valores de tabela: 10, 20 e 15 milhoes)
 const MEDIDO: Record<string, number> = { "2025-10": 1_000_000_000, "2026-08": 2_000_000_000, "2026-09": 1_500_000_000 };
-type Celula = PainelInicio["matriz"]["grupos"][number]["obras"][number]["celulas"][number];
-const celulas = (ultimas: Celula[]): Celula[] => [...Array<Celula>(12 - ultimas.length).fill(null), ...ultimas];
 
 const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   hoje: "2026-10-09",
   protocoladas: { obras_protocoladas: 2, obras_ativas: 18, ultima: "2026-09-30" },
-  medido: { competencia: "2026-09", valor_centavos: 1_827_715_696, quantidade: 2, ultimo_lancamento: "2026-10-08",
-    anterior: null, ano_anterior: null },
+  // 19/11/2026 (decisao do dono, #805): o medido do alto e' o do Fechamento, o mesmo do ultimo mes de `medido_12m`
+  medido: { competencia: "2026-09", valor_centavos: 1_500_000_000, anterior: null, ano_anterior: null },
   a_receber: { liberado: true, valor_centavos: 1_720_000_000, mais_60_centavos: 210_000_000,
     a_parte: { ano_inicial: "2025", valor_centavos: 0, anterior_centavos: 0, sem_atualizacao_centavos: 0, sem_atualizacao_desde: null } },
   ciclo: [
@@ -37,7 +35,7 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
   ],
   // #817: o ciclo aberto por contratante entra nos testes dele (`comContratantes`)
   ciclo_por_contratante: [],
-  medido_12m: MESES_MATRIZ.map(competencia => ({ competencia, valor_centavos: MEDIDO[competencia] ?? 0 })),
+  medido_12m: MESES_FECHADOS.map(competencia => ({ competencia, valor_centavos: MEDIDO[competencia] ?? 0 })),
   recebido_12m: MESES_12.map(mes => ({ mes, valor_centavos: RECEBIDO[mes] ?? 0 })),
   previsao: {
     neste_mes: { valor_centavos: 500_000, quantidade: 2 },
@@ -45,16 +43,6 @@ const painel = (extra: Partial<PainelInicio> = {}): PainelInicio => ({
     atrasado: { valor_centavos: 800_100, quantidade: 2 },
     sem_previsao: { valor_centavos: 0, quantidade: 0 },
     depois: { valor_centavos: 1_584_477_803, quantidade: 1 },     // as cinco somam a etapa "Protocolado" do ciclo
-  },
-  matriz: {
-    competencias: MESES_MATRIZ,
-    grupos: [
-      { contratante: "Contratante A", obras: [
-        { contrato_id: 7, obra: "Obra A", celulas: celulas([{ etapa: "recebida", medicao_id: 81 }, { etapa: "atrasado", medicao_id: 82 },
-          { etapa: "protocolado", medicao_id: 83 }, { etapa: "em_analise", medicao_id: 84 }]) },
-        { contrato_id: 8, obra: "Obra B", celulas: celulas([{ etapa: "nota", medicao_id: 91 }, null, { etapa: "boletim", medicao_id: 92 }]) }] },
-      { contratante: "Contratante B", obras: [{ contrato_id: 9, obra: "Obra C", celulas: celulas([]) }] },
-    ],
   },
   notas_mes: { mes: "2026-10", valor_centavos: 1_522_295_618, notas: 5, obras: 2, anterior: null },
   ...extra,
@@ -145,13 +133,14 @@ describe("Início", () => {
     // #817: os dois blocos novos entraram no grupo da cota; tirando eles, a tela e' a que o dono montou, na mesma ordem
     const NOVOS = ["Ciclo por contratante", "Medido em 12 meses"];
     const NOVAS = ["cartao ini-painel ini-orgaos", "cartao ini-painel ini-medido"];
+    // 19/11/2026 (decisao do dono, #805): a matriz obra por competencia saiu para o Resumo das medicoes
     expect(titulos.filter(t => !NOVOS.includes(t))).toEqual(
-      ["Cota da Lotufo", "Ciclo da medição", "Previsão de entrada", "Recebido em 12 meses", "Avisos importantes", "Medições por obra e competência"]);
+      ["Cota da Lotufo", "Ciclo da medição", "Previsão de entrada", "Recebido em 12 meses", "Avisos importantes"]);
     expect(blocos.filter(b => !NOVAS.includes(b))).toEqual(["ini-saudacao", "ini-numeros", "ini-cota", "cartao ini-painel ini-ciclo",
-      "cartao ini-painel ini-previsao", "cartao ini-painel ini-recebido", "cartao ini-painel ini-avisos", "cartao ini-painel ini-matriz"]);
+      "cartao ini-painel ini-previsao", "cartao ini-painel ini-recebido", "cartao ini-painel ini-avisos"]);
     // onde cada um entrou: o ciclo por contratante logo depois do ciclo e da previsao; o medido depois do recebido
     expect(titulos).toEqual(["Cota da Lotufo", "Ciclo da medição", "Previsão de entrada", "Ciclo por contratante", "Recebido em 12 meses",
-      "Medido em 12 meses", "Avisos importantes", "Medições por obra e competência"]);
+      "Medido em 12 meses", "Avisos importantes"]);
     expect(blocos.slice(3, 8)).toEqual(["cartao ini-painel ini-ciclo", "cartao ini-painel ini-previsao", NOVAS[0],
       "cartao ini-painel ini-recebido", NOVAS[1]]);
     // a saudacao com a legenda e os dois numeros do mes vem antes de tudo
@@ -330,71 +319,12 @@ describe("Início", () => {
     expect(regiao.querySelector(".ini-previsao__seg--atrasado")).toBeNull();
   });
 
-  const MATRIZ = "Medições por obra e competência";
-
-  it("#659: matriz com uma linha por obra, agrupada por contratante, 12 competências e a legenda das etapas", async () => {
+  it("19/11/2026 (#805): a matriz obra por competência saiu da Início para o Resumo das medições", async () => {
     api.mockResolvedValue(painel());
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const regiao = await screen.findByRole("region", { name: MATRIZ });
-    const legenda = within(regiao).getByRole("list", { name: "Legenda das etapas" });
-    // #805: a chave de cor de cada etapa e' a peca MarcaEtapa, a mesma do cabecalho das colunas do Fechamento
-    expect([...legenda.children].map(li => [limpo(li), li.querySelector(".marca-etapa__cor")?.className])).toEqual([
-      ["Em análise", "marca-etapa__cor marca-etapa__cor--em_analise"], ["Boletim", "marca-etapa__cor marca-etapa__cor--boletim"],
-      ["Nota", "marca-etapa__cor marca-etapa__cor--nota"], ["Protocolado", "marca-etapa__cor marca-etapa__cor--protocolado"],
-      ["Recebido", "marca-etapa__cor marca-etapa__cor--recebido"], ["Atrasado", "marca-etapa__cor marca-etapa__cor--atrasado"]]);
-    // o cabecalho: o mes em cada coluna; o ano so' na primeira e em janeiro
-    expect([...regiao.querySelectorAll(".ini-matriz__mes")].map(m => [...m.children].map(limpo).join(" "))).toEqual(
-      ["out 25", "nov", "dez", "jan 26", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set"]);
-    expect(within(regiao).getAllByRole("heading", { level: 3 }).map(limpo)).toEqual(["Contratante A", "Contratante B"]);
-    const linhas = [...regiao.querySelectorAll(".ini-matriz__linha--obra")];
-    expect(linhas.map(l => limpo(l.querySelector(".ini-matriz__obra")))).toEqual(["Obra A", "Obra B", "Obra C"]);
-    expect(linhas.map(l => l.querySelectorAll(".ini-matriz__celula").length)).toEqual([12, 12, 12]);
-  });
-
-  it("#659: cada célula pintada tem a cor da etapa, nome acessível e é um link para a medição; a vazia não", async () => {
-    api.mockResolvedValue(painel());
-    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const regiao = await screen.findByRole("region", { name: MATRIZ });
-    const links = within(regiao).getAllByRole("link");
-    expect(links.map(a => [a.getAttribute("aria-label"), a.getAttribute("href"), a.className.replace("ini-matriz__celula ", "")])).toEqual([
-      ["Obra A, 06/2026: Recebido", "/obras/7/medicoes/81", "ini-matriz__celula--recebida"],
-      ["Obra A, 07/2026: Atrasado", "/obras/7/medicoes/82", "ini-matriz__celula--atrasado"],
-      ["Obra A, 08/2026: Protocolado", "/obras/7/medicoes/83", "ini-matriz__celula--protocolado"],
-      ["Obra A, 09/2026: Em análise", "/obras/7/medicoes/84", "ini-matriz__celula--em_analise"],
-      ["Obra B, 07/2026: Nota", "/obras/8/medicoes/91", "ini-matriz__celula--nota"],
-      ["Obra B, 09/2026: Boletim", "/obras/8/medicoes/92", "ini-matriz__celula--boletim"],
-    ]);
-    expect(links.every(a => a.getAttribute("title") === a.getAttribute("aria-label"))).toBe(true);
-    const vazias = [...regiao.querySelectorAll(".ini-matriz__celula:not(a)")];
-    expect(vazias).toHaveLength(36 - 6);
-    expect(vazias.every(v => v.className === "ini-matriz__celula" && v.getAttribute("aria-hidden") === "true")).toBe(true);
-  });
-
-  it("#659: matriz tem a tabela equivalente, dentro de um div sr-only", async () => {
-    api.mockResolvedValue(painel());
-    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const regiao = await screen.findByRole("region", { name: MATRIZ });
-    const tabela = within(regiao).getByRole("table", { name: "Etapa da medição de cada obra por competência" });
-    expect(tabela.className).toBe("");
-    expect(tabela.parentElement?.tagName).toBe("DIV");
-    expect(tabela.parentElement?.className).toBe("sr-only");
-    expect(regiao.querySelector("table.sr-only")).toBeNull();
-    const t = "—";
-    expect(within(tabela).getAllByRole("row").map(l => [...l.children].map(limpo))).toEqual([
-      ["Obra", "Contratante", "10/2025", "11/2025", "12/2025", "01/2026", "02/2026", "03/2026", "04/2026", "05/2026", "06/2026",
-        "07/2026", "08/2026", "09/2026"],
-      ["Obra A", "Contratante A", t, t, t, t, t, t, t, t, "Recebido", "Atrasado", "Protocolado", "Em análise"],
-      ["Obra B", "Contratante A", t, t, t, t, t, t, t, t, t, "Nota", t, "Boletim"],
-      ["Obra C", "Contratante B", t, t, t, t, t, t, t, t, t, t, t, t],
-    ]);
-  });
-
-  it("#659: sem obra ativa, uma linha curta no lugar da matriz", async () => {
-    api.mockResolvedValue(painel({ matriz: { competencias: MESES_MATRIZ, grupos: [] } }));
-    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const regiao = await screen.findByRole("region", { name: MATRIZ });
-    expect(within(regiao).getByText("Nenhuma obra ativa.")).toBeTruthy();
-    expect(regiao.querySelector(".ini-matriz__grade, table")).toBeNull();
+    await screen.findByRole("region", { name: CICLO });
+    expect(screen.queryByRole("region", { name: "Medições por obra e competência" })).toBeNull();
+    expect(document.querySelector("[class*='matriz']")).toBeNull();
   });
 
   it("dois números só com rótulo e valor: notas protocoladas e medido do mês (#652: o recebido no ano virou as barras)", async () => {
@@ -405,11 +335,11 @@ describe("Início", () => {
     const numeros = [...regiao.querySelectorAll(".ini-numero")];
     expect(numeros.map(c => [...c.children].map(limpo))).toEqual([
       ["Notas fiscais protocoladas em outubro", "R$ 15.222.956,18"],
-      ["Medido em setembro", "R$ 18.277.156,96"],
+      ["Medido na competência de setembro", "R$ 15.000.000,00"],
     ]);
     expect(numeros.map(c => [...c.children].map(e => e.tagName))).toEqual([["DT", "DD"], ["DT", "DD"]]);
     expect(numeros.every(c => c.parentElement?.tagName === "DL" && c.parentElement.parentElement === regiao)).toBe(true);
-    expect(limpo(regiao)).toBe("Notas fiscais protocoladas em outubroR$ 15.222.956,18Medido em setembroR$ 18.277.156,96");
+    expect(limpo(regiao)).toBe("Notas fiscais protocoladas em outubroR$ 15.222.956,18Medido na competência de setembroR$ 15.000.000,00");
     expect(document.body.textContent).not.toContain("Recebido em 2026");
   });
 
@@ -503,61 +433,47 @@ describe("Início", () => {
     if (fila instanceof Error) throw fila;
     return { avisos: fila, resumo: {} };
   });
-  // cada item e' um link com dois filhos: o nome (obra, " · " so' de leitor de tela, mensagem) e o selo de dias
-  const linhasDe = (secao: HTMLElement) => within(secao).queryAllByRole("link").map(l => [...l.children].map(limpo));
   // #721: as contagens sao a peca Contador. A da caixa (ao lado do titulo) tem o numero desenhado, fora da leitura, e o
-  // rotulo so' de leitor de tela; a de cada secao e' o numero ao lado do titulo dela
+  // rotulo so' de leitor de tela; a de cada secao e' o numero ao lado do nome dela. 19/11/2026 (decisao do dono, #805):
+  // a caixa fica so' com a contagem; os itens estao na tela Avisos
   const contadorDaCaixa = () => document.querySelector(".ini-avisos > .ini-painel__cab .contador");
   const totalDaCaixa = () => limpo(contadorDaCaixa()?.querySelector("[aria-hidden='true']"));
-  const contadorDe = (secao: Element) => secao.querySelector(".ini-aviso__topo .contador");
+  const secoesDaCaixa = () => [...document.querySelectorAll(".ini-avisos .ini-aviso")];
+  const contadorDe = (secao: Element) => secao.querySelector("dd .contador");
+  // o numero desenhado do contador (o glifo da situacao tambem fica fora da leitura, e vem antes)
+  const contagens = () => secoesDaCaixa().map(s =>
+    [limpo(s.querySelector("dt")), limpo(contadorDe(s)?.querySelector("[aria-hidden='true']:not(.glifo)"))]);
+  const esperarSecoes = async () => { await screen.findByRole("complementary", { name: "Avisos importantes" }); await screen.findByText("Vencido"); };
 
-  it("#666: avisos em três seções pelo tempo (Vencido, Esta semana, Este mês), com a contagem, os itens e o selo de dias", async () => {
+  it("#666: avisos em três seções pelo tempo (Vencido, Esta semana, Este mês), só com a contagem de cada uma", async () => {
     servir();
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const caixa = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
+    await esperarSecoes();
     expect(api).toHaveBeenCalledWith("/api/inicio");
-    await caixa.findByRole("region", { name: "Vencido" });
-    expect(caixa.getAllByRole("heading", { level: 3 }).map(limpo)).toEqual(["Vencido", "Esta semana", "Este mês"]);
-    const vencido = caixa.getByRole("region", { name: "Vencido" });
-    // o mais antigo primeiro; o fato parado "desde" 12 dias é passado
-    expect(linhasDe(vencido)).toEqual([["Obra B · execução vencida", "há 450 dias"], ["Obra C · nota sem envio", "há 12 dias"]]);
-    // #721: o selo de dias e' a peca Selo, na situacao da secao: vencido = critico (era a pilula "acao", vermelha)
-    expect(within(vencido).getByText("há 450 dias").closest(".selo")!.className).toBe("selo selo--critico");
-    const semana = caixa.getByRole("region", { name: "Esta semana" });
-    expect(linhasDe(semana)).toEqual([["Empresa X · FGTS vence", "hoje"], ["Obra A · vigência termina", "em 5 dias"]]);
-    // o que vence na semana ou no mes = vence em breve (era a pilula "atencao", ambar)
-    expect(within(semana).getByText("em 5 dias").closest(".selo")!.className).toBe("selo selo--breve");
-    const mes = caixa.getByRole("region", { name: "Este mês" });
-    expect(linhasDe(mes)).toEqual([["Obra A · execução termina", "em 20 dias"]]);
-    expect(within(mes).getByText("em 20 dias").closest(".selo")!.className).toBe("selo selo--breve");
-    expect([vencido, semana, mes].map(s => limpo(contadorDe(s)))).toEqual(["2", "2", "1"]);
-    // cada item leva ao lugar do aviso, como na tela Avisos
-    expect(within(vencido).getAllByRole("link").map(l => l.getAttribute("href"))).toEqual(["/obras/8/prazos", "/obras/9/medicoes/31#notas"]);
-    expect(within(semana).getAllByRole("link")[0]?.getAttribute("href")).toBe("/documentos/4");
+    expect(contagens()).toEqual([["Vencido", "2"], ["Esta semana", "2"], ["Este mês", "1"]]);
+    // as secoes sao uma lista de nome e contagem (dl), sem os itens: nem a obra, nem a mensagem, nem o selo de dias
+    const caixa = screen.getByRole("complementary", { name: "Avisos importantes" });
+    expect(secoesDaCaixa().every(s => s.parentElement?.tagName === "DL" && [...s.children].map(c => c.tagName).join() === "DT,DD")).toBe(true);
+    expect(caixa.textContent).not.toMatch(/Obra B|Obra C|Empresa X|há 450 dias|em 5 dias/);
+    expect(caixa.querySelector(".selo, ul, .ini-aviso__lista, .ini-aviso__linha")).toBeNull();
+    expect(within(caixa).getAllByRole("link").map(l => l.getAttribute("href"))).toEqual(["/avisos"]);
   });
 
-  it("#721: contadores e selos dos avisos são as peças da fundação, com cor e forma; o sentido de cada seção não muda", async () => {
+  it("#721: os contadores dos avisos são a peça da fundação, com cor e forma; o sentido de cada seção não muda", async () => {
     servir();
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const caixa = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
-    const secoes = ["Vencido", "Esta semana", "Este mês"].map(n => caixa.getByRole("region", { name: n }));
+    await esperarSecoes();
+    const secoes = secoesDaCaixa();
     // o contador de cada secao: critico no vencido, vence em breve nas outras, cada um com o simbolo da situacao
     expect(secoes.map(s => contadorDe(s)?.className)).toEqual(["contador contador--critico", "contador contador--breve", "contador contador--breve"]);
     expect(secoes.map(s => contadorDe(s)?.querySelector(".glifo")?.className)).toEqual(["glifo glifo--critico", "glifo glifo--breve", "glifo glifo--breve"]);
-    // todo selo de uma secao tem a situacao dela, com o simbolo antes do texto; o `nivel` do aviso nao muda a cor
-    expect(secoes.map(s => [...new Set([...s.querySelectorAll(".selo")].map(e => e.className))])).toEqual(
-      [["selo selo--critico"], ["selo selo--breve"], ["selo selo--breve"]]);
-    expect([...document.querySelectorAll(".ini-avisos .selo")].every(e => e.firstElementChild?.classList.contains("glifo"))).toBe(true);
+    expect(secoes.map(s => limpo(contadorDe(s)?.querySelector(".sr-only")))).toEqual(["2 avisos", "2 avisos", "1 aviso"]);
     // o contador da caixa e' neutro (sem simbolo): o numero desenhado e o rotulo so' de leitor de tela, sem aria-label
     const total = contadorDaCaixa()!;
     expect(total.className).toBe("contador");
     expect(total.querySelector(".glifo")).toBeNull();
     expect(total.getAttribute("aria-label")).toBeNull();
     expect([...total.children].map(c => [c.className, c.getAttribute("aria-hidden"), c.textContent])).toEqual([["", "true", "5"], ["sr-only", null, "5 avisos"]]);
-    // a obra em destaque e a mensagem em elementos separados; o " · " entre as duas so' para o leitor de tela
-    const item = within(secoes[0]).getAllByRole("link")[0];
-    expect([...item.querySelector(".ini-aviso__nome")!.children].map(c => [c.className, c.textContent])).toEqual(
-      [["ini-aviso__obra", "Obra B"], ["sr-only", " · "], ["ini-aviso__msg", "execução vencida"]]);
     // as classes proprias do vocabulario antigo de tres niveis sairam
     expect(document.querySelector("[class*='ini-pilula'], [class*='ini-aviso--'], .ini-aviso__conta, .ini-avisos__total")).toBeNull();
   });
@@ -565,50 +481,45 @@ describe("Início", () => {
   it("#666: a contagem da caixa é a soma de Vencido, Esta semana e Este mês da tela Avisos, com a mesma fila", async () => {
     servir();
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const caixa = await screen.findByRole("complementary", { name: "Avisos importantes" });
-    await within(caixa).findByRole("region", { name: "Vencido" });
-    const total = totalDaCaixa();
+    await esperarSecoes();
+    const total = totalDaCaixa(), daCaixa = contagens();
     cleanup();
     render(<AvisosPagina busca={{}} />);
     await act(async () => {});
     // na tela Avisos as contagens ficam no alto da página, com a mesma fila e a mesma regra de seção
     const naTela = [...document.querySelectorAll(".avs-numero")].map(n => `${limpo(n.querySelector("dt"))} · ${limpo(n.querySelector(".avs-numero__valor"))}`);
     expect(naTela).toEqual(["Vencidos · 2", "Esta semana · 2", "Este mês · 1", "Próximos 90 dias · 1"]);
+    expect(daCaixa.map(([, n]) => n)).toEqual(["2", "2", "1"]);
     expect(total).toBe(String(2 + 2 + 1));
   });
 
-  it("#666: aviso sem data, além de 90 dias ou da seção Depois não conta nem aparece na caixa", async () => {
+  it("#666: aviso sem data, além de 90 dias ou da seção Depois não conta na caixa", async () => {
     servir();
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const caixa = await screen.findByRole("complementary", { name: "Avisos importantes" });
-    await within(caixa).findByRole("region", { name: "Vencido" });
+    await esperarSecoes();
+    const caixa = screen.getByRole("complementary", { name: "Avisos importantes" });
     expect(caixa.textContent).not.toMatch(/Obra D|Obra E|Obra F|Depois|Sem data/);
-    expect(within(caixa).queryByRole("region", { name: "Depois" })).toBeNull();
+    expect(contagens().map(([nome]) => nome)).toEqual(["Vencido", "Esta semana", "Este mês"]);
   });
 
-  it("#666: cada seção mostra os três primeiros itens; a contagem é de todos", async () => {
+  it("#666: a contagem de cada seção é de todos os avisos dela; seção sem aviso fica com zero, neutra", async () => {
     servir([1, 2, 3, 4, 5].map(n => aviso({ obra: `Obra ${n}`, contrato_id: n, mensagem: `Obra ${n}: execução vencida`, dias: -n, data: `2026-10-0${9 - n}` })));
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const caixa = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
-    const vencido = await caixa.findByRole("region", { name: "Vencido" });
-    expect(linhasDe(vencido).map(l => l[0])).toEqual(["Obra 5 · execução vencida", "Obra 4 · execução vencida", "Obra 3 · execução vencida"]);
-    expect(limpo(contadorDe(vencido))).toBe("5");
+    await esperarSecoes();
+    expect(contagens()).toEqual([["Vencido", "5"], ["Esta semana", "0"], ["Este mês", "0"]]);
     expect(totalDaCaixa()).toBe("5");
-    // seção sem aviso: a contagem zero, neutra (sem situação nem símbolo), sem lista
-    const semana = caixa.getByRole("region", { name: "Esta semana" });
-    expect(limpo(contadorDe(semana))).toBe("0");
+    const semana = secoesDaCaixa()[1];
     expect(contadorDe(semana)?.className).toBe("contador");
     expect(contadorDe(semana)?.querySelector(".glifo")).toBeNull();
-    expect(semana.querySelector("ul")).toBeNull();
   });
 
   it("#666: Ver todos abre a tela Avisos, sem filtro de categoria; as seções por assunto saíram", async () => {
     servir();
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-    const caixa = within(await screen.findByRole("complementary", { name: "Avisos importantes" }));
-    await caixa.findByRole("region", { name: "Vencido" });
+    await esperarSecoes();
+    const caixa = within(screen.getByRole("complementary", { name: "Avisos importantes" }));
     expect(caixa.getAllByRole("link", { name: "Ver todos os avisos" }).map(l => l.getAttribute("href"))).toEqual(["/avisos"]);
-    for (const velha of ["Reajustes", "Prazos", "Certidões"]) expect(caixa.queryByRole("region", { name: velha })).toBeNull();
+    for (const velha of ["Reajustes", "Prazos", "Certidões"]) expect(caixa.queryByText(velha)).toBeNull();
   });
 
   it("#666: fila sem aviso na agenda mostra uma linha curta; falha ao ler a fila vira erro na caixa, sem derrubar a página", async () => {
@@ -618,7 +529,7 @@ describe("Início", () => {
     expect(await caixa.findByText("Nenhum aviso.")).toBeTruthy();
     expect(totalDaCaixa()).toBe("0");
     expect(limpo(contadorDaCaixa()?.querySelector(".sr-only"))).toBe("0 avisos");
-    expect(caixa.queryByRole("region")).toBeNull();
+    expect(secoesDaCaixa()).toHaveLength(0);
     cleanup();
     servir(new Error("falhou"));
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
@@ -762,7 +673,7 @@ describe("Início", () => {
     expect(semMedido.every(m => m.getAttribute("aria-hidden") === "true")).toBe(true);
     // serie sem medido nenhum: nenhuma porta, sem dividir por zero
     cleanup();
-    api.mockResolvedValue(painel({ medido_12m: MESES_MATRIZ.map(competencia => ({ competencia, valor_centavos: 0 })) }));
+    api.mockResolvedValue(painel({ medido_12m: MESES_FECHADOS.map(competencia => ({ competencia, valor_centavos: 0 })) }));
     render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
     const zerada = await screen.findByRole("region", { name: MEDIDO_12 });
     expect(within(zerada).queryByRole("link")).toBeNull();

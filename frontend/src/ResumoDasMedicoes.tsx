@@ -11,6 +11,7 @@ import {
   type ContagemDaEtapa, type Grupo, type Referencia, type RespostaResumo,
 } from "./resumoEtapas";
 import { mesPorExtenso, somarMes } from "./resumoMedicoes";
+import ResumoMatriz, { type RespostaMatriz } from "./ResumoMatriz";
 import ResumoQuadro from "./ResumoQuadro";
 import ResumoTabela from "./ResumoTabela";
 import { trocarBusca, type Busca, type Ir, type Rota } from "./rota";
@@ -29,7 +30,10 @@ export type { RespostaResumo } from "./resumoEtapas";
 //
 // O que fica na URL (F5 e o link copiado abrem a mesma coisa): a competencia (?mes=), a aba (?aba=anteriores), a
 // vista do mes (?vista=tabela) e o contratante (?contratante=). O padrao de cada um nao entra nela.
-// - Abas: a competencia (a em trabalho e' a padrao) e os meses anteriores em aberto, de 2025 em diante.
+// - Abas: a competencia (a em trabalho e' a padrao), os meses anteriores em aberto, de 2025 em diante, e os ultimos 12
+//   meses (?aba=12-meses): a matriz obra por competencia, que veio da Inicio em 19/11/2026 (decisao do dono, #805),
+//   lida de GET /api/resumo-medicoes/matriz so' quando a aba abre. A matriz nao tem recorte por contratante: as obras
+//   ja' vem agrupadas por ele, e o filtro fica fora da aba.
 // - Vistas do mes: o Quadro (padrao) e a Tabela, que e' a de antes (uma linha por medicao, uma coluna por etapa) e
 //   serve para comparar os valores entre as linhas.
 // - Os meses anteriores saem na forma da tabela, agrupados por competencia: quase tudo ali esta' numa etapa so' (o
@@ -180,7 +184,9 @@ export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: 
   // tudo o que a pessoa escolhe esta' na URL; sem a competencia, o servidor responde a em trabalho (o mes anterior ao de hoje)
   const mes = busca.mes && MES.test(busca.mes) ? busca.mes : null;
   const contratante = busca.contratante || null;
-  const aba = busca.aba === "anteriores" ? "anteriores" : "mes";
+  const aba = busca.aba === "anteriores" ? "anteriores" : busca.aba === "12-meses" ? "12-meses" : "mes";
+  // a matriz dos ultimos 12 meses: `undefined` sem pedir (ou carregando), `null` falhou
+  const [matriz, setMatriz] = useState<RespostaMatriz | null | undefined>(undefined);
   const vista = busca.vista === "tabela" ? "tabela" : "quadro";
 
   const consulta = new URLSearchParams({ ...(mes ? { mes } : {}), ...(contratante ? { contratante } : {}) }).toString();
@@ -191,6 +197,14 @@ export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: 
       .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
     return () => { vivo = false; };
   }, [consulta]);
+  useEffect(() => {
+    if (aba !== "12-meses" || matriz) return;
+    let vivo = true;
+    api<RespostaMatriz>("/api/resumo-medicoes/matriz")
+      .then(r => { if (vivo) setMatriz(r); })
+      .catch(() => { if (vivo) setMatriz(null); });
+    return () => { vivo = false; };
+  }, [aba, matriz]);
 
   if (!d) {
     return erro
@@ -201,7 +215,7 @@ export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: 
   const irPara = (novo: string) => trocarBusca({ mes: novo === d.em_trabalho ? null : novo });
   /** A busca de agora com as mudancas; o que e' padrao (nulo) sai dela. */
   const com = (mudancas: Record<string, string | null>): Busca => {
-    const nova: Busca = { ...(mes ? { mes } : {}), ...(contratante ? { contratante } : {}), ...(aba === "anteriores" ? { aba } : {}),
+    const nova: Busca = { ...(mes ? { mes } : {}), ...(contratante ? { contratante } : {}), ...(aba !== "mes" ? { aba } : {}),
       ...(vista === "tabela" ? { vista } : {}) };
     for (const [k, v] of Object.entries(mudancas)) { if (v === null) delete nova[k]; else nova[k] = v; }
     return nova;
@@ -253,9 +267,13 @@ export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: 
         <Link className="aba" para={AQUI} busca={com({ aba: "anteriores" })} ir={ir} aria-current={aba === "anteriores" ? "page" : undefined}>
           Meses anteriores{nAnteriores > 0 && <> <Contador rotulo={contar(nAnteriores, "medição em aberto", "medições em aberto")}>{nAnteriores}</Contador></>}
         </Link>
+        <Link className="aba" para={AQUI} busca={com({ aba: "12-meses", contratante: null, vista: null })} ir={ir}
+          aria-current={aba === "12-meses" ? "page" : undefined}>
+          Últimos 12 meses
+        </Link>
       </nav>
 
-      {(opcoes.length > 1 || contratante || aba === "mes") && (
+      {aba !== "12-meses" && (opcoes.length > 1 || contratante || aba === "mes") && (
         <div className="rdm-barra">
           {(opcoes.length > 1 || contratante) && (
             <nav className="escolhas" aria-label="Contratante">
@@ -279,7 +297,11 @@ export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: 
         </div>
       )}
 
-      {aba === "mes" ? <>
+      {aba === "12-meses" ? (
+        matriz === undefined ? <p className="rdm-vazio">Carregando…</p>
+          : matriz === null ? <Falha>Não foi possível carregar as medições dos últimos 12 meses. Recarregue a página para tentar de novo.</Falha>
+            : <ResumoMatriz matriz={matriz} />
+      ) : aba === "mes" ? <>
         {/* o mes sem medicao nao tem numero a ler: a linha curta embaixo diz o vazio */}
         {linhasDoMes.length > 0 && (
           <FaixaDasEtapas etapas={d.etapas} mes={d.mes} medido={d.medido} mesmaAltura={d.mesma_altura}
