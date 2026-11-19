@@ -109,7 +109,7 @@ O QUE A #805 ACRESCENTOU (todo numero na cota, em centavos inteiros):
 import calendar
 import datetime
 
-from app import avisos_medicao, contratos, db, diretoria, fechamento, fila_medicoes, medicoes, tempo
+from app import avisos_medicao, contratos, db, diretoria, fechamento, fila_medicoes, inicio, medicoes, tempo
 
 ETAPAS = ("em_analise", "boletim", "nota", "protocolado", "recebido")
 ROTULO = {"antes": "Planilha/carta a enviar", "em_analise": "Em análise", "boletim": "Boletim", "nota": "Nota",
@@ -480,3 +480,51 @@ def linhas_csv(r: dict, brl) -> list[list[str]]:
         out.append(["sem medição no mês", o["contratante"] or "", o["obra"] or "", "", comp(r["mes"]), "", *[""] * len(ETAPAS), ""])
     out.extend(da_linha("meses anteriores", x) for g in r["anteriores"] for x in g["linhas"])
     return out
+
+
+# Issue #659: a matriz obra por competencia. Ate' 19/11/2026 ficava na Inicio; a decisao do dono de 19/11/2026 (#805)
+# a trouxe para esta pagina, com a MESMA conta: a etapa sai do estado pelos estados da faixa do ciclo da Inicio
+# (`inicio.CICLO`), mais `recebida`, e a atrasada e' a da previsao de entrada da Inicio (`diretoria.esperada`). Por
+# isso nao usa `_ETAPA_DO_ESTADO` desta pagina (que poe o `nf_emitida` legado no protocolado).
+# A etapa de cada estado, na ordem da menos para a mais adiantada. A protocolada atrasada vem antes da protocolada no
+# prazo: na mesma competencia, a celula e' a atrasada.
+ETAPAS_MATRIZ = ("em_analise", "boletim", "nota", "atrasado", "protocolado", "recebida")
+_ETAPA_NA_MATRIZ = {**{estado: etapa for etapa, estados, _ in inicio.CICLO for estado in estados}, "recebida": "recebida"}
+
+
+def matriz(conn, hoje: datetime.date | None = None) -> dict:
+    """Issue #659: uma linha por obra ativa, agrupadas pelo contratante (`diretoria._contratante`), e uma celula por
+    competencia, as 12 ultimas terminando no mes anterior a hoje (`inicio._ultimas_12_competencias`, as mesmas do
+    medido em 12 meses da Inicio). A celula traz a etapa da medicao daquela competencia, pelo estado dela, e a medicao
+    para o link; a protocolada com a data esperada (`diretoria.esperada`) anterior a hoje e' `atrasado`. Com mais de
+    uma medicao na competencia (execucao e reajuste), vale a menos adiantada. Cancelada, desistida, prevista e
+    planilha so' gerada nao pintam: a celula fica nula. Nao tem valor, so' a etapa, e nao tem recorte por contratante
+    (a aba mostra todos, agrupados). Tudo de um retrato so' do banco (`db.leitura`)."""
+    hoje = hoje or tempo.hoje_local()
+    competencias = inicio._ultimas_12_competencias(hoje)
+    with db.leitura(conn):
+        ms = diretoria._medicoes(conn)
+        prazos_ = diretoria.prazos_do_orgao(ms, hoje)
+        celulas: dict[tuple[int, str], tuple[int, int]] = {}      # (obra, competencia) -> (ordem da etapa, medicao)
+        for m in ms:
+            etapa = _ETAPA_NA_MATRIZ.get(m["estado"])
+            if etapa is None or m["competencia"] not in competencias:
+                continue
+            if m["sem_protocolo"]:
+                etapa = "protocolado"       # #743: a nota emitida da obra sem o passo "Envio da nota" espera o pagamento
+            elif etapa == "protocolado":
+                esperada = diretoria.esperada(m, prazos_)
+                etapa = "atrasado" if esperada is not None and esperada < hoje else etapa
+            chave, nova = (m["contrato_id"], m["competencia"]), (ETAPAS_MATRIZ.index(etapa), m["id"])
+            celulas[chave] = min(celulas.get(chave, nova), nova)
+        grupos: dict[str, list[dict]] = {}
+        for c in conn.execute("SELECT c.id, COALESCE(c.nome_curto, c.numero_instrumento) AS obra, o.nome AS orgao_nome, "
+                              "o.familia AS orgao_familia, o.chave AS orgao_chave FROM contratos c "
+                              "LEFT JOIN orgaos o ON o.id=c.orgao_id WHERE c.estado='ativo'"):
+            linha = [celulas.get((c["id"], comp)) for comp in competencias]
+            grupos.setdefault(diretoria._contratante(dict(c)), []).append({
+                "contrato_id": c["id"], "obra": c["obra"],
+                "celulas": [x and {"etapa": ETAPAS_MATRIZ[x[0]], "medicao_id": x[1]} for x in linha]})
+    return {"competencias": competencias,
+            "grupos": [{"contratante": k, "obras": sorted(v, key=lambda o: (o["obra"] or "", o["contrato_id"]))}
+                       for k, v in sorted(grupos.items())]}

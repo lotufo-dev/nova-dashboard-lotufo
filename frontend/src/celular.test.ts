@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 // o vitest entrega CSS vazio (mesmo com ?raw): le o arquivo do disco (o vitest roda na pasta frontend)
 const ler = (nome: string) => readFileSync(join(process.cwd(), "src", nome), "utf8");
 const inicioCss = ler("inicio.css");
+const matrizCss = ler("resumoMatriz.css");
 const tokensCss = ler("tokens.css");
 const medicaoPagina = ler("MedicaoPagina.tsx");
 
@@ -100,23 +101,25 @@ describe("celular", () => {
     expect(limitar(minima, (porDentro(1440) - chave - rotulo - 3 * vao) / em, maxima)).toBe(px("--texto-valor"));
   });
 
-  it("Início (#721): recebido em 12 meses deita as barras em painel estreito e a célula atrasada da matriz leva a marca", () => {
+  it("Início (#721): recebido em 12 meses deita as barras em painel estreito; a célula atrasada da matriz leva a marca", () => {
     const bloco = inicioCss.slice(inicioCss.indexOf(".ini-rec__rotulo"));
     expect(bloco).toMatch(/@container \(max-width:\s*\d+px\)\s*\{\s*\.ini-rec\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
     expect(inicioCss).toMatch(/\.ini-rec__coluna\s*\{[^}]*background:\s*var\(--cor-barra-recebido\)/);          // barras de tinta
-    expect(inicioCss).toMatch(/\.ini-matriz__celula--atrasado::after\s*\{[^}]*content:\s*var\(--etapa-atrasado-marca\)/);
+    // a matriz foi para o Resumo das medicoes em 19/11/2026 (#805)
+    expect(matrizCss).toMatch(/\.rdm-matriz__celula--atrasado::after\s*\{[^}]*content:\s*var\(--etapa-atrasado-marca\)/);
     expect(tokensCss).toMatch(/--etapa-atrasado-marca:\s*"!"/);
   });
 
-  it("Início (#659): a matriz cabe na largura do painel e, em painel estreito, o nome da obra sobe para a própria linha", () => {
+  it("Resumo das medições (#659, desde 19/11/2026 #805): a matriz cabe na largura do painel e, em painel estreito, o nome da obra sobe para a própria linha", () => {
     // 12 colunas que encolhem (minmax(0, 1fr)) ao lado do nome, que tambem encolhe: nenhuma largura fixa empurra a
     // pagina. #721: o container e' o painel, e a largura do nome vem de tokens.css
     expect(inicioCss).toMatch(/\.ini-painel\s*\{[^}]*container-type:\s*inline-size/);
-    expect(inicioCss).toMatch(/\.ini-matriz__linha\s*\{[^}]*grid-template-columns:\s*minmax\(0, var\(--largura-nome-obra\)\) repeat\(12, minmax\(0, 1fr\)\)/);
-    expect(inicioCss).toMatch(/\.ini-matriz__obra\s*\{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere/);
-    const bloco = inicioCss.slice(inicioCss.indexOf(".ini-matriz__celula--atrasado {"));
-    expect(bloco).toMatch(/@container \(max-width:\s*\d+px\)\s*\{\s*\.ini-matriz__linha\s*\{\s*grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\)/);
-    expect(bloco).toMatch(/\.ini-matriz__obra\s*\{\s*grid-column:\s*1 \/ -1/);
+    expect(matrizCss).toMatch(/\.rdm-matriz\s*\{[^}]*container-type:\s*inline-size/);
+    expect(matrizCss).toMatch(/\.rdm-matriz__linha\s*\{[^}]*grid-template-columns:\s*minmax\(0, var\(--largura-nome-obra\)\) repeat\(12, minmax\(0, 1fr\)\)/);
+    expect(matrizCss).toMatch(/\.rdm-matriz__obra\s*\{[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere/);
+    const bloco = matrizCss.slice(matrizCss.indexOf(".rdm-matriz__celula--atrasado {"));
+    expect(bloco).toMatch(/@container \(max-width:\s*\d+px\)\s*\{\s*\.rdm-matriz__linha\s*\{\s*grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\)/);
+    expect(bloco).toMatch(/\.rdm-matriz__obra\s*\{\s*grid-column:\s*1 \/ -1/);
   });
 
   it("Medição: abaixo de 600 px a meta desce para baixo do título", () => {

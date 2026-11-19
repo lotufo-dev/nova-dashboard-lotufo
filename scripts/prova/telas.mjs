@@ -40,6 +40,8 @@ import { cabecalhoDeNomeLongo } from "./simulados.mjs";
 import { aReceberComNotas } from "./simulados.mjs";   // #816: em linha propria, para nao mexer nas listas de cima
 // issue #817 (reestrutura 5c): a Inicio com o ciclo por contratante e o medido em 12 meses
 import { inicioPorContratante, inicioSemCiclo } from "./simulados.mjs";
+// peca "inicio" (19/11/2026, #805): a matriz obra por competencia no Resumo das medicoes
+import { matrizEmVolume, matrizVazia } from "./simulados.mjs";
 
 export const PERFIS = ["admin", "engenharia", "diretoria"];
 export const LARGURAS = [1440, 1024, 390];
@@ -172,6 +174,16 @@ export const TELAS = [
     simular: comResumo({ vazio: true }) },
   { rota: "resumo-medicoes", id: "resumo-medicoes-erro", caminho: "/resumo-medicoes", perfis: SO_ADMIN, espera: "#conteudo [role=alert]",
     erro: true, simular: falha(/^\/api\/resumo-medicoes$/) },
+  // peca "inicio" (19/11/2026, #805): a matriz obra por competencia, que saiu da Inicio, na aba "Últimos 12 meses":
+  // com o cadastro de exemplo (os tres perfis, que viam a matriz na Inicio), com o volume da carteira, sem obra ativa
+  // e com a leitura da matriz falhando
+  { rota: "resumo-medicoes", id: "resumo-medicoes-12-meses", caminho: "/resumo-medicoes?aba=12-meses", perfis: TODOS, espera: ".rdm-matriz" },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-12-meses-cheia", caminho: "/resumo-medicoes?aba=12-meses", perfis: ["diretoria"],
+    espera: ".rdm-matriz .rdm-matriz__celula--atrasado", simular: [{ caminho: /^\/api\/resumo-medicoes\/matriz$/, ajustar: matrizEmVolume }] },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-12-meses-vazia", caminho: "/resumo-medicoes?aba=12-meses", perfis: ["diretoria"],
+    espera: ".rdm-matriz .rdm-vazio", simular: [{ caminho: /^\/api\/resumo-medicoes\/matriz$/, ajustar: matrizVazia }] },
+  { rota: "resumo-medicoes", id: "resumo-medicoes-12-meses-erro", caminho: "/resumo-medicoes?aba=12-meses", perfis: SO_ADMIN,
+    espera: "#conteudo [role=alert]", erro: true, simular: falha(/^\/api\/resumo-medicoes\/matriz$/) },
 
   // ---- Obras em niveis (#805): "Por contratante" (a entrada), "Todas as obras", "Andamento" e o QDOP; a pagina de
   // um contratante; a lista vazia e a falha. As telas `-carteira` trocam o cadastro de exemplo (um orgao, duas obras)

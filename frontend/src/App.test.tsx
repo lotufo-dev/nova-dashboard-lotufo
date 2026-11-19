@@ -77,11 +77,11 @@ describe("App: os Avisos têm página própria (#805)", () => {
 const PAINEL_MINIMO = {
   hoje: "2026-10-28",
   protocoladas: { obras_protocoladas: 0, obras_ativas: 0, ultima: null },
-  medido: { competencia: "2026-10", valor_centavos: 0, quantidade: 0, ultimo_lancamento: null },
+  medido: { competencia: "2026-10", valor_centavos: 0 },
   a_receber: { liberado: false, valor_centavos: null, mais_60_centavos: null },
   ciclo: ["em_analise", "boletim", "nota", "protocolado", "recebido_mes"].map(
     etapa => ({ etapa, valor_centavos: 0, quantidade: 0, mais_antigo_dias: null })),
-  recebido_12m: [], matriz: { competencias: [], grupos: [] },
+  recebido_12m: [],
   previsao: Object.fromEntries(["neste_mes", "proximo_mes", "atrasado", "sem_previsao", "depois"].map(
     k => [k, { valor_centavos: 0, quantidade: 0 }])),
   notas_mes: { mes: "2026-10", valor_centavos: 0, notas: 0, obras: 0 },

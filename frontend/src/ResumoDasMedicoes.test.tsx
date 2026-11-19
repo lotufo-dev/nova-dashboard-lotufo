@@ -125,9 +125,13 @@ describe("Resumo das medições em quadro por etapa (#749, #805)", () => {
     expect(screen.queryByRole("button", { name: /Voltar à competência em trabalho/ })).toBeNull();
     expect(screen.getByRole("link", { name: /Exportar CSV/ }).getAttribute("href")).toBe("/api/resumo-medicoes.csv?mes=2026-10");
     expect(screen.getByRole("link", { name: "Mês a mês no Fechamento" }).getAttribute("href")).toBe("/fechamento");
-    // as abas: o mes em trabalho e os meses anteriores, com a quantidade em aberto
+    // as abas: o mes em trabalho, os meses anteriores, com a quantidade em aberto, e os ultimos 12 meses (a matriz que
+    // veio da Inicio em 19/11/2026)
     const abas = within(screen.getByRole("navigation", { name: "Resumo das medições" })).getAllByRole("link");
-    expect(abas.map(texto)).toEqual(["Outubro em trabalho", "Meses anteriores 11 medição em aberto"]);
+    expect(abas.map(texto)).toEqual(["Outubro em trabalho", "Meses anteriores 11 medição em aberto", "Últimos 12 meses"]);
+    expect(abas[2].getAttribute("href")).toBe("/resumo-medicoes?aba=12-meses");
+    // a matriz so' e' pedida quando a aba abre
+    expect(api).not.toHaveBeenCalledWith("/api/resumo-medicoes/matriz");
     expect(abas[0].getAttribute("aria-current")).toBe("page");
     expect(abas[1].getAttribute("href")).toBe("/resumo-medicoes?aba=anteriores");
     // a vista padrao e' o quadro
@@ -374,6 +378,33 @@ describe("Resumo das medições em quadro por etapa (#749, #805)", () => {
     cleanup();
     abrir("/resumo-medicoes?aba=anteriores");
     expect(await screen.findByRole("table", { name: /competências anteriores/ })).toBeTruthy();
+  });
+
+  it("19/11/2026 (#805): a aba Últimos 12 meses fica na URL e mostra a matriz obra por competência que saiu da Início", async () => {
+    const MATRIZ = { competencias: ["2025-10", "2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06",
+      "2026-07", "2026-08", "2026-09"],
+    grupos: [{ contratante: "Secretaria de Exemplo", obras: [{ contrato_id: 7, obra: "Obra Própria",
+      celulas: [...Array(11).fill(null), { etapa: "protocolado", medicao_id: 71 }] }] }] };
+    api.mockImplementation(async (caminho: string) => caminho === "/api/resumo-medicoes/matriz" ? MATRIZ : RESUMO);
+    abrir("/resumo-medicoes?contratante=Companhia%20de%20Exemplo&vista=tabela");
+    fireEvent.click(await screen.findByRole("link", { name: "Últimos 12 meses" }));
+    const regiao = await screen.findByRole("region", { name: "Medições por obra e competência" });
+    // a aba entra na URL; a matriz nao tem recorte por contratante nem vista, que saem dela
+    expect(window.location.search).toBe("?aba=12-meses");
+    expect(api).toHaveBeenCalledWith("/api/resumo-medicoes/matriz");
+    expect(screen.getByRole("link", { name: "Últimos 12 meses" }).getAttribute("aria-current")).toBe("page");
+    expect(within(regiao).getByRole("link", { name: "Obra Própria, 09/2026: Protocolado" }).getAttribute("href")).toBe("/obras/7/medicoes/71");
+    // o filtro por contratante, a vista e os blocos do mes nao aparecem aqui
+    expect(screen.queryByRole("navigation", { name: "Contratante" })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Vista do mês" })).toBeNull();
+    expect(screen.queryByRole("group", { name: /uma coluna por etapa/ })).toBeNull();
+    // falha ao ler a matriz vira aviso com o que fazer, sem derrubar a pagina
+    cleanup();
+    api.mockImplementation(async (caminho: string) => { if (caminho === "/api/resumo-medicoes/matriz") throw new Error("falhou"); return RESUMO; });
+    abrir("/resumo-medicoes?aba=12-meses");
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Não foi possível carregar as medições dos últimos 12 meses. Recarregue a página para tentar de novo.");
+    expect(screen.getByRole("heading", { name: "Outubro de 2026" })).toBeTruthy();
   });
 
   it("o filtro por contratante fica na URL, lista quem tem medição na aba e recorta no servidor", async () => {

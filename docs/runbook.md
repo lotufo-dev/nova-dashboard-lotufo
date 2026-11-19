@@ -1257,7 +1257,7 @@ dias entre o primeiro protocolo da nota e o recebimento, das medições recebida
 ⌈0,75 × n⌉ entre os dias em ordem (com cinco recebimentos, o quarto): sempre um prazo que aconteceu, sem interpolar.
 Cada medição recebida é um caso (execução e reajuste pagos juntos contam dois); não conta a recebida sem data de
 protocolo ou de recebimento, nem a de recebimento anterior ao protocolo. Usam essa conta a previsão de entrada e a
-linha "Atrasado" do Início e a matriz obra por competência. Contratante com menos de cinco recebimentos fica "Sem
+linha "Atrasado" do Início e a matriz obra por competência (no Resumo das medições). Contratante com menos de cinco recebimentos fica "Sem
 previsão" no Início: não há número padrão (os 30 dias saíram). O campo `previsto_centavos` de `/api/a-receber` segue a
 mesma conta (a medição de contratante sem prazo fica fora dele), mas nenhuma tela o mostra desde 06/11/2026.
 
