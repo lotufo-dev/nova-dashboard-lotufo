@@ -831,3 +831,30 @@ export const cabecalhoDeNomeLongo = cabecalho => ({
 // conta no limite de tentativas por computador, e a prova ja' entra uma vez por perfil e largura.
 export const LOGIN_RECUSADO = { detail: "E-mail ou senha inválidos, ou usuário bloqueado" };
 export const LOGIN_NO_LIMITE = { detail: "Muitas tentativas de entrar a partir deste computador. Tente de novo em alguns minutos." };
+
+// ---- Busca unica do topo (#819): GET /api/busca com os tres grupos, nomes compridos e o grupo de medicoes cortado
+// (8 de 23), e a resposta sem nada. Obras, orgaos e numeros inventados. O perfil sem SIGA nao recebe `processos`: a
+// prova da diretoria usa o servidor de verdade (o recorte e' dele), nao esta resposta.
+const medicaoAchada = (id, contrato_id, titulo, competencia, obra, contratante) => ({ id, contrato_id, titulo, competencia, obra, contratante });
+const OBRA_LONGA = "Rodovia Exemplo, trecho do entroncamento ao distrito, lote 2";
+export const BUSCA_CHEIA = {
+  obras: { total: 2, itens: [
+    { id: 1, nome: OBRA_LONGA, instrumento: "900/2026", contratante: "SINFRA", orgao_sub: "SUEF II" },
+    { id: 2, nome: "Corredor Beta", instrumento: "901/2026", contratante: "Pref. Cuiabá", orgao_sub: null },
+  ] },
+  medicoes: { total: 23, itens: [
+    medicaoAchada(11, 1, "15ª Medição", "2026-10", OBRA_LONGA, "SINFRA"),
+    medicaoAchada(12, 1, "Reajuste da 15ª Medição", "2026-10", OBRA_LONGA, "SINFRA"),
+    medicaoAchada(13, 2, "15ª Medição", "2026-09", "Corredor Beta", "Pref. Cuiabá"),
+    medicaoAchada(14, 3, "15ª Medição de Projeto", "2026-07", "Trevo Eta", "MTPAR"),
+    medicaoAchada(15, 4, "15ª Medição", "2026-05", "Rodovia Capa", "SINFRA"),
+    medicaoAchada(16, 5, "15ª Medição", "2026-02", "Ponte Gama", "SES-MT"),
+    medicaoAchada(17, 6, "15ª Medição", "2025-12", "Escola Delta", "MTPAR"),
+    medicaoAchada(18, 7, "15ª Medição", "2025-09", "Anel Viário Zeta", "SINFRA"),
+  ] },
+  processos: { total: 2, itens: [
+    { id: 1, numero: "ORGAO-PRO-2026/00015", assunto: `${OBRA_LONGA} · 15ª Medição` },
+    { id: 2, numero: null, assunto: "Corredor Beta · Pedido de paralisação" },
+  ] },
+};
+export const BUSCA_VAZIA = { obras: { itens: [], total: 0 }, medicoes: { itens: [], total: 0 }, processos: { itens: [], total: 0 } };
