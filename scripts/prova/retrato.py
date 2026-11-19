@@ -123,6 +123,7 @@ FORA = {
     "/api/correio/respostas/nao-vistas": _CORREIO,
     "/api/contratos/{contrato_id}/reajuste/sugestao": _PARAMETRO,
     "/api/contratos/{contrato_id}/planilhas/avisos": _PARAMETRO,
+    "/api/busca": _PARAMETRO,    # busca unica do topo (#819): so' responde a' pergunta (?q=) que a tela manda
     "/api/contratos/{contrato_id}/medicoes.csv": _ARQUIVO,
     "/api/resumo-medicoes.csv": _ARQUIVO,
     "/api/certidoes/{certidao_id}/arquivo": _ARQUIVO,

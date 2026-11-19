@@ -385,7 +385,7 @@ export const obrasComAParte = obras => obras.map((o, i) => ({ ...o, posicao: { .
 // `parada` da fila de trabalho: no protocolado, sem prazo do orgao (a MTPAR), dentro do prazo e alem dele; aprovado
 // abaixo do pedido (pequeno e critico) e acima dele; recebida com os dias da nota ao recebimento; planilha/carta
 // ainda nao enviada; obras sem medicao (uma que nunca mediu) e meses anteriores em aberto de tres competencias.
-// O protocolado tem a referencia da mesma altura e o recebido vem sem lastro (sem variacao). `contratante` recorta
+// O protocolado tem a variacao do acumulado contra a mesma altura e o recebido vem sem lastro (sem variacao). `contratante` recorta
 // como o servidor (a MTPAR fica com quatro etapas vazias); `vazio` e' o mes sem medicao nenhuma.
 // A resposta verdadeira da' o dia, a competencia e de quando e' o dado; o resto e' trocado.
 const ETAPAS_DO_RESUMO = ["em_analise", "boletim", "nota", "protocolado", "recebido"];
@@ -462,14 +462,18 @@ export const resumoEmQuadro = ({ contratante = null, vazio = false } = {}) => re
     return { contratante: n, medicoes: quantas(ls), valor_centavos: soma(ls), linhas: ls };
   });
   const medido = soma(linhasDoMes);
+  const acumulado = soma(linhasDoMes.filter(l => l.etapa === "protocolado" || l.etapa === "recebido"));
   // o mesmo dia de hoje, um mes antes (o dia 29 em diante fica no 28, para caber em qualquer mes)
   const d = new Date(hoje), ate = dataEm(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, Math.min(28, d.getUTCDate())));
   return { ...resposta, contratante, contratantes, etapas: porEtapa(linhasDoMes),
     // o medido subiu contra o mes anterior e ficou estavel contra o mesmo mes do ano anterior
     medido: { valor_centavos: medido, mes_anterior: medido ? { competencia: mesAntes(mes, 1), valor_centavos: Math.round(medido / 1.068) } : null,
       ano_anterior: medido ? { competencia: mesAntes(mes, 12), valor_centavos: Math.round(medido / 0.99) } : null },
-    // o protocolado caiu contra a mesma altura do mes anterior; o recebido nao tem lastro (sem variacao)
-    mesma_altura: medido ? { competencia: mesAntes(mes, 1), ate, protocolado_centavos: 3_780_000 * REAIS, recebido_centavos: null } : null,
+    // o protocolado compara o acumulado (o que esta' na etapa e o que ja' foi recebido), que subiu contra o da
+    // competencia anterior na mesma altura, embora o valor da etapa seja bem menor: o orgao pagou cedo. O recebido
+    // nao tem lastro (sem variacao)
+    protocolado_acumulado_centavos: acumulado,
+    mesma_altura: medido ? { competencia: mesAntes(mes, 1), ate, protocolado_acumulado_centavos: Math.round(acumulado / 1.09), recebido_centavos: null } : null,
     diferenca_critica_por_mil: 5, grupos, sem_medicao: recorte(semMedicao), anteriores_etapas: porEtapa(linhasDeAntes),
     anteriores: [...new Set(linhasDeAntes.map(l => l.competencia))].sort().map(c => {
       const ls = linhasDeAntes.filter(l => l.competencia === c);
@@ -524,6 +528,10 @@ const CARTEIRA = () => [
     paralisada: dataEm(hojeDaProva(), -100), ritmo: 300_000, necessario: null, mes: 900_000, antes: 905_000, receber: 900_000 }),
   // SES-MT: uma obra adiantada, sem nada pendente e sem medicao no mes (o contratante fica "Em dia")
   daCarteira(9010, "Hospital Capa", "SES-MT", "ses-mt", { vigente: 168_300_000, medido: 156_519_000, ritmo: 5_000_000, necessario: 4_000_000, dias: 75 }),
+  // SINFRA, decisao do dono de 18/11/2026: devagar (37% do necessario) e sem aviso nenhum. Na pagina do contratante a
+  // Situacao diz o motivo do andamento, e nao "Em dia"
+  daCarteira(9016, "Ponte Pi", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 54_000_000, medido: 16_200_000,
+    ritmo: 1_100_000, necessario: 2_900_000, mes: 1_050_000, antes: 1_000_000, dias: 390 }),
 ];
 export const carteiraSimulada = () => CARTEIRA_INTEIRA();
 
@@ -887,3 +895,30 @@ export const aReceberComNotas = ({ vazio = false, trava = false } = {}) => reg =
       valor_centavos: lista.reduce((t, g) => t + g.anteriores.valor_centavos, 0) },
     contratantes: lista };
 };
+
+// ---- Busca unica do topo (#819): GET /api/busca com os tres grupos, nomes compridos e o grupo de medicoes cortado
+// (8 de 23), e a resposta sem nada. Obras, orgaos e numeros inventados. O perfil sem SIGA nao recebe `processos`: a
+// prova da diretoria usa o servidor de verdade (o recorte e' dele), nao esta resposta.
+const medicaoAchada = (id, contrato_id, titulo, competencia, obra, contratante) => ({ id, contrato_id, titulo, competencia, obra, contratante });
+const OBRA_LONGA = "Rodovia Exemplo, trecho do entroncamento ao distrito, lote 2";
+export const BUSCA_CHEIA = {
+  obras: { total: 2, itens: [
+    { id: 1, nome: OBRA_LONGA, instrumento: "900/2026", contratante: "SINFRA", orgao_sub: "SUEF II" },
+    { id: 2, nome: "Corredor Beta", instrumento: "901/2026", contratante: "Pref. Cuiabá", orgao_sub: null },
+  ] },
+  medicoes: { total: 23, itens: [
+    medicaoAchada(11, 1, "15ª Medição", "2026-10", OBRA_LONGA, "SINFRA"),
+    medicaoAchada(12, 1, "Reajuste da 15ª Medição", "2026-10", OBRA_LONGA, "SINFRA"),
+    medicaoAchada(13, 2, "15ª Medição", "2026-09", "Corredor Beta", "Pref. Cuiabá"),
+    medicaoAchada(14, 3, "15ª Medição de Projeto", "2026-07", "Trevo Eta", "MTPAR"),
+    medicaoAchada(15, 4, "15ª Medição", "2026-05", "Rodovia Capa", "SINFRA"),
+    medicaoAchada(16, 5, "15ª Medição", "2026-02", "Ponte Gama", "SES-MT"),
+    medicaoAchada(17, 6, "15ª Medição", "2025-12", "Escola Delta", "MTPAR"),
+    medicaoAchada(18, 7, "15ª Medição", "2025-09", "Anel Viário Zeta", "SINFRA"),
+  ] },
+  processos: { total: 2, itens: [
+    { id: 1, numero: "ORGAO-PRO-2026/00015", assunto: `${OBRA_LONGA} · 15ª Medição` },
+    { id: 2, numero: null, assunto: "Corredor Beta · Pedido de paralisação" },
+  ] },
+};
+export const BUSCA_VAZIA = { obras: { itens: [], total: 0 }, medicoes: { itens: [], total: 0 }, processos: { itens: [], total: 0 } };
