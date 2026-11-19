@@ -151,7 +151,7 @@ def _confere_soma(f):
         linhas = f["por_contratante"][ano]
         for k in SOMAS:
             assert sum(g[k] for g in linhas) == tot[k], (ano, k)
-        assert len({g["contratante"] for g in linhas}) == len(linhas)
+        assert len({(g["contratante"], g["contratante_chave"]) for g in linhas}) == len(linhas)
         partes = [g["participacao_medido_por_mil"] for g in linhas]
         assert all(x is None for x in partes) or (sum(partes) == 1000 and min(partes) >= 0)
         assert [g["medido_centavos"] for g in linhas] == sorted((g["medido_centavos"] for g in linhas), reverse=True)
@@ -2028,6 +2028,24 @@ def test_por_contratante_obra_sem_orgao_no_cadastro_fica_com_o_texto_do_contrato
     f = fechamento.fechamento(c)
     assert [(g["contratante"], g["contratante_chave"], g["medido_centavos"]) for g in f["por_contratante"]["2026"]] == [
         ("ÓRGÃO ANTIGO", None, 10_001)]
+    _confere_soma(f)
+
+
+def test_por_contratante_obra_sem_orgao_com_o_texto_igual_a_uma_sigla_fica_na_linha_dela(contratantes):
+    """Revisao da #815 (ajuste 6): o contrato sem orgao no cadastro cujo texto e' igual a' sigla de um contratante
+    (\"SINFRA\") nao entra na linha do contratante de verdade. Sao duas linhas, cada uma com a sua chave (a do
+    contratante leva a' pagina dele; a do texto, a nenhuma), em qualquer ordem de chegada das medicoes, e o total do
+    ano nao muda."""
+    c, ids = contratantes
+    c.execute("UPDATE contratos SET orgao_id=NULL, orgao='SINFRA' WHERE id=?", (ids["Galpão"],))
+    c.commit()
+    # a medicao do contrato sem orgao chega primeiro (id menor e competencia mais antiga)
+    medir(c, ids["Galpão"], 1, "2026-01", "planilha_enviada", 10_001)
+    medir(c, ids["Estrada"], 1, "2026-02", "planilha_enviada", 20_003)
+    f = fechamento.fechamento(c)
+    linhas = sorted((g["contratante"], g["contratante_chave"] or "", g["medido_centavos"]) for g in f["por_contratante"]["2026"])
+    assert linhas == [("SINFRA", "", 10_001), ("SINFRA", "sinfra", 20_003)]
+    assert sum(g["medido_centavos"] for g in f["por_contratante"]["2026"]) == f["por_ano"]["2026"]["medido_centavos"] == 30_004
     _confere_soma(f)
 
 

@@ -1,7 +1,7 @@
 """Busca unica do topo (issue #819; decisao do dono de 18/11/2026, #805): obra, numero de medicao e numero de processo.
 
-Uma consulta so', com o recorte do perfil aplicado AQUI: o perfil que nao abre o SIGA (a diretoria, como na tela:
-App.tsx manda para a entrada quem cola /siga com esse perfil) nao recebe o grupo de processos, nem a contagem dele.
+Uma consulta so', com o recorte do perfil aplicado AQUI: o perfil sem `ver_siga` (a mesma regra da tela SIGA, #829)
+nao recebe o grupo de processos, nem a contagem dele.
 
 Como a pergunta e' lida (sem acento e sem caixa: "Medição" = "medicao", "15ª" = "15a"):
 - Obras: cada palavra da pergunta aparece no apelido, no instrumento, no nome da obra, no contratante, no sub-orgao
@@ -12,24 +12,27 @@ Como a pergunta e' lida (sem acento e sem caixa: "Medição" = "medicao", "15ª"
 - Processos: cada palavra aparece no numero do SIGA, no codigo, no nome que o robo leu, no complemento ou no nome
   montado (obra e assunto).
 Cada grupo devolve no maximo LIMITE itens e o total que casou. Nada de valor em reais sai daqui.
+
+A medicao que nao anda (prevista, cancelada ou desistida) continua no resultado (a pagina dela abre, e quem procura
+uma cancelada quer acha'-la), com o estado em `estado`; a viva vem com `estado` nulo (revisao da #819). A obra sai so'
+com o que a linha do resultado desenha (o instrumento ficou de fora: a tela nao o usa).
 """
 import re
 import sqlite3
 import unicodedata
 
 from app import medicoes, siga
-from app.permissoes import tem
+from app.permissoes import VER_SIGA, tem
 
 LIMITE = 8
 MAX_PERGUNTA = 100
+# os estados em que a medicao nao anda: saem escritos na linha do resultado
+ESTADOS_MARCADOS = ("prevista", "cancelada", "desistida")
 
-# Quem abre o SIGA: as telas de quem edita cadastros (engenharia e administracao). A diretoria (so' `ver_paineis`)
-# nao tem o SIGA no menu nem na rota (navegacao.ts, App.tsx); a busca segue o mesmo recorte.
-PERMISSAO_SIGA = "editar_cadastros"
-
-
+# Quem abre o SIGA: a permissao unica `ver_siga` (issue #829), a mesma da rota da tela, da aba do contratante, do menu
+# e do App. Desde a decisao do dono de 19/11/2026 a diretoria tambem a tem (so' para ler).
 def ve_siga(perfil: str) -> bool:
-    return tem(perfil, PERMISSAO_SIGA)
+    return tem(perfil, VER_SIGA)
 
 
 def normalizar(texto: str | None) -> str:
@@ -87,8 +90,8 @@ def _obras(conn: sqlite3.Connection) -> list[dict]:
         nome = r["nome_curto"] or r["numero_instrumento"]
         alvo = normalizar(" ".join(x for x in (r["nome_curto"], r["numero_instrumento"], r["obra_nome"], contratante,
                                                sub, r["municipio"]) if x))
-        saida.append({"id": r["id"], "nome": nome, "instrumento": r["numero_instrumento"],
-                      "contratante": contratante, "orgao_sub": sub, "_alvo": alvo, "_nome": normalizar(nome)})
+        saida.append({"id": r["id"], "nome": nome, "contratante": contratante, "orgao_sub": sub,
+                      "_alvo": alvo, "_nome": normalizar(nome)})
     return saida
 
 
@@ -121,7 +124,7 @@ def buscar(conn: sqlite3.Connection, pergunta: str, perfil: str) -> dict:
     if q["numero"] is not None:
         da_obra = {o["id"]: o for o in obras if _todas(q["da_obra"], o["_alvo"])}
         if da_obra:
-            sql = "SELECT id, contrato_id, numero, tipo, competencia FROM medicoes WHERE numero=?"
+            sql = "SELECT id, contrato_id, numero, tipo, competencia, estado FROM medicoes WHERE numero=?"
             args: list = [q["numero"]]
             if q["tipo"]:
                 sql += " AND tipo=?"
@@ -131,7 +134,8 @@ def buscar(conn: sqlite3.Connection, pergunta: str, perfil: str) -> dict:
             grupos["medicoes"] = {"total": len(linhas), "itens": [
                 {"id": r["id"], "contrato_id": r["contrato_id"], "titulo": medicoes.titulo(dict(r)),
                  "competencia": r["competencia"], "obra": da_obra[r["contrato_id"]]["nome"],
-                 "contratante": da_obra[r["contrato_id"]]["contratante"]}
+                 "contratante": da_obra[r["contrato_id"]]["contratante"],
+                 "estado": r["estado"] if r["estado"] in ESTADOS_MARCADOS else None}
                 for r in linhas[:LIMITE]]}
 
     if com_siga:

@@ -45,7 +45,42 @@ def test_derivacoes_do_processo_com_recebimento_no_setor():
     assert d["dias_uteis"] == 17                 # 02/10 a 27/10, sem o feriado de 12/10
     assert d["hoje"] == 1                        # o cancelado de hoje tambem nao conta
     assert d["ultima"]["evento"] == "Despacho"
+    assert d["dias_sem_movimentacao"] == 0       # o despacho e' de hoje
     assert d["protocolado_em"] == "2026-10-01 08:10:00"
+
+
+def test_dias_sem_movimentacao_contam_da_ultima_movimentacao_fora_marcacao_e_anotacao():
+    """#840: no setor ha' 17 dias uteis, mas a ultima movimentacao (o Despacho de 28/10) e' a mesma da coluna "Ultima
+    movimentacao"; Marcacao e Anotacao depois dela nao contam, nem como "andou hoje"."""
+    movs = [*MOVS, _mov("2026-11-05 15:00:00", "Marcação", at_lotacao="COFIN/ORGAO"),
+            _mov("2026-11-12 08:00:00", "Anotação", at_lotacao="COFIN/ORGAO")]
+    d = siga.derivar(SITUACAO_COFIN, movs, datetime.date(2026, 11, 12))
+    assert d["ultima"]["evento"] == "Despacho" and d["hoje"] == 0
+    assert d["dias_uteis"] == 27                 # no setor desde 02/10: so' informacao
+    assert d["dias_sem_movimentacao"] == 10      # 28, 29, 30/10, 3 a 6/11, 9, 10 e 11/11 (02/11 e' feriado)
+    assert siga.parado(d) == "critico"
+    assert siga.parado(siga.derivar(SITUACAO_COFIN, movs, datetime.date(2026, 11, 11))) == "breve"
+
+
+def test_mais_parado_e_o_de_mais_dias_sem_movimentacao_nao_o_de_mais_tempo_no_setor():
+    """#840: a ordem da tela, da aba do contratante e a posicao na medicao seguem os dias sem movimentacao; empate,
+    a ultima movimentacao mais antiga; sem movimentacao nenhuma, no fim."""
+    antigo_no_setor = {"processo_id": 1, "dias_uteis": 30, "dias_sem_movimentacao": 1, "ultima_em": "2026-10-27"}
+    parado = {"processo_id": 2, "dias_uteis": 6, "dias_sem_movimentacao": 6, "ultima_em": "2026-10-20"}
+    empate = {"processo_id": 3, "dias_uteis": 6, "dias_sem_movimentacao": 6, "ultima_em": "2026-10-19"}
+    sem = {"processo_id": 4, "dias_uteis": None, "dias_sem_movimentacao": None, "ultima_em": None}
+    ordem = sorted([sem, antigo_no_setor, parado, empate], key=siga._mais_parado)
+    assert [p["processo_id"] for p in ordem] == [3, 2, 1, 4]
+    assert siga.mais_parado([antigo_no_setor, parado]) is parado
+
+
+def test_processo_que_entrou_no_setor_ha_5_dias_e_andou_ontem_nao_esta_parado():
+    """#840, primeiro criterio: entrou no setor ha' 5 dias uteis, recebimento ontem: 1 dia util sem movimentacao, em
+    andamento, sem aviso de atencao."""
+    movs = [_mov("2026-10-20 09:00:00", "Transferência", at_lotacao="COFIN/ORGAO"),
+            _mov("2026-10-26 14:00:00", "Recebimento", at_lotacao="COFIN/ORGAO", at_pessoa="Fulano")]
+    d = siga.derivar(SITUACAO_COFIN, movs, datetime.date(2026, 10, 27))
+    assert (d["dias_uteis"], d["dias_sem_movimentacao"], siga.parado(d)) == (5, 1, "andamento")
 
 
 def test_dias_uteis_descontam_o_feriado_nacional():
@@ -178,7 +213,8 @@ def test_ultima_movimentacao_nao_e_marcacao_nem_anotacao():
 def test_processo_sem_movimentacao_nao_quebra():
     d = siga.derivar(None, [], datetime.date(2026, 10, 2))
     assert d == {"setor": "", "caixa_entrada": False, "com_quem": "", "desde": None, "dias_uteis": None,
-                 "hoje": 0, "ultima": None, "protocolado_em": None}
+                 "dias_sem_movimentacao": None, "hoje": 0, "ultima": None, "protocolado_em": None}
+    assert siga.parado(d) is None
 
 
 # --- atraso -----------------------------------------------------------------------------------------------
@@ -471,19 +507,31 @@ def test_link_colado_na_medicao_nao_cede_ao_processo_da_nota(conn):
     assert _ligados(conn) == [("SINFRA-PRO-2026/00111", 7, 31), ("SINFRA-PRO-2026/00222", None, None)]
 
 
-def test_aviso_de_processo_parado_usa_a_data_de_entrada_no_setor(conn):
-    # issue #650: o aviso conta os mesmos dias da tela; recebimento ou despacho seguinte no setor nao recomeca
-    _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+def test_aviso_de_processo_parado_conta_os_dias_sem_movimentacao_da_tela(conn):
+    # #840: o aviso conta os mesmos dias da coluna "Dias sem movimentação" (nao o tempo no setor, #650); Marcacao e
+    # Anotacao depois da ultima movimentacao nao recomecam a conta
+    protocolo_id = _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
     proc = _leitura(numero="SINFRA-PRO-2026/00001")[:1]
     proc[0]["movimentacoes"] += [
-        {**_mov("", "Recebimento", at_lotacao="COFIN/ORGAO", at_pessoa="Sicrana"), "data": "26/10/2026 09:00:00"}]
+        {**_mov("", "Marcação", at_lotacao="COFIN/ORGAO"), "data": "05/11/2026 15:00:00"},
+        {**_mov("", "Anotação", at_lotacao="COFIN/ORGAO"), "data": "11/11/2026 09:00:00"}]
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), proc)
-    hoje = datetime.date(2026, 10, 28)
-    p = next(x for x in siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"] if x["codigo"] == "ABC123")
+    hoje = datetime.date(2026, 11, 12)
+    p = next(x for x in siga.painel(conn, _cuiaba(2026, 11, 12, 11))["processos"] if x["codigo"] == "ABC123")
     [a] = [x for x in siga.avisos(conn, hoje) if x["tipo"] == "siga_parado"]
-    assert p["desde"] == "2026-10-02T09:00:00-04:00" and p["dias_uteis"] == 17
-    assert (a["dias"], a["data"], a["nivel"]) == (17, "2026-10-02", "acao")
-    assert a["mensagem"] == "processo SINFRA-PRO-2026/00001 parado em COFIN há 17 dias úteis"
+    assert p["desde"] == "2026-10-02T09:00:00-04:00" and p["dias_uteis"] == 27
+    assert p["ultima"]["data"] == "2026-10-28T09:30:00-04:00" and p["dias_sem_movimentacao"] == 10
+    assert p["situacao_tempo"] == "critico"
+    assert (a["dias"], a["data"], a["nivel"]) == (10, "2026-10-28", "acao")
+    assert a["mensagem"] == "processo SINFRA-PRO-2026/00001 em COFIN sem movimentação há 10 dias úteis"
+    # o passo do protocolo (etapa 4) recebe a mesma leitura
+    no_protocolo = siga.do_protocolo(conn, protocolo_id, hoje)
+    assert (no_protocolo["dias_uteis"], no_protocolo["dias_sem_movimentacao"], no_protocolo["situacao_tempo"]) == (
+        27, 10, "critico")
+    # um dia antes, 9 dias uteis: atencao; com o despacho de hoje (28/10), nenhum aviso, embora no setor ha' 17
+    assert [x["nivel"] for x in siga.avisos(conn, datetime.date(2026, 11, 11)) if x["tipo"] == "siga_parado"] == [
+        "atencao"]
+    assert [x for x in siga.avisos(conn, datetime.date(2026, 10, 28)) if x["tipo"] == "siga_parado"] == []
 
 
 def test_vinculo_chega_na_rodada_seguinte_ao_numero_registrado(conn):
@@ -1295,7 +1343,7 @@ def test_processo_arquivado_nao_avisa_parado(conn):
     _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
     proc = _leitura(numero="SINFRA-PRO-2026/00001")[:1]
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), proc)
-    hoje = datetime.date(2026, 10, 28)
+    hoje = datetime.date(2026, 11, 12)                                  # 10 dias uteis sem movimentacao
 
     def parados():
         return [a["tipo"] for a in siga.avisos(conn, hoje) if a["tipo"] == "siga_parado"]

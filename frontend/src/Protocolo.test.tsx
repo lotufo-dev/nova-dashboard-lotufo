@@ -345,7 +345,9 @@ describe("Protocolo", () => {
   describe("link do SIGA", () => {
     const LINK = "https://siga.exemplo.com.br/acompanhar?n=AbCdEf1234";
     const SIGA = { codigo: "AbCdEf1234", link: LINK, setor: null as string | null, com_quem: null as string | null,
-      dias_uteis: null as number | null, lido_em: null as string | null, registrado_em: "2026-10-20 12:00:00" };
+      dias_uteis: null as number | null, dias_sem_movimentacao: null as number | null,
+      situacao_tempo: null as "andamento" | "breve" | "critico" | "feito" | null, lido_em: null as string | null,
+      registrado_em: "2026-10-20 12:00:00" };
     const ENVIADO = { ...PROT, situacao: "enviado", envio_id: 3, numero_orgao: "X-1" };
     const tela = (p: Record<string, unknown>, podeEditar = true) => {
       const carregar = vi.fn(async () => {});
@@ -410,10 +412,12 @@ describe("Protocolo", () => {
     });
 
     it.each([
-      [2, null], [6, "Atenção"], [11, "Crítico"],
-    ])("com a leitura do robô há %i dias úteis: a linha “No SIGA” e o selo %s", async (dias, selo) => {
-      tela({ ...ENVIADO, siga: { ...SIGA, setor: "COFIN", com_quem: "Fulano", dias_uteis: dias, lido_em: "2026-10-28T15:00:00+00:00" } });
-      expect(await screen.findByText(`No SIGA: COFIN · com Fulano · há ${dias} dias úteis`)).toBeTruthy();
+      [2, "andamento", null], [6, "breve", "Atenção"], [11, "critico", "Crítico"],
+    ] as const)("sem movimentação há %i dias úteis (#840): a linha “No SIGA” e o selo da leitura do servidor (%s)", async (dias, situacao, selo) => {
+      // no setor ha' 30 dias uteis: o tempo no setor nao entra na linha nem no selo
+      tela({ ...ENVIADO, siga: { ...SIGA, setor: "COFIN", com_quem: "Fulano", dias_uteis: 30, dias_sem_movimentacao: dias,
+        situacao_tempo: situacao, lido_em: "2026-10-28T15:00:00+00:00" } });
+      expect(await screen.findByText(`No SIGA: COFIN · com Fulano · sem movimentação há ${dias} dias úteis`)).toBeTruthy();
       const linha = screen.getByText(/^No SIGA:/).parentElement!;
       expect(within(linha).queryByText("Atenção") !== null).toBe(selo === "Atenção");
       expect(within(linha).queryByText("Crítico") !== null).toBe(selo === "Crítico");
@@ -421,13 +425,15 @@ describe("Protocolo", () => {
     });
 
     it("na caixa de entrada não há “com quem”, e um dia útil fica no singular", async () => {
-      tela({ ...ENVIADO, siga: { ...SIGA, setor: "GABIN", dias_uteis: 1, lido_em: "2026-10-28T15:00:00+00:00" } });
-      expect(await screen.findByText("No SIGA: GABIN · há 1 dia útil")).toBeTruthy();
+      tela({ ...ENVIADO, siga: { ...SIGA, setor: "GABIN", dias_uteis: 1, dias_sem_movimentacao: 1, situacao_tempo: "andamento",
+        lido_em: "2026-10-28T15:00:00+00:00" } });
+      expect(await screen.findByText("No SIGA: GABIN · sem movimentação há 1 dia útil")).toBeTruthy();
     });
 
     it("quem só consulta não vê o campo, mas vê a linha “No SIGA” e o link", async () => {
-      tela({ ...ENVIADO, siga: { ...SIGA, setor: "COFIN", com_quem: "Fulano", dias_uteis: 6, lido_em: "2026-10-28T15:00:00+00:00" } }, false);
-      expect(await screen.findByText("No SIGA: COFIN · com Fulano · há 6 dias úteis")).toBeTruthy();
+      tela({ ...ENVIADO, siga: { ...SIGA, setor: "COFIN", com_quem: "Fulano", dias_uteis: 6, dias_sem_movimentacao: 6,
+        situacao_tempo: "breve", lido_em: "2026-10-28T15:00:00+00:00" } }, false);
+      expect(await screen.findByText("No SIGA: COFIN · com Fulano · sem movimentação há 6 dias úteis")).toBeTruthy();
       expect(screen.getByRole("link", { name: "Abrir no SIGA" })).toBeTruthy();
       expect(screen.queryByLabelText("Link do SIGA")).toBeNull();
     });

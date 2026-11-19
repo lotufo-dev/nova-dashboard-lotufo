@@ -24,8 +24,6 @@
 }
 .arc-numero__apoio { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .arc-numero--selo { padding-bottom: var(--espaco-traco); }
-/* o que o total soma: a base da leitura, uma vez, sob o numero */
-.arc-base { margin: calc(var(--espaco-entre-blocos) * -0.5) 0 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 
 /* painel com a tabela */
 .arc .arc-painel { min-width: 0; padding: var(--espaco-mini) 0; }

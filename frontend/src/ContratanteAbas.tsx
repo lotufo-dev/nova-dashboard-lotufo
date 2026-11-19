@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { AReceberDoContratante, Leitura, MedicoesDoContratante, SigaDoContratante } from "./abasDoContratante";
-import { APartes, BASE, Numeros, Tabela, TRAVA, type Vista } from "./AReceber";
+import { APartes, Numeros, Tabela, TRAVA, type Vista } from "./AReceber";
 import CaixaAviso from "./CaixaAviso";
 import Falha from "./Falha";
 import { IconeSiga } from "./icones";
@@ -59,7 +59,7 @@ export function AbaMedicoes({ leitura, nome, opera }: { leitura: Leitura<Medicoe
  *  filtrada por ele, com as pecas dela. O cabecalho do grupo traz o prazo de pagamento do orgao e o subtotal. */
 export function AbaAReceber({ leitura, nome, ir }: { leitura: Leitura<AReceberDoContratante>; nome: string; ir: Ir }) {
   return (
-    <ComLeitura leitura={leitura} lendo="Carregando o a receber…" falha="Não foi possível carregar o a receber">
+    <ComLeitura leitura={leitura} lendo="Carregando o em aberto…" falha="Não foi possível carregar o em aberto">
       {d => {
         if (!d.total_a_receber_liberado) {
           return <div className="arc ct-aba"><CaixaAviso nivel="atencao" className="arc-aviso">{TRAVA}</CaixaAviso></div>;
@@ -70,10 +70,7 @@ export function AbaAReceber({ leitura, nome, ir }: { leitura: Leitura<AReceberDo
           soltas_centavos: g.notas_sem_medicao_centavos };
         return (
           <div className="arc ct-aba">
-            {v && v.quantidade > 0 && <>
-              <Numeros v={v} anos={d.anos} />
-              <p className="arc-base">{BASE}</p>
-            </>}
+            {v && v.quantidade > 0 && <Numeros v={v} anos={d.anos} />}
             {!v || v.grupos.length === 0 ? (
               <section className="cartao" aria-label={`Em aberto de ${nome}`}>
                 <div className="vazio vazio--curto"><p className="vazio__titulo">Nenhuma nota em aberto de {nome}.</p></div>

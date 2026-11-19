@@ -6,7 +6,8 @@ import { andamento, foraDaRegua, reaisCurtos, type AndamentoDoServidor, type Lei
 // A leitura vem pronta do servidor (#822, `prazos.leitura_do_andamento`): a palavra, o percentual e os limites. A
 // peca nao compara o ritmo com o necessario; os dois valores so' entram na frase que os mostra. A obra fora da regua
 // (prazo no fim, prorrogacao pedida, sem medicao ha' tres competencias) leva o motivo escrito, em tinta e sem barra:
-// e' a razao de nao haver leitura, nao um aviso (o do prazo esta' nos Avisos).
+// o motivo nao e' aviso, e' a razao de nao haver leitura. (O aviso de execucao terminando e' so' da operacao: para a
+// diretoria, quem diz o prazo no fim e' a Situacao da obra, "Prazo no fim · execução até dd/mm", `SituacaoDaObra`.)
 
 /** Ate' onde vai o trilho, em percentual do necessario: o ritmo acima disso enche a barra inteira. */
 const TRILHO_ATE_PCT = 130;

@@ -49,7 +49,10 @@ const ICONES: Record<ItemMenu, (p: { className?: string }) => React.ReactElement
   garantias: IconeEscudo, "ancoras-docusign": IconeArquivo, admin: IconeAjustes, conta: IconePessoa,
 };
 
-export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemMenu | null; ir: Ir }) {
+// `permissoes`: as que o servidor informou em /api/auth/eu; o item SIGA e' de quem tem `ver_siga` (#829)
+export function Trilho({ perfil, permissoes, marcado, ir }: {
+  perfil: string; permissoes?: readonly string[]; marcado: ItemMenu | null; ir: Ir;
+}) {
   const [estado, setEstado] = useState<"largo" | "recolhido">(estadoInicial);
   const largo = estado === "largo";
   const caixa = useRef<HTMLElement>(null);
@@ -97,7 +100,7 @@ export function Trilho({ perfil, marcado, ir }: { perfil: string; marcado: ItemM
             navegador ganha "abrir em nova aba", copiar link e historico de graca. O item fica aceso tambem abaixo
             dele na hierarquia (navegacao.ts). */}
         <div className="menu__areas">
-          {menuDe(perfil).map(a => {
+          {menuDe(perfil, permissoes).map(a => {
             const sozinha = areaEhAPagina(a);
             const acesa = marcado !== null && a.paginas.includes(marcado);
             return (
@@ -199,14 +202,14 @@ function Conta({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
 
 /** Topo: o CAMINHO da pagina a' esquerda (#814), o lugar da busca unica e a conta a' direita. O trecho da pagina e' o
  *  titulo: nas telas de lista ele e' o h1; na obra, na medicao e no Inicio a pagina tem o proprio h1 (o objeto, ou o
- *  "Bom dia"), e a barra so' escreve o trecho, com a mesma cara. Quando o caminho nao cabe numa linha (celular, nome
+ *  "Bom dia"), e a barra so' escreve o trecho, na letra dos outros (19/11/2026). Quando o caminho nao cabe numa linha (celular, nome
  *  longo), ele quebra e a barra cresce; nada e' cortado. */
 export function BarraSuperior({ rota, busca, origem, ehH1, usuario, ir }: {
   rota: Rota; busca?: Filtros; origem?: Origem | null; ehH1: boolean; usuario: Usuario; ir: Ir;
 }) {
   return (
     <header className="topo">
-      <Caminho rota={rota} perfil={usuario.perfil} busca={busca} origem={origem} ehH1={ehH1} />
+      <Caminho rota={rota} perfil={usuario.perfil} permissoes={usuario.permissoes} busca={busca} origem={origem} ehH1={ehH1} />
       <Busca perfil={usuario.perfil} ir={ir} />
       <Conta usuario={usuario} ir={ir} />
     </header>

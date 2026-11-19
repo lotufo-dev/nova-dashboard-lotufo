@@ -347,15 +347,17 @@ describe("Medições: fila de trabalho, quadro do mês e meses anteriores (#805)
       expect(delta[1].querySelector(".selo--andamento")).not.toBeNull();
     });
 
-    it("a medição com processo vivo do SIGA mostra o setor e o tempo no setor na célula do passo (#664)", async () => {
-      const siga = { processo_id: 5, setor: "SUPE", dias_uteis: 5, desde: "2026-10-20T09:00:00-04:00", hoje: 0 };
+    it("a medição com processo vivo do SIGA mostra o setor e os dias sem movimentação na célula do passo (#664, #840)", async () => {
+      // no setor ha' 20 dias uteis, sem movimentacao ha' 5: a celula diz os 5, na leitura do servidor
+      const siga = { processo_id: 5, setor: "SUPE", dias_uteis: 20, desde: "2026-10-01T09:00:00-04:00", hoje: 0,
+        dias_sem_movimentacao: 5, ultima_em: "2026-10-20T09:00:00-04:00", situacao_tempo: "breve" as const };
       const comSiga = noQuadro(DELTA, { passos: noQuadro(DELTA).passos.map(p => p.numero === 2 ? { ...p, siga } : p) });
       responder(url => url.startsWith("/api/medicoes/fila")
         ? { ...FILA, quadro: [{ ...QUADRO[0], linhas: [comSiga] }] } : undefined);
       render(<MedicoesPagina usuario={usuario} aba="quadro" />);
       const tabela = await screen.findByRole("table", { name: "Quadro do mês" });
       const posicao = within(linhaDa(tabela, "Rodovia Delta")).getAllByRole("cell")[1].querySelector(".quadro__siga") as HTMLElement;
-      expect(posicao.textContent).toBe("No SIGA: SUPE 5 dias úteis");
+      expect(posicao.textContent).toBe("No SIGA: SUPE sem movimentação há 5 dias úteis");
       expect(posicao.querySelector(".quadro__siga-tempo--breve .glifo--breve")).not.toBeNull();
     });
 
@@ -403,13 +405,13 @@ describe("Medições: fila de trabalho, quadro do mês e meses anteriores (#805)
         .toEqual([null, null, "page"]);
     });
 
-    it("o que só espera pagamento e o que é de antes de 2025 viram uma linha, com o link para a página A receber (#816)", async () => {
+    it("o que só espera pagamento e o que é de antes de 2025 viram uma linha, com o link para a página Em aberto (#816)", async () => {
       responder();
       render(<MedicoesPagina usuario={usuario} aba="anteriores" />);
       await screen.findByRole("table", { name: "Com a Lotufo" });
       const resumo = document.querySelector(".fila-resumo") as HTMLElement;
-      expect(texto(resumo)).toBe("17 medições esperam pagamento · 4 medições abertas de antes de 2025Ver em A receber");
-      expect(within(resumo).getByRole("link", { name: "Ver em A receber" }).getAttribute("href")).toBe("/a-receber");
+      expect(texto(resumo)).toBe("17 medições esperam pagamento · 4 medições abertas de antes de 2025Ver na página Em aberto");
+      expect(within(resumo).getByRole("link", { name: "Ver na página Em aberto" }).getAttribute("href")).toBe("/a-receber");
       expect(within(resumo).queryByRole("link", { name: /Fechamento/ })).toBeNull();
     });
 
@@ -418,7 +420,7 @@ describe("Medições: fila de trabalho, quadro do mês e meses anteriores (#805)
         ? { ...FILA, anteriores: { linhas: [], esperam_pagamento: 1, antes_do_ano_inicial: 0, ano_inicial: "2025" } } : undefined);
       const { unmount } = render(<MedicoesPagina usuario={usuario} aba="anteriores" />);
       expect(await screen.findByText("Nenhuma medição de meses anteriores pede ação.")).toBeTruthy();
-      expect(texto(document.querySelector(".fila-resumo"))).toBe("1 medição espera pagamentoVer em A receber");
+      expect(texto(document.querySelector(".fila-resumo"))).toBe("1 medição espera pagamentoVer na página Em aberto");
       // sem contagem, a aba não leva o contador
       expect(texto(within(screen.getByRole("navigation", { name: "Vistas de Medições" })).getAllByRole("link")[2])).toBe("Meses anteriores");
       unmount();

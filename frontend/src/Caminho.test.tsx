@@ -22,14 +22,14 @@ describe("Caminho", () => {
 
   it("cada trecho de antes é um link; o último é onde se está, sem link", () => {
     render(<Caminho rota={{ tela: "a-receber" }} ehH1 />);
-    expect(trechos()).toEqual(["Financeiro", "A receber"]);
+    expect(trechos()).toEqual(["Financeiro", "Em aberto"]);
     expect(link("Financeiro")).toBe("/fechamento");
-    expect(within(caminho()).queryByRole("link", { name: "A receber" })).toBeNull();
+    expect(within(caminho()).queryByRole("link", { name: "Em aberto" })).toBeNull();
     const itens = [...caminho().querySelectorAll("li")];
     expect(itens.map(li => li.getAttribute("aria-current"))).toEqual([null, "page"]);
   });
 
-  it("o trecho da página é o título: h1 nas listas, só texto onde a página tem o próprio h1", () => {
+  it("o trecho da página é o título: h1 nas listas; onde a página tem o próprio h1, só texto na letra dos outros", () => {
     const { rerender } = render(<Caminho rota={{ tela: "medicoes", aba: "quadro" }} ehH1 />);
     expect(trechos()).toEqual(["Medições", "Quadro do mês"]);
     // com a vista depois dele, o título é link para a vista padrão
@@ -38,7 +38,15 @@ describe("Caminho", () => {
     expect(caminho().querySelectorAll(".caminho__trecho--titulo")).toHaveLength(1);
     rerender(<Caminho rota={{ tela: "medicoes", aba: "quadro" }} ehH1={false} />);
     expect(within(caminho()).queryByRole("heading")).toBeNull();
-    expect(caminho().querySelector(".caminho__trecho--titulo")!.textContent).toBe("Medições");
+    // 19/11/2026: sem a classe do título, o trecho final tem a letra dos outros trechos
+    expect(caminho().querySelector(".caminho__trecho--titulo")).toBeNull();
+    expect(link("Medições")).toBe("/medicoes");
+  });
+
+  it("o trecho que levaria à própria página é texto, não link", () => {
+    render(<Caminho rota={{ tela: "resumo-medicoes" }} perfil="diretoria" ehH1 />);
+    expect(trechos()).toEqual(["Medições", "Resumo das medições"]);
+    expect(within(caminho()).queryAllByRole("link")).toHaveLength(0);
   });
 
   it("o nome do objeto vem da página que o carregou, e chega depois dela", () => {

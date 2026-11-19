@@ -115,9 +115,9 @@ describe("Fechamento (#748)", () => {
     expect(texto(linhaMedicao)).toContain("R$ 4.000,01");
   });
 
-  it("o em aberto nota a nota saiu da página: fica o total do ano, com o link para A receber (#815)", async () => {
+  it("o em aberto nota a nota saiu da página: fica o total do ano, com o link para a página Em aberto (#815)", async () => {
     // o servidor continua mandando as linhas do em aberto, as notas sem medição e o em aberto anterior a 2025 (a
-    // página A receber usa): aqui nada disso é desenhado, em aba nenhuma
+    // página Em aberto usa): aqui nada disso é desenhado, em aba nenhuma
     const dois: RespostaFechamento = {
       ...TRES_PARTES,
       em_aberto: [...TRES_PARTES.em_aberto, { tipo_aberto: "nota", nota_id: 12, numero: "502", contrato_id: 7, obra: "Obra Alfa",
@@ -145,14 +145,14 @@ describe("Fechamento (#748)", () => {
     expect(valorDe("Em aberto")).toBe("R$ 6.000,01");
     const meses = screen.getByRole("table", { name: /por mês de competência de 2026/ });
     expect(texto(meses.querySelector("tfoot"))).toBe("Total de 2026R$ 17.000,01R$ 14.000,01R$ 14.000,01R$ 10.000,00R$ 6.000,01");
-    const porta = screen.getByRole("link", { name: "Em aberto nota a nota, na página A receber" });
+    const porta = screen.getByRole("link", { name: "Em aberto nota a nota, na página Em aberto" });
     expect(porta.getAttribute("href")).toBe("/a-receber");
     expect(porta.textContent?.trim()).toBe("nota a nota");            // ao lado do rótulo "Em aberto"
     expect(porta.closest(".fch-numero")?.querySelector("dt")?.textContent).toBe("Em aberto");
     // o total segue o ano escolhido, e o link continua lá
     fireEvent.click(screen.getByRole("button", { name: "2025" }));
     expect(valorDe("Em aberto")).toBe("R$ 300,03");
-    expect(screen.getByRole("link", { name: /na página A receber/ }).getAttribute("href")).toBe("/a-receber");
+    expect(screen.getByRole("link", { name: /na página Em aberto/ }).getAttribute("href")).toBe("/a-receber");
   });
 
   it("nota paga em parte: o selo na linha da medição", async () => {
@@ -288,7 +288,7 @@ describe("Fechamento (#748)", () => {
     expect(valorDe("Protocolado")).toBe("R$ 14.000,01");
     expect(valorDe("Recebido")).toBe("—");
     expect(valorDe("Em aberto")).toBe("—");
-    expect(screen.queryByRole("link", { name: /A receber/ })).toBeNull();      // sem valor, não há o que abrir
+    expect(screen.queryByRole("link", { name: /nota a nota/ })).toBeNull();      // sem valor, não há o que abrir
     const meses = screen.getByRole("table", { name: /por mês de competência de 2026/ });
     expect(texto(meses.querySelector("tfoot"))).toBe("Total de 2026R$ 17.000,01R$ 14.000,01R$ 14.000,01——");
     fireEvent.click(within(meses).getByRole("button", { name: /Março de 2026, por obra/ }));
@@ -630,13 +630,20 @@ describe("Fechamento em abas (#815)", () => {
 
   it("?mes= abre a página no ano do mês, com ele aberto por obra; a obra abre a medição", async () => {
     api.mockResolvedValue(ABAS);
+    const rolou = vi.fn();
+    Element.prototype.scrollIntoView = rolou;
     abrirEm("/fechamento?mes=2025-03");
     render(<Fechamento ir={() => {}} />);
     const tabela = await screen.findByRole("table", { name: /por mês de competência de 2025/ });
     expect(screen.getByRole("button", { name: "2025" }).getAttribute("aria-pressed")).toBe("true");
     expect(within(tabela).getByRole("button", { name: /Março de 2025, por obra/ }).getAttribute("aria-expanded")).toBe("true");
+    // a vista vai até a linha do mês aberto (19/11/2026), uma vez, ao abrir
+    const linhaDoMes = within(tabela).getByRole("button", { name: /Março de 2025, por obra/ }).closest("tr")!;
+    expect(rolou).toHaveBeenCalledTimes(1);
+    expect(rolou.mock.contexts[0]).toBe(linhaDoMes);
     fireEvent.click(within(tabela).getByRole("button", { name: /Obra Alfa, medições de 03\/2025/ }));
     expect(within(tabela).getByRole("link", { name: "3ª Medição" }).getAttribute("href")).toBe("/obras/7/medicoes/1");
+    expect(rolou).toHaveBeenCalledTimes(1);
     // escolher o outro ano tira o mês do endereço
     fireEvent.click(screen.getByRole("button", { name: "2026" }));
     expect(endereco()).toBe("/fechamento");
@@ -651,6 +658,8 @@ describe("Fechamento em abas (#815)", () => {
       expect(t.querySelector('[aria-expanded="true"]')).toBeNull();
       cleanup();
     }
+    // sem mês aberto, a vista fica no alto
+    expect(rolou).toHaveBeenCalledTimes(1);
   });
 
   it("por contratante: os cinco números de cada um, a participação no medido e o total do ano na última linha", async () => {

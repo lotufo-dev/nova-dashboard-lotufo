@@ -1,4 +1,5 @@
-"""Pagina A receber (issue #816, etapa 5 da reestrutura #805; decisao do dono de 18/11/2026): o em aberto do Fechamento
+"""Pagina Em aberto (issue #816, etapa 5 da reestrutura #805; decisao do dono de 18/11/2026; ate' 19/11/2026 ela se
+chamava "A receber", e o endereco `/a-receber` e a rota `/api/a-receber` ficaram): o em aberto do Fechamento
 nota a nota, agrupado por contratante e, dentro dele, pela data do protocolo, a mais antiga primeiro. So' leitura.
 
 Pergunta da tela: "o que esta' protocolado e ainda nao entrou, e ha' quanto tempo". A conta NAO e' nova: as linhas sao
@@ -12,13 +13,17 @@ uma vez so' na linha da medicao, como no Fechamento.
 
 Duas definicoes de dinheiro a receber, de proposito (docs/adr/0006): esta pagina e' a casa do "em aberto" do Fechamento,
 pelo valor bruto da nota e pela competencia; o "a receber" do Inicio e da lista de Obras (`diretoria.a_receber_na_cota`)
-soma tambem as cobrancas do RM que nenhuma medicao em aberto representa, pelo que falta nos titulos. A tela diz isso em
-uma frase e da' ao total o rotulo do Fechamento ("Em aberto").
+soma tambem as cobrancas do RM que nenhuma medicao em aberto representa, pelo que falta nos titulos. Por isso a pagina
+se chama "Em aberto", o rotulo do Fechamento (decisao do dono de 19/11/2026: o nome do outro numero saiu da pagina, e
+com ele a frase que explicava a diferenca); o numero "a receber" da Inicio e de Obras nao muda de nome nem de conta.
 
 A' parte, fora do total, como no Fechamento: a nota de cobranca em aberto no RM sem medicao ligada
 (`fechamento._notas_sem_medicao`, sem competencia) e o em aberto de competencia anterior a 2025 (o "a receber antigo",
 `fechamento.ANOS`). Os dois descem ao contratante da obra, para o recorte por contratante; a lista inteira das notas
-sem medicao vai tambem no alto, na ordem do Fechamento (a emissao, a mais antiga primeiro).
+sem medicao vai tambem no alto, na ordem do Fechamento (a emissao, a mais antiga primeiro). A nota sem medicao que
+esta' ligada a medicao ainda nao enviada ao orgao (prevista ou com a planilha/carta so' gerada: o vinculo existe, mas a
+medicao ainda nao mede, `medicoes.ESTADOS_NO_MEDIDO`) leva `ligada_a_medicao_nao_enviada` (decisao do dono de
+19/11/2026: rotulo proprio). E' so' a marca: a lista, o valor e o subtotal sao os do Fechamento.
 
 O que a tela mostra nasce aqui, pronto:
 - por contratante (`contratantes`): a chave da pagina dele em Obras (`fechamento._contratantes`, a mesma de
@@ -48,6 +53,8 @@ from app import db, diretoria, fechamento, fila_medicoes, medicoes, tempo
 
 # o contrato ainda em execucao: o contratante dele fica na fileira do filtro mesmo sem nada em aberto
 ESTADOS_NA_FILEIRA = ("ativo", "suspenso")
+# a medicao que ainda nao foi ao orgao: nao mede (`medicoes.ESTADOS_NO_MEDIDO`), nao foi cancelada nem desistida
+ESTADOS_NAO_ENVIADA = ("prevista", "planilha_gerada")
 
 
 def a_receber(conn, hoje: datetime.date | None = None) -> dict:
@@ -73,6 +80,18 @@ def _linha(e: dict, m: dict, hoje: datetime.date, prazos: dict[str, int]) -> dic
     parada = fila_medicoes._parada(_dia(e["protocolo_em"] or e["emitida_em"]), hoje, fila_medicoes.PASSO_PAGAMENTO,
                                    diretoria.esperada(m, prazos), prazos.get(diretoria._contratante(m)))
     return {**e, "parada": parada, "orgao_pagou_em": None}
+
+
+def _ligadas_a_medicao_nao_enviada(conn, nota_ids: list[int]) -> set[int]:
+    """Das notas sem medicao ligada (`fechamento._notas_sem_medicao`: nenhum vinculo ativo com medicao que mede), as
+    que tem vinculo ativo com medicao ainda nao enviada ao orgao (`ESTADOS_NAO_ENVIADA`)."""
+    if not nota_ids:
+        return set()
+    marcas = ",".join("?" * len(nota_ids))
+    estados = ",".join("?" * len(ESTADOS_NAO_ENVIADA))
+    return {r[0] for r in conn.execute(
+        f"SELECT DISTINCT a.nota_id FROM nf_alocacoes a JOIN medicoes m ON m.id=a.medicao_id WHERE a.desfeita_em IS NULL "
+        f"AND a.nota_id IN ({marcas}) AND m.estado IN ({estados})", (*nota_ids, *ESTADOS_NAO_ENVIADA))}
 
 
 def _a_receber(conn, hoje: datetime.date) -> dict:
@@ -112,6 +131,8 @@ def _a_receber(conn, hoje: datetime.date) -> dict:
             g["por_ano"][ano] += e["valor_centavos"]
             g["alem_do_prazo"] += bool(linha["parada"] and linha["parada"]["alem_do_prazo"])
     soltas = fechamento._notas_sem_medicao(conn)
+    previstas = _ligadas_a_medicao_nao_enviada(conn, [n["nota_id"] for n in soltas["em_aberto"]])
+    soltas["em_aberto"] = [{**n, "ligada_a_medicao_nao_enviada": n["nota_id"] in previstas} for n in soltas["em_aberto"]]
     for n in soltas["em_aberto"]:
         g = grupo_de(n["contrato_id"])
         g["notas_sem_medicao"].append(n)

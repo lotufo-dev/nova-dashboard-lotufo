@@ -149,22 +149,31 @@ do rótulo, na etiqueta sob o valor ou na barra.
   leitura, a obra com até duas competências de prazo ("Prazo no fim"; com pedido enviado e sem resposta,
   "Prazo no fim · prorrogação pedida"), a que tem pedido de prorrogação sem resposta ("Prorrogação pedida") e a que
   fechou três competências sem medição de execução ("Sem medição desde 07/2026", o mês da última). O motivo vai em
-  tinta, sem barra e sem tom de valor: é a razão de não haver leitura, e o aviso de prazo já está nos Avisos. Na
-  página da obra, fora da régua, a conclusão estimada fica sem selo. Só quem tem leitura entra nas contagens por
-  leitura; na faixa de números, as obras com o prazo no fim vão contadas ao lado, em tinta ("N com prazo no fim")
-  (#822, decisão do dono de 18/11/2026).
+  tinta, sem barra e sem tom de valor: o motivo não é aviso, é a razão de não haver leitura. Na página da obra, fora
+  da régua, a conclusão estimada continua com o selo ("N dias depois do fim da execução"): "Prazo no fim" diz que a
+  régua não vale; o selo diz quando a obra termina no ritmo de hoje (decisão do dono de 19/11/2026). Só quem tem
+  leitura entra nas contagens por leitura; na faixa de números, as obras com prazo a cumprir e sem leitura (fora da
+  régua ou que ainda não mediram) vão contadas ao lado, em tinta ("N sem leitura"), e as duas contagens somam as
+  linhas da vista Andamento (#822, decisões do dono de 18 e 19/11/2026).
   A contagem de obras por leitura ("3 devagar", "2 em atenção") vai numa etiqueta do tom da leitura, sem glifo:
   é valor, não situação (#805).
   Na tabela que traz a coluna Andamento ao lado da Situação (a página do contratante), a obra devagar e sem aviso
   não diz "Em dia": a Situação leva a etiqueta "Devagar" e o motivo ("mede N% do necessário"), pela mesma leitura da
   coluna. Qualquer aviso do farol continua ganhando, e "Atenção" no andamento não tira o "Em dia" (decisão do dono
   de 18/11/2026). Motivo: "Devagar" numa coluna e "Em dia" na outra se contradiziam.
+  A obra sem aviso no farol e com o prazo no fim também não diz "Em dia": a Situação escreve "Prazo no fim ·
+  execução até 20/12" (com o ano quando não é o de hoje), em tinta, sem selo. O aviso de execução terminando é só
+  da operação; para a diretoria, é a Situação que diz o prazo no fim. Qualquer aviso do farol continua ganhando
+  (decisão do dono de 19/11/2026).
 - **Tempo parado:** os dias numa etapa ou num setor, com o selo da situação e os limites do SIGA (seção "Quando
   usar cada uma" das situações). Na medição, são os dias úteis desde o evento que abriu o passo da vez. No passo
   Pagamento a régua é o prazo do órgão (`docs/adr/0007`): crítico só depois da data esperada do recebimento; antes
   dela, ou sem prazo, em andamento. Motivo: o órgão leva semanas para pagar, e dez dias úteis de espera não são
   atraso (#805). A leitura é uma só, do servidor: a mesma medição tem o mesmo selo na fila de trabalho e no cartão
   do Resumo das medições. A recebida não está parada: leva o selo do feito com a data.
+- **No repasse sem baixa não há tempo parado com o órgão.** A medição já foi paga pelo órgão: a linha leva o selo do
+  feito com o dia do pagamento ("órgão pagou em 04/11") e a nota leva o selo de em andamento "repasse sem baixa".
+  O tempo parado com o prazo do órgão é só da nota que o órgão ainda não pagou e da medição protocolada sem nota.
 - **Fica em tinta:** valor de contrato, data, número de documento e o próprio número ao lado da marca ou da
   etiqueta.
 
@@ -192,7 +201,7 @@ do rótulo, na etiqueta sob o valor ou na barra.
   bloco (o contratante, em Obras e no quadro do mês; quem tem de agir, na fila de trabalho; a categoria, no SIGA),
   com o subtotal do grupo nas colunas. Motivo: na linha cinza o contratante sumia
   entre as obras, e a página parecia uma lista só (decisão do dono de 18/11/2026, #805).
-- **Borda do tempo parado:** no SIGA, a borda esquerda da linha leva a cor da situação do tempo no setor, a mesma
+- **Borda do tempo parado:** no SIGA, a borda esquerda da linha leva a cor da situação dos dias sem movimentação (#840), a mesma
   do selo da linha; o encerrado não leva. Motivo: com tudo em tinta não dava para ver o que estava travado antes de
   ler (decisão do dono de 18/11/2026, #805).
 - **Barra de passos:** o fluxo da medição de uma obra em miniatura, na linha da tabela: um segmento por passo que
@@ -238,10 +247,11 @@ A casca é o que fica igual em toda tela: o menu à esquerda e o topo (decisões
   páginas dela: Painel, Medições, Obras, Financeiro, Prazos e avisos, Órgãos, Documentos e Sistema. A área que é a
   própria página (Obras) é um item só, sem o nome repetido. A área da página aberta fica com o nome aceso. Cada
   perfil vê as páginas que já via; área sem página do perfil não aparece. Motivo: dez itens soltos não diziam onde
-  cada página mora, e as páginas novas (A receber, as três de Documentos) não cabiam numa lista só (decisão do dono
+  cada página mora, e as páginas novas (Em aberto, então chamada A receber, e as três de Documentos) não cabiam numa lista só (decisão do dono
   de 18/11/2026, #805; #814). Substitui o menu de 09/10/2026, uma lista sem nome de grupo.
 - **Item de 36 px no menu**, e não os 40 px do botão: com 14 páginas o menu inteiro tem de caber numa janela de
-  900 px de altura. Em janela mais baixa o menu rola por dentro e o botão de recolher fica preso ao pé.
+  900 px de altura. Em janela mais baixa o menu rola por dentro e o botão de recolher fica preso ao pé. É exceção
+  ao alvo mínimo de 40 px, aceita pelo dono em 19/11/2026.
 - **Recolhido** fica só a coluna dos ícones (64 px), com um fio entre uma área e a outra. A escolha é guardada no
   navegador.
 - **Topo** sobre o papel, com o caminho da página, o lugar da busca e a conta (avatar redondo com as iniciais). Tem
@@ -251,7 +261,10 @@ A casca é o que fica igual em toda tela: o menu à esquerda e o topo (decisões
   objeto é o título da barra (maior e forte); os de antes são links sublinhados na cor do texto de apoio; depois do
   título só vem a vista (a aba), quando não é a padrão. Nada é cortado: o que não cabe desce para a linha de baixo.
   Motivo: com mais páginas e três níveis em Obras, a página precisa dizer onde está e dar o caminho de volta
-  (decisão do dono de 18/11/2026, #805; #814).
+  (decisão do dono de 18/11/2026, #805; #814). Na página que tem título próprio (a obra, a medição, o contratante,
+  o Início, Obras) o trecho final fica na letra dos outros trechos, porque o nome já está grande no título logo
+  abaixo; e o trecho que levaria à própria página (a área cuja primeira página é a aberta) é texto, não link
+  (decisões do dono de 19/11/2026).
 - **O menu aceso e o caminho respondem a perguntas diferentes na página da medição.** O menu acende Medições, a
   área de quem opera; o caminho diz onde a medição mora (dentro da obra, dentro do contratante). Para o perfil sem
   Medições no menu (diretoria), a medição acende Obras.

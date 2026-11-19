@@ -1,7 +1,11 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BarraSuperior, Trilho } from "./Casca";
+import { IconeAReceber, IconeBaixar } from "./icones";
 import type { Usuario } from "./Login";
+
+// as permissoes que /api/auth/eu informa (backend/app/permissoes.py); o item SIGA e' de quem tem `ver_siga` (#829)
+const COM_SIGA = ["ver_paineis", "ver_siga"];
 
 // Menu lateral de Medições (#643): um item só, que abre a fila de trabalho; "Iniciar medição" e "Em andamento" saíram.
 describe("menu lateral: Medições", () => {
@@ -37,12 +41,12 @@ describe("menu lateral em áreas (#814)", () => {
   ]);
 
   it("o administrador vê as oito áreas, com o nome e as páginas de cada uma; Obras aparece uma vez só", () => {
-    render(<Trilho perfil="admin" marcado="inicio" ir={vi.fn()} />);
+    render(<Trilho perfil="admin" permissoes={COM_SIGA} marcado="inicio" ir={vi.fn()} />);
     expect(areas()).toEqual([
       ["Painel", ["Início"]],
       ["Medições", ["Medições", "Resumo das medições"]],
       [null, ["Obras"]],
-      ["Financeiro", ["Fechamento", "A receber"]],
+      ["Financeiro", ["Fechamento", "Em aberto"]],
       ["Prazos e avisos", ["Avisos"]],
       ["Órgãos", ["SIGA"]],
       ["Documentos", ["Certidões", "Regularidade mensal", "Garantias"]],
@@ -55,25 +59,35 @@ describe("menu lateral em áreas (#814)", () => {
     expect(within(nav()).getAllByRole("link", { name: "Obras" })).toHaveLength(1);
   });
 
-  it("a engenharia não vê a Administração; a diretoria fica sem Medições, SIGA e Âncoras, e a área Órgãos some", () => {
-    const { unmount } = render(<Trilho perfil="engenharia" marcado="inicio" ir={vi.fn()} />);
+  it("a engenharia não vê a Administração; a diretoria fica sem Medições e Âncoras, e com o SIGA (#829)", () => {
+    const { unmount } = render(<Trilho perfil="engenharia" permissoes={COM_SIGA} marcado="inicio" ir={vi.fn()} />);
     expect(areas().map(a => a[0])).toEqual(["Painel", "Medições", null, "Financeiro", "Prazos e avisos", "Órgãos", "Documentos", "Sistema"]);
     expect(areas()[7][1]).toEqual(["Âncoras DocuSign", "Minha conta"]);
     unmount();
-    render(<Trilho perfil="diretoria" marcado="inicio" ir={vi.fn()} />);
+    render(<Trilho perfil="diretoria" permissoes={COM_SIGA} marcado="inicio" ir={vi.fn()} />);
     expect(areas()).toEqual([
       ["Painel", ["Início"]],
       ["Medições", ["Resumo das medições"]],
       [null, ["Obras"]],
-      ["Financeiro", ["Fechamento", "A receber"]],
+      ["Financeiro", ["Fechamento", "Em aberto"]],
       ["Prazos e avisos", ["Avisos"]],
+      ["Órgãos", ["SIGA"]],
       ["Documentos", ["Certidões", "Regularidade mensal", "Garantias"]],
       ["Sistema", ["Minha conta"]],
     ]);
   });
 
+  it("quem não tem `ver_siga` não tem o item SIGA, qualquer que seja o perfil, e a área Órgãos some (#829)", () => {
+    for (const perfil of ["admin", "engenharia", "diretoria"]) {
+      const { unmount } = render(<Trilho perfil={perfil} permissoes={["ver_paineis", "editar_cadastros"]} marcado="inicio" ir={vi.fn()} />);
+      expect(within(nav()).queryByRole("link", { name: "SIGA" })).toBeNull();
+      expect(areas().map(a => a[0])).not.toContain("Órgãos");
+      unmount();
+    }
+  });
+
   it("cada página leva ao endereço dela", () => {
-    render(<Trilho perfil="admin" marcado="inicio" ir={vi.fn()} />);
+    render(<Trilho perfil="admin" permissoes={COM_SIGA} marcado="inicio" ir={vi.fn()} />);
     expect(within(nav()).getAllByRole("link").map(l => l.getAttribute("href"))).toEqual(["/inicio", "/medicoes", "/resumo-medicoes", "/obras",
       "/fechamento", "/a-receber", "/avisos", "/siga", "/documentos", "/documentos/regularidade", "/documentos/garantias",
       "/ancoras-docusign", "/admin", "/conta"]);
@@ -83,7 +97,7 @@ describe("menu lateral em áreas (#814)", () => {
     const acesas = () => [...nav().querySelectorAll(".menu__area--acesa .menu__area-nome")].map(n => n.textContent);
     const { rerender } = render(<Trilho perfil="admin" marcado="a-receber" ir={vi.fn()} />);
     expect(acesas()).toEqual(["Financeiro"]);
-    expect(within(nav()).getAllByRole("link").filter(l => l.getAttribute("aria-current") === "page").map(l => l.textContent)).toEqual(["A receber"]);
+    expect(within(nav()).getAllByRole("link").filter(l => l.getAttribute("aria-current") === "page").map(l => l.textContent)).toEqual(["Em aberto"]);
     rerender(<Trilho perfil="admin" marcado="regularidade" ir={vi.fn()} />);
     expect(acesas()).toEqual(["Documentos"]);
     // Obras não tem nome de área para acender: fica só o item
@@ -99,7 +113,7 @@ describe("menu lateral em áreas (#814)", () => {
     fireEvent.click(within(nav()).getByRole("button", { name: "Recolher o menu" }));
     expect(nav().getAttribute("data-estado")).toBe("recolhido");
     expect(within(nav()).getByRole("list", { name: "Documentos" }).querySelectorAll("a")).toHaveLength(3);
-    expect(within(nav()).getByRole("link", { name: "A receber" }).getAttribute("title")).toBe("A receber");
+    expect(within(nav()).getByRole("link", { name: "Em aberto" }).getAttribute("title")).toBe("Em aberto");
   });
 });
 
@@ -154,14 +168,16 @@ describe("casca: marca, item ativo e topo", () => {
     const caminho = within(topo).getByRole("navigation", { name: "Você está em" });
     expect([...caminho.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Financeiro", "Fechamento"]);
     expect(within(caminho).getByRole("heading", { level: 1, name: "Fechamento" }).className).toBe("caminho__titulo");
-    expect(within(caminho).getByRole("link", { name: "Financeiro" }).getAttribute("href")).toBe("/fechamento");
+    // a área levaria à própria página (o Fechamento é a primeira de Financeiro): é texto (19/11/2026)
+    expect(within(caminho).queryByRole("link", { name: "Financeiro" })).toBeNull();
     const conta = within(topo).getByRole("button", { name: "Conta de Mariana Albuquerque Teixeira" });
     expect(conta.querySelector(".conta__avatar")!.textContent).toBe("MT");
     // na tela que tem o proprio h1 o topo escreve o mesmo caminho, sem um segundo h1
     rerender(<BarraSuperior rota={{ tela: "obras", aba: "qdop" }} ehH1={false} usuario={usuario} ir={vi.fn()} />);
     expect(within(topo).queryByRole("heading")).toBeNull();
     expect([...topo.querySelectorAll(".caminho li")].map(li => li.textContent)).toEqual(["Obras", "QDOP"]);
-    expect(topo.querySelector(".caminho__trecho--titulo")!.textContent).toBe("Obras");
+    // o trecho da página fica na letra dos outros trechos (19/11/2026)
+    expect(topo.querySelector(".caminho__trecho--titulo")).toBeNull();
   });
 
   it("a busca fica no topo, entre o caminho e a conta (#814; preenchida na #819)", () => {
@@ -170,5 +186,23 @@ describe("casca: marca, item ativo e topo", () => {
     expect([...topo.children].map(c => c.className)).toEqual(["caminho", "busca", "conta"]);
     expect(within(topo).getByRole("search")).toBeTruthy();
     expect(within(topo).getByRole("combobox", { name: "Buscar obra, medição ou processo" })).toBeTruthy();
+  });
+});
+
+// 19/11/2026: o ícone da página Em aberto (endereço /a-receber) era uma seta descendo até uma linha, quase o de baixar
+// arquivo dos botões de exportar. O menu e o botão de baixar não podem ter o mesmo desenho.
+describe("ícone da página Em aberto", () => {
+  afterEach(cleanup);
+
+  it("o item do menu não tem o desenho do botão de baixar", () => {
+    render(<Trilho perfil="admin" marcado={null} ir={vi.fn()} />);
+    const item = screen.getByRole("link", { name: /A receber|Em aberto/ });
+    const desenhoDoItem = item.querySelector("svg")!.innerHTML;
+    const { container } = render(<><IconeAReceber /><IconeBaixar /></>);
+    const [aReceber, baixar] = [...container.querySelectorAll("svg")].map(svg => svg.innerHTML);
+    expect(desenhoDoItem).toBe(aReceber);
+    expect(aReceber).not.toBe(baixar);
+    // nem a seta para baixo de antes
+    expect(aReceber).not.toContain("M7 10.5l5 5 5-5");
   });
 });

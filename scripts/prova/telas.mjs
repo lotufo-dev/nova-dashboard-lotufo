@@ -42,6 +42,7 @@ import { aReceberComNotas } from "./simulados.mjs";   // #816: em linha propria,
 import { inicioPorContratante, inicioSemCiclo } from "./simulados.mjs";
 // peca "inicio" (19/11/2026, #805): a matriz obra por competencia no Resumo das medicoes
 import { matrizEmVolume, matrizVazia } from "./simulados.mjs";
+import { LOGIN_NO_LIMITE, LOGIN_RECUSADO } from "./simulados.mjs";   // #821: os estados do login (ESTADOS_DO_LOGIN)
 
 export const PERFIS = ["admin", "engenharia", "diretoria"];
 export const LARGURAS = [1440, 1024, 390];
@@ -98,7 +99,7 @@ const comNecessario = noRitmo => [
   { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaComNecessario(noRitmo) },
   { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
 ];
-// issue #822: a pagina da obra fora da regua do andamento: o motivo no lugar da leitura, sem selo na conclusao.
+// issue #822: a pagina da obra fora da regua do andamento: o motivo no lugar da leitura; o selo da conclusao fica (19/11).
 // `noFim`: a execucao termina no mes que vem (duas competencias)
 import { cabecalhoNoFim, fichaForaDaRegua } from "./simulados.mjs";
 const foraDaRegua = (fora, noFim = false) => [
@@ -209,6 +210,10 @@ export const TELAS = [
     espera: ".obras-do-contratante .andamento", simular: comCarteira },
   { rota: "contratante", id: "contratante-sem-prazo", caminho: "/obras/contratante/mtpar", perfis: ["diretoria"],
     espera: ".obras-do-contratante .andamento", simular: comCarteira },
+  // decisao do dono de 19/11/2026: a obra com o prazo no fim e sem aviso no farol (Pref. Cuiabá, na carteira simulada)
+  // diz "Prazo no fim · execução até dd/mm" na Situação, no lugar de "Em dia"
+  { rota: "contratante", id: "contratante-prazo-no-fim", caminho: "/obras/contratante/pref-cuiaba", perfis: ["diretoria"],
+    espera: ".obras-do-contratante .obras-situacao__prazo", simular: comCarteira },
   { rota: "contratante", id: "contratante-nao-encontrado", caminho: "/obras/contratante/nao-existe", perfis: SO_ADMIN, espera: "#conteudo .vazio" },
   { rota: "contratante", id: "contratante-erro", caminho: "/obras/contratante/sinfra", perfis: SO_ADMIN, espera: "#conteudo [role=alert]",
     erro: true, simular: falha(/^\/api\/contratos$/) },
@@ -349,8 +354,8 @@ export const TELAS = [
   { rota: "obra", id: "obra-no-ritmo", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .selo--feito",
     simular: comNecessario(true) },
   // #822: fora da regua do andamento, o painel "Prazo" escreve o motivo (prazo no fim com a prorrogacao pedida; sem
-  // medicao ha' tres competencias) e a conclusao estimada fica sem selo
-  { rota: "obra", id: "obra-prazo-no-fim", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .andamento--fora",
+  // medicao ha' tres competencias); o selo da conclusao estimada continua (decisao do dono de 19/11/2026)
+  { rota: "obra", id: "obra-prazo-no-fim", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .selo--critico",
     simular: foraDaRegua({ motivo: "prazo_no_fim", prorrogacao_pedida: true }, true) },
   { rota: "obra", id: "obra-sem-medicao", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .andamento--fora",
     simular: foraDaRegua({ motivo: "sem_medicao", sem_medicao_desde: "2026-07" }) },
@@ -497,7 +502,8 @@ export const TELAS = [
     espera: ".topo .caminho li:nth-child(4)", simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoDeNomeLongo }] },
   // ---- Busca unica do topo (#819). No computador o campo esta' na barra; no celular, o botao da lupa abre o campo por
   // cima dela: o primeiro passo clica o que estiver a' vista (a lupa ou o proprio campo). Os resultados abrem por cima
-  // da pagina. A diretoria entra com o servidor de verdade: o recorte do perfil e' dele, e nao ha' grupo Processos.
+  // da pagina. A diretoria entra com o servidor de verdade: o recorte do perfil e' dele (desde a #829 ela tem `ver_siga`
+  // e recebe o grupo Processos; o perfil sem a permissao e' coberto pelo teste do servidor, test_api_busca.py).
   { rota: "inicio", id: "busca-fechada", caminho: "/inicio", perfis: TODOS, antes: ".ini", espera: ".topo .busca" },
   { rota: "inicio", id: "busca-resultados", caminho: "/inicio", perfis: OPERA, antes: ".ini", espera: ".busca__opcao",
     simular: [{ caminho: /^\/api\/busca$/, corpo: BUSCA_CHEIA }], passos: abrirBusca("15") },
@@ -508,7 +514,7 @@ export const TELAS = [
   // ---- As abas Medicoes, A receber e Processos no SIGA da pagina do contratante (#818). Cada uma com o servidor de
   // verdade (o cadastro de exemplo: um contratante so', quase nada em cada aba) e com o recorte simulado da carteira de
   // quatro contratantes (ver simulados.mjs); a trava do a receber, o contratante so' com o que fica a' parte, a aba sem
-  // linha e a falha. A diretoria nao tem a aba do SIGA: o endereco dela abre a pagina do contratante.
+  // linha e a falha. A aba do SIGA e' de quem tem `ver_siga` (#829: os tres perfis; a diretoria, so' para ler).
   { rota: "contratante", id: "contratante-medicoes", caminho: "/obras/contratante/sinfra/medicoes", perfis: TODOS, espera: ".ct-aba.medicoes" },
   { rota: "contratante", id: "contratante-medicoes-fila", caminho: "/obras/contratante/sinfra/medicoes", perfis: TODOS,
     espera: ".ct-aba .fila__tabela", simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/medicoes$/, ajustar: medicoesDoContratante }] },
@@ -527,8 +533,18 @@ export const TELAS = [
   { rota: "contratante", id: "contratante-siga", caminho: "/obras/contratante/sinfra/siga", perfis: OPERA, espera: ".ct-aba.siga" },
   { rota: "contratante", id: "contratante-siga-processos", caminho: "/obras/contratante/sinfra/siga", perfis: OPERA, espera: ".ct-aba .sg-grupo",
     simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/siga$/, corpo: SIGA_DO_CONTRATANTE }] },
-  { rota: "contratante", id: "contratante-siga-diretoria", caminho: "/obras/contratante/sinfra/siga", destino: "/obras/contratante/sinfra",
-    perfis: ["diretoria"], espera: ".obras-do-contratante" },
+  // #829 (decisao do dono de 19/11/2026): a diretoria tem a aba do SIGA, so' para ler (a aba nao tem botao)
+  { rota: "contratante", id: "contratante-siga-diretoria", caminho: "/obras/contratante/sinfra/siga", perfis: ["diretoria"],
+    espera: ".ct-aba .sg-grupo", simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/siga$/, corpo: SIGA_DO_CONTRATANTE }] },
+
+  // ---- SIGA para a diretoria, so' leitura (#829): a permissao `ver_siga` lhe da' o item do menu e a tela; os botoes
+  // que gravam (acompanhar processo, corrigir categoria, pedir leitura) nao aparecem, e o servidor os nega (403). O
+  // quadro vazio (o cadastro de exemplo), o quadro com processos e o historico de um processo.
+  { rota: "siga", id: "siga-diretoria", caminho: "/siga", perfis: ["diretoria"], espera: ".sg-numeros" },
+  { rota: "siga", id: "siga-processos-diretoria", caminho: "/siga", perfis: ["diretoria"], espera: ".sg-grupo table",
+    simular: comSiga(SIGA_COM_PROCESSOS) },
+  { rota: "siga", id: "siga-historico-diretoria", caminho: "/siga?processo=2", perfis: ["diretoria"], espera: ".sg__quadro table",
+    simular: comSiga(SIGA_COM_PROCESSOS) },
 ];
 
 // Rotas do roteador que a prova nao abre, cada uma com o motivo.
@@ -559,7 +575,6 @@ export function telasDoPerfil(perfil) {
 //   id       vira o nome da captura: `login-<id>-<largura>.png`
 //   simular  como nas telas; `pendurar: true` deixa o pedido sem resposta, e o botao fica em "Entrando…"
 //   espera   seletor do estado ja' na tela
-import { LOGIN_NO_LIMITE, LOGIN_RECUSADO } from "./simulados.mjs";
 
 const ENTRAR = /^\/api\/auth\/login$/;
 export const ESTADOS_DO_LOGIN = [

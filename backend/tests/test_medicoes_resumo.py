@@ -541,11 +541,13 @@ def test_quadro_mostra_setor_e_dias_uteis_no_passo_em_que_o_processo_corre(conn,
     pid_g = _processo_siga(c, "ANA001", medicao_id=g1, setor="SUPE", entrada="2026-10-28 10:00:00")
     b = _siga(_linha(c, "Obra B"))
     assert b[6] == {"processo_id": pid, "setor": "COFIN", "dias_uteis": 8, "desde": "2026-10-20T09:00:00-04:00",
-                    "hoje": 0}
+                    "hoje": 0, "dias_sem_movimentacao": 8, "ultima_em": "2026-10-20T09:00:00-04:00",
+                    "situacao_tempo": "breve"}
     assert all(v is None for n, v in b.items() if n != 6)
     gq = _siga(_linha(c, "Obra G"))
     assert gq[2] == {"processo_id": pid_g, "setor": "SUPE", "dias_uteis": 2, "desde": "2026-10-28T10:00:00-04:00",
-                     "hoje": 0}
+                     "hoje": 0, "dias_sem_movimentacao": 2, "ultima_em": "2026-10-28T10:00:00-04:00",
+                     "situacao_tempo": "andamento"}
     assert all(v is None for n, v in gq.items() if n != 2)
     # os mesmos setor, dias e entrada da tela SIGA
     from app import siga

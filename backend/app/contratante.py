@@ -10,7 +10,7 @@ pela mesma funcao e sem mudar nada nela:
   O subtotal e' o da pagina A receber filtrada por ele (`?contratante=<chave>`), ao centavo. Com o total a receber
   nao liberado, so' a trava, como la'.
 - Processos no SIGA: os processos vivos das obras do contratante, na leitura da tela SIGA (`siga.painel`), do mais
-  parado para o menos (`siga._mais_parado`, a ordem da tela). O encerrado continua so' na tela SIGA. Processo sem obra
+  parado para o menos (`siga._mais_parado`, a ordem da tela: dias sem movimentacao, #840). O encerrado continua so' na tela SIGA. Processo sem obra
   nao tem contratante e nao entra em aba nenhuma. Quem nao abre a tela SIGA (a diretoria) nao recebe esta aba: a rota
   exige a permissao da tela (`api_contratante.py`).
 
@@ -69,7 +69,8 @@ def em_aberto(conn, chave: str, hoje: datetime.date | None = None) -> dict:
 
 
 def _mais_parado(p: dict) -> tuple:
-    return siga._mais_parado({"dias_uteis": p["dias_uteis"], "desde": p["desde"], "processo_id": p["id"]})
+    return siga._mais_parado({"dias_sem_movimentacao": p["dias_sem_movimentacao"],
+                              "ultima_em": p["ultima"]["data"] if p["ultima"] else None, "processo_id": p["id"]})
 
 
 def processos_no_siga(conn, chave: str, agora: datetime.datetime | None = None) -> dict:

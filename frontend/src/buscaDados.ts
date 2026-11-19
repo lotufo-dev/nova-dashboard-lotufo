@@ -4,8 +4,10 @@ import { fmtCompetencia } from "./tempo";
 // O dado da busca unica do topo (#819): o contrato de GET /api/busca?q= e a resposta em secoes de opcoes, para a
 // peca (Busca.tsx) so' desenhar. O recorte do perfil e' do servidor: sem SIGA, `processos` nao vem.
 
-export type ObraAchada = { id: number; nome: string; instrumento: string | null; contratante: string; orgao_sub: string | null };
-export type MedicaoAchada = { id: number; contrato_id: number; titulo: string; competencia: string; obra: string; contratante: string };
+export type ObraAchada = { id: number; nome: string; contratante: string; orgao_sub: string | null };
+/** `estado`: so' o da medicao que nao anda ("prevista", "cancelada", "desistida"), que a linha escreve; nulo na viva. */
+export type MedicaoAchada = { id: number; contrato_id: number; titulo: string; competencia: string; obra: string; contratante: string;
+  estado?: "prevista" | "cancelada" | "desistida" | null };
 export type ProcessoAchado = { id: number; numero: string | null; assunto: string };
 type Grupo<T> = { itens: T[]; total: number };
 export type RespostaBusca = { obras: Grupo<ObraAchada>; medicoes: Grupo<MedicaoAchada>; processos?: Grupo<ProcessoAchado> };
@@ -39,7 +41,7 @@ export function secoesDe(r: RespostaBusca): Secao[] {
         para: { tela: "obra", id: o.id, aba: "ficha" } })) },
     { id: "medicoes", rotulo: "Medições", um: "medição", varios: "medições", total: r.medicoes.total,
       opcoes: r.medicoes.itens.map(m => ({ chave: `m${m.id}`, principal: juntar(m.titulo, m.obra),
-        detalhe: juntar(m.contratante, fmtCompetencia(m.competencia)), para: { tela: "medicao", obra: m.contrato_id, id: m.id } })) },
+        detalhe: juntar(m.contratante, fmtCompetencia(m.competencia), m.estado), para: { tela: "medicao", obra: m.contrato_id, id: m.id } })) },
   ];
   if (r.processos) {
     secoes.push({ id: "processos", rotulo: "Processos", um: "processo", varios: "processos", total: r.processos.total,

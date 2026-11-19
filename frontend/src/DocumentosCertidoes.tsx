@@ -5,7 +5,6 @@ import type { ItemLegenda } from "./LegendaCor";
 import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import { certidoesVencendo, chipCertidao, empresasComCertidaoExigida, type EmpresaDoc, type RenovarDoc } from "./matriz";
-import { substituir, type Busca } from "./rota";
 import { fmtDataPura } from "./tempo";
 import { Chip, MolduraDocumentos, type AnexarRef } from "./documentosComum";
 import { NOME_CHIP, PAPEL, usePainel } from "./documentosDados";
@@ -180,16 +179,12 @@ const LEGENDA: ItemLegenda[] = [
   { situacao: "feito", texto: "em dia" }, { situacao: "breve", texto: "vence antes do próximo protocolo" }, { situacao: "critico", texto: "vencida" },
 ];
 
-export default function DocumentosCertidoes({ usuario, busca = {} }: { usuario: Usuario; busca?: Busca }) {
+export default function DocumentosCertidoes({ usuario }: { usuario: Usuario }) {
   const podeEditar = usuario.perfil !== "diretoria";
   const { painel, erro, carregar } = usePainel();
   const [zip, setZip] = useState<EmpresaDoc | null>(null);
   const anexar = useRef<AnexarRef>(null);
-  // Link salvo da tela antiga (/documentos?empresa=N): abre a pagina da empresa, trocando o endereco no lugar.
-  const empresaAntiga = /^[1-9][0-9]{0,14}$/.test(busca.empresa ?? "") ? Number(busca.empresa) : null;
-  useEffect(() => {
-    if (empresaAntiga !== null) substituir({ tela: "documentos-empresa", id: empresaAntiga }, { semBusca: true });
-  }, [empresaAntiga]);
+  // O link salvo da tela antiga (/documentos?empresa=N) e' trocado pelo App (App.tsx), ao lado do ?aba=.
 
   const empresas = useMemo(() => painel?.empresas ?? [], [painel]);
   // #651: a matriz so' lista quem tem certidao exigida; o "Anexar PDF" segue com todas

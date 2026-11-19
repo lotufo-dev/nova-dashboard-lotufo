@@ -22,6 +22,7 @@ import Fechamento from "./Fechamento";
 import ResumoDasMedicoes from "./ResumoDasMedicoes";
 import { entradaDe, itemDe, ROTULO, tituloDe, vistaDe } from "./navegacao";
 import { useVistaPublicada } from "./nomesDoCaminho";
+import { pode } from "./permissoes";
 import SigaPagina from "./SigaPagina";
 import AncorasDocusign from "./AncorasDocusign";
 import AvisoRespostas from "./AvisoRespostas";
@@ -73,11 +74,13 @@ export default function App() {
   // canonico, com os filtros e a secao que vieram.
   useEffect(() => {
     if (!usuario) return;
+    // O SIGA (tela e aba do contratante) e' de quem tem `ver_siga`, a permissao que o servidor informa (#829)
     if (rota.tela === "raiz" || (rota.tela === "admin" && usuario.perfil !== "admin")
-      || ((rota.tela === "siga" || rota.tela === "ancoras-docusign") && usuario.perfil === "diretoria")) {
+      || (rota.tela === "siga" && !pode(usuario, "ver_siga"))
+      || (rota.tela === "ancoras-docusign" && usuario.perfil === "diretoria")) {
       substituir(entradaDe(usuario.perfil));
     } else if (rota.tela === "contratante" && rota.aba
-      && (!ABAS_PRONTAS.includes(rota.aba) || (rota.aba === "siga" && usuario.perfil === "diretoria"))) {
+      && (!ABAS_PRONTAS.includes(rota.aba) || (rota.aba === "siga" && !pode(usuario, "ver_siga")))) {
       // A aba do contratante que a pagina ainda nao desenha (ABAS_PRONTAS, abasDoContratante.ts) abre a pagina como ela e'
       // hoje. E a aba do SIGA segue a tela SIGA: quem nao a ve cai na pagina do contratante.
       substituir({ tela: "contratante", chave: rota.chave });
@@ -88,6 +91,10 @@ export default function App() {
       // Documentos tem tres enderecos (#814): o de antes, com a aba na busca ("/documentos?aba=garantias"), abre a pagina
       const { aba, ...resto } = busca;
       substituir(aba === "certidoes" ? { tela: "documentos" } : { tela: "documentos", pagina: aba }, { busca: resto });
+    } else if (rota.tela === "documentos" && /^[1-9][0-9]{0,14}$/.test(busca.empresa ?? "")) {
+      // O link salvo da tela antiga ("/documentos?empresa=3#emp-3") abre a pagina da empresa. Mora aqui, e nao na
+      // pagina Certidoes: o efeito da pagina roda antes deste e o App devolvia o endereco para /documentos.
+      substituir({ tela: "documentos-empresa", id: Number(busca.empresa) }, { semBusca: true });
     } else if (caminhoDe(rota) !== window.location.pathname) {
       substituir(rota);
     }
@@ -134,14 +141,15 @@ export default function App() {
         ev.preventDefault();
         document.getElementById("conteudo")?.focus();
       }}>Pular para o conteúdo</a>
-      <Trilho perfil={usuario.perfil} marcado={itemDe(rota, usuario.perfil)} ir={ir} />
+      <Trilho perfil={usuario.perfil} permissoes={usuario.permissoes} marcado={itemDe(rota, usuario.perfil)} ir={ir} />
 
       <div className="coluna">
         <BarraSuperior rota={rota} busca={busca} origem={origem} ehH1={!tituloProprio} usuario={usuario} ir={ir} />
         <main className="principal" id="conteudo" tabIndex={-1}>
           {rota.tela === "inicio" && <div className="pagina"><Inicio usuario={usuario} ir={ir} /></div>}
           {rota.tela === "medicoes" && <MedicoesPagina usuario={usuario} aba={rota.aba} busca={busca} />}
-          {rota.tela === "siga" && usuario.perfil !== "diretoria" && <SigaPagina busca={busca} podeEditar={usuario.perfil !== "diretoria"} />}
+          {/* a diretoria le o SIGA sem botao de escrita: o servidor nega a ela toda rota que grava (#829) */}
+          {rota.tela === "siga" && pode(usuario, "ver_siga") && <SigaPagina busca={busca} podeEditar={pode(usuario, "editar_cadastros")} />}
           {rota.tela === "ancoras-docusign" && usuario.perfil !== "diretoria" && <div className="pagina"><AncorasDocusign /></div>}
           {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}
           {rota.tela === "fechamento" && <div className="pagina"><Fechamento ir={ir} /></div>}
@@ -159,7 +167,8 @@ export default function App() {
           )}
           {/* a pagina do contratante (#805), entre a lista de Obras e a obra; `key` na chave: outro contratante remonta */}
           {rota.tela === "contratante" && (
-            <ContratantePagina key={rota.chave} chave={rota.chave} aba={rota.aba ?? "obras"} perfil={usuario.perfil} busca={busca} ir={ir} />
+            <ContratantePagina key={rota.chave} chave={rota.chave} aba={rota.aba ?? "obras"} perfil={usuario.perfil}
+              permissoes={usuario.permissoes} busca={busca} ir={ir} />
           )}
           {rota.tela === "medicao" && (
             // `key` na medicao: trocar de medicao (a da mesma competencia) remonta a pagina e os formularios dela.
@@ -167,7 +176,7 @@ export default function App() {
           )}
           {rota.tela === "nova-medicao" && <MedicaoNova key={rota.obra} contratoId={rota.obra} usuario={usuario} origem={origem} busca={busca} />}
           {/* as tres paginas de Documentos (#814, #820), cada uma no proprio endereco */}
-          {rota.tela === "documentos" && (rota.pagina ?? "certidoes") === "certidoes" && <DocumentosCertidoes usuario={usuario} busca={busca} />}
+          {rota.tela === "documentos" && (rota.pagina ?? "certidoes") === "certidoes" && <DocumentosCertidoes usuario={usuario} />}
           {rota.tela === "documentos" && rota.pagina === "regularidade" && <DocumentosRegularidade usuario={usuario} />}
           {rota.tela === "documentos" && rota.pagina === "garantias" && <DocumentosGarantias />}
           {rota.tela === "documentos-empresa" && (

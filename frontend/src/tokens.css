@@ -270,6 +270,7 @@
   --largura-medida: 75ch;                                                  /* medida do texto corrido (corpo do e-mail) */
   --largura-aviso-resposta: calc(var(--largura-menu) + var(--espaco-xxg) * 2);              /* aviso de resposta do orgao: 360px */
   --borda-tracejada: var(--borda-fina) dashed var(--cor-borda-controle);   /* area de soltar arquivo */
+  --altura-bloco-entrar: 288px;   /* login: o bloco do formulario sem a caixa de recusa, para o formulario nao subir quando ela aparece */
 
   /* familias de valor (#805; Variacao.tsx, Diferenca.tsx, Andamento.tsx, MarcaEtapa.tsx). Nenhuma cor nova: sao os
      tons das situacoes e os neutros, com o nome pelo papel que tem no valor. Valor nao e' situacao (a forma e'
@@ -695,8 +696,9 @@ td, th { font-variant-numeric: tabular-nums; }
   border-bottom: var(--borda-linha);
 }
 /* CAMINHO (Caminho.tsx, #814): "Obras › SINFRA › MT-388 › Medições › 15ª Medição". Os trechos de antes sao links
-   sublinhados, na cor do texto de apoio; o trecho da pagina (ou do objeto) e' o titulo da barra, com a letra do texto
-   (nao a condensada dos titulos de bloco), seja ele o h1 da pagina ou so' texto.
+   sublinhados, na cor do texto de apoio; o trecho da pagina e' o titulo da barra (o h1 da pagina), com a letra do texto
+   (nao a condensada dos titulos de bloco). Na pagina que tem o proprio h1 (a obra, a medicao, o Inicio) o trecho final
+   fica na letra dos outros trechos (decisao do dono de 19/11/2026).
    O caminho corre como texto: o que nao cabe numa linha desce para a de baixo e a barra cresce; nada e' cortado. Cada
    nome anda inteiro (so' o nome mais largo que a barra quebra por dentro), e o sinal "›" fica preso ao trecho de
    antes: a linha quebra depois dele. */

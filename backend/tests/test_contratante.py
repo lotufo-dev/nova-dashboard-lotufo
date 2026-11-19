@@ -1,6 +1,6 @@
 """Abas da pagina do contratante (issue #818): Medicoes, A receber e Processos no SIGA, cada uma o recorte, pelas obras
 do contratante, de uma resposta que outra tela ja' mostra. Nenhuma conta nova: as linhas sao as mesmas, o subtotal a
-receber e' o da pagina A receber filtrada, ao centavo, e a diretoria nao recebe a aba do SIGA. Obras, orgaos, processos
+receber e' o da pagina A receber filtrada, ao centavo, e a aba do SIGA e' de quem tem `ver_siga`. Obras, orgaos, processos
 e valores ficticios (os cenarios de test_fila_medicoes e test_fechamento)."""
 import datetime
 import json
@@ -8,7 +8,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app import a_receber, auth, contratante, fila_medicoes, siga, tempo
+from app import a_receber, auth, contratante, fila_medicoes, permissoes, siga, tempo
 from app.main import create_app
 from tests.test_fechamento import _lancar_dois_anos, contratantes  # noqa: F401  (a fixture `contratantes` vem de la')
 from tests.test_fila_medicoes import HOJE, MES, cenario, conn  # noqa: F401  (as fixtures `conn` e `cenario` vem de la')
@@ -214,19 +214,22 @@ def test_siga_os_processos_vivos_do_contratante_do_mais_parado_para_o_menos(proc
     assert p["sem_obra"] not in todos and p["encerrado"] not in todos
 
 
-def test_rota_do_siga_nega_a_diretoria_e_as_outras_abas_nao(processos, monkeypatch):
-    """A diretoria nao ve a tela SIGA: a aba nao aparece e o servidor nao manda o dado dela (403, sem processo no
-    corpo). Medicoes e A receber continuam abertas a ela; engenharia e administracao recebem os processos."""
+def test_rota_do_siga_e_de_quem_tem_ver_siga(processos, monkeypatch):
+    """Issue #829 (decisao do dono de 19/11/2026): a aba Processos no SIGA e' de quem tem `ver_siga`, os tres perfis (a
+    diretoria so' para ler). O perfil sem a permissao (simulado tirando-a da diretoria) recebe 403, sem processo no
+    corpo, e continua com Medicoes e A receber."""
     c, ids, p = processos
     _perfis(c)
     with _cliente(monkeypatch) as cliente:
         assert cliente.get("/api/contratantes/sinfra/siga").status_code == 401
         _entrar(cliente, "diretoria@exemplo.com.br")
-        negado = cliente.get("/api/contratantes/sinfra/siga")
-        assert negado.status_code == 403 and "processos" not in negado.json() and "ORGAO-PRO" not in negado.text
-        assert cliente.get("/api/contratantes/sinfra/medicoes").status_code == 200
-        assert cliente.get("/api/contratantes/sinfra/a-receber").status_code == 200
-        for email in ("engenharia@exemplo.com.br", "adm@exemplo.com.br"):
+        with monkeypatch.context() as m:
+            m.setitem(permissoes.PERFIS, "diretoria", permissoes.PERFIS["diretoria"] - {permissoes.VER_SIGA})
+            negado = cliente.get("/api/contratantes/sinfra/siga")
+            assert negado.status_code == 403 and "processos" not in negado.json() and "ORGAO-PRO" not in negado.text
+            assert cliente.get("/api/contratantes/sinfra/medicoes").status_code == 200
+            assert cliente.get("/api/contratantes/sinfra/a-receber").status_code == 200
+        for email in ("diretoria@exemplo.com.br", "engenharia@exemplo.com.br", "adm@exemplo.com.br"):
             _entrar(cliente, email)
             r = cliente.get("/api/contratantes/sinfra/siga")
             assert r.status_code == 200, r.text

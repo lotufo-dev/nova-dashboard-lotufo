@@ -200,7 +200,7 @@ def test_processo_parado_ha_7_dias_uteis_e_atencao_com_a_obra_e_o_destino(cenari
     pid = _processo_siga(c, ids, "2026-10-19 10:00:00")            # 19, 20, 21, 22, 23, 26 e 27/10: 7 dias uteis
     [a] = _de_siga(c)
     assert a["nivel"] == "atencao" and a["publico"] == ["operacao"]
-    assert a["mensagem"] == "processo SINFRA-PRO-2026/00001 parado em COFIN há 7 dias úteis"
+    assert a["mensagem"] == "processo SINFRA-PRO-2026/00001 em COFIN sem movimentação há 7 dias úteis"
     assert (a["obra"], a["contrato_id"], a["medicao_id"]) == ("Obra A", ids["contrato"], c.execute(
         "SELECT medicao_id FROM siga_processos WHERE id=?", (pid,)).fetchone()[0])
     assert (a["dias"], a["data"], a["sentido"]) == (7, "2026-10-19", "desde")
@@ -226,9 +226,11 @@ def test_processo_parado_continua_com_movimentacao_no_setor_e_some_com_medicao_r
     assert len(_de_siga(c)) == 1
     c.execute("INSERT INTO siga_movimentacoes (processo_id, data, evento, at_lotacao) VALUES (?,?,?,?)",
               (pid, "2026-10-28 09:30:00", "Despacho", "COFIN/ORGAO")); c.commit()
-    # issue #650: o aviso conta da entrada no setor, como a tela; despacho no mesmo setor nao recomeca a conta
-    [a] = _de_siga(c)
-    assert (a["nivel"], a["dias"], a["data"]) == ("atencao", 7, "2026-10-19")
+    # #840: o aviso conta da ultima movimentacao, como a coluna "Dias sem movimentação": o despacho de hoje no mesmo
+    # setor tira o aviso, embora o processo continue no setor desde 19/10
+    assert _de_siga(c) == []
+    [a] = _de_siga(c, D(2026, 11, 5))                                  # 28, 29, 30/10, 3 e 4/11: 5 dias uteis
+    assert (a["nivel"], a["dias"], a["data"]) == ("atencao", 5, "2026-10-28")
     # saiu do setor: a conta recomeca na transferencia
     c.execute("INSERT INTO siga_movimentacoes (processo_id, data, evento, at_lotacao) VALUES (?,?,?,?)",
               (pid, "2026-10-28 10:00:00", "Transferência", "GABIN/ORGAO"))
@@ -237,7 +239,7 @@ def test_processo_parado_continua_com_movimentacao_no_setor_e_some_com_medicao_r
     assert _de_siga(c) == [] and _de_siga(c, D(2026, 11, 4)) == []    # 28, 29, 30/10 e 3/11: 4 dias uteis
     [a] = _de_siga(c, D(2026, 11, 5))
     assert (a["nivel"], a["dias"], a["data"]) == ("atencao", 5, "2026-10-28")
-    assert a["mensagem"] == "processo SINFRA-PRO-2026/00001 parado em GABIN há 5 dias úteis"
+    assert a["mensagem"] == "processo SINFRA-PRO-2026/00001 em GABIN sem movimentação há 5 dias úteis"
     c.execute("UPDATE medicoes SET estado='recebida' WHERE id=(SELECT medicao_id FROM siga_processos WHERE id=?)", (pid,))
     c.commit()
     assert _de_siga(c, D(2026, 11, 5)) == []

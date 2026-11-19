@@ -1,3 +1,4 @@
+import { pode } from "./permissoes";
 import type { AbaContratante, AbaDocumentos, AbaFechamento, Busca, PaginaDocumentos, Rota } from "./rota";
 
 // Menu, entrada e caminho por perfil. Funcoes puras: a casca (Casca.tsx, Caminho.tsx) so' desenha o que sai daqui.
@@ -21,7 +22,7 @@ export type IdArea = "painel" | "medicoes" | "obras" | "financeiro" | "prazos" |
 
 export const ROTULO: Record<ItemMenu, string> = {
   inicio: "Início", medicoes: "Medições", "resumo-medicoes": "Resumo das medições", obras: "Obras", fechamento: "Fechamento",
-  "a-receber": "A receber", avisos: "Avisos", siga: "SIGA", certidoes: "Certidões", regularidade: "Regularidade mensal",
+  "a-receber": "Em aberto", avisos: "Avisos", siga: "SIGA", certidoes: "Certidões", regularidade: "Regularidade mensal",
   garantias: "Garantias", "ancoras-docusign": "Âncoras DocuSign", admin: "Administração", conta: "Minha conta",
 };
 
@@ -45,14 +46,16 @@ export const AREAS: readonly Area[] = [
 // #749: o Resumo das medicoes (so' leitura: a etapa da medicao de cada obra na competencia) para todos os perfis; a
 // diretoria continua sem o item Medicoes, que e' a tela de quem opera.
 // O Inicio voltou (decisao do dono, 08/10/2026): e' a entrada de todos os perfis, no alto do menu.
+// O SIGA (#829, decisao do dono de 19/11/2026) nao e' recorte de perfil: e' a permissao `ver_siga` que o servidor
+// informa em /api/auth/eu (permissoes.ts), a mesma que decide a rota da tela, a busca e a aba do contratante.
 type Recorte = "inicio" | "medicoes" | "resumo-medicoes" | "obras" | "avisos" | "siga" | "documentos" | "fechamento" | "ancoras-docusign" | "admin";
 const DO_PERFIL: Record<Perfil, readonly Recorte[]> = {
-  engenharia: ["inicio", "medicoes", "resumo-medicoes", "avisos", "siga", "documentos", "obras", "fechamento", "ancoras-docusign"],
+  engenharia: ["inicio", "medicoes", "resumo-medicoes", "avisos", "documentos", "obras", "fechamento", "ancoras-docusign"],
   diretoria: ["inicio", "resumo-medicoes", "avisos", "documentos", "obras", "fechamento"],
-  admin: ["inicio", "medicoes", "resumo-medicoes", "avisos", "siga", "documentos", "obras", "fechamento", "ancoras-docusign", "admin"],
+  admin: ["inicio", "medicoes", "resumo-medicoes", "avisos", "documentos", "obras", "fechamento", "ancoras-docusign", "admin"],
 };
 // De que recorte cada pagina depende. As paginas que nasceram com as areas herdam o de uma tela que o perfil ja' via:
-// A receber e' de quem ve o Fechamento (o em aberto nota a nota morava no fim dele); Certidoes, Regularidade mensal e
+// Em aberto (ate' 19/11/2026, "A receber") e' de quem ve o Fechamento (o em aberto nota a nota morava no fim dele); Certidoes, Regularidade mensal e
 // Garantias eram as tres abas de Documentos; a Minha conta sempre foi de todos (pelo avatar do topo).
 const RECORTE_DA_PAGINA: Record<ItemMenu, Recorte | null> = {
   inicio: "inicio", medicoes: "medicoes", "resumo-medicoes": "resumo-medicoes", obras: "obras", fechamento: "fechamento",
@@ -69,20 +72,21 @@ export function entradaDe(_perfil: string): Rota {
   return { tela: "inicio" };
 }
 
-/** O perfil tem a pagina no menu? */
-export function temPagina(perfil: string, i: ItemMenu): boolean {
+/** O perfil tem a pagina no menu? `permissoes`: as que o servidor informou (o SIGA e' de quem tem `ver_siga`). */
+export function temPagina(perfil: string, i: ItemMenu, permissoes: readonly string[] = []): boolean {
   const recorte = RECORTE_DA_PAGINA[i];
+  if (recorte === "siga") return pode({ permissoes }, "ver_siga");
   return recorte === null || DO_PERFIL[perfilDe(perfil)].includes(recorte);
 }
 
 /** O menu do perfil: as areas, na ordem, cada uma com as paginas que o perfil ve. Area sem pagina nao aparece. */
-export function menuDe(perfil: string): Area[] {
-  return AREAS.map(a => ({ ...a, paginas: a.paginas.filter(i => temPagina(perfil, i)) })).filter(a => a.paginas.length > 0);
+export function menuDe(perfil: string, permissoes: readonly string[] = []): Area[] {
+  return AREAS.map(a => ({ ...a, paginas: a.paginas.filter(i => temPagina(perfil, i, permissoes)) })).filter(a => a.paginas.length > 0);
 }
 
 /** As paginas do menu do perfil, em fila, na ordem do menu. */
-export function paginasDe(perfil: string): ItemMenu[] {
-  return menuDe(perfil).flatMap(a => a.paginas);
+export function paginasDe(perfil: string, permissoes: readonly string[] = []): ItemMenu[] {
+  return menuDe(perfil, permissoes).flatMap(a => a.paginas);
 }
 
 /** A area que so' tem uma pagina, com o mesmo nome dela (Obras): no menu e no caminho aparece uma vez so'. */
@@ -164,7 +168,7 @@ const VISTAS_DE_MEDICOES: Record<string, string> = { quadro: "Quadro do mês", a
 const VISTAS_DE_OBRAS: Record<string, string> = { todas: "Todas as obras", andamento: "Andamento", qdop: "QDOP" };
 const ABAS_DA_OBRA: Record<string, string> = { medicoes: "Medições", prazos: "Prazos", reajuste: "Reajuste", documentos: "Documentos", contrato: "Contrato" };
 const ABAS_DO_CONTRATANTE: Record<Exclude<AbaContratante, "obras">, string> = {
-  medicoes: "Medições", "a-receber": "A receber", siga: "Processos no SIGA", avisos: "Avisos",
+  medicoes: "Medições", "a-receber": "Em aberto", siga: "Processos no SIGA", avisos: "Avisos",
 };
 const ABAS_DA_ADMINISTRACAO: Record<string, string> = {
   reconciliacao: "Reconciliação", usuarios: "Usuários", auditoria: "Auditoria", pendencias: "Pendências de cadastro",
@@ -195,8 +199,8 @@ export function vistaDe(r: Rota, nomes: NomesDoCaminho = {}): string | undefined
  *  - A medicao fica dentro da obra, que fica dentro do contratante: "Obras › SINFRA › MT-388 › Medições › 15ª Medição".
  *  - `busca` so' serve ao historico do SIGA: o processo aberto vai na busca (?processo=7), e o trecho "SIGA" volta
  *    para a categoria de onde se veio. */
-export function trechosDe(r: Rota, opcoes: { perfil?: string; nomes?: NomesDoCaminho; busca?: Busca } = {}): Trecho[] {
-  const { perfil = "admin", nomes = {}, busca = {} } = opcoes;
+export function trechosDe(r: Rota, opcoes: { perfil?: string; permissoes?: readonly string[]; nomes?: NomesDoCaminho; busca?: Busca } = {}): Trecho[] {
+  const { perfil = "admin", permissoes = [], nomes = {}, busca = {} } = opcoes;
   if (r.tela === "raiz") return [];
   const vista = vistaDe(r, nomes);
   const fim: Trecho[] = vista ? [{ rotulo: vista, para: r }] : [];
@@ -220,13 +224,22 @@ export function trechosDe(r: Rota, opcoes: { perfil?: string; nomes?: NomesDoCam
   }
 
   // as outras: a area, a pagina do menu e o que houver abaixo dela
-  const item = itemDe(r) as ItemMenu;
-  const area = AREAS.find(a => a.paginas.includes(item))!;
+  const item = itemDe(r);
+  const area = item === null ? undefined : AREAS.find(a => a.paginas.includes(item));
+  // Reserva: a tela que entrar no tipo `Rota` sem pagina no menu (sem area) sai so' com o proprio nome, em vez de
+  // derrubar a barra do topo, que esta' em toda pagina.
+  if (item === null || area === undefined) return [{ rotulo: tituloDe(r.tela) || "grupolotufo", titulo: true }];
   const pagina: Trecho = { rotulo: ROTULO[item], para: rotaDoItem(item) };
   const inicio: Trecho[] = [];
   if (area.rotulo !== ROTULO[item]) {
-    const primeira = area.paginas.find(i => temPagina(perfil, i));
-    inicio.push({ rotulo: area.rotulo, para: primeira ? rotaDoItem(primeira) : undefined, area: true });
+    // A area leva a' primeira pagina dela no menu do perfil. Quando essa pagina e' a propria (Financeiro no
+    // Fechamento; para a diretoria, Medicoes no Resumo das medicoes e Sistema na Minha conta), o trecho e' so' texto:
+    // o link levaria para onde ja' se esta', ou para onde o trecho da pagina, logo depois, ja' leva. A excecao e' o
+    // historico do SIGA com filtro: ali o trecho "SIGA" volta para a categoria, e a area leva ao SIGA inteiro.
+    const primeira = area.paginas.find(i => temPagina(perfil, i, permissoes));
+    const filtroDoHistorico = r.tela === "siga" && /^\d+$/.test(busca.processo ?? "") && Object.keys(busca).some(k => k !== "processo");
+    const leva = primeira && (primeira !== item || filtroDoHistorico) ? rotaDoItem(primeira) : undefined;
+    inicio.push({ rotulo: area.rotulo, para: leva, area: true });
   }
   if (r.tela === "notas-envio") return [...inicio, pagina, { rotulo: tituloDe("notas-envio"), para: r, titulo: true }];
   if (r.tela === "documentos-empresa") return [...inicio, pagina, { rotulo: nomes.empresa ?? "Empresa", para: r, titulo: true }];

@@ -10,6 +10,7 @@ from tests.test_fechamento import (CONSORCIO, EMPRESA, PAGO, SEM_ENVIO_DA_NOTA, 
 
 HOJE = datetime.date(2026, 11, 18)
 SO_DO_FECHAMENTO = ("parada", "orgao_pagou_em")          # o que a linha leva alem da linha do em aberto do Fechamento
+SO_DA_NOTA_SOLTA = "ligada_a_medicao_nao_enviada"         # a marca que a nota sem medicao leva alem da do Fechamento
 
 
 def _linhas(r):
@@ -48,7 +49,8 @@ def _confere_com_o_fechamento(r, f):
     assert r["anteriores"] == f["em_aberto_anteriores"]
     assert r["anteriores"]["quantidade"] == sum(g["anteriores"]["quantidade"] for g in r["contratantes"])
     assert r["notas_sem_medicao_centavos"] == f["notas_sem_medicao"]["em_aberto_centavos"]
-    assert r["notas_sem_medicao"] == f["notas_sem_medicao"]["em_aberto"]
+    assert [{k: v for k, v in n.items() if k != SO_DA_NOTA_SOLTA} for n in r["notas_sem_medicao"]] == f["notas_sem_medicao"]["em_aberto"]
+    assert all(isinstance(n[SO_DA_NOTA_SOLTA], bool) for n in r["notas_sem_medicao"])
     assert sorted(n["nota_id"] for g in r["contratantes"] for n in g["notas_sem_medicao"]) == sorted(
         n["nota_id"] for n in f["notas_sem_medicao"]["em_aberto"])
     # o maior em aberto primeiro, empate pelo nome; cada contratante uma vez
@@ -204,6 +206,47 @@ def test_nota_sem_medicao_e_anterior_a_2025_ficam_a_parte_no_contratante_da_obra
     assert g["notas_sem_medicao_centavos"] == r["notas_sem_medicao_centavos"] == 700_002
     assert g["anteriores"] == r["anteriores"] == {"quantidade": 1, "valor_centavos": 50_000}
     assert r["em_aberto_centavos"] == 250_001                  # nem a nota solta nem o anterior entram
+
+
+def test_nota_ligada_a_medicao_ainda_nao_enviada_ganha_a_marca_e_o_total_nao_muda(cenario):
+    """Decisao do dono de 19/11/2026: a nota sem medicao que esta' ligada a medicao prevista (ou com a planilha/carta so'
+    gerada) leva a marca "ligada a medicao ainda nao enviada". So' a marca: a lista, o subtotal a' parte, o total e os
+    numeros do Fechamento sao os mesmos de antes do vinculo."""
+    c, ids = cenario
+    prevista = medir(c, ids["propria"], 5, "2026-09", "prevista", 0)
+    gerada = medir(c, ids["propria"], 6, "2026-10", "planilha_gerada", 0)
+    cancelada = medir(c, ids["propria"], 7, "2026-08", "cancelada", 0)
+    p = nota(c, 210_001, centro="9.001.001", emissao="2026-09-15")
+    g_ = nota(c, 320_003, centro="9.001.001", emissao="2026-10-15")
+    x = nota(c, 130_005, centro="9.001.001", emissao="2026-08-15")
+    solta = nota(c, 40_007, centro="9.001.001", emissao="2026-07-15")
+    mid = medir(c, ids["propria"], 4, "2026-05", "protocolada", 250_001, aprovado=250_001, protocolo="2026-06-01")
+    nota(c, 250_001, [mid])
+    antes = a_receber.a_receber(c, HOJE)
+    f_antes = fechamento.fechamento(c, HOJE)
+    assert all(not n[SO_DA_NOTA_SOLTA] for n in antes["notas_sem_medicao"])
+    # o vinculo com as medicoes que ainda nao foram ao orgao (e com a cancelada, que nao conta)
+    for numero, m in ((p, prevista), (g_, gerada), (x, cancelada)):
+        nid = c.execute("SELECT id FROM notas_fiscais WHERE idmov=?", (int(numero),)).fetchone()[0]
+        c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra) "
+                  "VALUES (?, ?, 0, 'manual', 't')", (m, nid))
+    c.commit()
+    depois = a_receber.a_receber(c, HOJE)
+    _confere_com_o_fechamento(depois, fechamento.fechamento(c, HOJE))
+    marcas = {p: True, g_: True, x: False, solta: False}
+    assert {n["numero"]: n[SO_DA_NOTA_SOLTA] for n in depois["notas_sem_medicao"]} == marcas
+    [g] = depois["contratantes"]
+    assert {n["numero"]: n[SO_DA_NOTA_SOLTA] for n in g["notas_sem_medicao"]} == marcas
+    # o total, o subtotal a' parte e cada valor: os mesmos de antes do vinculo, aqui e no Fechamento
+    def sem_as_listas(r):
+        return {k: v for k, v in r.items() if k not in ("notas_sem_medicao", "contratantes")}
+    assert sem_as_listas(depois) == sem_as_listas(antes)
+    assert depois["em_aberto_centavos"] == antes["em_aberto_centavos"] == 250_001
+    assert depois["notas_sem_medicao_centavos"] == antes["notas_sem_medicao_centavos"] == 700_016
+    assert [(n["nota_id"], n["valor_centavos"]) for n in depois["notas_sem_medicao"]] == [
+        (n["nota_id"], n["valor_centavos"]) for n in antes["notas_sem_medicao"]]
+    assert (g["em_aberto_centavos"], g["notas_sem_medicao_centavos"]) == (250_001, 700_016)
+    assert fechamento.fechamento(c, HOJE) == f_antes
 
 
 def test_contratante_sem_nada_em_aberto_fica_na_fileira_e_o_de_contrato_encerrado_sai(contratantes):

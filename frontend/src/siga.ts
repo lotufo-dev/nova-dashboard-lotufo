@@ -1,7 +1,8 @@
 // Tela SIGA (issue #329): o que o servidor devolve em GET /api/siga e as contas da tela (ordem, tempo no setor,
 // nivel de atraso, textos da linha). Funcoes puras; o SigaPagina so' desenha o que sai daqui.
 
-import { situacaoDoNivel, type Situacao } from "./situacao";
+import type { Situacao } from "./situacao";
+import { fmtData, fmtHora } from "./tempo";
 
 export type TipoMovimentacao = "transferencia" | "recebimento" | "juntada" | "marcacao" | "outras";
 
@@ -27,12 +28,15 @@ export type ProcessoSiga = {
   contrato_id: number | null; obra: string | null; medicao_id: number | null; medicao_titulo: string | null;
   // #805: o contratante da obra ("SINFRA", "SUEF II"); processo sem obra nao tem
   contratante: string | null; orgao_sub: string | null;
-  // #805: a leitura do tempo no setor, do servidor (a regua do tempo parado); nula no encerrado e sem data de entrada
+  // #805/#840: a leitura de "parado" do servidor (`siga.parado`: a regua do tempo parado sobre os dias sem
+  // movimentacao); nula no encerrado e sem movimentacao nenhuma
   situacao_tempo: Situacao | null;
   protocolo_id: number | null; situacao: string | null; setor: string; caixa_entrada: boolean; com_quem: string;
   // #657: medicao recebida ou processo arquivado; derivado pelo servidor a cada leitura. null = vivo
   encerrado: "recebida" | "arquivado" | null;
-  desde: string | null; dias_uteis: number | null; hoje: number; ultima: Movimentacao | null;
+  // desde/dias_uteis: a entrada no setor e o tempo nele (so' informacao). #840: dias_sem_movimentacao conta da `ultima`
+  // (fora Marcacao e Anotacao), e `hoje` sao as movimentacoes de hoje fora Marcacao e Anotacao
+  desde: string | null; dias_uteis: number | null; dias_sem_movimentacao: number | null; hoje: number; ultima: Movimentacao | null;
   protocolado_em: string | null; movimentacoes: Movimentacao[];
 };
 
@@ -70,20 +74,11 @@ export function situacaoDoBotao(robo: Robo, processoId: number | null): "lendo" 
   return null;
 }
 
-// Os mesmos limites dos avisos: ambar a partir de 5 dias uteis no mesmo setor, vermelho a partir de 10.
-export const DIAS_ATENCAO = 5;
-export const DIAS_ACAO = 10;
-
-export function nivelDias(dias: number | null): "atencao" | "acao" | null {
-  if (dias === null) return null;
-  return dias >= DIAS_ACAO ? "acao" : dias >= DIAS_ATENCAO ? "atencao" : null;
-}
-
-/** O atraso do processo no setor como situacao: andou hoje = feito; parado ha' 10 dias uteis ou mais = critico; ha' 5
- *  ou mais = breve (o nivel de `nivelDias`, pelo mapa unico de `situacao.ts`). Dentro do prazo, nenhuma: e' o que o
- *  quadro de Medicoes mostra, onde so' o atraso leva marca. */
-export function situacaoDoAtraso(p: Pick<ProcessoSiga, "dias_uteis" | "hoje">): Situacao | undefined {
-  return p.hoje > 0 ? "feito" : situacaoDoNivel(nivelDias(p.dias_uteis));
+/** O atraso do processo como o quadro de Medicoes o marca, a partir da leitura do SERVIDOR (#840: dias sem
+ *  movimentacao): andou hoje = feito; breve e critico ficam; dentro do prazo ("andamento"), nenhuma, porque ali so' o
+ *  atraso leva marca. */
+export function situacaoDoAtraso(p: { situacao_tempo: Situacao | null }): Situacao | undefined {
+  return p.situacao_tempo === "andamento" || p.situacao_tempo === null ? undefined : p.situacao_tempo;
 }
 
 const instante = (iso: string | null, vazio: number): number => {
@@ -91,11 +86,12 @@ const instante = (iso: string | null, vazio: number): number => {
   return Number.isNaN(t) ? vazio : t;
 };
 
-/** Do mais parado ao menos (dias uteis no setor, empate pelo mais antigo no setor); sem data de entrada vai para o fim. */
+/** Do mais parado ao menos, na ordem do servidor (`siga._mais_parado`, #840): mais dias sem movimentacao, empate
+ *  pela ultima movimentacao mais antiga; sem movimentacao nenhuma vai para o fim. */
 export function ordenar(processos: ProcessoSiga[]): ProcessoSiga[] {
   return [...processos].sort((a, b) => {
-    return (b.dias_uteis ?? -1) - (a.dias_uteis ?? -1)
-      || instante(a.desde, Infinity) - instante(b.desde, Infinity) || a.id - b.id;
+    return (b.dias_sem_movimentacao ?? -1) - (a.dias_sem_movimentacao ?? -1)
+      || instante(a.ultima?.data ?? null, Infinity) - instante(b.ultima?.data ?? null, Infinity) || a.id - b.id;
   });
 }
 
@@ -132,6 +128,23 @@ export function tempoNoSetor(p: Pick<ProcessoSiga, "desde" | "dias_uteis">, agor
   if (minutos < 60) return `${minutos} min`;
   if (minutos < 24 * 60) return `${Math.floor(minutos / 60)} h`;
   return "menos de 1 dia útil";
+}
+
+/** "Dias sem movimentação" (#840): "andou hoje", "N dias úteis" ou, com a ultima movimentacao num fim de semana ou
+ *  feriado depois do ultimo dia util, "menos de 1 dia útil". Sem movimentacao, "—". O numero vem do servidor. */
+export function textoSemMovimentacao(p: Pick<ProcessoSiga, "dias_sem_movimentacao" | "hoje">): string {
+  if (p.hoje > 0) return "andou hoje";
+  const dias = p.dias_sem_movimentacao;
+  if (dias === null) return "—";
+  if (dias === 0) return "menos de 1 dia útil";
+  return dias === 1 ? "1 dia útil" : `${dias} dias úteis`;
+}
+
+/** A data e a hora da movimentacao (#840): "dd/mm hh:mm", com o ano quando nao e' o de hoje ("dd/mm/aaaa hh:mm"). */
+export function dataHoraCurta(iso: string, agora: Date): string {
+  const [dia, hora] = [fmtData(iso), fmtHora(iso)];
+  const ano = fmtData(agora.toISOString()).slice(6);
+  return `${dia.slice(6) === ano ? dia.slice(0, 5) : dia} ${hora}`;
 }
 
 /** "(2º Volume)" quando o processo ja' esta' num volume depois do primeiro; o ultimo volume e' o da situacao. */
