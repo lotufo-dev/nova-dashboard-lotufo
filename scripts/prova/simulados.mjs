@@ -647,7 +647,7 @@ export const fichaComNecessario = noRitmo => ficha => {
 // corte dele (70% e 100%, por piso) ou, com `fora`, o motivo de a obra ficar fora da regua. A tela so' escreve o que
 // vem aqui. `FORA_DA_REGUA`: as obras que a carteira simulada nao tinha, uma de cada motivo (prazo no fim, com e sem
 // pedido de prorrogacao; prorrogacao pedida com prazo pela frente; sem medicao ha' tres competencias), com o aviso de
-// prazo que elas teriam. `fichaForaDaRegua`: a pagina da obra nesses estados (o selo da conclusao se cala junto).
+// prazo que elas teriam. `fichaForaDaRegua`: a pagina da obra nesses estados (o selo da conclusao continua, 19/11).
 const SEM_LEITURA = { situacao: null, pct: null, motivo: null, prorrogacao_pedida: false, sem_medicao_desde: null,
   atencao_desde_pct: 70, adiantada_desde_pct: 100 };
 const leituraSimulada = (ritmo, necessario, fora) => {
@@ -657,20 +657,22 @@ const leituraSimulada = (ritmo, necessario, fora) => {
 };
 const FORA_DA_REGUA = () => [
   daCarteira(9011, "Viaduto Lambda", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", vigente: 64_000_000, medido: 55_040_000,
-    ritmo: 1_900_000, necessario: 8_960_000, mes: 2_100_000, antes: 1_700_000, dias: 12, fora: { motivo: "prazo_no_fim", prorrogacao_pedida: true } }),
+    ritmo: 1_900_000, necessario: 8_960_000, mes: 2_100_000, antes: 1_700_000, dias: 12,
+    fora: { motivo: "prazo_no_fim", prorrogacao_pedida: true, execucao_fim: dataEm(hojeDaProva(), 12) } }),
   daCarteira(9012, "Maternidade Mi", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 240_000_000, medido: 5_040_000,
     ritmo: 840_000, necessario: 16_780_000, mes: 900_000, antes: 880_000, dias: 395, fora: { motivo: "prorrogacao_pedida", prorrogacao_pedida: true } }),
   daCarteira(9013, "Complexo Ni", "MTPAR", "mtpar", { vigente: 52_000_000, medido: 47_476_000, ritmo: 750_000, necessario: 1_131_000,
     dias: 110, fora: { motivo: "sem_medicao", sem_medicao_desde: competenciaHa(5) } }),
   daCarteira(9014, "Praça Xi", "Pref. Cuiabá", "pref-cuiaba", { vigente: 9_500_000, medido: 6_650_000, ritmo: 410_000, necessario: 1_425_000,
-    mes: 380_000, antes: 400_000, dias: 43, fora: { motivo: "prazo_no_fim" } }),
+    mes: 380_000, antes: 400_000, dias: 43, fora: { motivo: "prazo_no_fim", execucao_fim: dataEm(hojeDaProva(), 43) } }),
 ];
 // a carteira que as telas recebem: a de sempre e as obras fora da regua
 const CARTEIRA_INTEIRA = () => [...CARTEIRA(), ...FORA_DA_REGUA()];
 Object.assign(MOTIVOS, {
   9011: ["vermelho", [["critico", "execução termina em 12 dias"], ["atencao", "prorrogação pedida há 14 dias"]]],
   9012: ["atencao", [["atencao", "prorrogação pedida há 218 dias"]]],
-  9014: ["acao", [["acao", "execução termina em 43 dias"]]],
+  // 9014 (prazo no fim) fica verde: o aviso de execucao terminando e' so' da operacao, e o farol e' o da diretoria.
+  // A Situacao dela diz "Prazo no fim · execução até dd/mm" no lugar de "Em dia" (decisao do dono de 19/11/2026)
 });
 // a pagina da obra fora da regua. `noFim`: a execucao termina no ultimo dia do mes que vem (duas competencias, a de
 // hoje e a seguinte); senao, daqui a 4 meses (cinco), como em `fichaComNecessario`
@@ -687,7 +689,9 @@ export const fichaForaDaRegua = (fora, noFim = false) => ficha => {
   return { ...ficha,
     vencimentos: ficha.vencimentos.map(v => (v.chave === "execucao" ? { ...v, data: dataEm(fim), dias, nivel: nivelDosDias(dias) } : v)),
     ritmo: { ritmo_centavos: Math.round(necessario / 4), necessario_centavos: necessario, competencias_restantes: competencias,
-      conclusao: dataEm(fim, 190), situacao: null, dias_alem: null, leitura: leituraSimulada(null, null, fora) } };
+      // o selo da conclusao continua fora da regua (decisao do dono de 19/11/2026)
+      conclusao: dataEm(fim, 190), situacao: "atrasa", dias_alem: 190,
+      leitura: leituraSimulada(null, null, fora?.motivo === "prazo_no_fim" ? { ...fora, execucao_fim: dataEm(fim) } : fora) } };
 };
 export const semAvisoDePrazo = inicio => ({
   ...inicio, avisos: inicio.avisos.filter(a => !["instrumento_pendente", "execucao_vencendo"].includes(a.tipo)) });

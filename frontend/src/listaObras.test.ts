@@ -187,8 +187,10 @@ describe("Obras por contratante: andamento, medido do mês e o que pede atençã
     expect(fora.map(andamentoDaObra)).toEqual([null, null, null]);
     const r = resumoDe([...obras, ...fora]);
     expect([r.obras, r.comAndamento, r.devagar, r.atencao]).toEqual([9, 3, 1, 1]);
-    // a do prazo no fim é contada à parte; a da prorrogação pedida e a sem medição, não
-    expect([r.prazoNoFim, resumoDe(obras).prazoNoFim]).toEqual([1, 0]);
+    // decisão do dono de 19/11/2026: a faixa conta à parte toda obra com prazo a cumprir e sem leitura (as três fora
+    // da régua e a Anel, que ainda não mediu), e as duas contagens somam as linhas da vista Andamento
+    expect([r.semLeitura, resumoDe(obras).semLeitura]).toEqual([4, 1]);
+    expect(r.comAndamento + r.semLeitura).toBe(porAndamento([...obras, ...fora]).length);
   });
 
   it("paralisada e execução vencida: a vencida só conta na obra ativa, fora do encerramento e sem paralisação", () => {

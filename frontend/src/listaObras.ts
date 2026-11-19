@@ -281,19 +281,21 @@ export function participacao(parte: number, carteira: number): string | null {
 export type ResumoObras = {
   obras: number; totais: TotaisObras; medidoMes: MedidoMes | null;
   comAndamento: number; devagar: number; atencao: number;
-  /** #822: as obras que o servidor tirou da regua pelo prazo no fim (com ou sem pedido de prorrogacao): a faixa de
-   *  numeros as conta ao lado do "N de M", para o "de M" pequeno nao parecer a carteira inteira. */
-  prazoNoFim: number;
+  /** As obras com prazo a cumprir (o servidor mandou o necessario) e sem leitura: fora da regua (prazo no fim,
+   *  prorrogacao pedida, sem medicao) ou que ainda nao mediu execucao. A faixa de numeros as conta ao lado do
+   *  "N de M", e as duas contagens somam as linhas da vista Andamento (#822; decisao do dono de 19/11/2026: a faixa
+   *  contava so' o prazo no fim e nao explicava a tabela). */
+  semLeitura: number;
   paralisadas: number; execucaoVencida: number; avisosCriticos: number;
 };
 
 export function resumoDe(obras: ObraLista[], criticos?: ReadonlyMap<number, number>): ResumoObras {
   const r: ResumoObras = { obras: obras.length, totais: totaisDe(obras), medidoMes: medidoDoMes(obras),
-    comAndamento: 0, devagar: 0, atencao: 0, prazoNoFim: 0, paralisadas: 0, execucaoVencida: 0, avisosCriticos: 0 };
+    comAndamento: 0, devagar: 0, atencao: 0, semLeitura: 0, paralisadas: 0, execucaoVencida: 0, avisosCriticos: 0 };
   for (const o of obras) {
     const a = andamentoDaObra(o);
     if (a) { r.comAndamento += 1; if (a.leitura === "devagar") r.devagar += 1; else if (a.leitura === "atencao") r.atencao += 1; }
-    else if (o.andamento?.leitura?.motivo === "prazo_no_fim") r.prazoNoFim += 1;
+    else if ((o.andamento?.necessario_centavos ?? 0) > 0) r.semLeitura += 1;
     if (estaParalisada(o)) r.paralisadas += 1;
     if (execucaoVencida(o)) r.execucaoVencida += 1;
     r.avisosCriticos += criticos?.get(o.id) ?? 0;

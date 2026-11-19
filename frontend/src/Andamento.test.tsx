@@ -2,7 +2,7 @@ import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import Andamento from "./Andamento";
 import { SEM_LEITURA, leituraDeTeste } from "./andamentoTeste";
-import { andamento, foraDaRegua, temAndamento, type AndamentoDoServidor } from "./valores";
+import { andamento, foraDaRegua, prazoNoFimNaSituacao, temAndamento, type AndamentoDoServidor } from "./valores";
 
 // Valores inventados. A leitura é a que o servidor manda (`prazos.leitura_do_andamento`): a peça só a escreve.
 const lida = (situacao: AndamentoDoServidor["situacao"], pct: number): AndamentoDoServidor => ({ ...SEM_LEITURA, situacao, pct });
@@ -90,6 +90,21 @@ describe("Andamento (#805, #822)", () => {
       expect(render(<Andamento leitura={leitura} vazio="—" />).container.textContent).toBe("—");
       cleanup();
       expect([andamento(leitura), foraDaRegua(leitura), temAndamento(leitura)]).toEqual([null, null, false]);
+    }
+  });
+
+  it("Situação da obra com prazo no fim (19/11): a data do fim, com o ano só quando não é o de hoje", () => {
+    const fim = (execucao_fim: string | null, extra: Partial<AndamentoDoServidor> = {}) =>
+      prazoNoFimNaSituacao({ ...SEM_LEITURA, motivo: "prazo_no_fim", execucao_fim, ...extra }, "2026-11-19");
+    expect(fim("2026-12-20")).toBe("Prazo no fim · execução até 20/12");
+    expect(fim("2027-01-15")).toBe("Prazo no fim · execução até 15/01/2027");
+    expect(fim("2026-12-20", { prorrogacao_pedida: true })).toBe("Prazo no fim · execução até 20/12");
+    expect(fim(null)).toBe("Prazo no fim");
+    // fora do prazo no fim não há o que trocar: a Situação continua a do farol
+    for (const l of [null, undefined, SEM_LEITURA, lida("devagar", 40),
+      { ...SEM_LEITURA, motivo: "prorrogacao_pedida" as const, prorrogacao_pedida: true },
+      { ...SEM_LEITURA, motivo: "sem_medicao" as const, sem_medicao_desde: "2026-07" }]) {
+      expect(prazoNoFimNaSituacao(l, "2026-11-19")).toBeNull();
     }
   });
 

@@ -149,16 +149,22 @@ do rótulo, na etiqueta sob o valor ou na barra.
   leitura, a obra com até duas competências de prazo ("Prazo no fim"; com pedido enviado e sem resposta,
   "Prazo no fim · prorrogação pedida"), a que tem pedido de prorrogação sem resposta ("Prorrogação pedida") e a que
   fechou três competências sem medição de execução ("Sem medição desde 07/2026", o mês da última). O motivo vai em
-  tinta, sem barra e sem tom de valor: é a razão de não haver leitura, e o aviso de prazo já está nos Avisos. Na
-  página da obra, fora da régua, a conclusão estimada fica sem selo. Só quem tem leitura entra nas contagens por
-  leitura; na faixa de números, as obras com o prazo no fim vão contadas ao lado, em tinta ("N com prazo no fim")
-  (#822, decisão do dono de 18/11/2026).
+  tinta, sem barra e sem tom de valor: o motivo não é aviso, é a razão de não haver leitura. Na página da obra, fora
+  da régua, a conclusão estimada continua com o selo ("N dias depois do fim da execução"): "Prazo no fim" diz que a
+  régua não vale; o selo diz quando a obra termina no ritmo de hoje (decisão do dono de 19/11/2026). Só quem tem
+  leitura entra nas contagens por leitura; na faixa de números, as obras com prazo a cumprir e sem leitura (fora da
+  régua ou que ainda não mediram) vão contadas ao lado, em tinta ("N sem leitura"), e as duas contagens somam as
+  linhas da vista Andamento (#822, decisões do dono de 18 e 19/11/2026).
   A contagem de obras por leitura ("3 devagar", "2 em atenção") vai numa etiqueta do tom da leitura, sem glifo:
   é valor, não situação (#805).
   Na tabela que traz a coluna Andamento ao lado da Situação (a página do contratante), a obra devagar e sem aviso
   não diz "Em dia": a Situação leva a etiqueta "Devagar" e o motivo ("mede N% do necessário"), pela mesma leitura da
   coluna. Qualquer aviso do farol continua ganhando, e "Atenção" no andamento não tira o "Em dia" (decisão do dono
   de 18/11/2026). Motivo: "Devagar" numa coluna e "Em dia" na outra se contradiziam.
+  A obra sem aviso no farol e com o prazo no fim também não diz "Em dia": a Situação escreve "Prazo no fim ·
+  execução até 20/12" (com o ano quando não é o de hoje), em tinta, sem selo. O aviso de execução terminando é só
+  da operação; para a diretoria, é a Situação que diz o prazo no fim. Qualquer aviso do farol continua ganhando
+  (decisão do dono de 19/11/2026).
 - **Tempo parado:** os dias numa etapa ou num setor, com o selo da situação e os limites do SIGA (seção "Quando
   usar cada uma" das situações). Na medição, são os dias úteis desde o evento que abriu o passo da vez. No passo
   Pagamento a régua é o prazo do órgão (`docs/adr/0007`): crítico só depois da data esperada do recebimento; antes

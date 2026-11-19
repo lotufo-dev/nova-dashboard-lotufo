@@ -537,9 +537,9 @@ describe("Obras em níveis (#805): Por contratante, Todas as obras, Andamento e 
     // só a obra com leitura tem barra; o motivo vai em tinta, sem tom de valor
     expect(tabela.querySelectorAll(".andamento__trilho").length).toBe(1);
     expect(tabela.querySelectorAll(".andamento--fora").length).toBe(4);
-    // "1 de 1" é só quem tem leitura; as duas com o prazo no fim vão ao lado, em tinta (sem tom de valor)
+    // "1 de 1" é só quem tem leitura; as quatro sem leitura vão ao lado, em tinta, e as duas somam as linhas (19/11)
     const andamentoDaFaixa = [...screen.getByLabelText("Números da carteira").querySelectorAll(".obras-numero")].at(-1)!;
-    expect(limpo(andamentoDaFaixa.textContent)).toBe("Andamento1 de 1obra devagar2 com prazo no fim");
+    expect(limpo(andamentoDaFaixa.textContent)).toBe("Andamento1 de 1obra devagar4 sem leitura");
     expect(andamentoDaFaixa.querySelectorAll(".obras-etiqueta").length).toBe(1);
     cleanup();
     abrir("/obras/todas");
