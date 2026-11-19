@@ -88,6 +88,10 @@ export default function App() {
       // Documentos tem tres enderecos (#814): o de antes, com a aba na busca ("/documentos?aba=garantias"), abre a pagina
       const { aba, ...resto } = busca;
       substituir(aba === "certidoes" ? { tela: "documentos" } : { tela: "documentos", pagina: aba }, { busca: resto });
+    } else if (rota.tela === "documentos" && /^[1-9][0-9]{0,14}$/.test(busca.empresa ?? "")) {
+      // O link salvo da tela antiga ("/documentos?empresa=3#emp-3") abre a pagina da empresa. Mora aqui, e nao na
+      // pagina Certidoes: o efeito da pagina roda antes deste e o App devolvia o endereco para /documentos.
+      substituir({ tela: "documentos-empresa", id: Number(busca.empresa) }, { semBusca: true });
     } else if (caminhoDe(rota) !== window.location.pathname) {
       substituir(rota);
     }
@@ -167,7 +171,7 @@ export default function App() {
           )}
           {rota.tela === "nova-medicao" && <MedicaoNova key={rota.obra} contratoId={rota.obra} usuario={usuario} origem={origem} busca={busca} />}
           {/* as tres paginas de Documentos (#814, #820), cada uma no proprio endereco */}
-          {rota.tela === "documentos" && (rota.pagina ?? "certidoes") === "certidoes" && <DocumentosCertidoes usuario={usuario} busca={busca} />}
+          {rota.tela === "documentos" && (rota.pagina ?? "certidoes") === "certidoes" && <DocumentosCertidoes usuario={usuario} />}
           {rota.tela === "documentos" && rota.pagina === "regularidade" && <DocumentosRegularidade usuario={usuario} />}
           {rota.tela === "documentos" && rota.pagina === "garantias" && <DocumentosGarantias />}
           {rota.tela === "documentos-empresa" && (

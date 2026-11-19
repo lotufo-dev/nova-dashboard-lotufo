@@ -483,6 +483,22 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     expect(aceso()).toEqual(["Certidões"]);
   });
 
+  it("o link salvo da tela antiga /documentos?empresa=N abre a página da empresa (o App troca, ao lado do ?aba=)", async () => {
+    entrar("engenharia");
+    window.history.replaceState(null, "", "/documentos?empresa=3#emp-3");
+    render(<App />);
+    await waitFor(() => expect(endereco()).toBe("/documentos/3"));
+    expect(window.location.hash).toBe("");
+    await waitFor(() => expect(trechos()).toEqual(["Documentos", "Certidões", "Beta Ltda"]));
+    expect(aceso()).toEqual(["Certidões"]);
+    // número que não é de empresa: fica a página Certidões
+    cleanup();
+    window.history.replaceState(null, "", "/documentos?empresa=abc");
+    render(<App />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Certidões" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/documentos");
+  });
+
   it.each([
     ["/documentos?aba=regularidade", "/documentos/regularidade", "Regularidade mensal"],
     ["/documentos?aba=garantias", "/documentos/garantias", "Garantias"],

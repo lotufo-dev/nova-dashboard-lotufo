@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -284,13 +284,7 @@ test("competência pelo nome do arquivo do DP", () => {
   expect(competenciaDoNome("Documentos Lotufo.pdf")).toBe("");
 });
 
-test("link salvo da tela antiga (?empresa=N) abre a página da empresa, trocando o endereço", async () => {
-  window.history.replaceState(null, "", "/documentos?empresa=3#emp-3");
-  render(<DocumentosCertidoes usuario={usuario} busca={{ empresa: "3" }} />);
-  await waitFor(() => expect(window.location.pathname).toBe("/documentos/3"));
-  expect(window.location.search).toBe("");
-  expect(window.location.hash).toBe("");
-});
+// o link salvo da tela antiga (?empresa=N) e' trocado pelo App: o caso mora em App.test.tsx
 
 /* ---------------------------------------------------------------- Renovar agora (#658) */
 
