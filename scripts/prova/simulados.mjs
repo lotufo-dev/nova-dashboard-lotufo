@@ -919,12 +919,12 @@ export const aReceberComNotas = ({ vazio = false, trava = false } = {}) => reg =
     arGrupo("Pref. Várzea Grande", "pref-vg", null, [
       l("Escola Eta", "2026-09", null, 3_333_333_33, arParada("2026-10-14", 25, "andamento"), { emitida_em: "2026-10-14" }),
     ], { notas_sem_medicao: [{ nota_id: 9890, numero: "41990", contrato_id: reg.obra, obra: "Escola Eta", emissao: "2026-07-01",
-      valor_centavos: 1_777_777_77, paga_em_parte: false }], anteriores: { quantidade: 2, valor_centavos: 4_000_000_00 } }),
+      valor_centavos: 1_777_777_77, paga_em_parte: false, ligada_a_medicao_nao_enviada: false }], anteriores: { quantidade: 2, valor_centavos: 4_000_000_00 } }),
     arGrupo("Secretaria Municipal de Infraestrutura e Obras de Exemplo do Norte", null, null, [
       l("Requalificação urbana do corredor central, trecho do terminal ao distrito industrial, lote 3", "2026-06", "2026-07-08", 23_456_789_01,
         arParada("2026-07-08", 94, "andamento")),
     ], { notas_sem_medicao: [{ nota_id: 9891, numero: "41991", contrato_id: reg.obra, obra: "Requalificação urbana do corredor central",
-      emissao: null, valor_centavos: 890_000_00, paga_em_parte: true }] }),
+      emissao: null, valor_centavos: 890_000_00, paga_em_parte: true, ligada_a_medicao_nao_enviada: true }] }),
     arGrupo("SES-MT", "ses-mt", null),
   ];
   const lista = grupos.sort((a, b) => b.em_aberto_centavos - a.em_aberto_centavos || porNome(a.contratante, b.contratante));

@@ -214,7 +214,7 @@ describe("App: o menu lateral largo", () => {
     const links = within(nav).getAllByRole("link");
     // #814: as páginas na ordem das áreas (Painel, Medições, Obras, Financeiro, Prazos e avisos, Órgãos, Documentos, Sistema)
     expect(links.map(l => l.textContent)).toEqual(
-      ["Início", "Medições", "Resumo das medições", "Obras", "Fechamento", "A receber", "Avisos", "SIGA", "Certidões", "Regularidade mensal",
+      ["Início", "Medições", "Resumo das medições", "Obras", "Fechamento", "Em aberto", "Avisos", "SIGA", "Certidões", "Regularidade mensal",
         "Garantias", "Âncoras DocuSign", "Administração", "Minha conta"]);
     for (const l of links) expect(l.querySelector("svg")).not.toBeNull();
     expect(within(nav).getByRole("link", { name: "SIGA" }).getAttribute("aria-current")).toBe("page");
@@ -413,7 +413,7 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
         anteriores: { linhas: [], esperam_pagamento: 0, antes_do_ano_inicial: 0, ano_inicial: "2025" } };
     }
     if (caminho === "/api/health" || caminho.startsWith("/api/correio/respostas")) return [];
-    // #816: a página A receber sem nada em aberto, com a SINFRA na fileira (contrato ativo), com zero
+    // #816: a página Em aberto sem nada em aberto, com a SINFRA na fileira (contrato ativo), com zero
     if (caminho === "/api/a-receber") {
       return { anos: ["2025", "2026"], total_a_receber_liberado: true, em_aberto_centavos: 0, por_ano: { 2025: 0, 2026: 0 },
         quantidade: 0, alem_do_prazo: 0, notas_sem_medicao: [], notas_sem_medicao_centavos: 0, anteriores: { quantidade: 0, valor_centavos: 0 },
@@ -435,17 +435,17 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     .filter(l => l.getAttribute("aria-current") === "page").map(l => l.textContent);
   const endereco = () => window.location.pathname + window.location.search;
 
-  it("/a-receber abre a página A receber, com o caminho, o título e o estado vazio; o item fica aceso", async () => {
+  it("/a-receber abre a página Em aberto, com o caminho, o título e o estado vazio; o item fica aceso", async () => {
     entrar("diretoria");
     window.history.replaceState(null, "", "/a-receber");
     render(<App />);
-    expect(await screen.findByRole("heading", { level: 1, name: "A receber" })).toBeTruthy();
-    expect(trechos()).toEqual(["Financeiro", "A receber"]);
+    expect(await screen.findByRole("heading", { level: 1, name: "Em aberto" })).toBeTruthy();
+    expect(trechos()).toEqual(["Financeiro", "Em aberto"]);
     expect(within(caminho()).getByRole("link", { name: "Financeiro" }).getAttribute("href")).toBe("/fechamento");
     expect(await screen.findByText("Nenhuma nota em aberto.")).toBeTruthy();
     expect(endereco()).toBe("/a-receber");                    // da #748 até aqui o endereço levava ao Fechamento
-    expect(aceso()).toEqual(["A receber"]);
-    expect(document.title).toBe("A receber · grupolotufo");
+    expect(aceso()).toEqual(["Em aberto"]);
+    expect(document.title).toBe("Em aberto · grupolotufo");
   });
 
   it("/a-receber?contratante= mostra só o contratante do endereço, pela chave da página dele em Obras (#816)", async () => {
@@ -510,7 +510,7 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     expect(aceso()).toEqual(["Obras"]);
   });
 
-  it.each([["medicoes", "Medições"], ["a-receber", "A receber"], ["siga", "Processos no SIGA"]])(
+  it.each([["medicoes", "Medições"], ["a-receber", "Em aberto"], ["siga", "Processos no SIGA"]])(
     "a aba %s do contratante abre na página (#818): o endereço fica e a aba entra no caminho", async (aba, nome) => {
       entrar("engenharia");
       window.history.replaceState(null, "", `/obras/contratante/sinfra/${aba}`);

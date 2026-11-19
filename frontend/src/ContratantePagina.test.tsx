@@ -154,7 +154,7 @@ describe("Página do contratante (#805)", () => {
     expect(document.querySelector(".topbar .caminho, .topbar__trilha")).toBeNull();
   });
 
-  it("#818: a página desenha Obras, Medições, A receber e Processos no SIGA; Avisos ainda leva à página dos Avisos", async () => {
+  it("#818: a página desenha Obras, Medições, Em aberto e Processos no SIGA; Avisos ainda leva à página dos Avisos", async () => {
     expect(ABAS_PRONTAS).toEqual(["obras", "medicoes", "a-receber", "siga"]);
   });
 
@@ -370,7 +370,7 @@ describe("Página do contratante (#805)", () => {
   });
 });
 
-// #818: as abas Medições, A receber e Processos no SIGA, cada uma o recorte que o servidor manda de uma tela que já
+// #818: as abas Medições, Em aberto e Processos no SIGA, cada uma o recorte que o servidor manda de uma tela que já
 // existe, desenhado com as peças dela. A quantidade ao lado do nome é o número de linhas da aba.
 describe("Página do contratante: as abas (#818)", () => {
   beforeEach(() => { api.mockImplementation(servidor()); });
@@ -386,7 +386,7 @@ describe("Página do contratante: as abas (#818)", () => {
     await waitFor(() => expect(abas().map(a => a[1])).toEqual(["3", "4", "2", "3"]));
     expect(abas()).toEqual([
       ["Obras", "3", "/obras/contratante/sinfra"], ["Medições", "4", "/obras/contratante/sinfra/medicoes"],
-      ["A receber", "2", "/obras/contratante/sinfra/a-receber"], ["Processos no SIGA", "3", "/obras/contratante/sinfra/siga"]]);
+      ["Em aberto", "2", "/obras/contratante/sinfra/a-receber"], ["Processos no SIGA", "3", "/obras/contratante/sinfra/siga"]]);
     expect(abaAtual()).toEqual(["Obras"]);
     // o leitor de tela ouve a quantidade com o que ela conta
     expect([...document.querySelectorAll(".ct-abas .contador .sr-only")].map(s => s.textContent))
@@ -398,7 +398,7 @@ describe("Página do contratante: as abas (#818)", () => {
     api.mockClear();
     abrir("/obras/contratante/sinfra", "diretoria");
     await waitFor(() => expect(abas().map(a => a[1])).toEqual(["3", "4", "2"]));
-    expect(abas().map(a => a[0])).toEqual(["Obras", "Medições", "A receber"]);
+    expect(abas().map(a => a[0])).toEqual(["Obras", "Medições", "Em aberto"]);
     expect(api.mock.calls.map(c => String(c[0])).filter(c => c.endsWith("/siga"))).toEqual([]);
   });
 
@@ -442,10 +442,10 @@ describe("Página do contratante: as abas (#818)", () => {
     expect(abas()[1]).toEqual(["Medições", "0", "/obras/contratante/sinfra/medicoes"]);
   });
 
-  it("A receber: o subtotal e o prazo do órgão, e o total igual ao da página A receber filtrada pelo mesmo contratante", async () => {
+  it("Em aberto: o subtotal e o prazo do órgão, e o total igual ao da página Em aberto filtrada pelo mesmo contratante", async () => {
     abrir("/obras/contratante/sinfra/a-receber");
     const painel = await screen.findByRole("region", { name: "Em aberto de SINFRA" });
-    expect(abaAtual()).toEqual(["A receber"]);
+    expect(abaAtual()).toEqual(["Em aberto"]);
     const total = document.querySelector(".arc-numero__valor")!.textContent;
     const cabeca = painel.querySelector("tr.arc-grupo")!;
     const subtotal = cabeca.querySelector("td.dinheiro")!.textContent;
@@ -456,12 +456,12 @@ describe("Página do contratante: as abas (#818)", () => {
     expect(linhasEmAberto().map(l => l.querySelector(".arc-obra")!.textContent)).toEqual(["Estações BRT", "Cavalaria"]);
     expect(linhasEmAberto()).toHaveLength(Number(abas()[2][1]));
     expect(painel.querySelector("button")).toBeNull();
-    // a frase que diz o que o total soma (o a receber da faixa de cima é outra conta, docs/adr/0006)
-    expect(document.querySelector(".arc-base")!.textContent).toContain("O em aberto do Fechamento");
+    // a frase que explicava o total saiu com o nome novo da aba (decisão do dono de 19/11/2026)
+    expect(document.querySelector(".arc-base")).toBeNull();
     const daAba = { total, subtotal, linhas: linhasEmAberto().map(l => limpo(l.textContent)) };
     cleanup();
 
-    // a página A receber com o mesmo grupo, filtrada pela mesma chave: os mesmos números e as mesmas linhas
+    // a página Em aberto com o mesmo grupo, filtrada pela mesma chave: os mesmos números e as mesmas linhas
     api.mockImplementation(async (caminho: string) => {
       if (caminho !== "/api/a-receber") throw new Error(`chamada inesperada: ${caminho}`);
       return { anos: ["2025", "2026"], total_a_receber_liberado: true, em_aberto_centavos: 350_000_01, por_ano: { 2025: 0, 2026: 350_000_01 },
@@ -475,16 +475,16 @@ describe("Página do contratante: as abas (#818)", () => {
     expect(linhasEmAberto().map(l => limpo(l.textContent))).toEqual(daAba.linhas);
   });
 
-  it("A receber com a trava do total: a aba diz a trava, sem valor e sem quantidade", async () => {
+  it("Em aberto com a trava do total: a aba diz a trava, sem valor e sem quantidade", async () => {
     api.mockImplementation(servidor({ "/api/contratantes/sinfra/a-receber": { anos: ["2025", "2026"], total_a_receber_liberado: false } }));
     abrir("/obras/contratante/sinfra/a-receber");
     expect(await screen.findByText("O total a receber ainda não está liberado: o em aberto fica sem valor.")).toBeTruthy();
     expect(document.querySelector(".arc-numero__valor, .arc-tabela")).toBeNull();
     await waitFor(() => expect(abas()[1][1]).toBe("4"));
-    expect(abas()[2]).toEqual(["A receber", null, "/obras/contratante/sinfra/a-receber"]);
+    expect(abas()[2]).toEqual(["Em aberto", null, "/obras/contratante/sinfra/a-receber"]);
   });
 
-  it("A receber de contratante sem nota em aberto: a linha curta", async () => {
+  it("Em aberto de contratante sem nota em aberto: a linha curta", async () => {
     api.mockImplementation(servidor({ "/api/contratantes/sinfra/a-receber": { ...A_RECEBER, contratante: null, quantidade: 0 } }));
     abrir("/obras/contratante/sinfra/a-receber");
     expect(await screen.findByText("Nenhuma nota em aberto de SINFRA.")).toBeTruthy();
@@ -520,7 +520,7 @@ describe("Página do contratante: as abas (#818)", () => {
     abrir("/obras/contratante/sinfra/medicoes", "engenharia");
     expect((await screen.findByRole("alert")).textContent).toContain("Não foi possível carregar as medições");
     await waitFor(() => expect(abas().map(a => a[1])).toEqual(["3", null, "2", "3"]));
-    fireEvent.click(screen.getByRole("link", { name: /^A receber/ }));
+    fireEvent.click(screen.getByRole("link", { name: /^Em aberto/ }));
     expect(window.location.pathname).toBe("/obras/contratante/sinfra/a-receber");
     await screen.findByRole("region", { name: "Em aberto de SINFRA" });
     expect(screen.queryByRole("alert")).toBeNull();

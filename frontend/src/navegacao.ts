@@ -21,7 +21,7 @@ export type IdArea = "painel" | "medicoes" | "obras" | "financeiro" | "prazos" |
 
 export const ROTULO: Record<ItemMenu, string> = {
   inicio: "Início", medicoes: "Medições", "resumo-medicoes": "Resumo das medições", obras: "Obras", fechamento: "Fechamento",
-  "a-receber": "A receber", avisos: "Avisos", siga: "SIGA", certidoes: "Certidões", regularidade: "Regularidade mensal",
+  "a-receber": "Em aberto", avisos: "Avisos", siga: "SIGA", certidoes: "Certidões", regularidade: "Regularidade mensal",
   garantias: "Garantias", "ancoras-docusign": "Âncoras DocuSign", admin: "Administração", conta: "Minha conta",
 };
 
@@ -52,7 +52,7 @@ const DO_PERFIL: Record<Perfil, readonly Recorte[]> = {
   admin: ["inicio", "medicoes", "resumo-medicoes", "avisos", "siga", "documentos", "obras", "fechamento", "ancoras-docusign", "admin"],
 };
 // De que recorte cada pagina depende. As paginas que nasceram com as areas herdam o de uma tela que o perfil ja' via:
-// A receber e' de quem ve o Fechamento (o em aberto nota a nota morava no fim dele); Certidoes, Regularidade mensal e
+// Em aberto (ate' 19/11/2026, "A receber") e' de quem ve o Fechamento (o em aberto nota a nota morava no fim dele); Certidoes, Regularidade mensal e
 // Garantias eram as tres abas de Documentos; a Minha conta sempre foi de todos (pelo avatar do topo).
 const RECORTE_DA_PAGINA: Record<ItemMenu, Recorte | null> = {
   inicio: "inicio", medicoes: "medicoes", "resumo-medicoes": "resumo-medicoes", obras: "obras", fechamento: "fechamento",
@@ -164,7 +164,7 @@ const VISTAS_DE_MEDICOES: Record<string, string> = { quadro: "Quadro do mês", a
 const VISTAS_DE_OBRAS: Record<string, string> = { todas: "Todas as obras", andamento: "Andamento", qdop: "QDOP" };
 const ABAS_DA_OBRA: Record<string, string> = { medicoes: "Medições", prazos: "Prazos", reajuste: "Reajuste", documentos: "Documentos", contrato: "Contrato" };
 const ABAS_DO_CONTRATANTE: Record<Exclude<AbaContratante, "obras">, string> = {
-  medicoes: "Medições", "a-receber": "A receber", siga: "Processos no SIGA", avisos: "Avisos",
+  medicoes: "Medições", "a-receber": "Em aberto", siga: "Processos no SIGA", avisos: "Avisos",
 };
 const ABAS_DA_ADMINISTRACAO: Record<string, string> = {
   reconciliacao: "Reconciliação", usuarios: "Usuários", auditoria: "Auditoria", pendencias: "Pendências de cadastro",

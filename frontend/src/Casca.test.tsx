@@ -42,7 +42,7 @@ describe("menu lateral em áreas (#814)", () => {
       ["Painel", ["Início"]],
       ["Medições", ["Medições", "Resumo das medições"]],
       [null, ["Obras"]],
-      ["Financeiro", ["Fechamento", "A receber"]],
+      ["Financeiro", ["Fechamento", "Em aberto"]],
       ["Prazos e avisos", ["Avisos"]],
       ["Órgãos", ["SIGA"]],
       ["Documentos", ["Certidões", "Regularidade mensal", "Garantias"]],
@@ -65,7 +65,7 @@ describe("menu lateral em áreas (#814)", () => {
       ["Painel", ["Início"]],
       ["Medições", ["Resumo das medições"]],
       [null, ["Obras"]],
-      ["Financeiro", ["Fechamento", "A receber"]],
+      ["Financeiro", ["Fechamento", "Em aberto"]],
       ["Prazos e avisos", ["Avisos"]],
       ["Documentos", ["Certidões", "Regularidade mensal", "Garantias"]],
       ["Sistema", ["Minha conta"]],
@@ -83,7 +83,7 @@ describe("menu lateral em áreas (#814)", () => {
     const acesas = () => [...nav().querySelectorAll(".menu__area--acesa .menu__area-nome")].map(n => n.textContent);
     const { rerender } = render(<Trilho perfil="admin" marcado="a-receber" ir={vi.fn()} />);
     expect(acesas()).toEqual(["Financeiro"]);
-    expect(within(nav()).getAllByRole("link").filter(l => l.getAttribute("aria-current") === "page").map(l => l.textContent)).toEqual(["A receber"]);
+    expect(within(nav()).getAllByRole("link").filter(l => l.getAttribute("aria-current") === "page").map(l => l.textContent)).toEqual(["Em aberto"]);
     rerender(<Trilho perfil="admin" marcado="regularidade" ir={vi.fn()} />);
     expect(acesas()).toEqual(["Documentos"]);
     // Obras não tem nome de área para acender: fica só o item
@@ -99,7 +99,7 @@ describe("menu lateral em áreas (#814)", () => {
     fireEvent.click(within(nav()).getByRole("button", { name: "Recolher o menu" }));
     expect(nav().getAttribute("data-estado")).toBe("recolhido");
     expect(within(nav()).getByRole("list", { name: "Documentos" }).querySelectorAll("a")).toHaveLength(3);
-    expect(within(nav()).getByRole("link", { name: "A receber" }).getAttribute("title")).toBe("A receber");
+    expect(within(nav()).getByRole("link", { name: "Em aberto" }).getAttribute("title")).toBe("Em aberto");
   });
 });
 
