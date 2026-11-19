@@ -403,13 +403,14 @@ describe("Medições: fila de trabalho, quadro do mês e meses anteriores (#805)
         .toEqual([null, null, "page"]);
     });
 
-    it("o que só espera pagamento e o que é de antes de 2025 viram uma linha, com o link para o Fechamento", async () => {
+    it("o que só espera pagamento e o que é de antes de 2025 viram uma linha, com o link para a página A receber (#816)", async () => {
       responder();
       render(<MedicoesPagina usuario={usuario} aba="anteriores" />);
       await screen.findByRole("table", { name: "Com a Lotufo" });
       const resumo = document.querySelector(".fila-resumo") as HTMLElement;
-      expect(texto(resumo)).toBe("17 medições esperam pagamento · 4 medições abertas de antes de 2025Ver no Fechamento");
-      expect(within(resumo).getByRole("link", { name: "Ver no Fechamento" }).getAttribute("href")).toBe("/fechamento");
+      expect(texto(resumo)).toBe("17 medições esperam pagamento · 4 medições abertas de antes de 2025Ver em A receber");
+      expect(within(resumo).getByRole("link", { name: "Ver em A receber" }).getAttribute("href")).toBe("/a-receber");
+      expect(within(resumo).queryByRole("link", { name: /Fechamento/ })).toBeNull();
     });
 
     it("nada pede ação: uma linha curta; sem nada esperando pagamento, a linha de resumo não aparece", async () => {
@@ -417,7 +418,7 @@ describe("Medições: fila de trabalho, quadro do mês e meses anteriores (#805)
         ? { ...FILA, anteriores: { linhas: [], esperam_pagamento: 1, antes_do_ano_inicial: 0, ano_inicial: "2025" } } : undefined);
       const { unmount } = render(<MedicoesPagina usuario={usuario} aba="anteriores" />);
       expect(await screen.findByText("Nenhuma medição de meses anteriores pede ação.")).toBeTruthy();
-      expect(texto(document.querySelector(".fila-resumo"))).toBe("1 medição espera pagamentoVer no Fechamento");
+      expect(texto(document.querySelector(".fila-resumo"))).toBe("1 medição espera pagamentoVer em A receber");
       // sem contagem, a aba não leva o contador
       expect(texto(within(screen.getByRole("navigation", { name: "Vistas de Medições" })).getAllByRole("link")[2])).toBe("Meses anteriores");
       unmount();

@@ -28,7 +28,8 @@ const VISTAS: { id: AbaMedicoes; rotulo: string }[] = [
 ];
 
 /** Meses anteriores: os mesmos painéis da fila, com a competência em cada linha, e o que só espera o pagamento (ou é
- *  de antes do primeiro ano que as telas contam) numa linha de resumo que leva ao Fechamento. */
+ *  de antes do primeiro ano que as telas contam) numa linha de resumo que leva à página A receber (#816), onde o em
+ *  aberto está nota a nota. */
 function MesesAnteriores({ a, limites, opera }: { a: Anteriores; limites: Limites; opera: boolean }) {
   const resto = [
     a.esperam_pagamento > 0 ? (a.esperam_pagamento === 1 ? "1 medição espera pagamento" : `${a.esperam_pagamento.toLocaleString("pt-BR")} medições esperam pagamento`) : null,
@@ -42,7 +43,7 @@ function MesesAnteriores({ a, limites, opera }: { a: Anteriores; limites: Limite
       {resto.length > 0 && (
         <p className="fila-resumo">
           <span className="num">{resto.join(" · ")}</span>
-          <Link para={{ tela: "fechamento" }}>Ver no Fechamento</Link>
+          <Link para={{ tela: "a-receber" }}>Ver em A receber</Link>
         </p>
       )}
     </>
