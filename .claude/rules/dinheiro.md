@@ -14,6 +14,8 @@ paths:
   - "backend/app/qdop.py"
   - "backend/app/conciliacao.py"
   - "backend/app/sincronizacao_rm.py"
+  - "backend/app/inicio.py"
+  - "backend/app/fechamento.py"
   - "frontend/src/Medic*.tsx"
   - "frontend/src/Notas*.tsx"
   - "frontend/src/Espelho.tsx"
