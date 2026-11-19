@@ -412,6 +412,14 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
         anteriores: { linhas: [], esperam_pagamento: 0, antes_do_ano_inicial: 0, ano_inicial: "2025" } };
     }
     if (caminho === "/api/health" || caminho.startsWith("/api/correio/respostas")) return [];
+    // #816: a página A receber sem nada em aberto, com a SINFRA na fileira (contrato ativo), com zero
+    if (caminho === "/api/a-receber") {
+      return { anos: ["2025", "2026"], total_a_receber_liberado: true, em_aberto_centavos: 0, por_ano: { 2025: 0, 2026: 0 },
+        quantidade: 0, alem_do_prazo: 0, notas_sem_medicao: [], notas_sem_medicao_centavos: 0, anteriores: { quantidade: 0, valor_centavos: 0 },
+        contratantes: [{ contratante: "SINFRA", chave: "sinfra", prazo_orgao_dias: null, quantidade: 0, em_aberto_centavos: 0,
+          por_ano: { 2025: 0, 2026: 0 }, alem_do_prazo: 0, linhas: [], notas_sem_medicao: [], notas_sem_medicao_centavos: 0,
+          anteriores: { quantidade: 0, valor_centavos: 0 } }] };
+    }
     // o que a página pedir além disso falha: ela mostra a falha de leitura dela, e a casca continua de pé
     throw new Error("sem dado neste teste");
   });
@@ -433,18 +441,18 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     expect(await screen.findByRole("heading", { level: 1, name: "A receber" })).toBeTruthy();
     expect(trechos()).toEqual(["Financeiro", "A receber"]);
     expect(within(caminho()).getByRole("link", { name: "Financeiro" }).getAttribute("href")).toBe("/fechamento");
-    expect(screen.getByText("Nenhuma nota em aberto.")).toBeTruthy();
+    expect(await screen.findByText("Nenhuma nota em aberto.")).toBeTruthy();
     expect(endereco()).toBe("/a-receber");                    // da #748 até aqui o endereço levava ao Fechamento
     expect(aceso()).toEqual(["A receber"]);
     expect(document.title).toBe("A receber · grupolotufo");
   });
 
-  it("/a-receber?contratante= mostra só o contratante do endereço", async () => {
+  it("/a-receber?contratante= mostra só o contratante do endereço, pela chave da página dele em Obras (#816)", async () => {
     entrar("admin");
-    window.history.replaceState(null, "", "/a-receber?contratante=SINFRA");
+    window.history.replaceState(null, "", "/a-receber?contratante=sinfra");
     render(<App />);
     expect(await screen.findByText("Nenhuma nota em aberto de SINFRA.")).toBeTruthy();
-    expect(endereco()).toBe("/a-receber?contratante=SINFRA");
+    expect(endereco()).toBe("/a-receber?contratante=sinfra");
     await act(async () => { fireEvent.click(screen.getByRole("link", { name: "Ver todos os contratantes" })); });
     expect(endereco()).toBe("/a-receber");
     expect(screen.getByText("Nenhuma nota em aberto.")).toBeTruthy();

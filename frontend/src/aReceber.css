@@ -1,0 +1,124 @@
+/* A receber (#816): a disposicao e os blocos proprios da pagina. A moldura do painel (.cartao), a tabela (.tabela), o
+   selo, a escolha e a caixa de aviso sao pecas de base de tokens.css; o tempo parado e' o de barraDePassos.css. Cor,
+   familia, tamanho, espaco e borda so' por variavel. */
+
+/* A pagina e' o container: a tabela vira um bloco por linha pela largura que sobra para o conteudo (com o menu
+   aberto ou recolhido), e nao pela largura da janela. */
+.arc {
+  container: arc-pagina / inline-size;
+  min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); row-gap: var(--espaco-entre-blocos);
+  color: var(--cor-tinta); font-family: var(--fonte-texto); font-size: var(--texto-corpo); line-height: var(--entrelinha);
+}
+.arc-carregando { margin: 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.arc-aviso { margin: 0; }
+
+/* o total: rotulo e valor, sem moldura, como os numeros do ano do Fechamento; o de cada ano embaixo */
+.arc-numeros { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--espaco-m) var(--espaco-g); margin: 0; }
+.arc-numero { min-width: 0; }
+.arc-numero dd { margin: 0; }
+.arc-numero__rotulo { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.arc-numero__valor {
+  white-space: nowrap; color: var(--valor-atencao-texto);
+  font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
+  font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-valor); line-height: var(--entrelinha-numero);
+}
+.arc-numero__apoio { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.arc-numero--selo { padding-bottom: var(--espaco-traco); }
+/* o que o total soma: a base da leitura, uma vez, sob o numero */
+.arc-base { margin: calc(var(--espaco-entre-blocos) * -0.5) 0 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+
+/* painel com a tabela */
+.arc .arc-painel { min-width: 0; padding: var(--espaco-mini) 0; }
+.arc-painel__cab { padding: var(--espaco-m) var(--espaco-g) 0; margin-bottom: var(--titulo-margem-base); }
+.arc-painel__cab h2 { margin: 0; font-size: var(--texto-titulo-sub); }
+.arc-subtitulo { margin: 0 var(--espaco-g) var(--espaco-p); font-size: var(--texto-meta); }
+.arc-painel .arc-aviso { margin: 0 var(--espaco-g) var(--espaco-p); }
+.arc-rolagem { margin: 0; }
+
+.arc .arc-tabela th, .arc .arc-tabela td { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
+.arc .arc-tabela th:first-child, .arc .arc-tabela td:first-child { padding-left: var(--espaco-g); }
+.arc .arc-tabela th:last-child, .arc .arc-tabela td:last-child { padding-right: var(--espaco-g); }
+.arc .arc-tabela tbody th {
+  padding-top: var(--espaco-p); padding-bottom: var(--espaco-p); border-bottom: var(--borda-linha);
+  text-align: left; font-weight: var(--peso-normal); vertical-align: top;
+}
+.arc .arc-tabela tbody td { vertical-align: top; }
+.arc .arc-tabela tbody tr:last-child > th { border-bottom: 0; }
+/* a ultima linha de um grupo que nao e' o ultimo fecha com o fio (a base so' tira o da ultima linha do tbody); no
+   bloco por linha quem leva o fio e' a linha, nao a celula */
+@container arc-pagina (min-width: 641px) {
+  .arc .arc-tabela tbody:not(:last-of-type) tr:last-child > :is(th, td) { border-bottom: var(--borda-linha); }
+}
+.arc .arc-tabela thead th:first-child { width: 34%; }
+.arc .arc-tabela--soltas thead th:first-child { width: auto; }
+
+/* a linha: a obra forte e a medicao com a competencia embaixo; a data e o valor nao quebram */
+.arc-obra { display: block; color: var(--cor-tinta); font-weight: var(--peso-forte); text-decoration: none; overflow-wrap: anywhere; }
+a.arc-obra:hover { text-decoration: underline; text-underline-offset: var(--afastamento-sublinhado); }
+.arc-sub { display: block; font-size: var(--texto-mini); color: var(--cor-texto-secundario); }
+.arc .arc-tabela td.arc-a-data, .arc .arc-tabela td.arc-a-valor { white-space: nowrap; }
+.arc-sem-data { color: var(--cor-texto-secundario); white-space: normal; }
+.arc-nota { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-pp); }
+/* o em aberto sai no tom do "vence em breve", como no Fechamento (docs/identidade-visual.md, "Valores") */
+.arc .arc-tabela tbody td.arc-em-aberto { color: var(--valor-atencao-texto); }
+
+/* o contratante: o CABECALHO DE GRUPO FORTE (#805), em tinta cheia com a letra clara, com quantas linhas, o prazo do
+   orgao e o subtotal na coluna do valor. Recolhido, o nome e' o botao que abre o grupo. */
+.arc .arc-tabela tbody tr.arc-grupo > :is(th, td) {
+  padding-top: var(--espaco-pp); padding-bottom: var(--espaco-pp); border-bottom: 0; vertical-align: middle;
+  background: var(--cor-tinta); color: var(--cor-papel); font-size: var(--texto-corpo); font-weight: var(--peso-forte);
+}
+.arc .arc-tabela tbody tr.arc-grupo > td.dinheiro { color: var(--cor-papel); }
+.arc-grupo__cab { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-p); }
+.arc-grupo__abre {
+  display: inline-flex; align-items: center; gap: var(--espaco-pp); min-height: var(--alvo-menor); padding: 0;
+  border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.arc-grupo__abre:hover { text-decoration: underline; text-underline-offset: var(--afastamento-sublinhado); }
+.arc-grupo__abre:focus-visible { outline-color: var(--cor-papel); }
+.arc-grupo__seta { display: inline-block; min-width: var(--espaco-m); font-size: var(--texto-meta); }
+.arc-grupo__meta { color: var(--cor-papel-escuro); font-size: var(--texto-mini); font-weight: var(--peso-normal); }
+
+/* a' parte: o antigo numa linha de rotulo e valor */
+.arc-antigo { display: grid; gap: var(--espaco-mini); margin: 0; padding: var(--espaco-m) var(--espaco-g); border-top: var(--borda-linha); font-size: var(--texto-meta); }
+.arc-antigo > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--espaco-mini) var(--espaco-m); }
+.arc-antigo dt { color: var(--cor-texto-secundario); }
+.arc-antigo dd { margin: 0; font-weight: var(--peso-forte); }
+.arc-painel__cab + .arc-antigo { border-top: 0; padding-top: 0; }
+
+/* ---------------------------------------------------------------- um bloco por linha (ate' 640 px)
+   As cinco colunas nao cabem: a linha vira um bloco, com a obra e o valor em cima e a nota, o protocolo e o tempo
+   parado embaixo, o rotulo escrito antes do dado. O cabecalho do grupo: o nome a' esquerda e o subtotal a' direita. */
+@container arc-pagina (max-width: 640px) {
+  .arc .arc-tabela, .arc .arc-tabela :is(tbody, tfoot) { display: block; width: 100%; }
+  .arc .arc-tabela thead { position: absolute; width: var(--espaco-fio); height: var(--espaco-fio); overflow: hidden; clip: rect(0 0 0 0); }
+  .arc .arc-tabela tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--espaco-p); row-gap: var(--espaco-mini);
+    grid-template-areas: "medicao valor" "nota nota" "data data" "parada parada"; align-items: start;
+    padding: var(--espaco-p) var(--espaco-m); border-bottom: var(--borda-linha);
+  }
+  .arc .arc-tabela tbody tr:last-child { border-bottom: 0; }
+  .arc .arc-tabela tbody:not(:last-of-type) tr:last-child { border-bottom: var(--borda-linha); }
+  .arc .arc-tabela tfoot tr { grid-template-areas: "medicao valor"; border-top: var(--regua-secao); border-bottom: 0; }
+  .arc .arc-tabela.tabela tr > :is(th, td) {
+    display: block; min-width: 0; padding: 0; border: 0; white-space: normal; text-align: left; font-size: var(--texto-meta);
+  }
+  .arc .arc-tabela.tabela tr > :first-child { grid-area: medicao; }
+  .arc .arc-tabela.tabela tr > td.col-num { grid-area: valor; text-align: right; white-space: nowrap; }
+  .arc .arc-tabela.tabela tr > .arc-a-nota { grid-area: nota; }
+  .arc .arc-tabela.tabela tr > .arc-a-data { grid-area: data; }
+  .arc .arc-tabela.tabela tr > .arc-a-parada { grid-area: parada; }
+  .arc .arc-tabela [data-rotulo]::before {
+    content: attr(data-rotulo) " "; color: var(--cor-texto-secundario); font-family: var(--fonte-texto); font-size: var(--texto-mini);
+  }
+  .arc .arc-tabela .arc-a-parada::before { display: block; margin-bottom: var(--espaco-traco); }
+  .arc .arc-tabela .selo { font-size: var(--texto-mini); }
+  .arc .arc-tabela tbody tr.arc-grupo {
+    grid-template-areas: "medicao valor"; align-items: center; padding: var(--espaco-pp) var(--espaco-m); border-bottom: 0;
+    background: var(--cor-tinta);
+  }
+  .arc .arc-tabela.tabela tbody tr.arc-grupo > :is(th, td) { padding: 0; background: none; font-size: var(--texto-meta); }
+  .arc .arc-tabela tbody tr.arc-grupo > td { white-space: nowrap; }
+  .arc-painel__cab, .arc-subtitulo, .arc-painel .arc-aviso, .arc-antigo { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
+  .arc-subtitulo, .arc-painel .arc-aviso { margin-left: 0; margin-right: 0; }
+}

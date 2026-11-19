@@ -32,8 +32,8 @@ def test_painel_e_qdop_para_a_diretoria_e_401_sem_sessao(client):
     assert openpyxl.load_workbook(io.BytesIO(x.content)).active["S1"].value == "FRM.EXEMPLO.001"
 
 
-def test_fechamento_so_leitura_e_401_sem_sessao_e_a_receber_saiu(client, monkeypatch):
-    """Issue #748: a pagina Fechamento no lugar de A receber (a rota antiga nao existe mais) e da Carteira."""
+def test_fechamento_so_leitura_e_401_sem_sessao(client, monkeypatch):
+    """Issue #748: a pagina Fechamento no lugar da Carteira. A rota de A receber voltou com a pagina nova (#816)."""
     from app import permissoes
     assert client.get("/api/fechamento").status_code == 401
     c = db.get_conn()
@@ -49,11 +49,37 @@ def test_fechamento_so_leitura_e_401_sem_sessao_e_a_receber_saiu(client, monkeyp
     assert r.json()["anos"] == ["2025", "2026"] and r.json()["meses"] == []
     assert r.json()["por_contratante"] == {"2025": [], "2026": []}
     assert r.json()["diferenca_critica_por_mil"] == 5
-    assert client.get("/api/a-receber").status_code == 404
     assert client.get("/api/diretoria/custo").status_code == 404
     assert client.post("/api/fechamento").status_code == 405
     monkeypatch.setitem(permissoes.PERFIS, "diretoria", frozenset())
     assert client.get("/api/fechamento").status_code == 403
+
+
+def test_a_receber_para_quem_ve_o_fechamento_e_so_a_trava_sem_o_total_liberado(client, monkeypatch):
+    """Issue #816: a pagina A receber e' de quem ve o Fechamento (`ver_paineis`: os tres perfis), so' leitura. Sem o
+    total a receber liberado, a resposta e' so' a trava; liberado, o total e os contratantes."""
+    from app import permissoes
+    assert client.get("/api/a-receber").status_code == 401
+    c = db.get_conn()
+    for perfil in ("diretoria", "engenharia", "admin"):
+        auth.criar_usuario(c, perfil, f"{perfil}@l.com", "senha-forte-123", perfil)
+    c.close()
+    for perfil in ("diretoria", "engenharia", "admin"):
+        _login(client, f"{perfil}@l.com")
+        r = client.get("/api/a-receber")
+        assert r.status_code == 200 and r.json() == {"anos": ["2025", "2026"], "total_a_receber_liberado": False}, perfil
+        assert client.get("/api/fechamento").json()["total_a_receber_liberado"] is False
+    c = db.get_conn()
+    cadastro_aplicar.aplicar(c, 1, {"orgaos": [], "entidades": [], "contratos": [], "avisos": [],
+                                    "geral": {"qdop": {"modelo_caminho": str(MODELO)}, "diretoria": {"total_a_receber_liberado": True}}})
+    c.close()
+    r = client.get("/api/a-receber").json()
+    assert set(r) == {"anos", "total_a_receber_liberado", "em_aberto_centavos", "por_ano", "quantidade", "alem_do_prazo",
+                      "notas_sem_medicao", "notas_sem_medicao_centavos", "anteriores", "contratantes"}
+    assert (r["em_aberto_centavos"], r["quantidade"], r["contratantes"]) == (0, 0, [])
+    assert client.post("/api/a-receber").status_code == 405
+    monkeypatch.setitem(permissoes.PERFIS, "admin", frozenset())
+    assert client.get("/api/a-receber").status_code == 403
 
 
 def test_custo_da_obra_404_sem_cadastro_e_403_sem_ver_paineis(client, monkeypatch):
