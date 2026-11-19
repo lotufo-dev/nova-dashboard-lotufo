@@ -79,6 +79,7 @@ ROTAS = (
     "/api/fechamento",
     "/api/a-receber",
     "/api/resumo-medicoes",
+    "/api/resumo-medicoes/matriz",      # 19/11/2026 (#805): a matriz obra por competencia, que saiu do painel da Inicio
     "/api/documentos",
     "/api/entidades",
     "/api/certidoes/tipos",
