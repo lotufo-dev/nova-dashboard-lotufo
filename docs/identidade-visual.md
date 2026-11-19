@@ -120,8 +120,8 @@ do rótulo, na etiqueta sob o valor ou na barra.
   se é bom: no em aberto, cair é bom. Até 2% para cima ou para baixo é estável. O mês em curso compara com o mês
   anterior até o mesmo dia, e o rótulo diz ("× out até o dia 18"). Motivo: mês pela metade contra mês inteiro diria
   sempre "caiu". O valor de uma etapa do ciclo (o protocolado, o recebido de uma competência) compara com a mesma
-  altura do mês anterior: o que a competência anterior tinha na etapa no mesmo dia, um mês antes ("× set até
-  18/10"). Sai das datas dos eventos; faltando a data de algum, a variação não aparece. Período sem valor, ou anterior ao primeiro ano que as telas da diretoria contam, não serve de
+  altura do mês anterior, pelo acumulado (abaixo), até o mesmo dia um mês antes ("× set até 18/10"). A medição da
+  referência que não dá para situar no dia de corte apaga a variação. Período sem valor, ou anterior ao primeiro ano que as telas da diretoria contam, não serve de
   referência.
   No protocolado a comparação é pelo acumulado (decisão do dono de 18/11/2026): tudo o que a competência já
   protocolou até hoje, recebido depois ou não, contra o que a anterior tinha protocolado até o mesmo dia. Motivo: o

@@ -12,6 +12,7 @@ paths:
   - "backend/app/api_paineis.py"
   - "backend/app/api_contratos.py"
   - "backend/app/fila_medicoes.py"
+  - "backend/app/a_receber.py"
   - "frontend/src/Inicio.tsx"
   - "frontend/src/ObrasCarteira.tsx"
   - "frontend/src/Contratos.tsx"
@@ -21,6 +22,7 @@ paths:
   - "frontend/src/ObrasPecas.tsx"
   - "frontend/src/listaObras.ts"
   - "frontend/src/Fechamento.tsx"
+  - "frontend/src/AReceber.tsx"
   - "frontend/src/ResumoDasMedicoes.tsx"
   - "frontend/src/AvisosPagina.tsx"
   - "frontend/src/avisos.ts"
@@ -48,9 +50,9 @@ Os nomes das etapas e dos valores são os do `GLOSSARY.md`.
   ("Prazo no fim", "Sem medição desde 07/2026"). O aviso do mesmo fato continua nos Avisos.
 - **Recorte ou abertura de um total soma as mesmas linhas do total.** Um número que já existe (o total do ano no
   Fechamento, a faixa do ciclo na Início) ganha outro recorte (por contratante, por obra, por etapa) somando as
-  MESMAS linhas que somam o total, pela mesma função de seleção e no mesmo laço, nunca por uma consulta própria. O
-  teste soma as partes e compara com o total em toda coluna (`test_fechamento._confere_soma`; na Início,
-  `inicio._da_etapa` serve à faixa e à abertura por contratante). Motivo: consórcio, nota partilhada e nota paga em
+  MESMAS linhas que somam o total, pela mesma função de seleção (no Fechamento, no mesmo laço), nunca por uma
+  consulta própria. O teste soma as partes e compara com o total em toda coluna (`test_fechamento._confere_soma`; na
+  Início, `test_api_diretoria.test_inicio_por_contratante_e_medido_fecham_com_as_outras_telas`). Motivo: consórcio, nota partilhada e nota paga em
   parte já foram resolvidos na linha da medição; uma segunda conta chegaria a outro centavo.
 - **Lista nota a nota reaproveita as linhas do total.** A página que abre um total linha a linha lê as linhas da
   mesma função que monta o total (`fechamento._em_aberto_da_medicao`), e o teste compara as duas respostas: o total,
