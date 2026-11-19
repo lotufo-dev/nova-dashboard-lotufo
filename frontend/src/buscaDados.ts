@@ -18,6 +18,15 @@ export const MAX_PERGUNTA = 100;
 export type Opcao = { chave: string; principal: string; detalhe: string; para: Rota; busca?: Filtros };
 export type Secao = { id: "obras" | "medicoes" | "processos"; rotulo: string; um: string; varios: string; total: number; opcoes: Opcao[] };
 
+/** Mac (e iPad com teclado): o atalho da busca e' Cmd+K; nos outros sistemas, Ctrl+K. O Ctrl+K do Mac fica com o
+ *  campo de texto, onde ele apaga ate' o fim da linha. */
+export function ehMac(): boolean {
+  const n = typeof navigator === "undefined" ? undefined : navigator;
+  const plataforma = (n as (Navigator & { userAgentData?: { platform?: string } }) | undefined)?.userAgentData?.platform
+    || n?.platform || n?.userAgent || "";
+  return /mac|iphone|ipad/i.test(plataforma);
+}
+
 function juntar(...partes: (string | null | undefined)[]): string {
   return partes.filter(Boolean).join(" · ");
 }

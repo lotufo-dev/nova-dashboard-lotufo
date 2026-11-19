@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api } from "./api";
 import Contador from "./Contador";
 import Falha from "./Falha";
-import { ESPERA_MS, MAX_PERGUNTA, secoesDe, type Opcao, type RespostaBusca } from "./buscaDados";
+import { ESPERA_MS, MAX_PERGUNTA, ehMac, secoesDe, type Opcao, type RespostaBusca } from "./buscaDados";
 import { cliqueSimples, hrefDe, type Ir } from "./rota";
 import "./busca.css";
 
@@ -11,9 +11,12 @@ import "./busca.css";
 // aplica o recorte do perfil num lugar so': o perfil sem SIGA nao recebe o grupo de processos (nem a contagem dele).
 // Aqui so' se desenha o que o servidor manda, na ordem Obras, Medicoes, Processos.
 //
-// Teclado: "/" (fora de campo de texto) ou Ctrl/Cmd+K poem o foco no campo; setas andam pelos resultados; Enter abre;
-// Esc fecha e devolve o foco a quem o tinha. No celular (ate' 767 px) o campo vira um botao com a lupa, que abre o
-// campo por cima da barra; fechado, o caminho fica inteiro.
+// Teclado: "/" (fora de campo de texto) ou a tecla de comando do sistema + K (Cmd+K no Mac, Ctrl+K nos outros) poem o
+// foco no campo; setas andam pelos resultados; Enter abre; Esc fecha e devolve o foco a quem o tinha; sair do campo
+// (Tab, clique fora) fecha a lista. O Ctrl+K do Mac fica com o sistema: em campo de texto ele apaga ate' o fim da
+// linha. Com uma janela aberta (`dialog[open]`) o atalho nao age: o campo esta' inerte atras dela.
+// Abaixo de 1024 px (celular, e o computador com a janela estreita, onde o menu largo ainda ocupa 232 px) o campo vira
+// um botao com a lupa, que abre o campo por cima da barra; fechado, o caminho fica inteiro.
 
 function IconeLupa({ className }: { className?: string }) {
   return (
@@ -26,7 +29,8 @@ function IconeLupa({ className }: { className?: string }) {
 
 function editavel(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
-  return el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
+  return el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName)
+    || !!el.closest('[contenteditable=""], [contenteditable="true"]');
 }
 
 function visivel(el: HTMLElement | null): el is HTMLElement {
@@ -87,13 +91,16 @@ export default function Busca({ ir }: { perfil: string; ir: Ir }) {
     window.setTimeout(() => { campo.current?.focus(); campo.current?.select(); }, 0);
   }, []);
 
-  // atalho: "/" fora de campo de texto, ou Ctrl/Cmd+K em qualquer lugar
+  // atalho: "/" fora de campo de texto; Cmd+K (Mac) ou Ctrl+K (outros) em qualquer lugar
   useEffect(() => {
+    const mac = ehMac();
     const tecla = (ev: KeyboardEvent) => {
       const k = ev.key.toLowerCase();
-      const ctrlK = k === "k" && (ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey;
+      const comando = mac ? ev.metaKey && !ev.ctrlKey : ev.ctrlKey && !ev.metaKey;
+      const atalhoK = k === "k" && comando && !ev.altKey && !ev.shiftKey;
       const barra = ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !editavel(ev.target);
-      if (!ctrlK && !barra) return;
+      if (!atalhoK && !barra) return;
+      if (document.querySelector("dialog[open]")) return;
       ev.preventDefault();
       focar();
     };
@@ -108,6 +115,14 @@ export default function Busca({ ir }: { perfil: string; ir: Ir }) {
     document.addEventListener("mousedown", fora);
     return () => document.removeEventListener("mousedown", fora);
   }, [lista, painel, fechar]);
+
+  // sair da caixa com o teclado (Tab) fecha a lista e o painel; o clique num item nao tira o foco do campo
+  // (`onMouseDown` com preventDefault na lista), entao nao passa por aqui
+  function aoSair(ev: React.FocusEvent<HTMLDivElement>) {
+    const para = ev.relatedTarget as Node | null;
+    if (para && caixa.current?.contains(para)) return;
+    setLista(false); setPainel(false); setAtivo(-1);
+  }
 
   function abrir(o: Opcao) {
     setTexto(""); setResultado(null);
@@ -150,7 +165,7 @@ export default function Busca({ ir }: { perfil: string; ir: Ir }) {
 
   let i = -1;
   return (
-    <div className={`busca${painel ? " busca--aberta" : ""}`} ref={caixa}>
+    <div className={`busca${painel ? " busca--aberta" : ""}`} ref={caixa} onBlur={aoSair}>
       <button ref={botao} type="button" className="busca__abrir" aria-label="Buscar obra, medição ou processo"
         aria-expanded={painel} onClick={focar}>
         <IconeLupa />
@@ -162,14 +177,14 @@ export default function Busca({ ir }: { perfil: string; ir: Ir }) {
             placeholder="Obra, medição ou processo…" aria-label="Buscar obra, medição ou processo"
             role="combobox" aria-autocomplete="list" aria-expanded={aberta} aria-controls={idLista}
             aria-activedescendant={aberta && ativo >= 0 ? `${id}-op-${ativo}` : undefined}
-            aria-keyshortcuts="/ Control+K Meta+K" autoComplete="off" spellCheck={false}
+            aria-keyshortcuts={ehMac() ? "/ Meta+K" : "/ Control+K"} autoComplete="off" spellCheck={false}
             onChange={ev => { setTexto(ev.target.value); setLista(true); setAtivo(-1); }}
             onFocus={() => setLista(true)} onKeyDown={teclas} />
           <button type="button" className="btn btn--pequeno busca__fechar" onClick={() => { setTexto(""); fechar(true); }}>
             Fechar
           </button>
         </div>
-        <div className="busca__resultado" hidden={!aberta} aria-busy={buscando}>
+        <div className="busca__resultado" hidden={!aberta} aria-busy={buscando} onMouseDown={ev => ev.preventDefault()}>
           {erro && <Falha className="busca__falha">Não deu para buscar agora. Tente de novo em instantes.</Falha>}
           <div id={idLista} role="listbox" aria-label="Resultados da busca" className="busca__lista">
             {!erro && secoes.map(s => (

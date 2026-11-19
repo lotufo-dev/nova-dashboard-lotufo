@@ -155,6 +155,73 @@ describe("Busca", () => {
     }
   });
 
+  /** Tecla num elemento qualquer; devolve se o atalho a tomou (preventDefault). */
+  function apertar(alvo: Element, init: KeyboardEventInit): boolean {
+    const ev = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+    alvo.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  }
+
+  it("dentro de textarea e de editor, \"/\" e' texto; fora do Mac, Ctrl+K abre a busca e Cmd+K nao", () => {
+    montar();
+    const area = document.createElement("textarea");
+    const editor = document.createElement("div");
+    editor.setAttribute("contenteditable", "true");     // o jsdom nao implementa a propriedade contentEditable
+    document.body.append(area, editor);
+    try {
+      expect(apertar(area, { key: "/" })).toBe(false);
+      expect(apertar(editor, { key: "/" })).toBe(false);
+      expect(apertar(area, { key: "k", metaKey: true })).toBe(false);
+      expect(apertar(area, { key: "k", ctrlKey: true })).toBe(true);
+    } finally {
+      area.remove(); editor.remove();
+    }
+  });
+
+  it("no Mac, so' Cmd+K abre a busca: o Ctrl+K fica com o campo de texto (apaga ate' o fim da linha)", () => {
+    const plataforma = vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    try {
+      montar();
+      const area = document.createElement("textarea");
+      document.body.append(area);
+      expect(apertar(area, { key: "k", ctrlKey: true })).toBe(false);
+      expect(apertar(area, { key: "k", metaKey: true })).toBe(true);
+      expect(campo().getAttribute("aria-keyshortcuts")).toBe("/ Meta+K");
+      area.remove();
+    } finally {
+      plataforma.mockRestore();
+    }
+  });
+
+  it("com uma janela aberta, o atalho nao age", () => {
+    montar();
+    const janela = document.createElement("dialog");
+    janela.setAttribute("open", "");
+    document.body.append(janela);
+    try {
+      expect(apertar(document.body, { key: "/" })).toBe(false);
+      expect(apertar(document.body, { key: "k", ctrlKey: true })).toBe(false);
+    } finally {
+      janela.remove();
+    }
+  });
+
+  it("sair do campo com Tab fecha a lista; o clique num item nao tira o foco do campo", async () => {
+    api.mockResolvedValue(CHEIA);
+    montar();
+    await digitar("15");
+    const opcoes = await within(lista()).findAllByRole("option");
+    // o clique comeca com mousedown: a lista o segura para o campo nao perder o foco
+    expect(fireEvent.mouseDown(opcoes[0])).toBe(false);
+    expect(fireEvent.mouseDown(lista())).toBe(false);
+    // dentro da caixa (o Fechar do celular) a lista continua
+    fireEvent.blur(campo(), { relatedTarget: screen.getByRole("button", { name: "Fechar" }) });
+    expect(campo().getAttribute("aria-expanded")).toBe("true");
+    fireEvent.blur(campo(), { relatedTarget: screen.getByRole("button", { name: "antes" }) });
+    expect(campo().getAttribute("aria-expanded")).toBe("false");
+    expect(document.querySelector(".busca__resultado")!.hasAttribute("hidden")).toBe(true);
+  });
+
   it("no celular, o botao da lupa abre o campo e o Fechar o fecha", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {

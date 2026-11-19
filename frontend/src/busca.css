@@ -1,10 +1,12 @@
 /* BUSCA UNICA no topo (Busca.tsx, #819). Na barra do topo (`.topo`) o caminho fica com o que sobra; a busca tem
    largura propria (`flex: none`) e os resultados abrem POR CIMA da pagina, presos a' direita do campo, sem empurrar
-   nada. Ate' 767 px o campo vira o botao da lupa: fechado, o caminho fica inteiro; aberto, o campo cobre a barra. */
+   nada. Abaixo de 1024 px o campo vira o botao da lupa: fechado, o caminho fica inteiro; aberto, o campo cobre a
+   barra. Entre 768 e 1023 px o menu largo ainda ocupa 232 px, e um campo de 200 px deixava o caminho com 89 px (uma
+   palavra por linha na pagina da medicao): por isso a lupa vale ate' 1023 px, e nao so' no celular. */
 
 .busca { position: relative; flex: none; }
 
-/* o botao da lupa so' existe no celular */
+/* o botao da lupa so' existe abaixo de 1024 px */
 .busca__abrir {
   display: none; align-items: center; justify-content: center;
   width: var(--alvo-minimo); height: var(--alvo-minimo); padding: 0;
@@ -17,9 +19,9 @@
   position: absolute; left: var(--espaco-p); top: 50%; transform: translateY(-50%);
   color: var(--cor-texto-terciario); pointer-events: none;
 }
-/* 1440: cerca de 320 px; 1024: cerca de 230 px (o caminho fica com o resto) */
+/* o campo cresce com a janela: 180 px a 1024, 240 a 1100, 320 de 1180 em diante (o caminho fica com o resto) */
 .busca__campo {
-  width: clamp(200px, 22vw, 320px); min-width: 0;
+  width: clamp(180px, 100vw - 860px, 320px); min-width: 0;
   padding-left: calc(var(--espaco-p) + 18px + var(--espaco-pp));
   font-size: var(--texto-meta);
 }
@@ -58,7 +60,7 @@
 .busca__vazio { margin: 0; padding: var(--espaco-pp) var(--espaco-p); font-size: var(--texto-meta); color: var(--cor-texto-secundario); }
 .busca__falha { margin: var(--espaco-mini) var(--espaco-pp); }
 
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   .busca__abrir { display: inline-flex; }
   .busca__caixa { display: none; }
   /* aberto: o campo por cima da barra do topo, na largura da janela; os resultados logo abaixo, no fluxo do painel */
