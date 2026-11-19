@@ -129,6 +129,29 @@ def test_montar_mtpar_carta_notas_e_certidoes_na_ordem_do_orgao(cenario):
     assert protocolo.detalhe(c, pid)["situacao"] == "montado"
 
 
+def test_nota_anexada_depois_de_montar_bloqueia_ate_montar_de_novo(cenario):
+    """Issue #873 (migracao 096): o pacote guarda as notas que levou. Nota anexada depois da montagem nao esta' no PDF
+    nem na carta: o envio espera montar de novo. Onde as notas vao soltas (SINFRA) nao ha' o que montar."""
+    c, ids = cenario
+    pid = protocolo.criar(c, ids["uid"], ids["mtpar"], "unico", [ids["mtpar_exec"]], "301")
+    protocolo.montar(c, ids["uid"], pid)
+    p = protocolo._linha(c, pid)
+    nota = c.execute("SELECT id FROM medicao_documentos WHERE medicao_id=? AND tipo_doc='nfs'",
+                     (ids["mtpar_exec"],)).fetchone()[0]
+    assert json.loads(p["montado_notas"]) == [nota] and protocolo.notas_do_pacote_mudaram(c, p) is None
+    rel, sha = _gravar("notas", _pdf("NFS-e 2399"))
+    c.execute("INSERT INTO medicao_documentos (medicao_id, fonte, tipo_doc, nome, numero_nf, item_id, arquivo, sha256, "
+              "tamanho) VALUES (?, 'operacao', 'nfs', 'NFS-e 2399.pdf', '2399', ?, ?, ?, 10)",
+              (ids["mtpar_exec"], f"pdf:{sha}", rel, sha))
+    c.commit()
+    assert protocolo.motivos_bloqueio(c, protocolo._linha(c, pid), D(2026, 9, 16)) == [protocolo.PACOTE_NOTAS_MUDARAM]
+    r = protocolo.montar(c, ids["uid"], pid)
+    assert "NFS-e 2399" in "\n".join(_textos(r["arquivo"]))
+    assert protocolo.motivos_bloqueio(c, protocolo._linha(c, pid), D(2026, 9, 16)) == []
+    solto = protocolo.criar(c, ids["uid"], ids["sinfra"], "nota", [ids["sinfra_exec"]], None)
+    assert protocolo.notas_do_pacote_mudaram(c, protocolo._linha(c, solto)) is None
+
+
 def test_objeto_carta_vence_o_do_qdop_no_ref_e_no_corpo(cenario):
     c, ids = cenario
     c.execute("UPDATE contratos SET objeto_carta='Complexo Cultural da Praça da família' WHERE id=?", (ids["mtpar"],))

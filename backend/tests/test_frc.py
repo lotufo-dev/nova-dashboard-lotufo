@@ -421,6 +421,8 @@ def test_nota_substituida_nao_entra_no_pacote_nem_na_carta(conn, usuario, consor
     assinada = _assinar(conn, usuario, mid, _texto, f"FRC {n} assinada de novo.pdf")["documento_id"]
     # o pacote de antes leva a nota antiga e a FRC anterior: o envio espera montar de novo
     assert protocolo.frc_recusadas(conn, protocolo._linha(conn, pid)) == [protocolo.PACOTE_FRC_VELHA]
+    assert protocolo.motivos_bloqueio(conn, protocolo._linha(conn, pid), HOJE_873) == [
+        protocolo.PACOTE_FRC_VELHA, protocolo.PACOTE_NOTAS_MUDARAM]
     corpo = protocolo.corpo_padrao(conn, pid)
     assert "20260000304" in corpo and "20260000204" not in corpo
     protocolo.montar(conn, usuario["id"], pid, hoje=HOJE_873)
@@ -434,24 +436,89 @@ def test_nota_substituida_nao_entra_no_pacote_nem_na_carta(conn, usuario, consor
         "NF 20260000205", "NF 2284", "NF 2286", "NF 20260000304"]
 
 
-def test_nota_nao_lida_so_fica_fora_do_envio_com_as_esperadas_todas_atendidas(conn, usuario, consorcio14, _texto):  # noqa: F811
-    """Issue #873: enquanto falta nota esperada, o PDF que a leitura nao entendeu pode ser a que falta e continua
-    indo; com as quatro atendidas, ele nao e' nota da FRC e fica fora. A nota de empresa que o espelho nao espera
-    tambem fica fora."""
+def test_com_nota_esperada_em_falta_so_a_substituida_fica_fora(conn, usuario, consorcio14, _texto):  # noqa: F811
+    """Issue #873 (segunda revisao da PR): enquanto falta nota esperada, o PDF que a leitura nao entendeu e o lido que
+    nao casa com nenhuma esperada podem ser a nota que falta e continuam indo; a substituida (outra nota da mesma
+    empresa e municipio anexada depois) fica fora mesmo assim. Com as quatro atendidas, tudo o que sobra fica fora."""
     _, mid = consorcio14
-    docs = [r["documento_id"] for r in _anexar(conn, usuario, mid, _texto, NOTAS_FRC[:3])]
+    docs = [r["documento_id"] for r in _anexar(conn, usuario, mid, _texto, NOTAS_FRC[:3])]   # falta a 2286
     _texto("NOTA FISCAL DE SERVIÇOS ELETRÔNICA\nleiaute que o leitor ainda nao conhece")
     nao_lida = notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto("rascunho"), "rascunho.pdf")["documento_id"]
+    # nota lida de CNPJ que o cadastro nao liga a nenhuma consorciada (a filial, por exemplo): pode ser a que falta
+    _texto(_cuiaba(ficticios.mascara(ficticios.RIVOLI), 77, "Várzea Grande", 200000002, 8800000, 4000000, 2400000))
+    estranha = notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto("nota 77"), "NFSE 77.pdf")["documento_id"]
+    assert [x["documento_id"] for x in frc.situacao(conn, mid)["sobras"]] == [estranha]
     assert frc.fora_do_envio(conn, mid) == set()
-    assert [d["id"] for d in protocolo._docs_nota(conn, [mid])] == [*docs, nao_lida]
+    assert [d["id"] for d in protocolo._docs_nota(conn, [mid])] == [*docs, nao_lida, estranha]
+    # a Beta troca a nota de Varzea Grande com a 2286 ainda em falta: a antiga ja' fica fora
+    _texto(_texto_da(NOTA_TROCADA))
+    nova = notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto("nota 304"), "NFSE 304.pdf")["documento_id"]
+    assert frc.fora_do_envio(conn, mid) == {docs[0]}
+    assert [d["id"] for d in protocolo._docs_nota(conn, [mid])] == [*docs[1:], nao_lida, estranha, nova]
+    # a 2286 chega: as quatro esperadas atendidas, e o que sobra nao e' nota da FRC
     _texto(_texto_da(NOTAS_FRC[3]))
     ultima = notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto("nota 2286"), "NFSE 2286.pdf")["documento_id"]
-    assert frc.fora_do_envio(conn, mid) == {nao_lida}
-    assert [d["id"] for d in protocolo._docs_nota(conn, [mid])] == [*docs, ultima]
-    # nota lida de empresa que o espelho nao espera: nao atende nenhuma esperada
-    _texto(_cuiaba(ficticios.mascara(ficticios.RIVOLI), 77, "Cuiabá", 100000, 4400, 2000, 1200))
-    estranha = notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto("nota 77"), "NFSE 77.pdf")["documento_id"]
-    assert frc.fora_do_envio(conn, mid) == {nao_lida, estranha}
+    assert frc.fora_do_envio(conn, mid) == {docs[0], nao_lida, estranha}
+    assert [d["id"] for d in protocolo._docs_nota(conn, [mid])] == [*docs[1:], nova, ultima]
+
+
+def _pacote_da_prefeitura(conn, usuario, cid, mid, _texto, assinar: bool):  # noqa: F811
+    """As quatro notas (a FRC sai sozinha), a assinada se pedida, e o pacote montado na familia prefeitura."""
+    conn.execute("UPDATE orgaos SET familia='prefeitura' WHERE id=(SELECT orgao_id FROM contratos WHERE id=?)", (cid,))
+    conn.commit()
+    for nota in NOTAS_FRC:
+        _texto(_texto_da(nota))
+        notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto(f"nota {nota[1]}"), f"NFSE {nota[1]}.pdf")
+    if assinar:
+        _assinar(conn, usuario, mid, _texto, f"FRC {ULTIMA + 1} assinada.pdf")
+    pid = protocolo.criar(conn, usuario["id"], cid, "unico", [mid], "7")
+    protocolo.montar(conn, usuario["id"], pid, hoje=HOJE_873)
+    return pid
+
+
+def test_pacote_montado_sem_a_assinada_bloqueia_quando_a_nota_e_trocada(conn, usuario, consorcio14, _texto):  # noqa: F811
+    """Issue #873 (segunda revisao da PR): sem FRC assinada anexada, a regra da 041 nao segura o pacote velho. O pacote
+    guarda as notas que levou (096): trocada a nota, o envio e o anexo do assinado esperam montar de novo, e a tela
+    oferece o Montar de novo."""
+    cid, mid = consorcio14
+    pid = _pacote_da_prefeitura(conn, usuario, cid, mid, _texto, assinar=False)
+    p = protocolo._linha(conn, pid)
+    assert len(json.loads(p["montado_notas"])) == 4 and protocolo.notas_do_pacote_mudaram(conn, p) is None
+    assert protocolo.bloqueio(conn, p, HOJE_873) is None
+    _texto(_texto_da(NOTA_TROCADA))
+    notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto(f"nota {NOTA_TROCADA[1]}"), f"NFSE {NOTA_TROCADA[1]}.pdf")
+    p = protocolo._linha(conn, pid)
+    assert protocolo.motivos_bloqueio(conn, p, HOJE_873) == [protocolo.PACOTE_NOTAS_MUDARAM]
+    with pytest.raises(ValueError, match="As notas que vão ao órgão mudaram"):
+        protocolo.receber_assinado(conn, usuario["id"], pid, _pdf_com_texto("assinado do pacote de antes"))
+    d = notas_envio.detalhe_envio(conn, pid, hoje=HOJE_873)
+    assert d["bloqueio"] == protocolo.PACOTE_NOTAS_MUDARAM and d["remontar"] and d["remontar_liberado"]
+    assert d["envio"]["situacao"] == "bloqueado" and "Pacote com as notas de antes: monte de novo" in d["envio"]["aviso"]
+    protocolo.montar(conn, usuario["id"], pid, hoje=HOJE_873)
+    texto = _texto_do_pacote(conn, pid)
+    assert "nota 20260000304" in texto and "20260000204" not in texto
+    assert protocolo.notas_do_pacote_mudaram(conn, protocolo._linha(conn, pid)) is None
+
+
+def test_pacote_montado_antes_da_096_so_pede_montar_de_novo_com_nota_que_nao_vai(conn, usuario, consorcio14, _texto):  # noqa: F811
+    """Issue #873: o pacote de antes da migracao 096 nao diz que notas levou. Sem nota sobrando na medicao ele segue
+    valendo; com a nota trocada (o pacote pode ter a antiga dentro, mesmo com a FRC assinada vigente nele), o envio
+    espera montar de novo."""
+    cid, mid = consorcio14
+    pid = _pacote_da_prefeitura(conn, usuario, cid, mid, _texto, assinar=True)
+    conn.execute("UPDATE protocolos SET montado_notas=NULL WHERE id=?", (pid,))
+    conn.commit()
+    assert protocolo.motivos_bloqueio(conn, protocolo._linha(conn, pid), HOJE_873) == []
+    # como ficou o pacote montado com a regra antiga: as cinco notas e a assinada da FRC vigente dentro
+    _texto(_texto_da(NOTA_TROCADA))
+    notas.anexar_pdf(conn, usuario, mid, _pdf_com_texto(f"nota {NOTA_TROCADA[1]}"), f"NFSE {NOTA_TROCADA[1]}.pdf")
+    frc.gerar(conn, usuario, mid, ULTIMA + 1)
+    assinada = _assinar(conn, usuario, mid, _texto, f"FRC {ULTIMA + 1} assinada de novo.pdf")["documento_id"]
+    conn.execute("UPDATE protocolos SET montado_frcs=? WHERE id=?", (json.dumps([assinada]), pid))
+    conn.commit()
+    p = protocolo._linha(conn, pid)
+    assert protocolo.frc_recusadas(conn, p) == []
+    assert protocolo.motivos_bloqueio(conn, p, HOJE_873) == [protocolo.PACOTE_NOTAS_MUDARAM]
 
 
 def test_obra_propria_e_medicao_sem_espelho_mandam_todas_as_notas(conn, usuario, consorcio14, _texto):  # noqa: F811

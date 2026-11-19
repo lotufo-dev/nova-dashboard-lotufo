@@ -7,18 +7,28 @@ de nota da medição. A nota antiga ia no pacote, nos anexos soltos do e-mail e 
 de uma FRC que não a somava (#873, achado em 19/11/2026 pela revisão da ronda).
 
 Decidimos que o envio usa a regra da FRC. Na obra de consórcio com espelho vigente que espera notas, vai ao órgão
-o PDF de nota que a FRC soma. Ficam fora:
+o PDF de nota que a FRC soma. Fica fora o PDF que o sistema sabe que não é nota da FRC:
 
-- o PDF lido que não atende nenhuma saída: a nota antiga, quando outra da mesma empresa e município foi anexada
-  depois, e a nota de empresa que o espelho não espera;
-- com todas as saídas atendidas, o PDF que a leitura não entendeu (rascunho, leiaute desconhecido). Enquanto falta
-  alguma nota esperada ele pode ser a que falta, e continua indo.
+- a nota substituída: o PDF lido que sobra, de empresa e município cuja nota esperada já é atendida por outro PDF
+  (o último anexado). Vale mesmo com outra nota ainda em falta;
+- com todas as notas esperadas atendidas, tudo o que sobra: o PDF lido que não atende nenhuma e o que a leitura não
+  entendeu (rascunho, leiaute desconhecido).
+
+Enquanto falta nota esperada, o PDF que sobra sem ser substituído (CNPJ que o cadastro não liga à empresa,
+município lido diferente do espelho) e o não lido podem ser a nota que falta, e continuam indo. A segunda revisão
+da PR mostrou que tirar toda sobra nesse momento faria o e-mail sair com uma nota a menos do que saía antes.
 
 A nota que fica fora não é apagada nem marcada: continua em `medicao_documentos`, com a auditoria do anexo, e a
 tela da FRC continua mostrando que ela não corresponde a nenhuma nota esperada.
 
 A regra mora em `frc.fora_do_envio`, e `protocolo._docs_nota` é a única lista de onde saem o PDF único, os anexos
 soltos, os números da carta, o corpo do e-mail e o passo de envio da tela.
+
+Onde as notas vão dentro do PDF único, o pacote montado passa a guardar os PDFs de nota que levou
+(`protocolos.montado_notas`, migração 096), como já guardava a FRC assinada. Se a lista que vai ao órgão muda
+depois da montagem, o envio e o anexo do assinado ficam bloqueados até montar de novo. Sem isso, o pacote montado
+antes da troca saía com a nota antiga quando a FRC assinada ainda não estava anexada, e a tela listava as notas de
+agora para um PDF que tinha as de antes.
 
 ## Opções consideradas
 
@@ -35,15 +45,16 @@ soltos, os números da carta, o corpo do e-mail e o passo de envio da tela.
 
 ## Consequências
 
-- **O envio e a FRC não discordam mais.** O que a FRC assinada lista é o que vai. Nota trocada depois da FRC a
-  deixa desatualizada, o que já bloqueava o envio até gerar e assinar de novo; o pacote montado antes fica
-  bloqueado até montar de novo (issue #169), e a nova montagem já sai sem a nota antiga.
+- **O envio e a FRC não discordam mais quando a FRC está completa.** O que a FRC assinada lista é o que vai.
 - **Não há ato a fazer nem dado a corrigir.** Medição que já tinha nota sobrando passa a mandar só a vigente assim
-  que o código novo entra, sem migração.
-- **O pacote montado antes desta regra não é refeito sozinho.** Se ele foi montado com a nota antiga dentro e a
-  FRC assinada vigente já estava nele, nada o bloqueia: é preciso montar de novo antes de enviar.
+  que o código novo entra.
+- **O pacote montado guarda as notas que levou, em qualquer obra.** Nota anexada depois de montar bloqueia o envio
+  até montar de novo, também na obra própria: o PDF e a carta não a trazem. Antes o pacote saía sem ela.
+- **O pacote montado antes da migração 096 não diz o que levou.** Ele só pede para montar de novo quando alguma
+  nota da medição já não vai ao órgão, que é o caso em que pode ter a nota antiga dentro. Os demais seguem valendo.
 - **"Vale o último anexado" não tem volta pela tela.** Anexar por engano uma nota da mesma empresa e município
   depois da certa faz a errada valer, e arrastar de novo o PDF certo não muda a ordem (o mesmo arquivo não entra
   duas vezes). Isso já era assim na FRC; agora vale também para o envio. Fica no `docs/backlog.md`.
-- **A obra própria continua como estava**: todos os PDFs de nota anexados vão, inclusive o de nota cancelada ou
+- **A obra própria continua mandando todos os PDFs de nota anexados**, inclusive o de nota cancelada ou
   desconsiderada. É outro defeito, com outra fonte de verdade, e está no `docs/backlog.md`.
+- **A tela do envio não diz qual PDF ficou de fora.** Isso aparece só no quadro da FRC, no passo da nota.
