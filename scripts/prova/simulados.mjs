@@ -945,8 +945,8 @@ const medicaoAchada = (id, contrato_id, titulo, competencia, obra, contratante) 
 const OBRA_LONGA = "Rodovia Exemplo, trecho do entroncamento ao distrito, lote 2";
 export const BUSCA_CHEIA = {
   obras: { total: 2, itens: [
-    { id: 1, nome: OBRA_LONGA, instrumento: "900/2026", contratante: "SINFRA", orgao_sub: "SUEF II" },
-    { id: 2, nome: "Corredor Beta", instrumento: "901/2026", contratante: "Pref. Cuiabá", orgao_sub: null },
+    { id: 1, nome: OBRA_LONGA, contratante: "SINFRA", orgao_sub: "SUEF II" },
+    { id: 2, nome: "Corredor Beta", contratante: "Pref. Cuiabá", orgao_sub: null },
   ] },
   medicoes: { total: 23, itens: [
     medicaoAchada(11, 1, "15ª Medição", "2026-10", OBRA_LONGA, "SINFRA"),
@@ -955,8 +955,8 @@ export const BUSCA_CHEIA = {
     medicaoAchada(14, 3, "15ª Medição de Projeto", "2026-07", "Trevo Eta", "MTPAR"),
     medicaoAchada(15, 4, "15ª Medição", "2026-05", "Rodovia Capa", "SINFRA"),
     medicaoAchada(16, 5, "15ª Medição", "2026-02", "Ponte Gama", "SES-MT"),
-    medicaoAchada(17, 6, "15ª Medição", "2025-12", "Escola Delta", "MTPAR"),
-    medicaoAchada(18, 7, "15ª Medição", "2025-09", "Anel Viário Zeta", "SINFRA"),
+    { ...medicaoAchada(17, 6, "15ª Medição", "2025-12", "Escola Delta", "MTPAR"), estado: "cancelada" },
+    { ...medicaoAchada(18, 7, "15ª Medição", "2025-09", "Anel Viário Zeta", "SINFRA"), estado: "prevista" },
   ] },
   processos: { total: 2, itens: [
     { id: 1, numero: "ORGAO-PRO-2026/00015", assunto: `${OBRA_LONGA} · 15ª Medição` },
