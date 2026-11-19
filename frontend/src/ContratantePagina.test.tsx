@@ -26,9 +26,9 @@ const obra = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLis
   andamento: { ritmo_centavos: null, necessario_centavos: null }, medido_mes: doMes(0, 0), ...extra });
 
 const OBRAS: ObraLista[] = [
-  obra(1, "Estações BRT", { andamento: { ritmo_centavos: 2_400_000_00, necessario_centavos: 8_800_000_00 }, medido_mes: doMes(80_00, 100_00),
-    posicao: { vigente_centavos: 1000_00, medido_centavos: 370_00, saldo_centavos: 630_00, a_receber_centavos: 120_00 } }),
-  obra(2, "Cavalaria", { andamento: { ritmo_centavos: 81_00, necessario_centavos: 100_00 }, medido_mes: doMes(60_00, 60_00) }),
+  obra(1, "Estações BRT", { andamento: { ritmo_centavos: 3_000_000_00, necessario_centavos: 7_500_000_00 }, medido_mes: doMes(80_00, 100_00),
+    posicao: { vigente_centavos: 1000_00, medido_centavos: 650_00, saldo_centavos: 350_00, a_receber_centavos: 120_00 } }),
+  obra(2, "Cavalaria", { andamento: { ritmo_centavos: 78_00, necessario_centavos: 100_00 }, medido_mes: doMes(60_00, 60_00) }),
   obra(3, "5 Bairros", { execucao_fim_vigente: "2026-08-31", dias_execucao: -24, andamento: { ritmo_centavos: 10_00, necessario_centavos: null } }),
   obra(4, "Trevo Antigo", { estado: "encerrado", execucao_fim_vigente: "2025-12-31" }),
   obra(5, "Granito", { orgao: "MTPAR", contratante: "MTPAR", contratante_chave: "mtpar",
@@ -163,7 +163,7 @@ describe("Página do contratante (#805)", () => {
     await waitFor(() => expect(limpo(faixa.textContent)).toContain("47 dias"));
     expect([...faixa.querySelectorAll(".obras-numero")].map(n => limpo(n.textContent))).toEqual([
       "ContratadoR$ 3.000,0075% da carteira",              // 3 de 4 obras em andamento de 1.000,00
-      "Medido (29%)R$ 870,00",
+      "Medido (38%)R$ 1.150,00",
       "Medido em agostoR$ 140,00▼ −12,5%× julcaiu 12,5% em relação a julho",      // 140,00 contra 160,00
       "A receberR$ 120,00",
       "Prazo de pagamento47 dias",
@@ -184,11 +184,11 @@ describe("Página do contratante (#805)", () => {
     const celulas = (nome: string) => [...linha(nome).querySelectorAll("td")].map(td => limpo(td.textContent));
     await waitFor(() => expect(linha("Estações BRT").querySelector(".obras-situacao")).toBeTruthy());
     expect(celulas("Estações BRT")).toEqual([
-      "Estações BRTexecução até 31/03/2027", "37%", "Devagar · 27% do necessárioR$ 2,4 mi/mês de R$ 8,8 mi",
+      "Estações BRTexecução até 31/03/2027", "65%", "Devagar · 40% do necessárioR$ 3 mi/mês de R$ 7,5 mi",
       "R$ 80,00▼ −20,0%× julcaiu 20,0% em relação a julho", "R$ 120,00", "Críticogarantia não cobre o fim da execuçãomais 1 motivo de Estações BRT"]);
     expect(linha("Estações BRT").querySelector(".obras-em-aberto")).toBeTruthy();
     expect(celulas("Cavalaria")).toEqual([
-      "Cavalariaexecução até 31/03/2027", "25%", "Atenção · 81% do necessárioR$ 81/mês de R$ 100",
+      "Cavalariaexecução até 31/03/2027", "25%", "Atenção · 78% do necessárioR$ 78/mês de R$ 100",
       "R$ 60,00● estável× julestável em relação a julho", "R$ 0,00", "Em dia"]);
     expect(linha("Cavalaria").querySelector(".obras-em-aberto")).toBeNull();
     // execução vencida: sem necessário, sem leitura do andamento; o motivo diz o que há
@@ -319,7 +319,7 @@ describe("Página do contratante (#805)", () => {
       obra(1, "Estações BRT", { andamento: fora({ motivo: "prazo_no_fim", prorrogacao_pedida: true }) }),
       obra(2, "Cavalaria", { andamento: fora({ motivo: "sem_medicao", sem_medicao_desde: "2026-05" }) }),
       obra(3, "5 Bairros", { andamento: fora({ motivo: "prorrogacao_pedida", prorrogacao_pedida: true }) }),
-      obra(4, "Leblon", { andamento: { ritmo_centavos: 27_00, necessario_centavos: 100_00 } }),
+      obra(4, "Leblon", { andamento: { ritmo_centavos: 40_00, necessario_centavos: 100_00 } }),
     ];
     api.mockImplementation(async (caminho: string) => caminho === "/api/contratos" ? obras : PAINEL);
     abrir("/obras/contratante/sinfra");
@@ -328,7 +328,7 @@ describe("Página do contratante (#805)", () => {
     expect(limpo(andamento("Estações BRT").textContent)).toBe("Prazo no fim · prorrogação pedida");
     expect(limpo(andamento("Cavalaria").textContent)).toBe("Sem medição desde 05/2026");
     expect(limpo(andamento("5 Bairros").textContent)).toBe("Prorrogação pedida");
-    expect(limpo(andamento("Leblon").textContent)).toBe("Devagar · 27% do necessárioR$ 27/mês de R$ 100");
+    expect(limpo(andamento("Leblon").textContent)).toBe("Devagar · 40% do necessárioR$ 40/mês de R$ 100");
     expect(tabela.querySelectorAll(".andamento__trilho").length).toBe(1);
     expect(andamento("Estações BRT").querySelector(".andamento--fora")).toBeTruthy();
     // a contagem só olha quem tem leitura: uma obra, e ela está devagar; a do prazo no fim vai ao lado, em tinta

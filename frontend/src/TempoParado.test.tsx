@@ -1,5 +1,5 @@
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fraseDoTempo, textoDoTempo, type Parada } from "./parada";
 import TempoParado from "./TempoParado";
 
@@ -8,7 +8,9 @@ const parada = (extra: Partial<Parada>): Parada => ({
   desde: "2026-11-04", dias_uteis: 10, hoje: false, situacao: "critico", prazo_orgao_dias: null, esperada: null, alem_do_prazo: false, ...extra });
 
 describe("TempoParado (#805)", () => {
-  afterEach(cleanup);
+  // so' a data e' falsa: o ano de hoje decide se a data esperada leva o ano (#816)
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-18T15:00:00Z")); });
+  afterEach(() => { cleanup(); vi.useRealTimers(); });
 
   it("o texto dos dias úteis: hoje, menos de um dia útil, singular e plural", () => {
     expect(textoDoTempo({ dias_uteis: 0, hoje: true })).toBe("hoje");
@@ -34,6 +36,22 @@ describe("TempoParado (#805)", () => {
     const alem = render(<TempoParado parada={parada({ dias_uteis: 41, prazo_orgao_dias: 45, esperada: "2026-11-09", alem_do_prazo: true })} />);
     expect(alem.container.querySelector(".tempo-parado__prazo")?.textContent).toBe("prazo do órgão venceu em 09/11");
     expect(alem.container.querySelector(".selo--critico")).not.toBeNull();
+  });
+
+  it("a data esperada de outro ano leva o ano: a do ano que vem não se lê como passada, e a vencida no ano anterior também diz o ano (#816)", () => {
+    const longe = render(<TempoParado parada={parada({ dias_uteis: 98, situacao: "andamento", prazo_orgao_dias: 210, esperada: "2027-01-30" })} />);
+    expect(longe.container.querySelector(".tempo-parado__prazo")?.textContent).toBe("prazo do órgão: 30/01/2027");
+    cleanup();
+    const antiga = render(<TempoParado parada={parada({ dias_uteis: 230, prazo_orgao_dias: 38, esperada: "2025-12-20", alem_do_prazo: true })} />);
+    expect(antiga.container.querySelector(".tempo-parado__prazo")?.textContent).toBe("prazo do órgão venceu em 20/12/2025");
+    cleanup();
+    // virou o ano: a data do ano corrente perde o ano, a do anterior ganha
+    vi.setSystemTime(new Date("2027-01-05T15:00:00Z"));
+    expect(render(<TempoParado parada={parada({ situacao: "andamento", prazo_orgao_dias: 210, esperada: "2027-01-30" })} />)
+      .container.querySelector(".tempo-parado__prazo")?.textContent).toBe("prazo do órgão: 30/01");
+    cleanup();
+    expect(render(<TempoParado parada={parada({ prazo_orgao_dias: 45, esperada: "2026-12-27", alem_do_prazo: true })} />)
+      .container.querySelector(".tempo-parado__prazo")?.textContent).toBe("prazo do órgão venceu em 27/12/2026");
   });
 
   it("em frase, para o cartão do Resumo das medições: o mesmo selo e o mesmo prazo, e nada sem a data do evento", () => {
