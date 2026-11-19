@@ -24,7 +24,8 @@ def painel(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Conne
 @router.get("/api/fechamento")
 def fechamento_mensal(_=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
     """Issue #748: medido, aprovado, protocolado e recebido por mes de competencia de 2025 e 2026, na cota, com o em
-    aberto nota a nota (`app/fechamento.py`)."""
+    aberto nota a nota (`app/fechamento.py`). Issue #815: e os mesmos numeros de cada contratante no ano
+    (`por_contratante`), que somam o total do ano."""
     return fechamento.fechamento(conn)
 
 
