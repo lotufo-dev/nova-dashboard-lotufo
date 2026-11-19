@@ -341,12 +341,15 @@ test("sem nada a renovar o bloco não aparece, o contador some e o chip que venc
   const chip = within(linhaDe("Lotufo")).getByText("FGTS", { selector: ".doc-chip__rotulo" }).closest(".doc-chip")!;
   expect(chip.textContent).toContain("4 d");
   expect(chip.className).toContain("doc-chip--feito");
-  // diretoria, sem nada a renovar: o alto (contador e Anexar) nao existe, so' a legenda
+  // diretoria, sem nada a renovar: no alto so' a legenda (sem contador nem Anexar)
   cleanup();
   vi.mocked(api).mockResolvedValueOnce({ ...PAINEL, renovar_agora: [], empresas: [] });
   render(<DocumentosCertidoes usuario={{ ...usuario, perfil: "diretoria" }} />);
   await screen.findByText("Nenhuma empresa.");
-  expect(document.querySelector(".doc-topo")).toBeNull();
+  const alto = document.querySelector(".doc-topo")!;
+  expect(alto.querySelector(".contador")).toBeNull();
+  expect(alto.querySelector("button")).toBeNull();
+  within(alto as HTMLElement).getByRole("list", { name: "Legenda das cores" });
   expect(screen.queryByRole("region", { name: "Certidões por empresa" })).toBeNull();
 });
 

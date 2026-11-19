@@ -42,33 +42,31 @@ export function Chip({ cor, rotulo, valor, data, href, titulo, semRotulo }: {
 /** A fila de leitura do "Anexar PDF" do alto da pagina: as empresas da digitacao e o que refazer depois de gravar. */
 export type AnexarDaPagina = { empresas: EmpresaDoc[]; aoGravar: () => Promise<void> };
 
-/** A moldura das tres paginas de Documentos (#820): a falha, o anuncio, o alto (a regua grossa, o contador do que pede
- *  acao e o "Anexar PDF"), a legenda da pagina e o "Carregando". O titulo e o caminho sao da barra do topo (#814).
- *  `anexar`: so' nas paginas de onde se anexa (Certidoes e Regularidade), e so' para quem edita; `null` enquanto o
- *  painel nao chegou, com o botao desligado. `refAnexar`: da pagina, que tambem abre a escolha (o "Anexar" da linha). */
+/** A moldura das tres paginas de Documentos (#820): a falha, o anuncio, o alto (a regua grossa; o contador do que pede
+ *  acao a' esquerda; a legenda da pagina e o "Anexar PDF" a' direita, numa linha so') e o "Carregando". O titulo e o
+ *  caminho sao da barra do topo (#814). `anexar`: so' nas paginas de onde se anexa (Certidoes e Regularidade), e so'
+ *  para quem edita; `null` enquanto o painel nao chegou, com o botao desligado. `refAnexar`: da pagina, que tambem abre
+ *  a escolha (o "Anexar" da linha do "Renovar agora"). */
 export function MolduraDocumentos({ classe, erro, carregado, contador, legenda, anexar, refAnexar, children }: {
   classe: string; erro: string; carregado: boolean; contador?: ReactNode; legenda: ItemLegenda[];
   anexar?: AnexarDaPagina | null; refAnexar?: RefObject<AnexarRef>; children: ReactNode;
 }) {
   const [anuncio, setAnuncio] = useState("");
-  const comBotao = anexar !== undefined;
   return (
     <div className={`pagina doc ${classe}`}>
       {erro && <Falha>{erro}</Falha>}
       <p className="sr-only" role="status">{anuncio}</p>
-      {(contador || comBotao) && (
-        <div className="doc-topo">
-          {contador && <p className="doc-topo__conta">{contador}</p>}
-          {comBotao && (
-            <div className="doc-topo__acoes">
-              <button type="button" className="btn btn--primario" disabled={!anexar} onClick={() => refAnexar?.current?.escolher()}>
-                <IconeEnviarNuvem className="icone" />Anexar PDF
-              </button>
-            </div>
+      <div className="doc-topo">
+        {contador && <p className="doc-topo__conta">{contador}</p>}
+        <div className="doc-topo__acoes">
+          <LegendaCor itens={legenda} />
+          {anexar !== undefined && (
+            <button type="button" className="btn btn--primario" disabled={!anexar} onClick={() => refAnexar?.current?.escolher()}>
+              <IconeEnviarNuvem className="icone" />Anexar PDF
+            </button>
           )}
         </div>
-      )}
-      <LegendaCor itens={legenda} />
+      </div>
       {!carregado && !erro && <p className="campo__nota">Carregando…</p>}
       {carregado && <div className="doc-corpo">{children}</div>}
       {/* a fila de leitura do "Anexar PDF" (fica montada para o botao do alto sempre ter onde abrir) */}
