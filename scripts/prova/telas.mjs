@@ -545,6 +545,23 @@ export const TELAS = [
     simular: comSiga(SIGA_COM_PROCESSOS) },
   { rota: "siga", id: "siga-historico-diretoria", caminho: "/siga?processo=2", perfis: ["diretoria"], espera: ".sg__quadro table",
     simular: comSiga(SIGA_COM_PROCESSOS) },
+
+  // ---- Criterio de encerramento do SIGA (#841): o quadro com o sobrestado e o "medição a ligar"; os Encerrados com o
+  // juntado e o encerrado a' mao ("Reabrir" so' para quem edita); o historico com a medicao proposta e o formulario de
+  // encerrar; o historico do encerrado a' mao; e a medicao com a pendencia do protocolo novo. A diretoria ve tudo sem
+  // botao nenhum.
+  { rota: "siga", id: "siga-841-quadro", caminho: "/siga", perfis: TODOS, espera: ".sg-grupo table", simular: comSiga(SIGA_ENCERRAMENTO) },
+  { rota: "siga", id: "siga-841-encerrados", caminho: "/siga", perfis: TODOS, antes: ".sg-grupo table", espera: ".sg__encerrados[open] table",
+    simular: comSiga(SIGA_ENCERRAMENTO), passos: [{ clicar: ".sg__encerrados > summary" }] },
+  { rota: "siga", id: "siga-841-proposta", caminho: "/siga?processo=21", perfis: TODOS, espera: ".sg-hist .sg__filtros",
+    simular: comSiga(SIGA_ENCERRAMENTO) },
+  { rota: "siga", id: "siga-841-encerrar", caminho: "/siga?processo=8", perfis: OPERA, antes: ".sg__quadro",
+    espera: 'form[aria-label="Encerrar processo"]', simular: comSiga(SIGA_ENCERRAMENTO),
+    passos: [{ clicar: '#conteudo button:has-text("Encerrar processo")' }] },
+  { rota: "siga", id: "siga-841-encerrado-a-mao", caminho: "/siga?processo=23", perfis: TODOS, espera: ".sg-hist .sg__filtros",
+    simular: comSiga(SIGA_ENCERRAMENTO) },
+  { rota: "medicao", id: "medicao-841-protocolo-novo", caminho: MEDICAO, perfis: TODOS, espera: "nav.passos",
+    simular: [{ caminho: MEDICOES_DA_OBRA, ajustar: medicaoComProtocoloNovo }] },
 ];
 
 // Rotas do roteador que a prova nao abre, cada uma com o motivo.
@@ -598,3 +615,6 @@ function abrirBusca(texto) {
 
 // ---- As abas da pagina do contratante (#818): o recorte simulado de cada aba (ver simulados.mjs)
 import { ABAS_DA_CARTEIRA, aReceberDoContratante, medicoesDoContratante, SIGA_DO_CONTRATANTE } from "./simulados.mjs";
+
+// ---- Criterio de encerramento do SIGA (#841): o quadro, os encerrados, o historico e a medicao (ver simulados.mjs)
+import { medicaoComProtocoloNovo, SIGA_ENCERRAMENTO } from "./simulados.mjs";
