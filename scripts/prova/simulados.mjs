@@ -289,6 +289,41 @@ export const inicioComVariacoes = painel => {
       ano_anterior: { competencia: mesAntes(competencia, 12), valor_centavos: 2410000003 } } };
 };
 
+// O que faltava apresentar a' diretoria na Inicio (#817): o cadastro de exemplo tem um orgao so' e poucas medicoes, e a
+// tela foi desenhada para varios contratantes com valores de dezenas de milhoes. Aqui o ciclo abre em cinco
+// contratantes (um de nome longo e um sem orgao no cadastro, que nao tem pagina), a faixa do ciclo e o a receber saem
+// da soma das linhas (como no servidor: a tela mostra os dois e eles tem de fechar), e o medido das 12 competencias
+// ganha uma serie regular, com um mes sem medicao. Tudo inventado e redondo.
+//                         contratante, chave, em analise, boletim, nota, protocolado, a receber
+const INI_CONTRATANTES = [
+  ["SINFRA", "sinfra", 150000000, 50000000, 300000000, 900000000, 1300000000],
+  ["MTPAR", "mtpar", 0, 0, 0, 1200000000, 1200000000],
+  ["Pref. Cuiabá", "pref-cuiaba", 60000000, 0, 0, 90000000, 90000000],
+  ["Consórcio Intermunicipal de Desenvolvimento do Vale do Rio Exemplo", "consorcio-exemplo", 0, 20000000, 0, 0, 10000000],
+  ["sem órgão", null, 4000000, 0, 0, 0, 0],
+];
+const INI_ETAPAS = ["em_analise", "boletim", "nota", "protocolado"];
+const INI_MEDIDO = [1000000000, 1100000000, 1200000000, 0, 1300000000, 1400000000, 1500000000, 1600000000, 1700000000,
+  1800000000, 1900000000, 2000000000];
+export const inicioPorContratante = painel => {
+  const linhas = INI_CONTRATANTES.map(([contratante, chave, ...valores]) => ({ contratante, chave,
+    ...Object.fromEntries(INI_ETAPAS.map((e, i) => [`${e}_centavos`, valores[i]])), a_receber_centavos: valores[4] }));
+  const soma = campo => linhas.reduce((s, l) => s + l[campo], 0);
+  return { ...painel,
+    ciclo: painel.ciclo.map(e => INI_ETAPAS.includes(e.etapa)
+      ? { ...e, valor_centavos: soma(`${e.etapa}_centavos`), quantidade: 3 + INI_ETAPAS.indexOf(e.etapa) * 4, mais_antigo_dias: 12 + INI_ETAPAS.indexOf(e.etapa) * 31 }
+      : e),
+    a_receber: { liberado: true, valor_centavos: soma("a_receber_centavos"), mais_60_centavos: 90000000,
+      a_parte: painel.a_receber.a_parte ?? { ano_inicial: "2025", valor_centavos: 0, anterior_centavos: 0, sem_atualizacao_centavos: 0,
+        sem_atualizacao_desde: null } },
+    ciclo_por_contratante: linhas,
+    medido_12m: painel.medido_12m.map((m, i) => ({ ...m, valor_centavos: INI_MEDIDO[i] ?? 0 })) };
+};
+// Nada no ciclo nem a receber, e nenhuma competencia com medido: a linha curta no lugar da tabela e o grafico sem coluna.
+export const inicioSemCiclo = painel => ({ ...painel,
+  ciclo: painel.ciclo.map(e => ({ ...e, valor_centavos: 0, quantidade: 0, mais_antigo_dias: null })),
+  ciclo_por_contratante: [], medido_12m: painel.medido_12m.map(m => ({ ...m, valor_centavos: 0 })) });
+
 // As familias de valor no Fechamento (#805): dois anos, para o medido de cada mes ter o mesmo mes do ano anterior, e
 // as leituras da diferenca entre o aprovado e o pedido. Julho: um corte critico. Agosto: um corte que, no mes, fica
 // pequeno, ao lado de uma medicao dentro da tolerancia de arredondamento (R$ 0,03). Setembro: uma medicao com o pedido

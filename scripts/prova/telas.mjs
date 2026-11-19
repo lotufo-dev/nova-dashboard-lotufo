@@ -36,6 +36,8 @@ import { avisosEmVolume, semAvisos, cabecalhoCom, cabecalhoEmDia, CUSTO_DA_OBRA,
 import { fechamentoEmAbas } from "./simulados.mjs";   // #815: em linha propria, para nao mexer na lista de cima
 
 import { carteiraSimulada, filaSimulada, painelDaCarteira } from "./simulados.mjs";
+// issue #817 (reestrutura 5c): a Inicio com o ciclo por contratante e o medido em 12 meses
+import { inicioPorContratante, inicioSemCiclo } from "./simulados.mjs";
 
 export const PERFIS = ["admin", "engenharia", "diretoria"];
 export const LARGURAS = [1440, 1024, 390];
@@ -124,6 +126,12 @@ export const TELAS = [
   // as familias de valor (#805): os dois numeros do alto com a variacao contra as referencias (subiu, caiu e estavel)
   { rota: "inicio", id: "inicio-variacoes", caminho: "/inicio", perfis: ["diretoria"], espera: ".ini-numero__variacoes .variacao",
     simular: [{ caminho: /^\/api\/inicio\/painel$/, ajustar: inicioComVariacoes }] },
+  // o que faltava apresentar a' diretoria (#817): o ciclo aberto por contratante e o medido em 12 meses, com o volume
+  // que o cadastro de exemplo nao tem; e a mesma tela sem nada no ciclo
+  { rota: "inicio", id: "inicio-por-contratante", caminho: "/inicio", perfis: TODOS, espera: ".ini-orgaos table tfoot",
+    simular: [{ caminho: /^\/api\/inicio\/painel$/, ajustar: inicioPorContratante }] },
+  { rota: "inicio", id: "inicio-sem-ciclo", caminho: "/inicio", perfis: ["diretoria"], espera: ".ini-orgaos .ini-vazio",
+    simular: [{ caminho: /^\/api\/inicio\/painel$/, ajustar: inicioSemCiclo }] },
   // a ultima rede: uma resposta que a tela nao sabe desenhar derruba o desenho e aparece "A tela parou de responder"
   { rota: "inicio", id: "tela-parou", caminho: "/inicio", perfis: TODOS, espera: ".falha", parou: true,
     simular: [{ caminho: /^\/api\/inicio\/painel$/, corpo: RESPOSTA_QUE_QUEBRA }] },

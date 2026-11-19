@@ -75,7 +75,7 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 
 ## Decisões do dono em aberto
 
-- Nenhuma em 17/11/2026: as que havia foram decididas e estão em "Decisões vigentes".
+- 2026-11-18 Início (#817): o número "Medido em <mês>" do alto é valor cheio e leva o complemento do RM (`inicio._medido`, B-01); o gráfico "Medido em 12 meses" logo abaixo e o mês do Fechamento, para onde o número agora leva, são a cota, sem o complemento (`fechamento.medido_das_competencias`). Em obra de consórcio os dois diferem. Decidir se o número do alto passa para a conta do Fechamento ou se o rótulo dele diz a base.
 
 ## Externo (dono)
 
