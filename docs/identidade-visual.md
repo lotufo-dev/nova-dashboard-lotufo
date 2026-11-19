@@ -165,6 +165,9 @@ do rótulo, na etiqueta sob o valor ou na barra.
   dela, ou sem prazo, em andamento. Motivo: o órgão leva semanas para pagar, e dez dias úteis de espera não são
   atraso (#805). A leitura é uma só, do servidor: a mesma medição tem o mesmo selo na fila de trabalho e no cartão
   do Resumo das medições. A recebida não está parada: leva o selo do feito com a data.
+- **No repasse sem baixa não há tempo parado com o órgão.** A medição já foi paga pelo órgão: a linha leva o selo do
+  feito com o dia do pagamento ("órgão pagou em 04/11") e a nota leva o selo de em andamento "repasse sem baixa".
+  O tempo parado com o prazo do órgão é só da nota que o órgão ainda não pagou e da medição protocolada sem nota.
 - **Fica em tinta:** valor de contrato, data, número de documento e o próprio número ao lado da marca ou da
   etiqueta.
 
