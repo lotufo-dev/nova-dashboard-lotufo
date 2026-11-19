@@ -58,17 +58,33 @@ O QUE A #805 ACRESCENTOU (todo numero na cota, em centavos inteiros):
   ano anterior (`ano_anterior`). So' na competencia ja' encerrada (anterior ao mes de hoje: o mes em curso ainda
   recebe medicao, a regra de `fechamento._medido_do_ano_anterior`), e so' quando a referencia e' de `ANO_INICIAL` em
   diante e teve medido; senao, nula.
-- A MESMA ALTURA DO MES ANTERIOR (`mesma_altura`): a referencia da variacao do protocolado e do recebido. O valor de
-  uma etapa e' um retrato de hoje (o medido das medicoes que estao nela), entao a referencia e' o mesmo retrato da
-  competencia anterior na data em que faltavam para ela os mesmos dias: o mesmo dia de hoje, um mes antes (`ate`; dia
-  31 num mes de 30 vira o ultimo dia). Hoje em 18/11 e a competencia de outubro: o que as medicoes de setembro tinham
-  no protocolado e no recebido em 18/10. Onde cada medicao estava naquele dia sai das datas dos eventos, nunca da
-  competencia: estava recebida com a data do recebimento ate' `ate`; estava no protocolado com a data do primeiro
-  protocolo ate' `ate` e sem recebimento ate' la'. O valor e' o medido de hoje dessas medicoes.
-  So' aparece o que tem lastro: se uma medicao da competencia anterior chegou a' etapa sem a data do evento (recebida
-  sem a data do recebimento; protocolada, ou recebida depois de `ate`, sem a data do protocolo na obra que tem a
-  etapa), a referencia daquela etapa vem nula e a tela nao mostra a variacao. Competencia anterior a `ANO_INICIAL` nao
-  serve de referencia: `mesma_altura` vem nulo.
+- A MESMA ALTURA DO MES ANTERIOR (`mesma_altura`): a referencia da variacao do protocolado e do recebido, na data em
+  que faltavam para a competencia anterior os mesmos dias: o mesmo dia de hoje, um mes antes (`ate`; dia 31 num mes de
+  30 vira o ultimo dia). Hoje em 18/11 e a competencia de outubro: o que as medicoes de setembro tinham em 18/10. Onde
+  cada medicao estava naquele dia sai das datas dos eventos, nunca da competencia. O valor e' o medido de hoje dessas
+  medicoes. Competencia anterior a `ANO_INICIAL` nao serve de referencia: `mesma_altura` vem nulo.
+  - RECEBIDO (`recebido_centavos`): o que ja' estava recebido em `ate` (a data do recebimento ate' `ate`). O recebido
+    encerra o ciclo, entao o que esta' na etapa e o que ja' passou por ela sao o mesmo numero: compara com o valor da
+    coluna. Medicao recebida sem a data do recebimento: sem lastro, vem nulo.
+  - PROTOCOLADO, PELO ACUMULADO (decisao do dono de 18/11/2026; `protocolado_acumulado_centavos`, aqui e no alto do
+    resumo): a variacao do protocolado NAO compara o que esta' parado na etapa. Compara tudo o que a competencia ja'
+    protocolou ate' hoje, tenha ou nao sido recebido depois (`protocolado_acumulado_centavos` do resumo), com o que a
+    competencia anterior tinha protocolado ate' `ate` (o de `mesma_altura`). O retrato caia quando o orgao pagava mais
+    rapido (o valor saia do protocolado para o recebido) e a variacao saia vermelha por um fato bom; no acumulado,
+    receber nao tira nada. O valor da coluna continua sendo o retrato (o que esta' na etapa agora): a tela escreve o
+    proprio acumulado ao lado da variacao ("acumulado R$ ..."), porque os dois numeros so' coincidem enquanto nada
+    foi recebido.
+    Quando a medicao ja' estava protocolada (`_protocolado_ate`), com P = a data do PRIMEIRO protocolo da nota e R = a
+    data do recebimento: com P ate' o dia; ou com R ate' o dia, na obra que tem a etapa (ou com P registrado). O
+    RECEBIMENTO PROVA O PROTOCOLO ATE' A DATA DELE: ninguem recebe sem ter protocolado, e a data do recebimento e' data
+    de evento (a baixa do RM ou o registro do administrador). E' o caso do orgao que paga rapido, em que a baixa chega
+    antes de alguem registrar o protocolo; R anterior a P conta por R.
+    So' aparece o que tem lastro. Na REFERENCIA (o dia de corte ja' passou), a medicao sem P que nao da' para situar
+    naquele dia deixa o lado nulo, e a tela nao mostra a variacao: a recebida sem R ou com R depois do corte, e a
+    protocolada pelo estado. No lado de HOJE as duas contam: o estado diz que ja' passaram pelo protocolado. Com isso,
+    no lado de hoje o acumulado fecha com o valor da etapa protocolado mais o da etapa recebido das medicoes de obra
+    que tem a etapa (ou com P registrado); um teste confere. A recebida na obra sem a etapa (sem o passo "Envio da
+    nota") e sem protocolo nunca protocolou: fica fora dos dois lados.
 - PARADA HA' (`parada`): ha' quanto tempo a medicao esta' parada e a leitura disso. E' o MESMO `parada` da fila de
   trabalho da tela Medicoes (`fila_medicoes.paradas`, a unica leitura do tempo parado): os dias uteis desde o evento
   que abriu a situacao atual da medicao, com os limites do SIGA; no passo Pagamento, critico so' depois da data
@@ -170,6 +186,9 @@ def _medicao(conn, m: dict, passos_de) -> dict | None:
     return {"id": m["id"], "contrato_id": m["contrato_id"], "numero": m["numero"], "tipo": m["tipo"],
             "competencia": m["competencia"], "titulo": medicoes.titulo(m), "etapa": da_vez, "etapas": etapas,
             "valor_centavos": _cota(m),
+            # a data do primeiro protocolo da nota, com ou sem a etapa na linha: a do acumulado (`_protocolado_ate`).
+            # Fica na parte, nao vai para a linha da pagina (`_linhas` monta a linha campo a campo)
+            "protocolado_em": datas[5].isoformat() if datas[5] else None,
             # #805: os dois lados da diferenca aprovado x pedido, a conta do Fechamento; nulo sem os dois valores
             "diferenca": fechamento.aprovado_contra_o_pedido(m["estado"], m["valor_protocolado_centavos"],
                                                              m["valor_atestado_centavos"], m["pct"])}
@@ -285,36 +304,60 @@ def _medido(conn, hoje: datetime.date, mes: str, contratos_ids) -> dict:
     return {"valor_centavos": soma[mes], "mes_anterior": referencia(anterior), "ano_anterior": referencia(ano_anterior)}
 
 
-def _mesma_altura(partes: list[dict], competencia: str, ate: datetime.date) -> dict | None:
-    """O protocolado e o recebido que as medicoes da competencia anterior (`partes`, as de `_medicao`) tinham em `ate`,
-    pelas datas dos eventos (ver o texto do modulo). A etapa sem lastro (alguma medicao chegou nela sem a data do
-    evento) vem nula."""
+def _protocolado_ate(partes: list[dict], ate: datetime.date, hoje: datetime.date) -> int | None:
+    """O ACUMULADO protocolado de uma competencia em `ate` (decisao do dono de 18/11/2026): o medido de hoje, na cota,
+    das medicoes dela (`partes`, as de `_medicao`) que ja' estavam protocoladas naquele dia, tenham ou nao sido
+    recebidas depois. Receber nao tira a medicao daqui, ao contrario do valor da etapa. Estava protocolada com o
+    primeiro protocolo da nota ate' o dia ou, na obra que tem a etapa (ou com protocolo registrado), com o recebimento
+    ate' o dia: o recebimento prova o protocolo ate' a data dele. Nulo sem lastro: na referencia (`ate` anterior a
+    `hoje`), a medicao sem a data do protocolo que nao da' para situar naquele dia; ate' hoje, o estado basta (ver o
+    texto do modulo)."""
+    limite = ate.isoformat()
+    ate_hoje = ate >= hoje
+    soma = 0
+    for p in partes:
+        if p["etapa"] not in ("protocolado", "recebido"):
+            continue                                # ainda nao chegou ao protocolado
+        valor = p["valor_centavos"] or 0
+        protocolo = p["protocolado_em"]
+        if protocolo is not None and protocolo <= limite:
+            soma += valor
+            continue
+        if p["etapa"] == "recebido":
+            if protocolo is None and not any(e["etapa"] == "protocolado" for e in p["etapas"]):
+                continue                            # a obra nao tem a etapa e nao ha' protocolo: nunca protocolou
+            recebimento = next(e["data"] for e in p["etapas"] if e["etapa"] == "recebido")
+            if recebimento is not None and recebimento <= limite:
+                soma += valor                       # o recebimento prova o protocolo ate' a data dele
+                continue
+        if protocolo is not None:
+            continue                                # protocolada depois do dia, e nao recebida ate' ele
+        # sem a data do protocolo: a protocolada pelo estado, e a recebida sem a data do recebimento ou recebida depois
+        if not ate_hoje:
+            return None                             # nao da' para dizer se ja' estava protocolada naquele dia
+        soma += valor                               # ate' hoje: o estado diz que ja' passou pelo protocolado
+    return soma
+
+
+def _mesma_altura(partes: list[dict], competencia: str, ate: datetime.date, hoje: datetime.date) -> dict | None:
+    """O que as medicoes da competencia anterior (`partes`, as de `_medicao`) tinham em `ate`, pelas datas dos eventos
+    (ver o texto do modulo): o protocolado acumulado (`_protocolado_ate`) e o recebido. O que nao tem lastro (alguma
+    medicao chegou la' sem a data do evento) vem nulo."""
     if competencia[:4] < diretoria.ANO_INICIAL:
         return None
     limite = ate.isoformat()
-    protocolado = recebido = 0
-    protocolado_tem_lastro = recebido_tem_lastro = True
+    recebido = 0
+    recebido_tem_lastro = True
     for p in partes:
-        etapa = {e["etapa"]: e for e in p["etapas"]}
-        valor = p["valor_centavos"] or 0
-        recebida = p["etapa"] == "recebido"
-        quando = etapa["recebido"]["data"] if recebida else None
-        if recebida and quando is None:
-            recebido_tem_lastro = False
-        ja_recebida = recebida and quando is not None and quando <= limite
-        if ja_recebida:
-            recebido += valor
-        do_protocolo = etapa.get("protocolado")
-        # nunca passou pelo protocolado (a obra nao tem a etapa, ou a medicao ainda nao chegou la'), ou ja' tinha
-        # saido dele em `ate`
-        if do_protocolo is None or do_protocolo["situacao"] == "futuro" or ja_recebida:
+        if p["etapa"] != "recebido":
             continue
-        if do_protocolo["data"] is None or (recebida and quando is None):
-            protocolado_tem_lastro = False       # nao da' para dizer se estava no protocolado naquele dia
-        elif do_protocolo["data"] <= limite:
-            protocolado += valor
+        quando = next(e["data"] for e in p["etapas"] if e["etapa"] == "recebido")
+        if quando is None:
+            recebido_tem_lastro = False
+        elif quando <= limite:
+            recebido += p["valor_centavos"] or 0
     return {"competencia": competencia, "ate": limite,
-            "protocolado_centavos": protocolado if protocolado_tem_lastro else None,
+            "protocolado_acumulado_centavos": _protocolado_ate(partes, ate, hoje),
             "recebido_centavos": recebido if recebido_tem_lastro else None}
 
 
@@ -401,7 +444,9 @@ def _resumo(conn, hoje: datetime.date | None, mes: str | None, contratante: str 
     return {"hoje": hoje.isoformat(), "mes": mes, "em_trabalho": em_trabalho, "atualizacao": _atualizacao(conn),
             "contratante": contratante, "contratantes": contratantes,
             "etapas": _por_etapa(do_mes), "medido": _medido(conn, hoje, mes, do_recorte),
-            "mesma_altura": _mesma_altura(da_anterior, anterior, _um_mes_antes(hoje)),
+            # a variacao do protocolado compara o acumulado: o da competencia ate' hoje e o da anterior ate' `ate`
+            "protocolado_acumulado_centavos": _protocolado_ate(do_mes, hoje, hoje),
+            "mesma_altura": _mesma_altura(da_anterior, anterior, _um_mes_antes(hoje), hoje),
             "diferenca_critica_por_mil": avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL,
             "grupos": [{"contratante": k, **_subtotal(v), "linhas": v}
                        for k, v in sorted(grupos.items(), key=lambda kv: medicoes._chave_nome(kv[0]))],

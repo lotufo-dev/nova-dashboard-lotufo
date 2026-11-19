@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import EmAbertoAParte from "./EmAbertoAParte";
 import {
-  andamentoDaObra, ehDoContratante, escopoDaUrl, fimDaExecucao, filtrarObras, gruposPorContratante, nomeDaObra, pctExecutado, pctPiso, posicaoDe, totaisDe,
+  ehDoContratante, escopoDaUrl, fimDaExecucao, filtrarObras, gruposPorContratante, nomeDaObra, pctExecutado, pctPiso, posicaoDe, totaisDe,
   type ObraLista, type TotaisObras,
 } from "./listaObras";
 import { brl } from "./Medicoes";
 import { Glifo } from "./Selo";
 import Andamento from "./Andamento";
+import { temAndamento } from "./valores";
 import ObrasAndamento from "./ObrasAndamento";
 import { Qdop, Reajustes, type Painel } from "./ObrasCarteira";
 import ObrasContratantes from "./ObrasContratantes";
@@ -226,11 +227,11 @@ export default function Contratos({ ir, busca = {}, aba = "contratantes" }: { ir
                               {/* o medido passou do valor vigente: em critico, como no alto da pagina da obra */}
                               {p.saldo_centavos < 0 && <Glifo situacao="critico" />}{brl(p.saldo_centavos)}</td>
                             <td data-rotulo="Executado"><Executado pct={pctExecutado(o)} /></td>
-                            <td data-rotulo="Andamento" className={`obras-posicao__andamento${andamentoDaObra(o) ? "" : " obras-posicao__andamento--sem"}`}>
-                              {/* sem necessario ou sem ritmo a peca nao desenha nada: fica o tracinho. A tabela ja' tem
-                                  quatro colunas de valor: aqui vai a palavra e a razao; os valores por mes estao na
-                                  pagina do contratante e na vista Andamento */}
-                              {andamentoDaObra(o) ? <Andamento ritmo={o.andamento?.ritmo_centavos} necessario={o.andamento?.necessario_centavos} /> : "—"}
+                            <td data-rotulo="Andamento" className={`obras-posicao__andamento${temAndamento(o.andamento?.leitura) ? "" : " obras-posicao__andamento--sem"}`}>
+                              {/* #822: a leitura vem do servidor; fora da regua a peca escreve o motivo, e sem nada fica o
+                                  tracinho. A tabela ja' tem quatro colunas de valor: aqui vai a palavra e a razao; os
+                                  valores por mes estao na pagina do contratante e na vista Andamento */}
+                              <Andamento leitura={o.andamento?.leitura} vazio="—" />
                             </td>
                             <td data-rotulo="A receber" className="col-num dinheiro num">{p.a_receber_centavos == null ? "—" : brl(p.a_receber_centavos)}</td>
                           </tr>

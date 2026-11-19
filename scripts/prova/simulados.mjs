@@ -385,7 +385,7 @@ export const obrasComAParte = obras => obras.map((o, i) => ({ ...o, posicao: { .
 // `parada` da fila de trabalho: no protocolado, sem prazo do orgao (a MTPAR), dentro do prazo e alem dele; aprovado
 // abaixo do pedido (pequeno e critico) e acima dele; recebida com os dias da nota ao recebimento; planilha/carta
 // ainda nao enviada; obras sem medicao (uma que nunca mediu) e meses anteriores em aberto de tres competencias.
-// O protocolado tem a referencia da mesma altura e o recebido vem sem lastro (sem variacao). `contratante` recorta
+// O protocolado tem a variacao do acumulado contra a mesma altura e o recebido vem sem lastro (sem variacao). `contratante` recorta
 // como o servidor (a MTPAR fica com quatro etapas vazias); `vazio` e' o mes sem medicao nenhuma.
 // A resposta verdadeira da' o dia, a competencia e de quando e' o dado; o resto e' trocado.
 const ETAPAS_DO_RESUMO = ["em_analise", "boletim", "nota", "protocolado", "recebido"];
@@ -462,14 +462,18 @@ export const resumoEmQuadro = ({ contratante = null, vazio = false } = {}) => re
     return { contratante: n, medicoes: quantas(ls), valor_centavos: soma(ls), linhas: ls };
   });
   const medido = soma(linhasDoMes);
+  const acumulado = soma(linhasDoMes.filter(l => l.etapa === "protocolado" || l.etapa === "recebido"));
   // o mesmo dia de hoje, um mes antes (o dia 29 em diante fica no 28, para caber em qualquer mes)
   const d = new Date(hoje), ate = dataEm(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, Math.min(28, d.getUTCDate())));
   return { ...resposta, contratante, contratantes, etapas: porEtapa(linhasDoMes),
     // o medido subiu contra o mes anterior e ficou estavel contra o mesmo mes do ano anterior
     medido: { valor_centavos: medido, mes_anterior: medido ? { competencia: mesAntes(mes, 1), valor_centavos: Math.round(medido / 1.068) } : null,
       ano_anterior: medido ? { competencia: mesAntes(mes, 12), valor_centavos: Math.round(medido / 0.99) } : null },
-    // o protocolado caiu contra a mesma altura do mes anterior; o recebido nao tem lastro (sem variacao)
-    mesma_altura: medido ? { competencia: mesAntes(mes, 1), ate, protocolado_centavos: 3_780_000 * REAIS, recebido_centavos: null } : null,
+    // o protocolado compara o acumulado (o que esta' na etapa e o que ja' foi recebido), que subiu contra o da
+    // competencia anterior na mesma altura, embora o valor da etapa seja bem menor: o orgao pagou cedo. O recebido
+    // nao tem lastro (sem variacao)
+    protocolado_acumulado_centavos: acumulado,
+    mesma_altura: medido ? { competencia: mesAntes(mes, 1), ate, protocolado_acumulado_centavos: Math.round(acumulado / 1.09), recebido_centavos: null } : null,
     diferenca_critica_por_mil: 5, grupos, sem_medicao: recorte(semMedicao), anteriores_etapas: porEtapa(linhasDeAntes),
     anteriores: [...new Set(linhasDeAntes.map(l => l.competencia))].sort().map(c => {
       const ls = linhasDeAntes.filter(l => l.competencia === c);
@@ -495,7 +499,8 @@ const daCarteira = (id, nome, contratante, chave, x) => {
     vigencia_automatica: false, paralisada_desde: x.paralisada ?? null, pedido_prorrogacao: null,
     posicao: { vigente_centavos: vigente, medido_centavos: medido, saldo_centavos: vigente - medido, a_receber_centavos: (x.receber ?? 0) * REAIS,
       a_receber_ano_inicial: "2025", a_receber_anterior_centavos: 0, a_receber_sem_atualizacao_centavos: 0 },
-    andamento: { ritmo_centavos: x.ritmo == null ? null : x.ritmo * REAIS, necessario_centavos: x.necessario == null ? null : x.necessario * REAIS },
+    andamento: { ritmo_centavos: x.ritmo == null ? null : x.ritmo * REAIS, necessario_centavos: x.necessario == null ? null : x.necessario * REAIS,
+      leitura: leituraSimulada(x.ritmo, x.necessario, x.fora) },
     medido_mes: { competencia: competenciaHa(1), valor_centavos: (x.mes ?? 0) * REAIS, referencia_competencia: competenciaHa(2),
       referencia_centavos: (x.antes ?? 0) * REAIS },
   };
@@ -523,8 +528,12 @@ const CARTEIRA = () => [
     paralisada: dataEm(hojeDaProva(), -100), ritmo: 300_000, necessario: null, mes: 900_000, antes: 905_000, receber: 900_000 }),
   // SES-MT: uma obra adiantada, sem nada pendente e sem medicao no mes (o contratante fica "Em dia")
   daCarteira(9010, "Hospital Capa", "SES-MT", "ses-mt", { vigente: 168_300_000, medido: 156_519_000, ritmo: 5_000_000, necessario: 4_000_000, dias: 75 }),
+  // SINFRA, decisao do dono de 18/11/2026: devagar (37% do necessario) e sem aviso nenhum. Na pagina do contratante a
+  // Situacao diz o motivo do andamento, e nao "Em dia"
+  daCarteira(9016, "Ponte Pi", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 54_000_000, medido: 16_200_000,
+    ritmo: 1_100_000, necessario: 2_900_000, mes: 1_050_000, antes: 1_000_000, dias: 390 }),
 ];
-export const carteiraSimulada = () => CARTEIRA();
+export const carteiraSimulada = () => CARTEIRA_INTEIRA();
 
 const farolDaCarteira = (o, farol, motivos = []) => ({
   contrato_id: o.id, seq: o.id - 9000, obra: o.nome_curto, contratante: o.contratante, empreita: o.percentual_direito_bp === 10000 ? "PRÓPRIA" : "CONSÓRCIO",
@@ -541,7 +550,7 @@ const MOTIVOS = {
   9009: ["atencao", [["atencao", "obra paralisada há 100 dias"]]],
 };
 export const painelDaCarteira = painel => {
-  const emAndamento = CARTEIRA().filter(o => o.estado !== "encerrado");
+  const emAndamento = CARTEIRA_INTEIRA().filter(o => o.estado !== "encerrado");
   const obras = emAndamento.map(o => farolDaCarteira(o, ...(MOTIVOS[o.id] ?? ["verde", []])));
   return { ...painel, obras, prazo_pagamento: { SINFRA: 47, "Pref. Cuiabá": 62, "SES-MT": 38 },
     reajustes_apostilamento: { competencias: 3, valor_centavos: 41_250_000, obras: [
@@ -592,7 +601,55 @@ export const fichaComNecessario = noRitmo => ficha => {
   return { ...ficha,
     vencimentos: ficha.vencimentos.map(v => (v.chave === "execucao" ? { ...v, data: dataEm(fim), dias: diasAte(fim), nivel: "normal" } : v)),
     ritmo: { ritmo_centavos: Math.round(necessario * (noRitmo ? 5 : 3) / 4), necessario_centavos: necessario, competencias_restantes: 5,
-      conclusao: dataEm(fim, noRitmo ? -13 : 70), situacao: noRitmo ? "no_prazo" : "atrasa", dias_alem: noRitmo ? null : 70 } };
+      conclusao: dataEm(fim, noRitmo ? -13 : 70), situacao: noRitmo ? "no_prazo" : "atrasa", dias_alem: noRitmo ? null : 70,
+      leitura: leituraSimulada(noRitmo ? 5 : 3, 4) } };
+};
+
+// #822: a leitura do andamento como o servidor a manda (`prazos.leitura_do_andamento`): a palavra e o percentual pelo
+// corte dele (70% e 100%, por piso) ou, com `fora`, o motivo de a obra ficar fora da regua. A tela so' escreve o que
+// vem aqui. `FORA_DA_REGUA`: as obras que a carteira simulada nao tinha, uma de cada motivo (prazo no fim, com e sem
+// pedido de prorrogacao; prorrogacao pedida com prazo pela frente; sem medicao ha' tres competencias), com o aviso de
+// prazo que elas teriam. `fichaForaDaRegua`: a pagina da obra nesses estados (o selo da conclusao se cala junto).
+const SEM_LEITURA = { situacao: null, pct: null, motivo: null, prorrogacao_pedida: false, sem_medicao_desde: null,
+  atencao_desde_pct: 70, adiantada_desde_pct: 100 };
+const leituraSimulada = (ritmo, necessario, fora) => {
+  if (fora || ritmo == null || necessario == null || necessario <= 0) return { ...SEM_LEITURA, ...fora };
+  const pct = Math.floor(ritmo * 100 / necessario);
+  return { ...SEM_LEITURA, pct, situacao: pct >= 100 ? "adiantada" : pct >= 70 ? "atencao" : "devagar" };
+};
+const FORA_DA_REGUA = () => [
+  daCarteira(9011, "Viaduto Lambda", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", vigente: 64_000_000, medido: 55_040_000,
+    ritmo: 1_900_000, necessario: 8_960_000, mes: 2_100_000, antes: 1_700_000, dias: 12, fora: { motivo: "prazo_no_fim", prorrogacao_pedida: true } }),
+  daCarteira(9012, "Maternidade Mi", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 240_000_000, medido: 5_040_000,
+    ritmo: 840_000, necessario: 16_780_000, mes: 900_000, antes: 880_000, dias: 395, fora: { motivo: "prorrogacao_pedida", prorrogacao_pedida: true } }),
+  daCarteira(9013, "Complexo Ni", "MTPAR", "mtpar", { vigente: 52_000_000, medido: 47_476_000, ritmo: 750_000, necessario: 1_131_000,
+    dias: 110, fora: { motivo: "sem_medicao", sem_medicao_desde: competenciaHa(5) } }),
+  daCarteira(9014, "Praça Xi", "Pref. Cuiabá", "pref-cuiaba", { vigente: 9_500_000, medido: 6_650_000, ritmo: 410_000, necessario: 1_425_000,
+    mes: 380_000, antes: 400_000, dias: 43, fora: { motivo: "prazo_no_fim" } }),
+];
+// a carteira que as telas recebem: a de sempre e as obras fora da regua
+const CARTEIRA_INTEIRA = () => [...CARTEIRA(), ...FORA_DA_REGUA()];
+Object.assign(MOTIVOS, {
+  9011: ["vermelho", [["critico", "execução termina em 12 dias"], ["atencao", "prorrogação pedida há 14 dias"]]],
+  9012: ["atencao", [["atencao", "prorrogação pedida há 218 dias"]]],
+  9014: ["acao", [["acao", "execução termina em 43 dias"]]],
+});
+// a pagina da obra fora da regua. `noFim`: a execucao termina no ultimo dia do mes que vem (duas competencias, a de
+// hoje e a seguinte); senao, daqui a 4 meses (cinco), como em `fichaComNecessario`
+const fimNoFim = () => { const h = new Date(); return Date.UTC(h.getFullYear(), h.getMonth() + 2, 0); };
+const nivelDosDias = dias => (dias <= 30 ? "critico" : dias <= 60 ? "atencao" : "normal");
+export const cabecalhoNoFim = cabecalho => {
+  const fim = fimNoFim(), dias = diasAte(fim);
+  return { ...cabecalho, execucao_fim: dataEm(fim), dias_execucao: dias, execucao_sem_prazo: false, nivel_execucao: nivelDosDias(dias),
+    vigencia_fim: dataEm(fim, 90), dias_vigencia: dias + 90, nivel_vigencia: "normal" };
+};
+export const fichaForaDaRegua = (fora, noFim = false) => ficha => {
+  const fim = noFim ? fimNoFim() : fimEmDia(), competencias = noFim ? 2 : 5, dias = diasAte(fim);
+  const necessario = Math.round(ficha.topo.saldo_centavos / competencias);
+  return { ...ficha,
+    vencimentos: ficha.vencimentos.map(v => (v.chave === "execucao" ? { ...v, data: dataEm(fim), dias, nivel: nivelDosDias(dias) } : v)),
+    ritmo: { ritmo_centavos: Math.round(necessario / 4), necessario_centavos: necessario, competencias_restantes: competencias,
+      conclusao: dataEm(fim, 190), situacao: null, dias_alem: null, leitura: leituraSimulada(null, null, fora) } };
 };
 export const semAvisoDePrazo = inicio => ({
   ...inicio, avisos: inicio.avisos.filter(a => !["instrumento_pendente", "execucao_vencendo"].includes(a.tipo)) });
@@ -778,3 +835,30 @@ export const LOGIN_NO_LIMITE = { detail: "Muitas tentativas de entrar a partir d
 // ---- Documentos em tres paginas (#820): o painel sem empresa, sem obra e sem nada a renovar (cada pagina mostra o
 // estado vazio dela)
 export const DOCUMENTOS_VAZIO = { hoje: "2026-09-23", empresas: [], contratos: [], renovar_agora: [] };
+
+// ---- Busca unica do topo (#819): GET /api/busca com os tres grupos, nomes compridos e o grupo de medicoes cortado
+// (8 de 23), e a resposta sem nada. Obras, orgaos e numeros inventados. O perfil sem SIGA nao recebe `processos`: a
+// prova da diretoria usa o servidor de verdade (o recorte e' dele), nao esta resposta.
+const medicaoAchada = (id, contrato_id, titulo, competencia, obra, contratante) => ({ id, contrato_id, titulo, competencia, obra, contratante });
+const OBRA_LONGA = "Rodovia Exemplo, trecho do entroncamento ao distrito, lote 2";
+export const BUSCA_CHEIA = {
+  obras: { total: 2, itens: [
+    { id: 1, nome: OBRA_LONGA, instrumento: "900/2026", contratante: "SINFRA", orgao_sub: "SUEF II" },
+    { id: 2, nome: "Corredor Beta", instrumento: "901/2026", contratante: "Pref. Cuiabá", orgao_sub: null },
+  ] },
+  medicoes: { total: 23, itens: [
+    medicaoAchada(11, 1, "15ª Medição", "2026-10", OBRA_LONGA, "SINFRA"),
+    medicaoAchada(12, 1, "Reajuste da 15ª Medição", "2026-10", OBRA_LONGA, "SINFRA"),
+    medicaoAchada(13, 2, "15ª Medição", "2026-09", "Corredor Beta", "Pref. Cuiabá"),
+    medicaoAchada(14, 3, "15ª Medição de Projeto", "2026-07", "Trevo Eta", "MTPAR"),
+    medicaoAchada(15, 4, "15ª Medição", "2026-05", "Rodovia Capa", "SINFRA"),
+    medicaoAchada(16, 5, "15ª Medição", "2026-02", "Ponte Gama", "SES-MT"),
+    medicaoAchada(17, 6, "15ª Medição", "2025-12", "Escola Delta", "MTPAR"),
+    medicaoAchada(18, 7, "15ª Medição", "2025-09", "Anel Viário Zeta", "SINFRA"),
+  ] },
+  processos: { total: 2, itens: [
+    { id: 1, numero: "ORGAO-PRO-2026/00015", assunto: `${OBRA_LONGA} · 15ª Medição` },
+    { id: 2, numero: null, assunto: "Corredor Beta · Pedido de paralisação" },
+  ] },
+};
+export const BUSCA_VAZIA = { obras: { itens: [], total: 0 }, medicoes: { itens: [], total: 0 }, processos: { itens: [], total: 0 } };

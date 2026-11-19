@@ -91,6 +91,14 @@ const comNecessario = noRitmo => [
   { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaComNecessario(noRitmo) },
   { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
 ];
+// issue #822: a pagina da obra fora da regua do andamento: o motivo no lugar da leitura, sem selo na conclusao.
+// `noFim`: a execucao termina no mes que vem (duas competencias)
+import { cabecalhoNoFim, fichaForaDaRegua } from "./simulados.mjs";
+const foraDaRegua = (fora, noFim = false) => [
+  { caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: noFim ? cabecalhoNoFim : cabecalhoEmDia },
+  { caminho: /^\/api\/contratos\/\d+\/ficha$/, ajustar: fichaForaDaRegua(fora, noFim) },
+  { caminho: /^\/api\/inicio$/, ajustar: semAvisoDePrazo },
+];
 // issue #805: a fila de avisos com o volume da producao (dezenas de vencidos em varias obras, um aviso de cada assunto
 // pelo menos; ver simulados.mjs). O servidor recorta a fila pelo perfil, e a simulada tambem: a tela entra duas vezes
 // na lista com o mesmo id, uma para quem opera (com certidao, prazo a vencer, nota e SIGA) e outra para a diretoria
@@ -317,6 +325,12 @@ export const TELAS = [
     simular: comNecessario(false) },
   { rota: "obra", id: "obra-no-ritmo", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .selo--feito",
     simular: comNecessario(true) },
+  // #822: fora da regua do andamento, o painel "Prazo" escreve o motivo (prazo no fim com a prorrogacao pedida; sem
+  // medicao ha' tres competencias) e a conclusao estimada fica sem selo
+  { rota: "obra", id: "obra-prazo-no-fim", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .andamento--fora",
+    simular: foraDaRegua({ motivo: "prazo_no_fim", prorrogacao_pedida: true }, true) },
+  { rota: "obra", id: "obra-sem-medicao", caminho: "/obras/:obra", perfis: ["diretoria"], espera: ".obra-ritmo .andamento--fora",
+    simular: foraDaRegua({ motivo: "sem_medicao", sem_medicao_desde: "2026-07" }) },
   { rota: "obra", id: "obra-erro", caminho: "/obras/:obra", perfis: SO_ADMIN, espera: "#conteudo [role=alert]", erro: true,
     simular: falha(/^\/api\/contratos\/\d+\/cabecalho$/) },
 
@@ -442,6 +456,16 @@ export const TELAS = [
     simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoDeNomeLongo }] },
   { rota: "obra", id: "caminho-longo-obra", caminho: "/obras/:obra/prazos", perfis: ["diretoria"], antes: OBRA_GRADE,
     espera: ".topo .caminho li:nth-child(4)", simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoDeNomeLongo }] },
+  // ---- Busca unica do topo (#819). No computador o campo esta' na barra; no celular, o botao da lupa abre o campo por
+  // cima dela: o primeiro passo clica o que estiver a' vista (a lupa ou o proprio campo). Os resultados abrem por cima
+  // da pagina. A diretoria entra com o servidor de verdade: o recorte do perfil e' dele, e nao ha' grupo Processos.
+  { rota: "inicio", id: "busca-fechada", caminho: "/inicio", perfis: TODOS, antes: ".ini", espera: ".topo .busca" },
+  { rota: "inicio", id: "busca-resultados", caminho: "/inicio", perfis: OPERA, antes: ".ini", espera: ".busca__opcao",
+    simular: [{ caminho: /^\/api\/busca$/, corpo: BUSCA_CHEIA }], passos: abrirBusca("15") },
+  { rota: "inicio", id: "busca-sem-resultado", caminho: "/inicio", perfis: OPERA, antes: ".ini", espera: ".busca__vazio",
+    simular: [{ caminho: /^\/api\/busca$/, corpo: BUSCA_VAZIA }], passos: abrirBusca("xyzw") },
+  { rota: "inicio", id: "busca-sem-siga", caminho: "/inicio", perfis: ["diretoria"], antes: ".ini", espera: ".busca__opcao",
+    passos: abrirBusca("1") },
 ];
 
 // Rotas do roteador que a prova nao abre, cada uma com o motivo.
@@ -486,3 +510,10 @@ export const ESTADOS_DO_LOGIN = [
 
 // ---- Documentos em tres paginas (#820): o painel vazio
 import { DOCUMENTOS_VAZIO } from "./simulados.mjs";
+
+// ---- Busca unica do topo (#819): os passos que abrem a busca e digitam a pergunta, nas tres larguras
+import { BUSCA_CHEIA, BUSCA_VAZIA } from "./simulados.mjs";
+
+function abrirBusca(texto) {
+  return [{ clicar: ".topo .busca__abrir:visible, .topo .busca__campo:visible" }, { preencher: [".topo .busca__campo", texto] }];
+}

@@ -208,6 +208,8 @@ def create_app() -> FastAPI:
     app.include_router(rm_router)
     from app.api_siga import router as siga_router
     app.include_router(siga_router)
+    from app.api_busca import router as busca_router      # busca unica do topo (#819)
+    app.include_router(busca_router)
     app.include_router(usuarios_router)
 
     if os.environ.get("DASH_SEM_JOBS") != "1":

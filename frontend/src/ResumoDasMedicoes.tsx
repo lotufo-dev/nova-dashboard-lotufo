@@ -7,7 +7,7 @@ import { IconeBaixar } from "./icones";
 import { Link } from "./Link";
 import MarcaEtapa from "./MarcaEtapa";
 import {
-  ANTES, ETAPAS, linhasDaEtapa, maiuscula, mesDaUltima, nomeDaMesmaAltura, nomeDaReferencia,
+  ACUMULADO, ANTES, ETAPAS, linhasDaEtapa, maiuscula, mesDaUltima, nomeDaMesmaAltura, nomeDaReferencia,
   type ContagemDaEtapa, type Grupo, type Referencia, type RespostaResumo,
 } from "./resumoEtapas";
 import { mesPorExtenso, somarMes } from "./resumoMedicoes";
@@ -53,29 +53,40 @@ function VariacaoDoMedido({ atual, referencia, mes }: { atual: number; referenci
 
 /** Quanto ha' em cada etapa (o medido das medicoes que estao nela, na cota) e quantas medicoes. No mes, o protocolado
  *  e o recebido levam a variacao contra a mesma altura do mes anterior, e a faixa fecha com o medido do mes (a soma
- *  das cinco etapas, o numero do Fechamento) e as variacoes dele. Nos meses anteriores, so' as etapas. */
-function FaixaDasEtapas({ etapas, rotulo, mes, medido, mesmaAltura }: {
+ *  das cinco etapas, o numero do Fechamento) e as variacoes dele. Nos meses anteriores, so' as etapas.
+ *  A variacao do PROTOCOLADO compara o acumulado (`protocoladoAcumulado`: tudo o que a competencia ja' protocolou,
+ *  recebido depois ou nao) com o acumulado da anterior, e nao o valor da etapa: por isso a linha dela mostra o
+ *  proprio numero de que a seta fala ("acumulado R$ 150.000,00 ▲ +20,0% × set até 16/10"), separada da contagem de
+ *  medicoes.
+ *  Sem lastro num dos lados, somem o numero e a variacao. No recebido, o valor da etapa ja' e' o acumulado. */
+function FaixaDasEtapas({ etapas, rotulo, mes, medido, mesmaAltura, protocoladoAcumulado }: {
   etapas: ContagemDaEtapa[]; rotulo: string; mes: string; medido?: RespostaResumo["medido"]; mesmaAltura?: RespostaResumo["mesma_altura"];
+  protocoladoAcumulado?: number | null;
 }) {
   const de = new Map(etapas.map(e => [e.etapa, e]));
   const altura = mesmaAltura ? nomeDaMesmaAltura(mesmaAltura.competencia, mesmaAltura.ate, mes) : null;
-  // so' o protocolado e o recebido tem a referencia; nula (sem lastro) ou zero, a variacao nao aparece
-  const referenciaDe = (etapa: string): number | null =>
-    (etapa === "protocolado" ? mesmaAltura?.protocolado_centavos : etapa === "recebido" ? mesmaAltura?.recebido_centavos : null) ?? null;
+  // so' o protocolado e o recebido tem variacao: os dois lados dela; nulo (sem lastro) um dos dois, ou a referencia em
+  // zero, ela nao aparece
+  // `comBase`: a variacao nao fala do valor da coluna, e o numero de que ela fala vai escrito na linha dela
+  const variacaoDe = (etapa: string, daEtapa: number): { atual: number | null; referencia: number | null; comBase: boolean } =>
+    etapa === "protocolado" ? { atual: protocoladoAcumulado ?? null, referencia: mesmaAltura?.protocolado_acumulado_centavos ?? null, comBase: true }
+      : etapa === "recebido" ? { atual: daEtapa, referencia: mesmaAltura?.recebido_centavos ?? null, comBase: false }
+        : { atual: null, referencia: null, comBase: false };
   return (
     <dl className="rdm-faixa" aria-label={rotulo}>
       {ETAPAS.map(e => {
         const x = de.get(e.chave);
         const n = x?.medicoes ?? 0;
-        const referencia = referenciaDe(e.chave);
+        const v = variacaoDe(e.chave, x?.valor_centavos ?? 0);
         return (
           <div key={e.chave} className="rdm-faixa__item">
             <dt><MarcaEtapa etapa={e.chave} /></dt>
             <dd className="rdm-faixa__valor">{n === 0 ? "—" : valor(x?.valor_centavos)}</dd>
             {n > 0 && <dd className="rdm-faixa__apoio rdm-faixa__qtd num">{contar(n, "medição", "medições")}</dd>}
-            {altura && referencia !== null && referencia > 0 && (
-              <dd className="rdm-faixa__apoio rdm-faixa__variacao">
-                <Variacao atual={x?.valor_centavos ?? 0} referencia={referencia} rotulo={altura.curto} porExtenso={altura.extenso} />
+            {altura && v.atual !== null && v.referencia !== null && v.referencia > 0 && (
+              <dd className={`rdm-faixa__apoio rdm-faixa__variacao${v.comBase ? " rdm-faixa__variacao--com-base" : ""}`}>
+                {v.comBase && <><span className="rdm-faixa__base">{ACUMULADO} <span className="num">{brl(v.atual)}</span></span>{" "}</>}
+                <Variacao atual={v.atual} referencia={v.referencia} rotulo={altura.curto} porExtenso={altura.extenso} />
               </dd>
             )}
           </div>
@@ -272,6 +283,7 @@ export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: 
         {/* o mes sem medicao nao tem numero a ler: a linha curta embaixo diz o vazio */}
         {linhasDoMes.length > 0 && (
           <FaixaDasEtapas etapas={d.etapas} mes={d.mes} medido={d.medido} mesmaAltura={d.mesma_altura}
+            protocoladoAcumulado={d.protocolado_acumulado_centavos}
             rotulo={`Medições de ${nomeMes} por etapa, com o medido na cota da Lotufo`} />
         )}
         {linhasDoMes.length === 0 ? (

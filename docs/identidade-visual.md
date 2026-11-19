@@ -123,6 +123,16 @@ do rótulo, na etiqueta sob o valor ou na barra.
   altura do mês anterior: o que a competência anterior tinha na etapa no mesmo dia, um mês antes ("× set até
   18/10"). Sai das datas dos eventos; faltando a data de algum, a variação não aparece. Período sem valor, ou anterior ao primeiro ano que as telas da diretoria contam, não serve de
   referência.
+  No protocolado a comparação é pelo acumulado (decisão do dono de 18/11/2026): tudo o que a competência já
+  protocolou até hoje, recebido depois ou não, contra o que a anterior tinha protocolado até o mesmo dia. Motivo: o
+  que está na etapa cai quando o órgão paga mais rápido, e a variação saía vermelha por um fato bom. Como o valor da
+  coluna continua sendo o que está na etapa, a linha da variação mostra o número de que a seta fala ("acumulado
+  R$ 150.000,00 ▲ +20,0% × set até 16/10"), separada da contagem de medições por um fio, para não ler como legenda
+  do valor de cima. O número não se parte; na coluna estreita, a palavra fica na linha de cima dele. Abaixo de
+  1050 px de conteúdo a faixa dos números vai em duas linhas de três, para o valor de oito dígitos caber na coluna
+  sem encostar no vizinho. Sem lastro num dos lados, somem o número e a variação. O
+  recebimento prova o protocolo até a data dele: a medição recebida sem protocolo registrado conta desde o dia em que
+  foi recebida. No recebido, que encerra o ciclo, o valor da etapa já é o acumulado.
 - **Diferença:** entre dois valores que deveriam ser iguais (o aprovado e o pedido). Igual leva o sinal de igual.
   Diferente mostra os reais e o percentual: até 0,5% da base, no tom de "vence em breve"; acima, no tom do crítico.
   É o limite do aviso "aprovado abaixo do pedido" (#741), um número só no sistema. Só entre medições que têm os
@@ -134,8 +144,21 @@ do rótulo, na etiqueta sob o valor ou na barra.
   arredondamento do órgão e conta como igual (decisão do dono de 10/11/2026).
 - **Andamento:** a partir de 100% do necessário, "Adiantada", no tom do feito; de 70% a 99%, "Atenção", no tom de
   "vence em breve"; abaixo de 70%, "Devagar", no tom do crítico. Sem necessário ou sem ritmo, nada aparece.
+  A leitura é uma só, do servidor: a mesma palavra e o mesmo percentual na lista de Obras, na página do
+  contratante e na página da obra. A tela não repete o corte. Fica fora da régua, com o motivo escrito no lugar da
+  leitura, a obra com até duas competências de prazo ("Prazo no fim"; com pedido enviado e sem resposta,
+  "Prazo no fim · prorrogação pedida"), a que tem pedido de prorrogação sem resposta ("Prorrogação pedida") e a que
+  fechou três competências sem medição de execução ("Sem medição desde 07/2026", o mês da última). O motivo vai em
+  tinta, sem barra e sem tom de valor: é a razão de não haver leitura, e o aviso de prazo já está nos Avisos. Na
+  página da obra, fora da régua, a conclusão estimada fica sem selo. Só quem tem leitura entra nas contagens por
+  leitura; na faixa de números, as obras com o prazo no fim vão contadas ao lado, em tinta ("9 com prazo no fim")
+  (#822, decisão do dono de 18/11/2026).
   A contagem de obras por leitura ("3 devagar", "2 em atenção") vai numa etiqueta do tom da leitura, sem glifo:
   é valor, não situação (#805).
+  Na tabela que traz a coluna Andamento ao lado da Situação (a página do contratante), a obra devagar e sem aviso
+  não diz "Em dia": a Situação leva a etiqueta "Devagar" e o motivo ("mede N% do necessário"), pela mesma leitura da
+  coluna. Qualquer aviso do farol continua ganhando, e "Atenção" no andamento não tira o "Em dia" (decisão do dono
+  de 18/11/2026). Motivo: "Devagar" numa coluna e "Em dia" na outra se contradiziam.
 - **Tempo parado:** os dias numa etapa ou num setor, com o selo da situação e os limites do SIGA (seção "Quando
   usar cada uma" das situações). Na medição, são os dias úteis desde o evento que abriu o passo da vez. No passo
   Pagamento a régua é o prazo do órgão (`docs/adr/0007`): crítico só depois da data esperada do recebimento; antes

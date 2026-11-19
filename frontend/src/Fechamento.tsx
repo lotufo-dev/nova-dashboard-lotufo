@@ -5,6 +5,7 @@ import Diferenca from "./Diferenca";
 import { brl, contar, fmtPercentual } from "./formato";
 import { Link } from "./Link";
 import MarcaEtapa from "./MarcaEtapa";
+import { useNomesDoCaminho } from "./nomesDoCaminho";
 import { tituloMedicao } from "./medicao";
 import Rolagem from "./Rolagem";
 import { cliqueSimples, irHref, useRota, type AbaFechamento, type Busca, type Ir } from "./rota";
@@ -525,6 +526,12 @@ function doEndereco(f: RespostaFechamento, aba: AbaFechamento | undefined, busca
   return { aba: aba && ABAS.includes(aba) ? aba : "meses", ano, padrao, mes };
 }
 
+/** O nome da aba de comparacao: os dois anos que o servidor manda, o mais novo primeiro ("2026 × 2025"). */
+function nomeDaComparacao(f: RespostaFechamento): string {
+  const [a, b] = f.anos;
+  return `${b} × ${a}`;
+}
+
 export default function Fechamento({ ir }: { ir: Ir }) {
   const { rota, busca, trocarBusca } = useRota();
   const [f, setF] = useState<RespostaFechamento | null>(null);
@@ -535,14 +542,15 @@ export default function Fechamento({ ir }: { ir: Ir }) {
       .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
     return () => { vivo = false; };
   }, []);
+  // #814: o caminho do topo e o titulo da aba do navegador dizem a aba de comparacao como ela se chama aqui, pelos anos
+  useNomesDoCaminho({ vista: f && rota.tela === "fechamento" && rota.aba === "comparacao" ? nomeDaComparacao(f) : null });
   if (erro) return <Falha>Não foi possível carregar o fechamento: {erro} Recarregue a página para tentar de novo.</Falha>;
   if (!f) return <p className="fch-vazio">Carregando…</p>;
   const { aba, ano: atual, padrao, mes } = doEndereco(f, rota.tela === "fechamento" ? rota.aba : undefined, busca);
   // a aba leva o ano escolhido para a outra; o mes aberto e' so' da tabela do mes
   const doAno: Busca | undefined = atual === padrao ? undefined : { ano: atual };
-  const [a, b] = f.anos;
   // o nome da aba e' o titulo do painel dela: o painel nao repete o titulo, so' leva o nome para o leitor de tela
-  const rotulos: Record<AbaFechamento, string> = { meses: "Mês a mês", comparacao: `${b} × ${a}`, contratantes: "Por contratante" };
+  const rotulos: Record<AbaFechamento, string> = { meses: "Mês a mês", comparacao: nomeDaComparacao(f), contratantes: "Por contratante" };
   return (
     <div className="fch">
       <nav className="abas fch-abas" aria-label="Fechamento">

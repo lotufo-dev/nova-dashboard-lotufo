@@ -164,11 +164,11 @@ describe("casca: marca, item ativo e topo", () => {
     expect(topo.querySelector(".caminho__trecho--titulo")!.textContent).toBe("Obras");
   });
 
-  it("o lugar da busca fica no topo, entre o caminho e a conta, e por ora não desenha nada (#814; a #819 preenche)", () => {
+  it("a busca fica no topo, entre o caminho e a conta (#814; preenchida na #819)", () => {
     render(<BarraSuperior rota={{ tela: "inicio" }} ehH1={false} usuario={usuario} ir={vi.fn()} />);
     const topo = screen.getByRole("banner");
-    expect([...topo.children].map(c => c.className)).toEqual(["caminho", "conta"]);
-    expect(within(topo).queryByRole("search")).toBeNull();
-    expect(within(topo).queryByRole("searchbox")).toBeNull();
+    expect([...topo.children].map(c => c.className)).toEqual(["caminho", "busca", "conta"]);
+    expect(within(topo).getByRole("search")).toBeTruthy();
+    expect(within(topo).getByRole("combobox", { name: "Buscar obra, medição ou processo" })).toBeTruthy();
   });
 });

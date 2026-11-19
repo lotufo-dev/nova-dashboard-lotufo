@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Caminho from "./Caminho";
 import { ABAS_PRONTAS } from "./abasDoContratante";
+import { comLeitura, leituraDeTeste } from "./andamentoTeste";
 import ContratantePagina from "./ContratantePagina";
 import type { ObraLista } from "./listaObras";
 import { useRota } from "./rota";
@@ -13,7 +14,8 @@ vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api"
 // encerrada; a MTPAR com uma. O medido é o de agosto (a competência fechada) contra julho.
 const doMes = (valor: number, referencia: number) =>
   ({ competencia: "2026-08", valor_centavos: valor, referencia_competencia: "2026-07", referencia_centavos: referencia });
-const obra = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => ({
+// #822: a leitura do andamento vem do servidor; `comLeitura` põe em cada obra a que ele mandaria para o ritmo e o necessário dela
+const obra = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => comLeitura({
   id, orgao: "SINFRA - SUEF II", contratante: "SINFRA", contratante_chave: "sinfra", numero_instrumento: `IC ${id}/2026`, nome_curto: nome,
   estado: "ativo", percentual_direito_bp: 10000, execucao_fim_vigente: "2027-03-31", dias_execucao: 190,
   posicao: { vigente_centavos: 1000_00, medido_centavos: 250_00, saldo_centavos: 750_00, a_receber_centavos: 0 },
@@ -127,6 +129,48 @@ describe("Página do contratante (#805)", () => {
     expect((window.history.state as { origem?: { tela: string; href: string } }).origem).toEqual({ tela: "contratante", href: "/obras/contratante/sinfra" });
   });
 
+  it("devagar é motivo da situação: a obra devagar sem aviso não diz 'Em dia'; o aviso do farol continua ganhando", async () => {
+    // decisao do dono de 18/11/2026: "Devagar" numa coluna e "Em dia" na outra se contradiziam
+    const ritmo = (centavos: number) => ({ andamento: { ritmo_centavos: centavos, necessario_centavos: 100_00 } });
+    const obras = [
+      obra(1, "Anel Viário", ritmo(69_99)),        // devagar (69,99% e' 69%, pela regua da coluna), sem aviso
+      obra(2, "Estações BRT", ritmo(40_00)),       // devagar, com aviso critico
+      obra(3, "5 Bairros", ritmo(40_00)),          // devagar, com aviso de atencao
+      obra(4, "Cavalaria", ritmo(70_00)),          // em atencao (70%), sem aviso
+      obra(5, "Granito", ritmo(120_00)),           // adiantada, sem aviso
+      obra(6, "Trevo Novo"),                       // sem leitura do andamento, sem aviso
+    ];
+    const painel = { ...PAINEL, avisos: [aviso(2, "critico")], obras: [
+      noPainel(1, "Anel Viário", "verde"), noPainel(2, "Estações BRT", "vermelho", ["garantia não cobre o fim da execução"]),
+      noPainel(3, "5 Bairros", "atencao", ["prorrogação pedida há 9 dias"]), noPainel(4, "Cavalaria", "verde"),
+      noPainel(5, "Granito", "verde"), noPainel(6, "Trevo Novo", "verde")] };
+    api.mockImplementation(async (caminho: string) => (caminho === "/api/contratos" ? obras : painel));
+    abrir("/obras/contratante/sinfra");
+    const tabela = await screen.findByRole("table", { name: /Obras de SINFRA/ });
+    const celula = (nome: string, rotulo: string) =>
+      within(tabela).getByRole("link", { name: nome }).closest("tr")!.querySelector<HTMLElement>(`td[data-rotulo="${rotulo}"]`)!;
+    const situacao = (nome: string) => celula(nome, "Situação");
+    await waitFor(() => expect(situacao("Estações BRT").querySelector(".selo")).toBeTruthy());
+
+    // devagar sem aviso: a Situacao diz o motivo do andamento, com o mesmo percentual da coluna Andamento
+    expect(limpo(celula("Anel Viário", "Andamento").textContent)).toBe("Devagar · 69% do necessárioR$ 70/mês de R$ 100");
+    expect(limpo(situacao("Anel Viário").textContent)).toBe("Devagarmede 69% do necessário");
+    expect(situacao("Anel Viário").querySelector(".obras-situacao__emdia")).toBeNull();
+    // andamento e' valor, nao situacao: a palavra vai na etiqueta do tom da leitura, sem selo e sem glifo
+    expect(situacao("Anel Viário").querySelector(".obras-etiqueta--devagar")!.textContent)
+      .toBe(celula("Anel Viário", "Andamento").querySelector(".andamento__palavra")!.textContent);        // a mesma palavra
+    expect(situacao("Anel Viário").querySelector(".selo, .glifo")).toBeNull();
+
+    // devagar com aviso critico, ou com aviso de atencao: o aviso ganha, e o andamento fica so' na coluna dele
+    expect(limpo(situacao("Estações BRT").textContent)).toBe("Críticogarantia não cobre o fim da execução");
+    expect(limpo(situacao("5 Bairros").textContent)).toBe("Atençãoprorrogação pedida há 9 dias");
+    for (const nome of ["Estações BRT", "5 Bairros"]) expect(situacao(nome).querySelector(".obras-etiqueta--devagar")).toBeNull();
+
+    // em dia: em atencao no andamento (so' o devagar vira motivo), adiantada e sem leitura
+    expect(limpo(celula("Cavalaria", "Andamento").textContent)).toContain("Atenção · 70% do necessário");
+    for (const nome of ["Cavalaria", "Granito", "Trevo Novo"]) expect(limpo(situacao(nome).textContent)).toBe("Em dia");
+  });
+
   it("só as obras do contratante, em andamento; 'Ver todas' traz a encerrada sem mudar os números do alto", async () => {
     abrir("/obras/contratante/sinfra");
     await screen.findByRole("table", { name: /Obras de SINFRA/ });
@@ -191,5 +235,30 @@ describe("Página do contratante (#805)", () => {
     await screen.findByRole("table", { name: /Obras de SINFRA/ });
     expect((await screen.findByRole("alert")).textContent).toContain("Não foi possível carregar a situação das obras e o prazo de pagamento.");
     expect(limpo(screen.getByLabelText("Números de SINFRA").textContent)).toContain("Prazo de pagamento—");
+  });
+
+  it("#822: a obra fora da régua leva o motivo no andamento, sem barra, e não conta em 'N devagar'", async () => {
+    // as três mediriam 10% do necessário; o servidor as tirou da régua
+    const fora = (motivo: Parameters<typeof leituraDeTeste>[2]) => ({ ritmo_centavos: 10_00, necessario_centavos: 100_00, leitura: leituraDeTeste(10_00, 100_00, motivo) });
+    const obras = [
+      obra(1, "Estações BRT", { andamento: fora({ motivo: "prazo_no_fim", prorrogacao_pedida: true }) }),
+      obra(2, "Cavalaria", { andamento: fora({ motivo: "sem_medicao", sem_medicao_desde: "2026-05" }) }),
+      obra(3, "5 Bairros", { andamento: fora({ motivo: "prorrogacao_pedida", prorrogacao_pedida: true }) }),
+      obra(4, "Leblon", { andamento: { ritmo_centavos: 27_00, necessario_centavos: 100_00 } }),
+    ];
+    api.mockImplementation(async (caminho: string) => caminho === "/api/contratos" ? obras : PAINEL);
+    abrir("/obras/contratante/sinfra");
+    const tabela = await screen.findByRole("table", { name: /Obras de SINFRA/ });
+    const andamento = (nome: string) => within(tabela).getByRole("link", { name: nome }).closest("tr")!.querySelector('td[data-rotulo="Andamento"]')!;
+    expect(limpo(andamento("Estações BRT").textContent)).toBe("Prazo no fim · prorrogação pedida");
+    expect(limpo(andamento("Cavalaria").textContent)).toBe("Sem medição desde 05/2026");
+    expect(limpo(andamento("5 Bairros").textContent)).toBe("Prorrogação pedida");
+    expect(limpo(andamento("Leblon").textContent)).toBe("Devagar · 27% do necessárioR$ 27/mês de R$ 100");
+    expect(tabela.querySelectorAll(".andamento__trilho").length).toBe(1);
+    expect(andamento("Estações BRT").querySelector(".andamento--fora")).toBeTruthy();
+    // a contagem só olha quem tem leitura: uma obra, e ela está devagar; a do prazo no fim vai ao lado, em tinta
+    const faixa = screen.getByLabelText("Números de SINFRA");
+    expect([...faixa.querySelectorAll(".obras-numero")].map(n => limpo(n.textContent))).toContain("Andamento1 de 1obra devagar1 com prazo no fim");
+    expect([...document.querySelectorAll(".pagina > .obras-etiquetas .obras-etiqueta")].map(e => limpo(e.textContent))).toEqual(["1 devagar"]);
   });
 });

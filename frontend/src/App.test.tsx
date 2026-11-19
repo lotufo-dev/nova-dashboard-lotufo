@@ -535,6 +535,33 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     expect(trechos()).toEqual(["Medições"]);
   });
 
+  it("as abas do Fechamento entram no caminho e no título; a de comparação com os anos que a página diz", async () => {
+    // sem lançamento: só os anos importam aqui
+    const FECHAMENTO = { anos: ["2025", "2026"], meses: [], por_ano: {}, acumulado: { ate_mes: null }, em_aberto: [],
+      em_aberto_anteriores: { quantidade: 0, valor_centavos: 0 },
+      notas_sem_medicao: { em_aberto: [], em_aberto_centavos: 0, pagas: { quantidade: 0, valor_centavos: 0 } },
+      cobertura: {}, total_a_receber_liberado: true };
+    entrar("diretoria");
+    const resto = api.getMockImplementation()!;
+    api.mockImplementation(async (c: string) => (c === "/api/fechamento" ? FECHAMENTO : resto(c)));
+    window.history.replaceState(null, "", "/fechamento/comparacao");
+    render(<App />);
+    await waitFor(() => expect(trechos()).toEqual(["Financeiro", "Fechamento", "2026 × 2025"]));
+    expect(document.title).toBe("Fechamento · 2026 × 2025 · grupolotufo");
+    expect(within(topo()).getByRole("heading", { level: 1 }).textContent).toBe("Fechamento");
+    expect(within(caminho()).getByRole("link", { name: "Fechamento" }).getAttribute("href")).toBe("/fechamento");
+    // pela aba da página, a outra vista
+    await act(async () => { fireEvent.click(screen.getByRole("link", { name: "Por contratante" })); });
+    expect(endereco()).toBe("/fechamento/contratantes");
+    await waitFor(() => expect(trechos()).toEqual(["Financeiro", "Fechamento", "Por contratante"]));
+    expect(document.title).toBe("Fechamento · Por contratante · grupolotufo");
+    // e pelo trecho da página, a vista padrão, que não entra no caminho
+    await act(async () => { fireEvent.click(within(caminho()).getByRole("link", { name: "Fechamento" })); });
+    expect(endereco()).toBe("/fechamento");
+    await waitFor(() => expect(trechos()).toEqual(["Financeiro", "Fechamento"]));
+    expect(document.title).toBe("Fechamento · grupolotufo");
+  });
+
   it.each([
     ["/inicio", ["Painel", "Início"]],
     ["/resumo-medicoes", ["Medições", "Resumo das medições"]],
