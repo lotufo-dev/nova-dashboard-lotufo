@@ -23,11 +23,12 @@ import type { Medicao } from "./Medicoes";
 import { Notas } from "./Notas";
 import { ProtocolosDaMedicao, useProtocolos } from "./Protocolo";
 import { LinhaDoTempo, ResumoMedicao, ValorDaPagina, type PassoResumo } from "./ResumoLateral";
-import { ir, type Origem, type Rota, useRota } from "./rota";
+import { ir, temOrigem, type Origem, type Rota, useRota } from "./rota";
 import { Link } from "./Link";
 import Selo from "./Selo";
 import { fmtDataHora, fmtDataPura, fmtMesExtenso } from "./tempo";
-import { Migalhas, VoltarOrigem } from "./Topo";
+import { useNomesDoCaminho } from "./nomesDoCaminho";
+import { VoltarOrigem } from "./Topo";
 import "./etapas.css";
 import "./passos.css";
 import Falha from "./Falha";
@@ -42,7 +43,11 @@ import Falha from "./Falha";
 // #722 (montada pelo dono em 16/11/2026): a identificacao com o valor no alto e o Resumo em faixa logo abaixo; os
 // passos em abas ligadas ao painel do passo aberto; a Linha do tempo na coluna ao lado (embaixo na tela estreita).
 
-type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number };
+type Cabecalho = { obra: string; orgao: string; instrumento: string; percentual_lotufo_bp: number;
+  // #805: a sigla do contratante e a chave da pagina dele, para o caminho do topo
+  contratante?: string | null; contratante_chave?: string | null };
+// as telas que estao no caminho da medicao (Obras › contratante › obra › ...): o trecho delas ja' volta sozinho
+const FORA_DO_CAMINHO: Rota["tela"][] = ["obras", "contratante"];
 type LinhaAndamento = { id: number; proximo_passo: string; desde: string };
 type Painel = "fora" | "protocolado" | "atestado" | "recebimento" | "cancelada" | "desistida" | "final" | "desfinal" | "assinatura" | "boletim" | "diferenca" | "sozinha" | "liberar" | "assinados" | "assinados_fora" | null;
 
@@ -273,15 +278,18 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     atualAnterior.current = atual;
   }, [m, atual, atualFirme]);
 
-  const cabeca = (
+  // O caminho ("Obras › SINFRA › MT-388 › Medições › 15ª Medição") e' da barra do topo (#814): a pagina so' diz os
+  // nomes que ja' carregou. Aqui fica o "← origem", quando se chegou de uma tela que nao esta' no caminho (a fila de
+  // Medicoes, o Inicio, o SIGA).
+  useNomesDoCaminho({ obra: cab?.obra, medicao: m ? titulo : null,
+    contratante: cab ? { nome: cab.contratante ?? cab.orgao, chave: cab.contratante_chave } : null });
+  const cabeca = temOrigem(origem, FORA_DO_CAMINHO) ? (
     <header className="topbar topbar--detalhe med-trilha">
       <div className="topbar__trilha">
-        <VoltarOrigem origem={origem} alemDe={["obras", "medicoes"]} />
-        <Migalhas origem={origem} itens={[{ rotulo: "Medições", para: { tela: "medicoes" } },
-          { rotulo: obra, para: { tela: "obra", id: contratoId, aba: "ficha" } }, { rotulo: titulo }]} />
+        <VoltarOrigem origem={origem} alemDe={FORA_DO_CAMINHO} />
       </div>
     </header>
-  );
+  ) : null;
 
   if (erro && !medicoes) {
     return (

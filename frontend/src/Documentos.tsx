@@ -9,7 +9,7 @@ import {
   certidoesVencendo, chipCertidao, chipValidadeGarantia, competenciasRegularidade, empresasComCertidaoExigida, empresasComFolha,
   estadosRegularidade, garantiasAConferir, obrasPorOrgao, regularidadesFaltando, type CorChip, type EmpresaDoc, type ObraDoc, type RenovarDoc,
 } from "./matriz";
-import { substituir, trocarBusca, type Busca } from "./rota";
+import { ir, substituir, type Busca, type PaginaDocumentos } from "./rota";
 import { Glifo } from "./Selo";
 import { fmtCompetencia, fmtDataPura, fmtMesCurto, fmtMesExtenso } from "./tempo";
 import { AnexarCertidoes, type AnexarRef } from "./documentosComum";
@@ -20,7 +20,11 @@ import Falha from "./Falha";
  * sair". Tres abas com contador, uma linha por empresa (ou por obra) e a situacao de cada documento com o glifo dela. Certidoes (dias que faltam), Regularidade mensal (os seis ultimos meses do DP) e Garantias
  * (por orgao). O "Anexar PDF" do topo recebe qualquer PDF; o servidor decide pelo conteudo se e' certidao ou
  * regularidade (`/api/documentos/anexar`). A regra (o que e' exigido, a situacao) e' do servidor
- * (`documentos.painel`); a tela so' mostra. Aba na URL: ?aba=regularidade|garantias.
+ * (`documentos.painel`); a tela so' mostra.
+ *
+ * #814 (menu em areas): cada assunto tem o proprio endereco e o proprio item no menu ("/documentos", as Certidoes;
+ * "/documentos/regularidade"; "/documentos/garantias"); o App diz qual abrir pela prop `pagina`, e as abas levam de um
+ * endereco ao outro. Por ora e' a mesma tela nos tres; a issue #820 separa as paginas de verdade.
  */
 
 /** A janela do ZIP: a data vale para todas e sai um ZIP por empresa marcada. */
@@ -321,13 +325,15 @@ function LegendaAba({ aba }: { aba: IdAba }) {
   return <LegendaCor itens={LEGENDAS[aba]} />;
 }
 
-export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; busca?: Busca }) {
+export default function Documentos({ usuario, busca = {}, pagina = "certidoes" }: {
+  usuario: Usuario; busca?: Busca; pagina?: PaginaDocumentos;
+}) {
   const podeEditar = usuario.perfil !== "diretoria";
   const { painel, erro, carregar } = usePainel();
   const [anuncio, setAnuncio] = useState("");
   const [zip, setZip] = useState<EmpresaDoc | null>(null);
   const anexar = useRef<AnexarRef>(null);
-  const aba: IdAba = busca.aba === "regularidade" || busca.aba === "garantias" ? busca.aba : "certidoes";
+  const aba: IdAba = pagina;
   // Link salvo da tela antiga (/documentos?empresa=N): abre a pagina da empresa, trocando o endereco no lugar.
   const empresaAntiga = /^[1-9][0-9]{0,14}$/.test(busca.empresa ?? "") ? Number(busca.empresa) : null;
   useEffect(() => {
@@ -359,7 +365,7 @@ export default function Documentos({ usuario, busca = {} }: { usuario: Usuario; 
             {ABAS.map(a => (
               <button key={a.id} type="button" role="tab" id={`aba-${a.id}`} aria-selected={aba === a.id}
                 aria-controls="painel-documentos" className="escolha doc-aba"
-                onClick={() => trocarBusca({ aba: a.id === "certidoes" ? null : a.id })}>
+                onClick={() => ir(a.id === "certidoes" ? { tela: "documentos" } : { tela: "documentos", pagina: a.id })}>
                 {a.rotulo}{contadores[a.id] > 0 && <> <Contador situacao={a.cor}>{a.sufixo(contadores[a.id])}</Contador></>}
               </button>
             ))}

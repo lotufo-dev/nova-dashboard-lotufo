@@ -809,6 +809,16 @@ export const filaSimulada = (resposta, reg) => {
   };
 };
 
+// ------------------------------------------------------------------ caminho no alto (#814)
+// O cabecalho da obra com nomes compridos, como os da producao: o contratante escrito por extenso e a obra com o
+// trecho e o lote no nome. O caminho do topo ("Obras › contratante › obra › Medições › 15ª Medição") tem de quebrar
+// em linhas a 390 px em vez de cortar ou de alargar a pagina. Nomes inventados.
+export const cabecalhoDeNomeLongo = cabecalho => ({
+  ...cabecalho,
+  contratante: "Secretaria de Estado de Infraestrutura e Logística",
+  obra: "Rodovia Exemplo, trecho do entroncamento ao distrito, lote 2",
+});
+
 // ---- Tela de login (#821): o que o servidor responde a quem tenta entrar. Simuladas porque a recusa de verdade
 // conta no limite de tentativas por computador, e a prova ja' entra uma vez por perfil e largura.
 export const LOGIN_RECUSADO = { detail: "E-mail ou senha inválidos, ou usuário bloqueado" };

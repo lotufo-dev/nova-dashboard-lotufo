@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import Caminho from "./Caminho";
 import SigaPagina from "./SigaPagina";
 import type { Movimentacao, PainelSiga, ProcessoSiga, Robo, TipoMovimentacao } from "./siga";
 
@@ -85,6 +86,11 @@ const escolhas = () => within(screen.getByRole("navigation", { name: "Categoria 
 const mostrar = (dados: PainelSiga, busca: Record<string, string> = {}) => {
   api.mockResolvedValue(dados);
   return render(<SigaPagina busca={busca} agora={AGORA} />);
+};
+// com o caminho da barra do topo ao lado da página, como a casca o desenha (#814)
+const mostrarComCaminho = (dados: PainelSiga, busca: Record<string, string> = {}) => {
+  api.mockResolvedValue(dados);
+  return render(<><Caminho rota={{ tela: "siga" }} busca={busca} ehH1={false} /><SigaPagina busca={busca} agora={AGORA} /></>);
 };
 const linhasDe = (onde: HTMLElement) => within(onde).getAllByRole("row").filter(l => l.classList.contains("sg__linha"));
 const nomesEm = (onde: HTMLElement) => linhasDe(onde).map(l => l.getAttribute("aria-label"));
@@ -172,7 +178,7 @@ describe("SigaPagina", () => {
     fireEvent.click(await screen.findByRole("row", { name: "Obra Alfa · Aditivo de prazo" }));
     expect(window.location.pathname + window.location.search).toBe("/siga?categoria=aditivos&processo=21");
     unmount();
-    mostrar(painel([ALFA, ADITIVO]), { categoria: "aditivos", processo: "21" });
+    mostrarComCaminho(painel([ALFA, ADITIVO]), { categoria: "aditivos", processo: "21" });
     await screen.findByRole("heading", { level: 1 });
     expect(within(screen.getByRole("navigation", { name: "Você está em" })).getByRole("link", { name: "SIGA" }).getAttribute("href"))
       .toBe("/siga?categoria=aditivos");
@@ -404,14 +410,16 @@ describe("SigaPagina", () => {
   const chipsDe = () => within(screen.getByRole("group", { name: "Tipo de movimentação" })).getAllByRole("button").map(b => b.textContent);
   const linhasDoHistorico = () => within(screen.getByRole("table")).getAllByRole("row").slice(1);
 
-  it("histórico: trilha, título, número, total e período, Abrir no SIGA e a medição", async () => {
-    mostrar(painel([ALFA]), { processo: "1" });
+  it("histórico: caminho, título, número, total e período, Abrir no SIGA e a medição", async () => {
+    mostrarComCaminho(painel([ALFA]), { processo: "1" });
     const h1 = await screen.findByRole("heading", { level: 1 });
     expect(h1.textContent).toBe("Histórico · Obra Alfa · 7ª Medição");
+    // o caminho é da barra do topo (#814): o processo é o último trecho, com o nome que a página diz
     const trilha = screen.getByRole("navigation", { name: "Você está em" });
+    expect([...trilha.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Órgãos", "SIGA", "Obra Alfa · 7ª Medição"]);
     expect(within(trilha).getByRole("link", { name: "SIGA" }).getAttribute("href")).toBe("/siga");
-    expect(trilha.textContent).toContain("Obra Alfa · 7ª Medição");
-    expect(within(trilha).getByText("Histórico").getAttribute("aria-current")).toBe("page");
+    expect(within(trilha).getByText("Obra Alfa · 7ª Medição").closest("li")!.getAttribute("aria-current")).toBe("page");
+    expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);   // a página não desenha trilha própria
     expect(screen.getByText("ORGAO-PRO-2026/00001 · 5 movimentações · 20/10/2026 a 28/10/2026")).toBeTruthy();
     expect(screen.getByRole("link", { name: /Abrir no SIGA/ }).getAttribute("href")).toBe("https://siga.exemplo.com.br/acompanhar?n=ABC123");
     expect(screen.getByRole("link", { name: "Ver a medição" }).getAttribute("href")).toBe("/obras/7/medicoes/31#passo-5");

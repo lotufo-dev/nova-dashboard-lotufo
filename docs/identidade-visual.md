@@ -218,10 +218,29 @@ do rótulo, na etiqueta sob o valor ou na barra.
 
 A casca é o que fica igual em toda tela: o menu à esquerda e o topo (decisões 8, 9 e 10 da Início; PR #725).
 
-- **Menu lateral escuro**, de 232 px, com o símbolo L e o nome da marca em dois pesos, um item por tela e o botão de
-  recolher no pé. O item da tela atual tem fundo realçado, texto claro e forte e o ícone em laranja.
-- **Recolhido** fica só a coluna dos ícones (64 px). A escolha é guardada no navegador.
-- **Topo** de 56 px sobre o papel, com o título da tela e a conta (avatar redondo com as iniciais).
+- **Menu lateral escuro**, de 232 px, com o símbolo L e o nome da marca em dois pesos, um item por página e o botão
+  de recolher no pé. O item da página atual tem fundo realçado, texto claro e forte e o ícone em laranja.
+- **Menu em áreas:** os itens ficam agrupados por área, com o nome da área em letra pequena de título em cima das
+  páginas dela: Painel, Medições, Obras, Financeiro, Prazos e avisos, Órgãos, Documentos e Sistema. A área que é a
+  própria página (Obras) é um item só, sem o nome repetido. A área da página aberta fica com o nome aceso. Cada
+  perfil vê as páginas que já via; área sem página do perfil não aparece. Motivo: dez itens soltos não diziam onde
+  cada página mora, e as páginas novas (A receber, as três de Documentos) não cabiam numa lista só (decisão do dono
+  de 18/11/2026, #805; #814). Substitui o menu de 09/10/2026, uma lista sem nome de grupo.
+- **Item de 36 px no menu**, e não os 40 px do botão: com 14 páginas o menu inteiro tem de caber numa janela de
+  900 px de altura. Em janela mais baixa o menu rola por dentro e o botão de recolher fica preso ao pé.
+- **Recolhido** fica só a coluna dos ícones (64 px), com um fio entre uma área e a outra. A escolha é guardada no
+  navegador.
+- **Topo** sobre o papel, com o caminho da página, o lugar da busca e a conta (avatar redondo com as iniciais). Tem
+  56 px, ou mais quando o caminho ocupa mais de uma linha.
+- **Caminho:** onde se está, da área até o objeto, cada trecho um link: "Obras › SINFRA › MT-388 › Medições ›
+  15ª Medição". É uma peça só, na barra do topo; nenhuma página desenha trilha própria. O trecho da página ou do
+  objeto é o título da barra (maior e forte); os de antes são links sublinhados na cor do texto de apoio; depois do
+  título só vem a vista (a aba), quando não é a padrão. Nada é cortado: o que não cabe desce para a linha de baixo.
+  Motivo: com mais páginas e três níveis em Obras, a página precisa dizer onde está e dar o caminho de volta
+  (decisão do dono de 18/11/2026, #805; #814).
+- **O menu aceso e o caminho respondem a perguntas diferentes na página da medição.** O menu acende Medições, a
+  área de quem opera; o caminho diz onde a medição mora (dentro da obra, dentro do contratante). Para o perfil sem
+  Medições no menu (diretoria), a medição acende Obras.
 - **Página** com largura máxima de 1320 px e margem lateral de 32 px.
 
 ## Larguras
@@ -230,8 +249,9 @@ A casca é o que fica igual em toda tela: o menu à esquerda e o topo (decisões
 - **1024 px:** menu aberto e 792 px de conteúdo. A página não rola de lado. Colunas ao lado descem para baixo;
   tabela que não cabe rola dentro da própria caixa. O quadro por etapa vira uma etapa embaixo da outra, com os
   cartões lado a lado; no celular, um cartão embaixo do outro.
-- **390 px (celular):** o menu nasce recolhido (64 px), abre por cima da tela e fecha ao navegar; no topo fica só o
-  avatar. As telas de leitura da diretoria (Início, Obras, página da obra, Fechamento, Resumo das medições) são
+- **390 px (celular):** o menu nasce recolhido (64 px), abre por cima da tela, com os nomes das áreas, e fecha ao
+  navegar; no topo ficam o caminho e o avatar. O caminho vai em duas alturas: os trechos de antes numa linha de letra
+  pequena e o título na linha de baixo. As telas de leitura da diretoria (Início, Obras, página da obra, Fechamento, Resumo das medições) são
   desenhadas para essa largura: uma coluna, e a tabela vira um bloco por linha. As telas de operação são de
   computador; no celular nada se sobrepõe, e o que não cabe rola dentro da área da tela.
 - **Na Início e na página da medição, o bloco que muda de disposição mede o próprio painel**, não a janela, porque
