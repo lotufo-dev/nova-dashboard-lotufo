@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AReceber, { type ContratanteAReceber, type LinhaAReceber, type RespostaAReceber } from "./AReceber";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
@@ -73,7 +73,9 @@ async function abrir(resposta: RespostaAReceber | Error, busca: Record<string, s
 }
 
 describe("A receber: o em aberto nota a nota (#816)", () => {
-  afterEach(() => { cleanup(); api.mockReset(); });
+  // so' a data e' falsa: o ano de hoje decide se a data prevista leva o ano
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-18T15:00:00Z")); });
+  afterEach(() => { cleanup(); vi.useRealTimers(); api.mockReset(); });
 
   it("no alto, o total em aberto com o de cada ano, as linhas além do prazo e o que ele soma", async () => {
     await abrir(RESPOSTA);
@@ -105,10 +107,16 @@ describe("A receber: o em aberto nota a nota (#816)", () => {
     expect(linhas()).toHaveLength(0);                                    // recolhidos: só o cabeçalho
     const sinfra = screen.getByRole("button", { name: /SINFRA/ });
     expect(sinfra.getAttribute("aria-expanded")).toBe("false");
+    // o botão controla a lista de linhas do grupo, e não o grupo que o contém
+    const lista = document.getElementById(sinfra.getAttribute("aria-controls") ?? "")!;
+    expect(lista.tagName).toBe("TBODY");
+    expect(lista.contains(sinfra)).toBe(false);
+    expect(lista.children).toHaveLength(0);
     fireEvent.click(sinfra);
     expect(sinfra.getAttribute("aria-expanded")).toBe("true");
     expect(linhas().map(l => texto(l.querySelector("th")))).toEqual([
       "Obra Alfa 3ª Medição · 08/2026", "Obra Beta 5ª Medição · 09/2026", "Obra Alfa Reajuste da 4ª Medição · 09/2026"]);
+    expect([...lista.children]).toEqual(linhas());
     fireEvent.click(sinfra);
     expect(linhas()).toHaveLength(0);
   });
@@ -138,6 +146,17 @@ describe("A receber: o em aberto nota a nota (#816)", () => {
     expect(reajuste.querySelector(".arc-a-parada .selo--andamento")).toBeTruthy();
     expect(texto(reajuste.querySelector(".arc-a-valor"))).toBe("R$ 333,33");
     expect(screen.queryByRole("region", { name: /À parte/ })).toBeNull();     // a SINFRA não tem nada à parte
+  });
+
+  it("a data prevista e a do pagamento do órgão de outro ano levam o ano: a do ano que vem não se lê como passada", async () => {
+    const [alfa, beta, reajuste] = SINFRA.linhas;
+    const sinfra = { ...SINFRA, linhas: [alfa, { ...beta, orgao_pagou_em: "2025-12-12" },
+      { ...reajuste, parada: parada("2026-11-10", 6, "andamento", "2027-06-25", 210) }] };
+    await abrir({ ...RESPOSTA, contratantes: [sinfra, PREFEITURA, SES] }, { contratante: "sinfra" });
+    const [l1, l2, l3] = linhas();
+    expect(texto(l1.querySelector(".arc-a-parada"))).toBe("55 dias úteis prazo do órgão venceu em 16/10");
+    expect(texto(l2.querySelector(".arc-a-parada"))).toBe("órgão pagou em 12/12/2025");
+    expect(texto(l3.querySelector(".arc-a-parada"))).toBe("6 dias úteis prazo do órgão: 25/06/2027");
   });
 
   it("paga em parte, a nota sem protocolo conta da emissão e o órgão sem prazo não tem data prevista; à parte, a nota sem medição e o antigo", async () => {

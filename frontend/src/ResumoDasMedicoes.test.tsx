@@ -112,7 +112,7 @@ const abrir = (endereco = "/resumo-medicoes") => {
 };
 
 describe("Resumo das medições em quadro por etapa (#749, #805)", () => {
-  afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
+  afterEach(() => { cleanup(); vi.useRealTimers(); api.mockReset(); window.history.replaceState(null, "", "/"); });
 
   it("abre na competência em trabalho, no quadro, e diz de quando é o dado", async () => {
     api.mockResolvedValue(RESUMO);
@@ -223,6 +223,9 @@ describe("Resumo das medições em quadro por etapa (#749, #805)", () => {
   });
 
   it("o cartão diz a obra, o contratante, a medição, o valor, há quanto tempo está parada e a diferença para o pedido", async () => {
+    // so' a data e' falsa: a data esperada do ano de hoje sai sem o ano (#816)
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-18T15:00:00Z"));
     api.mockResolvedValue(RESUMO);
     abrir();
     const quadro = await screen.findByRole("group", { name: /uma coluna por etapa/ });

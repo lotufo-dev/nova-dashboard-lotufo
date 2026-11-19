@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import CaixaAviso from "./CaixaAviso";
 import Falha from "./Falha";
@@ -7,12 +7,11 @@ import { Link } from "./Link";
 import MarcaEtapa from "./MarcaEtapa";
 import { tituloMedicao } from "./medicao";
 import type { Parada } from "./parada";
-import { diaMes } from "./Passos";
 import Rolagem from "./Rolagem";
 import type { Busca, Ir } from "./rota";
 import Selo from "./Selo";
 import TempoParado from "./TempoParado";
-import { fmtCompetencia, fmtDataPura } from "./tempo";
+import { fmtCompetencia, fmtDataPura, fmtDiaNoAno } from "./tempo";
 import "./aReceber.css";
 
 // A RECEBER (#816; decisao do dono de 18/11/2026, #805): o em aberto do Fechamento nota a nota, na area Financeiro.
@@ -113,7 +112,7 @@ function NotaDaLinha({ l }: { l: LinhaAReceber }) {
 /** O tempo parado com o orgao; no repasse o orgao ja' pagou (a medicao recebida leva o selo do feito, com a data). */
 function ParadaDaLinha({ l }: { l: LinhaAReceber }) {
   if (l.tipo_aberto === "repasse") {
-    const dia = diaMes(l.orgao_pagou_em);
+    const dia = fmtDiaNoAno(l.orgao_pagou_em);
     return <Selo situacao="feito">{dia ? <>órgão pagou em <span className="num">{dia}</span></> : "órgão pagou"}</Selo>;
   }
   return l.parada ? <TempoParado parada={l.parada} /> : <span className="tempo-parado tempo-parado--sem">—</span>;
@@ -180,10 +179,15 @@ function Tabela({ grupos, recolhidos, ir }: { grupos: ContratanteAReceber[]; rec
           const id = `arc-grupo-${i}`;
           const aberto = !recolhidos || abertos.has(g.contratante);
           return (
-            <tbody key={g.contratante} id={id}>
-              <CabecaDoGrupo g={g} aberto={aberto} alternar={recolhidos ? () => alternar(g.contratante) : null} id={id} />
-              {aberto && g.linhas.map(l => <Linha key={`${l.tipo_aberto}-${l.medicao_id}-${l.nota_id ?? ""}`} l={l} ir={ir} />)}
-            </tbody>
+            <Fragment key={g.contratante}>
+              <tbody>
+                <CabecaDoGrupo g={g} aberto={aberto} alternar={recolhidos ? () => alternar(g.contratante) : null} id={id} />
+              </tbody>
+              {/* as linhas do grupo, que o botao do nome abre e fecha (`aria-controls`) */}
+              <tbody id={id}>
+                {aberto && g.linhas.map(l => <Linha key={`${l.tipo_aberto}-${l.medicao_id}-${l.nota_id ?? ""}`} l={l} ir={ir} />)}
+              </tbody>
+            </Fragment>
           );
         })}
       </table>
