@@ -192,7 +192,7 @@ do rótulo, na etiqueta sob o valor ou na barra.
   bloco (o contratante, em Obras e no quadro do mês; quem tem de agir, na fila de trabalho; a categoria, no SIGA),
   com o subtotal do grupo nas colunas. Motivo: na linha cinza o contratante sumia
   entre as obras, e a página parecia uma lista só (decisão do dono de 18/11/2026, #805).
-- **Borda do tempo parado:** no SIGA, a borda esquerda da linha leva a cor da situação do tempo no setor, a mesma
+- **Borda do tempo parado:** no SIGA, a borda esquerda da linha leva a cor da situação dos dias sem movimentação (#840), a mesma
   do selo da linha; o encerrado não leva. Motivo: com tudo em tinta não dava para ver o que estava travado antes de
   ler (decisão do dono de 18/11/2026, #805).
 - **Barra de passos:** o fluxo da medição de uma obra em miniatura, na linha da tabela: um segmento por passo que
