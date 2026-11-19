@@ -247,8 +247,9 @@ def test_painel_sem_as_chaves_que_nenhuma_tela_le(cenario):
     c, _ = cenario
     p = inicio.painel(c, HOJE)
     assert not {"notas_a_enviar", "certidoes", "reajustes", "recebido_ano", "prazos", "espelhos"} & set(p)
+    # #817: o ciclo por contratante e o medido em 12 meses, que a tela mostra
     assert set(p) == {"hoje", "protocoladas", "medido", "a_receber", "ciclo", "recebido_12m", "previsao", "matriz",
-                      "notas_mes"}
+                      "notas_mes", "ciclo_por_contratante", "medido_12m"}
 
 
 def test_painel_nao_monta_mais_a_caixa_de_avisos(cenario):
@@ -658,3 +659,141 @@ def test_matriz_protocolada_alem_do_prazo_do_contratante_e_atrasada_como_na_prev
     assert _celulas(c, sem) == {"2026-07": ("protocolado", sem_prazo)}
     # a mesma regra da previsao de entrada: as atrasadas da matriz sao as da linha "Atrasado"
     assert inicio.painel(c, HOJE)["previsao"]["atrasado"]["quantidade"] == 2
+
+
+# --- issue #817: ciclo por contratante e medido em 12 meses ---
+
+ETAPAS_DO_CICLO = ("em_analise", "boletim", "nota", "protocolado")
+
+
+def _liberar_a_receber(c):
+    c.execute("INSERT INTO cadastro_geral (chave, valor) VALUES ('diretoria', ?)",
+              (json.dumps({"total_a_receber_liberado": True}),))
+    c.commit()
+
+
+def _por_contratante(p):
+    return {x["contratante"]: tuple(x[f"{e}_centavos"] for e in ETAPAS_DO_CICLO) + (x["a_receber_centavos"],)
+            for x in p["ciclo_por_contratante"]}
+
+
+def _fecha_com_a_faixa(p):
+    """Em cada etapa, a soma dos contratantes e' o numero da faixa do ciclo; a do a receber, o total do a receber."""
+    faixa = {e["etapa"]: e["valor_centavos"] for e in p["ciclo"]}
+    for etapa in ETAPAS_DO_CICLO:
+        assert sum(x[f"{etapa}_centavos"] for x in p["ciclo_por_contratante"]) == faixa[etapa], etapa
+    if p["a_receber"]["liberado"]:
+        assert sum(x["a_receber_centavos"] for x in p["ciclo_por_contratante"]) == p["a_receber"]["valor_centavos"]
+    else:
+        assert all(x["a_receber_centavos"] is None for x in p["ciclo_por_contratante"])
+
+
+def test_ciclo_por_contratante_fecha_com_a_faixa_em_cada_etapa_e_com_o_a_receber(cenario):
+    """A soma por contratante, em cada etapa, e' o total que o Inicio ja' mostra; a do a receber e' o total dele. Cota
+    com centavo impar em consorcio (50% e um terco), a SINFRA numa linha so', medicao sem a data do evento, pendencia
+    a' parte e nota do RM sem medicao."""
+    from app import diretoria
+    c, mtpar = cenario
+    c.execute("UPDATE contratos SET percentual_direito_bp=5000 WHERE id=?", (mtpar,))
+    suef = _obra_de(c, "sinfra_a", "SINFRA - SUEF II", "sinfra", "CT 3/2025")
+    supu = _obra_de(c, "sinfra_b", "SINFRA - SUPU (Pavimentação Urbana)", "sinfra", "CT 4/2025")
+    alfa = _obra_de(c, "prefeitura_alfa", "Prefeitura Alfa", "prefeitura", "CT 2/2025")
+    c.execute("UPDATE contratos SET percentual_direito_bp=3333 WHERE id=?", (alfa,))
+    c.execute("UPDATE contratos SET centro_custo_rm='9.001.003' WHERE id=?", (supu,))
+    _liberar_a_receber(c)
+    # em analise: duas no consorcio a 50% (100.001 -> 50.001 cada: 100.002, e nao a cota da soma) e uma na SINFRA
+    _no_ciclo(c, mtpar, 1, "planilha_enviada", 100_001, planilha_enviada_em="2026-10-08")
+    _no_ciclo(c, mtpar, 2, "planilha_enviada", 100_001, planilha_enviada_em="2026-10-07")
+    _no_ciclo(c, suef, 3, "planilha_enviada", 70_007, planilha_enviada_em="2026-10-01")
+    _no_ciclo(c, supu, 4, "planilha_enviada", 999)                                     # sem a data do envio: fora
+    # boletim: so' na Prefeitura Alfa, a um terco (100.000 x 33,33% = 33.330)
+    _no_ciclo(c, alfa, 5, "espelho_gerado", 999_999, aprovado=100_000, atestado_em="2026-10-02")
+    # nota: as duas superintendencias da SINFRA somam numa linha
+    _no_ciclo(c, suef, 6, "nota_emitida", 9, aprovado=20_001, nota_emitida_em="2026-10-03")
+    _no_ciclo(c, supu, 7, "nota_emitida", 9, aprovado=30_002, nota_emitida_em="2026-10-04")
+    # protocolado: uma com a data do protocolo em cada contratante; a sem data fica fora da etapa e dentro do a receber
+    _protocolada(c, mtpar, 8, "2026-09-10", 300_003)                                   # 150.001,5 -> 150.002
+    _protocolada(c, supu, 9, "2026-09-11", 40_000)
+    _protocolada(c, alfa, 10, None, 90_000)                                            # 90.000 x 33,33% = 29.997
+    # a' parte (competencia anterior a 2025): fora da etapa, do a receber e da linha do contratante
+    velha = _medicao(c, suef, 11, "2024-12-20 10:00:00", 555_555, estado="protocolada", competencia="2024-11")
+    _protocolar(c, velha, "2024-12-22")
+    # nota do RM em aberto sem medicao, na obra da SUPU pelo centro de custo: entra so' no a receber
+    col = c.execute("SELECT e.coligada_rm FROM contratos k JOIN entidades e ON e.id=COALESCE(k.entidade_id, 1) WHERE k.id=?",
+                    (supu,)).fetchone()[0]
+    nid = c.execute("INSERT INTO notas_fiscais (coligada, idmov, numero, emissao, valor_centavos, situacao, centro_custo, "
+                    "codtmv) VALUES (?, 71, '71', '2026-09-05', 60001, 'ativa', '9.001.003', '2.2.01')", (col,)).lastrowid
+    c.execute("INSERT INTO baixas (coligada, idlan, nota_id, idmov, valor_original_centavos, valor_baixado_centavos, "
+              "status_lan) VALUES (?, 71, ?, 71, 60001, 0, 0)", (col, nid))
+    c.commit()
+    p = inicio.painel(c, HOJE)
+    _fecha_com_a_faixa(p)
+    assert {e["etapa"]: e["valor_centavos"] for e in p["ciclo"]} == {
+        "em_analise": 170_009, "boletim": 33_330, "nota": 50_003, "protocolado": 190_002, "recebido_mes": 0}
+    assert p["a_receber"]["valor_centavos"] == 150_002 + 40_000 + 60_001 + 29_997
+    assert p["a_receber"]["a_parte"]["anterior_centavos"] == 555_555
+    #                                         em analise, boletim, nota, protocolado, a receber
+    assert _por_contratante(p) == {"SINFRA": (70_007, 0, 50_003, 40_000, 100_001),
+                                   "MTPAR": (100_002, 0, 0, 150_002, 150_002),
+                                   "Prefeitura Alfa": (0, 33_330, 0, 0, 29_997)}
+    # do que tem mais dinheiro nas quatro etapas para o que tem menos; a chave e' a da pagina do contratante
+    assert [(x["contratante"], x["chave"]) for x in p["ciclo_por_contratante"]] == [
+        ("MTPAR", "mtpar"), ("SINFRA", "sinfra"), ("Prefeitura Alfa", "prefeitura_alfa")]
+    assert {x["chave"] for x in p["ciclo_por_contratante"]} == {
+        diretoria.contratante_da_obra(c, cid)["contratante_chave"] for cid in (mtpar, suef, supu, alfa)}
+
+
+def test_ciclo_por_contratante_sem_o_total_liberado_nao_traz_o_a_receber(cenario):
+    c, cid = cenario
+    _no_ciclo(c, cid, 1, "planilha_enviada", 1_001, planilha_enviada_em="2026-10-08")
+    _protocolada(c, cid, 2, "2026-09-10", 2_003)
+    p = inicio.painel(c, HOJE)
+    assert p["a_receber"]["liberado"] is False
+    _fecha_com_a_faixa(p)
+    assert _por_contratante(p) == {"MTPAR": (1_001, 0, 0, 2_003, None)}
+
+
+def test_ciclo_por_contratante_vazio_sem_medicao_e_obra_sem_orgao_sem_chave(cenario):
+    c, _ = cenario
+    _liberar_a_receber(c)
+    assert inicio.painel(c, HOJE)["ciclo_por_contratante"] == []
+    c.execute("INSERT INTO contratos (orgao, numero_instrumento, nome_curto, objeto, valor_original_centavos) "
+              "VALUES ('texto livre', 'CT 9/2025', 'Obra sem órgão', 'obra', 100)")
+    solta = c.execute("SELECT MAX(id) FROM contratos").fetchone()[0]
+    _no_ciclo(c, solta, 1, "planilha_enviada", 4_004, planilha_enviada_em="2026-10-08")
+    p = inicio.painel(c, HOJE)
+    _fecha_com_a_faixa(p)
+    assert p["ciclo_por_contratante"] == [{"contratante": "sem órgão", "chave": None, "em_analise_centavos": 4_004,
+                                           "boletim_centavos": 0, "nota_centavos": 0, "protocolado_centavos": 0,
+                                           "a_receber_centavos": 0}]
+
+
+def test_medido_12_meses_sao_as_competencias_fechadas_com_a_conta_do_fechamento(cenario):
+    """A serie do medido e' a do Fechamento, competencia a competencia, na cota: as 12 ultimas fechadas (as da matriz),
+    sem o mes de hoje. Consorcio com centavo impar; cancelada, prevista e planilha so' gerada nao medem."""
+    from app import fechamento
+    c, cid = cenario
+    c.execute("UPDATE contratos SET percentual_direito_bp=5000 WHERE id=?", (cid,))
+    propria = _obra_de(c, "sinfra_a", "SINFRA - SUEF II", "sinfra", "CT 3/2025")
+    _no_ciclo(c, cid, 1, "planilha_enviada", 100_001)                       # so' o pedido: 50.001 na cota
+    _no_ciclo(c, cid, 2, "espelho_gerado", 999_999, aprovado=100_001)       # o aprovado vale: mais 50.001
+    _no_ciclo(c, propria, 3, "recebida", 7_007)
+    for numero, estado in ((4, "cancelada"), (5, "prevista"), (6, "planilha_gerada")):
+        _no_ciclo(c, propria, numero, estado, 1_000_000)
+    _medicao(c, propria, 7, "2025-11-05 10:00:00", 30_003, estado="recebida", competencia="2025-10")
+    _medicao(c, propria, 8, "2025-10-05 10:00:00", 9_999, estado="recebida", competencia="2025-09")   # 13a para tras
+    _medicao(c, propria, 9, "2026-10-08 10:00:00", 8_888, estado="planilha_enviada", competencia="2026-10")  # mes de hoje
+    p = inicio.painel(c, HOJE)
+    serie = p["medido_12m"]
+    assert [x["competencia"] for x in serie] == p["matriz"]["competencias"]
+    assert (serie[0]["competencia"], serie[-1]["competencia"]) == ("2025-10", "2026-09")
+    do_fechamento = {m["competencia"]: m["medido_centavos"] for m in fechamento.fechamento(c, HOJE)["meses"]}
+    assert do_fechamento["2026-10"] == 8_888 and do_fechamento["2025-09"] == 9_999       # o Fechamento os tem; a serie nao
+    assert {x["competencia"]: x["valor_centavos"] for x in serie} == {
+        x["competencia"]: do_fechamento.get(x["competencia"], 0) for x in serie}
+    valores = {x["competencia"]: x["valor_centavos"] for x in serie}
+    assert valores["2026-09"] == 50_001 + 50_001 + 7_007 and valores["2025-10"] == 30_003
+    assert sum(valores.values()) == 137_012 and valores["2026-08"] == 0
+    # nao e' a conta do cartao do alto, que e' valor cheio (B-01): em consorcio os dois numeros diferem
+    assert p["medido"]["valor_centavos"] == 100_001 + 100_001 + 7_007 != valores["2026-09"]
+
