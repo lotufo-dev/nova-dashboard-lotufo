@@ -385,7 +385,7 @@ export const obrasComAParte = obras => obras.map((o, i) => ({ ...o, posicao: { .
 // `parada` da fila de trabalho: no protocolado, sem prazo do orgao (a MTPAR), dentro do prazo e alem dele; aprovado
 // abaixo do pedido (pequeno e critico) e acima dele; recebida com os dias da nota ao recebimento; planilha/carta
 // ainda nao enviada; obras sem medicao (uma que nunca mediu) e meses anteriores em aberto de tres competencias.
-// O protocolado tem a referencia da mesma altura e o recebido vem sem lastro (sem variacao). `contratante` recorta
+// O protocolado tem a variacao do acumulado contra a mesma altura e o recebido vem sem lastro (sem variacao). `contratante` recorta
 // como o servidor (a MTPAR fica com quatro etapas vazias); `vazio` e' o mes sem medicao nenhuma.
 // A resposta verdadeira da' o dia, a competencia e de quando e' o dado; o resto e' trocado.
 const ETAPAS_DO_RESUMO = ["em_analise", "boletim", "nota", "protocolado", "recebido"];
@@ -462,14 +462,18 @@ export const resumoEmQuadro = ({ contratante = null, vazio = false } = {}) => re
     return { contratante: n, medicoes: quantas(ls), valor_centavos: soma(ls), linhas: ls };
   });
   const medido = soma(linhasDoMes);
+  const acumulado = soma(linhasDoMes.filter(l => l.etapa === "protocolado" || l.etapa === "recebido"));
   // o mesmo dia de hoje, um mes antes (o dia 29 em diante fica no 28, para caber em qualquer mes)
   const d = new Date(hoje), ate = dataEm(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, Math.min(28, d.getUTCDate())));
   return { ...resposta, contratante, contratantes, etapas: porEtapa(linhasDoMes),
     // o medido subiu contra o mes anterior e ficou estavel contra o mesmo mes do ano anterior
     medido: { valor_centavos: medido, mes_anterior: medido ? { competencia: mesAntes(mes, 1), valor_centavos: Math.round(medido / 1.068) } : null,
       ano_anterior: medido ? { competencia: mesAntes(mes, 12), valor_centavos: Math.round(medido / 0.99) } : null },
-    // o protocolado caiu contra a mesma altura do mes anterior; o recebido nao tem lastro (sem variacao)
-    mesma_altura: medido ? { competencia: mesAntes(mes, 1), ate, protocolado_centavos: 3_780_000 * REAIS, recebido_centavos: null } : null,
+    // o protocolado compara o acumulado (o que esta' na etapa e o que ja' foi recebido), que subiu contra o da
+    // competencia anterior na mesma altura, embora o valor da etapa seja bem menor: o orgao pagou cedo. O recebido
+    // nao tem lastro (sem variacao)
+    protocolado_acumulado_centavos: acumulado,
+    mesma_altura: medido ? { competencia: mesAntes(mes, 1), ate, protocolado_acumulado_centavos: Math.round(acumulado / 1.09), recebido_centavos: null } : null,
     diferenca_critica_por_mil: 5, grupos, sem_medicao: recorte(semMedicao), anteriores_etapas: porEtapa(linhasDeAntes),
     anteriores: [...new Set(linhasDeAntes.map(l => l.competencia))].sort().map(c => {
       const ls = linhasDeAntes.filter(l => l.competencia === c);
