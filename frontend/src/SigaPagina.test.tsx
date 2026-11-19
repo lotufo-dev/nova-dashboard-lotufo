@@ -451,7 +451,8 @@ describe("SigaPagina", () => {
     expect(h1.textContent).toBe("Histórico · Obra Alfa · 7ª Medição");
     // o caminho é da barra do topo (#814): o processo é o último trecho, com o nome que a página diz
     const trilha = screen.getByRole("navigation", { name: "Você está em" });
-    expect([...trilha.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Órgãos", "SIGA", "Obra Alfa · 7ª Medição"]);
+    // o nome chega ao caminho pelo efeito da página, depois do h1 (#862): espera
+    await vi.waitFor(() => expect([...trilha.querySelectorAll("li")].map(li => li.textContent)).toEqual(["Órgãos", "SIGA", "Obra Alfa · 7ª Medição"]));
     expect(within(trilha).getByRole("link", { name: "SIGA" }).getAttribute("href")).toBe("/siga");
     expect(within(trilha).getByText("Obra Alfa · 7ª Medição").closest("li")!.getAttribute("aria-current")).toBe("page");
     expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);   // a página não desenha trilha própria
