@@ -5,7 +5,7 @@
 import type { Aviso, Nivel } from "./Alertas";
 import { fmtDias, fmtPercentual } from "./formato";
 import { fmtDataPura, fmtMesCurto, fmtMesExtenso } from "./tempo";
-import { andamento } from "./valores";
+import { andamento, type AndamentoDoServidor } from "./valores";
 
 export type ObraLista = {
   id: number; orgao: string; numero_instrumento: string; nome_curto?: string | null; estado: string;
@@ -25,10 +25,11 @@ export type ObraLista = {
   // obra (servidor); o a receber e' nulo ate' o total ser liberado
   posicao?: PosicaoObra | null;
   // #805 (Obras por contratante), tudo do servidor e na cota: a chave da pagina do contratante (nula no contrato sem
-  // orgao no cadastro); o ritmo e o necessario por mes, pela conta do painel "Prazo" da pagina da obra; e o medido da
-  // ultima competencia fechada com o da anterior, o mesmo numero do Fechamento
+  // orgao no cadastro); o ritmo e o necessario por mes, pela conta do painel "Prazo" da pagina da obra, com a
+  // `leitura` do andamento ja' feita (#822: a mesma da pagina da obra); e o medido da ultima competencia fechada com
+  // o da anterior, o mesmo numero do Fechamento
   contratante_chave?: string | null;
-  andamento?: { ritmo_centavos: number | null; necessario_centavos: number | null } | null;
+  andamento?: { ritmo_centavos: number | null; necessario_centavos: number | null; leitura?: AndamentoDoServidor | null } | null;
   medido_mes?: MedidoMes | null;
 };
 
@@ -214,10 +215,14 @@ export type GrupoDeObras = { contratante: string; chave: string | null; obras: O
 
 /* --------------------------------------------------- andamento e o que pede atencao (#805) */
 
-/** A leitura do andamento da obra (Adiantada, Atencao, Devagar) e o percentual do necessario, pela regua UNICA de
- *  `valores.ts`: a mesma da peca `Andamento`, para a contagem "N obras devagar" nunca discordar da barra desenhada.
- *  Nula na obra sem necessario (sem prazo a cumprir: parada, vencida, em encerramento, sem saldo) ou sem ritmo. */
-export const andamentoDaObra = (o: ObraLista) => andamento(o.andamento?.ritmo_centavos, o.andamento?.necessario_centavos);
+/** A leitura do andamento da obra (Adiantada, Atencao, Devagar) e o percentual do necessario, como o SERVIDOR os
+ *  mandou em `andamento.leitura` (#822): a mesma da peca `Andamento` e da pagina da obra, para a contagem "N obras
+ *  devagar" nunca discordar da barra desenhada. A tela nao compara o ritmo com o necessario.
+ *  Nula na obra sem leitura: sem necessario (sem prazo a cumprir: parada, vencida, em encerramento, sem saldo), sem
+ *  ritmo, ou fora da regua (prazo no fim, prorrogacao pedida, sem medicao ha' tres competencias). */
+export const andamentoDaObra = (o: ObraLista) => andamento(o.andamento?.leitura);
+/** O que `andamentoDaObra` devolve quando a leitura existe: a palavra e o percentual do necessario. */
+export type LeituraDaObra = NonNullable<ReturnType<typeof andamentoDaObra>>;
 
 /** Obra paralisada: o estado suspenso ou a ordem de paralisacao em vigor (`paralisada_desde`, do servidor). */
 export const estaParalisada = (o: ObraLista) => o.estado === "suspenso" || !!o.paralisada_desde;
@@ -271,19 +276,24 @@ export function participacao(parte: number, carteira: number): string | null {
 }
 
 /** Os numeros de um conjunto de obras (a carteira ou um contratante): os totais da posicao, o medido do mes fechado,
- *  as contagens do andamento (`comAndamento` e' o "de M": as obras em que a leitura existe) e do que pede atencao. */
+ *  as contagens do andamento (`comAndamento` e' o "de M": as obras em que a leitura existe; a obra fora da regua,
+ *  com o prazo no fim, a prorrogacao pedida ou sem medicao, nao entra em nenhuma das duas) e do que pede atencao. */
 export type ResumoObras = {
   obras: number; totais: TotaisObras; medidoMes: MedidoMes | null;
   comAndamento: number; devagar: number; atencao: number;
+  /** #822: as obras que o servidor tirou da regua pelo prazo no fim (com ou sem pedido de prorrogacao): a faixa de
+   *  numeros as conta ao lado do "N de M", para o "de M" pequeno nao parecer a carteira inteira. */
+  prazoNoFim: number;
   paralisadas: number; execucaoVencida: number; avisosCriticos: number;
 };
 
 export function resumoDe(obras: ObraLista[], criticos?: ReadonlyMap<number, number>): ResumoObras {
   const r: ResumoObras = { obras: obras.length, totais: totaisDe(obras), medidoMes: medidoDoMes(obras),
-    comAndamento: 0, devagar: 0, atencao: 0, paralisadas: 0, execucaoVencida: 0, avisosCriticos: 0 };
+    comAndamento: 0, devagar: 0, atencao: 0, prazoNoFim: 0, paralisadas: 0, execucaoVencida: 0, avisosCriticos: 0 };
   for (const o of obras) {
     const a = andamentoDaObra(o);
     if (a) { r.comAndamento += 1; if (a.leitura === "devagar") r.devagar += 1; else if (a.leitura === "atencao") r.atencao += 1; }
+    else if (o.andamento?.leitura?.motivo === "prazo_no_fim") r.prazoNoFim += 1;
     if (estaParalisada(o)) r.paralisadas += 1;
     if (execucaoVencida(o)) r.execucaoVencida += 1;
     r.avisosCriticos += criticos?.get(o.id) ?? 0;
@@ -291,17 +301,26 @@ export function resumoDe(obras: ObraLista[], criticos?: ReadonlyMap<number, numb
   return r;
 }
 
-/** A vista Andamento: as obras com prazo a cumprir (o servidor mandou o necessario), da que mede a menor parte do
- *  necessario para a que mede a maior; no empate do percentual, pela razao exata e depois pelo nome. A obra sem ritmo
- *  (sem medicao de execucao na janela) nao tem leitura e vai ao fim, pelo nome. */
+/** Onde a obra sem leitura entra na vista Andamento, depois das que tem: a sem medicao ha' tres competencias (parada
+ *  de fato), a com o prazo no fim ou com a prorrogacao pedida, e por ultimo a que nao tem o que escrever. */
+const ORDEM_FORA_DA_REGUA: Record<string, number> = { sem_medicao: 1, prazo_no_fim: 2, prorrogacao_pedida: 2 };
+
+/** A vista Andamento: as obras com prazo a cumprir (o servidor mandou o necessario). Primeiro as que tem leitura, da
+ *  que mede a menor parte do necessario para a que mede a maior; no empate do percentual, pela razao dos dois valores
+ *  e depois pelo nome. Depois as que ficaram fora da regua, com o motivo: a sem medicao (a mais antiga primeiro) e a
+ *  com o prazo no fim ou a prorrogacao pedida (a que termina antes primeiro). Por ultimo, pelo nome, a que nao tem o
+ *  que escrever (ainda nao mediu execucao). */
 export function porAndamento(obras: ObraLista[]): ObraLista[] {
   const comPrazo = obras.filter(o => (o.andamento?.necessario_centavos ?? 0) > 0);
   const razao = (o: ObraLista) => (o.andamento?.ritmo_centavos ?? 0) / (o.andamento?.necessario_centavos ?? 1);
-  return comPrazo.sort((a, b) => {
-    const la = andamentoDaObra(a), lb = andamentoDaObra(b);
-    if (!la || !lb) return (la ? 0 : 1) - (lb ? 0 : 1) || nomeDaObra(a).localeCompare(nomeDaObra(b), "pt-BR");
-    return la.pct - lb.pct || razao(a) - razao(b) || nomeDaObra(a).localeCompare(nomeDaObra(b), "pt-BR");
-  });
+  const grupo = (o: ObraLista) => andamentoDaObra(o) ? 0 : ORDEM_FORA_DA_REGUA[o.andamento?.leitura?.motivo ?? ""] ?? 3;
+  const dentroDoGrupo = (a: ObraLista, b: ObraLista, g: number) => {
+    if (g === 0) return (andamentoDaObra(a)?.pct ?? 0) - (andamentoDaObra(b)?.pct ?? 0) || razao(a) - razao(b);
+    if (g === 1) return (a.andamento?.leitura?.sem_medicao_desde ?? "").localeCompare(b.andamento?.leitura?.sem_medicao_desde ?? "");
+    if (g === 2) return (a.execucao_fim_vigente ?? "").localeCompare(b.execucao_fim_vigente ?? "");
+    return 0;
+  };
+  return comPrazo.sort((a, b) => grupo(a) - grupo(b) || dentroDoGrupo(a, b, grupo(a)) || nomeDaObra(a).localeCompare(nomeDaObra(b), "pt-BR"));
 }
 
 /** Os blocos da vista "Por contratante": do maior contratado para o menor (a participacao na carteira e' o que o bloco

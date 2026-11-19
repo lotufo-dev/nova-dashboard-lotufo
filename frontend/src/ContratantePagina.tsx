@@ -114,8 +114,10 @@ export default function ContratantePagina({ chave, perfil, busca = {}, ir }: {
                             </td>
                             <td data-rotulo="Executado"><Executado pct={pctExecutado(o)} /></td>
                             <td data-rotulo="Andamento" className="obras-posicao__andamento">
-                              {/* sem necessario ou sem ritmo a peca nao desenha nada: fica o tracinho */}
-                              {andamentoDaObra(o) ? <Andamento ritmo={o.andamento?.ritmo_centavos} necessario={o.andamento?.necessario_centavos} detalhe="valores" /> : "—"}
+                              {/* #822: a leitura vem do servidor. Fora da regua a peca escreve o motivo; sem nada, o tracinho */}
+                              {andamentoDaObra(o)
+                                ? <Andamento leitura={o.andamento?.leitura} ritmo={o.andamento?.ritmo_centavos} necessario={o.andamento?.necessario_centavos} detalhe="valores" />
+                                : <Andamento leitura={o.andamento?.leitura} vazio="—" />}
                             </td>
                             <td data-rotulo={`Medido${mes ? ` em ${mes}` : " no mês"}`} className="col-num dinheiro"><MedidoNoMes mm={o.medido_mes} /></td>
                             <td data-rotulo="A receber" className="col-num dinheiro"><AReceber centavos={posicaoDe(o).a_receber_centavos} /></td>

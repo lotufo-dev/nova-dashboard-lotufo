@@ -5,6 +5,8 @@ import {
   filtrarObras, fimDaExecucao, gruposPorContratante, medidoDoMes, mesesDoMedido, participacao, pctExecutado, pctPiso, porAndamento, posicaoDe,
   prazoDaObra, resumoDe, totaisDe, type ObraLista,
 } from "./listaObras";
+import { leituraDeTeste } from "./andamentoTeste";
+import type { AndamentoDoServidor } from "./valores";
 
 const o = (id: number, nome: string, extra: Partial<ObraLista> = {}): ObraLista => ({
   id, orgao: "SINFRA", numero_instrumento: `${id}/2026`, nome_curto: nome, estado: "ativo", ...extra });
@@ -151,7 +153,9 @@ describe("lista de Obras na cota da Lotufo, por contratante (#645)", () => {
 describe("Obras por contratante: andamento, medido do mês e o que pede atenção (#805)", () => {
   const mes = (valor: number, referencia: number | null, ref: string | null = "2026-09") =>
     ({ competencia: "2026-10", valor_centavos: valor, referencia_competencia: ref, referencia_centavos: referencia });
-  const ritmo = (r: number | null, n: number | null) => ({ ritmo_centavos: r, necessario_centavos: n });
+  // `leitura` e' a do servidor (#822); o dado de teste a monta pelo corte dele, ou com o motivo de ficar fora da regua
+  const ritmo = (r: number | null, n: number | null, fora: Partial<AndamentoDoServidor> = {}) =>
+    ({ ritmo_centavos: r, necessario_centavos: n, leitura: leituraDeTeste(r, n, fora) });
   const pos = (vigente: number, medido: number) => ({ vigente_centavos: vigente, medido_centavos: medido, saldo_centavos: vigente - medido, a_receber_centavos: null });
   const obras = [
     o(1, "Ponte", { contratante: "SINFRA", contratante_chave: "sinfra", posicao: pos(1000, 100), andamento: ritmo(69_999, 100_000), medido_mes: mes(500, 400) }),
@@ -163,11 +167,28 @@ describe("Obras por contratante: andamento, medido do mês e o que pede atençã
     o(6, "Cais", { orgao: "sem cadastro", dias_execucao: -3, andamento: ritmo(10, null) }),
   ];
 
-  it("a leitura do andamento usa a régua única (70% e 100%): a contagem nunca discorda da barra", () => {
+  it("a leitura do andamento é a que o servidor mandou: a contagem nunca discorda da barra", () => {
     expect(obras.map(andamentoDaObra)).toEqual([
       { leitura: "devagar", pct: 69 }, { leitura: "atencao", pct: 70 }, { leitura: "adiantada", pct: 100 }, null, null, null]);
     const r = resumoDe(obras);
     expect([r.obras, r.comAndamento, r.devagar, r.atencao]).toEqual([6, 3, 1, 1]);
+    // a tela não compara o ritmo com o necessário: sem a leitura do servidor não há leitura, e vale a palavra dele
+    expect(andamentoDaObra(o(7, "X", { andamento: { ritmo_centavos: 10, necessario_centavos: 100 } }))).toBeNull();
+    expect(andamentoDaObra(o(7, "X", { andamento: ritmo(120, 100, { situacao: "atencao", pct: 99 }) }))).toEqual({ leitura: "atencao", pct: 99 });
+  });
+
+  it("#822: a obra fora da régua não tem leitura e não entra em 'N devagar de M'", () => {
+    // as três mediriam 10% do necessário (devagar), mas o servidor as tirou da régua
+    const fora = [
+      o(11, "Viaduto", { andamento: ritmo(10, 100, { motivo: "prazo_no_fim" }) }),
+      o(12, "Trincheira", { andamento: ritmo(10, 100, { motivo: "prorrogacao_pedida", prorrogacao_pedida: true }) }),
+      o(13, "Rotatória", { andamento: ritmo(10, 100, { motivo: "sem_medicao", sem_medicao_desde: "2026-07" }) }),
+    ];
+    expect(fora.map(andamentoDaObra)).toEqual([null, null, null]);
+    const r = resumoDe([...obras, ...fora]);
+    expect([r.obras, r.comAndamento, r.devagar, r.atencao]).toEqual([9, 3, 1, 1]);
+    // a do prazo no fim é contada à parte; a da prorrogação pedida e a sem medição, não
+    expect([r.prazoNoFim, resumoDe(obras).prazoNoFim]).toEqual([1, 0]);
   });
 
   it("paralisada e execução vencida: a vencida só conta na obra ativa, fora do encerramento e sem paralisação", () => {
@@ -208,6 +229,18 @@ describe("Obras por contratante: andamento, medido do mês e o que pede atençã
     // no mesmo percentual inteiro, a razão exata desempata
     const empate = [o(1, "B", { andamento: ritmo(27_900, 100_000) }), o(2, "A", { andamento: ritmo(27_100, 100_000) })];
     expect(porAndamento(empate).map(x => x.nome_curto)).toEqual(["A", "B"]);
+  });
+
+  it("#822: na vista Andamento, depois das obras com leitura vêm a sem medição, a com o prazo no fim ou a prorrogação pedida e a sem nada a escrever", () => {
+    const fora = [
+      o(11, "Viaduto", { execucao_fim_vigente: "2026-12-20", andamento: ritmo(10, 100, { motivo: "prazo_no_fim" }) }),
+      o(12, "Trincheira", { execucao_fim_vigente: "2027-08-31", andamento: ritmo(10, 100, { motivo: "prorrogacao_pedida", prorrogacao_pedida: true }) }),
+      o(13, "Rotatória", { andamento: ritmo(10, 100, { motivo: "sem_medicao", sem_medicao_desde: "2026-07" }) }),
+      o(14, "Balsa", { andamento: ritmo(null, 100, { motivo: "sem_medicao", sem_medicao_desde: "2026-02" }) }),
+      o(15, "Acesso", { execucao_fim_vigente: "2026-11-30", andamento: ritmo(200, 100, { motivo: "prazo_no_fim", prorrogacao_pedida: true }) }),
+    ];
+    expect(porAndamento([...fora, ...obras]).map(x => x.nome_curto)).toEqual(
+      ["Ponte", "Avenida", "Trevo", "Balsa", "Rotatória", "Acesso", "Viaduto", "Trincheira", "Anel"]);
   });
 
   it("os blocos vão do maior contratado para o menor, com a chave da página; a participação tem uma casa", () => {

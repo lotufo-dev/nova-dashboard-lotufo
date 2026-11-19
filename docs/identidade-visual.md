@@ -134,6 +134,15 @@ do rótulo, na etiqueta sob o valor ou na barra.
   arredondamento do órgão e conta como igual (decisão do dono de 10/11/2026).
 - **Andamento:** a partir de 100% do necessário, "Adiantada", no tom do feito; de 70% a 99%, "Atenção", no tom de
   "vence em breve"; abaixo de 70%, "Devagar", no tom do crítico. Sem necessário ou sem ritmo, nada aparece.
+  A leitura é uma só, do servidor: a mesma palavra e o mesmo percentual na lista de Obras, na página do
+  contratante e na página da obra. A tela não repete o corte. Fica fora da régua, com o motivo escrito no lugar da
+  leitura, a obra com até duas competências de prazo ("Prazo no fim"; com pedido enviado e sem resposta,
+  "Prazo no fim · prorrogação pedida"), a que tem pedido de prorrogação sem resposta ("Prorrogação pedida") e a que
+  fechou três competências sem medição de execução ("Sem medição desde 07/2026", o mês da última). O motivo vai em
+  tinta, sem barra e sem tom de valor: é a razão de não haver leitura, e o aviso de prazo já está nos Avisos. Na
+  página da obra, fora da régua, a conclusão estimada fica sem selo. Só quem tem leitura entra nas contagens por
+  leitura; na faixa de números, as obras com o prazo no fim vão contadas ao lado, em tinta ("9 com prazo no fim")
+  (#822, decisão do dono de 18/11/2026).
   A contagem de obras por leitura ("3 devagar", "2 em atenção") vai numa etiqueta do tom da leitura, sem glifo:
   é valor, não situação (#805).
 - **Tempo parado:** os dias numa etapa ou num setor, com o selo da situação e os limites do SIGA (seção "Quando

@@ -513,6 +513,9 @@ td.col-num, .dinheiro, .entrada--num, .saldo__valor, .alerta__valor {
 .andamento--atencao .andamento__palavra { color: var(--valor-atencao-texto); }
 .andamento--devagar .andamento__barra { background: var(--valor-ruim-ponto); }
 .andamento--devagar .andamento__palavra { color: var(--valor-ruim-texto); }
+/* fora da regua (prazo no fim, prorrogacao pedida, sem medicao, #822): so' o motivo, em tinta e sem barra. E' a razao
+   de nao haver leitura, nao um aviso: nenhum tom de valor */
+.andamento--fora .andamento__palavra { color: var(--cor-tinta); }
 
 /* EM ABERTO A' PARTE (EmAbertoAParte.tsx, docs/adr/0006): o a receber que fica fora do total (competencia anterior ao
    ano inicial, nota sem atualizacao do RM). Uma linha por parte, rotulo a' esquerda e valor a' direita, na letra de

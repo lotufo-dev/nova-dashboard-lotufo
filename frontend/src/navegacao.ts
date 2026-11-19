@@ -1,4 +1,4 @@
-import type { AbaContratante, AbaDocumentos, Busca, PaginaDocumentos, Rota } from "./rota";
+import type { AbaContratante, AbaDocumentos, AbaFechamento, Busca, PaginaDocumentos, Rota } from "./rota";
 
 // Menu, entrada e caminho por perfil. Funcoes puras: a casca (Casca.tsx, Caminho.tsx) so' desenha o que sai daqui.
 //
@@ -153,6 +153,9 @@ export type NomesDoCaminho = {
   medicao?: string | null;
   empresa?: string | null;
   processo?: string | null;
+  /** o nome da vista que sai do dado: a comparacao do Fechamento se chama pelos dois anos que o servidor manda
+   *  ("2026 × 2025"). So' vale na rota dessa vista (`vistaDe`). */
+  vista?: string | null;
 };
 
 // As vistas (abas) que entram no caminho como ultimo trecho. A vista padrao de cada pagina nao entra, como nao entra na
@@ -166,16 +169,22 @@ const ABAS_DO_CONTRATANTE: Record<Exclude<AbaContratante, "obras">, string> = {
 const ABAS_DA_ADMINISTRACAO: Record<string, string> = {
   reconciliacao: "Reconciliação", usuarios: "Usuários", auditoria: "Auditoria", pendencias: "Pendências de cadastro",
 };
+// A aba de comparacao do Fechamento se chama pelos anos que o servidor manda ("2026 × 2025"): a pagina publica o nome
+// (`NomesDoCaminho.vista`) quando o dado chega; ate' la', e se a leitura falhar, o caminho diz "Comparação".
+const VISTAS_DO_FECHAMENTO: Record<Exclude<AbaFechamento, "meses">, string> = { comparacao: "Comparação", contratantes: "Por contratante" };
 
 /** O nome da vista da rota, quando ela nao e' a padrao: e' o ultimo trecho do caminho e entra no titulo da aba do
- *  navegador ("Obras · QDOP"). */
-export function vistaDe(r: Rota): string | undefined {
+ *  navegador ("Obras · QDOP"). `nomes.vista`: o nome que a pagina publicou, para a vista que se chama pelo dado. */
+export function vistaDe(r: Rota, nomes: NomesDoCaminho = {}): string | undefined {
   switch (r.tela) {
     case "medicoes": return r.aba ? VISTAS_DE_MEDICOES[r.aba] : undefined;
     case "obras": return r.aba ? VISTAS_DE_OBRAS[r.aba] : undefined;
     case "obra": return ABAS_DA_OBRA[r.aba];
     case "contratante": return r.aba && r.aba !== "obras" ? ABAS_DO_CONTRATANTE[r.aba] : undefined;
     case "admin": return r.aba ? ABAS_DA_ADMINISTRACAO[r.aba] : undefined;
+    case "fechamento":
+      if (r.aba === "comparacao") return nomes.vista || VISTAS_DO_FECHAMENTO.comparacao;
+      return r.aba === "contratantes" ? VISTAS_DO_FECHAMENTO.contratantes : undefined;
     default: return undefined;
   }
 }
@@ -189,7 +198,7 @@ export function vistaDe(r: Rota): string | undefined {
 export function trechosDe(r: Rota, opcoes: { perfil?: string; nomes?: NomesDoCaminho; busca?: Busca } = {}): Trecho[] {
   const { perfil = "admin", nomes = {}, busca = {} } = opcoes;
   if (r.tela === "raiz") return [];
-  const vista = vistaDe(r);
+  const vista = vistaDe(r, nomes);
   const fim: Trecho[] = vista ? [{ rotulo: vista, para: r }] : [];
 
   // os tres niveis de Obras, comuns ao contratante, a' obra e a' medicao
