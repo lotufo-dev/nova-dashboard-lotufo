@@ -40,6 +40,7 @@ import { cabecalhoDeNomeLongo } from "./simulados.mjs";
 import { aReceberComNotas } from "./simulados.mjs";   // #816: em linha propria, para nao mexer nas listas de cima
 // issue #817 (reestrutura 5c): a Inicio com o ciclo por contratante e o medido em 12 meses
 import { inicioPorContratante, inicioSemCiclo } from "./simulados.mjs";
+import { LOGIN_NO_LIMITE, LOGIN_RECUSADO } from "./simulados.mjs";   // #821: os estados do login (ESTADOS_DO_LOGIN)
 
 export const PERFIS = ["admin", "engenharia", "diretoria"];
 export const LARGURAS = [1440, 1024, 390];
@@ -547,7 +548,6 @@ export function telasDoPerfil(perfil) {
 //   id       vira o nome da captura: `login-<id>-<largura>.png`
 //   simular  como nas telas; `pendurar: true` deixa o pedido sem resposta, e o botao fica em "Entrando…"
 //   espera   seletor do estado ja' na tela
-import { LOGIN_NO_LIMITE, LOGIN_RECUSADO } from "./simulados.mjs";
 
 const ENTRAR = /^\/api\/auth\/login$/;
 export const ESTADOS_DO_LOGIN = [

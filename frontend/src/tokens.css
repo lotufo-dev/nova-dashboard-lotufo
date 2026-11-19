@@ -270,6 +270,7 @@
   --largura-medida: 75ch;                                                  /* medida do texto corrido (corpo do e-mail) */
   --largura-aviso-resposta: calc(var(--largura-menu) + var(--espaco-xxg) * 2);              /* aviso de resposta do orgao: 360px */
   --borda-tracejada: var(--borda-fina) dashed var(--cor-borda-controle);   /* area de soltar arquivo */
+  --altura-bloco-entrar: 288px;   /* login: o bloco do formulario sem a caixa de recusa, para o formulario nao subir quando ela aparece */
 
   /* familias de valor (#805; Variacao.tsx, Diferenca.tsx, Andamento.tsx, MarcaEtapa.tsx). Nenhuma cor nova: sao os
      tons das situacoes e os neutros, com o nome pelo papel que tem no valor. Valor nao e' situacao (a forma e'

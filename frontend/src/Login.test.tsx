@@ -112,6 +112,12 @@ describe("Login: a marca ocupa o lado escuro, parada (#821)", () => {
     expect(Object.keys({ ...pacote.dependencies, ...pacote.devDependencies }).filter(n => /(^|\/)three$/.test(n))).toEqual([]);
   });
 
+  it("o formulário não sobe quando a caixa de recusa aparece: o bloco fica preso pelo alto, não centrado", () => {
+    const painel = [...css.matchAll(/\.entrar__painel \{([^}]*)\}/g)].map(m => m[1]).find(r => r.includes("justify-content: flex-start"));
+    expect(painel).toBeDefined();
+    expect(painel).toContain("var(--altura-bloco-entrar)");
+  });
+
   it("no celular o formulário vem primeiro e a marca embaixo, em uma coluna", () => {
     const celular = /@media \(max-width: \d+px\) \{([\s\S]*)\}\s*$/.exec(css)![1];
     expect(celular).toMatch(/\.entrar \{ flex-direction: column; \}/);

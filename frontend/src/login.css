@@ -34,7 +34,12 @@
 .entrar__nome { font-family: var(--fonte-marca); font-weight: var(--peso-marca); font-size: var(--texto-titulo-pagina); line-height: var(--entrelinha-justa); }
 .entrar__nome-apoio { font-family: var(--fonte-marca-apoio); font-weight: var(--peso-normal); }
 
-.entrar__painel { padding: var(--espaco-xxg) var(--espaco-xg); }
+/* o formulario fica parado quando a caixa de recusa aparece: o bloco e' preso pelo alto, na altura em que o bloco sem
+   a caixa ficaria centrado (--altura-bloco-entrar), e a caixa cresce para baixo. Centrado pela altura, ele subia. */
+.entrar__painel {
+  justify-content: flex-start;
+  padding: max(var(--espaco-xxg), calc(50vh - var(--altura-bloco-entrar) / 2)) var(--espaco-xg) var(--espaco-xxg);
+}
 .entrar__bloco {
   display: flex; flex-direction: column; gap: var(--espaco-g);
   width: 100%; max-width: calc(var(--largura-menu) + var(--largura-nome-obra) / 2);
