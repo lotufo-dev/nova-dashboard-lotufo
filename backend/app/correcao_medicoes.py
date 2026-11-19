@@ -777,8 +777,13 @@ def _corrigir_pedido(conn, uid, m, op, fonte):
         raise ValueError("diga o motivo (motivo: ...)")
     if op.get("pedido") is None or (isinstance(op.get("pedido"), str) and not op["pedido"].strip()):
         raise ValueError("diga o pedido certo (pedido: \"1.234,56\", entre aspas)")
+    if not isinstance(op["pedido"], str):
+        # sem aspas, o YAML le 12345 como numero inteiro (R$ 12.345,00) e 12345.67 como fracao: so' texto vale
+        raise ValueError(f"pedido inválido: {op['pedido']!r} (escreva entre aspas, como \"1.234,56\")")
     novo = _valor(op, "pedido")
     medicoes.conferir_sinal(m["tipo"], novo)
+    if novo == 0 and m["tipo"] != "reajuste":
+        raise ValueError("pedido zero não é pedido: se a medição não houve, ela se cancela (operação cancelar)")
     if m["estado"] in ENCERRADAS:
         raise ValueError(f"medição {medicoes.rotulo_estado(m['estado'])} não tem pedido a corrigir "
                          "(se ela vale, reabra antes: operação reabrir)")
@@ -795,20 +800,55 @@ def _corrigir_pedido(conn, uid, m, op, fonte):
                          "é documento que saiu e ficaria com um valor que não é mais o pedido")
     versoes = conn.execute("SELECT versao, valor_pedido_centavos FROM medicao_planilhas WHERE medicao_id=? "
                            "ORDER BY versao", (m["id"],)).fetchall()
+    if versoes and m["estado"] == "planilha_gerada":
+        # o envio grava o pedido da versao enviada (planilha_envio): a correcao seria desfeita por ele
+        raise ValueError("a planilha/carta desta medição ainda não foi enviada: o pedido será o da versão enviada "
+                         "(revise a planilha/carta na tela)")
     if versoes and novo not in {v["valor_pedido_centavos"] for v in versoes}:
         raise ValueError("o pedido vem da planilha/carta registrada no sistema ("
                          + "; ".join(f"versão {v['versao']}: {dinheiro.format_brl(v['valor_pedido_centavos'])}"
                                      for v in versoes)
                          + f"): {dinheiro.format_brl(novo)} não é o de nenhuma versão e deixaria a planilha/carta que "
                            "saiu incoerente")
+    aprovado = m["valor_atestado_centavos"]
+    notas = _nfs_ativas(conn, m["id"])
+    if aprovado is None and notas:
+        # sem boletim, o pedido faz as vezes do aprovado contra a nota (fechamento._aprovado, notas.acima_da_medicao,
+        # a cobertura do recebimento): o pedido novo tem de ser o que a nota de alguma coligada cobre (a fatura do
+        # consorcio, no valor cheio; na obra propria, a NF), pela conta de `medicoes.valor_do_par`
+        cobre = medicoes.valor_do_par(conn, m["id"], novo)
+        somas = {}
+        for n in notas:
+            somas[n["coligada"]] = somas.get(n["coligada"], 0) + n["valor_vinculo"]
+        if cobre not in somas.values():
+            raise ValueError("a medição não tem aprovado e tem nota ligada ("
+                             + ", ".join(_fmt_nf(n) for n in notas)
+                             + f"): sem boletim, o pedido é o valor que a nota cobre, e {dinheiro.format_brl(novo)} "
+                               "deixaria a nota acima ou abaixo da medição; registre antes o aprovado do boletim (na "
+                               "tela) ou desligue a nota que não é desta medição (desligar_nf)")
+    if m["tipo"] == "reajuste" and atual is None:
+        # o primeiro pedido do reajuste nao dobra o de outra medicao da mesma competencia e data-base (como na tela)
+        from app import reajuste   # import local: reajuste le' medicoes pelo banco
+        reajuste.conferir_pedido_sem_dobro(conn, m)
     cur = conn.execute("UPDATE medicoes SET valor_protocolado_centavos=?, valor_protocolado_origem='manual' "
                        "WHERE id=? AND valor_protocolado_centavos IS ? AND estado=?", (novo, m["id"], atual, m["estado"]))
     db.exigir_uma_linha(cur, "Medição alterada concorrentemente; tente novamente")
-    op["_pedido"] = {"motivo": motivo, "pedido_antes_centavos": atual, "pedido_depois_centavos": novo,
+    op["_pedido"] = {"motivo_correcao": motivo, "pedido_antes_centavos": atual, "pedido_depois_centavos": novo,
                      "origem_antes": m["valor_protocolado_origem"]}
     detalhes = [f"pedido {dinheiro.format_brl(atual) if atual is not None else 'sem valor'} → "
                 f"{dinheiro.format_brl(novo)} (valor cheio)"]
-    aprovado = m["valor_atestado_centavos"]
+    if versoes:
+        bate = next(v["versao"] for v in versoes if v["valor_pedido_centavos"] == novo)
+        detalhes.append(f"é o pedido da versão {bate} da planilha/carta registrada no sistema")
+    from app import fechamento   # import local: fechamento importa sincronizacao_rm, que importa medicoes
+    if aprovado is None and m["estado"] in fechamento.ESTADOS_COM_NOTA:
+        detalhes.append("sem boletim, com a nota emitida o Fechamento conta o pedido como aprovado: passa a contar "
+                        f"{dinheiro.format_brl(novo)}")
+    if atual is not None and m["tipo"] == "execucao" and conn.execute(
+            "SELECT 1 FROM medicao_grupos WHERE medicao_id=? AND planilha_id IS NULL AND situacao='lida' "
+            "AND pedido_centavos=?", (m["id"], atual)).fetchone():
+        detalhes.append("AVISO: a leitura por grupo desta medição foi conferida contra o pedido antigo e deixa de "
+                        "valer (o medido por grupo some do custo da obra até a planilha certa ser lida)")
     if aprovado is not None:
         antes = f"{dinheiro.format_brl(aprovado - atual)}" if atual is not None else "sem pedido"
         detalhes.append(f"aprovado {dinheiro.format_brl(aprovado)}: a diferença aprovado − pedido passa de {antes} "

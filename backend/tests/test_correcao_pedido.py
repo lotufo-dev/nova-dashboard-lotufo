@@ -66,7 +66,8 @@ def test_corrige_o_pedido_de_medicao_congelada_e_recebida_com_auditoria(cenario)
     assert (a["valor_protocolado_centavos"], a["valor_protocolado_origem"]) == (1_000_001, "aceito")
     assert (d["valor_protocolado_centavos"], d["valor_protocolado_origem"]) == (1_234_567, "manual")
     assert d["operacao"] == "corrigir_pedido" and d["origem"] == "correção de cadastro"
-    assert d["motivo"] == MOTIVO and d["fonte"] == FONTE
+    assert d["motivo_correcao"] == MOTIVO and d["fonte"] == FONTE
+    assert d["motivo"] == a["motivo"]               # o motivo do represamento (da foto) nao muda
     assert (d["pedido_antes_centavos"], d["pedido_depois_centavos"], d["origem_antes"]) == (1_000_001, 1_234_567, "aceito")
     # correcao silenciosa: nenhum evento de valor na linha do tempo
     assert not c.execute("SELECT 1 FROM audit_log WHERE acao='medicao.valor_protocolado' AND entidade_id=?",
@@ -233,3 +234,69 @@ def test_operacao_invalida_recusa_o_arquivo_inteiro(cenario):
     assert _linha(c, boa)["valor_protocolado_centavos"] == 1_000_001
     assert _estado(c, boa) == "protocolada"
     assert json.dumps(rel, ensure_ascii=False)        # o relatorio se imprime
+
+
+# ------------------------------------------------------------------ revisao independente (segunda rodada)
+
+def test_sem_aprovado_com_nota_ligada_o_pedido_tem_de_ser_o_que_a_nota_cobre(cenario):
+    """Sem boletim, o pedido faz as vezes do aprovado contra a nota (Fechamento, nota acima da medicao, cobertura do
+    recebimento): o pedido que a nota nao cobre e' recusado; o que ela cobre passa, com o aviso do Fechamento."""
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 4, estado="nf_emitida", valor=900_001)
+    _ligar(c, mid, _nota(c, 702, valor=1_000_001), valor=1_000_001)
+    rel = _rodar(c, uid, [_op(mid, pedido="9.500,01")])
+    assert rel["erros"] == 1 and "não tem aprovado e tem nota ligada" in rel["itens"][0]["erro"], rel
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 900_001
+    rel = _rodar(c, uid, [_op(mid, pedido="10.000,01")])
+    assert rel["feitos"] == 1, rel
+    assert any("o Fechamento conta o pedido como aprovado: passa a contar R$ 10.000,01" in d
+               for d in rel["itens"][0]["detalhes"])
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 1_000_001
+
+
+def test_com_aprovado_a_nota_nao_impede(cenario):
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 4, estado="nf_emitida", valor=900_001)
+    _aprovar(c, mid, 1_000_001)
+    _ligar(c, mid, _nota(c, 703, valor=1_000_001), valor=1_000_001)
+    assert _rodar(c, uid, [_op(mid, pedido="9.500,01")])["feitos"] == 1
+
+
+def test_recusa_valor_sem_aspas_e_pedido_zero(cenario):
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 4, valor=1_000_001)
+    for pedido, erro in ((12345, "escreva entre aspas"), ("0,00", "pedido zero não é pedido"),
+                         ("-0,00", "pedido zero não é pedido")):
+        rel = _rodar(c, uid, [_op(mid, pedido=pedido)])
+        assert rel["erros"] == 1 and erro in rel["itens"][0]["erro"], (pedido, rel)
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 1_000_001
+
+
+def test_planilha_ainda_nao_enviada_recusa(cenario):
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 4, estado="planilha_gerada", valor=1_000_003)
+    c.execute("INSERT INTO medicao_planilhas (medicao_id, versao, valor_pedido_centavos, acumulado_anterior_centavos, "
+              "origem) VALUES (?,1,1000001,0,'manual')", (mid,))
+    c.commit()
+    rel = _rodar(c, uid, [_op(mid, pedido="10.000,01")])
+    assert rel["erros"] == 1 and "ainda não foi enviada" in rel["itens"][0]["erro"], rel
+
+
+def test_ensaio_avisa_a_leitura_por_grupo_do_pedido_antigo(cenario):
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 4, valor=1_000_001)
+    c.execute("INSERT INTO medicao_grupos (medicao_id, origem, sha256, situacao, total_centavos, pedido_centavos) "
+              "VALUES (?, 'carga', 'ab', 'lida', 1000001, 1000001)", (mid,))
+    c.commit()
+    rel = _rodar(c, uid, [_op(mid)], ensaio=True)
+    assert any(d.startswith("AVISO: a leitura por grupo") for d in rel["itens"][0]["detalhes"]), rel
+
+
+def test_boletim_registrado_depois_da_correcao_nao_e_trocado(cenario):
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 4, estado="boletim_recebido", valor=1_000_001)
+    assert _rodar(c, uid, [_op(mid)])["feitos"] == 1
+    # um boletim posterior que, por outro caminho, guardou o pedido antigo continua dizendo o que guardou
+    _aprovar(c, mid, 1_234_565, pedido=1_000_001, arquivo="boletins/exemplo.pdf", criado_em="2999-01-01 00:00:00")
+    texto = next(e["texto"] for e in medicoes.edicoes_valor(c, [mid])[mid] if e["texto"].startswith("Boletim"))
+    assert "pedido R$ 10.000,01" in texto

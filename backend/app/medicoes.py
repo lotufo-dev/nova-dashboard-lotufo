@@ -278,24 +278,27 @@ _MEIO_BOLETIM = {"smo": "SMO", "oficio": "ofício", "email": "e-mail", "carimbo"
 
 def pedidos_corrigidos(conn: sqlite3.Connection, ids: list[int]) -> dict[int, list[tuple]]:
     """Issue #863: as correcoes do pedido pela correcao de cadastro (`corrigir_pedido`), por medicao e em ordem, como
-    (pedido de antes, pedido de depois). O evento de atesto guarda o pedido de quando o boletim entrou (070) e nao se
+    (pedido de antes, pedido de depois, quando). O evento de atesto guarda o pedido de quando o boletim entrou (070) e nao se
     altera (trigger da 039): a leitura troca o pedido gravado errado pelo corrigido, sem marca na tela."""
     out: dict[int, list[tuple]] = {}
     for i in range(0, len(ids), LOTE_AUDITORIA):
         lote = [str(x) for x in ids[i:i + LOTE_AUDITORIA]]
         for r in conn.execute(
                 "SELECT entidade_id, json_extract(depois, '$.pedido_antes_centavos') AS antes, "
-                "json_extract(depois, '$.pedido_depois_centavos') AS depois FROM audit_log "
+                "json_extract(depois, '$.pedido_depois_centavos') AS depois, criado_em FROM audit_log "
                 "WHERE entidade='medicao' AND acao='medicao.correcao_cadastro' "
                 f"AND entidade_id IN ({','.join('?' * len(lote))}) "
                 "AND json_extract(depois, '$.operacao')='corrigir_pedido' ORDER BY id", lote):
-            out.setdefault(int(r["entidade_id"]), []).append((r["antes"], r["depois"]))
+            out.setdefault(int(r["entidade_id"]), []).append((r["antes"], r["depois"], r["criado_em"]))
     return out
 
 
-def pedido_como_corrigido(pedido: int | None, correcoes: list[tuple]) -> int | None:
-    """O pedido de um registro antigo depois das correcoes de `pedidos_corrigidos` que o alcancam."""
-    for antes, depois in correcoes:
+def pedido_como_corrigido(pedido: int | None, correcoes: list[tuple], registrado_em: str | None = None) -> int | None:
+    """O pedido de um registro antigo depois das correcoes de `pedidos_corrigidos` que o alcancam: as feitas depois do
+    registro (`registrado_em`, o `criado_em` dele) que partem do pedido que ele guardou."""
+    for antes, depois, quando in correcoes:
+        if registrado_em is not None and quando < registrado_em:
+            continue
         if pedido is not None and pedido == antes:
             pedido = depois
     return pedido
@@ -310,7 +313,8 @@ def _texto_boletim(r, dia: str | None, correcoes: list[tuple] = ()) -> str:
     texto += f" ({_MEIO_BOLETIM.get(r['meio'], r['meio'])})" if r["meio"] else ""
     texto += f" de {_data_br(dia)}" if dia else ""
     texto += f": aprovado {format_brl(r['valor_centavos'])}"
-    pedido = pedido_como_corrigido(r["pedido_centavos"] if "pedido_centavos" in r.keys() else None, correcoes)
+    pedido = pedido_como_corrigido(r["pedido_centavos"] if "pedido_centavos" in r.keys() else None, correcoes,
+                                   r["criado_em"] if "criado_em" in r.keys() else None)
     if pedido is not None:
         texto += f", pedido {format_brl(pedido)}, diferença {format_brl(r['valor_centavos'] - pedido)}"
     return texto
