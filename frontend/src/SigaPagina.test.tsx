@@ -950,3 +950,158 @@ describe("SigaPagina", () => {
     expect(window.location.search).toBe("?processo=8");
   });
 });
+
+// Issue #841: criterio de encerramento. A leitura (sobrestado, encerrado e por que, a medicao proposta) vem do servidor;
+// a tela desenha e manda as escritas. Obras, processos e pessoas ficticios.
+describe("SigaPagina: critério de encerramento (#841)", () => {
+  afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
+  const encerrados = () => screen.getByRole("group", { name: "Encerrados" }) as HTMLDetailsElement;
+  const PROPOSTA = { id: 31, contrato_id: 7, titulo: "7ª Medição", obra: "Obra Alfa", estado: "recebida" };
+  const SEM_MEDICAO = processo({ id: 40, nome: "7ª Medição - Obra Alfa", categoria: "medicoes", categoria_sugerida: true,
+    o_que_e: "Medição", dias_uteis: 3, medicao_proposta: PROPOSTA });
+  const SOBRESTADO = processo({ id: 41, nome: "Processo Sobrestado", situacao: "1º Volume - Sobrestado [COFIN, [X]]",
+    dias_uteis: 30, situacao_tempo: "sobrestado" });
+  const JUNTADO = processo({ id: 42, nome: "Processo Juntado", encerrado: "juntado" });
+  const A_MAO = processo({ id: 43, nome: "Processo Encerrado à Mão", encerrado: "manual",
+    encerramento: { motivo: "aditivo publicado", por: "Pessoa de teste", em: "2026-10-27T14:00:00+00:00" } });
+  const OBRAS = [{ id: 7, orgao: "ORGAO", numero_instrumento: "IC 7/2026", nome_curto: "Obra Alfa", estado: "em_andamento" }];
+  const MEDICOES = [{ id: 31, numero: 7, tipo: "execucao", estado: "recebida" }, { id: 30, numero: 6, tipo: "execucao", estado: "recebida" },
+                    { id: 29, numero: 5, tipo: "execucao", estado: "cancelada" }];
+
+  it("sobrestado: a palavra no lugar dos dias, sem selo nem cor de atraso, e depois dos parados", async () => {
+    mostrar(painel([SOBRESTADO, GAMA]));
+    await carregada();
+    expect(nomesNaTabela()).toEqual(["Processo Gama", "Processo Sobrestado"]);
+    const linha = screen.getByRole("row", { name: "Processo Sobrestado" });
+    expect(linha.className).toBe("sg__linha");
+    const celula = within(linha).getByText("Sobrestado");
+    expect(celula.closest(".selo")).toBeNull();
+    expect(linha.querySelector(".selo, .glifo, [class*='--critico'], [class*='--breve']")).toBeNull();
+  });
+
+  it("juntado e encerrado à mão vão para Encerrados com o motivo; o à mão diz o motivo, quem e quando, e só quem edita vê Reabrir", async () => {
+    const { unmount } = mostrar(painel([GAMA, JUNTADO, A_MAO]));
+    await carregada();
+    const secao = encerrados();
+    expect(within(within(secao).getByRole("row", { name: "Processo Juntado" })).getByText("Juntado a outro processo")).toBeTruthy();
+    const mao = within(secao).getByRole("row", { name: "Processo Encerrado à Mão" });
+    expect(within(mao).getByText("Encerrado")).toBeTruthy();
+    expect(mao.textContent).toContain("aditivo publicado · Pessoa de teste, 27/10/2026");
+    expect(within(mao).getByRole("button", { name: "Reabrir" })).toBeTruthy();
+    expect(within(within(secao).getByRole("row", { name: "Processo Juntado" })).queryByRole("button")).toBeNull();
+    unmount();
+    render(<SigaPagina busca={{}} agora={AGORA} podeEditar={false} />);
+    await carregada();
+    expect(within(encerrados()).queryByRole("button", { name: "Reabrir" })).toBeNull();
+  });
+
+  it("Reabrir na seção Encerrados chama o servidor, não abre o histórico e a tela relê", async () => {
+    const chamadas: string[] = [];
+    let reaberto = false;
+    api.mockImplementation(async (caminho: string) => {
+      chamadas.push(caminho);
+      if (caminho === "/api/siga/processos/43/reabrir") { reaberto = true; return { id: 43 }; }
+      return painel([GAMA, reaberto ? { ...A_MAO, encerrado: null, encerramento: null } : A_MAO]);
+    });
+    render(<SigaPagina busca={{}} agora={AGORA} />);
+    await carregada();
+    fireEvent.click(within(encerrados()).getByRole("button", { name: "Reabrir" }));
+    await vi.waitFor(() => expect(screen.queryByRole("group", { name: "Encerrados" })).toBeNull());
+    expect(chamadas).toContain("/api/siga/processos/43/reabrir");
+    expect(window.location.search).toBe("");
+    expect(nomesNaTabela()).toContain("Processo Encerrado à Mão");
+  });
+
+  it("processo de Medições sem medição: 'medição a ligar' na linha e, no histórico, a proposta com 'Ligar à medição', que liga pela rota", async () => {
+    const chamadas: { caminho: string; opts?: RequestInit }[] = [];
+    let ligado = false;
+    const LIGADO = { ...SEM_MEDICAO, medicao_id: 31, contrato_id: 7, obra: "Obra Alfa", medicao_titulo: "7ª Medição", o_que_e: "7ª Medição",
+      encerrado: "recebida" as const, medicao_proposta: null, categoria_sugerida: false };
+    api.mockImplementation(async (caminho: string, opts?: RequestInit) => {
+      chamadas.push({ caminho, opts });
+      if (caminho === "/api/siga/processos/40/vinculo") { ligado = true; return { id: 40 }; }
+      return painel([ligado ? LIGADO : SEM_MEDICAO]);
+    });
+    const { unmount } = render(<SigaPagina busca={{}} agora={AGORA} />);
+    await carregada();
+    expect(within(screen.getByRole("row", { name: "7ª Medição - Obra Alfa" })).getByText("medição a ligar")).toBeTruthy();
+    unmount();
+    render(<SigaPagina busca={{ processo: "40" }} agora={AGORA} />);
+    expect((await screen.findByText(/Medição proposta/)).textContent).toBe("Medição proposta: Obra Alfa · 7ª Medição");
+    fireEvent.click(screen.getByRole("button", { name: "Ligar à medição" }));
+    // ligado a' medicao recebida, o servidor diz encerrado: o historico diz por que e o botao some
+    await vi.waitFor(() => expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Histórico · Obra Alfa · 7ª Medição"));
+    const envio = chamadas.find(c => c.caminho === "/api/siga/processos/40/vinculo");
+    expect(envio?.opts?.method).toBe("POST");
+    expect(JSON.parse(envio?.opts?.body as string)).toEqual({ medicao_id: 31 });
+    expect(screen.queryByRole("button", { name: "Ligar à medição" })).toBeNull();
+    expect(document.querySelector(".sg__sub")?.textContent).toContain("medição recebida");
+    expect(screen.getByRole("button", { name: "Desfazer vínculo" })).toBeTruthy();
+  });
+
+  it("Confirmar categoria abre em Medições com a obra e a medição propostas, e a medição recebida também se escolhe", async () => {
+    api.mockImplementation(async (caminho: string) => {
+      if (caminho === "/api/contratos") return OBRAS;
+      if (caminho === "/api/contratos/7/medicoes") return MEDICOES;
+      return painel([SEM_MEDICAO]);
+    });
+    render(<SigaPagina busca={{ processo: "40" }} agora={AGORA} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Confirmar categoria" }));
+    const form = screen.getByRole("form", { name: "Corrigir categoria" });
+    await within(form).findByRole("option", { name: "6ª Medição" });
+    expect((within(form).getByLabelText("Categoria") as HTMLSelectElement).value).toBe("medicoes");
+    expect((within(form).getByLabelText("Obra") as HTMLSelectElement).value).toBe("7");
+    expect((within(form).getByLabelText("Medição") as HTMLSelectElement).value).toBe("31");
+    expect(within(form).queryByRole("option", { name: "5ª Medição" })).toBeNull();      // cancelada nao entra
+  });
+
+  it("Encerrar processo pede o motivo, manda à rota e o histórico passa a dizer o motivo, quem e quando, com Reabrir", async () => {
+    const chamadas: { caminho: string; opts?: RequestInit }[] = [];
+    let fechado = false;
+    api.mockImplementation(async (caminho: string, opts?: RequestInit) => {
+      chamadas.push({ caminho, opts });
+      if (caminho === "/api/siga/processos/5/encerrar") { fechado = true; return { id: 5 }; }
+      return painel([fechado ? { ...GAMA, encerrado: "manual", situacao_tempo: null,
+        encerramento: { motivo: "pedido respondido", por: "Pessoa de teste", em: "2026-10-28T15:00:00+00:00" } } : GAMA]);
+    });
+    render(<SigaPagina busca={{ processo: "5" }} agora={AGORA} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Encerrar processo" }));
+    const form = screen.getByRole("form", { name: "Encerrar processo" });
+    fireEvent.change(within(form).getByLabelText("Motivo"), { target: { value: " pedido respondido " } });
+    fireEvent.click(within(form).getByRole("button", { name: "Encerrar" }));
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Reabrir" })).toBeTruthy());
+    const envio = chamadas.find(c => c.caminho === "/api/siga/processos/5/encerrar");
+    expect(JSON.parse(envio?.opts?.body as string)).toEqual({ motivo: "pedido respondido" });
+    expect(document.querySelector(".sg__sub")?.textContent).toContain("encerrado: pedido respondido (Pessoa de teste, 28/10/2026)");
+    expect(screen.queryByRole("button", { name: "Encerrar processo" })).toBeNull();
+  });
+
+  it("erro do servidor ao encerrar aparece em português e o formulário fica aberto", async () => {
+    const { ApiErro } = await import("./api");
+    api.mockImplementation(async (caminho: string) => {
+      if (caminho === "/api/siga/processos/5/encerrar") throw new ApiErro(422, "Escreva o motivo do encerramento");
+      return painel([GAMA]);
+    });
+    render(<SigaPagina busca={{ processo: "5" }} agora={AGORA} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Encerrar processo" }));
+    const form = screen.getByRole("form", { name: "Encerrar processo" });
+    fireEvent.click(within(form).getByRole("button", { name: "Encerrar" }));
+    expect((await within(form).findByRole("alert")).textContent).toContain("Escreva o motivo do encerramento");
+  });
+
+  it("quem só consulta não vê Ligar, Desfazer, Encerrar nem Reabrir, nem 'medição a ligar'", async () => {
+    const LIGADO_A_MAO = processo({ id: 44, nome: "Ligado", medicao_id: 31, contrato_id: 7, obra: "Obra Alfa", medicao_titulo: "7ª Medição" });
+    api.mockResolvedValue(painel([SEM_MEDICAO, LIGADO_A_MAO, A_MAO]));
+    for (const id of ["40", "44", "43"]) {
+      const { unmount } = render(<SigaPagina busca={{ processo: id }} agora={AGORA} podeEditar={false} />);
+      await screen.findByRole("heading", { level: 1 });
+      for (const nome of ["Ligar à medição", "Desfazer vínculo", "Encerrar processo", "Reabrir", "Confirmar categoria"]) {
+        expect(screen.queryByRole("button", { name: nome })).toBeNull();
+      }
+      unmount();
+    }
+    render(<SigaPagina busca={{}} agora={AGORA} podeEditar={false} />);
+    await carregada();
+    expect(screen.queryByText("medição a ligar")).toBeNull();
+  });
+});

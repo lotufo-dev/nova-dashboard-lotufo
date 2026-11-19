@@ -42,7 +42,7 @@ export type ProtocoloDet = {
 // #840: dias_sem_movimentacao e situacao_tempo sao a leitura de "parado" do servidor (`siga.parado`); dias_uteis (no
 // setor) fica so' como informacao
 export type SigaDoProtocolo = { codigo: string; link: string | null; setor: string | null; com_quem: string | null;
-  dias_uteis: number | null; dias_sem_movimentacao?: number | null; situacao_tempo?: Situacao | null;
+  dias_uteis: number | null; dias_sem_movimentacao?: number | null; situacao_tempo?: Situacao | "sobrestado" | null;
   lido_em: string | null; registrado_em: string | null };
 export type Lista = { familia: string; etapas: Etapa[]; pecas: PecaCfg[]; medicoes: Medicao[]; protocolos: ProtocoloDet[] };
 type Previa = { para: string[]; copia: string[]; assunto: string; corpo: string;
@@ -199,7 +199,7 @@ function NoSiga({ siga }: { siga?: SigaDoProtocolo | null }) {
   const dias = siga?.dias_sem_movimentacao ?? null;
   if (!siga || (!siga.link && dias === null && !siga.setor)) return null;
   const partes = [siga.setor, siga.com_quem && `com ${siga.com_quem}`,
-    siga.situacao_tempo === "feito" ? "andou hoje"
+    siga.situacao_tempo === "sobrestado" ? "sobrestado" : siga.situacao_tempo === "feito" ? "andou hoje"
       : dias === null ? null : `sem movimentação há ${dias} ${dias === 1 ? "dia útil" : "dias úteis"}`].filter(Boolean);
   const selo = siga.situacao_tempo === "critico" ? <Selo situacao="critico">Crítico</Selo>
     : siga.situacao_tempo === "breve" ? <Selo situacao="breve">Atenção</Selo> : null;

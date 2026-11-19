@@ -17,6 +17,14 @@ export const CATEGORIAS: { categoria: Categoria; rotulo: string }[] = [
   { categoria: "indenizatorios", rotulo: "Indenizatórios" }, { categoria: "outros", rotulo: "Outros" },
 ];
 
+// #841: a leitura de "parado" do servidor; "sobrestado" e' o processo suspenso pelo orgao, que nao e' atraso (sem cor,
+// fora dos parados e do aviso)
+export type LeituraDoTempo = Situacao | "sobrestado";
+// #657/#841: por que o processo esta' encerrado; derivado pelo servidor a cada leitura
+export type MotivoEncerrado = "recebida" | "arquivado" | "juntado" | "manual";
+// #841: a medicao que o nome do processo indica (obra e numero), para a pessoa confirmar ou trocar
+export type MedicaoProposta = { id: number; contrato_id: number; titulo: string; obra: string; estado: string };
+
 export type ProcessoSiga = {
   id: number; codigo: string | null; link: string | null; numero: string | null; nome: string | null;
   // o_que_e: a segunda parte do nome montado pelo servidor ("7ª Medição", "Aditivo de prazo")
@@ -30,10 +38,14 @@ export type ProcessoSiga = {
   contratante: string | null; orgao_sub: string | null;
   // #805/#840: a leitura de "parado" do servidor (`siga.parado`: a regua do tempo parado sobre os dias sem
   // movimentacao); nula no encerrado e sem movimentacao nenhuma
-  situacao_tempo: Situacao | null;
+  situacao_tempo: LeituraDoTempo | null;
   protocolo_id: number | null; situacao: string | null; setor: string; caixa_entrada: boolean; com_quem: string;
-  // #657: medicao recebida ou processo arquivado; derivado pelo servidor a cada leitura. null = vivo
-  encerrado: "recebida" | "arquivado" | null;
+  // #657: medicao recebida ou processo arquivado; #841: juntado a outro processo ou encerrado a' mao. null = vivo
+  encerrado: MotivoEncerrado | null;
+  // #841: o encerrado a' mao (motivo, quem, quando); o vinculo com a medicao feito pela tela (quem, quando); a proposta
+  encerramento?: { motivo: string; por: string; em: string } | null;
+  vinculo?: { por: string | null; em: string } | null;
+  medicao_proposta?: MedicaoProposta | null;
   // desde/dias_uteis: a entrada no setor e o tempo nele (so' informacao). #840: dias_sem_movimentacao conta da `ultima`
   // (fora Marcacao e Anotacao), e `hoje` sao as movimentacoes de hoje fora Marcacao e Anotacao
   desde: string | null; dias_uteis: number | null; dias_sem_movimentacao: number | null; hoje: number; ultima: Movimentacao | null;
@@ -77,8 +89,14 @@ export function situacaoDoBotao(robo: Robo, processoId: number | null): "lendo" 
 /** O atraso do processo como o quadro de Medicoes o marca, a partir da leitura do SERVIDOR (#840: dias sem
  *  movimentacao): andou hoje = feito; breve e critico ficam; dentro do prazo ("andamento"), nenhuma, porque ali so' o
  *  atraso leva marca. */
-export function situacaoDoAtraso(p: { situacao_tempo: Situacao | null }): Situacao | undefined {
-  return p.situacao_tempo === "andamento" || p.situacao_tempo === null ? undefined : p.situacao_tempo;
+export function situacaoDoAtraso(p: { situacao_tempo: LeituraDoTempo | null }): Situacao | undefined {
+  return p.situacao_tempo === "andamento" || p.situacao_tempo === "sobrestado" || p.situacao_tempo === null
+    ? undefined : p.situacao_tempo;
+}
+
+/** A situacao que pinta a linha (#840): a leitura do servidor, menos o sobrestado (#841), que nao leva cor. */
+export function situacaoDaLinha(p: { situacao_tempo: LeituraDoTempo | null }): Situacao | null {
+  return p.situacao_tempo === "sobrestado" ? null : p.situacao_tempo;
 }
 
 const instante = (iso: string | null, vazio: number): number => {
@@ -87,10 +105,11 @@ const instante = (iso: string | null, vazio: number): number => {
 };
 
 /** Do mais parado ao menos, na ordem do servidor (`siga._mais_parado`, #840): mais dias sem movimentacao, empate
- *  pela ultima movimentacao mais antiga; sem movimentacao nenhuma vai para o fim. */
+ *  pela ultima movimentacao mais antiga; sem movimentacao nenhuma vai para o fim. #841: o sobrestado, depois dos outros. */
 export function ordenar(processos: ProcessoSiga[]): ProcessoSiga[] {
+  const sob = (p: ProcessoSiga) => (p.situacao_tempo === "sobrestado" ? 1 : 0);
   return [...processos].sort((a, b) => {
-    return (b.dias_sem_movimentacao ?? -1) - (a.dias_sem_movimentacao ?? -1)
+    return sob(a) - sob(b) || (b.dias_sem_movimentacao ?? -1) - (a.dias_sem_movimentacao ?? -1)
       || instante(a.ultima?.data ?? null, Infinity) - instante(b.ultima?.data ?? null, Infinity) || a.id - b.id;
   });
 }
@@ -115,7 +134,9 @@ export function naoLidoDe(robo: Robo, processoId: number): string | null {
   return aviso ? aviso.texto.replace(/^não lido\s*/i, "") : null;
 }
 
-export const ROTULO_ENCERRADO = { recebida: "Medição recebida", arquivado: "Arquivado" } as const;
+export const ROTULO_ENCERRADO: Record<MotivoEncerrado, string> = {
+  recebida: "Medição recebida", arquivado: "Arquivado", juntado: "Juntado a outro processo", manual: "Encerrado",
+};
 
 /** "N dias uteis" a partir de um dia util; antes disso, minutos ou horas; passado um dia corrido sem dia util
  *  completo (fim de semana, feriado), "menos de 1 dia util". */
@@ -132,7 +153,8 @@ export function tempoNoSetor(p: Pick<ProcessoSiga, "desde" | "dias_uteis">, agor
 
 /** "Dias sem movimentação" (#840): "andou hoje", "N dias úteis" ou, com a ultima movimentacao num fim de semana ou
  *  feriado depois do ultimo dia util, "menos de 1 dia útil". Sem movimentacao, "—". O numero vem do servidor. */
-export function textoSemMovimentacao(p: Pick<ProcessoSiga, "dias_sem_movimentacao" | "hoje">): string {
+export function textoSemMovimentacao(p: Pick<ProcessoSiga, "dias_sem_movimentacao" | "hoje"> & { situacao_tempo?: LeituraDoTempo | null }): string {
+  if (p.situacao_tempo === "sobrestado") return "Sobrestado";       // #841: no lugar dos dias, sem destaque
   if (p.hoje > 0) return "andou hoje";
   const dias = p.dias_sem_movimentacao;
   if (dias === null) return "—";

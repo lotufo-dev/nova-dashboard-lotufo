@@ -24,6 +24,14 @@ describe("siga", () => {
     expect(textoSemMovimentacao(p({}))).toBe("—");
   });
 
+  it("sobrestado (#841): a palavra no lugar dos dias, sem marca de atraso no quadro de Medições, e depois dos parados", () => {
+    expect(textoSemMovimentacao(p({ situacao_tempo: "sobrestado", dias_sem_movimentacao: 30 }))).toBe("Sobrestado");
+    expect(situacaoDoAtraso({ situacao_tempo: "sobrestado" })).toBeUndefined();
+    const sob = p({ id: 1, situacao_tempo: "sobrestado", dias_sem_movimentacao: 30 });
+    const parado = p({ id: 2, situacao_tempo: "breve", dias_sem_movimentacao: 5 });
+    expect(ordenar([sob, parado]).map(x => x.id)).toEqual([2, 1]);
+  });
+
   it("Última movimentação em data e hora; o ano só quando não é o de hoje (#840)", () => {
     const agora = new Date("2026-10-26T15:00:00Z");
     expect(dataHoraCurta("2026-10-23T17:05:00-04:00", agora)).toBe("23/10 17:05");

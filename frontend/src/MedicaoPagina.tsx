@@ -651,6 +651,19 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
           </CaixaAviso>
         ))}
 
+        {/* #841: o processo do SIGA desta medicao foi arquivado ou juntado (o pleito, por exemplo): falta o protocolo
+            novo, que se cola no passo de analise (antes do protocolo) ou no do protocolo */}
+        {grupo.filter(x => x.siga_protocolo_novo).map(x => {
+          const alvo = atual <= 2 && passos.includes(2) ? 2 : 5;
+          return (
+            <CaixaAviso key={`siga-novo-${x.id}`} nivel="atencao">
+              {grupo.length > 1 ? `${tituloMedicao(x)}: processo do SIGA arquivado ou juntado, ` : "Processo do SIGA arquivado ou juntado: "}
+              <Link className="link" para={aqui} secao={`passo-${alvo}`}
+                ir={(p, o) => { setVendo(alvo); ir(p, o); }}>{podeEditar ? "cole o link do protocolo novo" : "ver o passo"}</Link>
+            </CaixaAviso>
+          );
+        })}
+
         <div className="med-corpo">
           <div className="med-passo-col">
             <Passos passos={passos} atual={atual} vendo={aberta} datas={datas} espera={!!esperaAqui}

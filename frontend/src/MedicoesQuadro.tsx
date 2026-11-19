@@ -29,7 +29,7 @@ function PosicaoSiga({ siga }: { siga: SigaNoQuadro | null }) {
     <span className="quadro__siga">
       <span className="sr-only">No SIGA: </span>
       <span className="quadro__siga-setor">{siga.setor}</span>
-      {tempo !== "—" && <> <span className={`quadro__siga-tempo num${situacao ? ` quadro__siga-tempo--${situacao}` : ""}`}>{situacao && <Glifo situacao={situacao} />}{tempo !== "hoje" && <span className="sr-only">sem movimentação há </span>}{tempo}</span></>}
+      {tempo !== "—" && <> <span className={`quadro__siga-tempo num${situacao ? ` quadro__siga-tempo--${situacao}` : ""}`}>{situacao && <Glifo situacao={situacao} />}{tempo !== "hoje" && siga.situacao_tempo !== "sobrestado" && <span className="sr-only">sem movimentação há </span>}{tempo}</span></>}
     </span>
   );
 }

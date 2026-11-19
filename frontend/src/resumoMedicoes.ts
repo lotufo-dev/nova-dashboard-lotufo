@@ -37,7 +37,8 @@ export type MedicaoCurta = { numero: number; tipo: string; competencia: string }
 // (desde, dias_uteis) fica so' como informacao
 export type SigaNoQuadro = {
   processo_id: number; setor: string; dias_uteis: number | null; desde: string | null; hoje: number;
-  dias_sem_movimentacao: number | null; ultima_em: string | null; situacao_tempo: SituacaoDoTempo | null;
+  // #841: "sobrestado" (suspenso pelo orgao) nao e' atraso: sem marca, com a palavra no lugar dos dias
+  dias_sem_movimentacao: number | null; ultima_em: string | null; situacao_tempo: SituacaoDoTempo | "sobrestado" | null;
 };
 export type PassoQuadro = {
   numero: number; nome: string; situacao: "feito" | "atual" | "futuro"; data: string | null; medicao_id: number | null;

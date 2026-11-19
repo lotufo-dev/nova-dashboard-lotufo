@@ -49,6 +49,10 @@
 .sg__novo { min-width: 0; max-width: 100%; padding: var(--espaco-m); border: var(--borda-linha); background: var(--cor-papel-sombreado); }
 .sg__gravado { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .sg__gravado:empty { display: none; }
+/* #841: a medicao proposta no historico (com o botao de ligar) e o "Reabrir" na linha do encerrado a' mao */
+.sg__proposta { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-p);
+  margin-top: var(--espaco-pp); padding: var(--espaco-p) var(--espaco-m); border: var(--borda-linha); }
+.sg__acao-linha { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-p); margin-top: var(--espaco-pp); }
 
 /* ---------------------------------------------------------------- painel e tabela */
 .sg__quadro { min-width: 0; padding: var(--espaco-pp) 0 var(--espaco-mini); overflow: hidden; }

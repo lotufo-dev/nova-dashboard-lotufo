@@ -1518,3 +1518,20 @@ describe("MT-PAR: o passo do boletim antes do espelho (issue #753)", () => {
     expect(screen.getByRole("menuitem", { name: "Registrar boletim" })).toBeTruthy();
   });
 });
+
+describe("processo do SIGA arquivado ou juntado: pendência do protocolo novo (issue #841)", () => {
+  beforeEach(() => window.history.replaceState(null, "", "/obras/1/medicoes/5"));
+  afterEach(() => { cleanup(); api.mockReset(); });
+
+  it("a medição diz a pendência com o link para o passo; sem ela, nada", async () => {
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "protocolada", siga_protocolo_novo: true }] });
+    const { unmount } = pagina();
+    const caixa = (await screen.findByText(/Processo do SIGA arquivado ou juntado/)).closest(".aviso") as HTMLElement;
+    expect(within(caixa).getByRole("link", { name: "cole o link do protocolo novo" })).toBeTruthy();
+    unmount();
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, estado: "protocolada", siga_protocolo_novo: false }] });
+    pagina();
+    await screen.findByRole("navigation", { name: "Passos da medição" });
+    expect(screen.queryByText(/Processo do SIGA arquivado/)).toBeNull();
+  });
+});
