@@ -15,7 +15,7 @@ const PALAVRA: Record<LeituraDoAndamento, string> = { adiantada: "Adiantada", at
 
 /** O que vai escrito sob a barra:
  *  - "percentual" (padrao): a palavra e a razao ("Devagar · mede 40% do necessário");
- *  - "valores": a palavra, a razao e os dois valores por mes, abreviados ("R$ 1 mi/mês de R$ 2,5 mi"), para a
+ *  - "valores": a palavra, a razao e os dois valores por mes, abreviados ("R$ 3 mi/mês de R$ 7,5 mi"), para a
  *    tabela que nao tem coluna propria para eles (o valor exato esta' na pagina da obra);
  *  - "palavra": so' a palavra, na tabela que ja' traz o percentual e os dois valores em colunas. */
 export type DetalheDoAndamento = "percentual" | "valores" | "palavra";

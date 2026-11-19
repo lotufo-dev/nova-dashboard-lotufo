@@ -426,8 +426,8 @@ export const resumoEmQuadro = ({ contratante = null, vazio = false } = {}) => re
     linha(9004, "Quartel Delta", "SINFRA", "35ª Medição", "protocolado", 209_000, 12, 8, { prazo: [47, 35] }),
     linha(9015, "Viaduto Ômicron", "SES-MT", "3ª Medição", "protocolado", 240_000, 16, 11, { prazo: [14, -2] }),
     linha(9003, "Estações Gama", "SINFRA", "8ª Medição", "recebido", 14_629_000, 5, null, { ...comPedido(14_629_000), dias_da_nota_ao_recebimento: 4 }),
-    linha(9001, "Avenida Alfa", "SINFRA", "Reajuste da 28ª Medição", "recebido", 1_500_000, 9, null,
-      { tipo: "reajuste", ...comPedido(2_000_000, 500_000), dias_da_nota_ao_recebimento: 31 }),
+    linha(9001, "Avenida Alfa", "SINFRA", "Reajuste da 28ª Medição", "recebido", 2_000_000, 9, null,
+      { tipo: "reajuste", ...comPedido(2_500_000, 500_000), dias_da_nota_ao_recebimento: 31 }),
     // a planilha/carta gerada e ainda nao enviada: existe, sem valor e sem etapa
     { ...linha(9004, "Quartel Delta", "SINFRA", "1ª de Projeto", "antes", 0, 4, 3), tipo: "projeto", valor_centavos: null,
       etapas: ETAPAS_DO_RESUMO.map(e => ({ etapa: e, situacao: "futuro", data: null })) },
@@ -443,7 +443,7 @@ export const resumoEmQuadro = ({ contratante = null, vazio = false } = {}) => re
     ...deAntes(7, linha(9009, "Orla Iota", "Pref. Cuiabá", "23ª Medição", "protocolado", 905_000, 190, 128)),
     ...deAntes(2, linha(9002, "Corredor Beta", "SINFRA", "14ª Medição", "protocolado", 2_790_000, 48, 33, comPedido(2_800_000, 10_000)),
       linha(9007, "Trevo Eta", "MTPAR", "23ª Medição", "protocolado", 4_000_000, 51, 35)),
-    ...deAntes(1, linha(9001, "Avenida Alfa", "SINFRA", "28ª Medição", "protocolado", 1_760_000, 20, 14),
+    ...deAntes(1, linha(9001, "Avenida Alfa", "SINFRA", "28ª Medição", "protocolado", 5_000_000, 20, 14),
       linha(9003, "Estações Gama", "SINFRA", "7ª Medição", "nota", 9_600_000, 15, 10),
       linha(9008, "Anel Teta", "MTPAR", "7ª Medição", "em_analise", 610_000, 40, 28)),
   ];
@@ -508,7 +508,7 @@ const daCarteira = (id, nome, contratante, chave, x) => {
 const CARTEIRA = () => [
   // SINFRA: devagar (40% e 18% do necessario), adiantada, em atencao, em encerramento e uma encerrada
   daCarteira(9001, "Avenida Alfa", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 120_000_000, medido: 60_000_000,
-    ritmo: 1_000_000, necessario: 2_500_000, mes: 1_600_000, antes: 1_760_000 }),
+    ritmo: 3_000_000, necessario: 7_500_000, mes: 4_000_000, antes: 5_000_000 }),
   daCarteira(9002, "Corredor Beta", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", bp: 4900, vigente: 210_000_000, medido: 178_500_000,
     ritmo: 4_100_000, necessario: 3_600_000, mes: 3_300_000, antes: 2_790_000, receber: 3_900_000, dias: 96 }),
   daCarteira(9003, "Estações Gama", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", vigente: 180_000_000, medido: 63_000_000,
@@ -528,10 +528,10 @@ const CARTEIRA = () => [
     paralisada: dataEm(hojeDaProva(), -100), ritmo: 300_000, necessario: null, mes: 900_000, antes: 905_000, receber: 900_000 }),
   // SES-MT: uma obra adiantada, sem nada pendente e sem medicao no mes (o contratante fica "Em dia")
   daCarteira(9010, "Hospital Capa", "SES-MT", "ses-mt", { vigente: 168_300_000, medido: 156_519_000, ritmo: 5_000_000, necessario: 4_000_000, dias: 75 }),
-  // SINFRA, decisao do dono de 18/11/2026: devagar (37% do necessario) e sem aviso nenhum. Na pagina do contratante a
+  // SINFRA, decisao do dono de 18/11/2026: devagar (40% do necessario) e sem aviso nenhum. Na pagina do contratante a
   // Situacao diz o motivo do andamento, e nao "Em dia"
   daCarteira(9016, "Ponte Pi", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 54_000_000, medido: 16_200_000,
-    ritmo: 1_100_000, necessario: 2_900_000, mes: 1_050_000, antes: 1_000_000, dias: 390 }),
+    ritmo: 3_000_000, necessario: 7_500_000, mes: 1_050_000, antes: 1_000_000, dias: 390 }),
 ];
 export const carteiraSimulada = () => CARTEIRA_INTEIRA();
 
@@ -774,7 +774,7 @@ export const filaSimulada = (resposta, reg) => {
   const orgao = [
     linhaDaFila(reg, 8, "Bairros Épsilon", "35ª Medição", "orgao", SEIS, 6, paradaDaFila(41, "critico", { prazo: 45, esperada: -9 }), 209_000, 209_000, { sub: "SUPU" }),
     linhaDaFila(reg, 9, "Rodovia Capa", "29ª Medição", "orgao", SEIS, 2, paradaDaFila(11, "critico"), 856_000, null),
-    linhaDaFila(reg, 10, "Avenida Alfa", "11ª Medição", "orgao", SEIS, 2, paradaDaFila(5, "breve"), 1_600_000, null),
+    linhaDaFila(reg, 10, "Avenida Alfa", "11ª Medição", "orgao", SEIS, 2, paradaDaFila(5, "breve"), 4_000_000, null),
     linhaDaFila(reg, 11, "Complexo Lambda", "25ª Medição + Reajuste", "orgao", CINCO, 6, paradaDaFila(4, "andamento", { prazo: 45, esperada: 39 }), 1_904_000, 1_904_000, mtpar),
     linhaDaFila(reg, 12, "Praça Mi", "2ª Medição", "orgao", TRES, 6, paradaDaFila(3, "andamento"), 77_000, 77_000, { contratante: "Pref. Cuiabá", sub: null }),
   ];

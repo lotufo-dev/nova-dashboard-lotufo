@@ -15,7 +15,7 @@ describe("Andamento (#805, #822)", () => {
 
   it("escreve a palavra e o percentual que o servidor mandou: Adiantada, Atenção e Devagar", () => {
     for (const [situacao, pct, frase] of [["adiantada", 120, "Adiantada · mede 120% do necessário"],
-      ["atencao", 85, "Atenção · mede 85% do necessário"], ["devagar", 40, "Devagar · mede 40% do necessário"]] as const) {
+      ["atencao", 78, "Atenção · mede 78% do necessário"], ["devagar", 40, "Devagar · mede 40% do necessário"]] as const) {
       const { container } = render(<Andamento leitura={lida(situacao, pct)} />);
       expect(texto(container)).toBe(frase);
       expect(classe(container)).toBe(`andamento andamento--${situacao}`);
@@ -46,10 +46,10 @@ describe("Andamento (#805, #822)", () => {
   });
 
   it("com os valores: a palavra, a razão e o ritmo por mês contra o necessário, abreviados", () => {
-    // R$ 1.000.000,00 por mês de R$ 2.500.000,00 necessários
-    const { container } = render(<Andamento leitura={lida("devagar", 40)} ritmo={100_000_000} necessario={250_000_000} detalhe="valores" />);
+    // R$ 3.000.000,00 por mês de R$ 7.500.000,00 necessários
+    const { container } = render(<Andamento leitura={lida("devagar", 40)} ritmo={300_000_000} necessario={750_000_000} detalhe="valores" />);
     const linhas = [...container.querySelectorAll(".andamento__texto")].map(p => (p.textContent ?? "").replace(/\s/g, " "));
-    expect(linhas).toEqual(["Devagar · 40% do necessário", "R$ 1 mi/mês de R$ 2,5 mi"]);
+    expect(linhas).toEqual(["Devagar · 40% do necessário", "R$ 3 mi/mês de R$ 7,5 mi"]);
     cleanup();
     // abaixo do milhão e abaixo do milhar
     const menor = render(<Andamento leitura={lida("adiantada", 55555)} ritmo={50_000_000} necessario={90_000} detalhe="valores" />).container;
@@ -57,10 +57,10 @@ describe("Andamento (#805, #822)", () => {
   });
 
   it("só a palavra, na tabela que já traz o percentual e os valores em colunas", () => {
-    const { container } = render(<Andamento leitura={lida("atencao", 85)} detalhe="palavra" />);
+    const { container } = render(<Andamento leitura={lida("atencao", 78)} detalhe="palavra" />);
     expect(texto(container)).toBe("Atenção");
     expect(container.querySelector(".andamento__valores")).toBeNull();
-    expect(largura(container)).toMatch(/^65\.38/);
+    expect(largura(container)).toBe("60%");
   });
 
   it("fora da régua: o motivo escrito, em tinta e sem barra", () => {
