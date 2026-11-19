@@ -912,17 +912,21 @@ PACOTE_NOTAS_MUDARAM = ("As notas que vão ao órgão mudaram depois que o pacot
 
 
 def notas_do_pacote_mudaram(conn, p: dict) -> str | None:
-    """Issue #873 (docs/adr/0017): com as notas DENTRO do pacote, o montado leva as notas de quando foi montado (ids em
-    `montado_notas`, migracao 096) e a carta cita os numeros delas. Se a lista que vai ao orgao agora e' outra (nota
-    trocada pela consorciada, nota anexada depois), o envio espera montar de novo. Pacote de antes da 096 (NULL) nao
-    diz o que levou: so' pede montar de novo onde alguma nota da medicao ja' nao vai ao orgao, que e' o caso em que
-    ele pode ter a nota antiga dentro."""
+    """Issue #873 (docs/adr/0017): na obra de consorcio com as notas DENTRO do pacote, o montado leva as notas de
+    quando foi montado (ids em `montado_notas`, migracao 096) e a carta cita os numeros delas. Se a lista que vai ao
+    orgao agora e' outra (nota trocada pela consorciada, nota que faltava anexada depois), o envio espera montar de
+    novo. Pacote de antes da 096 (NULL) nao diz o que levou: so' pede montar de novo onde alguma nota da medicao ja'
+    nao vai ao orgao, que e' o caso em que ele pode ter a nota antiga dentro.
+    Obra propria fica como era (o pacote vale como foi montado): la' todo PDF de nota anexado vai, nao ha' como tirar
+    um anexado por engano, e o bloqueio so' teria saida levando-o junto (segunda revisao da PR, rodada 2)."""
     if not p.get("montado_arquivo") or p["situacao"] in ("enviado", "descartado"):
         return None
     e = _contexto(conn, p)[2]
     if not (e.carta and "notas" in e.partes):
         return None
     ids = [m["id"] for m in _medicoes(conn, p["id"])]
+    if not any(frc.de_consorcio(conn, i) for i in ids):
+        return None
     if p.get("montado_notas") is None:
         return PACOTE_NOTAS_MUDARAM if any(frc.fora_do_envio(conn, i) for i in ids) else None
     agora = sorted(d["id"] for d in _docs_nota(conn, ids) if d["tipo_doc"] != "fatura")
@@ -1453,6 +1457,9 @@ def enviar(conn, usuario: dict, protocolo_ids: list[int], para: list[str], copia
         agora = [r for x in agora_ps for r in frc_recusadas(conn, x)]
         # issue #278 (revisor, rodada 2 da PR #435): o termo pode ter mudado entre a reserva e a leitura dos anexos
         agora += [m for x in agora_ps if (m := apostilamento_mudou(conn, x))]
+        # issue #873 (segunda revisao, rodada 2): nota trocada ou anexada entre a previa e a reserva; o anexo e' o
+        # PDF do pacote, que nao muda, entao a conferencia dos anexos nao a veria
+        agora += [m for x in agora_ps if (m := notas_do_pacote_mudaram(conn, x))]
         if agora:
             raise Bloqueio(" · ".join(dict.fromkeys(agora)))
         _conferir_anexos([{"nome": n, "tamanho": len(b)} for n, b, _ in rotulados], pv["anexos"])

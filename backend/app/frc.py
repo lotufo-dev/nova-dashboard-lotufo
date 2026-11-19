@@ -169,6 +169,11 @@ def checklist(conn, m: dict) -> dict:
     return {"itens": itens, "nao_lidas": nao_lidas, "sobras": sobras, "tem_espelho": esp is not None}
 
 
+def de_consorcio(conn, medicao_id: int) -> bool:
+    """A medicao e' de obra de consorcio (o contrato e' de uma entidade de papel consorcio)?"""
+    return _contexto(conn, medicao_id)[1] is not None
+
+
 def fora_do_envio(conn, medicao_id: int) -> set[int]:
     """Issue #873 (docs/adr/0017): os PDFs de nota da medicao (ids de `medicao_documentos`) que NAO vao ao orgao.
 
