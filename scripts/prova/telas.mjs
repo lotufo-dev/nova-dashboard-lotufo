@@ -414,6 +414,16 @@ export const TELAS = [
     simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoDeNomeLongo }] },
   { rota: "obra", id: "caminho-longo-obra", caminho: "/obras/:obra/prazos", perfis: ["diretoria"], antes: OBRA_GRADE,
     espera: ".topo .caminho li:nth-child(4)", simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoDeNomeLongo }] },
+  // ---- Busca unica do topo (#819). No computador o campo esta' na barra; no celular, o botao da lupa abre o campo por
+  // cima dela: o primeiro passo clica o que estiver a' vista (a lupa ou o proprio campo). Os resultados abrem por cima
+  // da pagina. A diretoria entra com o servidor de verdade: o recorte do perfil e' dele, e nao ha' grupo Processos.
+  { rota: "inicio", id: "busca-fechada", caminho: "/inicio", perfis: TODOS, antes: ".ini", espera: ".topo .busca" },
+  { rota: "inicio", id: "busca-resultados", caminho: "/inicio", perfis: OPERA, antes: ".ini", espera: ".busca__opcao",
+    simular: [{ caminho: /^\/api\/busca$/, corpo: BUSCA_CHEIA }], passos: abrirBusca("15") },
+  { rota: "inicio", id: "busca-sem-resultado", caminho: "/inicio", perfis: OPERA, antes: ".ini", espera: ".busca__vazio",
+    simular: [{ caminho: /^\/api\/busca$/, corpo: BUSCA_VAZIA }], passos: abrirBusca("xyzw") },
+  { rota: "inicio", id: "busca-sem-siga", caminho: "/inicio", perfis: ["diretoria"], antes: ".ini", espera: ".busca__opcao",
+    passos: abrirBusca("1") },
 ];
 
 // Rotas do roteador que a prova nao abre, cada uma com o motivo.
@@ -455,3 +465,10 @@ export const ESTADOS_DO_LOGIN = [
   { id: "espera", simular: [{ metodo: "POST", caminho: ENTRAR, pendurar: true }],
     espera: 'form.entrar__form button[type="submit"]:disabled' },
 ];
+
+// ---- Busca unica do topo (#819): os passos que abrem a busca e digitam a pergunta, nas tres larguras
+import { BUSCA_CHEIA, BUSCA_VAZIA } from "./simulados.mjs";
+
+function abrirBusca(texto) {
+  return [{ clicar: ".topo .busca__abrir:visible, .topo .busca__campo:visible" }, { preencher: [".topo .busca__campo", texto] }];
+}
