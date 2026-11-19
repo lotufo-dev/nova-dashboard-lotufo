@@ -14,6 +14,8 @@ Regras:
 Issue #638: `desconsiderar_nf` e `reconsiderar_nf` nao tem medicao; o alvo e' a nota. A nota desconsiderada continua
 ativa no RM e vale, para a dashboard, como cancelada: `situacao` passa a 'cancelada' com a marca `desconsiderada_em`
 (todo leitor de nota ativa ja' a deixa de fora, e a sincronizacao nao a devolve); o registro e' so' a auditoria.
+
+Issue #863: `corrigir_pedido` e' o unico caminho que muda o pedido congelado (`_corrigir_pedido`).
 """
 import datetime
 import re
@@ -31,7 +33,7 @@ TIPOS = ("execucao", "projeto", "reajuste")
 # issue #638 e docs/adr/0006 (residuo): sem medicao, o alvo e' a nota
 OPERACOES_DE_NOTA = ("desconsiderar_nf", "reconsiderar_nf", "encerrar_residuo_nf", "reabrir_residuo_nf")
 OPERACOES = ("cancelar", "reabrir", "trocar_tipo", "desligar_nf", "ligar_nf", "protocolar", "estado", "devolver",
-             "desfazer_recebimento",
+             "desfazer_recebimento", "corrigir_pedido",
              *OPERACOES_DE_NOTA)
 ENCERRADAS = ("cancelada", "desistida")
 # `devolver` (docs/adr/0006, "Atos de correcao de cadastro"): os estados que o documento prova, antes da nota
@@ -39,7 +41,7 @@ DESTINOS_DEVOLVER = ("em_analise", "boletim_recebido")
 CAMPOS_DEVOLVER = {"novo", "motivo", "data", "processo", "aprovado", "data_aprovacao", "meio"}
 # Campos que cada operacao aceita, alem de `operacao`, `fonte`, `medicao_id`, `obra`, `numero` e `tipo`
 CAMPOS = {"cancelar": {"duplicata_de", "motivo"}, "reabrir": CAMPOS_DEVOLVER, "trocar_tipo": {"novo_tipo", "novo_numero"},
-          "devolver": CAMPOS_DEVOLVER, "desfazer_recebimento": {"motivo"},
+          "devolver": CAMPOS_DEVOLVER, "desfazer_recebimento": {"motivo"}, "corrigir_pedido": {"pedido", "motivo"},
           "desligar_nf": {"nf", "coligada"}, "ligar_nf": {"nfs", "coligada", "forcar_centro", "parcial"},
           "protocolar": {"data", "processo", "oficio"}, "estado": {"novo", "motivo", "data", "processo", "oficio"},
           "desconsiderar_nf": {"nf", "coligada", "motivo", "substituida_por"},
@@ -229,6 +231,8 @@ def _foto(conn, mid: int) -> dict:
     ativas = _nfs_ativas(conn, mid)
     return {"estado": m["estado"], "numero": m["numero"], "tipo": m["tipo"], "congelada": m["congelada"],
             "motivo": m["motivo_represamento"],
+            "valor_protocolado_centavos": m["valor_protocolado_centavos"],
+            "valor_protocolado_origem": m["valor_protocolado_origem"],
             "nfs": [f"{n['numero']}/{n['coligada']}" for n in ativas],
             "notas": [_ident_nf(n) for n in ativas],
             "protocolos": [r[0] for r in conn.execute("SELECT data FROM medicao_protocolos WHERE medicao_id=? "
@@ -745,6 +749,118 @@ def _desfazer_recebimento(conn, uid, m, op, fonte):
     return detalhes
 
 
+def _espelho_do_pedido(conn, mid: int):
+    """O espelho gerado a partir do pedido (o primeiro achado), ou None. O espelho usa o aprovado vigente e, sem ele, o
+    pedido (`medicoes.valor_travado`, #284): saiu do pedido o espelho gerado quando a medicao ainda nao tinha evento de
+    atesto (`medicao_atestos` ate' o `criado_em` do espelho), a mesma leitura de `espelhos.desatualizadas`. Conta toda
+    versao, a substituida tambem: ela pode ter ido ao faturamento. Aprovado sem evento de atesto (carga antiga) conta
+    como sem aprovado: na duvida, recusa."""
+    return conn.execute(
+        "SELECT e.id, e.versao, e.criado_em FROM espelho_medicoes em JOIN espelhos e ON e.id=em.espelho_id "
+        "WHERE em.medicao_id=? AND NOT EXISTS (SELECT 1 FROM medicao_atestos a WHERE a.medicao_id=em.medicao_id "
+        "AND a.criado_em <= e.criado_em) ORDER BY e.versao LIMIT 1", (mid,)).fetchone()
+
+
+def _corrigir_pedido(conn, uid, m, op, fonte):
+    """Issue #863: o pedido (`valor_protocolado_centavos`) gravado errado se corrige pelo documento, em medicao
+    congelada ou nao, em qualquer estado menos cancelada e desistida. E' o unico caminho que muda pedido congelado. Nao
+    muda estado, aprovado, notas, protocolos nem espelho; o pedido de antes fica na auditoria
+    (`medicao.correcao_cadastro`, com motivo e fonte). A origem passa a 'manual' (o valor veio de um documento lido por
+    gente, como o digitado na tela); a anterior fica na auditoria.
+
+    Recusa o que deixaria incoerente um documento que ja' saiu: o pedido que veio do proprio espelho (muda gerando o
+    espelho de novo), a medicao com espelho gerado a partir do pedido e o pedido diferente de toda versao da
+    planilha/carta registrada no sistema. Sem tela e sem evento na linha do tempo (decisao do dono: correcao
+    silenciosa); por isso nao grava `medicao.valor_protocolado`, que a linha do tempo mostra."""
+    motivo = _texto(op, "motivo")
+    if motivo is None:
+        raise ValueError("diga o motivo (motivo: ...)")
+    if op.get("pedido") is None or (isinstance(op.get("pedido"), str) and not op["pedido"].strip()):
+        raise ValueError("diga o pedido certo (pedido: \"1.234,56\", entre aspas)")
+    if not isinstance(op["pedido"], str):
+        # sem aspas, o YAML le 12345 como numero inteiro (R$ 12.345,00) e 12345.67 como fracao: so' texto vale
+        raise ValueError(f"pedido inválido: {op['pedido']!r} (escreva entre aspas, como \"1.234,56\")")
+    novo = _valor(op, "pedido")
+    medicoes.conferir_sinal(m["tipo"], novo)
+    if novo == 0 and m["tipo"] != "reajuste":
+        raise ValueError("pedido zero não é pedido: se a medição não houve, ela se cancela (operação cancelar)")
+    if m["estado"] in ENCERRADAS:
+        raise ValueError(f"medição {medicoes.rotulo_estado(m['estado'])} não tem pedido a corrigir "
+                         "(se ela vale, reabra antes: operação reabrir)")
+    atual = m["valor_protocolado_centavos"]
+    if atual == novo:
+        raise _JaFeito(f"o pedido já é {dinheiro.format_brl(novo)}")
+    if m["valor_protocolado_origem"] == "espelho":
+        raise ValueError("o pedido desta medição veio do espelho: o espelho é documento que saiu, e o valor dele muda "
+                         "gerando o espelho de novo (antes do protocolo), não por aqui")
+    esp = _espelho_do_pedido(conn, m["id"])
+    if esp is not None:
+        raise ValueError(f"o espelho versão {esp['versao']} desta medição foi gerado a partir do pedido "
+                         f"({dinheiro.format_brl(atual) if atual is not None else 'sem valor'}), sem boletim: o espelho "
+                         "é documento que saiu e ficaria com um valor que não é mais o pedido")
+    versoes = conn.execute("SELECT versao, valor_pedido_centavos FROM medicao_planilhas WHERE medicao_id=? "
+                           "ORDER BY versao", (m["id"],)).fetchall()
+    if versoes and m["estado"] == "planilha_gerada":
+        # o envio grava o pedido da versao enviada (planilha_envio): a correcao seria desfeita por ele
+        raise ValueError("a planilha/carta desta medição ainda não foi enviada: o pedido será o da versão enviada "
+                         "(revise a planilha/carta na tela)")
+    if versoes and novo not in {v["valor_pedido_centavos"] for v in versoes}:
+        raise ValueError("o pedido vem da planilha/carta registrada no sistema ("
+                         + "; ".join(f"versão {v['versao']}: {dinheiro.format_brl(v['valor_pedido_centavos'])}"
+                                     for v in versoes)
+                         + f"): {dinheiro.format_brl(novo)} não é o de nenhuma versão e deixaria a planilha/carta que "
+                           "saiu incoerente")
+    aprovado = m["valor_atestado_centavos"]
+    notas = _nfs_ativas(conn, m["id"])
+    if aprovado is None and notas:
+        # sem boletim, o pedido faz as vezes do aprovado contra a nota (fechamento._aprovado, notas.acima_da_medicao,
+        # a cobertura do recebimento): o pedido novo tem de ser o que a nota de alguma coligada cobre (a fatura do
+        # consorcio, no valor cheio; na obra propria, a NF), pela conta de `medicoes.valor_do_par`
+        cobre = medicoes.valor_do_par(conn, m["id"], novo)
+        somas = {}
+        for n in notas:
+            somas[n["coligada"]] = somas.get(n["coligada"], 0) + n["valor_vinculo"]
+        if cobre not in somas.values():
+            raise ValueError("a medição não tem aprovado e tem nota ligada ("
+                             + ", ".join(_fmt_nf(n) for n in notas)
+                             + f"): sem boletim, o pedido é o valor que a nota cobre, e {dinheiro.format_brl(novo)} "
+                               "deixaria a nota acima ou abaixo da medição; registre antes o aprovado do boletim (na "
+                               "tela) ou desligue a nota que não é desta medição (desligar_nf)")
+    if m["tipo"] == "reajuste" and atual is None:
+        # o primeiro pedido do reajuste nao dobra o de outra medicao da mesma competencia e data-base (como na tela)
+        from app import reajuste   # import local: reajuste le' medicoes pelo banco
+        reajuste.conferir_pedido_sem_dobro(conn, m)
+    cur = conn.execute("UPDATE medicoes SET valor_protocolado_centavos=?, valor_protocolado_origem='manual' "
+                       "WHERE id=? AND valor_protocolado_centavos IS ? AND estado=?", (novo, m["id"], atual, m["estado"]))
+    db.exigir_uma_linha(cur, "Medição alterada concorrentemente; tente novamente")
+    op["_pedido"] = {"motivo_correcao": motivo, "pedido_antes_centavos": atual, "pedido_depois_centavos": novo,
+                     "origem_antes": m["valor_protocolado_origem"]}
+    detalhes = [f"pedido {dinheiro.format_brl(atual) if atual is not None else 'sem valor'} → "
+                f"{dinheiro.format_brl(novo)} (valor cheio)"]
+    if versoes:
+        bate = next(v["versao"] for v in versoes if v["valor_pedido_centavos"] == novo)
+        detalhes.append(f"é o pedido da versão {bate} da planilha/carta registrada no sistema")
+    from app import fechamento   # import local: fechamento importa sincronizacao_rm, que importa medicoes
+    if aprovado is None and m["estado"] in fechamento.ESTADOS_COM_NOTA:
+        detalhes.append("sem boletim, com a nota emitida o Fechamento conta o pedido como aprovado: passa a contar "
+                        f"{dinheiro.format_brl(novo)}")
+    if atual is not None and m["tipo"] == "execucao" and conn.execute(
+            "SELECT 1 FROM medicao_grupos WHERE medicao_id=? AND planilha_id IS NULL AND situacao='lida' "
+            "AND pedido_centavos=?", (m["id"], atual)).fetchone():
+        detalhes.append("AVISO: a leitura por grupo desta medição foi conferida contra o pedido antigo e deixa de "
+                        "valer (o medido por grupo some do custo da obra até a planilha certa ser lida)")
+    if aprovado is not None:
+        antes = f"{dinheiro.format_brl(aprovado - atual)}" if atual is not None else "sem pedido"
+        detalhes.append(f"aprovado {dinheiro.format_brl(aprovado)}: a diferença aprovado − pedido passa de {antes} "
+                        f"para {dinheiro.format_brl(aprovado - novo)}")
+        if medicoes.diferenca_aceita(conn, m["id"]) is None and conn.execute(
+                "SELECT 1 FROM medicao_diferencas_aceitas WHERE medicao_id=? AND atesto_id=? AND pedido_centavos IS ?",
+                (m["id"], medicoes._atesto_vigente(conn, m["id"]), atual)).fetchone():
+            detalhes.append("AVISO: a diferença aceita do boletim era a do pedido antigo e deixa de valer; se o "
+                            "aprovado ficou abaixo do pedido novo, o aviso volta até alguém aceitar a diferença nova")
+    return detalhes
+
+
 def _valor(op: dict, campo: str) -> int | None:
     v = op.get(campo)
     if v is None or (isinstance(v, str) and not v.strip()):
@@ -1073,7 +1189,7 @@ def _aplicar_nota(conn, uid: int, op: dict, item: dict, nome: str, fonte: str) -
 
 EXECUTORES = {"cancelar": _cancelar, "reabrir": _reabrir, "trocar_tipo": _trocar_tipo, "desligar_nf": _desligar_nf,
               "ligar_nf": _ligar_nf, "protocolar": _protocolar, "estado": _estado, "devolver": _devolver,
-              "desfazer_recebimento": _desfazer_recebimento}
+              "desfazer_recebimento": _desfazer_recebimento, "corrigir_pedido": _corrigir_pedido}
 
 
 def _aplicar(conn, uid: int, op, item: dict) -> None:
@@ -1099,7 +1215,7 @@ def _aplicar(conn, uid: int, op, item: dict) -> None:
     auditoria.registrar(conn, uid, "medicao.correcao_cadastro", "medicao", m["id"], antes,
                         {**depois, "operacao": nome, "fonte": fonte, "origem": ORIGEM,
                          **({"centro_forcado": op["_forcado"]} if op.get("_forcado") else {}),
-                         **op.get("_duplicata", {})})
+                         **op.get("_duplicata", {}), **op.get("_pedido", {})})
     item["depois"], item["detalhes"], item["situacao"] = depois["estado"], detalhes, "feito"
 
 
