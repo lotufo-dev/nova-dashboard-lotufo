@@ -27,11 +27,11 @@ function mesmaPagina(a: Rota, b: Rota): boolean {
  *  aberta publicou. `busca`: os filtros do endereco (o historico do SIGA mora neles). `origem`: de onde se chegou ao
  *  detalhe; quando ela e' um trecho do caminho (chegou-se pela lista de Obras filtrada, ou pela pagina do contratante
  *  com as encerradas a' vista), o link do trecho volta para la' como estava. `ehH1`: o trecho do titulo e' o h1. */
-export default function Caminho({ rota, perfil, busca, origem, ehH1 }: {
-  rota: Rota; perfil?: string; busca?: Busca; origem?: Origem | null; ehH1: boolean;
+export default function Caminho({ rota, perfil, permissoes, busca, origem, ehH1 }: {
+  rota: Rota; perfil?: string; permissoes?: readonly string[]; busca?: Busca; origem?: Origem | null; ehH1: boolean;
 }) {
   const nomes = useNomesPublicados();
-  const trechos: Trecho[] = trechosDe(rota, { perfil, nomes, busca });
+  const trechos: Trecho[] = trechosDe(rota, { perfil, permissoes, nomes, busca });
   if (trechos.length === 0) return null;
   const veioDe = origem ? destinoDeHref(origem.href) : null;
   return (

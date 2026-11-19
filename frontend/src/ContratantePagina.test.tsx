@@ -102,15 +102,17 @@ const SIGA: SigaDoContratante = {
 };
 
 // o caminho é da barra do topo (#814): aqui ele entra ao lado da página, como a casca o desenha
-function Pagina({ perfil = "diretoria" }: { perfil?: string }) {
+// `permissoes`: as que /api/auth/eu informa; desde a #829 todo perfil tem `ver_siga` (a diretoria, so' para ler)
+function Pagina({ perfil = "diretoria", permissoes = ["ver_paineis", "ver_siga"] }: { perfil?: string; permissoes?: string[] }) {
   const { rota, busca, ir } = useRota();
   return rota.tela === "contratante"
-    ? <><Caminho rota={rota} perfil={perfil} ehH1={false} /><ContratantePagina chave={rota.chave} aba={rota.aba} perfil={perfil} busca={busca} ir={ir} /></>
+    ? <><Caminho rota={rota} perfil={perfil} permissoes={permissoes} ehH1={false} />
+      <ContratantePagina chave={rota.chave} aba={rota.aba} perfil={perfil} permissoes={permissoes} busca={busca} ir={ir} /></>
     : <p>outra tela</p>;
 }
-function abrir(url: string, perfil?: string) {
+function abrir(url: string, perfil?: string, permissoes?: string[]) {
   window.history.replaceState(null, "", url);
-  return render(<Pagina perfil={perfil} />);
+  return render(<Pagina perfil={perfil} permissoes={permissoes} />);
 }
 /** O servidor do teste: a lista, o painel e o recorte da SINFRA de cada aba; `troca` muda a resposta de um caminho
  *  (um Error vira falha). Outro contratante recebe o recorte vazio, como o servidor manda. */
@@ -381,7 +383,7 @@ describe("Página do contratante: as abas (#818)", () => {
   const linhasEmAberto = () => [...document.querySelectorAll(".arc-tabela:not(.arc-tabela--soltas) tbody tr:not(.arc-grupo)")];
   const linhasDoSiga = () => [...document.querySelectorAll("tr.sg__linha")];
 
-  it("cada aba com endereço e a quantidade de linhas; a diretoria não tem a do SIGA e a página nem pede o dado dela", async () => {
+  it("cada aba com endereço e a quantidade de linhas; quem não tem `ver_siga` não tem a do SIGA e a página nem pede o dado dela", async () => {
     abrir("/obras/contratante/sinfra", "engenharia");
     await waitFor(() => expect(abas().map(a => a[1])).toEqual(["3", "4", "2", "3"]));
     expect(abas()).toEqual([
@@ -395,8 +397,13 @@ describe("Página do contratante: as abas (#818)", () => {
     expect(document.querySelectorAll("tr.linha--obra")).toHaveLength(3);
     cleanup();
 
-    api.mockClear();
+    // #829: a diretoria tem a aba do SIGA, como os outros perfis
     abrir("/obras/contratante/sinfra", "diretoria");
+    await waitFor(() => expect(abas().map(a => a[1])).toEqual(["3", "4", "2", "3"]));
+    cleanup();
+
+    api.mockClear();
+    abrir("/obras/contratante/sinfra", "diretoria", ["ver_paineis"]);
     await waitFor(() => expect(abas().map(a => a[1])).toEqual(["3", "4", "2"]));
     expect(abas().map(a => a[0])).toEqual(["Obras", "Medições", "Em aberto"]);
     expect(api.mock.calls.map(c => String(c[0])).filter(c => c.endsWith("/siga"))).toEqual([]);
@@ -506,8 +513,15 @@ describe("Página do contratante: as abas (#818)", () => {
     expect(window.location.pathname + window.location.search).toBe("/siga?processo=3");
   });
 
-  it("Processos no SIGA para a diretoria: a aba não existe e o endereço dela mostra Obras", async () => {
+  it("Processos no SIGA para a diretoria (#829): a aba abre, só leitura, sem botão nenhum", async () => {
     abrir("/obras/contratante/sinfra/siga", "diretoria");
+    await waitFor(() => expect(linhasDoSiga()).toHaveLength(3));
+    expect(abaAtual()).toEqual(["Processos no SIGA"]);
+    expect(document.querySelectorAll(".ct-aba button")).toHaveLength(0);
+  });
+
+  it("Processos no SIGA para quem não tem `ver_siga`: a aba não existe e o endereço dela mostra Obras", async () => {
+    abrir("/obras/contratante/sinfra/siga", "diretoria", ["ver_paineis"]);
     await screen.findByRole("table", { name: /Obras de SINFRA/ });
     expect(abaAtual()).toEqual(["Obras"]);
     expect(abas().map(a => a[0])).not.toContain("Processos no SIGA");

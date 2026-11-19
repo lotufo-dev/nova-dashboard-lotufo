@@ -172,7 +172,8 @@ function Numero({ rotulo, n, situacao, children }: { rotulo: string; n: number; 
   );
 }
 
-// "Atualizar processo" / "Atualizar todos" (#343): pedir leitura nao muda dado, entao quem ve a tela ve o botao.
+// "Pedir leitura" (#343): aparece quando o servidor diz `pode_atualizar` (robo configurado e quem pode pedir: desde a
+// #829 a diretoria le o SIGA e nao pede leitura).
 // Com pedido ou rodada que ja' cobre o clique, o botao mostra o estado e fica desabilitado.
 function Atualizar({ rotulo, processoId, robo, aoPedir }: {
   rotulo: string; processoId: number | null; robo: Robo; aoPedir: () => Promise<void>;
@@ -465,6 +466,7 @@ function CorrigirCategoria({ p, aoGravar }: { p: ProcessoSiga; aoGravar: () => P
   );
 }
 
+// `podeEditar`: os botoes que gravam (acompanhar processo, corrigir categoria); o App passa `editar_cadastros` (#829)
 export default function SigaPagina({ busca, agora, podeEditar = true }: { busca: Busca; agora?: Date; podeEditar?: boolean }) {
   const [dados, setDados] = useState<PainelSiga | null>(null);
   const [erro, setErro] = useState("");

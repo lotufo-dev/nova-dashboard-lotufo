@@ -489,7 +489,8 @@ export const TELAS = [
     espera: ".topo .caminho li:nth-child(4)", simular: [{ caminho: /^\/api\/contratos\/\d+\/cabecalho$/, ajustar: cabecalhoDeNomeLongo }] },
   // ---- Busca unica do topo (#819). No computador o campo esta' na barra; no celular, o botao da lupa abre o campo por
   // cima dela: o primeiro passo clica o que estiver a' vista (a lupa ou o proprio campo). Os resultados abrem por cima
-  // da pagina. A diretoria entra com o servidor de verdade: o recorte do perfil e' dele, e nao ha' grupo Processos.
+  // da pagina. A diretoria entra com o servidor de verdade: o recorte do perfil e' dele (desde a #829 ela tem `ver_siga`
+  // e recebe o grupo Processos; o perfil sem a permissao e' coberto pelo teste do servidor, test_api_busca.py).
   { rota: "inicio", id: "busca-fechada", caminho: "/inicio", perfis: TODOS, antes: ".ini", espera: ".topo .busca" },
   { rota: "inicio", id: "busca-resultados", caminho: "/inicio", perfis: OPERA, antes: ".ini", espera: ".busca__opcao",
     simular: [{ caminho: /^\/api\/busca$/, corpo: BUSCA_CHEIA }], passos: abrirBusca("15") },
@@ -500,7 +501,7 @@ export const TELAS = [
   // ---- As abas Medicoes, A receber e Processos no SIGA da pagina do contratante (#818). Cada uma com o servidor de
   // verdade (o cadastro de exemplo: um contratante so', quase nada em cada aba) e com o recorte simulado da carteira de
   // quatro contratantes (ver simulados.mjs); a trava do a receber, o contratante so' com o que fica a' parte, a aba sem
-  // linha e a falha. A diretoria nao tem a aba do SIGA: o endereco dela abre a pagina do contratante.
+  // linha e a falha. A aba do SIGA e' de quem tem `ver_siga` (#829: os tres perfis; a diretoria, so' para ler).
   { rota: "contratante", id: "contratante-medicoes", caminho: "/obras/contratante/sinfra/medicoes", perfis: TODOS, espera: ".ct-aba.medicoes" },
   { rota: "contratante", id: "contratante-medicoes-fila", caminho: "/obras/contratante/sinfra/medicoes", perfis: TODOS,
     espera: ".ct-aba .fila__tabela", simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/medicoes$/, ajustar: medicoesDoContratante }] },
@@ -519,8 +520,18 @@ export const TELAS = [
   { rota: "contratante", id: "contratante-siga", caminho: "/obras/contratante/sinfra/siga", perfis: OPERA, espera: ".ct-aba.siga" },
   { rota: "contratante", id: "contratante-siga-processos", caminho: "/obras/contratante/sinfra/siga", perfis: OPERA, espera: ".ct-aba .sg-grupo",
     simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/siga$/, corpo: SIGA_DO_CONTRATANTE }] },
-  { rota: "contratante", id: "contratante-siga-diretoria", caminho: "/obras/contratante/sinfra/siga", destino: "/obras/contratante/sinfra",
-    perfis: ["diretoria"], espera: ".obras-do-contratante" },
+  // #829 (decisao do dono de 19/11/2026): a diretoria tem a aba do SIGA, so' para ler (a aba nao tem botao)
+  { rota: "contratante", id: "contratante-siga-diretoria", caminho: "/obras/contratante/sinfra/siga", perfis: ["diretoria"],
+    espera: ".ct-aba .sg-grupo", simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/siga$/, corpo: SIGA_DO_CONTRATANTE }] },
+
+  // ---- SIGA para a diretoria, so' leitura (#829): a permissao `ver_siga` lhe da' o item do menu e a tela; os botoes
+  // que gravam (acompanhar processo, corrigir categoria, pedir leitura) nao aparecem, e o servidor os nega (403). O
+  // quadro vazio (o cadastro de exemplo), o quadro com processos e o historico de um processo.
+  { rota: "siga", id: "siga-diretoria", caminho: "/siga", perfis: ["diretoria"], espera: ".sg-numeros" },
+  { rota: "siga", id: "siga-processos-diretoria", caminho: "/siga", perfis: ["diretoria"], espera: ".sg-grupo table",
+    simular: comSiga(SIGA_COM_PROCESSOS) },
+  { rota: "siga", id: "siga-historico-diretoria", caminho: "/siga?processo=2", perfis: ["diretoria"], espera: ".sg__quadro table",
+    simular: comSiga(SIGA_COM_PROCESSOS) },
 ];
 
 // Rotas do roteador que a prova nao abre, cada uma com o motivo.

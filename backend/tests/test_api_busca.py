@@ -2,7 +2,7 @@
 nomes de obra e de orgao publico podem (docs/adr/0011)."""
 import pytest
 
-from app import auth, busca, db, medicoes
+from app import auth, busca, db, medicoes, permissoes
 from tests.conftest import novo_contrato
 
 SENHA = "senha-forte-123"
@@ -139,9 +139,13 @@ def test_pergunta_longa_demais_e_recusada(client):
     assert client.get("/api/busca", params={"q": "x" * (busca.MAX_PERGUNTA + 1)}).status_code == 422
 
 
-@pytest.mark.parametrize("perfil,ve", [("admin", True), ("engenharia", True), ("diretoria", False)])
-def test_processo_so_para_quem_abre_o_siga(client, cenario, perfil, ve):
-    """Risco de auth (#819): a diretoria nao abre o SIGA; nem o grupo, nem a contagem dele saem na resposta."""
+@pytest.mark.parametrize("perfil,ve,sem_ver_siga", [("admin", True, False), ("engenharia", True, False),
+                                                   ("diretoria", True, False), ("diretoria", False, True)])
+def test_processo_so_para_quem_abre_o_siga(client, cenario, monkeypatch, perfil, ve, sem_ver_siga):
+    """Risco de auth (#819, #829): os processos sao de quem tem `ver_siga`. Desde 19/11/2026 a diretoria tem (so' para
+    ler); o perfil sem a permissao (simulado tirando-a da diretoria) nao recebe o grupo, nem a contagem dele."""
+    if sem_ver_siga:
+        monkeypatch.setitem(permissoes.PERFIS, perfil, permissoes.PERFIS[perfil] - {permissoes.VER_SIGA})
     _entrar(client, perfil)
     for q in ("15", "00123", "MT-388", "paralisacao", "xyzw", ""):
         corpo = _q(client, q)
@@ -161,8 +165,8 @@ def test_nao_sai_valor_em_reais(client, cenario):
 
 
 def test_ve_siga_segue_as_permissoes():
-    assert busca.ve_siga("admin") and busca.ve_siga("engenharia")
-    assert not busca.ve_siga("diretoria") and not busca.ve_siga("desconhecido")
+    assert busca.ve_siga("admin") and busca.ve_siga("engenharia") and busca.ve_siga("diretoria")
+    assert not busca.ve_siga("desconhecido")
 
 
 def test_ler_pergunta():

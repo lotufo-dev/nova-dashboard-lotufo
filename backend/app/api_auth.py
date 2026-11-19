@@ -121,8 +121,11 @@ def logout(request: Request, response: Response, conn: sqlite3.Connection = Depe
 def eu(usuario: dict = Depends(usuario_atual)):
     # devolve o csrf da sessao: apos F5 o front perde o token (so vive em memoria)
     # e precisa recupera-lo aqui, senao toda mutacao da 403 ate o proximo login.
+    # as permissoes do perfil (#829): a tela decide o menu e a rota pela mesma regra do servidor, e nao pelo nome do
+    # perfil. Import local: permissoes.py importa este modulo.
+    from app.permissoes import do_perfil
     return {**{k: usuario[k] for k in ("id", "nome", "email", "perfil")},
-            "csrf": usuario["csrf_token"]}
+            "permissoes": do_perfil(usuario["perfil"]), "csrf": usuario["csrf_token"]}
 
 
 @router.get("/acessos")

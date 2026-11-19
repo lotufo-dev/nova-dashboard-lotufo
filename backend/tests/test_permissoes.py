@@ -19,7 +19,19 @@ from fastapi import Depends
 from app import auth, cli, db
 from app.permissoes import exigir
 
-PERMISSOES = {"ver_paineis", "editar_cadastros", "editar_config_fiscal", "administrar"}
+PERMISSOES = {"ver_paineis", "ver_siga", "editar_cadastros", "editar_config_fiscal", "administrar"}
+
+
+def test_ver_siga_e_dos_tres_perfis_e_so_quem_edita_cadastros_escreve_no_siga():
+    """Issue #829 (decisao do dono de 19/11/2026): a diretoria le o SIGA e nao escreve nele. Nenhum perfil fica sem
+    `ver_siga`; o perfil desconhecido nao tem."""
+    for perfil in ("diretoria", "engenharia", "admin"):
+        assert tem(perfil, "ver_siga")
+    assert not tem("desconhecido", "ver_siga")
+    assert not tem("diretoria", "editar_cadastros")
+    from app.permissoes import do_perfil
+    assert do_perfil("diretoria") == ["ver_paineis", "ver_siga"]
+    assert do_perfil("desconhecido") == []
 
 def _seed(email="leo@lotufo.com", senha="senha-forte-123", perfil="admin"):
     conn = db.get_conn()
