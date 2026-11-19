@@ -163,7 +163,7 @@ export function SemMedicaoNoMes({ obras, mes, podeIniciar, aoIniciar }: {
   );
 }
 
-function Concluidas({ d }: { d: FilaMedicoes }) {
+export function Concluidas({ d }: { d: Pick<FilaMedicoes, "concluidas"> }) {
   return (
     <section className="cartao medicoes__painel fila-bloco" aria-labelledby="concluidas-titulo">
       <div className="medicoes__painel-cab">

@@ -444,8 +444,8 @@ export const TELAS = [
     perfis: SO_ADMIN, espera: '#aba-garantias[aria-selected="true"]' },
   { rota: "documentos", id: "documentos-certidoes-por-extenso", caminho: "/documentos/certidoes", destino: "/documentos", perfis: SO_ADMIN,
     espera: ".doc-painel-aba" },
-  // a aba do contratante ja' tem endereco; enquanto a #818 nao chega, ele abre a pagina do contratante
-  { rota: "contratante", id: "contratante-aba", caminho: "/obras/contratante/sinfra/medicoes", destino: "/obras/contratante/sinfra",
+  // a aba Avisos do contratante ja' tem endereco; enquanto a pagina nao a desenha, ele abre a pagina do contratante
+  { rota: "contratante", id: "contratante-aba", caminho: "/obras/contratante/sinfra/avisos", destino: "/obras/contratante/sinfra",
     perfis: ["diretoria"], espera: ".obras-do-contratante" },
   // O menu no estado que as outras telas nao mostram: um clique no botao do pe' o recolhe no computador (so' os
   // icones, com o fio entre as areas) e o abre por cima da tela no celular (onde ele nasce recolhido). No computador a
@@ -471,6 +471,30 @@ export const TELAS = [
     simular: [{ caminho: /^\/api\/busca$/, corpo: BUSCA_VAZIA }], passos: abrirBusca("xyzw") },
   { rota: "inicio", id: "busca-sem-siga", caminho: "/inicio", perfis: ["diretoria"], antes: ".ini", espera: ".busca__opcao",
     passos: abrirBusca("1") },
+  // ---- As abas Medicoes, A receber e Processos no SIGA da pagina do contratante (#818). Cada uma com o servidor de
+  // verdade (o cadastro de exemplo: um contratante so', quase nada em cada aba) e com o recorte simulado da carteira de
+  // quatro contratantes (ver simulados.mjs); a trava do a receber, o contratante so' com o que fica a' parte, a aba sem
+  // linha e a falha. A diretoria nao tem a aba do SIGA: o endereco dela abre a pagina do contratante.
+  { rota: "contratante", id: "contratante-medicoes", caminho: "/obras/contratante/sinfra/medicoes", perfis: TODOS, espera: ".ct-aba.medicoes" },
+  { rota: "contratante", id: "contratante-medicoes-fila", caminho: "/obras/contratante/sinfra/medicoes", perfis: TODOS,
+    espera: ".ct-aba .fila__tabela", simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/medicoes$/, ajustar: medicoesDoContratante }] },
+  { rota: "contratante", id: "contratante-medicoes-vazia", caminho: "/obras/contratante/mtpar/medicoes", perfis: ["diretoria"],
+    espera: ".ct-aba .medicoes__vazio", simular: comCarteira },
+  { rota: "contratante", id: "contratante-medicoes-erro", caminho: "/obras/contratante/sinfra/medicoes", perfis: SO_ADMIN,
+    espera: "#conteudo [role=alert]", erro: true, simular: falha(/^\/api\/contratantes\/sinfra\/medicoes$/) },
+  { rota: "contratante", id: "contratante-a-receber", caminho: "/obras/contratante/sinfra/a-receber", perfis: TODOS, espera: ".ct-aba.arc" },
+  { rota: "contratante", id: "contratante-a-receber-notas", caminho: "/obras/contratante/sinfra/a-receber", perfis: TODOS,
+    espera: ".ct-aba tr.arc-grupo", simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/a-receber$/, corpo: aReceberDoContratante() }] },
+  { rota: "contratante", id: "contratante-a-receber-a-parte", caminho: "/obras/contratante/pref-cuiaba/a-receber", perfis: ["diretoria"],
+    espera: ".ct-aba .arc-antigo",
+    simular: [...comCarteira, { caminho: /^\/api\/contratantes\/pref-cuiaba\/a-receber$/, corpo: aReceberDoContratante({ de: "pref-vg", como: ["Pref. Cuiabá", "pref-cuiaba"] }) }] },
+  { rota: "contratante", id: "contratante-a-receber-trava", caminho: "/obras/contratante/sinfra/a-receber", perfis: ["diretoria"],
+    espera: ".ct-aba.arc .aviso", simular: [{ caminho: /^\/api\/contratantes\/sinfra\/a-receber$/, corpo: aReceberDoContratante({ trava: true }) }] },
+  { rota: "contratante", id: "contratante-siga", caminho: "/obras/contratante/sinfra/siga", perfis: OPERA, espera: ".ct-aba.siga" },
+  { rota: "contratante", id: "contratante-siga-processos", caminho: "/obras/contratante/sinfra/siga", perfis: OPERA, espera: ".ct-aba .sg-grupo",
+    simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/siga$/, corpo: SIGA_DO_CONTRATANTE }] },
+  { rota: "contratante", id: "contratante-siga-diretoria", caminho: "/obras/contratante/sinfra/siga", destino: "/obras/contratante/sinfra",
+    perfis: ["diretoria"], espera: ".obras-do-contratante" },
 ];
 
 // Rotas do roteador que a prova nao abre, cada uma com o motivo.
@@ -519,3 +543,6 @@ import { BUSCA_CHEIA, BUSCA_VAZIA } from "./simulados.mjs";
 function abrirBusca(texto) {
   return [{ clicar: ".topo .busca__abrir:visible, .topo .busca__campo:visible" }, { preencher: [".topo .busca__campo", texto] }];
 }
+
+// ---- As abas da pagina do contratante (#818): o recorte simulado de cada aba (ver simulados.mjs)
+import { aReceberDoContratante, medicoesDoContratante, SIGA_DO_CONTRATANTE } from "./simulados.mjs";

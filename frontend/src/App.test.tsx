@@ -509,7 +509,22 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     expect(aceso()).toEqual(["Obras"]);
   });
 
-  it.each(["medicoes", "a-receber", "avisos"])("a aba %s do contratante já tem endereço; enquanto a página não a desenha (#818), ele abre a página", async (aba) => {
+  it.each([["medicoes", "Medições"], ["a-receber", "A receber"], ["siga", "Processos no SIGA"]])(
+    "a aba %s do contratante abre na página (#818): o endereço fica e a aba entra no caminho", async (aba, nome) => {
+      entrar("engenharia");
+      window.history.replaceState(null, "", `/obras/contratante/sinfra/${aba}`);
+      render(<App />);
+      await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
+      await waitFor(() => expect(trechos()).toEqual(["Obras", "SINFRA", nome]));
+      await act(async () => {});
+      expect(endereco()).toBe(`/obras/contratante/sinfra/${aba}`);
+      const abas = screen.getByRole("navigation", { name: "Seções de SINFRA" });
+      expect(within(abas).getAllByRole("link").filter(l => l.getAttribute("aria-current") === "page").map(l => l.getAttribute("href")))
+        .toEqual([`/obras/contratante/sinfra/${aba}`]);
+    });
+
+  it("a aba Avisos do contratante já tem endereço; enquanto a página não a desenha, ele abre a página", async () => {
+    const aba = "avisos";
     entrar("engenharia");
     window.history.replaceState(null, "", `/obras/contratante/sinfra/${aba}?situacao=todas`);
     render(<App />);
@@ -528,6 +543,8 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     await screen.findByRole("heading", { level: 1, name: /SINFRA/ });
     await waitFor(() => expect(endereco()).toBe("/obras/contratante/sinfra"));
     expect(api).not.toHaveBeenCalledWith("/api/siga");
+    // #818: nem o dado da aba (que o servidor nega a ela)
+    expect(api.mock.calls.some(c => String(c[0]).endsWith("/siga"))).toBe(false);
   });
 
   it("a vista entra no caminho como último trecho, e no título da aba do navegador", async () => {

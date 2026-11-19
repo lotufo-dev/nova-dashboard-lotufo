@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { abasDoPerfil, pronta, useLeitura, type AReceberDoContratante, type MedicoesDoContratante, type SigaDoContratante } from "./abasDoContratante";
 import Andamento from "./Andamento";
 import { api, mensagemDeErro } from "./api";
+import Contador from "./Contador";
+import { AbaAReceber, AbaMedicoes, AbaSiga } from "./ContratanteAbas";
 import Falha from "./Falha";
 import { contar } from "./formato";
 import { Link } from "./Link";
@@ -13,21 +16,30 @@ import { type Painel } from "./ObrasCarteira";
 import { AReceber, EtiquetasDeAtencao, Executado, MedidoNoMes, NumerosDeObras, SituacaoDaObra } from "./ObrasPecas";
 import Rolagem from "./Rolagem";
 import { useNomesDoCaminho } from "./nomesDoCaminho";
+import { vistaDe } from "./navegacao";
 import { type AbaContratante, type Busca, type Ir } from "./rota";
 import "./obras.css";
+import "./contratante.css";
 
 // A pagina do contratante (#805), o segundo nivel de Obras: "/obras/contratante/<chave>". A chave e' a que o servidor
 // manda em cada obra (`contratante_chave`: a familia "sinfra" ou a chave do orgao no cadastro), nunca o nome escrito.
-// No alto, os mesmos numeros do bloco do contratante (das obras em andamento dele), com a participacao na carteira e o
-// prazo de pagamento do orgao; embaixo, uma linha por obra, com o andamento e a situacao com o motivo. Tudo na COTA da
-// Lotufo e do servidor (`/api/contratos`, `/api/diretoria`). `?situacao=todas` traz as obras encerradas a' tabela.
-// As abas Medicoes, A receber e Processos no SIGA do contratante ficam para a PR seguinte (#818); ate' la', os atalhos
-// levam a's paginas que ja' existem. O endereco de cada aba ja' existe na rota (`aba`, #814).
+// Logo abaixo do titulo, as abas, cada uma com endereco e com a quantidade de linhas ao lado do nome (#818). Obras, a
+// padrao: os mesmos numeros do bloco do contratante (das obras em andamento dele), com a participacao na carteira e o
+// prazo de pagamento do orgao, e uma linha por obra, com o andamento e a situacao com o motivo; tudo na COTA da
+// Lotufo, de `/api/contratos` e `/api/diretoria`; `?situacao=todas` traz as encerradas. Medicoes, A receber e
+// Processos no SIGA: ContratanteAbas.tsx, cada uma o recorte que o servidor manda de uma tela que ja' existe. A aba
+// do SIGA nao aparece para quem nao abre a tela SIGA (a diretoria), e a pagina nem pede o dado dela.
 
 const FORA = new Set(["encerrado", "rescindido"]);
 
-// `aba`: a aba do endereco. Por ora so' existe a de Obras (ver ABAS_PRONTAS, em abasDoContratante.ts).
-export default function ContratantePagina({ chave, perfil, busca = {}, ir }: {
+/** O que o leitor de tela diz no lugar do numero ao lado do nome da aba. */
+const ROTULO_DA_QUANTIDADE: Record<AbaContratante, (n: number) => string> = {
+  obras: n => contar(n, "obra", "obras"), medicoes: n => contar(n, "medição", "medições"), "a-receber": n => `${n} em aberto`,
+  siga: n => contar(n, "processo", "processos"), avisos: n => contar(n, "aviso", "avisos"),
+};
+
+// `aba`: a aba do endereco; a que o perfil nao tem (ou que a pagina ainda nao desenha) abre Obras.
+export default function ContratantePagina({ chave, aba = "obras", perfil, busca = {}, ir }: {
   chave: string; aba?: AbaContratante; perfil: string; busca?: Busca; ir: Ir;
 }) {
   const [lista, setLista] = useState<ObraLista[] | null>(null);
@@ -56,7 +68,24 @@ export default function ContratantePagina({ chave, perfil, busca = {}, ir }: {
   const mes = r.medidoMes ? mesesDoMedido(r.medidoMes).curto : null;
   const aqui = { tela: "contratante" as const, chave };
 
-  useEffect(() => { document.title = `${nome ?? "Contratante"} · Obras · grupolotufo`; }, [nome]);
+  // as abas do perfil e o dado de cada uma, pedidos juntos ao abrir a pagina: a faixa mostra a quantidade de todas
+  const abas = abasDoPerfil(perfil);
+  const atual: AbaContratante = abas.includes(aba) ? aba : "obras";
+  const doServidor = `/api/contratantes/${encodeURIComponent(chave)}`;
+  const medicoes = useLeitura<MedicoesDoContratante>(`${doServidor}/medicoes`);
+  const aReceber = useLeitura<AReceberDoContratante>(`${doServidor}/a-receber`);
+  const siga = useLeitura<SigaDoContratante>(abas.includes("siga") ? `${doServidor}/siga` : null);
+  // a quantidade e' o numero de linhas da aba: na de Obras, as da tabela; nas outras, a do servidor. Sem o dado (lendo,
+  // falhou, ou a receber ainda nao liberado), a aba fica so' com o nome.
+  const quantidade: Partial<Record<AbaContratante, number>> = {
+    obras: linhas.length, medicoes: pronta(medicoes)?.quantidade, "a-receber": pronta(aReceber)?.quantidade,
+    siga: pronta(siga)?.quantidade,
+  };
+  // o nome de cada aba e' o da vista no caminho do topo ("Obras › SINFRA › Medições"); a padrao, Obras
+  const rotuloDa = (a: AbaContratante) => (a === "obras" ? "Obras" : vistaDe({ tela: "contratante", chave, aba: a }) ?? a);
+  const daAba = rotuloDa(atual);
+
+  useEffect(() => { document.title = `${nome ?? "Contratante"} · ${daAba} · grupolotufo`; }, [nome, daAba]);
   // o caminho ("Obras › SINFRA") e' da barra do topo (#814): a pagina so' diz o nome do contratante, quando a lista chega
   useNomesDoCaminho({ contratante: nome ? { nome, chave } : null });
 
@@ -81,6 +110,33 @@ export default function ContratantePagina({ chave, perfil, busca = {}, ir }: {
         )}
         {lista && nome && (
           <>
+            {/* as abas logo abaixo do titulo, na mesma altura em todas: cada uma com endereco
+                ("/obras/contratante/sinfra/medicoes") e a quantidade de linhas dela. Na mesma faixa, a' direita, o que e'
+                do contratante noutra pagina: os Avisos, filtrados por ele (o a receber e o SIGA, que antes levavam ao
+                Fechamento e a' tela SIGA, sao abas desta pagina, #818) */}
+            <div className="ct-faixa">
+              <nav className="abas ct-abas" aria-label={`Seções de ${nome}`}>
+                {abas.map(a => {
+                  const n = quantidade[a];
+                  return (
+                    <Link key={a} className="aba" para={a === "obras" ? aqui : { ...aqui, aba: a }} ir={ir} aria-current={a === atual ? "page" : undefined}>
+                      {rotuloDa(a)}
+                      {n !== undefined && <Contador rotulo={`, ${ROTULO_DA_QUANTIDADE[a](n)}`}>{n.toLocaleString("pt-BR")}</Contador>}
+                    </Link>
+                  );
+                })}
+              </nav>
+              <nav className="obras-atalhos ct-atalhos" aria-label={`${nome} em outras páginas`}>
+                <Link para={{ tela: "avisos" }} busca={{ c: nome }} ir={ir}>Avisos</Link>
+              </nav>
+            </div>
+
+            {atual === "medicoes" && <AbaMedicoes leitura={medicoes} nome={nome} opera={perfil !== "diretoria"} />}
+            {atual === "a-receber" && <AbaAReceber leitura={aReceber} nome={nome} ir={ir} />}
+            {atual === "siga" && <AbaSiga leitura={siga} />}
+
+            {/* a aba Obras: os numeros do contratante (das obras em andamento dele), o que pede atencao e a tabela */}
+            {atual === "obras" && <>
             <NumerosDeObras r={r} rotulo={`Números de ${nome}`} participacao={participacao(r.totais.contratado, carteira)}
               prazo={painel?.prazo_pagamento?.[nome] ?? null} />
             <EtiquetasDeAtencao r={r} />
@@ -139,13 +195,7 @@ export default function ContratantePagina({ chave, perfil, busca = {}, ir }: {
                 {comEncerradas && <Link para={aqui} ir={ir}>Só em andamento</Link>}
               </footer>
             </section>
-
-            {/* o que e' do contratante nas outras paginas; o SIGA so' para quem o ve (a diretoria nao) */}
-            <nav className="obras-atalhos" aria-label={`${nome} em outras páginas`}>
-              <Link para={{ tela: "avisos" }} busca={{ c: nome }} ir={ir}>Avisos</Link>
-              <Link para={{ tela: "fechamento" }} ir={ir}>Fechamento</Link>
-              {perfil !== "diretoria" && <Link para={{ tela: "siga" }} ir={ir}>SIGA</Link>}
-            </nav>
+            </>}
           </>
         )}
       </div>

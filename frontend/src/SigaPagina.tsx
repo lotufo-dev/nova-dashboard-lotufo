@@ -122,7 +122,7 @@ function Linha({ p, agora, robo, categoria }: { p: ProcessoSiga; agora: Date; ro
 
 /** O painel de uma categoria (#805): o cabecalho de grupo forte, com quantos processos ela tem e quantos estao
  *  parados alem do limite critico, e as linhas do mais parado ao menos (a ordem de `porCategoria`). */
-function PainelDaCategoria({ secao, limites, agora, robo, categoria }: {
+export function PainelDaCategoria({ secao, limites, agora, robo, categoria }: {
   secao: { categoria: Categoria; rotulo: string; processos: ProcessoSiga[] }; limites: LimitesSiga; agora: Date; robo: Robo;
   categoria: Categoria | null;
 }) {
