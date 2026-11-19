@@ -2051,6 +2051,41 @@ def test_frc_que_muda_durante_a_reserva_recusa_e_destrava(conn, usuario, consorc
     assert conn.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
 
 
+def test_nota_trocada_durante_a_reserva_recusa_e_destrava(conn, usuario, consorcio14, _texto, tmp_path,
+                                                         monkeypatch):  # noqa: F811
+    """Issue #873 (segunda revisao da PR, rodada 2): com as notas dentro do pacote, a consorciada troca a nota entre a
+    previa e a reserva. O anexo do e-mail e' o PDF do pacote, que nao muda, e a conferencia dos anexos nao ve a troca:
+    a conferencia depois da reserva recusa antes do e-mail e destrava a reserva."""
+    monkeypatch.setenv("DASH_GRAPH_SIMULADOR", str(tmp_path / "sim"))
+    cid, mid = consorcio14
+    test_frc._anexar(conn, usuario, mid, _texto, test_frc.NOTAS_FRC)        # sem a assinada: so' a regra das notas
+    conn.execute("UPDATE medicoes SET estado='nota_emitida' WHERE id=?", (mid,))
+    conn.commit()
+    _mtpar(conn, cid)
+    pid = notas_envio.iniciar(conn, usuario["id"], cid, [mid], "301")
+    protocolo.montar(conn, usuario["id"], pid)
+    pv = protocolo.previa_envio(conn, [pid], hoje=HOJE)
+    assert pv["bloqueio"] is None
+    reservar = protocolo.envio_reserva.reservar
+
+    def no_meio(conn_, *a, **k):            # a nota trocada e' anexada enquanto o envio reserva
+        reservar(conn_, *a, **k)
+        rel, sha = arquivos.gravar_bytes("notas", _pdf("nota trocada"), "pdf")
+        leitura = conn_.execute("SELECT leitura FROM medicao_documentos WHERE medicao_id=? AND tipo_doc='nfs' "
+                                "ORDER BY id LIMIT 1", (mid,)).fetchone()[0]
+        conn_.execute("INSERT INTO medicao_documentos (medicao_id, fonte, tipo_doc, nome, numero_nf, item_id, arquivo, "
+                      "sha256, tamanho, leitura) VALUES (?, 'operacao', 'nfs', 'NFSE trocada.pdf', '304', ?, ?, ?, 10, ?)",
+                      (mid, sha, rel, sha, leitura))
+    monkeypatch.setattr(protocolo.envio_reserva, "reservar", no_meio)
+    with pytest.raises(protocolo.Bloqueio, match="As notas que vão ao órgão mudaram depois que o pacote foi montado"):
+        protocolo.enviar(conn, usuario, [pid], ["orgao@exemplo.com.br"], [], pv["assunto"], pv["corpo"],
+                         "justificativa longa o bastante para passar", hoje=HOJE,
+                         confirmadas=[x["mensagem"] for x in pv["pendencias"]])
+    p = conn.execute("SELECT situacao, envio_id, envio_reservado_em FROM protocolos WHERE id=?", (pid,)).fetchone()
+    assert tuple(p) == ("montado", None, None)
+    assert conn.execute("SELECT COUNT(*) FROM envios").fetchone()[0] == 0
+
+
 def test_irma_com_frc_que_bloqueia_nao_vai_no_registro_por_fora(conn, usuario, consorcio14, _texto):  # noqa: F811
     """Aviso: onde medicao e reajuste vao juntos, a irma cuja FRC assinada bloqueia (aqui: reajuste sem espelho) nao
     se oferece nem entra no registro por fora, que contornaria o bloqueio do envio."""
