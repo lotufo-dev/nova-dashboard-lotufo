@@ -1,15 +1,17 @@
-/* Documentos (#161, #513; fundacao do redesenho na #767): a lista em tres abas e a pagina da empresa. A moldura do
+/* Documentos (#161, #513; fundacao do redesenho na #767; tres paginas na #820): Certidoes, Regularidade mensal,
+   Garantias e a pagina da empresa. A moldura do
    painel (.cartao), a tabela (.tabela), o botao (.btn), o selo, o glifo, o contador e a legenda sao pecas de base de
    tokens.css. Cor, familia, tamanho, espaco e borda so' por variavel. */
 
-/* ---------------------------------------------------------------- alto da lista: regua, abas e o Anexar */
+/* ---------------------------------------------------------------- alto da pagina: regua, contador e o Anexar */
 .doc-topo {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--espaco-p) var(--espaco-g);
   border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro);
 }
+.doc-topo__conta { margin: 0; }
 .doc-topo__acoes { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-p); margin-left: auto; }
-.doc .legenda-cor { margin-top: calc(var(--espaco-p) * -1); }
-.doc-painel-aba { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-entre-blocos); }
+.doc-topo + .legenda-cor { margin-top: calc(var(--espaco-p) * -1); }
+.doc-corpo { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-entre-blocos); }
 
 /* ---------------------------------------------------------------- painel de linhas */
 .doc-bloco { min-width: 0; padding: var(--espaco-g) 0 var(--espaco-mini); }
@@ -109,8 +111,7 @@ a.doc-chip:focus-visible { outline: var(--largura-foco) solid var(--cor-foco); o
   .doc-linha--renovar { grid-template-columns: minmax(0, 1fr); }
   .doc-renovar__acoes { justify-content: flex-start; }
   .doc-grupo__mais { margin: 0 var(--espaco-p); }
-  .doc-aba { flex: 1 1 100%; justify-content: space-between; }
-  .doc-abas, .doc-topo__acoes { width: 100%; }
+  .doc-topo__acoes { width: 100%; }
 }
 
 /* ---------------------------------------------------------------- pecas comuns */

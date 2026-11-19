@@ -3,8 +3,10 @@ import Admin from "./Admin";
 import { api, setCsrf } from "./api";
 import AReceber from "./AReceber";
 import { BarraSuperior, Trilho } from "./Casca";
-import Documentos from "./Documentos";
+import DocumentosCertidoes from "./DocumentosCertidoes";
 import DocumentosEmpresa from "./DocumentosEmpresa";
+import DocumentosGarantias from "./DocumentosGarantias";
+import DocumentosRegularidade from "./DocumentosRegularidade";
 import AbrirEnvio from "./AbrirEnvio";
 import { ABAS_PRONTAS } from "./abasDoContratante";
 import ContratantePagina from "./ContratantePagina";
@@ -161,8 +163,10 @@ export default function App() {
             <MedicaoPagina key={`${rota.obra}-${rota.id}`} contratoId={rota.obra} medicaoId={rota.id} usuario={usuario} origem={origem} />
           )}
           {rota.tela === "nova-medicao" && <MedicaoNova key={rota.obra} contratoId={rota.obra} usuario={usuario} origem={origem} busca={busca} />}
-          {/* as tres paginas de Documentos (#814): por ora a mesma tela, aberta no assunto do endereco */}
-          {rota.tela === "documentos" && <Documentos usuario={usuario} busca={busca} pagina={rota.pagina ?? "certidoes"} />}
+          {/* as tres paginas de Documentos (#814, #820), cada uma no proprio endereco */}
+          {rota.tela === "documentos" && (rota.pagina ?? "certidoes") === "certidoes" && <DocumentosCertidoes usuario={usuario} busca={busca} />}
+          {rota.tela === "documentos" && rota.pagina === "regularidade" && <DocumentosRegularidade usuario={usuario} />}
+          {rota.tela === "documentos" && rota.pagina === "garantias" && <DocumentosGarantias />}
           {rota.tela === "documentos-empresa" && (
             // `key` na empresa: trocar de empresa (pelo link de consorciada) remonta a pagina e o formulario da regularidade.
             <DocumentosEmpresa key={rota.id} usuario={usuario} id={rota.id} aba={rota.aba ?? "certidoes"} origem={origem} />

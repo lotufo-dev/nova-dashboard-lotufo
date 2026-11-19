@@ -752,3 +752,7 @@ export const cabecalhoDeNomeLongo = cabecalho => ({
 // conta no limite de tentativas por computador, e a prova ja' entra uma vez por perfil e largura.
 export const LOGIN_RECUSADO = { detail: "E-mail ou senha inválidos, ou usuário bloqueado" };
 export const LOGIN_NO_LIMITE = { detail: "Muitas tentativas de entrar a partir deste computador. Tente de novo em alguns minutos." };
+
+// ---- Documentos em tres paginas (#820): o painel sem empresa, sem obra e sem nada a renovar (cada pagina mostra o
+// estado vazio dela)
+export const DOCUMENTOS_VAZIO = { hoje: "2026-09-23", empresas: [], contratos: [], renovar_agora: [] };

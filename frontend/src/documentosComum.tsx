@@ -1,7 +1,8 @@
-import { forwardRef, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode, type RefObject } from "react";
 import { apiForm, mensagemDeErro } from "./api";
 import { IconeEnviarNuvem } from "./icones";
-import { NOME_CURTO, type EmpresaDoc } from "./matriz";
+import LegendaCor, { type ItemLegenda } from "./LegendaCor";
+import { NOME_CURTO, type CorChip, type EmpresaDoc } from "./matriz";
 import Selo, { Glifo } from "./Selo";
 // emissao/validade sao DATAS PURAS do papel que o orgao emitiu: fmtDataPura nao passa por fuso.
 import { fmtDataPura } from "./tempo";
@@ -12,9 +13,71 @@ import "./documentos.css";
 import { situacaoDoNivel } from "./situacao";
 import Falha from "./Falha";
 
-/* Pecas comuns das duas telas de Documentos (#161): a lista de empresas (Documentos.tsx) e a pagina da empresa
- * (DocumentosEmpresa.tsx). Os dados vem de `documentos.painel` (GET /api/documentos); a regra (o que e' exigido, a
- * situacao de cada certidao) e' do servidor, e a tela so' mostra. */
+/* Pecas comuns das paginas de Documentos (#161, #820): as tres paginas da area (DocumentosCertidoes.tsx,
+ * DocumentosRegularidade.tsx, DocumentosGarantias.tsx) e a pagina da empresa (DocumentosEmpresa.tsx). Os dados vem de
+ * `documentos.painel` (GET /api/documentos); a regra (o que e' exigido, a situacao de cada certidao) e' do servidor, e
+ * a tela so' mostra. */
+
+/** A celula de um documento: o fundo claro da situacao, o glifo e o valor (Certidoes e Garantias). `semRotulo`: a
+ *  versao de linha, sem fundo, com o rotulo so' para o leitor de tela (o cabecalho das colunas o diz). */
+export function Chip({ cor, rotulo, valor, data, href, titulo, semRotulo }: {
+  cor: CorChip; rotulo: string; valor: string; data?: string; href?: string; titulo?: string; semRotulo?: boolean;
+}) {
+  const corpo = (
+    <>
+      <span className={semRotulo ? "sr-only" : "doc-chip__rotulo"}>{rotulo}</span>
+      <span className="doc-chip__valor">
+        {/* a forma da situacao ao lado do valor: a cor nunca vai sozinha */}
+        {cor !== "neutro" && <Glifo situacao={cor} />}
+        <b>{valor}</b>{data ? <small>{data}</small> : null}
+      </span>
+    </>
+  );
+  const classe = `doc-chip doc-chip--${cor}${semRotulo ? " doc-chip--linha" : ""}`;
+  return href
+    ? <a className={classe} href={href} target="_blank" rel="noreferrer" title={titulo}>{corpo}</a>
+    : <div className={classe} title={titulo}>{corpo}</div>;
+}
+
+/** A fila de leitura do "Anexar PDF" do alto da pagina: as empresas da digitacao e o que refazer depois de gravar. */
+export type AnexarDaPagina = { empresas: EmpresaDoc[]; aoGravar: () => Promise<void> };
+
+/** A moldura das tres paginas de Documentos (#820): a falha, o anuncio, o alto (a regua grossa, o contador do que pede
+ *  acao e o "Anexar PDF"), a legenda da pagina e o "Carregando". O titulo e o caminho sao da barra do topo (#814).
+ *  `anexar`: so' nas paginas de onde se anexa (Certidoes e Regularidade), e so' para quem edita; `null` enquanto o
+ *  painel nao chegou, com o botao desligado. `refAnexar`: da pagina, que tambem abre a escolha (o "Anexar" da linha). */
+export function MolduraDocumentos({ classe, erro, carregado, contador, legenda, anexar, refAnexar, children }: {
+  classe: string; erro: string; carregado: boolean; contador?: ReactNode; legenda: ItemLegenda[];
+  anexar?: AnexarDaPagina | null; refAnexar?: RefObject<AnexarRef>; children: ReactNode;
+}) {
+  const [anuncio, setAnuncio] = useState("");
+  const comBotao = anexar !== undefined;
+  return (
+    <div className={`pagina doc ${classe}`}>
+      {erro && <Falha>{erro}</Falha>}
+      <p className="sr-only" role="status">{anuncio}</p>
+      {(contador || comBotao) && (
+        <div className="doc-topo">
+          {contador && <p className="doc-topo__conta">{contador}</p>}
+          {comBotao && (
+            <div className="doc-topo__acoes">
+              <button type="button" className="btn btn--primario" disabled={!anexar} onClick={() => refAnexar?.current?.escolher()}>
+                <IconeEnviarNuvem className="icone" />Anexar PDF
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      <LegendaCor itens={legenda} />
+      {!carregado && !erro && <p className="campo__nota">Carregando…</p>}
+      {carregado && <div className="doc-corpo">{children}</div>}
+      {/* a fila de leitura do "Anexar PDF" (fica montada para o botao do alto sempre ter onde abrir) */}
+      {anexar && (
+        <AnexarCertidoes ref={refAnexar} empresas={anexar.empresas} aoGravar={anexar.aoGravar} anunciar={setAnuncio} unificado semZona />
+      )}
+    </div>
+  );
+}
 
 // D15: "em dia" e' o estado normal: o glifo de feito e a palavra, sem fundo; o selo com fundo fica para o que pede
 // atencao. A maiuscula inicial do selo vem do CSS; aqui ela sai do texto.
