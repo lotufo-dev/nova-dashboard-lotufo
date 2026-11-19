@@ -163,8 +163,8 @@ def test_encerrado_a_mao_volta_sozinho_com_movimentacao_posterior_e_fica_registr
 
 def _obra_exemplo(conn):
     """Duas obras (nº do instrumento e nome curto ficticios) e as medicoes 7 (execucao e reajuste) e 8 da primeira."""
-    for cid, instrumento, curto in ((9, "082/2025/00/00-EXEMPLO", "Ponte do Exemplo"),
-                                    (10, "083/2025/00/00-EXEMPLO", "Outra Obra")):
+    for cid, instrumento, curto in ((9, "517/2031/00/00-EXEMPLO", "Ponte do Exemplo"),
+                                    (10, "518/2031/00/00-EXEMPLO", "Outra Obra")):
         conn.execute("INSERT INTO contratos (id, orgao, numero_instrumento, objeto, valor_original_centavos, nome_curto) "
                      "VALUES (?, 'SECRETARIA DE EXEMPLO', ?, 'Obra', 100, ?)", (cid, instrumento, curto))
     for mid, cid, numero, tipo, estado in ((71, 9, 7, "execucao", "protocolada"), (72, 9, 7, "reajuste", "recebida"),
@@ -175,11 +175,11 @@ def _obra_exemplo(conn):
 
 
 @pytest.mark.parametrize("nome,esperada", [
-    ("7ª Medição - Ponte do Exemplo - IC 082/2025 (ORGAO-PRO-2026/00020)", 71),
+    ("7ª Medição - Ponte do Exemplo - IC 517/2031 (ORGAO-PRO-2026/00020)", 71),
     ("7ª Medição/Reajuste - Ponte do Exemplo (ORGAO-PRO-2026/00020)", 71),     # o processo leva os dois: a medicao
-    ("Reajuste da 7ª Medição - IC 082/2025 (ORGAO-PRO-2026/00020)", 72),
+    ("Reajuste da 7ª Medição - IC 517/2031 (ORGAO-PRO-2026/00020)", 72),
     ("CT-099 - 8ª Medição - Ponte do Exemplo (ORGAO)", 81),
-    ("7ª Medição - IC 083/2025", 91),
+    ("7ª Medição - IC 518/2031", 91),
     ("9ª Medição - Ponte do Exemplo", None),                                  # a medicao nao existe
     ("7ª Medição - Obra que nao existe (ORGAO-PRO-2026/00020)", None),        # sem obra
     ("7ª Medição - Ponte do Exemplo e Outra Obra", None),                    # duas obras: ninguem adivinha
@@ -204,7 +204,7 @@ def test_processo_no_quadro_ganha_proposta_e_ligado_a_medicao_recebida_encerra(c
     numero igual. O teste pela rota esta' em test_api_siga.py."""
     uid = _usuario(conn)
     _obra_exemplo(conn)
-    proc = {"codigo": "PRC777", "numero": "ORGAO-PRO-2026/00020", "nome": "7ª Medição - Ponte do Exemplo - IC 082/2025",
+    proc = {"codigo": "PRC777", "numero": "ORGAO-PRO-2026/00020", "nome": "7ª Medição - Ponte do Exemplo - IC 517/2031",
             "situacao": SITUACAO_COFIN, "movimentacoes": [{**m, "data": _br(m["data"])} for m in MOVS]}
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), [proc])
     agora = _cuiaba(2026, 10, 28, 11)

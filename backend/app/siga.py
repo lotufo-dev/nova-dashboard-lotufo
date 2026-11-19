@@ -933,7 +933,7 @@ class NaoEncerradoAMao(ValueError):
 
 
 # A proposta de medicao (#841): pela obra e pelo numero que aparecem no nome do processo. "7ª Medição", "Reajuste da
-# 15ª Medição", "3ª Medição de Projeto"; a obra pelo nº do instrumento ("IC 082/2025" casa com "082/2025/00/00-...")
+# 15ª Medição", "3ª Medição de Projeto"; a obra pelo nº do instrumento ("IC 517/2031" casa com "517/2031/00/00-...")
 # ou pelo nome curto escrito por inteiro. Sem obra unica ou sem medicao unica, nao ha' proposta: a pessoa escolhe.
 _NUMERO_MEDICAO = re.compile(r"(?:(reajuste)\s+d[ao]\s+)?(\d{1,3})\s*[ªºa°o]?\s*medi[cç][aã]o(\s+de\s+projeto)?", re.I)
 _INSTRUMENTO_NO_NOME = re.compile(r"(?<![\d/-])0*(\d{1,4})\s*/\s*(\d{4})(?!\d)")
