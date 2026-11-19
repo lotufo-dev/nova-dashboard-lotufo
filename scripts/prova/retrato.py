@@ -107,6 +107,7 @@ _ARQUIVO = "devolve arquivo (PDF, planilha, zip), não JSON"
 _SESSAO = "muda a cada sessão ou a cada minuto (acesso, auditoria, saúde): só faria ruído na comparação"
 _CORREIO = "estado da caixa de e-mail de quem está logado; no servidor de prova é o simulador"
 _PARAMETRO = "só responde com os parâmetros que a tela manda (número, competência, período)"
+_RECORTE = "recorte por contratante de rota que já está no retrato (/api/medicoes/fila, /api/a-receber, /api/siga)"
 FORA = {
     "/api/health": _SESSAO,
     "/api/auth/eu": _SESSAO,
@@ -140,6 +141,10 @@ FORA = {
     "/api/protocolos/{pid}/pacote": _ARQUIVO,
     "/api/protocolos/{pid}/assinado": _ARQUIVO,
     "/api/protocolos/{pid}/comprovante": _ARQUIVO,
+    # as abas da pagina do contratante (#818): o recorte por contratante de rotas que ja' estao no retrato
+    "/api/contratantes/{chave}/medicoes": _RECORTE,
+    "/api/contratantes/{chave}/a-receber": _RECORTE,
+    "/api/contratantes/{chave}/siga": _RECORTE,
 }
 
 _MARCADOR = re.compile(r"\{([^}]+)\}")

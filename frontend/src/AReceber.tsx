@@ -68,12 +68,13 @@ export type RespostaAReceber = {
 };
 
 /** O que a vista mostra: a pagina inteira ou um contratante, com os numeros que o servidor mandou para ela. */
-type Vista = { quantidade: number; em_aberto_centavos: number; por_ano: Record<string, number>; alem_do_prazo: number;
+export type Vista = { quantidade: number; em_aberto_centavos: number; por_ano: Record<string, number>; alem_do_prazo: number;
   grupos: ContratanteAReceber[]; soltas: NotaSemMedicao[]; soltas_centavos: number; anteriores: Anteriores };
 
 const AQUI = { tela: "a-receber" } as const;
-const BASE = "O em aberto do Fechamento, na cota da Lotufo e pelo valor bruto da nota; o a receber da Início e de Obras "
+export const BASE = "O em aberto do Fechamento, na cota da Lotufo e pelo valor bruto da nota; o a receber da Início e de Obras "
   + "também soma cobranças do RM sem medição em aberto.";
+export const TRAVA = "O total a receber ainda não está liberado: o em aberto fica sem valor.";
 
 function prazoDoOrgao(dias: number | null): string {
   return dias === null ? "sem previsão de pagamento" : `prazo do órgão: ${contar(dias, "dia", "dias")}`;
@@ -158,7 +159,7 @@ function CabecaDoGrupo({ g, aberto, alternar, id }: { g: ContratanteAReceber; ab
   );
 }
 
-function Tabela({ grupos, recolhidos, ir }: { grupos: ContratanteAReceber[]; recolhidos: boolean; ir: Ir }) {
+export function Tabela({ grupos, recolhidos, ir }: { grupos: ContratanteAReceber[]; recolhidos: boolean; ir: Ir }) {
   const [abertos, setAbertos] = useState<ReadonlySet<string>>(() => new Set());
   const alternar = (nome: string) => setAbertos(a => {
     const novo = new Set(a);
@@ -199,7 +200,7 @@ function Tabela({ grupos, recolhidos, ir }: { grupos: ContratanteAReceber[]; rec
 
 /** O total da vista, com o de cada ano (os numeros do Fechamento, que mostra um ano por vez; o ano sem nada em aberto
  *  nao entra) e, quando ha', quantas linhas passaram da data esperada do recebimento. */
-function Numeros({ v, anos }: { v: Vista; anos: string[] }) {
+export function Numeros({ v, anos }: { v: Vista; anos: string[] }) {
   const doAno = [...anos].reverse().filter(a => (v.por_ano[a] ?? 0) !== 0);
   return (
     <dl className="arc-numeros">
@@ -224,7 +225,7 @@ function Numeros({ v, anos }: { v: Vista; anos: string[] }) {
 
 /** Fora do total, como no Fechamento: a nota em aberto no RM sem medicao ligada (sem competencia) e o em aberto de
  *  competencia anterior ao primeiro ano. */
-function APartes({ v, anos, comSemNota }: { v: Vista; anos: string[]; comSemNota: boolean }) {
+export function APartes({ v, anos, comSemNota }: { v: Vista; anos: string[]; comSemNota: boolean }) {
   if (v.soltas.length === 0 && v.anteriores.quantidade === 0) return null;
   return (
     <section className="cartao arc-painel" aria-labelledby="arc-aparte">
@@ -288,7 +289,7 @@ export default function AReceber({ busca = {}, ir }: { busca?: Busca; ir: Ir }) 
   if (!r.total_a_receber_liberado) {
     return (
       <div className="arc">
-        <CaixaAviso nivel="atencao" className="arc-aviso">O total a receber ainda não está liberado: o em aberto fica sem valor.</CaixaAviso>
+        <CaixaAviso nivel="atencao" className="arc-aviso">{TRAVA}</CaixaAviso>
       </div>
     );
   }

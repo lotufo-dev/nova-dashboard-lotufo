@@ -964,3 +964,49 @@ export const BUSCA_CHEIA = {
   ] },
 };
 export const BUSCA_VAZIA = { obras: { itens: [], total: 0 }, medicoes: { itens: [], total: 0 }, processos: { itens: [], total: 0 } };
+
+// ---- As abas da pagina do contratante (#818): o recorte da SINFRA que o servidor manda de cada tela
+// (`app/contratante.py`), tirado das respostas simuladas das telas de onde ele vem, para a aba ter o volume que o
+// cadastro de exemplo nao tem. Obras, notas, processos e valores inventados, como os de la'.
+
+/** As abas dos contratantes da carteira simulada que o cadastro de exemplo nao tem (o servidor responde 404 a' chave
+ *  que nenhuma obra tem): vazias, como o servidor manda ao contratante sem nada na aba. A SINFRA e' do cadastro de
+ *  exemplo e fica com o servidor de verdade. */
+const OUTROS_DA_CARTEIRA = "(mtpar|pref-cuiaba|ses-mt)";
+export const ABAS_DA_CARTEIRA = [
+  { caminho: new RegExp(`^/api/contratantes/${OUTROS_DA_CARTEIRA}/medicoes$`), corpo: () => ({ hoje: dataEm(hojeDaProva()), mes: competenciaHa(1),
+    limites: { dias_atencao: 5, dias_critico: 10, diferenca_critica_por_mil: 5 }, grupos: [], concluidas: [], sem_medicao: [], quantidade: 0 }) },
+  { caminho: new RegExp(`^/api/contratantes/${OUTROS_DA_CARTEIRA}/a-receber$`),
+    corpo: { anos: AR_ANOS, total_a_receber_liberado: true, contratante: null, quantidade: 0 } },
+  { caminho: new RegExp(`^/api/contratantes/${OUTROS_DA_CARTEIRA}/siga$`), corpo: { lido_em: null, limites: { dias_atencao: 5, dias_critico: 10 },
+    robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, processos: [], quantidade: 0 } },
+];
+
+/** Medicoes: as linhas da SINFRA na fila simulada (`filaSimulada`), as concluidas no mes e as obras sem medicao. */
+export const medicoesDoContratante = (resposta, reg) => {
+  const f = filaSimulada({ ...resposta, sem_medicao: resposta.sem_medicao ?? [] }, reg);
+  const daSinfra = l => l.contratante === "SINFRA";
+  const grupos = f.grupos.map(g => ({ ...g, linhas: g.linhas.filter(daSinfra) })).filter(g => g.linhas.length > 0);
+  const sem_medicao = f.sem_medicao.filter(daSinfra);
+  return { hoje: resposta.hoje, mes: resposta.mes, limites: resposta.limites, grupos, concluidas: f.concluidas, sem_medicao,
+    quantidade: grupos.reduce((t, g) => t + g.linhas.length, 0) + f.concluidas.length };
+};
+
+/** A receber: o grupo de um contratante na pagina A receber simulada (`aReceberComNotas`). `de`: a chave do grupo
+ *  tirado de la'; `como`: o nome e a chave com que ele vem (o contratante da carteira simulada que a pagina abre). */
+export const aReceberDoContratante = ({ trava = false, de = "sinfra", como = null } = {}) => reg => {
+  const r = aReceberComNotas({ trava })(reg);
+  if (trava) return r;
+  const g = r.contratantes.find(x => x.chave === de);
+  const grupo = como ? { ...g, contratante: como[0], chave: como[1] } : g;
+  return { anos: r.anos, total_a_receber_liberado: true, contratante: grupo, quantidade: grupo.quantidade };
+};
+
+/** Processos no SIGA: os vivos da SINFRA no SIGA simulado, do mais parado para o menos, com o "nao lido" deles. */
+const doMaisParado = (a, b) => (b.dias_uteis ?? -1) - (a.dias_uteis ?? -1) || (a.desde ?? "9").localeCompare(b.desde ?? "9") || a.id - b.id;
+const PROCESSOS_DA_SINFRA = SIGA_COM_NAO_LIDOS.processos.filter(p => p.contratante === "SINFRA" && !p.encerrado).sort(doMaisParado);
+export const SIGA_DO_CONTRATANTE = {
+  lido_em: SIGA_COM_NAO_LIDOS.lido_em, limites: SIGA_COM_NAO_LIDOS.limites,
+  robo: { ...SIGA_COM_NAO_LIDOS.robo, avisos: SIGA_COM_NAO_LIDOS.robo.avisos.filter(a => PROCESSOS_DA_SINFRA.some(p => p.id === a.processo_id)) },
+  processos: PROCESSOS_DA_SINFRA, quantidade: PROCESSOS_DA_SINFRA.length,
+};
