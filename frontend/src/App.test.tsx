@@ -606,10 +606,15 @@ describe("App: o caminho no alto e as páginas novas do menu em áreas (#814)", 
     await screen.findByRole("navigation", { name: "Navegação principal" });
     await waitFor(() => expect(trechos()).toEqual(esperado));
     expect(screen.getAllByRole("navigation", { name: "Você está em" })).toHaveLength(1);
-    // o trecho da página é o título da barra; ele só não é o h1 onde a página tem o dela (o Início e Obras)
-    const titulo = topo().querySelector(".caminho__trecho--titulo")!;
-    expect(titulo.textContent).toBe(esperado[esperado.length - 1] === "Usuários" ? "Administração" : esperado[esperado.length - 1]);
-    expect(titulo.querySelector("h1") !== null).toBe(url !== "/inicio" && url !== "/obras");
+    // o trecho da página é o título da barra (o h1); onde a página tem o dela (o Início e Obras) ele fica na letra dos
+    // outros trechos, sem a classe do título (19/11/2026)
+    const titulo = topo().querySelector(".caminho__trecho--titulo");
+    if (url === "/inicio" || url === "/obras") {
+      expect(titulo).toBeNull();
+    } else {
+      expect(titulo!.textContent).toBe(esperado[esperado.length - 1] === "Usuários" ? "Administração" : esperado[esperado.length - 1]);
+      expect(titulo!.querySelector("h1")).not.toBeNull();
+    }
   });
 
   it("a Minha conta entra pelo menu (área Sistema) e pelo avatar, e fica acesa", async () => {

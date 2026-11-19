@@ -241,7 +241,8 @@ A casca é o que fica igual em toda tela: o menu à esquerda e o topo (decisões
   cada página mora, e as páginas novas (A receber, as três de Documentos) não cabiam numa lista só (decisão do dono
   de 18/11/2026, #805; #814). Substitui o menu de 09/10/2026, uma lista sem nome de grupo.
 - **Item de 36 px no menu**, e não os 40 px do botão: com 14 páginas o menu inteiro tem de caber numa janela de
-  900 px de altura. Em janela mais baixa o menu rola por dentro e o botão de recolher fica preso ao pé.
+  900 px de altura. Em janela mais baixa o menu rola por dentro e o botão de recolher fica preso ao pé. É exceção
+  ao alvo mínimo de 40 px, aceita pelo dono em 19/11/2026.
 - **Recolhido** fica só a coluna dos ícones (64 px), com um fio entre uma área e a outra. A escolha é guardada no
   navegador.
 - **Topo** sobre o papel, com o caminho da página, o lugar da busca e a conta (avatar redondo com as iniciais). Tem
@@ -251,7 +252,10 @@ A casca é o que fica igual em toda tela: o menu à esquerda e o topo (decisões
   objeto é o título da barra (maior e forte); os de antes são links sublinhados na cor do texto de apoio; depois do
   título só vem a vista (a aba), quando não é a padrão. Nada é cortado: o que não cabe desce para a linha de baixo.
   Motivo: com mais páginas e três níveis em Obras, a página precisa dizer onde está e dar o caminho de volta
-  (decisão do dono de 18/11/2026, #805; #814).
+  (decisão do dono de 18/11/2026, #805; #814). Na página que tem título próprio (a obra, a medição, o contratante,
+  o Início, Obras) o trecho final fica na letra dos outros trechos, porque o nome já está grande no título logo
+  abaixo; e o trecho que levaria à própria página (a área cuja primeira página é a aberta) é texto, não link
+  (decisões do dono de 19/11/2026).
 - **O menu aceso e o caminho respondem a perguntas diferentes na página da medição.** O menu acende Medições, a
   área de quem opera; o caminho diz onde a medição mora (dentro da obra, dentro do contratante). Para o perfil sem
   Medições no menu (diretoria), a medição acende Obras.

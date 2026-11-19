@@ -695,8 +695,9 @@ td, th { font-variant-numeric: tabular-nums; }
   border-bottom: var(--borda-linha);
 }
 /* CAMINHO (Caminho.tsx, #814): "Obras › SINFRA › MT-388 › Medições › 15ª Medição". Os trechos de antes sao links
-   sublinhados, na cor do texto de apoio; o trecho da pagina (ou do objeto) e' o titulo da barra, com a letra do texto
-   (nao a condensada dos titulos de bloco), seja ele o h1 da pagina ou so' texto.
+   sublinhados, na cor do texto de apoio; o trecho da pagina e' o titulo da barra (o h1 da pagina), com a letra do texto
+   (nao a condensada dos titulos de bloco). Na pagina que tem o proprio h1 (a obra, a medicao, o Inicio) o trecho final
+   fica na letra dos outros trechos (decisao do dono de 19/11/2026).
    O caminho corre como texto: o que nao cabe numa linha desce para a de baixo e a barra cresce; nada e' cortado. Cada
    nome anda inteiro (so' o nome mais largo que a barra quebra por dentro), e o sinal "›" fica preso ao trecho de
    antes: a linha quebra depois dele. */

@@ -220,13 +220,22 @@ export function trechosDe(r: Rota, opcoes: { perfil?: string; nomes?: NomesDoCam
   }
 
   // as outras: a area, a pagina do menu e o que houver abaixo dela
-  const item = itemDe(r) as ItemMenu;
-  const area = AREAS.find(a => a.paginas.includes(item))!;
+  const item = itemDe(r);
+  const area = item === null ? undefined : AREAS.find(a => a.paginas.includes(item));
+  // Reserva: a tela que entrar no tipo `Rota` sem pagina no menu (sem area) sai so' com o proprio nome, em vez de
+  // derrubar a barra do topo, que esta' em toda pagina.
+  if (item === null || area === undefined) return [{ rotulo: tituloDe(r.tela) || "grupolotufo", titulo: true }];
   const pagina: Trecho = { rotulo: ROTULO[item], para: rotaDoItem(item) };
   const inicio: Trecho[] = [];
   if (area.rotulo !== ROTULO[item]) {
+    // A area leva a' primeira pagina dela no menu do perfil. Quando essa pagina e' a propria (Financeiro no
+    // Fechamento; para a diretoria, Medicoes no Resumo das medicoes e Sistema na Minha conta), o trecho e' so' texto:
+    // o link levaria para onde ja' se esta', ou para onde o trecho da pagina, logo depois, ja' leva. A excecao e' o
+    // historico do SIGA com filtro: ali o trecho "SIGA" volta para a categoria, e a area leva ao SIGA inteiro.
     const primeira = area.paginas.find(i => temPagina(perfil, i));
-    inicio.push({ rotulo: area.rotulo, para: primeira ? rotaDoItem(primeira) : undefined, area: true });
+    const filtroDoHistorico = r.tela === "siga" && /^\d+$/.test(busca.processo ?? "") && Object.keys(busca).some(k => k !== "processo");
+    const leva = primeira && (primeira !== item || filtroDoHistorico) ? rotaDoItem(primeira) : undefined;
+    inicio.push({ rotulo: area.rotulo, para: leva, area: true });
   }
   if (r.tela === "notas-envio") return [...inicio, pagina, { rotulo: tituloDe("notas-envio"), para: r, titulo: true }];
   if (r.tela === "documentos-empresa") return [...inicio, pagina, { rotulo: nomes.empresa ?? "Empresa", para: r, titulo: true }];
