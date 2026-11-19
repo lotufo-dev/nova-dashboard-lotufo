@@ -5,7 +5,10 @@
 /* ================================================================ PAGINA E DISPOSICAO
    A largura da tela vira o container `ini-pagina`: a disposicao muda pela largura que a tela tem de fato (com o menu
    aberto ou recolhido), nao pela largura da janela. Uma coluna; de 680px, ciclo e previsao lado a lado; de 900px, a
-   saudacao e os numeros do mes dividem a primeira linha. */
+   saudacao e os numeros do mes dividem a primeira linha.
+   #817: entram o ciclo por contratante (`orgaos`, logo abaixo do ciclo e da previsao) e o medido em 12 meses (`medido`,
+   depois do recebido; de 1200px, ao lado dele: abaixo disso cada painel teria menos que os 520px de que as colunas em
+   pe' precisam, e as barras deitariam). O que ja' existia segue na mesma ordem. */
 .ini {
   min-width: 0; container: ini-pagina / inline-size;
   color: var(--cor-tinta); font-family: var(--fonte-texto); font-size: var(--texto-corpo); line-height: var(--entrelinha);
@@ -16,28 +19,40 @@
 
 .ini-grade {
   display: grid; grid-template-columns: minmax(0, 1fr); row-gap: var(--espaco-entre-blocos);
-  grid-template-areas: "saud" "numeros" "cota" "ciclo" "previsao" "recebido" "avisos" "matriz";
+  grid-template-areas: "saud" "numeros" "cota" "ciclo" "previsao" "orgaos" "recebido" "medido" "avisos" "matriz";
 }
 .ini-saudacao { grid-area: saud; min-width: 0; }
 .ini-numeros { grid-area: numeros; min-width: 0; }
 .ini-cota { grid-area: cota; }
 .ini-ciclo { grid-area: ciclo; }
 .ini-previsao { grid-area: previsao; }
+.ini-orgaos { grid-area: orgaos; }
 .ini-recebido { grid-area: recebido; }
+.ini-medido { grid-area: medido; }
 .ini-avisos { grid-area: avisos; }
 .ini-matriz { grid-area: matriz; }
 .ini-avisos, .ini-matriz { margin-top: calc(var(--espaco-entre-blocos) * 0.2); }
 @container ini-pagina (min-width: 680px) {
   .ini-grade {
     grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--espaco-entre-colunas);
-    grid-template-areas: "saud saud" "numeros numeros" "cota cota" "ciclo previsao" "recebido recebido" "avisos avisos" "matriz matriz";
+    grid-template-areas: "saud saud" "numeros numeros" "cota cota" "ciclo previsao" "orgaos orgaos" "recebido recebido"
+      "medido medido" "avisos avisos" "matriz matriz";
   }
   .ini-numeros { justify-self: start; }
 }
 @container ini-pagina (min-width: 900px) {
-  .ini-grade { grid-template-areas: "saud numeros" "cota cota" "ciclo previsao" "recebido recebido" "avisos avisos" "matriz matriz"; }
+  .ini-grade {
+    grid-template-areas: "saud numeros" "cota cota" "ciclo previsao" "orgaos orgaos" "recebido recebido" "medido medido"
+      "avisos avisos" "matriz matriz";
+  }
   .ini-saudacao { align-self: end; }
   .ini-numeros { align-self: end; justify-self: end; }
+}
+@container ini-pagina (min-width: 1200px) {
+  .ini-grade {
+    grid-template-areas: "saud numeros" "cota cota" "ciclo previsao" "orgaos orgaos" "recebido medido" "avisos avisos"
+      "matriz matriz";
+  }
 }
 
 /* a legenda das situacoes fica sob a saudacao, a' esquerda (a peca alinha a' direita por padrao) */
@@ -57,7 +72,12 @@
 .ini-painel__cab { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-pp) var(--espaco-p); margin-bottom: var(--titulo-margem-base); }
 .ini-painel__cab h2 { margin: 0; font-size: var(--texto-titulo-bloco); }
 .ini-painel__cab .contador { align-self: center; }
-:is(.ini-ciclo, .ini-previsao, .ini-recebido) .ini-painel__cab h2 { font-size: var(--texto-titulo-sub); }
+:is(.ini-ciclo, .ini-previsao, .ini-recebido, .ini-orgaos, .ini-medido) .ini-painel__cab h2 { font-size: var(--texto-titulo-sub); }
+
+/* #817: o numero que e' porta para a pagina que o explica continua com a aparencia de numero: o sublinhado so' aparece
+   ao passar o mouse ou ao receber o foco */
+.ini-porta { text-decoration: none; }
+.ini-porta:hover, .ini-porta:focus-visible { text-decoration: underline; }
 
 /* ================================================================ NUMEROS DO MES
    So' rotulo e valor, sem moldura. O valor nao quebra; em tela muito estreita a letra dele acompanha a largura. */
@@ -169,6 +189,48 @@
   .ini-rec__valor { grid-area: valor; text-align: right; }
   .ini-rec__trilho { display: contents; }
   .ini-rec__coluna { grid-area: trilho; justify-self: start; width: var(--ini-rec-tamanho); height: var(--altura-faixa); border-radius: 0 var(--raio-canto) var(--raio-canto) 0; }
+}
+
+/* ================================================================ MEDIDO EM 12 MESES (#817)
+   A mesma forma do recebido (as classes .ini-rec acima). Aqui o item da lista embrulha a coluna, que e' o link para o
+   mes no Fechamento (ou so' o desenho, na competencia sem medido): o link nao muda a aparencia da coluna, e ao passar
+   o mouse ou receber o foco o mes fica em tinta e sublinhado. */
+.ini-medido .ini-rec > li { min-width: 0; }
+.ini-rec__mes--porta { color: inherit; text-decoration: none; }
+.ini-rec__mes--porta:hover .ini-rec__rotulo, .ini-rec__mes--porta:focus-visible .ini-rec__rotulo {
+  color: var(--cor-tinta); text-decoration: underline;
+}
+.ini-rec__mes--porta:hover .ini-rec__valor, .ini-rec__mes--porta:focus-visible .ini-rec__valor { color: var(--cor-tinta); }
+
+/* ================================================================ CICLO POR CONTRATANTE (#817)
+   Tabela (comparam-se valores entre linhas): um contratante por linha, uma etapa por coluna, com a marca da etapa no
+   cabecalho, e a linha de total. E' a peca .tabela; aqui so' o que muda dentro do painel: a tabela encosta nas margens
+   dele e o nome do contratante e' o cabecalho da linha. Em painel estreito (celular) cada contratante vira um bloco: o
+   nome em cima e, em cada linha, a etapa a' esquerda (a copia do rotulo, escondida no computador) e o valor a' direita. */
+.ini-orgaos .tabela :is(thead, tbody, tfoot) :is(th, td):first-child, .ini-orgaos .tabela tbody th[scope="row"]:first-child { padding-left: 0; }
+.ini-orgaos .tabela :is(thead, tbody, tfoot) :is(th, td):last-child { padding-right: 0; }
+.ini-orgaos .tabela thead th { background: none; }
+.ini-orgaos .tabela tbody th[scope="row"] { font-weight: var(--peso-forte); overflow-wrap: anywhere; }
+.ini-orgaos .tabela tbody tr.linha:hover > th { background: var(--cor-papel-sombreado); }
+.ini-orgaos__rotulo { display: none; }
+/* painel de largura media (a tela a 1024px): as colunas apertam o respiro para cinco valores de dezenas de milhoes
+   caberem sem a tabela rolar dentro da caixa */
+@container (min-width: 620.02px) and (max-width: 760px) {
+  .ini-orgaos .tabela :is(thead, tbody, tfoot) :is(th, td):not(:first-child):not(:last-child) { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
+  .ini-orgaos .tabela :is(thead, tbody, tfoot) :is(th, td):first-child { padding-right: var(--espaco-mini); }
+  .ini-orgaos .tabela :is(thead, tbody, tfoot) :is(th, td):last-child { padding-left: var(--espaco-mini); }
+}
+@container (max-width: 620px) {
+  .ini-orgaos .tabela, .ini-orgaos .tabela :is(tbody, tfoot, tr, th, td) { display: block; }
+  /* o cabecalho das colunas sai da vista sem sair da leitura: a etapa esta' escrita em cada linha do bloco */
+  .ini-orgaos .tabela thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .ini-orgaos .tabela :is(tbody, tfoot) tr { padding: var(--espaco-pp) 0; border-top: var(--borda-linha); }
+  .ini-orgaos .tabela tbody tr:first-child { border-top: 0; padding-top: 0; }
+  .ini-orgaos .tabela tfoot tr { border-top: var(--regua-secao); padding-bottom: 0; }
+  .ini-orgaos .tabela :is(tbody, tfoot) :is(th, td), .ini-orgaos .tabela tbody th[scope="row"] { padding: var(--espaco-mini) 0; border: 0; }
+  .ini-orgaos .tabela :is(tbody, tfoot) th, .ini-orgaos .tabela tbody th[scope="row"] { font-size: var(--texto-rotulo); }
+  .ini-orgaos .tabela :is(tbody, tfoot) td { display: flex; align-items: baseline; justify-content: space-between; gap: var(--espaco-p); }
+  .ini-orgaos__rotulo { display: inline; font-family: var(--fonte-texto); font-weight: var(--peso-normal); color: var(--cor-texto-secundario); }
 }
 
 /* ================================================================ AVISOS IMPORTANTES (#666)

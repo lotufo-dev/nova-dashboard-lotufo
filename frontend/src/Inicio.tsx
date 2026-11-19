@@ -9,6 +9,7 @@ import { brl, contar } from "./formato";
 import LegendaCor from "./LegendaCor";
 import type { Usuario } from "./Login";
 import MarcaEtapa from "./MarcaEtapa";
+import Rolagem from "./Rolagem";
 import { type Ir } from "./rota";
 import { Link } from "./Link";
 import Selo, { Glifo } from "./Selo";
@@ -29,6 +30,11 @@ import "./inicio.css";
 // o ciclo e a previsao lado a lado e o recebido embaixo; depois os avisos e a matriz, na largura toda.
 // #805 (decisao do dono de 18/11/2026): os dois numeros do alto dizem se estao melhor ou pior que antes, com a peca
 // Variacao. As referencias vem do servidor, com a mesma conta do numero em outro periodo; a tela so' desenha.
+// #817 (reestrutura 5c): o que faltava apresentar a' diretoria, acrescentado sem mexer no que o dono montou. No grupo da
+// cota entram o ciclo aberto por contratante (logo abaixo do ciclo e da previsao) e o medido em 12 meses (ao lado do
+// recebido, com a mesma forma). Todo numero novo e' uma porta: o contratante e o a receber dele abrem a pagina do
+// contratante, e o medido de cada mes abre o mes no Fechamento (o do alto tambem). As contas moram em
+// `backend/app/inicio.py`; a tela nao soma nada.
 
 type ChaveEtapa = "em_analise" | "boletim" | "nota" | "protocolado" | "recebido_mes";
 // #642: uma etapa da faixa do ciclo, na cota da Lotufo; `mais_antigo_dias` nulo = etapa vazia ou sem idade (recebido)
@@ -43,6 +49,15 @@ type CelulaMatriz = { etapa: EtapaMatriz; medicao_id: number } | null;
 type ObraMatriz = { contrato_id: number; obra: string; celulas: CelulaMatriz[] };
 /** #805: o medido de outra competencia, a referencia da variacao; nulo sem com o que comparar */
 type ReferenciaMedido = { competencia: string; valor_centavos: number } | null;
+// #817: as quatro etapas do ciclo que abrem por contratante (o recebido no mes nao abre)
+type EtapaAberta = Exclude<ChaveEtapa, "recebido_mes">;
+/** #817: um contratante no ciclo, na cota. `chave` e' a do endereco da pagina dele (nula sem orgao no cadastro);
+ *  `a_receber_centavos` e' o a receber da pagina do contratante e da lista de Obras (nao o em aberto do Fechamento,
+ *  docs/adr/0006), e vem nulo sem o total a receber liberado */
+type LinhaContratante = { contratante: string; chave: string | null; a_receber_centavos: number | null }
+  & Record<`${EtapaAberta}_centavos`, number>;
+/** #817: o medido de uma competencia, pela conta do Fechamento */
+type MesMedido = { competencia: string; valor_centavos: number };
 export type PainelInicio = {
   hoje: string;
   protocoladas: { obras_protocoladas: number; obras_ativas: number; ultima: string | null };
@@ -55,6 +70,10 @@ export type PainelInicio = {
     a_parte: { ano_inicial: string; valor_centavos: number; anterior_centavos: number; sem_atualizacao_centavos: number;
       sem_atualizacao_desde: string | null } | null };
   ciclo: EtapaCiclo[];
+  // #817: em cada etapa, a soma das linhas e' o valor da etapa em `ciclo`; a do a receber, `a_receber.valor_centavos`
+  ciclo_por_contratante: LinhaContratante[];
+  // #817: as 12 ultimas competencias fechadas (as da matriz), na cota, pela conta do Fechamento
+  medido_12m: MesMedido[];
   recebido_12m: MesRecebido[];
   // #652: `depois` = data esperada alem do proximo mes
   previsao: Record<"neste_mes" | "proximo_mes" | "atrasado" | "sem_previsao" | "depois", GrupoPrevisao>;
@@ -153,10 +172,8 @@ function Recebido12Meses({ meses }: { meses: MesRecebido[] }) {
       <div className="ini-painel__cab"><h2 id="ini-recebido">Recebido em 12 meses</h2></div>
       <ol className="ini-rec" aria-hidden="true">
         {meses.map(m => (
-          <li key={m.mes} className="ini-rec__mes"
-            style={{ "--ini-rec-tamanho": `${maior > 0 ? Math.round(100 * Math.max(0, m.valor_centavos) / maior) : 0}%` } as React.CSSProperties}>
-            <span className="ini-rec__trilho"><span className="ini-rec__valor">{curto(m.valor_centavos)}</span><span className="ini-rec__coluna" /></span>
-            <span className="ini-rec__rotulo">{fmtMesCurto(m.mes)}</span>
+          <li key={m.mes} className="ini-rec__mes" style={tamanhoDaColuna(m.valor_centavos, maior)}>
+            <ColunaDoMes mes={m.mes} centavos={m.valor_centavos} />
           </li>
         ))}
       </ol>
@@ -167,6 +184,126 @@ function Recebido12Meses({ meses }: { meses: MesRecebido[] }) {
           {meses.map(m => <tr key={m.mes}><th scope="row">{fmtCompetencia(m.mes)}</th><td>{brl(m.valor_centavos)}</td></tr>)}
         </tbody>
       </table></div>
+    </section>
+  );
+}
+
+/** O tamanho da coluna de um mes: a fracao do maior mes da serie (`--ini-rec-tamanho`); serie zerada nao divide por zero. */
+function tamanhoDaColuna(centavos: number, maior: number): React.CSSProperties {
+  return { "--ini-rec-tamanho": `${maior > 0 ? Math.round(100 * Math.max(0, centavos) / maior) : 0}%` } as React.CSSProperties;
+}
+
+/** O desenho de um mes nos graficos de 12 meses (recebido, #652, e medido, #817): o valor curto sobre a coluna e o mes embaixo. */
+function ColunaDoMes({ mes, centavos }: { mes: string; centavos: number }) {
+  return <>
+    <span className="ini-rec__trilho"><span className="ini-rec__valor">{curto(centavos)}</span><span className="ini-rec__coluna" /></span>
+    <span className="ini-rec__rotulo">{fmtMesCurto(mes)}</span>
+  </>;
+}
+
+/** Medido em 12 meses (#817): a mesma forma do recebido, uma coluna por competencia, as 12 ultimas fechadas. O valor e' o
+ *  medido do mes no Fechamento (a conta dele, na cota), e a coluna e' a porta para o mes la'; competencia sem medido nao
+ *  tem o que abrir. A coluna e' um link com o nome escrito (`aria-label`); a tabela equivalente fica para o leitor de tela. */
+function Medido12Meses({ meses, ir }: { meses: MesMedido[]; ir: Ir }) {
+  const maior = Math.max(0, ...meses.map(m => m.valor_centavos));
+  return (
+    <section aria-labelledby="ini-medido" className="cartao ini-painel ini-medido">
+      <div className="ini-painel__cab"><h2 id="ini-medido">Medido em 12 meses</h2></div>
+      <ol className="ini-rec">
+        {meses.map(m => {
+          const nome = `Medido em ${fmtCompetencia(m.competencia)}: ${brl(m.valor_centavos)}`;
+          const coluna = <ColunaDoMes mes={m.competencia} centavos={m.valor_centavos} />;
+          return (
+            <li key={m.competencia}>
+              {m.valor_centavos > 0
+                ? <Link para={{ tela: "fechamento" }} busca={{ mes: m.competencia }} ir={ir} className="ini-rec__mes ini-rec__mes--porta"
+                  style={tamanhoDaColuna(m.valor_centavos, maior)} aria-label={nome} title={nome}>{coluna}</Link>
+                : <span className="ini-rec__mes" style={tamanhoDaColuna(0, maior)} aria-hidden="true">{coluna}</span>}
+            </li>);
+        })}
+      </ol>
+      <div className="sr-only"><table>
+        <caption>Medido por mês de competência, na cota da Lotufo</caption>
+        <thead><tr><th scope="col">Competência</th><th scope="col">Medido</th></tr></thead>
+        <tbody>
+          {meses.map(m => <tr key={m.competencia}><th scope="row">{fmtCompetencia(m.competencia)}</th><td>{brl(m.valor_centavos)}</td></tr>)}
+        </tbody>
+      </table></div>
+    </section>
+  );
+}
+
+// #817: as colunas do ciclo por contratante, na ordem do ciclo; a marca e' a da etapa (MarcaEtapa)
+const ETAPAS_ABERTAS: { chave: EtapaAberta; etapa: Etapa }[] = [
+  { chave: "em_analise", etapa: "em_analise" }, { chave: "boletim", etapa: "boletim" },
+  { chave: "nota", etapa: "nota" }, { chave: "protocolado", etapa: "protocolado" },
+];
+
+/** Ciclo por contratante (#817): onde o dinheiro esta' parado, por orgao. Uma linha por contratante e uma coluna por
+ *  etapa do ciclo, com a marca da etapa, mais o a receber (so' com o total a receber liberado). A linha "Total" repete
+ *  os numeros do painel do ciclo e o a receber: sao os que o servidor manda para eles, nao uma soma feita aqui (um teste
+ *  do servidor confere que as linhas fecham com eles). O a receber e' o da pagina do contratante e da lista de Obras, e
+ *  leva o mesmo rotulo que la' ("A receber"): o "Em aberto" e' o numero do Fechamento, outra conta (docs/adr/0006).
+ *  O contratante e o a receber dele abrem a pagina do contratante, que mostra o mesmo valor; o contratante sem orgao no
+ *  cadastro e o total nao tem pagina. Em painel estreito (celular) cada contratante vira um bloco, com a etapa escrita
+ *  ao lado do valor (inicio.css). */
+function CicloPorContratante({ linhas, ciclo, aReceber, ir }:
+    { linhas: LinhaContratante[]; ciclo: EtapaCiclo[]; aReceber: PainelInicio["a_receber"]; ir: Ir }) {
+  const comAReceber = aReceber.liberado;
+  const total = (chave: EtapaAberta) => ciclo.find(e => e.etapa === chave)?.valor_centavos ?? 0;
+  const valor = (centavos: number) => centavos > 0 ? brl(centavos) : "—";
+  // no celular a etapa vai escrita na celula; no computador ela esta' no cabecalho da coluna e esta copia fica escondida
+  const rotulo = (etapa: Etapa, texto?: string) =>
+    <span className="ini-orgaos__rotulo" aria-hidden="true"><MarcaEtapa etapa={etapa}>{texto}</MarcaEtapa></span>;
+  const aReceberDe = (centavos: number | null, nome: string, chave: string | null) => (
+    <td className="col-num dinheiro num">
+      {rotulo("em_aberto", "A receber")}
+      <span className="ini-orgaos__valor">
+        {centavos === null || centavos <= 0 ? "—"
+          : chave ? <Link para={{ tela: "contratante", chave }} ir={ir} className="ini-porta"
+            aria-label={`${nome}: ${brl(centavos)} a receber`}>{brl(centavos)}</Link>
+          : brl(centavos)}
+      </span>
+    </td>);
+  return (
+    <section aria-labelledby="ini-orgaos" className="cartao ini-painel ini-orgaos">
+      <div className="ini-painel__cab"><h2 id="ini-orgaos">Ciclo por contratante</h2></div>
+      {linhas.length === 0 ? <p className="ini-vazio">Nenhum contratante com valor no ciclo.</p> : (
+        <Rolagem rotulo="Tabela do ciclo por contratante">
+          <table className="tabela ini-orgaos__tabela">
+            <caption className="sr-only">Valor em cada etapa do ciclo por contratante, na cota da Lotufo</caption>
+            <thead>
+              <tr>
+                <th scope="col">Contratante</th>
+                {ETAPAS_ABERTAS.map(c => <th key={c.chave} scope="col" className="col-num"><MarcaEtapa etapa={c.etapa} /></th>)}
+                {comAReceber && <th scope="col" className="col-num"><MarcaEtapa etapa="em_aberto">A receber</MarcaEtapa></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {linhas.map(l => (
+                <tr key={l.contratante} className="linha">
+                  <th scope="row" className="ini-orgaos__nome">
+                    {l.chave ? <Link para={{ tela: "contratante", chave: l.chave }} ir={ir}>{l.contratante}</Link> : l.contratante}
+                  </th>
+                  {ETAPAS_ABERTAS.map(c => (
+                    <td key={c.chave} className="col-num dinheiro num">
+                      {rotulo(c.etapa)}<span className="ini-orgaos__valor">{valor(l[`${c.chave}_centavos`])}</span>
+                    </td>))}
+                  {comAReceber && aReceberDe(l.a_receber_centavos, l.contratante, l.chave)}
+                </tr>))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <th scope="row" className="ini-orgaos__nome">Total</th>
+                {ETAPAS_ABERTAS.map(c => (
+                  <td key={c.chave} className="col-num dinheiro num">
+                    {rotulo(c.etapa)}<span className="ini-orgaos__valor">{valor(total(c.chave))}</span>
+                  </td>))}
+                {comAReceber && aReceberDe(aReceber.valor_centavos, "Total", null)}
+              </tr>
+            </tfoot>
+          </table>
+        </Rolagem>)}
     </section>
   );
 }
@@ -397,7 +534,8 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
           <dl className="ini-numeros__lista">
             <div className="ini-numero">
               <dt className="ini-numero__rotulo">Notas fiscais protocoladas em {fmtMesExtenso(mesDeHoje)}</dt>
-              <dd className="ini-numero__valor">{brl(nm.valor_centavos)}</dd>
+              {/* #817: o numero e' a porta para a pagina que diz em que etapa esta' a medicao de cada obra */}
+              <dd className="ini-numero__valor"><Link para={{ tela: "resumo-medicoes" }} ir={ir} className="ini-porta">{brl(nm.valor_centavos)}</Link></dd>
               {/* o mes de hoje esta' pela metade: compara com o mes anterior ate' o mesmo dia, e o rotulo diz isso */}
               {nm.anterior && refNotas && (
                 <dd className="ini-numero__variacoes">
@@ -407,7 +545,10 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
             </div>
             <div className="ini-numero">
               <dt className="ini-numero__rotulo">Medido em {fmtMesExtenso(m.competencia)}</dt>
-              <dd className="ini-numero__valor">{brl(m.valor_centavos)}</dd>
+              {/* #817: o medido do mes abre o mes no Fechamento */}
+              <dd className="ini-numero__valor">
+                <Link para={{ tela: "fechamento" }} busca={{ mes: m.competencia }} ir={ir} className="ini-porta">{brl(m.valor_centavos)}</Link>
+              </dd>
               {(m.anterior || m.ano_anterior) && (
                 <dd className="ini-numero__variacoes">
                   {m.anterior && refAnterior && <Variacao atual={m.valor_centavos} referencia={m.anterior.valor_centavos}
@@ -418,11 +559,13 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
             </div>
           </dl>
         </section>
-        {/* a base dos valores, dita uma vez: vale para os tres paineis que vem a seguir */}
+        {/* a base dos valores, dita uma vez: vale para os paineis que vem a seguir, ate' os avisos */}
         <div className="ini-cota"><h2>Cota da Lotufo</h2></div>
         <CicloMedicao etapas={p.ciclo} aParte={p.a_receber.a_parte} />
         <PrevisaoEntrada previsao={p.previsao} />
+        <CicloPorContratante linhas={p.ciclo_por_contratante} ciclo={p.ciclo} aReceber={p.a_receber} ir={ir} />
         <Recebido12Meses meses={p.recebido_12m} />
+        <Medido12Meses meses={p.medido_12m} ir={ir} />
         <CaixaAvisos avisos={avisos} ir={ir} />
         <MatrizObras matriz={p.matriz} />
       </div>
