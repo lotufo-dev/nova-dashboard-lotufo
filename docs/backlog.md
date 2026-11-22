@@ -7,6 +7,7 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 
 ## Código
 
+- 2026-11-22 #842, data do recebimento pela baixa do RM: não existe ato que desfaça uma data gravada pela regra (`sincronizacao_rm.datar_recebidas`). A nota desligada depois, ou a ligada depois com baixa mais nova, não move a data; se um caso aparecer, o ato entra na correção de cadastro, com evento novo.
 - 2026-11-19 #805, Fechamento em abas: a aba Mês a mês fica perto do limite de uma tela e meia a 1440 px num ano de doze meses; cada aviso a mais (a trava do total a receber, a nota diferente da cota, o par misto) soma uma faixa e, com dois deles, a página passa do limite. A 1024 px ela já passa. Decidir se os avisos do ano viram uma linha só ou se o limite cede nesta página.
 - 2026-11-19 #805, Documentos em três páginas: Certidões e Garantias cabem em uma tela e meia a 1440 px com folga de poucos pixels; uma empresa ou uma garantia a mais passa do limite. Garantias a 1024 px já passa. Sem ação até passar; então decidir o corte (recolher grupos, ou o limite ceder).
 - 2026-11-19 #805, caminho no topo: a 1024 px o caminho das páginas de detalhe (obra, medição, histórico do SIGA) quebra em duas ou três linhas com a busca ao lado; a 390 px ele perde largura para a lupa e também ganha uma linha, e o nome longo da obra pode deixar uma palavra sozinha na linha. Nada é cortado; decidir se o topo encolhe a busca, abrevia os trechos do meio ou aceita a altura.

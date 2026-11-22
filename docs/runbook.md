@@ -555,7 +555,7 @@ A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_US
 
 ## Gravação de dado na produção
 
-Vale para todo comando do `app.cli` que grava dado no banco de produção e tem `--ensaio` (hoje: carga e correção de medições, `cadastro aplicar`, `legado remapear`, `documentos importar`, `medicoes planilhas`, `conciliacao` e `notas reler`), rodado fora de um deploy. Essa gravação não espera autorização do dono (`docs/adr/0014`); quem a segura são estes passos, nesta ordem. Conta de acesso (`criar-admin`, senha, proteção) não é dado: fica fora deste rito e continua só com a autorização do dono na hora. A gravação pedida junto de um deploy segue a skill `deploy`.
+Vale para todo comando do `app.cli` que grava dado no banco de produção e tem `--ensaio` (hoje: carga e correção de medições, `cadastro aplicar`, `legado remapear`, `documentos importar`, `medicoes planilhas`, `conciliacao`, `rm datar-recebidas` e `notas reler`), rodado fora de um deploy. Essa gravação não espera autorização do dono (`docs/adr/0014`); quem a segura são estes passos, nesta ordem. Conta de acesso (`criar-admin`, senha, proteção) não é dado: fica fora deste rito e continua só com a autorização do dono na hora. A gravação pedida junto de um deploy segue a skill `deploy`.
 
 1. **Ensaio em produção** (`--ensaio`) e o relatório lido inteiro. Erro, conflito ou linha que não se esperava: parar e corrigir a origem. O código de saída do ensaio não substitui a leitura.
 2. **Backup do banco** logo antes de gravar, no mesmo script da gravação; sem ele a gravação não roda:
@@ -1319,6 +1319,46 @@ O faturado até o QDOP de 22/09/2026 conta como pago, menos o que o RM mostra em
 em aberto representa (título com mais de R$ 1,00 faltando, na cota, idade pela emissão da nota). Liberado em `geral.yaml`
 (`diretoria.total_a_receber_liberado: true`). Ordem em produção: backup → `cadastro aplicar` →
 `conciliacao antiga` → `conciliacao corte`.
+
+### Data do recebimento pela baixa do RM (issue #842)
+
+O corte, a correção de cadastro em lote e a carga do histórico fecham a medição como recebida sem saber o dia. Quando
+essa medição tem nota ligada e todos os títulos dessas notas estão baixados no RM, ela ganha a data da última baixa
+(`docs/adr/0006`). O estado não muda, a data já gravada nunca é trocada, e a medição sem nota ligada fica sem data.
+
+Roda sozinha no fim de cada sincronização com o RM, de hora em hora: a medição que ganhar a nota ou a baixa depois
+recebe a data na rodada seguinte, sem ninguém fazer nada. O comando faz o mesmo passo na hora, sem falar com o RM (lê
+as baixas que já estão no banco), e serve para ver antes o que a regra vai gravar:
+
+```
+python -m app.cli rm datar-recebidas --ensaio
+python -m app.cli rm datar-recebidas
+```
+
+O ensaio lista cada medição com a data que receberia, quantas notas e títulos a sustentam, e avisa de duas situações:
+o título que o RM baixou por valor menor (segue em Administração › Reconciliação, no grupo "Títulos baixados no RM por
+valor menor") e a data que vem da nota da empresa em consórcio (é o dia do repasse da cota, e não conta no prazo do
+órgão). Não pede `--usuario`: a data vem do RM, e a auditoria a grava pelo sistema (`medicao.recebida_em`).
+
+Na produção, depois do deploy que trouxe a regra:
+
+1. A primeira sincronização depois de o serviço subir já grava as datas. Para ler a lista antes disso, rodar o
+   `--ensaio` numa cópia do banco com o código novo, antes do deploy (`DASH_DB_PATH` apontando para a cópia); na
+   produção, depois da primeira rodada, o ensaio responde zero.
+2. Para não esperar a rodada, rodar o comando pelo rito de "Gravação de dado na produção": ensaio lido, backup,
+   gravação.
+3. Conferência: a segunda execução responde `0`; as datas gravadas estão em Administração › Auditoria, na ação "Data
+   do recebimento pela baixa do RM", uma linha por medição; e o Resumo das medições passa a mostrar a variação do
+   Recebido nos meses e contratantes em que não sobra medição recebida sem data.
+
+Fica sem data, por desenho: a medição sem nota ligada (decisão do dono de 22/11/2026: não se põe data sem documento);
+a que tem título em aberto, baixado em parte além de R$ 1,00 ou baixado sem a data; a que tem nota desconsiderada ou
+sem título no RM; a que perdeu uma nota por cancelamento ou exclusão no RM, até outra nota ser ligada a ela; a que
+teria a data depois de hoje ou antes da emissão da nota; e a que tem título baixado **sem valor** (glosa,
+compensação): essa baixa não é recebimento, e o dia dela não é o de um pagamento.
+
+Se o passo falhar numa rodada, a rodada termina bem assim mesmo e o erro fica no log do serviço e no evento
+"Sincronização com o RM" da auditoria (`recebidas_datadas_erro`); a rodada seguinte tenta de novo.
 
 ## Tabelas arquivadas (bloco 9)
 

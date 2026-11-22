@@ -443,6 +443,8 @@ def _rm(args) -> int:
     from app import sincronizacao_rm
     if args.acao == "liberar-exclusao":
         return _liberar_exclusao(args)
+    if args.acao == "datar-recebidas":
+        return _datar_recebidas(args)
     try:
         banco = db.db_path().resolve()
     except RuntimeError:
@@ -466,6 +468,37 @@ def _rm(args) -> int:
         print(f"    NF {v['numero']} (idmov {v['idmov']}, coligada {v['coligada']}, tipo {v['codtmv']}) "
               f"-> medição {v['medicao_id']} ({v['numero_instrumento']} nº {v['medicao_numero']} {v['medicao_tipo']}, "
               f"{v['medicao_estado']}): {format_brl(v['valor_centavos'])}, regra {v['regra'] or '-'}")
+    return 0
+
+
+def _datar_recebidas(args) -> int:
+    """`rm datar-recebidas [--ensaio]` (issue #842): põe a data da última baixa do RM na medição recebida sem data
+    cujas notas ligadas têm todos os títulos baixados. É o mesmo passo do fim de cada sincronização com o RM, sem
+    falar com o RM: lê as baixas que já estão no banco. Não pede usuário: a data vem do RM, e a auditoria a grava
+    pelo sistema."""
+    import datetime
+
+    from app import medicoes, sincronizacao_rm
+    conn = db.get_conn()
+    try:
+        db.migrate(conn)
+        rel = sincronizacao_rm.datar_recebidas(conn, ensaio=args.ensaio, disparo="comando")
+    finally:
+        conn.close()
+    print("ENSAIO (nada foi gravado)" if rel["ensaio"] else "APLICADO")
+    print(f"  medições recebidas sem data que ganham a data da última baixa do RM: {rel['datadas']}")
+    for x in rel["linhas"]:
+        dia = datetime.date.fromisoformat(x["recebida_em"][:10]).strftime("%d/%m/%Y")
+        if x["acompanha"] is not None:
+            de_onde = f"acompanha a execução que absorveu o reajuste (medição {x['acompanha']})"
+        else:
+            de_onde = f"{x['notas']} nota(s), {x['titulos']} título(s)"
+            if x["com_diferenca"]:
+                de_onde += "; título baixado por valor menor: conferir na Reconciliação"
+            if x["repasse"]:
+                de_onde += "; pela nota da empresa em consórcio: é a data do repasse da cota e não conta no prazo do órgão"
+        print(f"    {x['obra']}, {medicoes.nome_medicao(x['numero'], x['tipo'])} de {x['competencia']} "
+              f"(id {x['medicao_id']}): {dia} ({de_onde})")
     return 0
 
 
@@ -704,10 +737,11 @@ def main(argv: list[str] | None = None) -> int:
     con.add_argument("--data", help="data do corte (AAAA-MM-DD), só em `corte`")
     con.add_argument("--usuario", required=True, help="e-mail de quem aplica")
     con.add_argument("--ensaio", action="store_true", help="mostra o relatório e desfaz")
-    rmp = sub.add_parser("rm", help="relatos do casamento das notas do RM e liberação da exclusão em massa")
-    rmp.add_argument("acao", choices=["vinculos-fora-da-cobranca", "liberar-exclusao"])
+    rmp = sub.add_parser("rm", help="relatos do casamento das notas do RM, liberação da exclusão em massa e data das recebidas")
+    rmp.add_argument("acao", choices=["vinculos-fora-da-cobranca", "liberar-exclusao", "datar-recebidas"])
     rmp.add_argument("--usuario", help="e-mail de quem libera (só em `liberar-exclusao`)")
-    rmp.add_argument("--ensaio", action="store_true", help="mostra o que seria marcado e desfaz (`liberar-exclusao`)")
+    rmp.add_argument("--ensaio", action="store_true",
+                     help="mostra o que seria gravado e desfaz (`liberar-exclusao`, `datar-recebidas`)")
     nts = sub.add_parser("notas", help="relê os PDFs de nota anexados cuja leitura falhou")
     nts.add_argument("acao", choices=["reler"])
     nts.add_argument("--usuario", required=True, help="e-mail de quem aplica")

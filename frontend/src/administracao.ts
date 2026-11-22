@@ -206,6 +206,7 @@ const ROTULO_ACAO: Record<string, string> = {
   "medicao.numero_orgao": "Número do órgão registrado na medição", "medicao.remover_teste": "Medição de teste removida",
   "medicao.documento": "Documento da medição", "medicao.faturada_legado": "Faturamento carregado do legado",
   "medicao.recebida_com_diferenca": "Recebida com diferença dentro da tolerância",
+  "medicao.recebida_em": "Data do recebimento pela baixa do RM",   // #842
   "medicao.planilha_envio": "Planilha/carta enviada ao protocolo", "medicao.planilha_peca": "Peça da planilha/carta",
   "medicao.sem_boletim": "Espelho gerado sem boletim",
   "medicao.reajuste_congelado": "Pedido do reajuste congelado no envio da planilha/carta",

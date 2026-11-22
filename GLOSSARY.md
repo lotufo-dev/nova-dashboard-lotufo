@@ -101,6 +101,9 @@ _Avoid_: protocolada para a planilha enviada (isso é "em análise")
 **Recebido**:
 O órgão pagou: há baixa no RM, ou registro do administrador com motivo. Parte do protocolado; na obra sem o passo
 "Envio da nota", parte da nota emitida, sem protocolo, e a espera conta da emissão da nota.
+A medição que virou recebida sem data (corte, correção de cadastro, carga do histórico) ganha a data da última baixa
+quando tem nota ligada e todos os títulos dessas notas baixados no RM; sem nota ligada, fica sem data
+(`docs/adr/0006`).
 _Avoid_: pago, quitado
 
 **Paga em parte**:
@@ -234,7 +237,8 @@ declara, a dos tipos extras dela (`docs/adr/0015`). Só ela entra no faturado do
 **Prazo do órgão**:
 Quantos dias o órgão costuma levar do protocolo ao pagamento: o terceiro quartil dos dias entre o protocolo e o
 recebimento, das medições recebidas nos últimos 365 dias, com no mínimo cinco. Com menos, o órgão fica sem previsão.
-A medição recebida sem protocolo (obra sem o passo "Envio da nota") fica fora da conta.
+A medição recebida sem protocolo (obra sem o passo "Envio da nota") fica fora da conta. Também fica fora a medição de
+consórcio cuja data do recebimento é a do repasse da cota (`docs/adr/0007`).
 A SINFRA conta inteira, não cada superintendência.
 
 **Custo lançado no RM**:

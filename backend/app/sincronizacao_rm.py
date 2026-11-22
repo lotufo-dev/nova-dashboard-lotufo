@@ -48,6 +48,9 @@ Uma rodada (`sincronizar`) faz, nesta ordem:
    cujas NFs alocadas DA COLIGADA DA ENTIDADE DO CONTRATO cobrem o valor dela (issue #714) e ja' tem baixa (status 1, 3 ou 4) cobrindo o titulo vira
    `recebida`, com a maior data de baixa. Issue #35: titulo pago ate' R$ 1,00 a menos tambem fecha, com a diferenca auditada em
    `medicao.recebida_com_diferenca`. Parcial fica visivel no detalhe da medicao (recebido por NF), sem mudar de estado.
+   Issue #842: a medicao que ja' estava recebida SEM a data do recebimento (o corte, a correcao de cadastro, a carga do
+   historico), com nota ligada e todos os titulos dessas notas baixados, ganha a data da ultima baixa
+   (`datar_recebidas`); o estado nao muda, e a sem nota ligada fica sem data.
 
 6. Excluidos no RM (issue #755, docs/adr/0006): a nota e o titulo que o RM deixou de devolver sao MARCADOS
    (`excluida_rm_em`; nada se apaga) e saem de toda soma; voltando a vir, a marca e' limpa (`_marcar_excluidos`,
@@ -1245,6 +1248,168 @@ def _recebimentos(conn, medicao_ids: list[int] | None = None) -> int:
     return n
 
 
+# ------------------------------------------- data do recebimento pela baixa (#842)
+
+ACAO_DATA_DA_BAIXA = "medicao.recebida_em"
+ORIGEM_DATA_DA_BAIXA = "baixa do RM"
+
+
+class _EnsaioDaData(Exception):
+    pass
+
+
+# A medicao `m` cuja data do recebimento (a que esta' gravada) veio de `datar_recebidas` pela baixa da nota da empresa
+# em consorcio: o dia do repasse da cota, nao o do pagamento do orgao. Expressao SQL sobre `medicoes m`, pela
+# auditoria (indice `ix_audit_log_entidade`), como `conciliacao.recebidas_a_mao` le a origem do recebimento. Vale o
+# ULTIMO evento da medicao, e a data dele tem de ser a gravada: a medicao que perdeu a data e foi recebida de novo
+# por outro caminho nao fica marcada.
+SQL_DATADA_PELO_REPASSE = f"""COALESCE((SELECT json_extract(a.depois, '$.repasse')=1
+        AND json_extract(a.depois, '$.recebida_em')=m.recebida_em
+    FROM audit_log a WHERE a.entidade='medicao' AND a.entidade_id=CAST(m.id AS TEXT)
+      AND a.acao='{ACAO_DATA_DA_BAIXA}' ORDER BY a.id DESC LIMIT 1), 0)"""
+
+
+def _ultima_baixa(conn, medicao_id: int, tolerancia: int, hoje: datetime.date) -> dict | None:
+    """Issue #842: o dia da ultima baixa das notas ligadas a uma medicao, quando TODOS os titulos delas estao baixados
+    no RM; None enquanto nao da' para dizer. Contam as notas com vinculo vigente, de qualquer coligada: em consorcio
+    com a nota da empresa ligada, a ultima baixa e' a do repasse da cota (docs/adr/0006). Nao ha' data:
+    - sem nota ligada (decisao do dono de 22/11/2026: nao se poe data sem documento);
+    - com nota que nao esta' ativa (a desconsiderada; a cancelada e a excluida no RM, ate' a rodada desfazer o
+      vinculo) ou sem titulo no RM (a nota so' do PDF);
+    - quando a medicao perdeu uma nota por cancelamento ou exclusao no RM e nada foi ligado a ela depois: o
+      faturamento refaz a nota, e a data pelas que sobraram sairia antes de a substituta entrar (revisao da PR);
+    - com titulo em aberto, baixado em parte alem da tolerancia somada das notas (a mesma do recebimento, issue #35)
+      ou baixado sem valor (glosa, compensacao): a leitura e' a de `_falta_por_titulo`, a unica do que falta;
+    - com titulo baixado sem a data da baixa: a ultima pode ser justamente a que falta;
+    - com a ultima baixa depois de hoje, antes da emissao de alguma das notas ou antes da emissao gravada na medicao
+      (a ordem dos marcos que `medicoes.mudar_estado` exige de quem registra o recebimento): e' data digitada errada
+      no RM ou nota que nao e' desta medicao, e a data gravada nao se desfaz.
+    O titulo que o RM deu como baixado por valor menor nao tem falta (docs/adr/0006) e entra com a data da baixa.
+    A cobertura do valor da medicao pelas notas nao e' exigida, ao contrario do recebimento (#714): o estado nao muda
+    aqui, e a data e' a de um pagamento que o RM registrou.
+    Devolve {data, notas, titulos, repasse}. `repasse`: a data NAO e' a da baixa de uma nota da coligada da entidade
+    do contrato (a que o orgao paga, a unica que `_recebimentos` olha); e' a da nota da empresa em consorcio, o dia
+    em que a cota entrou. Essa data nao mede o prazo do orgao (`SQL_DATADA_PELO_REPASSE`)."""
+    notas = conn.execute("""SELECT n.id, n.situacao, n.coligada, n.emissao, e.coligada_rm AS coligada_contrato,
+                                   m.nf_emitida_em, m.nota_emitida_em
+                            FROM nf_alocacoes a JOIN notas_fiscais n ON n.id=a.nota_id
+                            JOIN medicoes m ON m.id=a.medicao_id JOIN contratos c ON c.id=m.contrato_id
+                            JOIN entidades e ON e.id=COALESCE(c.entidade_id, 1)
+                            WHERE a.medicao_id=? AND a.desfeita_em IS NULL ORDER BY n.id""", (medicao_id,)).fetchall()
+    if not notas:
+        return None
+    if conn.execute("""SELECT 1 FROM nf_alocacoes d WHERE d.medicao_id=? AND d.desfeita_em IS NOT NULL
+                       AND d.motivo_desfazer IN (?, ?)
+                       AND NOT EXISTS (SELECT 1 FROM nf_alocacoes v WHERE v.medicao_id=d.medicao_id
+                                       AND v.desfeita_em IS NULL AND v.id > d.id) LIMIT 1""",
+                    (medicao_id, MOTIVO_CANCELADA_RM, MOTIVO_EXCLUIDA_RM)).fetchone():
+        return None
+    falta, titulos, datas, do_contrato = 0, 0, [], []
+    for n in notas:
+        if n["situacao"] != "ativa":
+            return None
+        da_nota = conn.execute("SELECT data_baixa FROM baixas WHERE nota_id=? AND status_lan<>2 "
+                               "AND excluida_rm_em IS NULL", (n["id"],)).fetchall()
+        falta_da_nota = _falta_por_titulo(conn, n["id"])
+        if not da_nota or falta_da_nota is None or any(b["data_baixa"] is None for b in da_nota):
+            return None
+        falta += falta_da_nota
+        titulos += len(da_nota)
+        datas += [b["data_baixa"] for b in da_nota]
+        if n["coligada"] == n["coligada_contrato"]:
+            do_contrato += [b["data_baixa"] for b in da_nota]
+    if falta > tolerancia:
+        return None
+    data = max(datas)
+    marcos = [n["emissao"] for n in notas] + [notas[0]["nf_emitida_em"], notas[0]["nota_emitida_em"]]
+    if data[:10] > hoje.isoformat() or any(x and data[:10] < x[:10] for x in marcos):
+        return None
+    return {"data": data, "notas": [n["id"] for n in notas], "titulos": titulos,
+            "repasse": not do_contrato or max(do_contrato) < data}
+
+
+def _gravar_data_da_baixa(conn, medicao_id: int, data: str, depois: dict) -> bool:
+    """So' preenche a data que falta: a medicao que deixou de ser recebida ou ja' tem data fica como esta'."""
+    cur = conn.execute("UPDATE medicoes SET recebida_em=? WHERE id=? AND estado='recebida' AND recebida_em IS NULL",
+                       (data, medicao_id))
+    if cur.rowcount != 1:
+        return False
+    auditoria.registrar(conn, None, ACAO_DATA_DA_BAIXA, "medicao", medicao_id, {"recebida_em": None},
+                        {"recebida_em": data, **depois})
+    return True
+
+
+def datar_recebidas(conn, ensaio: bool = False, disparo: str = "rodada") -> dict:
+    """Issue #842 (decisao do dono de 22/11/2026): a medicao recebida SEM a data do recebimento, com nota ligada e
+    todos os titulos dessas notas baixados no RM, passa a ter `recebida_em` = o dia da ultima baixa (`_ultima_baixa`).
+    Sao as que viraram recebidas sem ninguem saber o dia (o corte, a correcao de cadastro em lote, a carga do
+    historico) e ganharam a nota depois. Sem a data elas ficavam fora do recebido de qualquer mes e deixavam sem
+    referencia a variacao do Recebido no resumo das medicoes (`resumo_medicoes._mesma_altura`).
+
+    O estado nao muda, e a data ja' gravada nunca e' trocada: so' entra onde esta' nula. Por isso roda quantas vezes
+    for, e a segunda nao acha nada. Roda no fim de cada rodada da sincronizacao (depois de `_recebimentos`), que e'
+    quando chegam os dois fatos de que a regra depende (a baixa do titulo e, pelo vinculo feito desde a rodada
+    anterior, a nota), e pelo comando `rm datar-recebidas`, com ensaio (`docs/runbook.md`). Olhar na rodada, e nao no
+    ato de ligar a nota, e' o que faz a medicao faturada em mais de uma nota levar a ultima baixa do conjunto: ligadas
+    uma a uma, a primeira nota paga daria a data antes de a segunda entrar.
+
+    A medicao sem nota ligada nao entra e nao gera aviso. O reajuste negativo absorvido pelo espelho da execucao
+    (issue #589) nao tem nota propria e acompanha a data dela, como acompanha o recebimento. Cada data gravada vai
+    para a auditoria (`medicao.recebida_em`, pelo sistema), dizendo que veio da baixa do RM e de quais notas.
+    `com_diferenca`: alguma nota tem titulo no grupo "Titulos baixados no RM por valor menor" da reconciliacao
+    (`_baixados_com_diferenca`, a mesma lista que a tela mostra); a diferenca continua la' para conferencia.
+
+    Em consorcio com a nota da empresa ligada a data e' a do repasse da cota, nao a do pagamento do orgao: a auditoria
+    a marca (`repasse`) e o prazo do orgao nao a conta (`SQL_DATADA_PELO_REPASSE`, docs/adr/0007).
+
+    Devolve {ensaio, datadas, linhas}; cada linha: {medicao_id, obra, numero, tipo, competencia, recebida_em, notas,
+    titulos, com_diferenca, repasse, acompanha}."""
+    from app import diretoria   # import local: diretoria importa este modulo
+    rel = {"ensaio": ensaio, "datadas": 0, "linhas": []}
+    try:
+        with db.mutacao(conn):
+            pendentes = conn.execute("""
+                SELECT m.id, m.numero, m.tipo, m.competencia, COALESCE(c.nome_curto, c.numero_instrumento) AS obra
+                FROM medicoes m JOIN contratos c ON c.id=m.contrato_id
+                WHERE m.estado='recebida' AND m.recebida_em IS NULL
+                  AND EXISTS (SELECT 1 FROM nf_alocacoes a WHERE a.medicao_id=m.id AND a.desfeita_em IS NULL)
+                ORDER BY obra, m.competencia, m.numero, m.tipo, m.id""").fetchall()
+            hoje = tempo.hoje_local()
+            na_reconciliacao: set[int] | None = None      # so' e' lido quando ha' o que datar (o caso raro)
+            for m in pendentes:
+                baixa = _ultima_baixa(conn, m["id"], diretoria.TOLERANCIA_CENTAVOS, hoje)
+                if baixa is None:
+                    continue
+                if na_reconciliacao is None:
+                    na_reconciliacao = {x["nota_id"] for x in _baixados_com_diferenca(conn)}
+                # o titulo baixado por valor menor que o grupo da reconciliacao mostra: a mesma lista, nao outra conta
+                baixa["com_diferenca"] = any(n in na_reconciliacao for n in baixa["notas"])
+                origem = {"origem": ORIGEM_DATA_DA_BAIXA, "disparo": disparo, "repasse": baixa["repasse"]}
+                if not _gravar_data_da_baixa(conn, m["id"], baixa["data"], {
+                        **origem, "notas": baixa["notas"], "titulos": baixa["titulos"],
+                        "com_diferenca": baixa["com_diferenca"]}):
+                    continue
+                linha = {"medicao_id": m["id"], "obra": m["obra"], "numero": m["numero"], "tipo": m["tipo"],
+                         "competencia": m["competencia"], "recebida_em": baixa["data"], "notas": len(baixa["notas"]),
+                         "titulos": baixa["titulos"], "com_diferenca": baixa["com_diferenca"],
+                         "repasse": baixa["repasse"], "acompanha": None}
+                rel["linhas"].append(linha)
+                if m["tipo"] != "execucao":
+                    continue
+                for r in medicoes.absorvidas(conn, m["id"]):
+                    if _gravar_data_da_baixa(conn, r["id"], baixa["data"], {
+                            **origem, "acompanha": medicoes.ACOMPANHA_A_EXECUCAO, "execucao_id": m["id"]}):
+                        numero = conn.execute("SELECT numero FROM medicoes WHERE id=?", (r["id"],)).fetchone()[0]
+                        rel["linhas"].append({**linha, "medicao_id": r["id"], "numero": numero, "tipo": "reajuste",
+                                              "notas": 0, "titulos": 0, "com_diferenca": False, "acompanha": m["id"]})
+            rel["datadas"] = len(rel["linhas"])
+            if ensaio:
+                raise _EnsaioDaData
+    except _EnsaioDaData:
+        pass
+    return rel
+
+
 def vinculos_fora_da_cobranca(conn) -> list[dict]:
     """Issue #584: vinculos automaticos vigentes (origem `detectado`) cuja nota tem tipo de movimento do RM que nao e'
     cobranca ao orgao no contrato da medicao (`cobranca_orgao.e_cobranca`: fora da lista geral e dos tipos extras
@@ -1606,7 +1771,7 @@ def sincronizar(conn: sqlite3.Connection, cliente, disparo: str = "manual") -> d
         # Rede primeiro, sem lock de escrita.
         nfs = cliente.consultar(rm.CONSULTA_NF)
         baixas = cliente.consultar(rm.CONSULTA_BAIXA)
-        resumo = {"nfs": 0, "baixas": 0, "alocacoes": 0, "sugestoes": 0, "recebimentos": 0,
+        resumo = {"nfs": 0, "baixas": 0, "alocacoes": 0, "sugestoes": 0, "recebimentos": 0, "recebidas_datadas": 0,
                   "notas_excluidas": 0, "titulos_excluidos": 0, "vinculos_refeitos": 0, "exclusao_aviso": None}
         with db.mutacao(conn):
             _garantir_posse(conn, rodada_id)
@@ -1637,6 +1802,14 @@ def sincronizar(conn: sqlite3.Connection, cliente, disparo: str = "manual") -> d
                 elif r == "ambigua":           # coluna `sugestoes` da rodada conta as NFs ambiguas
                     resumo["sugestoes"] += 1
             resumo["recebimentos"] = _recebimentos(conn)
+            # Issue #842: a recebida sem data cujas notas ligadas estao todas baixadas leva a data da ultima baixa.
+            # Falha aqui nao derruba a rodada (notas, baixas e recebimentos ficam): o bloco se desfaz sozinho
+            # (`db.mutacao` aninhada), o erro vai para o log e para a auditoria da rodada, e a rodada seguinte tenta de novo
+            try:
+                resumo["recebidas_datadas"] = datar_recebidas(conn)["datadas"]
+            except Exception as e:
+                log.exception("data do recebimento pela baixa falhou (rodada %s)", rodada_id)
+                resumo["recebidas_datadas_erro"] = str(e)[:200]
             conn.execute("""UPDATE rm_sincronizacoes SET estado='success', terminado_em=datetime('now'),
                             nfs=?, baixas=?, alocacoes=?, sugestoes=?, recebimentos=?, custo_erro=?,
                             custo_aviso=?, exclusao_aviso=? WHERE id=? AND estado='running'""",

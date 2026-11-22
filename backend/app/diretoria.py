@@ -56,12 +56,14 @@ def _d(iso: str | None) -> datetime.date | None:
 def _medicoes(conn) -> list[dict]:
     """As medicoes com o contrato e o orgao. `sem_protocolo` (issue #743, docs/adr/0006): a medicao com nota emitida
     da obra cujo cadastro nao tem o passo "Envio da nota" (`medicoes.recebe_sem_protocolo`). La' a nota emitida ja'
-    e' a cobranca: a medicao espera o pagamento como a protocolada (`espera_pagamento`)."""
+    e' a cobranca: a medicao espera o pagamento como a protocolada (`espera_pagamento`).
+    `recebida_pelo_repasse` (issue #842): a data do recebimento veio da baixa da nota da empresa em consorcio
+    (`sincronizacao_rm.datar_recebidas`), o dia em que a cota entrou; nao e' caso do prazo do orgao (docs/adr/0007)."""
     passos_de = medicoes.passos_das_medicoes(conn)
     return [{**dict(r), "sem_protocolo": medicoes.recebe_sem_protocolo(r["estado"], passos_de(r))} for r in conn.execute(
         "SELECT m.*, c.percentual_direito_bp AS pct, c.orgao_id, c.estado AS contrato_estado, "
         "COALESCE(c.nome_curto, c.numero_instrumento) AS obra, o.nome AS orgao_nome, o.familia AS orgao_familia, "
-        "o.chave AS orgao_chave, "
+        f"o.chave AS orgao_chave, {sincronizacao_rm.SQL_DATADA_PELO_REPASSE} AS recebida_pelo_repasse, "
         "(SELECT MIN(mp.data) FROM medicao_protocolos mp WHERE mp.medicao_id=m.id AND mp.etapa='nota' AND mp.desfeita_em IS NULL) AS protocolo_em "
         "FROM medicoes m JOIN contratos c ON c.id=m.contrato_id LEFT JOIN orgaos o ON o.id=c.orgao_id")]
 
@@ -98,13 +100,17 @@ def prazos_do_orgao(ms: list[dict], hoje: datetime.date) -> dict[str, int]:
     Cada medicao recebida e' um caso (execucao e reajuste pagos juntos contam dois). Nao e' caso a recebida sem data
     de protocolo ou sem `recebida_em` (o corte de 25/09/2026; e a recebida sem protocolo da obra sem o passo "Envio
     da nota", issue #743, docs/adr/0007), a de recebimento anterior ao protocolo nem a de
-    recebimento com data depois de hoje. Contratante com menos de PRAZO_MINIMO_CASOS recebimentos fica FORA do
+    recebimento com data depois de hoje. Tambem nao e' caso a medicao de consorcio cuja data do recebimento e' a do
+    repasse da cota (`recebida_pelo_repasse`, issue #842): o prazo mede o pagamento do orgao, e o repasse leva junto a
+    demora do consorcio. Contratante com menos de PRAZO_MINIMO_CASOS recebimentos fica FORA do
     dicionario: e' "sem previsao", e ninguem preenche com numero padrao."""
     desde = hoje - datetime.timedelta(days=PRAZO_JANELA_DIAS)
     dias: dict[str, list[int]] = {}
     for m in ms:
         recebida, protocolo = _d(m["recebida_em"]), _d(m["protocolo_em"])
         if m["estado"] != "recebida" or not recebida or not protocolo or not desde <= recebida <= hoje or recebida < protocolo:
+            continue
+        if m.get("recebida_pelo_repasse"):
             continue
         dias.setdefault(_contratante(m), []).append((recebida - protocolo).days)
     return {k: _quantil(v, PRAZO_QUARTIL) for k, v in dias.items() if len(v) >= PRAZO_MINIMO_CASOS}
