@@ -135,7 +135,8 @@ O dono delegou estas decisões em 17/11/2026, medidas numa cópia da produção.
 
 - **O registro à mão exige a data.** Sem ela a medição ficava recebida com a data nula, fora do recebido de qualquer
   mês e do prazo do órgão. A rota recusa o registro sem data e com data depois de hoje. As medições recebidas sem data
-  que existem vieram do corte e da correção de cadastro, que não sabem o dia.
+  que existem vieram do corte e da correção de cadastro, que não sabem o dia. As que têm nota ligada com os títulos
+  baixados ganham a data da última baixa (seção "Data do recebimento da medição recebida sem data").
 - **Só o recebimento registrado pelo administrador tira a nota do a receber.** Já era assim (#203) e fica assim. A
   medição recebida pela correção de cadastro (`estado: recebida`) não conta como registro à mão: a correção fecha
   medição do histórico em lote, com base nos documentos da carga, e não é afirmação de pagamento. Para ela, como para
@@ -167,6 +168,65 @@ O dono delegou estas decisões em 17/11/2026, medidas numa cópia da produção.
   e sem cobertura do valor não vira recebida (regra do começo deste documento) e passou a ter aviso próprio, o par do
   aviso da nota maior que a medição. Não muda estado nenhum: a saída é ligar a nota que falta ou o administrador
   registrar o recebimento.
+
+## Data do recebimento da medição recebida sem data (22/11/2026, #842)
+
+O corte, a correção de cadastro em lote e a carga do histórico fecham a medição como recebida sem saber o dia. Sem a
+data ela fica fora do recebido de qualquer mês, e a variação do Recebido no Resumo das medições vem sem referência.
+Parte delas ganhou a nota depois, e a data da baixa já estava no banco sem chegar à medição.
+
+Decisão do dono: **a medição recebida sem data, com nota ligada e todos os títulos dessas notas baixados no RM, recebe
+a data da última baixa.** A medição recebida sem nota ligada fica sem data e não gera aviso: não se põe data sem
+documento.
+
+- **Regra no código, não lista gravada à mão** (`sincronizacao_rm.datar_recebidas`). Roda no fim de cada rodada da
+  sincronização e pelo comando `rm datar-recebidas`, com ensaio (`docs/runbook.md`). Vale para o que já existe e
+  para a medição que ganhar a nota ou a baixa depois.
+- **Só preenche a data que falta.** O estado não muda e a data já gravada nunca é trocada, nem a do registro do
+  administrador. Por isso roda quantas vezes for, e a segunda não acha nada.
+- **Olha na rodada, não no ato de ligar a nota.** A medição faturada em mais de uma nota leva a última baixa do
+  conjunto que estiver ligado quando a rodada passar; ligadas uma a uma no mesmo ato, a primeira nota paga daria a
+  data antes de a segunda entrar. A nota ligada depois de a data gravada não a move.
+- **Baixado é a leitura de sempre** (`_falta_por_titulo`): o título que o RM deu como baixado com valor não tem
+  falta, mesmo por valor menor, e entra com a data da baixa; a diferença continua no grupo "Títulos baixados no RM
+  por valor menor" da reconciliação. O baixado em parte só conta dentro da tolerância de R$ 1,00 somada das notas.
+  Título em aberto, título baixado sem a data da baixa, nota desconsiderada ou sem título no RM: sem data. O título
+  cancelado e o excluído no RM ficam fora da conta, como em toda leitura.
+- **Nota que saiu por cancelamento ou exclusão no RM segura a data.** A rodada desfaz o vínculo dessa nota antes de
+  olhar a data, e a medição faturada em duas notas ficaria com a data da que sobrou; o faturamento costuma refazer a
+  nota, e a substituta, ligada e paga depois, não moveria a data. Enquanto nada for ligado à medição depois desse
+  vínculo desfeito, ela fica sem data.
+- **A ordem dos marcos vale como no registro à mão.** A última baixa depois de hoje, antes da emissão de alguma das
+  notas ligadas ou antes da emissão gravada na medição não dá a data: é dia digitado errado no RM ou nota que não é
+  daquela medição. A regra não levanta erro, só não grava, e volta a olhar na rodada seguinte.
+- **Falha neste passo não derruba a rodada.** As notas, as baixas e os recebimentos da rodada ficam; o erro vai
+  para o log e para o evento da rodada na auditoria, e a rodada seguinte tenta de novo.
+- **A baixa total sem valor não dá a data.** Glosa, compensação ou encontro de contas não é recebimento (seção
+  "Título baixado no RM não tem falta"), e o dia dela não é o de um pagamento. Na cópia da produção de 20/11/2026 é
+  o caso de uma medição, a que o levantamento da issue listou como "título baixado por valor menor": o título dela
+  está baixado com valor zero e não aparece em grupo nenhum da reconciliação. Ela fica sem data até alguém decidir
+  o caso com o documento.
+- **A cobertura do valor da medição pelas notas não é exigida**, ao contrário do recebimento pela baixa (#714). Lá a
+  pergunta é se a medição foi paga; aqui ela já está recebida e a pergunta é o dia. Em consórcio a nota ligada
+  costuma ser só a da empresa, que vale a cota e nunca cobriria o valor cheio.
+- **Em consórcio, a data é a do repasse da cota** quando a última baixa é a da nota da empresa: contam as notas
+  ligadas de qualquer coligada. É a data que as telas da diretoria, na cota, querem. Ela não é o dia em que o órgão
+  pagou: a auditoria marca essas medições e o prazo do órgão não as conta (`docs/adr/0007`).
+- **O reajuste negativo absorvido pelo espelho da execução acompanha a data dela**, como acompanha o recebimento
+  (#589): ele não tem nota própria, e a nota do par é a da execução.
+- **Auditoria.** Cada data gravada é um evento `medicao.recebida_em`, pelo sistema, com a origem ("baixa do RM"), as
+  notas, a quantidade de títulos, se alguma nota está no grupo dos títulos baixados por valor menor da reconciliação
+  (a mesma lista da tela) e se a data é a do repasse. Na tela nada muda além do número: sem selo nem aviso.
+- Medida na cópia da produção de 20/11/2026: 73 medições ganham data, 64 delas de 2025 e 2026, com a mesma data
+  que o levantamento da issue propôs para cada uma, e 9 de competências anteriores; 16 pela nota da empresa. A
+  segunda execução não grava nada. O prazo do órgão muda só onde há pagamento novo do próprio órgão na amostra.
+  Nenhum mês ganha a referência do Recebido na leitura sem filtro, porque em todos sobra medição sem nota; com o
+  filtro por contratante, alguns ganham.
+  Em 9 das 73 as notas da coligada do contrato somam menos que a medição (consórcio que fatura em parcelas que não
+  batem com a medição): a data delas é a da última baixa do que está ligado.
+
+Ficou de fora: desfazer uma data gravada por esta regra (não existe ato; a nota desligada depois não a apaga) e
+mostrar na reconciliação o título baixado sem valor de nota ligada a medição.
 
 ## Nota e título excluídos no RM deixam de contar (17/11/2026, #755)
 

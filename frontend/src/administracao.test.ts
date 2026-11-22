@@ -120,6 +120,7 @@ describe("administração", () => {
       "correio.envio", "cronograma.nova_versao", "entidade.coligada_rm", "entidade.criar", "entidade.desativar", "envio.liberar",
       "espelho.enviar", "espelho.envio_externo", "espelho.gerar", "frc.gerar", "medicao.criar", "medicao.documento", "medicao.estado",
       "medicao.faturada_legado", "medicao.final", "medicao.numero_orgao", "medicao.protocolo", "medicao.recebida_com_diferenca",
+      "medicao.recebida_em",
       "medicao.remover_teste", "medicao.planilha_envio", "medicao.planilha_peca",
       "medicao.valor_atestado", "medicao.valor_protocolado", "nf.alocar", "nf.desalocar", "nota.conferencia", "nota.confirmacao",
       "nota.justificar", "nota.manual", "notas.envio_externo", "pleito.anexo", "pleito.anexo_removido", "pleito.assinado",
@@ -141,6 +142,7 @@ describe("administração", () => {
     expect(rotuloAcao("siga.vinculo")).toBe("Processo do SIGA ligado ao protocolo ou à medição");   // #327, #328
     expect(rotuloAcao("protocolo.siga")).toBe("Link do SIGA registrado");
     expect(rotuloAcao("medicao.recebida_com_diferenca")).toBe("Recebida com diferença dentro da tolerância");   // #35
+    expect(rotuloAcao("medicao.recebida_em")).toBe("Data do recebimento pela baixa do RM");   // #842
     expect(rotuloAcao("medicao.planilha_envio")).toBe("Planilha/carta enviada ao protocolo");   // #282
     expect(rotuloAcao("medicao.planilha_peca")).toBe("Peça da planilha/carta");
     expect(rotuloAcao("medicao.sem_boletim")).toBe("Espelho gerado sem boletim");   // #284

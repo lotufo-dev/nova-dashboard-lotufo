@@ -17,3 +17,7 @@ padrão, porque seria inventado.
 - A medição recebida sem protocolo, na obra sem o passo "Envio da nota" (`docs/adr/0006`, #743), não entra na
   amostra: o prazo mede do protocolo ao pagamento, e misturar a emissão da nota como início encurtaria ou alongaria o
   prazo dos outros contratos do mesmo órgão. Enquanto espera, ela também não tem data esperada nem "Atrasado".
+- A medição de consórcio cuja data do recebimento veio da baixa da nota da empresa (`docs/adr/0006`, #842) também não
+  entra na amostra: essa data é a do repasse da cota, que soma a demora do consórcio ao prazo do órgão. Na cópia da
+  produção de 20/11/2026, contá-las levaria o prazo da SINFRA de 27 para 39 dias. A medição que ganhou a data pela
+  baixa de nota da coligada do contrato é caso como qualquer outra recebida pela baixa.
