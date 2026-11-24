@@ -774,3 +774,45 @@ def test_cli_desconsiderar_nf_ensaio_e_gravacao(cenario, tmp_path, capsys):
     assert "GRAVADO" in capsys.readouterr().out and _nota_db(c, nid)["situacao"] == "cancelada"
     assert cli.main(["cadastro", "corrigir-medicoes", str(arq), "--usuario", "leo@l.com"]) == 0
     assert "já feito 1" in capsys.readouterr().out
+
+
+# Issue #897: console do Windows em cp1252 nao representa "→"; o relatorio nao pode derrubar o comando.
+
+def _roda_cli_cp1252(tmp_path, arq, *extra):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252", "DASH_DB_PATH": str(tmp_path / "t.db"), "DASH_SEM_JOBS": "1"}
+    env.pop("DASH_CADASTRO_DIR", None)
+    return subprocess.run([sys.executable, "-m", "app.cli", "cadastro", "corrigir-medicoes", str(arq), *extra,
+                           "--usuario", "leo@l.com"], cwd=Path(__file__).resolve().parent.parent, env=env,
+                          capture_output=True, timeout=120)
+
+
+def test_cli_relatorio_sai_com_console_cp1252(cenario, tmp_path):
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 1)
+    arq = tmp_path / "correcoes.yaml"
+    arq.write_text(yaml.safe_dump([{"operacao": "cancelar", "obra": "Obra Própria", "numero": 1,
+                                    "tipo": "execucao", "fonte": "ofício"}], allow_unicode=True), "utf-8")
+    r = _roda_cli_cp1252(tmp_path, arq, "--ensaio")
+    assert r.returncode == 0, r.stderr.decode("cp1252", "replace")
+    saida = r.stdout.decode("cp1252")
+    assert "ENSAIO (nada foi gravado)" in saida and "protocolada -> cancelada" in saida and "Total: feito 1" in saida
+    assert _estado(c, mid) == "protocolada"
+    # gravacao de verdade: o commit vem antes do relatorio, e o relatorio impresso nao muda o codigo de saida
+    r = _roda_cli_cp1252(tmp_path, arq)
+    assert r.returncode == 0, r.stderr.decode("cp1252", "replace")
+    assert "GRAVADO" in r.stdout.decode("cp1252") and "Total: feito 1" in r.stdout.decode("cp1252")
+    assert _estado(c, mid) == "cancelada"
+
+
+def test_cli_saida_tolerante_troca_o_que_o_console_nao_representa():
+    import io
+    from app import cli
+    bruto = io.BytesIO()
+    fluxo = io.TextIOWrapper(bruto, encoding="cp1252", errors="strict")
+    cli._saida_tolerante(fluxo)
+    print("a → b ✓ ç", file=fluxo, flush=True)
+    assert bruto.getvalue().decode("cp1252") == "a -> b ? ç\n"

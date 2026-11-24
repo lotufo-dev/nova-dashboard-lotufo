@@ -1,4 +1,5 @@
 import argparse
+import codecs
 import getpass
 import os
 import sqlite3
@@ -704,7 +705,29 @@ def _sentinela(args) -> int:
     return 0 if r["tabela"] == 0 and r["migracao"] == 0 else 1
 
 
+def _trocar_o_que_o_console_nao_representa(erro: UnicodeError):
+    """Tratador de codificação da saída: "→" vira "->" e o resto que o console não representa vira "?"."""
+    if not isinstance(erro, UnicodeEncodeError):
+        raise erro
+    return "".join("->" if c == "→" else "?" for c in erro.object[erro.start:erro.end]), erro.end
+
+
+codecs.register_error("cli_tolerante", _trocar_o_que_o_console_nao_representa)
+
+
+def _saida_tolerante(*fluxos) -> None:
+    """Issue #897: o console do Windows (cp1252) não representa "→" nem outros caracteres dos relatórios, e a
+    `UnicodeEncodeError` no `print` derrubava o comando DEPOIS de a transação ter sido confirmada (dado gravado,
+    código de saída 1, sem relatório). A saída do CLI não pode depender da página de código do console: mantém a
+    codificação do console (os acentos do português saem certos) e troca só o que ela não representa."""
+    for fluxo in fluxos:
+        reconfigurar = getattr(fluxo, "reconfigure", None)
+        if reconfigurar is not None:
+            reconfigurar(errors="cli_tolerante")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _saida_tolerante(sys.stdout, sys.stderr)
     p = argparse.ArgumentParser(prog="app.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
     ca = sub.add_parser("criar-admin")
