@@ -827,3 +827,43 @@ def test_medido_12_meses_sao_as_competencias_fechadas_com_a_conta_do_fechamento(
     # decisao do dono de 19/11/2026 (#805): o numero do alto e' o ultimo ponto da serie, tambem em consorcio
     assert p["medido"]["valor_centavos"] == valores["2026-09"]
 
+
+
+@pytest.mark.parametrize("o_segundo_primeiro", [False, True])
+def test_ciclo_por_contratante_dois_orgaos_de_mesmo_nome_ficam_em_duas_linhas(cenario, o_segundo_primeiro):
+    """Issue #864: a linha e' o par (nome, chave), como no Fechamento e na pagina Em aberto. Dois orgaos do cadastro com
+    o mesmo nome e chaves diferentes saem em duas linhas, cada uma com a chave da pagina dela, em qualquer ordem de
+    chegada das medicoes; o contrato sem orgao cujo texto e' a sigla de um contratante ("MTPAR") fica fora da linha
+    dele. A soma das linhas, em cada coluna, e' a da faixa e a do a receber, e e' a mesma de quando as duas linhas de
+    mesmo nome eram uma so'. Consorcio a um terco com centavo impar (rateio com residuo)."""
+    c, mtpar = cenario
+    alfa = _obra_de(c, "prefeitura_alfa", "Prefeitura Alfa", "prefeitura", "CT 2/2025")
+    outra = _obra_de(c, "prefeitura_alfa_2", "Prefeitura Alfa", "prefeitura", "CT 3/2025")
+    c.execute("UPDATE contratos SET percentual_direito_bp=3333 WHERE id=?", (outra,))
+    c.execute("INSERT INTO contratos (orgao, numero_instrumento, nome_curto, objeto, valor_original_centavos) "
+              "VALUES ('MTPAR', 'CT 9/2025', 'Obra sem órgão', 'obra', 100)")
+    solta = c.execute("SELECT MAX(id) FROM contratos").fetchone()[0]
+    _liberar_a_receber(c)
+    primeira, segunda = (outra, alfa) if o_segundo_primeiro else (alfa, outra)
+    _no_ciclo(c, primeira, 1, "planilha_enviada", 10_001, planilha_enviada_em="2026-10-05")
+    _no_ciclo(c, segunda, 2, "planilha_enviada", 20_003, planilha_enviada_em="2026-10-06")
+    _protocolada(c, alfa, 3, "2026-09-10", 30_005)
+    _protocolada(c, outra, 4, "2026-09-11", 90_001)                                   # 90.001 x 33,33% = 29.997,33 -> 29.997
+    _no_ciclo(c, solta, 5, "planilha_enviada", 4_007, planilha_enviada_em="2026-10-07")
+    _protocolada(c, mtpar, 6, "2026-09-12", 5_009)
+    p = inicio.painel(c, HOJE)
+    _fecha_com_a_faixa(p)
+    em_analise_alfa = 10_001 if primeira == alfa else 20_003
+    em_analise_outra = 6_667 if primeira == alfa else 3_333          # na cota: 20.003 x 33,33% = 6.666,9999; 10.001 -> 3.333,33
+    linhas = {(x["contratante"], x["chave"]): tuple(x[f"{e}_centavos"] for e in ETAPAS_DO_CICLO) + (x["a_receber_centavos"],)
+              for x in p["ciclo_por_contratante"]}
+    #                                                         em analise, boletim, nota, protocolado, a receber
+    assert linhas == {("Prefeitura Alfa", "prefeitura_alfa"): (em_analise_alfa, 0, 0, 30_005, 30_005),
+                      ("Prefeitura Alfa", "prefeitura_alfa_2"): (em_analise_outra, 0, 0, 29_997, 29_997),
+                      ("sem órgão", None): (4_007, 0, 0, 0, 0),
+                      ("MTPAR", "mtpar"): (0, 0, 0, 5_009, 5_009)}
+    assert len(p["ciclo_por_contratante"]) == 4
+    # a soma das duas linhas de mesmo nome e' a linha unica de antes da #864: nenhum total muda, so' a divisao
+    juntas = [sum(v) for v in zip(linhas[("Prefeitura Alfa", "prefeitura_alfa")], linhas[("Prefeitura Alfa", "prefeitura_alfa_2")])]
+    assert juntas == [em_analise_alfa + em_analise_outra, 0, 0, 60_002, 60_002]
+    assert p["a_receber"]["valor_centavos"] == 30_005 + 29_997 + 5_009
