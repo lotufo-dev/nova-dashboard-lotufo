@@ -616,6 +616,20 @@ describe("Início", () => {
     expect(ir).toHaveBeenCalledWith({ tela: "contratante", chave: "contratante-a" }, expect.anything());
   });
 
+  it("#864: dois contratantes de mesmo nome e chaves diferentes são duas linhas, cada uma com a página dela", async () => {
+    const erro = vi.spyOn(console, "error").mockImplementation(() => {});
+    const [a, b] = LINHAS_POR_CONTRATANTE;
+    api.mockResolvedValue(comContratantes({ ciclo_por_contratante: [a, { ...b, contratante: a.contratante, chave: "contratante-a-2" }] }));
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: POR_CONTRATANTE });
+    expect(regiao.querySelectorAll("tbody tr")).toHaveLength(2);
+    expect(within(regiao).getAllByRole("link", { name: "Contratante A" }).map(l => l.getAttribute("href"))).toEqual([
+      "/obras/contratante/contratante-a", "/obras/contratante/contratante-a-2"]);
+    // a linha e' o par (nome, chave): sem chave repetida no React
+    expect(erro.mock.calls.some(c => String(c[0]).includes("same key"))).toBe(false);
+    erro.mockRestore();
+  });
+
   it("#817: sem o total a receber liberado a coluna A receber não existe; sem contratante com valor, uma linha curta", async () => {
     const base = comContratantes();
     api.mockResolvedValue(comContratantes({ a_receber: { liberado: false, valor_centavos: null, mais_60_centavos: null, a_parte: null },

@@ -4,7 +4,9 @@ sem medicao ligada e o em aberto de antes de 2025. Dados ficticios (os cenarios 
 import datetime
 import json
 
-from app import a_receber, fechamento, feriados, fila_medicoes
+import pytest
+
+from app import a_receber, contratante, fechamento, feriados, fila_medicoes
 from tests.test_fechamento import (CONSORCIO, EMPRESA, PAGO, SEM_ENVIO_DA_NOTA, _emitir, _lancar_dois_anos,  # noqa: F401
                                    _propria, cenario, contratantes, exemplo, medir, nota)
 
@@ -21,8 +23,11 @@ def _grupo(r, nome):
     return next(g for g in r["contratantes"] if g["contratante"] == nome)
 
 
-def _em_aberto_do_contratante(f, nome, ano):
-    return next((g["em_aberto_centavos"] for g in f["por_contratante"][ano] if g["contratante"] == nome), 0)
+def _em_aberto_do_contratante(f, nome, chave, ano):
+    """O em aberto da linha do Fechamento com o mesmo par (nome, chave) do grupo (issue #864): o nome sozinho acharia a
+    linha errada quando dois contratantes tem o mesmo nome."""
+    return next((g["em_aberto_centavos"] for g in f["por_contratante"][ano]
+                 if (g["contratante"], g["contratante_chave"]) == (nome, chave)), 0)
 
 
 def _chave_da_linha(e):
@@ -34,7 +39,7 @@ def _confere_com_o_fechamento(r, f):
     assert r["em_aberto_centavos"] == sum(f["por_ano"][a]["em_aberto_centavos"] for a in f["anos"])
     assert r["por_ano"] == {a: f["por_ano"][a]["em_aberto_centavos"] for a in f["anos"]}
     for g in r["contratantes"]:
-        assert g["por_ano"] == {a: _em_aberto_do_contratante(f, g["contratante"], a) for a in f["anos"]}, g["contratante"]
+        assert g["por_ano"] == {a: _em_aberto_do_contratante(f, g["contratante"], g["chave"], a) for a in f["anos"]}, g["contratante"]
         assert g["em_aberto_centavos"] == sum(g["por_ano"].values()) == sum(e["valor_centavos"] for e in g["linhas"])
         assert g["quantidade"] == len(g["linhas"])
         assert g["notas_sem_medicao_centavos"] == sum(e["valor_centavos"] for e in g["notas_sem_medicao"])
@@ -53,9 +58,15 @@ def _confere_com_o_fechamento(r, f):
     assert all(isinstance(n[SO_DA_NOTA_SOLTA], bool) for n in r["notas_sem_medicao"])
     assert sorted(n["nota_id"] for g in r["contratantes"] for n in g["notas_sem_medicao"]) == sorted(
         n["nota_id"] for n in f["notas_sem_medicao"]["em_aberto"])
-    # o maior em aberto primeiro, empate pelo nome; cada contratante uma vez
+    # o maior em aberto primeiro, empate pelo nome; cada contratante (o par nome e chave) uma vez
     assert [g["em_aberto_centavos"] for g in r["contratantes"]] == sorted((g["em_aberto_centavos"] for g in r["contratantes"]), reverse=True)
-    assert len({g["contratante"] for g in r["contratantes"]}) == len(r["contratantes"])
+    assert len({(g["contratante"], g["chave"]) for g in r["contratantes"]}) == len(r["contratantes"])
+    # e todo par do Fechamento com em aberto tem o seu grupo aqui, pelo mesmo valor
+    for a in f["anos"]:
+        for g in f["por_contratante"][a]:
+            if g["em_aberto_centavos"]:
+                par = (g["contratante"], g["contratante_chave"])
+                assert next(x for x in r["contratantes"] if (x["contratante"], x["chave"]) == par)["por_ano"][a] == g["em_aberto_centavos"]
 
 
 def test_total_subtotal_e_linhas_sao_os_do_fechamento_com_consorcio_e_nota_partilhada(contratantes):
@@ -272,3 +283,70 @@ def test_sem_o_total_a_receber_liberado_nada_do_em_aberto_sai(contratantes):
     c.commit()
     r = a_receber.a_receber(c, HOJE)
     assert r == {"anos": ["2025", "2026"], "total_a_receber_liberado": False}
+
+
+def _por_par(r):
+    return {(g["contratante"], g["chave"]): (g["quantidade"], g["em_aberto_centavos"]) for g in r["contratantes"]}
+
+
+@pytest.mark.parametrize("sem_orgao_primeiro", [True, False])
+def test_obra_sem_orgao_com_o_texto_de_uma_sigla_fica_no_grupo_dela_nas_duas_ordens(contratantes, sem_orgao_primeiro):
+    """Issue #864: o contrato sem orgao no cadastro cujo texto e' a sigla de um contratante ("SINFRA") fica no grupo
+    dele, sem chave, como na aba "Por contratante" do Fechamento, em qualquer ordem de chegada das medicoes. O grupo da
+    SINFRA de verdade continua com a chave (o link e o filtro `?contratante=`, a pagina do contratante), o subtotal de
+    cada grupo e' o da linha do Fechamento com o mesmo par, e o total e' a soma dos dois, a mesma de antes."""
+    c, ids = contratantes
+    c.execute("UPDATE contratos SET orgao_id=NULL, orgao='SINFRA' WHERE id=?", (ids["Galpão"],))
+    c.commit()
+    primeira, segunda = ("Galpão", "Estrada") if sem_orgao_primeiro else ("Estrada", "Galpão")
+    m1 = medir(c, ids[primeira], 1, "2026-03", "protocolada", 50_001, aprovado=50_001, protocolo="2026-04-01")
+    nota(c, 50_001, [m1], emissao="2026-03-25")
+    m2 = medir(c, ids[segunda], 1, "2026-04", "protocolada", 70_003, aprovado=70_003, protocolo="2026-05-04")
+    nota(c, 70_003, [m2], emissao="2026-04-27")
+    r = a_receber.a_receber(c, HOJE)
+    f = fechamento.fechamento(c, HOJE)
+    _confere_com_o_fechamento(r, f)
+    sem_orgao, sinfra = (50_001, 70_003) if sem_orgao_primeiro else (70_003, 50_001)
+    pares = _por_par(r)
+    assert (pares[("SINFRA", "sinfra")], pares[("SINFRA", None)]) == ((1, sinfra), (1, sem_orgao))
+    assert sum(q for _, q in pares.values()) == r["em_aberto_centavos"] == 120_004
+    # a pagina do contratante acha o grupo pela chave, com o subtotal so' da SINFRA de verdade
+    assert contratante.em_aberto(c, "sinfra", HOJE)["contratante"]["em_aberto_centavos"] == sinfra
+
+
+def test_dois_orgaos_de_mesmo_nome_ficam_em_dois_grupos(contratantes):
+    """Issue #864: dois orgaos do cadastro com o mesmo nome e chaves diferentes ("Secretaria X" e a Companhia Y
+    renomeada) sao dois grupos, cada um com a sua chave e o subtotal da linha do Fechamento com o mesmo par; a soma dos
+    dois e' o subtotal de antes, quando eram um grupo so'. Consorcio a 33,33% com centavo impar e nota partilhada com
+    residuo (o cenario de dois anos)."""
+    c, ids = contratantes
+    _lancar_dois_anos(c, ids)
+    antes = a_receber.a_receber(c, HOJE)
+    galpao = medir(c, ids["Galpão"], 90, "2026-05", "protocolada", 90_001, aprovado=90_001, protocolo="2026-06-01")
+    nota(c, 90_001, [galpao], emissao="2026-05-26")
+    com_o_galpao = a_receber.a_receber(c, HOJE)
+    c.execute("UPDATE orgaos SET nome='Secretaria X' WHERE chave='companhia-y'")
+    c.commit()
+    r = a_receber.a_receber(c, HOJE)
+    _confere_com_o_fechamento(r, fechamento.fechamento(c, HOJE))
+    pares = _por_par(r)
+    assert pares[("Secretaria X", "orgao-x")] == _por_par(antes)[("Secretaria X", "orgao-x")] == (3, 234_992)
+    assert pares[("Secretaria X", "companhia-y")] == (1, 90_001)
+    # so' a divisao muda: o total, o de cada ano e a quantidade sao os de antes de renomear
+    assert (r["em_aberto_centavos"], r["por_ano"], r["quantidade"]) == (
+        com_o_galpao["em_aberto_centavos"], com_o_galpao["por_ano"], com_o_galpao["quantidade"]) == (
+        1_434_994 + 90_001, {"2025": 0, "2026": 1_434_994 + 90_001}, 7)
+    assert pares[("Secretaria X", "orgao-x")][1] + pares[("Secretaria X", "companhia-y")][1] == 234_992 + 90_001
+
+
+def test_grupo_sem_orgao_nao_pega_o_prazo_do_contratante_de_mesmo_nome(contratantes):
+    """Issue #864: o grupo do contrato sem orgao cujo texto e' o nome de um contratante, sem linha no total (so' na
+    fileira do filtro), nao herda o prazo de pagamento do contratante de verdade: o prazo do contrato sem orgao e' o de
+    "sem órgão" (`diretoria._contratante`), que aqui nao tem amostra."""
+    c, ids = contratantes
+    _recebidas(c, ids["Escola"], 50, [10, 20, 30, 40, 50])            # Secretaria X: prazo de 40 dias
+    c.execute("UPDATE contratos SET orgao_id=NULL, orgao='Secretaria X' WHERE id=?", (ids["Galpão"],))
+    c.commit()
+    r = a_receber.a_receber(c, HOJE)
+    prazo = {(g["contratante"], g["chave"]): g["prazo_orgao_dias"] for g in r["contratantes"]}
+    assert (prazo[("Secretaria X", "orgao-x")], prazo[("Secretaria X", None)]) == (40, None)

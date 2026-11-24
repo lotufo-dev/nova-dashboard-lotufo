@@ -131,8 +131,9 @@ export function Estado({ m }: { m: Medicao }) {
 }
 
 type LinhaAndamento = { id: number; proximo_passo: string; desde: string };
-/** #748: o custo lancado no RM da competencia (`/api/contratos/{id}/custo`, so' na obra com cadastro de custo). */
-type CustoObra = { linhas: { competencia: string; custo_centavos: number }[] };
+/** #748: o custo lancado no RM da competencia (`/api/contratos/{id}/custo`); #804: a obra sem cadastro de custo
+ *  responde `sem_cadastro`, vazia, e fica sem a coluna. */
+type CustoObra = { sem_cadastro?: boolean; linhas: { competencia: string; custo_centavos: number }[] };
 
 /** O custo lançado no RM de cada competência vai na linha da primeira medição de execução dela (a de menor número),
  *  uma vez só: a coluna fica fora de qualquer total. Competência sem custo lançado (zero) não ganha número. */
@@ -170,7 +171,7 @@ export default function Medicoes({ contratoId, busca, versao = 0, aoLer }: {
   // a obra cujas medicoes ja' estao na tela: so' ao trocar de obra a tela volta a "Carregando"; uma releitura
   // pedida por outro cartao (versao) troca a tabela no lugar, sem encolher a pagina sob o cartao que agiu
   const obraLida = useRef<number | null>(null);
-  // #748: a coluna "Custo lançado no RM" so' existe na obra com cadastro de custo (a rota responde 404 nas outras)
+  // #748: a coluna "Custo lançado no RM" so' existe na obra com cadastro de custo (#804: as outras respondem `sem_cadastro`)
   const [custo, setCusto] = useState<CustoObra | null>(null);
   // a funcao mais recente da pagina, sem entrar nas dependencias da leitura (uma funcao nova a cada desenho a repetiria)
   const aoLerAtual = useRef(aoLer);
@@ -192,7 +193,7 @@ export default function Medicoes({ contratoId, busca, versao = 0, aoLer }: {
       .finally(() => { if (g === geracao.current) setCarregando(false); });
     api<Frescor>("/api/rm/status").then(f => { if (g === geracao.current) setFrescor(f); }).catch(() => {});
     api<CustoObra>(`/api/contratos/${contratoId}/custo`)
-      .then(c => { if (g === geracao.current) setCusto(c && Array.isArray(c.linhas) ? c : null); })
+      .then(c => { if (g === geracao.current) setCusto(c && !c.sem_cadastro && Array.isArray(c.linhas) ? c : null); })
       .catch(() => { if (g === geracao.current) setCusto(null); });
     return () => { geracao.current += 1; };
   }, [contratoId, versao]);

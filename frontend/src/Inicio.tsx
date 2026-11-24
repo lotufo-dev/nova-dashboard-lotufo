@@ -278,7 +278,7 @@ function CicloPorContratante({ linhas, ciclo, aReceber, ir }:
             </thead>
             <tbody>
               {linhas.map(l => (
-                <tr key={l.contratante} className="linha">
+                <tr key={`${l.contratante}|${l.chave ?? ""}`} className="linha">
                   <th scope="row" className="ini-orgaos__nome">
                     {l.chave ? <Link para={{ tela: "contratante", chave: l.chave }} ir={ir}>{l.contratante}</Link> : l.contratante}
                   </th>

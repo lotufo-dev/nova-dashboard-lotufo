@@ -134,16 +134,17 @@ def _ciclo_por_contratante(ms: list[dict], a_receber: list[dict] | None) -> list
       toda linha.
     "Recebido no mes" nao abre por contratante: nenhuma tela o mostra assim.
     `chave` e' a do endereco da pagina do contratante (`diretoria.chave_do_contratante`, a mesma da lista de Obras);
-    nula no contrato sem orgao no cadastro. So' sai o contratante com valor em alguma coluna, do que tem mais dinheiro
-    nas quatro etapas para o que tem menos (empate: mais a receber, depois o nome)."""
+    nula no contrato sem orgao no cadastro. A linha e' o par (nome, chave), como no Fechamento e na pagina Em aberto
+    (`diretoria.linha_do_contratante`, issue #864): dois orgaos do cadastro com o mesmo nome ficam em duas linhas.
+    So' sai o contratante com valor em alguma coluna, do que tem mais dinheiro nas quatro etapas para o que tem menos
+    (empate: mais a receber, depois o nome e a chave)."""
     etapas = [etapa for etapa, _, _ in CICLO]
-    linhas: dict[str, dict] = {}
+    linhas: dict[tuple[str, str | None], dict] = {}
 
     def do(x: dict) -> dict:
-        nome = diretoria._contratante(x)
-        chave = diretoria.chave_do_contratante(x.get("orgao_familia"), x.get("orgao_chave")) if x.get("orgao_nome") else None
-        return linhas.setdefault(nome, {"contratante": nome, "chave": chave, **{f"{e}_centavos": 0 for e in etapas},
-                                        "a_receber_centavos": None if a_receber is None else 0})
+        nome, chave = diretoria.linha_do_contratante(diretoria._contratante(x), x.get("orgao_familia"), x.get("orgao_chave"))
+        return linhas.setdefault((nome, chave), {"contratante": nome, "chave": chave, **{f"{e}_centavos": 0 for e in etapas},
+                                                 "a_receber_centavos": None if a_receber is None else 0})
     for etapa, estados, campo in CICLO:
         for m, _ in _da_etapa(ms, etapa, estados, campo):
             do(m)[f"{etapa}_centavos"] += diretoria._cota(m)
@@ -151,7 +152,8 @@ def _ciclo_por_contratante(ms: list[dict], a_receber: list[dict] | None) -> list
         do(x)["a_receber_centavos"] += diretoria._a_receber_cota(x)
     no_ciclo = lambda linha: sum(linha[f"{e}_centavos"] for e in etapas)
     com_valor = [x for x in linhas.values() if no_ciclo(x) or x["a_receber_centavos"]]
-    return sorted(com_valor, key=lambda x: (-no_ciclo(x), -(x["a_receber_centavos"] or 0), x["contratante"]))
+    return sorted(com_valor, key=lambda x: (-no_ciclo(x), -(x["a_receber_centavos"] or 0),
+                                            *diretoria.ordem_do_contratante((x["contratante"], x["chave"]))))
 
 
 def _ultimos_12_meses(hoje: datetime.date) -> list[str]:

@@ -120,6 +120,21 @@ describe("Em aberto: o em aberto nota a nota (#816)", () => {
     expect(linhas()).toHaveLength(0);
   });
 
+  it("#864: dois contratantes de mesmo nome e chaves diferentes são dois grupos e duas opções; o nome abre só o seu grupo", async () => {
+    const erro = vi.spyOn(console, "error").mockImplementation(() => {});
+    const gemeo = { ...PREFEITURA, contratante: SINFRA.contratante, chave: "sinfra-2" };
+    await abrir({ ...RESPOSTA, contratantes: [SINFRA, gemeo, SES] });
+    const opcoes = within(screen.getByRole("navigation", { name: "Contratante" })).getAllByRole("link");
+    expect(opcoes.map(o => o.getAttribute("href"))).toEqual(["/a-receber", "/a-receber?contratante=sinfra",
+      "/a-receber?contratante=sinfra-2", "/a-receber?contratante=ses-mt"]);
+    const [primeiro, segundo] = screen.getAllByRole("button", { name: /SINFRA/ });
+    fireEvent.click(primeiro);
+    expect([primeiro, segundo].map(b => b.getAttribute("aria-expanded"))).toEqual(["true", "false"]);
+    expect(linhas()).toHaveLength(SINFRA.linhas.length);
+    expect(erro.mock.calls.some(c => String(c[0]).includes("same key"))).toBe(false);
+    erro.mockRestore();
+  });
+
   it("?contratante= mostra só o contratante, aberto, com cada linha: medição, nota, protocolo, tempo parado, data prevista e valor", async () => {
     await abrir(RESPOSTA, { contratante: "sinfra" });
     expect(within(screen.getByRole("navigation", { name: "Contratante" })).getAllByRole("link").map(o => o.getAttribute("aria-current")))

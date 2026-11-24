@@ -108,7 +108,8 @@ describe("SigaPagina", () => {
   afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
 
   it("um painel por categoria, na ordem fixa, com o cabeçalho de grupo forte; dentro de cada um, do mais parado ao menos (#805)", async () => {
-    mostrar(painel([ALFA, ADITIVO, INDENIZATORIO, DELTA, EPSILON, BETA, GAMA, ADITIVO_PARADO]));
+    // a lista na ordem do servidor (do mais parado ao menos, #861), com as categorias misturadas
+    mostrar(painel([GAMA, ADITIVO_PARADO, INDENIZATORIO, DELTA, ALFA, BETA, ADITIVO, EPSILON]));
     await carregada();
     expect(paineis().map(tituloDe)).toEqual(["Medições", "Aditivos", "Indenizatórios", "Outros"]);
     expect(paineis().map(nomesEm)).toEqual([
@@ -134,6 +135,14 @@ describe("SigaPagina", () => {
     expect(within(cabeca(2)).getByText("1 sem movimentação há 10 dias úteis ou mais").className).toBe("sr-only");
     expect(within(cabeca(3)).getByText("1 sem movimentação há 10+ dias úteis").getAttribute("aria-hidden")).toBe("true");
     expect(screen.queryByRole("complementary")).toBeNull();
+  });
+
+  it("a ordem das linhas é a do servidor: a tela não refaz a conta do mais parado (#861)", async () => {
+    // de proposito, o contrario dos dias: Alfa andou hoje e Gama esta' ha' 12 dias; a tela segue o que veio
+    mostrar(painel([ALFA, DELTA, EPSILON, BETA, GAMA]));
+    await carregada();
+    expect(paineis().map(nomesEm)).toEqual([
+      ["Obra Alfa · 7ª Medição", "Obra Delta · 4ª Medição", "Obra Épsilon · 2ª Medição"], ["Processo Beta", "Processo Gama"]]);
   });
 
   it("categoria sem processo não tem painel e continua nas escolhas, com zero (#805)", async () => {
@@ -361,9 +370,16 @@ describe("SigaPagina", () => {
     const largura = (col: string) => Number(new RegExp(`\\.sg__c-${col}\\s*\\{\\s*width:\\s*(\\d+)%`).exec(css)?.[1]);
     const colunas = ["proc", "contr", "onde", "quem", "setor", "parado", "ultima", "tipo", "seta"];
     expect(colunas.reduce((soma, c) => soma + largura(c), 0)).toBe(100);
-    expect(largura("parado")).toBeGreaterThanOrEqual(14);     // o selo "25 dias úteis" em duas linhas no painel de ~724 px
-    expect(largura("contr")).toBeGreaterThanOrEqual(10);      // "Contratante" no cabeçalho, separada em sílabas, sem encostar na vizinha
-    expect(largura("quem")).toBeGreaterThanOrEqual(11);       // um nome sem partir a 1024 px
+    expect(largura("parado")).toBeGreaterThanOrEqual(14);     // o selo "25 dias úteis" em duas linhas e "movimentação" sem separar
+    expect(largura("tipo")).toBeGreaterThanOrEqual(13);       // "Recebimento" e "movimentação" inteiras
+    expect(largura("ultima")).toBeGreaterThanOrEqual(12);     // "movimentação" inteira no cabeçalho
+    expect(largura("contr")).toBeGreaterThanOrEqual(10);      // "Contratante" inteira no cabeçalho
+    expect(largura("onde")).toBeGreaterThanOrEqual(12);       // a coluna Setor: a sigla "NUCLEO-ADM" ou "GSAGPM" sem partir no meio (#859)
+    expect(largura("quem")).toBeGreaterThanOrEqual(9);        // um nome sem partir a 1024 px
+    // #859: o cabeçalho não é separado em sílabas, a sigla do setor só quebra no hífen
+    expect(css).not.toMatch(/\.sg__tabela thead th[^{]*\{[^}]*hyphens:\s*auto/);
+    expect(css).toMatch(/\.sg__tabela thead th\s*\{[^}]*hyphens:\s*manual;\s*overflow-wrap:\s*normal/);
+    expect(css).toMatch(/td\[data-rotulo="Setor"\]\s*\{[^}]*overflow-wrap:\s*normal/);
     mostrar(painel([ALFA]));
     const alfa = await screen.findByRole("row", { name: /Obra Alfa/ });
     expect(within(alfa).getByText("01/10/2026").className).toBe("num");
@@ -969,7 +985,7 @@ describe("SigaPagina: critério de encerramento (#841)", () => {
                     { id: 29, numero: 5, tipo: "execucao", estado: "cancelada" }];
 
   it("sobrestado: a palavra no lugar dos dias, sem selo nem cor de atraso, e depois dos parados", async () => {
-    mostrar(painel([SOBRESTADO, GAMA]));
+    mostrar(painel([GAMA, SOBRESTADO]));      // a ordem do servidor: o sobrestado depois dos parados (#861)
     await carregada();
     expect(nomesNaTabela()).toEqual(["Processo Gama", "Processo Sobrestado"]);
     const linha = screen.getByRole("row", { name: "Processo Sobrestado" });

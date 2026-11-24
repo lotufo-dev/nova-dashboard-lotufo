@@ -300,3 +300,172 @@ def test_boletim_registrado_depois_da_correcao_nao_e_trocado(cenario):
     _aprovar(c, mid, 1_234_565, pedido=1_000_001, arquivo="boletins/exemplo.pdf", criado_em="2999-01-01 00:00:00")
     texto = next(e["texto"] for e in medicoes.edicoes_valor(c, [mid])[mid] if e["texto"].startswith("Boletim"))
     assert "pedido R$ 10.000,01" in texto
+
+
+# ------------------------------------------------------------------ issue #883: espelho que cobre so' parte da medicao
+
+def _medicao_de_duas_fontes(c, cid, origem="espelho"):
+    """Medicao recebida em duas notas, uma por fonte de recurso: o espelho e' o de uma fonte so' (R$ 6.000,03) e o
+    pedido nasceu dele; a outra nota (R$ 4.000,02) foi ligada depois. O aprovado e' a soma (R$ 10.000,05)."""
+    mid = _medicao(c, cid, 22, estado="recebida", valor=600_003)
+    c.execute("UPDATE medicoes SET congelada=1, valor_protocolado_origem=? WHERE id=?", (origem, mid))
+    c.commit()
+    eid = _espelho(c, cid, mid, 22, 600_003)
+    _aprovar(c, mid, 1_000_005)                    # depois do espelho: o espelho saiu do pedido
+    na, nb = _nota(c, 801, valor=600_003), _nota(c, 802, valor=400_002)
+    _ligar(c, mid, na, valor=600_003)
+    _ligar(c, mid, nb, valor=400_002)
+    return mid, eid, na, nb
+
+
+def _op_parcial(mid, pedido="10.000,05", **extra):
+    return _op(mid, pedido=pedido, espelho_parcial=True, motivo="a medição saiu em duas notas, uma por fonte",
+               **extra)
+
+
+def test_espelho_parcial_corrige_com_a_soma_das_notas_e_audita_a_declaracao(cenario):
+    c, cid, uid = cenario
+    mid, eid, na, nb = _medicao_de_duas_fontes(c, cid)
+    esp_antes = c.execute("SELECT * FROM espelho_medicoes WHERE espelho_id=?", (eid,)).fetchall()
+    rel = _rodar(c, uid, [_op_parcial(mid)])
+    assert rel["feitos"] == 1 and rel["erros"] == 0, rel
+    linha = _linha(c, mid)
+    assert (linha["valor_protocolado_centavos"], linha["valor_protocolado_origem"]) == (1_000_005, "manual")
+    assert linha["estado"] == "recebida" and linha["congelada"] == 1 and linha["valor_atestado_centavos"] == 1_000_005
+    # o espelho nao muda
+    assert [tuple(r) for r in c.execute("SELECT * FROM espelho_medicoes WHERE espelho_id=?", (eid,))] \
+        == [tuple(r) for r in esp_antes]
+    assert _ativas(c, mid) == [na, nb]
+    _, d = _correcoes(c, mid)[0]
+    assert (d["pedido_antes_centavos"], d["pedido_depois_centavos"], d["origem_antes"]) == (600_003, 1_000_005, "espelho")
+    assert d["fonte"] == FONTE and d["motivo_correcao"] == "a medição saiu em duas notas, uma por fonte"
+    p = d["espelho_parcial"]
+    assert p["declarado"] is True and p["soma_centavos"] == 1_000_005 and p["coligada"] == 1
+    assert [(n["nota_id"], n["valor_vinculo_centavos"]) for n in p["notas_somadas"]] == [(na, 600_003), (nb, 400_002)]
+    assert len(p["recusas_vencidas"]) == 2
+    assert "veio do espelho" in p["recusas_vencidas"][0] and "gerado a partir do pedido" in p["recusas_vencidas"][1]
+    assert p["espelhos"] == [{"versao": 1, "situacao": "vigente", "valor_centavos": 600_003}]
+
+
+def test_espelho_parcial_o_ensaio_diz_a_recusa_vencida_e_nao_grava(cenario):
+    c, cid, uid = cenario
+    mid, _, _, _ = _medicao_de_duas_fontes(c, cid)
+    n = _auditorias(c, mid)
+    rel = _rodar(c, uid, [_op_parcial(mid)], ensaio=True)
+    assert rel["ensaio"] and rel["feitos"] == 1, rel
+    detalhes = rel["itens"][0]["detalhes"]
+    assert detalhes[0] == "pedido R$ 6.000,03 → R$ 10.000,05 (valor cheio)"
+    assert detalhes[1].startswith("espelho_parcial declarado: vence a recusa “o pedido desta medição veio do espelho")
+    assert "” e a recusa “o espelho versão 1 desta medição foi gerado a partir do pedido" in detalhes[1]
+    assert detalhes[2] == ("o pedido novo é a soma das notas ligadas: NF 801, idmov 1701 (R$ 6.000,03) + NF 802, "
+                           "idmov 1702 (R$ 4.000,02) = R$ 10.000,05")
+    assert detalhes[3] == "o espelho versão 1 leva R$ 6.000,03 e não muda: é a parte da NF 801, idmov 1701 (R$ 6.000,03)"
+    assert not any(d.startswith("AVISO: o valor do espelho") for d in detalhes)
+    assert any("a diferença aprovado − pedido passa de R$ 4.000,02 para R$ 0,00" in d for d in detalhes)
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 600_003
+    assert _auditorias(c, mid) == n
+
+
+def test_espelho_parcial_segunda_rodada_ja_feito(cenario):
+    c, cid, uid = cenario
+    mid, _, _, _ = _medicao_de_duas_fontes(c, cid)
+    assert _rodar(c, uid, [_op_parcial(mid)])["feitos"] == 1
+    n = _auditorias(c, mid)
+    rel = _rodar(c, uid, [_op_parcial(mid)])
+    assert rel["ja_feitos"] == 1 and rel["feitos"] == 0 and rel["erros"] == 0, rel
+    assert "já é R$ 10.000,05" in rel["itens"][0]["detalhes"][0]
+    assert _auditorias(c, mid) == n
+
+
+def test_sem_a_declaracao_as_recusas_de_hoje_continuam(cenario):
+    c, cid, uid = cenario
+    mid, _, _, _ = _medicao_de_duas_fontes(c, cid)
+    for op in (_op(mid, pedido="10.000,05"), _op(mid, pedido="10.000,05", espelho_parcial=False)):
+        rel = _rodar(c, uid, [op])
+        assert rel["erros"] == 1, rel
+        assert rel["itens"][0]["erro"] == ("o pedido desta medição veio do espelho: o espelho é documento que saiu, e "
+                                           "o valor dele muda gerando o espelho de novo (antes do protocolo), não por aqui")
+    # pedido de outra origem com espelho gerado dele: a segunda recusa, a de hoje
+    c.execute("UPDATE medicoes SET valor_protocolado_origem='manual' WHERE id=?", (mid,))
+    c.commit()
+    rel = _rodar(c, uid, [_op(mid, pedido="10.000,05")])
+    assert rel["erros"] == 1 and rel["itens"][0]["erro"] == (
+        "o espelho versão 1 desta medição foi gerado a partir do pedido (R$ 6.000,03), sem boletim: o espelho é "
+        "documento que saiu e ficaria com um valor que não é mais o pedido"), rel
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 600_003
+    assert _correcoes(c, mid) == []
+
+
+def test_espelho_parcial_em_medicao_que_nao_se_enquadra_e_recusado(cenario):
+    c, cid, uid = cenario
+    mid, _, _, nb = _medicao_de_duas_fontes(c, cid)
+    # soma diferente: nem o valor de uma nota, nem outro valor qualquer
+    for pedido in ("4.000,02", "10.000,07"):
+        rel = _rodar(c, uid, [_op_parcial(mid, pedido=pedido)])
+        assert rel["erros"] == 1, rel
+        erro = rel["itens"][0]["erro"]
+        assert "com espelho_parcial o pedido é a soma das notas vigentes ligadas" in erro, erro
+        assert "= R$ 10.000,05" in erro
+    # declaracao que nao e' true/false
+    rel = _rodar(c, uid, [_op(mid, pedido="10.000,05", espelho_parcial="sim")])
+    assert rel["erros"] == 1 and "espelho_parcial deve ser true ou false" in rel["itens"][0]["erro"], rel
+    # uma nota so': a outra desligada nao conta
+    c.execute("UPDATE nf_alocacoes SET desfeita_em=datetime('now') WHERE medicao_id=? AND nota_id=?", (mid, nb))
+    c.commit()
+    rel = _rodar(c, uid, [_op_parcial(mid, pedido="6.000,05")])
+    assert rel["erros"] == 1 and "só vale na medição com mais de uma nota ligada" in rel["itens"][0]["erro"], rel
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 600_003
+    assert _correcoes(c, mid) == []
+
+
+def test_espelho_parcial_sem_recusa_a_vencer_e_recusado(cenario):
+    """Sem espelho (ou com espelho do aprovado e pedido de outra origem) nao ha' recusa do espelho: a declaracao nao
+    se aplica e sairia como registro falso na auditoria."""
+    c, cid, uid = cenario
+    mid = _medicao(c, cid, 4, estado="recebida", valor=600_003)
+    _aprovar(c, mid, 1_000_005)
+    _ligar(c, mid, _nota(c, 811, valor=600_003), valor=600_003)
+    _ligar(c, mid, _nota(c, 812, valor=400_002), valor=400_002)
+    rel = _rodar(c, uid, [_op_parcial(mid)])
+    assert rel["erros"] == 1 and "esta medição não tem nenhuma: tire espelho_parcial" in rel["itens"][0]["erro"], rel
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 600_003
+
+
+def test_espelho_parcial_recusa_espelho_que_nao_e_parte(cenario):
+    """O espelho que ja' leva o valor inteiro (ou mais) nao cobre so' parte da medicao: a declaracao e' falsa."""
+    c, cid, uid = cenario
+    mid, eid, _, _ = _medicao_de_duas_fontes(c, cid)
+    c.execute("UPDATE espelho_medicoes SET valor_centavos=1000005, valor_com_sinal_centavos=1000005 WHERE espelho_id=?",
+              (eid,))
+    c.commit()
+    rel = _rodar(c, uid, [_op_parcial(mid)])
+    assert rel["erros"] == 1, rel
+    assert "o espelho versão 1 leva R$ 10.000,05, não uma parte de R$ 10.000,05" in rel["itens"][0]["erro"]
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 600_003
+
+
+def test_espelho_parcial_avisa_espelho_que_nao_bate_com_nota(cenario):
+    c, cid, uid = cenario
+    mid, eid, _, _ = _medicao_de_duas_fontes(c, cid)
+    c.execute("UPDATE espelho_medicoes SET valor_centavos=500001, valor_com_sinal_centavos=500001 WHERE espelho_id=?",
+              (eid,))
+    c.commit()
+    rel = _rodar(c, uid, [_op_parcial(mid)], ensaio=True)
+    assert rel["feitos"] == 1, rel
+    assert any(d.startswith("AVISO: o valor do espelho versão 1 não bate com nenhuma das notas somadas")
+               for d in rel["itens"][0]["detalhes"])
+
+
+def test_espelho_parcial_nao_soma_notas_de_coligadas_diferentes(cenario):
+    """Consorcio: a fatura do consorcio (coligada 90) e a NF da Lotufo (coligada 1) cobrem a mesma medicao, uma o
+    cheio e a outra a cota. Duas notas ligadas, mas nao duas fontes: a soma e' por coligada."""
+    from tests.test_correcao_medicoes import _nota_col
+    c, cid, uid = cenario
+    mid, _, na, nb = _medicao_de_duas_fontes(c, cid)
+    c.execute("UPDATE nf_alocacoes SET desfeita_em=datetime('now') WHERE medicao_id=? AND nota_id=?", (mid, nb))
+    _ligar(c, mid, _nota_col(c, 803, 90, 400_002), valor=400_002)
+    rel = _rodar(c, uid, [_op_parcial(mid)])
+    assert rel["erros"] == 1, rel
+    erro = rel["itens"][0]["erro"]
+    assert "coligada 1: NF 801, idmov 1701 (R$ 6.000,03) = R$ 6.000,03" in erro and "coligada 90:" in erro, erro
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 600_003

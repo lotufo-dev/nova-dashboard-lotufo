@@ -1534,10 +1534,11 @@ def linhas_em_andamento(conn, hoje: datetime.date | None = None, obras: dict[int
     return linhas
 
 
-def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> dict:
+def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None, com_siga: bool = True) -> dict:
     """Pagina Medicoes: as obras ativas (com o que a janela "Iniciar" precisa), o quadro do mes e as medicoes abertas
     de competencias anteriores. Issue #699: `contagens` e `linhas` sairam da resposta (nenhuma tela as lia); as linhas
-    de "em andamento" seguem em `linhas_em_andamento`, de onde saem os meses anteriores."""
+    de "em andamento" seguem em `linhas_em_andamento`, de onde saem os meses anteriores. `com_siga` (#853): sem ele,
+    o quadro nao le o SIGA e o `siga` de todo passo vem nulo (quem nao tem `ver_siga`)."""
     hoje = hoje or tempo.hoje_local()
     mes = mes or hoje.strftime("%Y-%m")   # o mes de "Iniciar medicao" (#507): as obras sem medicao NESTA competencia
     obras = _obras_com_contratante(conn)
@@ -1646,7 +1647,7 @@ def resumo(conn, hoje: datetime.date | None = None, mes: str | None = None) -> d
                     "proxima": proxima(o["id"])[0], "proxima_tipo": proxima(o["id"])[1]}
                    for o in ativas]
     return {"hoje": hoje.isoformat(), "mes": mes, "obras": lista_obras,
-            "quadro": _quadro_do_mes(conn, mes, obras, sem_fluxo_medicao, hoje),
+            "quadro": _quadro_do_mes(conn, mes, obras, sem_fluxo_medicao, hoje, com_siga),
             "anteriores": _meses_anteriores(mes, linhas)}
 
 
@@ -1754,14 +1755,15 @@ PASSOS_COM_SIGA = (2, 6)    # #664: o processo do orgao corre na Analise do orga
 
 
 def _quadro_do_mes(conn, mes: str, obras: dict[int, dict], sem_fluxo_medicao: set[int],
-                   hoje: datetime.date) -> list[dict]:
+                   hoje: datetime.date, com_siga: bool = True) -> list[dict]:
     """Uma linha por obra ativa (e por obra, ativa ou nao, com medicao na competencia): cada passo com a situacao
     (feito, atual, futuro), o dia em que foi feito e a medicao que o passo da vez abre. Com mais de uma medicao na
     competencia (execucao e reajuste), cada passo mostra a menos adiantada; o passo feito leva o dia da ultima a
     fechar. A prevista, a cancelada e a desistida nao contam: a obra so' com elas esta' sem medicao (`iniciar`).
     A obra sem fluxo de medicao no cadastro (`passos_medicao: []`, #660) fica fora do quadro.
     `siga` (#664): no passo em que o processo do SIGA corre (`PASSOS_COM_SIGA`), a posicao do processo vivo ligado
-    a' medicao que esta' nesse passo (setor, entrada e dias uteis no setor); None nos demais."""
+    a' medicao que esta' nesse passo (setor, entrada e dias uteis no setor); None nos demais, e em todos sem `com_siga`
+    (#853: a posicao do processo e' leitura do SIGA, de quem tem `ver_siga`)."""
     from app import siga                # import local: siga importa este modulo
     passos_de = passos_das_medicoes(conn)
     do_mes: dict[int, list[dict]] = {}
@@ -1775,7 +1777,8 @@ def _quadro_do_mes(conn, mes: str, obras: dict[int, dict], sem_fluxo_medicao: se
         tem = passos_de(m)
         passo_de[m["id"]] = (tem, passo_do_estado(m["estado"], tem))
     # #664: a posicao do processo vivo do SIGA, de uma vez, so' das medicoes que estao num passo em que o processo corre
-    siga_de = siga.posicao_das_medicoes(conn, [i for i, (_, atual) in passo_de.items() if atual in PASSOS_COM_SIGA], hoje)
+    siga_de = siga.posicao_das_medicoes(
+        conn, [i for i, (_, atual) in passo_de.items() if atual in PASSOS_COM_SIGA], hoje) if com_siga else {}
     quadro = []
     for o in sorted(obras.values(), key=lambda o: (_chave_nome(o["obra"]), o["id"])):
         ms = sorted(do_mes.get(o["id"], []), key=lambda m: (_ORDEM_TIPO.index(m["tipo"]), m["numero"], m["id"]))

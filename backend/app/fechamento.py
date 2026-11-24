@@ -628,8 +628,10 @@ def _cobertura(linhas: list[dict]) -> dict:
 def _contratantes(conn) -> dict[int, tuple[str, str | None]]:
     """Issue #815: contrato -> (o contratante, a chave da pagina dele). A sigla e a chave sao as da lista de Obras
     (`medicoes.contratante` e `diretoria.chave_do_contratante`, como em `api_contratos`): a SINFRA inteira e' um
-    contratante so', e o contrato sem orgao no cadastro fica com o texto do proprio contrato, sem chave."""
-    return {i: (o["contratante"], diretoria.chave_do_contratante(o["familia"], o["chave"]))
+    contratante so', e o contrato sem orgao no cadastro fica com o texto do proprio contrato, sem chave. O par e' a
+    linha do contratante nas telas que abrem um total por contratante (`diretoria.linha_do_contratante`, issue #864):
+    esta pagina e a pagina Em aberto (`a_receber.py`) o leem daqui."""
+    return {i: diretoria.linha_do_contratante(o["contratante"], o["familia"], o["chave"])
             for i, o in medicoes._obras_com_contratante(conn).items()}
 
 
@@ -638,8 +640,8 @@ def _linhas_por_contratante(grupos: dict[tuple[str, str | None], dict]) -> list[
     uma com a participacao do medido dela no medido do ano, em milesimos. A reparticao e' de
     `dinheiro.ratear_proporcional` (so' inteiros, o residuo nos maiores restos): as participacoes somam 1000. Sem
     medido no ano, ou com medido negativo em algum contratante, a participacao vem nula."""
-    linhas = sorted(grupos.values(), key=lambda g: (-g["medido_centavos"], medicoes._chave_nome(g["contratante"]),
-                                                    g["contratante_chave"] or ""))
+    linhas = sorted(grupos.values(), key=lambda g: (-g["medido_centavos"],
+                                                    *diretoria.ordem_do_contratante((g["contratante"], g["contratante_chave"]))))
     pesos = [g["medido_centavos"] for g in linhas]
     partes = (dinheiro.ratear_proporcional(1000, pesos) if pesos and min(pesos) >= 0 and sum(pesos) > 0
               else [None] * len(linhas))
@@ -709,7 +711,8 @@ def _fechamento(conn, hoje: datetime.date) -> dict:
     # issue #815: a mesma linha de medicao soma tambem no contratante da obra dela, no ano da competencia
     contratante_de = _contratantes(conn)
     # a linha e' o par (nome, chave), nao o nome: o contrato sem orgao no cadastro cujo texto e' igual a' sigla de um
-    # contratante ("SINFRA") fica na linha dele, sem chave, e nao dentro da do contratante (revisao da #815)
+    # contratante ("SINFRA") fica na linha dele, sem chave, e nao dentro da do contratante (revisao da #815; o par sai
+    # de `diretoria.linha_do_contratante`, o mesmo da pagina Em aberto e do Inicio, issue #864)
     do_contratante: dict[str, dict[tuple[str, str | None], dict]] = {a: {} for a in ANOS}
     anteriores = {"quantidade": 0, "valor_centavos": 0}
     em_aberto, diferem = [], []

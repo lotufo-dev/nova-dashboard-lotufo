@@ -132,10 +132,11 @@ def _contagem(linhas: list[dict]) -> dict:
             "alem_do_prazo": sum(1 for x in linhas if x["parada"]["alem_do_prazo"])}
 
 
-def fila(conn, hoje: datetime.date | None = None, mes: str | None = None) -> dict:
-    """A resposta da tela Medicoes na competencia `mes` (AAAA-MM; padrao, o mes de hoje, como `medicoes.resumo`)."""
+def fila(conn, hoje: datetime.date | None = None, mes: str | None = None, com_siga: bool = True) -> dict:
+    """A resposta da tela Medicoes na competencia `mes` (AAAA-MM; padrao, o mes de hoje, como `medicoes.resumo`).
+    `com_siga` (#853): sem ele, o quadro sai sem a posicao do processo no SIGA (`medicoes.resumo`)."""
     hoje = hoje or tempo.hoje_local()
-    base = medicoes.resumo(conn, hoje, mes)
+    base = medicoes.resumo(conn, hoje, mes, com_siga=com_siga)
     mes = base["mes"]
     todas = diretoria._medicoes(conn)
     de = {m["id"]: m for m in todas}

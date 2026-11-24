@@ -34,17 +34,17 @@
 .entrar__nome { font-family: var(--fonte-marca); font-weight: var(--peso-marca); font-size: var(--texto-titulo-pagina); line-height: var(--entrelinha-justa); }
 .entrar__nome-apoio { font-family: var(--fonte-marca-apoio); font-weight: var(--peso-normal); }
 
-/* o formulario fica parado quando a caixa de recusa aparece: o bloco e' preso pelo alto, na altura em que o bloco sem
-   a caixa ficaria centrado (--altura-bloco-entrar), e a caixa cresce para baixo. Centrado pela altura, ele subia. */
-.entrar__painel {
-  justify-content: flex-start;
-  padding: max(var(--espaco-xxg), calc(50vh - var(--altura-bloco-entrar) / 2)) var(--espaco-xg) var(--espaco-xxg);
-}
+/* o formulario fica parado quando a caixa de recusa aparece: o bloco e' centrado sem ela, e a caixa sai do fluxo e se
+   pendura embaixo dele (position: absolute), entao a altura do bloco nao depende dela, qualquer que seja o tamanho da
+   letra. No celular o formulario fica no alto e a caixa volta ao fluxo (#866). */
+.entrar__painel { padding: var(--espaco-xxg) var(--espaco-xg); }
 .entrar__bloco {
+  position: relative;
   display: flex; flex-direction: column; gap: var(--espaco-g);
   width: 100%; max-width: calc(var(--largura-menu) + var(--largura-nome-obra) / 2);
   border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro);
 }
+.entrar__form .aviso--falha { position: absolute; top: 100%; left: 0; right: 0; margin-top: var(--espaco-m); }
 .entrar__titulo { margin: 0; font-size: var(--texto-titulo-pagina); }
 
 .entrar__form { display: flex; flex-direction: column; gap: var(--espaco-m); }
@@ -57,6 +57,7 @@
   .entrar { flex-direction: column; }
   .entrar__painel { order: 1; flex: none; padding: var(--espaco-xg) var(--espaco-m); }
   .entrar__bloco { max-width: none; }
+  .entrar__form .aviso--falha { position: static; margin-top: 0; }
   .entrar__marca { order: 2; flex: 1 0 auto; gap: var(--espaco-m); padding: var(--espaco-xg) var(--espaco-m); }
   .entrar__simbolo { width: calc(var(--simbolo-marca-largura) * 5); height: calc(var(--simbolo-marca-altura) * 5); }
 }
