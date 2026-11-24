@@ -42,6 +42,10 @@ describe("destino do aviso", () => {
     const sem: Aviso = { ...base, tipo: "siga_sem_leitura", contrato_id: null, destino: { tela: "siga" } };
     const d7 = destinoDoAviso(sem)!;
     expect(hrefDe(d7.para, d7.busca, d7.secao)).toBe("/siga");
+    // #881: o processo da medicao arquivado ou juntado leva a pagina da medicao, onde a caixa pede o protocolo novo
+    const novo: Aviso = { ...base, tipo: "siga_protocolo_novo", contrato_id: 7, medicao_id: 31, destino: { tela: "contrato", id: 7, aba: "medicao" } };
+    const d8 = destinoDoAviso(novo)!;
+    expect(hrefDe(d8.para, d8.busca, d8.secao)).toBe("/obras/7/medicoes/31");
   });
 });
 

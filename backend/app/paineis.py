@@ -187,9 +187,9 @@ def posicao_na_cota(vigente_execucao_centavos: int, medido_centavos: int, percen
 
 # ------------------------------------------------------------------ avisos
 
-def alertas(conn: sqlite3.Connection, hoje: str | None = None) -> list[dict]:
+def alertas(conn: sqlite3.Connection, hoje: str | None = None, com_siga: bool = True) -> list[dict]:
     """Bloco 6: os avisos vem do registro unico (`app/avisos.py`, spec §11). Sem `hoje`, a data de Cuiaba
     (`tempo.hoje_local`), nao a do relogio da maquina. Sairam os alertas antigos de data-base, reajuste sem
     par, medicao sem protocolo e prazo vencido (virou nivel do aviso de prazo)."""
     hoje_d = datetime.date.fromisoformat(hoje) if hoje else tempo.hoje_local()
-    return avisos.listar(conn, hoje_d)
+    return avisos.listar(conn, hoje_d, com_siga=com_siga)

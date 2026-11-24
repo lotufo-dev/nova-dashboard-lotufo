@@ -64,7 +64,8 @@ export const ASSUNTO_DO_TIPO: Readonly<Record<string, Exclude<Assunto, "outros">
   espelho_desatualizado: "medicoes", espelho_nao_conferido: "medicoes",
   nota_divergente: "medicoes", nota_acima_da_medicao: "medicoes", notas_pagas_nao_cobrem: "medicoes",
   recebida_notas_nao_cobrem: "medicoes", nota_ausente_rm: "medicoes", nota_cancelada_rm: "medicoes",
-  siga_parado: "siga", siga_sem_leitura: "siga",
+  // o processo do SIGA: o parado, o monitor sem leitura e a medicao cujo processo foi arquivado ou juntado (#881)
+  siga_parado: "siga", siga_sem_leitura: "siga", siga_protocolo_novo: "siga",
 };
 
 /** O assunto do aviso, pelo `tipo`; o tipo que o mapa nao conhece fica em "Outros", para nada sumir. */

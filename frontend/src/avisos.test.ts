@@ -130,6 +130,8 @@ describe("assunto do aviso (#805): as abas da página Avisos", () => {
     expect(assuntoDoAviso(doTipo("reajuste_sem_resposta", "reajuste"))).toBe("reajustes");
     expect(assuntoDoAviso(doTipo("nota_divergente", "notas"))).toBe("medicoes");
     expect(assuntoDoAviso({ ...doTipo("siga_parado", null), destino: { tela: "siga", processo: 4 } })).toBe("siga");
+    // #881: a pendencia do protocolo novo abre a medicao, mas o assunto e' o SIGA
+    expect(assuntoDoAviso(doTipo("siga_protocolo_novo", "medicao"))).toBe("siga");
   });
 
   it("tipo que o mapa não conhece fica em Outros, para nada sumir; nome herdado de objeto não vira assunto", () => {

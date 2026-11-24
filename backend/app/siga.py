@@ -969,10 +969,29 @@ def _medicao_do_nome(nome: str | None) -> tuple[int, str] | None:
     return int(achado.group(2)), tipo
 
 
+def _vinculos_desfeitos(conn) -> set[tuple[int, int]]:
+    """Os pares (processo, medicao) cujo vinculo alguem desfez pela tela (#881), pelo registro que `desfazer_vinculo`
+    deixa na auditoria. Ligar de novo a' mao e desfazer outra vez deixa o mesmo par: continua de fora."""
+    return {(int(r[0]), int(r[1])) for r in conn.execute(
+        "SELECT entidade_id, json_extract(antes, '$.medicao_id') FROM audit_log "
+        "WHERE acao='siga.vinculo_desfeito' AND entidade='siga_processo'")
+        if str(r[0]).isdigit() and r[1] is not None}
+
+
+def _titulo_do_nome(nome: str | None) -> str | None:
+    """O titulo da medicao que o nome do SIGA escreve ("7ª Medição"), para o processo de Medicoes ainda sem medicao
+    (#881: depois de desfeito o vinculo, a obra fica e o nome nao perde o numero). Sem numero no nome, None."""
+    achado = _medicao_do_nome(nome)
+    return medicoes.titulo({"numero": achado[0], "tipo": achado[1]}) if achado else None
+
+
 def propostas_de_medicao(conn, processos: list) -> dict[int, dict]:
     """{processo: medicao proposta} para os processos de Medicoes sem medicao e sem protocolo (#841). `processos`: as
-    linhas com id, nome, contrato_id, medicao_id e protocolo_id. A proposta so' sai com obra unica e medicao unica."""
+    linhas com id, nome, contrato_id, medicao_id e protocolo_id. A proposta so' sai com obra unica e medicao unica.
+    #881: a medicao cujo vinculo alguem desfez naquele processo nao volta como proposta dele (a pessoa escolhe outra
+    na lista; ligar a' mao continua possivel). Outra medicao da obra, ou a mesma em outro processo, ainda se propoe."""
     contratos = conn.execute("SELECT id, numero_instrumento, nome_curto FROM contratos").fetchall()
+    desfeitos = _vinculos_desfeitos(conn)
     out = {}
     for p in processos:
         if p["medicao_id"] is not None or p["protocolo_id"] is not None:
@@ -986,7 +1005,7 @@ def propostas_de_medicao(conn, processos: list) -> dict[int, dict]:
         ms = conn.execute("SELECT m.id, m.numero, m.tipo, m.contrato_id, m.estado FROM medicoes m WHERE m.contrato_id=? "
                           "AND m.numero=? AND m.tipo=? AND m.estado NOT IN ('cancelada', 'desistida')",
                           (next(iter(obras)), *alvo)).fetchall()
-        if len(ms) == 1:
+        if len(ms) == 1 and (p["id"], ms[0]["id"]) not in desfeitos:
             m = dict(ms[0])
             out[p["id"]] = {"id": m["id"], "contrato_id": m["contrato_id"], "titulo": medicoes.titulo(m),
                             "obra": _obra(conn, m["contrato_id"]), "estado": m["estado"]}
@@ -998,6 +1017,20 @@ def protocolo_novo_pendente(conn, medicao_ids) -> set[int]:
     processos do SIGA, todos, foram arquivados ou juntados. Em algumas superintendencias o pleito, curto, e' arquivado
     quando o processo da medicao e' aberto, com outro codigo: o processo sai do quadro e a medicao pede o novo. Ligado
     pela medicao ou pelo protocolo que a leva, como em `posicao_das_medicoes`."""
+    return set(_pendencias_do_protocolo_novo(conn, medicao_ids))
+
+
+def _ultimo_andamento(movimentacoes: list[dict]) -> str | None:
+    """A data da movimentacao mais recente, fora Marcacao, Anotacao e cancelada (a regua da #840)."""
+    datas = [m["data"] for m in movimentacoes
+             if not _marcacao_ou_anotacao(m["evento"]) and "cancelad" not in (m["evento"] or "").lower()]
+    return max(datas) if datas else None
+
+
+def _pendencias_do_protocolo_novo(conn, medicao_ids) -> dict[int, dict]:
+    """{medicao: {motivos, data}} das medicoes de `protocolo_novo_pendente`. `motivos`: os de encerramento dos
+    processos dela (arquivado, juntado); `data`: o ultimo andamento entre eles ('AAAA-MM-DD ...', hora de Cuiaba) ou
+    None, para o aviso da fila (#881) ter a data do fato."""
     medicoes_de: dict[int, set[int]] = {}
     estados = {}
     for lote in _em_lotes(medicao_ids):
@@ -1011,7 +1044,7 @@ def protocolo_novo_pendente(conn, medicao_ids) -> set[int]:
                 [*lote, *lote]):
             medicoes_de.setdefault(r[0], set()).add(r[1])
     if not medicoes_de:
-        return set()
+        return {}
     situacoes, manuais = _situacoes(conn, medicoes_de), _manuais(conn)
     movs_de: dict[int, list] = {}
     for lote in _em_lotes(sorted(medicoes_de)):
@@ -1019,12 +1052,18 @@ def protocolo_novo_pendente(conn, medicao_ids) -> set[int]:
                               f"WHERE processo_id IN ({','.join('?' * len(lote))})", lote):
             movs_de.setdefault(r["processo_id"], []).append(dict(r))
     motivos_da: dict[int, list[str | None]] = {}
+    datas_da: dict[int, list[str]] = {}
     for pid, mids in medicoes_de.items():
         manual = manuais.get(pid)
-        motivo = _encerramento(None, situacoes.get(pid), movs_de.get(pid, []), manual["encerrado_em"] if manual else None)
+        movs = movs_de.get(pid, [])
+        motivo = _encerramento(None, situacoes.get(pid), movs, manual["encerrado_em"] if manual else None)
+        data = _ultimo_andamento(movs)
         for mid in mids:
             motivos_da.setdefault(mid, []).append(motivo)
-    return {mid for mid, motivos in motivos_da.items()
+            if data:
+                datas_da.setdefault(mid, []).append(data)
+    return {mid: {"motivos": set(motivos), "data": max(datas_da[mid]) if mid in datas_da else None}
+            for mid, motivos in motivos_da.items()
             if estados.get(mid) not in ("recebida", "cancelada", "desistida")
             and all(m in ("arquivado", "juntado") for m in motivos)}
 
@@ -1193,7 +1232,7 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
         categoria = sugerida or categoria
         medicao_titulo = medicoes.titulo({"numero": p["m_numero"], "tipo": p["m_tipo"]}) if p["medicao_id"] \
             else _titulo_das_medicoes(conn, None, p["protocolo_id"])
-        assunto = o_que_e(categoria, p["complemento"], medicao_titulo)
+        assunto = o_que_e(categoria, p["complemento"], medicao_titulo or _titulo_do_nome(p["nome"]))
         obra = obras.get(p["contrato_id"]) if p["contrato_id"] else None
         saida.append({
             "id": p["id"], "codigo": p["codigo"], "link": link_do_processo(p["codigo"]), "numero": p["numero"], "nome": p["nome"],
@@ -1508,12 +1547,39 @@ def saude(conn) -> dict:
             "processos": conn.execute("SELECT COUNT(*) FROM siga_processos").fetchone()[0]}
 
 
+_O_QUE_HOUVE = {frozenset({"arquivado"}): "arquivado", frozenset({"juntado"}): "juntado a outro processo"}
+
+
+def _avisos_do_protocolo_novo(conn) -> list[dict]:
+    """`siga_protocolo_novo` (#881): a pendencia do protocolo novo (`protocolo_novo_pendente`) tambem na fila de
+    avisos, alem da caixa na pagina da medicao. Um por medicao, com a data do ultimo andamento do processo (o
+    arquivamento ou a juntada); o clique leva a' pagina da medicao, onde a caixa diz em que passo colar o link. Some
+    com o processo novo vivo ligado a' medicao, ou com a medicao recebida, cancelada ou desistida."""
+    ids = [r[0] for r in conn.execute(
+        "SELECT m.id FROM medicoes m WHERE m.estado NOT IN ('recebida','cancelada','desistida') AND ("
+        "EXISTS (SELECT 1 FROM siga_processos sp WHERE sp.medicao_id=m.id) OR EXISTS (SELECT 1 FROM siga_processos sp "
+        "JOIN protocolo_medicoes pm ON pm.protocolo_id=sp.protocolo_id WHERE pm.medicao_id=m.id)) ORDER BY m.id")]
+    out = []
+    for mid, pendencia in sorted(_pendencias_do_protocolo_novo(conn, ids).items()):
+        m = conn.execute("SELECT contrato_id, numero, tipo FROM medicoes WHERE id=?", (mid,)).fetchone()
+        houve = _O_QUE_HOUVE.get(frozenset(pendencia["motivos"]), "arquivado ou juntado")
+        data = pendencia["data"][:10] if pendencia["data"] else None
+        out.append({**registro_avisos.aviso(
+            "siga_protocolo_novo", "atencao",
+            f"{medicoes.titulo(dict(m))}: processo do SIGA {houve}, falta o protocolo novo", m["contrato_id"],
+            registro_avisos.obra(conn, m["contrato_id"]),
+            destino={"tela": "contrato", "id": m["contrato_id"], "aba": "medicao"},
+            data=data, sentido="desde" if data else None), "medicao_id": mid})
+    return out
+
+
 def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) -> list[dict]:
     """Avisos da fila (issue #330). `siga_parado`: processo ligado a medicao ainda nao recebida, 5 dias uteis ou
     mais sem movimentacao: os dias sao os da coluna "Dias sem movimentacao" da tela (`derivar`, desde a ultima
     movimentacao fora Marcacao e Anotacao, #840), e o nivel e' o de `parado`. Um so' por medicao: o do processo do protocolo mais recente (sem protocolo
     vale menos que com; empate, o processo mais novo), porque o antigo fica arquivado no SIGA depois de uma
-    devolucao; o arquivado (#657) nao avisa. `siga_sem_leitura`: um so', quando o robo passou do atraso nos processos vivos. Processo sem
+    devolucao; o arquivado (#657) nao avisa. `siga_protocolo_novo` (#881): a medicao que pede o protocolo novo
+    (`_avisos_do_protocolo_novo`). `siga_sem_leitura`: um so', quando o robo passou do atraso nos processos vivos. Processo sem
     medicao (Outros processos) nao avisa: nao ha' obra nem ato da dashboard que o faca sumir."""
     agora = agora or tempo.agora_utc()
     out = []
@@ -1544,6 +1610,7 @@ def avisos(conn, hoje: datetime.date, agora: datetime.datetime | None = None) ->
             registro_avisos.obra(conn, p["contrato_id"]), dias=dias,
             destino={"tela": "siga", "processo": p["id"]}, data=parado_desde, sentido="desde"),
             "medicao_id": p["medicao_id"]})
+    out.extend(_avisos_do_protocolo_novo(conn))
     lido_em = _leitura_dos_vivos(conn, encerrados(conn))
     if atrasado(lido_em, agora):
         local = tempo.para_local(datetime.datetime.fromisoformat(lido_em))
