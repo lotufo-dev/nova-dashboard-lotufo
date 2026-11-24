@@ -56,6 +56,7 @@
 /* sob o nome: a situacao com o motivo escrito; na coluna propria da pagina do contratante, o mesmo desenho */
 .obras-situacao { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-traco) var(--espaco-pp); font-size: var(--texto-meta); }
 .obras-situacao__motivo { min-width: 0; color: var(--cor-tinta); }
+.obras-situacao__trecho { white-space: nowrap; }  /* "Prazo no fim ·" e "execucao ate' dd/mm": a quebra so' cai entre os dois */
 .obras-situacao__mais { font-size: var(--texto-mini); white-space: nowrap; }
 .obras-do-contratante__situacao { min-width: calc(var(--alvo-minimo) * 4); }
 /* o percentual do necessario e' o que separa uma obra da outra na vista Andamento: numero em tinta, do corpo */

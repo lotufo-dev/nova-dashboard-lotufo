@@ -271,6 +271,9 @@ describe("Página do contratante (#805)", () => {
     expect(limpo(situacao("Estações BRT").textContent)).toBe(`Prazo no fim · execução até 15/01/${Number(ano) + 1}`);
     for (const nome of ["Anel Viário", "Estações BRT"]) {
       expect(situacao(nome).querySelector(".obras-situacao__prazo")).toBeTruthy();
+      // #848: a frase quebra so' no "·": "Prazo no fim ·" e "execução até dd/mm" sao trechos que nao quebram por dentro
+      expect([...situacao(nome).querySelectorAll(".obras-situacao__trecho")].map(t => t.textContent))
+        .toEqual(["Prazo no fim ·", expect.stringMatching(/^execução até \d{2}\/\d{2}(\/\d{4})?$/)]);
       expect(situacao(nome).querySelector(".selo, .glifo, .obras-etiqueta")).toBeNull();
     }
     // o aviso do farol continua ganhando; a prorrogacao pedida com prazo pela frente continua "Em dia"
