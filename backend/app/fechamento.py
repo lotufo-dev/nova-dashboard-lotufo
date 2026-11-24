@@ -618,7 +618,7 @@ def _medido_do_ano_anterior(lista: list[dict], hoje: datetime.date) -> None:
 
 def _linhas_das_medicoes(conn) -> list[dict]:
     """A linha (`_linha_medicao`) de cada medicao que mede, com as notas dela: a base de toda soma desta pagina e da
-    pagina A receber (`a_receber.py`, issue #816), que le o em aberto daqui sem refazer a conta. As chaves que comecam
+    pagina Em aberto (`a_receber.py`, issue #816), que le o em aberto daqui sem refazer a conta. As chaves que comecam
     com `_` sao internas e saem antes da resposta (`_fechamento`)."""
     ms = _medicoes(conn)
     notas = _notas_por_medicao(conn, {m["id"] for m in ms})
@@ -630,7 +630,7 @@ def _em_aberto_da_medicao(x: dict, emitida_em: str | None) -> list[dict]:
     que falta de cada nota que conta e nao esta' recebida, e (b) a medicao sem nota ligada, pelo valor dela. Cada uma
     leva a obra, a medicao, a competencia e de quando a espera conta (`protocolo_em`; na medicao sem protocolo da obra
     sem o passo "Envio da nota", `emitida_em`). O em aberto do Fechamento (`_fechamento`, o do ano e o anterior a
-    `ANOS`) e o da pagina A receber (issue #816) saem daqui."""
+    `ANOS`) e o da pagina Em aberto (issue #816) saem daqui."""
     abertas = [{"tipo_aberto": "repasse" if nt["aguarda_repasse"] else "nota", "nota_id": nt["nota_id"], "numero": nt["numero"],
                 "valor_centavos": nt["em_aberto_centavos"], "paga_em_parte": nt["paga_em_parte"]}
                for nt in x["notas"] if not nt["recebida"]]
