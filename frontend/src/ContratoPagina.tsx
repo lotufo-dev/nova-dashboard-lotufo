@@ -191,8 +191,9 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
                 <div className="painel-aba">
                   {abaAtiva === "medicoes" && (
                     <div className="pilha">
-                      {/* a medicao nasce do espelho, na etapa 1 da pagina dela (ou, no fluxo antigo, a mao): aqui so' o atalho */}
-                      {podeEditar && !c.sem_fluxo_medicao && <IniciarProxima contratoId={contratoId} versao={versaoMedicoes} inicial={medicaoDaBusca(busca)}
+                      {/* a medicao nasce do espelho, na etapa 1 da pagina dela (ou, no fluxo antigo, a mao): aqui so' o atalho.
+                          Obra encerrada ou rescindida nao inicia medicao: sem o atalho e sem o formulario (o servidor nao a barra, a tela nao a oferece) */}
+                      {podeEditar && !c.sem_fluxo_medicao && c.status !== "encerrado" && c.status !== "rescindido" && <IniciarProxima contratoId={contratoId} versao={versaoMedicoes} inicial={medicaoDaBusca(busca)}
                         medicoes={lidas?.obra === contratoId ? lidas.itens : null} aoCriar={() => setVersaoMedicoes(v => v + 1)} />}
                       <Medicoes contratoId={contratoId} busca={busca} versao={versaoMedicoes}
                         aoLer={itens => setLidas({ obra: contratoId, itens })} />
