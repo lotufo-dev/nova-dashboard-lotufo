@@ -18,6 +18,7 @@ import type { Situacao } from "./situacao";
 import Pendencias from "./Pendencias";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import Falha from "./Falha";
+import ErroCampo from "./ErroCampo";
 
 // Protocolo de medicao feito pelo sistema (bloco 5; spec §3 passos 4 a 7). A tela desenha o que o
 // servidor responde (etapas da familia, pecas do orgao, pendencias, conferencia do assinado): as
@@ -224,9 +225,19 @@ function NumeroOrgao({ p, podeEditar, aoMudar }: { p: ProtocoloDet; podeEditar: 
   const [erro, setErro] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const entradaArquivo = useRef<HTMLInputElement>(null);
+  // Issue #11: o numero vazio que o servidor recusaria com certeza (sem comprovante e sem link novo, ou com
+  // comprovante e sem numero gravado) para no clique, com o erro no campo; os outros vazios seguem ao servidor.
+  const [tentou, setTentou] = useState(false);
+  const linkDigitado = linkSiga.trim();
+  const faltaNumero = numero.trim() ? undefined
+    : comprovante ? (p.numero_orgao ? undefined : "Informe o número do protocolo junto com o comprovante.")
+    : !linkDigitado || linkDigitado === linkGravado ? "Informe o número do protocolo no órgão." : undefined;
+  const erroNumero = tentou ? faltaNumero : undefined;
   async function salvar(ev: React.FormEvent) {
     ev.preventDefault();
     if (ocupado) return;
+    setTentou(true);
+    if (faltaNumero) { document.getElementById(`orgao-${p.id}`)?.focus(); return; }
     const fd = new FormData();
     fd.append("numero", numero);
     const linkNovo = linkSiga.trim();
@@ -235,6 +246,7 @@ function NumeroOrgao({ p, podeEditar, aoMudar }: { p: ProtocoloDet; podeEditar: 
     setOcupado(true); setErro("");
     try {
       aoMudar(await apiForm<ProtocoloDet>(`/api/protocolos/${p.id}/numero-orgao`, fd));
+      setTentou(false);
       if (linkNovo) setLinkGravado(linkNovo);
       setComprovante(null);
       if (entradaArquivo.current) entradaArquivo.current.value = "";
@@ -249,7 +261,10 @@ function NumeroOrgao({ p, podeEditar, aoMudar }: { p: ProtocoloDet; podeEditar: 
           <label className="campo__rotulo" htmlFor={`orgao-${p.id}`}>Nº do protocolo no órgão</label>
           {/* gate Sol S1 (10/10/2026): vazio so' passa para anexar o comprovante de um numero ja' gravado; o erro do
               servidor explica na hora */}
-          <input id={`orgao-${p.id}`} name="numero_orgao" autoComplete="off" spellCheck={false} className="entrada--media" maxLength={100} value={numero} disabled={!podeEditar} onChange={e => setNumero(e.target.value)} />
+          <input id={`orgao-${p.id}`} name="numero_orgao" autoComplete="off" spellCheck={false} className="entrada--media" maxLength={100} value={numero} disabled={!podeEditar}
+            {...(erroNumero ? { "aria-invalid": true as const, "aria-describedby": `orgao-${p.id}-erro` } : {})}
+            onChange={e => setNumero(e.target.value)} />
+          <ErroCampo id={`orgao-${p.id}-erro`} erro={erroNumero} />
         </div>
         {/* issue #328: o link que o orgao manda por e-mail; e' por ele que o robo acompanha o processo. Quem so'
             consulta nao ve o campo, ve a linha "No SIGA" logo abaixo */}

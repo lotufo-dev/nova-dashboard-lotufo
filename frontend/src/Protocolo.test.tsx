@@ -309,6 +309,43 @@ describe("Protocolo", () => {
       expect(entrada.value).toBe("");                 // escolher o mesmo arquivo de novo dispara onChange
     });
 
+    // issue #11: o vazio que o servidor recusaria com certeza para no clique, com o erro no campo
+    it("nº vazio sem comprovante e sem link novo: o clique mostra o erro no campo e não chama o servidor", async () => {
+      apiForm.mockResolvedValueOnce({ ...ENVIADO, numero_orgao: "X-9" });
+      tela({ ...ENVIADO, numero_orgao: "" });
+      const campo = await screen.findByLabelText("Nº do protocolo no órgão");
+      const salvar = screen.getByRole("button", { name: "Salvar" }) as HTMLButtonElement;
+      fireEvent.click(salvar);
+      expect(apiForm).not.toHaveBeenCalled();
+      expect(campo.getAttribute("aria-invalid")).toBe("true");
+      expect(document.getElementById(campo.getAttribute("aria-describedby") ?? "")?.textContent).toContain("Informe o número do protocolo no órgão.");
+      expect(document.activeElement).toBe(campo);
+      // com o comprovante e sem número gravado, o servidor também recusaria: o erro diz o que falta
+      fireEvent.change(screen.getByLabelText("Anexar o comprovante do órgão (PDF)"), { target: { files: [pdf()] } });
+      fireEvent.click(salvar);
+      expect(apiForm).not.toHaveBeenCalled();
+      expect(screen.getByText("Informe o número do protocolo junto com o comprovante.")).toBeTruthy();
+      fireEvent.change(campo, { target: { value: "X-9" } });
+      expect(campo.getAttribute("aria-invalid")).toBeNull();
+      fireEvent.click(salvar);
+      await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(1));
+      const fd = apiForm.mock.calls[0][1] as FormData;
+      expect(fd.get("numero")).toBe("X-9");
+      expect((fd.get("comprovante") as File).name).toBe("protocolo-orgao.pdf");
+    });
+
+    it("nº vazio com o comprovante e o número já gravado segue ao servidor, sem erro no campo", async () => {
+      apiForm.mockResolvedValueOnce(ENVIADO);
+      tela(ENVIADO);
+      const campo = await screen.findByLabelText("Nº do protocolo no órgão");
+      fireEvent.change(campo, { target: { value: "" } });
+      fireEvent.change(screen.getByLabelText("Anexar o comprovante do órgão (PDF)"), { target: { files: [pdf()] } });
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      await waitFor(() => expect(apiForm).toHaveBeenCalledTimes(1));
+      expect((apiForm.mock.calls[0][1] as FormData).get("numero")).toBe("");
+      expect(campo.getAttribute("aria-invalid")).toBeNull();
+    });
+
     it("sem arquivo escolhido, não manda o campo do comprovante", async () => {
       apiForm.mockResolvedValueOnce(ENVIADO);
       tela(ENVIADO);

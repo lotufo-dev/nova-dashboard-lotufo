@@ -138,8 +138,18 @@ test("regularidade: situação, competência esperada, anexadas e gravar com a c
   const campo = screen.getByLabelText("Competência") as HTMLInputElement;
   expect(campo.value).toBe("07/2026");              // a esperada vem da API como 2026-07
   const gravar = screen.getByRole("button", { name: /Gravar regularidade/ }) as HTMLButtonElement;
-  expect(gravar.disabled).toBe(true);
-  fireEvent.change(screen.getByLabelText(/da regularidade de Lotufo/), { target: { files: [new File(["%PDF"], "x.pdf", { type: "application/pdf" })] } });
+  // issue #11: o botão não fica apagado esperando o PDF; o clique sem ele diz o que falta, no campo do arquivo
+  expect(gravar.disabled).toBe(false);
+  const antes = vi.mocked(apiForm).mock.calls.length;
+  fireEvent.click(gravar);
+  expect(vi.mocked(apiForm).mock.calls.length).toBe(antes);
+  const arquivo = screen.getByLabelText(/da regularidade de Lotufo/);
+  expect(arquivo.getAttribute("aria-invalid")).toBe("true");
+  expect(document.getElementById(arquivo.getAttribute("aria-describedby") ?? "")?.textContent).toContain("Escolha o PDF da regularidade.");
+  expect(document.activeElement).toBe(arquivo);
+  fireEvent.change(arquivo, { target: { files: [new File(["%PDF"], "x.pdf", { type: "application/pdf" })] } });
+  expect(screen.queryByText("Escolha o PDF da regularidade.")).toBeNull();
+  expect(arquivo.getAttribute("aria-invalid")).toBeNull();
   fireEvent.change(campo, { target: { value: "062026" } });
   expect(campo.value).toBe("06/2026");
   fireEvent.click(gravar);

@@ -13,6 +13,7 @@ import "./notas.css";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
 import { fmtHora } from "./tempo";
 import Falha from "./Falha";
+import ErroCampo from "./ErroCampo";
 
 // Enviar a nota (2026-10-09): o protocolo da etapa `nota` (SINFRA) ou `unico` (demais) de um envio. Sem carta
 // (SINFRA, prefeituras): o que vai no e-mail e para quem vai. Com carta (MTPAR, SES): oficio, assinar e enviar
@@ -56,14 +57,25 @@ function Complementares({ protocoloId, extras, links, ocupado, agir, aoMudar, em
   const [sobre, setSobre] = useState(false);
   const [linkNome, setLinkNome] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
+  const [tentouLink, setTentouLink] = useState(false);
+  const idNome = `link-nome-${protocoloId}`;
+  const idUrl = `link-url-${protocoloId}`;
+  // O botao nao fica apagado esperando os campos (issue #11): o clique diz o que falta, junto do campo.
+  const faltaNome = !linkNome.trim() ? "Escreva o nome do arquivo." : undefined;
+  const faltaUrl = !linkUrl.trim() ? "Cole o link do OneDrive." : undefined;
+  const erroNome = tentouLink ? faltaNome : undefined;
+  const erroUrl = tentouLink ? faltaUrl : undefined;
 
   // Arquivo grande por link do OneDrive (opcao A, 09/10/2026): como a Maria fazia no Outlook ("anexar como link").
   // O link entra no corpo do e-mail e nao conta no limite de 25 MB dos anexos.
   function adicionarLink() {
+    setTentouLink(true);
+    const primeira = faltaNome ? idNome : faltaUrl ? idUrl : null;
+    if (primeira) { document.getElementById(primeira)?.focus(); return; }
     void agir(async () => {
       await api(`/api/protocolos/${protocoloId}/links`, { method: "POST",
         body: JSON.stringify({ nome: linkNome.trim(), url: linkUrl.trim() }) });
-      setLinkNome(""); setLinkUrl("");
+      setLinkNome(""); setLinkUrl(""); setTentouLink(false);
       await aoMudar();
     });
   }
@@ -133,17 +145,21 @@ function Complementares({ protocoloId, extras, links, ocupado, agir, aoMudar, em
         </ul>
       )}
       <form className="nota-complementares__link" onSubmit={ev => { ev.preventDefault(); adicionarLink(); }}>
-        <label className="campo">
-          <span className="campo__nota">Nome do arquivo</span>
-          <input type="text" value={linkNome} maxLength={200}
+        <div className="campo">
+          <label className="campo__nota" htmlFor={idNome}>Nome do arquivo</label>
+          <input id={idNome} type="text" value={linkNome} maxLength={200}
+            {...(erroNome ? { "aria-invalid": true as const, "aria-describedby": `${idNome}-erro` } : {})}
             disabled={ocupado} onChange={ev => setLinkNome(ev.target.value)} />
-        </label>
-        <label className="campo nota-complementares__url">
-          <span className="campo__nota">Link do OneDrive</span>
-          <input type="url" name="link_url" autoComplete="off" spellCheck={false} value={linkUrl} maxLength={2100} placeholder="https://…sharepoint.com/…"
+          <ErroCampo id={`${idNome}-erro`} erro={erroNome} />
+        </div>
+        <div className="campo nota-complementares__url">
+          <label className="campo__nota" htmlFor={idUrl}>Link do OneDrive</label>
+          <input id={idUrl} type="url" name="link_url" autoComplete="off" spellCheck={false} value={linkUrl} maxLength={2100} placeholder="https://…sharepoint.com/…"
+            {...(erroUrl ? { "aria-invalid": true as const, "aria-describedby": `${idUrl}-erro` } : {})}
             disabled={ocupado} onChange={ev => setLinkUrl(ev.target.value)} />
-        </label>
-        <button type="submit" className="btn btn--pequeno" disabled={ocupado || !linkNome.trim() || !linkUrl.trim()}>Adicionar link</button>
+          <ErroCampo id={`${idUrl}-erro`} erro={erroUrl} />
+        </div>
+        <button type="submit" className="btn btn--pequeno" disabled={ocupado}>Adicionar link</button>
       </form>
     </div>
   );

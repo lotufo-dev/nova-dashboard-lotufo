@@ -32,6 +32,7 @@ import { VoltarOrigem } from "./Topo";
 import "./etapas.css";
 import "./passos.css";
 import Falha from "./Falha";
+import ErroCampo from "./ErroCampo";
 
 // Pagina da obra em medicao (issue #508, aprovada em 06/11/2026): "Nª Medição + Reajuste" numa pagina so', com o
 // cabecalho (obra, medicao, mes e o valor grande), a BARRA DE PASSOS -- Planilha e carta, Analise do orgao,
@@ -784,8 +785,13 @@ function CampoNumeroOrgao({ ms, rotulo, podeEditar, aoMudar }: { ms: Medicao[]; 
   const [erro, setErro] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const id = `numero-orgao-fora-${ms[0].id}`;
+  // O botao nao fica apagado esperando o numero (issue #11): o clique diz o que falta, junto do campo.
+  const [tentou, setTentou] = useState(false);
+  const erroNumero = tentou && !numero.trim() ? "Informe o número do protocolo no órgão." : undefined;
   async function salvar(ev: React.FormEvent) {
     ev.preventDefault();
+    setTentou(true);
+    if (!numero.trim()) { document.getElementById(id)?.focus(); return; }
     setOcupado(true); setErro("");
     const gravadas: string[] = [];
     try {
@@ -804,9 +810,12 @@ function CampoNumeroOrgao({ ms, rotulo, podeEditar, aoMudar }: { ms: Medicao[]; 
       <div className="campo">
         <label className="campo__rotulo" htmlFor={id}>Nº do protocolo no órgão{rotulo}</label>
         <input id={id} name="numero_orgao" autoComplete="off" spellCheck={false} className="entrada--media" maxLength={100}
-          value={numero} disabled={!podeEditar} onChange={ev => setNumero(ev.target.value)} />
+          value={numero} disabled={!podeEditar}
+          {...(erroNumero ? { "aria-invalid": true as const, "aria-describedby": `${id}-erro` } : {})}
+          onChange={ev => setNumero(ev.target.value)} />
+        <ErroCampo id={`${id}-erro`} erro={erroNumero} />
       </div>
-      {podeEditar && <button type="submit" className="btn btn--pequeno" disabled={ocupado || !numero.trim()}>{ocupado ? "Salvando…" : "Salvar"}</button>}
+      {podeEditar && <button type="submit" className="btn btn--pequeno" disabled={ocupado}>{ocupado ? "Salvando…" : "Salvar"}</button>}
       {erro && <span className="notas__diverge">{erro}</span>}
     </form>
   );

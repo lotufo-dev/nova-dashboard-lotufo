@@ -371,20 +371,27 @@ export function FormMotivo({ id, titulo, rotulo, placeholder, acao, acaoOcupada,
   ocupado: boolean; aoConfirmar: (motivo: string) => void; aoFechar: () => void; destrutivo?: boolean;
 }) {
   const [motivo, setMotivo] = useState("");
+  const [tentou, setTentou] = useState(false);
+  const erro = tentou && !motivo.trim() ? "Escreva o motivo." : undefined;
   function enviar(ev: React.FormEvent) {
     ev.preventDefault();
-    if (motivo.trim()) aoConfirmar(motivo.trim());
+    setTentou(true);
+    if (!motivo.trim()) { document.getElementById(id)?.focus(); return; }
+    aoConfirmar(motivo.trim());
   }
   return (
-    <form className="painel-inline" onSubmit={enviar} onKeyDown={ev => ev.key === "Escape" && aoFechar()}>
+    <form className="painel-inline" onSubmit={enviar} noValidate onKeyDown={ev => ev.key === "Escape" && aoFechar()}>
       <p className="painel__titulo">{titulo}</p>
       <div className="form-inline">
         <CaixaJustificativa>
           <label className="campo__rotulo" htmlFor={id}>{rotulo}</label>
           <input id={id} name="motivo" autoComplete="off" className="entrada--larga" required maxLength={1000} autoFocus
-            placeholder={placeholder} value={motivo} onChange={ev => setMotivo(ev.target.value)} />
+            placeholder={placeholder} value={motivo}
+            {...(erro ? { "aria-invalid": true as const, "aria-describedby": `${id}-erro` } : {})}
+            onChange={ev => setMotivo(ev.target.value)} />
+          <ErroCampo id={`${id}-erro`} erro={erro} />
         </CaixaJustificativa>
-        <button type="submit" className={`btn ${destrutivo ? "btn--destrutivo" : "btn--primario"}`} disabled={ocupado || !motivo.trim()}>
+        <button type="submit" className={`btn ${destrutivo ? "btn--destrutivo" : "btn--primario"}`} disabled={ocupado}>
           {ocupado ? acaoOcupada : acao}
         </button>
         <button type="button" className="btn" onClick={aoFechar}>Voltar</button>

@@ -7,6 +7,7 @@ import { MIN_JUSTIFICATIVA } from "./JustificativaEnvio";
 import { avisoPorFora, mensagem, notasDe, type Envio, type Irma } from "./NotasAEnviar";
 import { hojeLocal } from "./tempo";
 import Falha from "./Falha";
+import ErroCampo from "./ErroCampo";
 
 // "Registrar envio feito fora do sistema" (16/10/2026): UMA acao so', na etapa 4 da pagina da medicao, para o que ja'
 // saiu por fora (e-mail pelo Outlook, protocolo no balcao do orgao). Junta o antigo "Registrar envio feito por fora"
@@ -51,10 +52,25 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
     || (e.irmas ?? []).some(i => !irmasFora.includes(i.medicao_id) && divergente(i.divergencias))));
   const motivoCurto = diverge && motivo.trim().length < MIN_JUSTIFICATIVA;
 
+  // O botao nao fica apagado esperando o formulario valer (issue #11): o clique diz o que falta, junto do campo.
+  // As regras sao as de antes (data obrigatoria e nao futura, como o `max` do campo; observacao; motivo minimo).
+  const [tentou, setTentou] = useState(false);
+  const faltas = {
+    data: !data ? "Informe a data do envio." : data > hojeLocal() ? "A data do envio não pode ser futura." : undefined,
+    obs: !obs.trim() ? "Escreva como e para quem a nota foi enviada." : undefined,
+    motivo: motivoCurto ? `Escreva o motivo, com pelo menos ${MIN_JUSTIFICATIVA} caracteres.` : undefined,
+  };
+  const erroDe = (campo: keyof typeof faltas) => tentou ? faltas[campo] : undefined;
+  const ligacao = (campo: keyof typeof faltas, id: string) =>
+    erroDe(campo) ? { "aria-invalid": true as const, "aria-describedby": `${id}-erro` } : {};
+
   const fechar = () => { if (parcial) aoRecarregar(); aoFechar(); };
 
   function registrar(ev: React.FormEvent) {
     ev.preventDefault();
+    setTentou(true);
+    const primeira = faltas.data ? "porfora-data" : faltas.obs ? "porfora-obs" : faltas.motivo ? "porfora-motivo" : null;
+    if (primeira) { document.getElementById(primeira)?.focus(); return; }
     void executar(confirmadas);
   }
 
@@ -120,12 +136,14 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
 
   return (
     <Janela titulo="Registrar envio feito fora do sistema" aoFechar={fechar}>
-      <form className="pilha" onSubmit={registrar}>
-        <div className="form-inline">
+      <form className="pilha" onSubmit={registrar} noValidate>
+        <div className="form-inline porfora__linha">
           <div className="campo">
             <label className="campo__rotulo" htmlFor="porfora-data">Data do envio (obrigatória)</label>
             <input id="porfora-data" type="date" required autoFocus className="entrada--media" value={data} max={hojeLocal()}
+              {...ligacao("data", "porfora-data")}
               onChange={e => setData(e.target.value)} />
+            <ErroCampo id="porfora-data-erro" erro={erroDe("data")} />
           </div>
           <div className="campo">
             <label className="campo__rotulo" htmlFor="porfora-oficio">Nº do ofício (opcional)</label>
@@ -146,13 +164,17 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
         <div className="campo">
           <label className="campo__rotulo" htmlFor="porfora-obs">Como e para quem a nota foi enviada</label>
           <textarea id="porfora-obs" rows={2} maxLength={2000} required value={obs}
+            {...ligacao("obs", "porfora-obs")}
             onChange={e => setObs(e.target.value)} />
+          <ErroCampo id="porfora-obs-erro" erro={erroDe("obs")} />
         </div>
         {diverge && (
           <CaixaJustificativa>
             <label className="campo__rotulo" htmlFor="porfora-motivo">Motivo do registro com a nota divergente (obrigatório)</label>
             <textarea id="porfora-motivo" name="motivo_divergencia" rows={2} maxLength={2000} required value={motivo}
+              {...ligacao("motivo", "porfora-motivo")}
               onChange={e => setMotivo(e.target.value)} />
+            <ErroCampo id="porfora-motivo-erro" erro={erroDe("motivo")} />
           </CaixaJustificativa>
         )}
         <fieldset className="opcoes">
@@ -179,7 +201,7 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
         </fieldset>
         {erro && <Falha>{erro}</Falha>}
         <div className="iniciar__rodape">
-          <button type="submit" className="btn btn--primario" disabled={ocupado || !data || !obs.trim() || motivoCurto}>{ocupado ? "Gravando…" : "Registrar"}</button>
+          <button type="submit" className="btn btn--primario" disabled={ocupado}>{ocupado ? "Gravando…" : "Registrar"}</button>
           <button type="button" className="btn" onClick={fechar}>Cancelar</button>
         </div>
       </form>

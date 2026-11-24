@@ -172,13 +172,19 @@ describe("Etapa 4: registrar envio feito fora do sistema", () => {
     await abrir([envio({ divergencias: [{ medicao_id: 631, nota_id: 9, numero: 2275, campo: "valor", espelho: 1, nota: 2, grau: "divergente" }] })]);
     const botao = screen.getByRole("button", { name: "Registrar" }) as HTMLButtonElement;
     fireEvent.change(screen.getByLabelText(COMO), { target: { value: "Pelo Outlook, ao fiscal" } });
-    expect(botao.disabled).toBe(true);
     // #722: a justificativa obrigatoria fica na caixa propria (CaixaJustificativa)
-    expect(screen.getByLabelText("Motivo do registro com a nota divergente (obrigatório)").closest(".justificativa")).not.toBeNull();
-    fireEvent.change(screen.getByLabelText("Motivo do registro com a nota divergente (obrigatório)"), { target: { value: "curto" } });
-    expect(botao.disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Motivo do registro com a nota divergente (obrigatório)"),
-      { target: { value: "NF substituta pedida ao faturamento" } });
+    const motivo = screen.getByLabelText("Motivo do registro com a nota divergente (obrigatório)");
+    expect(motivo.closest(".justificativa")).not.toBeNull();
+    // issue #11: o motivo curto nao apaga o botao; o clique diz o que falta, no campo do motivo
+    fireEvent.change(motivo, { target: { value: "curto" } });
+    expect(botao.disabled).toBe(false);
+    fireEvent.click(botao);
+    expect(apiForm).not.toHaveBeenCalled();
+    expect(motivo.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(motivo.getAttribute("aria-describedby") ?? "")?.textContent).toContain("pelo menos 10 caracteres");
+    expect(document.activeElement).toBe(motivo);
+    fireEvent.change(motivo, { target: { value: "NF substituta pedida ao faturamento" } });
+    expect(screen.queryByText(/pelo menos 10 caracteres/)).toBeNull();
     fireEvent.click(botao);
     await waitFor(() => expect(apiForm).toHaveBeenCalled());
     const [, fd] = apiForm.mock.calls[0] as [string, FormData];
@@ -200,13 +206,42 @@ describe("Etapa 4: registrar envio feito fora do sistema", () => {
     expect([fd.getAll("irma_ids"), fd.get("motivo_divergencia")]).toEqual([["632"], "NF do reajuste substituta pedida"]);
   });
 
+  // issue #11: o botão não fica apagado; o clique sem a observação diz o que falta, no campo
   it("a observação é obrigatória (vira a justificativa na auditoria) e não há texto padrão", async () => {
     await abrir([envio()]);
     const botao = screen.getByRole("button", { name: "Registrar" }) as HTMLButtonElement;
-    expect(botao.disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText(COMO), { target: { value: "   " } });
-    expect(botao.disabled).toBe(true);
+    expect(botao.disabled).toBe(false);
+    const como = screen.getByLabelText(COMO) as HTMLTextAreaElement;
+    expect(como.value).toBe("");
+    fireEvent.change(como, { target: { value: "   " } });
+    fireEvent.click(botao);
     expect(apiForm).not.toHaveBeenCalled();
+    expect(como.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(como.getAttribute("aria-describedby") ?? "")?.textContent)
+      .toContain("Escreva como e para quem a nota foi enviada.");
+    expect(document.activeElement).toBe(como);
+  });
+
+  it("sem a data ou com data futura o clique mostra o erro no campo da data e não grava (issue #11)", async () => {
+    const p = await abrir([envio()]);
+    const data = screen.getByLabelText("Data do envio (obrigatória)");
+    fireEvent.change(screen.getByLabelText(COMO), { target: { value: "Pelo Outlook" } });
+    fireEvent.change(data, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
+    expect(apiForm).not.toHaveBeenCalled();
+    expect(data.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(data.getAttribute("aria-describedby") ?? "")?.textContent).toContain("Informe a data do envio.");
+    expect(document.activeElement).toBe(data);
+    fireEvent.change(data, { target: { value: "2999-01-01" } });
+    expect(screen.getByText("A data do envio não pode ser futura.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
+    expect(apiForm).not.toHaveBeenCalled();
+    fireEvent.change(data, { target: { value: "2026-10-08" } });
+    expect(data.getAttribute("aria-invalid")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Registrar" }));
+    await waitFor(() => expect(p.aoMudar).toHaveBeenCalled());
+    const [, fd] = apiForm.mock.calls[0] as [string, FormData];
+    expect([fd.get("enviado_em"), fd.get("observacao")]).toEqual(["2026-10-08", "Pelo Outlook"]);
   });
 
   it("o ofício vai no campo próprio (issue #231), a observação sai sem ele e o processo vai no nº do órgão da medição", async () => {
