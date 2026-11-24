@@ -202,6 +202,18 @@ describe("Em aberto: o em aberto nota a nota (#816)", () => {
     expect(texto(within(aparte).getByRole("table").querySelector("tfoot"))).toBe("Subtotal à parte R$ 7.777,77");
   });
 
+  it("sem aviso quando toda nota sem medição já está ligada a medição não enviada; o total não muda", async () => {
+    const ligada = { nota_id: 3004, numero: "3004", contrato_id: 9, obra: "Escola Gama", emissao: "2026-08-01", valor_centavos: 777_777,
+      paga_em_parte: false, ligada_a_medicao_nao_enviada: true };
+    await abrir({ ...RESPOSTA, notas_sem_medicao: [ligada],
+      contratantes: [SINFRA, { ...PREFEITURA, notas_sem_medicao: [ligada] }, SES] });
+    const aparte = screen.getByRole("region", { name: "À parte, fora do total" });
+    expect(texto(within(aparte).getByRole("table").querySelector("tbody tr"))).toContain("ligada a medição ainda não enviada");
+    expect(aparte.querySelector(".aviso")).toBeNull();
+    expect(texto(within(aparte).getByRole("table").querySelector("tfoot"))).toBe("Subtotal à parte R$ 7.777,77");
+    expect(texto(document.querySelector(".arc-numero__valor"))).toBe("R$ 1.310.333,33");
+  });
+
   it("contratante sem nada em aberto: a opção fica na fileira com zero e a página diz o vazio em uma linha", async () => {
     await abrir(RESPOSTA, { contratante: "ses-mt" });
     expect(texto(screen.getByRole("link", { name: /SES-MT/ }))).toBe("SES-MT 0");
