@@ -15,7 +15,8 @@ Issue #638: `desconsiderar_nf` e `reconsiderar_nf` nao tem medicao; o alvo e' a 
 ativa no RM e vale, para a dashboard, como cancelada: `situacao` passa a 'cancelada' com a marca `desconsiderada_em`
 (todo leitor de nota ativa ja' a deixa de fora, e a sincronizacao nao a devolve); o registro e' so' a auditoria.
 
-Issue #863: `corrigir_pedido` e' o unico caminho que muda o pedido congelado (`_corrigir_pedido`).
+Issue #863: `corrigir_pedido` e' o unico caminho que muda o pedido congelado (`_corrigir_pedido`). Issue #883: a
+declaracao `espelho_parcial` vence as recusas do espelho quando ele cobre so' parte da medicao (`_espelho_parcial`).
 """
 import datetime
 import re
@@ -41,7 +42,7 @@ DESTINOS_DEVOLVER = ("em_analise", "boletim_recebido")
 CAMPOS_DEVOLVER = {"novo", "motivo", "data", "processo", "aprovado", "data_aprovacao", "meio"}
 # Campos que cada operacao aceita, alem de `operacao`, `fonte`, `medicao_id`, `obra`, `numero` e `tipo`
 CAMPOS = {"cancelar": {"duplicata_de", "motivo"}, "reabrir": CAMPOS_DEVOLVER, "trocar_tipo": {"novo_tipo", "novo_numero"},
-          "devolver": CAMPOS_DEVOLVER, "desfazer_recebimento": {"motivo"}, "corrigir_pedido": {"pedido", "motivo"},
+          "devolver": CAMPOS_DEVOLVER, "desfazer_recebimento": {"motivo"}, "corrigir_pedido": {"pedido", "motivo", "espelho_parcial"},
           "desligar_nf": {"nf", "coligada"}, "ligar_nf": {"nfs", "coligada", "forcar_centro", "parcial"},
           "protocolar": {"data", "processo", "oficio"}, "estado": {"novo", "motivo", "data", "processo", "oficio"},
           "desconsiderar_nf": {"nf", "coligada", "motivo", "substituida_por"},
@@ -761,6 +762,94 @@ def _espelho_do_pedido(conn, mid: int):
         "AND a.criado_em <= e.criado_em) ORDER BY e.versao LIMIT 1", (mid,)).fetchone()
 
 
+def _recusas_do_espelho(conn, m) -> list[str]:
+    """Issue #863: as recusas do `corrigir_pedido` que protegem o espelho, documento que saiu: o pedido que veio do
+    proprio espelho e o espelho gerado a partir do pedido. Na ordem em que se recusa (a primeira e' a mensagem de quem
+    nao declara `espelho_parcial`)."""
+    recusas = []
+    if m["valor_protocolado_origem"] == "espelho":
+        recusas.append("o pedido desta medição veio do espelho: o espelho é documento que saiu, e o valor dele muda "
+                       "gerando o espelho de novo (antes do protocolo), não por aqui")
+    esp = _espelho_do_pedido(conn, m["id"])
+    if esp is not None:
+        atual = m["valor_protocolado_centavos"]
+        recusas.append(f"o espelho versão {esp['versao']} desta medição foi gerado a partir do pedido "
+                       f"({dinheiro.format_brl(atual) if atual is not None else 'sem valor'}), sem boletim: o espelho "
+                       "é documento que saiu e ficaria com um valor que não é mais o pedido")
+    return recusas
+
+
+def _somas_de_notas(notas: list[dict], alvo: int) -> list[dict] | None:
+    """As notas cuja soma de `valor_vinculo` da' `alvo` (a primeira combinacao achada, das menores para as maiores),
+    ou None. So' informa o ensaio: poucas notas por medicao, a busca e' exaustiva ate' 12 delas."""
+    from itertools import combinations
+    if len(notas) > 12:
+        return None
+    for k in range(1, len(notas) + 1):
+        for combo in combinations(notas, k):
+            if sum(n["valor_vinculo"] for n in combo) == alvo:
+                return list(combo)
+    return None
+
+
+def _espelho_parcial(conn, m, novo: int, recusas: list[str]) -> dict:
+    """Issue #883: a medicao saiu em mais de uma nota (uma por fonte de recurso) e o espelho gerado e' o de uma parte
+    dela; o pedido nasceu do espelho e ficou so' com essa parte. A declaracao `espelho_parcial: true` vence as recusas
+    do espelho (`_recusas_do_espelho`) e so' elas: vale com mais de uma nota ligada e com o pedido novo igual a' soma
+    das notas vigentes ligadas a ela (de uma coligada, pela conta de `medicoes.valor_do_par`, a mesma do pedido sem
+    boletim), e com todo espelho da medicao abaixo do pedido novo (ele cobre so' parte). O espelho nao muda. Devolve os
+    detalhes do ensaio e o registro da auditoria (a declaracao, as recusas vencidas, as notas somadas e os espelhos)."""
+    if not recusas:
+        raise ValueError("espelho_parcial vence só as recusas do espelho (pedido que veio do espelho, espelho gerado a "
+                         "partir do pedido) e esta medição não tem nenhuma: tire espelho_parcial")
+    notas = _nfs_ativas(conn, m["id"])
+    if len(notas) < 2:
+        raise ValueError("espelho_parcial só vale na medição com mais de uma nota ligada (uma por fonte de recurso): "
+                         + (f"esta tem só a {_fmt_nf(notas[0])}" if notas else "esta não tem nota ligada"))
+    por_coligada: dict[int, list[dict]] = {}
+    for n in notas:
+        por_coligada.setdefault(n["coligada"], []).append(n)
+    cobre = medicoes.valor_do_par(conn, m["id"], novo)
+    coligada, somadas = next(((col, ns) for col, ns in por_coligada.items()
+                              if len(ns) > 1 and sum(n["valor_vinculo"] for n in ns) == cobre), (None, None))
+    if somadas is None:
+        raise ValueError("com espelho_parcial o pedido é a soma das notas vigentes ligadas à medição ("
+                         + "; ".join(f"coligada {col}: " + " + ".join(_fmt_nf(n) for n in ns) + " = "
+                                     + dinheiro.format_brl(sum(n["valor_vinculo"] for n in ns))
+                                     for col, ns in por_coligada.items())
+                         + f"), e {dinheiro.format_brl(novo)} não é")
+    soma = sum(n["valor_vinculo"] for n in somadas)
+    espelhos = [dict(r) for r in conn.execute(
+        "SELECT e.versao, e.situacao, COALESCE(em.valor_com_sinal_centavos, em.valor_centavos) AS valor_centavos "
+        "FROM espelho_medicoes em JOIN espelhos e ON e.id=em.espelho_id WHERE em.medicao_id=? ORDER BY e.versao, e.id",
+        (m["id"],))]
+    if not espelhos:
+        raise ValueError("espelho_parcial vale na medição com espelho gerado, e esta não tem espelho")
+    for e in espelhos:
+        if e["valor_centavos"] is None or not 0 < e["valor_centavos"] < novo:
+            valor = "sem valor gravado" if e["valor_centavos"] is None else dinheiro.format_brl(e["valor_centavos"])
+            raise ValueError(f"espelho_parcial diz que o espelho cobre só parte da medição, e o espelho versão "
+                             f"{e['versao']} leva {valor}, não uma parte de {dinheiro.format_brl(novo)}")
+    detalhes = ["espelho_parcial declarado: vence a recusa “" + "” e a recusa “".join(recusas) + "”",
+                "o pedido novo é a soma das notas ligadas: " + " + ".join(_fmt_nf(n) for n in somadas)
+                + f" = {dinheiro.format_brl(soma)}" + (f" (coligada {coligada})" if len(por_coligada) > 1 else "")]
+    if cobre != novo:
+        detalhes[-1] += (f"; menos {dinheiro.format_brl(cobre - novo)} do reajuste negativo absorvido pelo espelho, "
+                         f"dá {dinheiro.format_brl(novo)}")
+    for e in espelhos:
+        bate = _somas_de_notas(somadas, medicoes.valor_do_par(conn, m["id"], e["valor_centavos"]))
+        detalhes.append(f"o espelho versão {e['versao']} leva {dinheiro.format_brl(e['valor_centavos'])} e não muda"
+                        + (f": é a parte da {' + '.join(_fmt_nf(n) for n in bate)}" if bate and len(bate) < len(somadas)
+                           else ""))
+        if not bate or len(bate) == len(somadas):
+            detalhes.append(f"AVISO: o valor do espelho versão {e['versao']} não bate com nenhuma das notas somadas "
+                            "(nem com uma soma de parte delas): confira se o espelho é mesmo o de uma das fontes")
+    auditoria_ = {"declarado": True, "recusas_vencidas": recusas, "coligada": coligada, "soma_centavos": soma,
+                  "notas_somadas": [{**_ident_nf(n), "valor_vinculo_centavos": n["valor_vinculo"]} for n in somadas],
+                  "espelhos": espelhos}
+    return {"detalhes": detalhes, "auditoria": auditoria_}
+
+
 def _corrigir_pedido(conn, uid, m, op, fonte):
     """Issue #863: o pedido (`valor_protocolado_centavos`) gravado errado se corrige pelo documento, em medicao
     congelada ou nao, em qualquer estado menos cancelada e desistida. E' o unico caminho que muda pedido congelado. Nao
@@ -770,8 +859,9 @@ def _corrigir_pedido(conn, uid, m, op, fonte):
 
     Recusa o que deixaria incoerente um documento que ja' saiu: o pedido que veio do proprio espelho (muda gerando o
     espelho de novo), a medicao com espelho gerado a partir do pedido e o pedido diferente de toda versao da
-    planilha/carta registrada no sistema. Sem tela e sem evento na linha do tempo (decisao do dono: correcao
-    silenciosa); por isso nao grava `medicao.valor_protocolado`, que a linha do tempo mostra."""
+    planilha/carta registrada no sistema. As duas primeiras cedem so' a' declaracao `espelho_parcial` (#883). Sem
+    tela e sem evento na linha do tempo (decisao do dono: correcao silenciosa); por isso nao grava
+    `medicao.valor_protocolado`, que a linha do tempo mostra."""
     motivo = _texto(op, "motivo")
     if motivo is None:
         raise ValueError("diga o motivo (motivo: ...)")
@@ -781,6 +871,7 @@ def _corrigir_pedido(conn, uid, m, op, fonte):
         # sem aspas, o YAML le 12345 como numero inteiro (R$ 12.345,00) e 12345.67 como fracao: so' texto vale
         raise ValueError(f"pedido inválido: {op['pedido']!r} (escreva entre aspas, como \"1.234,56\")")
     novo = _valor(op, "pedido")
+    parcial = _booleano(op, "espelho_parcial")
     medicoes.conferir_sinal(m["tipo"], novo)
     if novo == 0 and m["tipo"] != "reajuste":
         raise ValueError("pedido zero não é pedido: se a medição não houve, ela se cancela (operação cancelar)")
@@ -790,14 +881,10 @@ def _corrigir_pedido(conn, uid, m, op, fonte):
     atual = m["valor_protocolado_centavos"]
     if atual == novo:
         raise _JaFeito(f"o pedido já é {dinheiro.format_brl(novo)}")
-    if m["valor_protocolado_origem"] == "espelho":
-        raise ValueError("o pedido desta medição veio do espelho: o espelho é documento que saiu, e o valor dele muda "
-                         "gerando o espelho de novo (antes do protocolo), não por aqui")
-    esp = _espelho_do_pedido(conn, m["id"])
-    if esp is not None:
-        raise ValueError(f"o espelho versão {esp['versao']} desta medição foi gerado a partir do pedido "
-                         f"({dinheiro.format_brl(atual) if atual is not None else 'sem valor'}), sem boletim: o espelho "
-                         "é documento que saiu e ficaria com um valor que não é mais o pedido")
+    recusas = _recusas_do_espelho(conn, m)
+    if recusas and not parcial:
+        raise ValueError(recusas[0])
+    declaracao = _espelho_parcial(conn, m, novo, recusas) if parcial else None
     versoes = conn.execute("SELECT versao, valor_pedido_centavos FROM medicao_planilhas WHERE medicao_id=? "
                            "ORDER BY versao", (m["id"],)).fetchall()
     if versoes and m["estado"] == "planilha_gerada":
@@ -834,9 +921,12 @@ def _corrigir_pedido(conn, uid, m, op, fonte):
                        "WHERE id=? AND valor_protocolado_centavos IS ? AND estado=?", (novo, m["id"], atual, m["estado"]))
     db.exigir_uma_linha(cur, "Medição alterada concorrentemente; tente novamente")
     op["_pedido"] = {"motivo_correcao": motivo, "pedido_antes_centavos": atual, "pedido_depois_centavos": novo,
-                     "origem_antes": m["valor_protocolado_origem"]}
+                     "origem_antes": m["valor_protocolado_origem"],
+                     **({"espelho_parcial": declaracao["auditoria"]} if declaracao else {})}
     detalhes = [f"pedido {dinheiro.format_brl(atual) if atual is not None else 'sem valor'} → "
                 f"{dinheiro.format_brl(novo)} (valor cheio)"]
+    if declaracao:
+        detalhes.extend(declaracao["detalhes"])
     if versoes:
         bate = next(v["versao"] for v in versoes if v["valor_pedido_centavos"] == novo)
         detalhes.append(f"é o pedido da versão {bate} da planilha/carta registrada no sistema")
