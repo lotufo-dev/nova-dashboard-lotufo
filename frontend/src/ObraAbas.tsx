@@ -74,7 +74,7 @@ function oQueFalta(i: ItemChecklist): string {
   return `${i.tipo}${i.entidade === null && i.jurisdicao ? ` (${JURISDICOES[i.jurisdicao] ?? i.jurisdicao})` : ""}`;
 }
 
-const NATUREZA = { execucao: "Medição", projeto: "Projeto", reajuste: "Reajuste" };
+const NATUREZA = { execucao: "Medição", reajuste: "Reajuste" };
 
 /** Um quadro por natureza: o veredito de hoje e, quando falta, uma linha por documento com o caminho para a
  *  empresa em Documentos, onde ele e' anexado. */
@@ -129,7 +129,6 @@ export function DocumentosObra({ contratoId }: { contratoId: number }) {
   return (
     <div className="pilha">
       <QuadroExigidos contratoId={contratoId} natureza="execucao" />
-      <QuadroExigidos contratoId={contratoId} natureza="projeto" />
       <QuadroExigidos contratoId={contratoId} natureza="reajuste" />
     </div>
   );

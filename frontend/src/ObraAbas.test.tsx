@@ -19,20 +19,15 @@ const quadroDe = async (nome: string) => (await screen.findByRole("heading", { n
 describe("Documentos da obra", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
-  it("mostra o veredito da medição, o do projeto e o do reajuste, cada um com a sua natureza", async () => {
-    api.mockImplementation((url: string) => Promise.resolve(
-      url.includes("natureza=reajuste") ? checklist(false, [item("pendente", { validade: null, dias: null })])
-        : url.includes("natureza=projeto") ? checklist(false, [item("pendente", { tipo_id: 2, tipo: "CNDT", validade: null, dias: null })])
-          : checklist(true, [item("ok")])));
+  it("mostra o veredito da medição e o do reajuste, cada um com a sua natureza", async () => {
+    api.mockImplementation((url: string) => Promise.resolve(url.includes("natureza=reajuste")
+      ? checklist(false, [item("pendente", { validade: null, dias: null })])
+      : checklist(true, [item("ok")])));
     render(<DocumentosObra contratoId={7} />);
     expect(await within(await quadroDe("Medição")).findByText("Pronto para protocolar")).toBeTruthy();
-    const projeto = await quadroDe("Projeto");
-    expect(await within(projeto).findByText("Falta documento para protocolar")).toBeTruthy();
-    expect(within(projeto).getByRole("list", { name: "O que falta: Projeto" }).textContent).toBe("CNDTConstrutora Alfa");
     expect(await within(await quadroDe("Reajuste")).findByText("Falta documento para protocolar")).toBeTruthy();
     expect(api.mock.calls.map(c => c[0]).sort()).toEqual(
-      ["/api/contratos/7/checklist-protocolo", "/api/contratos/7/checklist-protocolo?natureza=projeto",
-        "/api/contratos/7/checklist-protocolo?natureza=reajuste"]);
+      ["/api/contratos/7/checklist-protocolo", "/api/contratos/7/checklist-protocolo?natureza=reajuste"]);
   });
 
   it("com certidão vencida, diz o que falta numa linha por item e leva à empresa em Documentos", async () => {
@@ -70,7 +65,7 @@ describe("Documentos da obra", () => {
   it("sem documento exigido: uma linha curta, sem veredito", async () => {
     api.mockResolvedValue(checklist(true, []));
     render(<DocumentosObra contratoId={1} />);
-    expect((await screen.findAllByText("Nenhum documento exigido.")).length).toBe(3);
+    expect((await screen.findAllByText("Nenhum documento exigido.")).length).toBe(2);
     expect(screen.queryByText("Pronto para protocolar")).toBeNull();
   });
 });
