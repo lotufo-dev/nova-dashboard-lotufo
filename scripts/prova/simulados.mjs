@@ -988,7 +988,7 @@ export const ABAS_DA_CARTEIRA = [
   { caminho: new RegExp(`^/api/contratantes/${OUTROS_DA_CARTEIRA}/a-receber$`),
     corpo: { anos: AR_ANOS, total_a_receber_liberado: true, contratante: null, quantidade: 0 } },
   { caminho: new RegExp(`^/api/contratantes/${OUTROS_DA_CARTEIRA}/siga$`), corpo: { lido_em: null, limites: { dias_atencao: 5, dias_critico: 10 },
-    robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, processos: [], quantidade: 0 } },
+    robo: { estado: "parado", rodada: null, pedidos: [], avisos: [] }, processos: [], quantidade: 0, sem_obra: 0 } },
 ];
 
 /** Medicoes: as linhas da SINFRA na fila simulada (`filaSimulada`), as concluidas no mes e as obras sem medicao. */
@@ -1019,6 +1019,8 @@ export const SIGA_DO_CONTRATANTE = {
   lido_em: SIGA_COM_NAO_LIDOS.lido_em, limites: SIGA_COM_NAO_LIDOS.limites,
   robo: { ...SIGA_COM_NAO_LIDOS.robo, avisos: SIGA_COM_NAO_LIDOS.robo.avisos.filter(a => PROCESSOS_DA_SINFRA.some(p => p.id === a.processo_id)) },
   processos: PROCESSOS_DA_SINFRA, quantidade: PROCESSOS_DA_SINFRA.length,
+  // #845: os vivos do SIGA simulado sem obra ligada, o total da tela SIGA (de nenhum contratante)
+  sem_obra: SIGA_COM_NAO_LIDOS.processos.filter(p => p.contrato_id == null && !p.encerrado).length,
 };
 
 // ---- Peca "inicio" da reestrutura (19/11/2026, decisao do dono na #805): a matriz obra por competencia (#659) saiu

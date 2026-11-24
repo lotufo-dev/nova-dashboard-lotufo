@@ -3,7 +3,9 @@ import type { AReceberDoContratante, Leitura, MedicoesDoContratante, SigaDoContr
 import { APartes, Numeros, Tabela, TRAVA, type Vista } from "./AReceber";
 import CaixaAviso from "./CaixaAviso";
 import Falha from "./Falha";
+import { contar } from "./formato";
 import { IconeSiga } from "./icones";
+import { Link } from "./Link";
 import { Concluidas, GruposDaFila, SemMedicaoNoMes } from "./MedicoesFila";
 import { mesPorExtenso } from "./resumoMedicoes";
 import type { Ir } from "./rota";
@@ -15,7 +17,8 @@ import "./contratante.css";
 
 // As abas Medicoes, A receber e Processos no SIGA da pagina do contratante (#818). Cada uma desenha, com as pecas da
 // tela de onde o dado vem, o recorte que o servidor manda (`app/contratante.py`): a fila de trabalho (MedicoesFila), a
-// pagina Em aberto (AReceber) e a tela SIGA (SigaPagina). Nada se soma nem se conta aqui. O invólucro de cada aba
+// pagina Em aberto (AReceber) e a tela SIGA (SigaPagina). Nada se soma nem se conta aqui: a cota das Medicoes (#844)
+// e a contagem dos processos sem obra (#845) chegam prontas do servidor. O invólucro de cada aba
 // leva a classe da pagina de origem (`medicoes`, `arc`, `siga`): as pecas medem a largura por ela, e no celular a
 // linha vira bloco como la'.
 
@@ -31,8 +34,8 @@ function ComLeitura<T>({ leitura, lendo, falha, children }: {
 
 /** As medicoes do contratante na competencia em trabalho: a fila por quem tem de agir (cada grupo da mais parada para a
  *  menos, com a barra de passos, o tempo parado e a diferenca aprovado x pedido), as concluidas no mes e as obras sem
- *  medicao. Pedido e aprovado sao o valor cheio da medicao, como na tela Medicoes; o cabecalho diz, porque o resto
- *  da pagina e' na cota. Quem so' consulta ve "Abrir" no lugar do proximo passo. */
+ *  medicao. Pedido e aprovado na cota da Lotufo, como o resto da pagina (#844); o valor cheio fica na pagina da
+ *  medicao e na tela Medicoes. O cabecalho diz a base. Quem so' consulta ve "Abrir" no lugar do proximo passo. */
 export function AbaMedicoes({ leitura, nome, opera }: { leitura: Leitura<MedicoesDoContratante>; nome: string; opera: boolean }) {
   return (
     <ComLeitura leitura={leitura} lendo="Carregando as medições…" falha="Não foi possível carregar as medições">
@@ -40,7 +43,7 @@ export function AbaMedicoes({ leitura, nome, opera }: { leitura: Leitura<Medicoe
         <div className="medicoes ct-aba">
           <div className="ct-aba__cab">
             <h2 className="medicoes__mes">{mesPorExtenso(d.mes)}</h2>
-            <p className="medicoes__cab-rotulo">competência em trabalho · valor cheio</p>
+            <p className="medicoes__cab-rotulo">competência em trabalho · cota da Lotufo</p>
           </div>
           {d.grupos.length > 0
             ? <GruposDaFila grupos={d.grupos} limites={d.limites} opera={opera} />
@@ -89,8 +92,10 @@ export function AbaAReceber({ leitura, nome, ir }: { leitura: Leitura<AReceberDo
 }
 
 /** Os processos vivos do contratante no SIGA: um painel por categoria, cada um do mais parado para o menos, com a
- *  borda da linha na cor do tempo no setor. A linha abre o historico na tela SIGA. */
-export function AbaSiga({ leitura, agora }: { leitura: Leitura<SigaDoContratante>; agora?: Date }) {
+ *  borda da linha na cor do tempo no setor. A linha abre o historico na tela SIGA. Os processos sem obra ligada nao
+ *  tem contratante e nao entram aqui (#845): a aba diz quantos ha', com o link para a tela SIGA, onde se ligam a'
+ *  obra, para o zero da aba nao dizer que nao ha' processo. */
+export function AbaSiga({ leitura, nome, ir, agora }: { leitura: Leitura<SigaDoContratante>; nome: string; ir: Ir; agora?: Date }) {
   return (
     <ComLeitura leitura={leitura} lendo="Carregando os processos…" falha="Não foi possível carregar os processos do SIGA">
       {d => {
@@ -98,8 +103,14 @@ export function AbaSiga({ leitura, agora }: { leitura: Leitura<SigaDoContratante
         const quando = agora ?? new Date();
         return (
           <div className="siga ct-aba">
+            {d.sem_obra > 0 && (
+              <p className="ct-sem-obra">
+                {contar(d.sem_obra, "processo em andamento sem obra ligada", "processos em andamento sem obra ligada")}
+                {" · "}<Link para={{ tela: "siga" }} ir={ir}>Ver na tela SIGA</Link>
+              </p>
+            )}
             {secoes.length === 0 ? (
-              <section className="cartao sg__quadro"><div className="sg__vazio"><IconeSiga className="icone" /><p>Nenhum processo em andamento.</p></div></section>
+              <section className="cartao sg__quadro"><div className="sg__vazio"><IconeSiga className="icone" /><p>Nenhum processo em andamento nas obras de {nome}.</p></div></section>
             ) : secoes.map(s => <PainelDaCategoria key={s.categoria} secao={s} limites={d.limites} agora={quando} robo={d.robo} categoria={null} />)}
           </div>
         );
