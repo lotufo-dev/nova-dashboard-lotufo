@@ -8,7 +8,7 @@ vi.mock("./api", () => ({ api, apiForm }));
 
 const base: Medicao = {
   id: 631, numero: 7, tipo: "execucao", competencia: "2026-09", estado: "nota_emitida",
-  valor_protocolado_centavos: 938483418, valor_protocolado_origem: "espelho",
+  valor_protocolado_centavos: 900000000, valor_protocolado_origem: "espelho",
   valor_atestado_centavos: null, valor_atestado_origem: null, atestado_em: null, nf_emitida_em: null,
   recebida_em: null, congelada: 0, protocolos: [],
 };
@@ -97,9 +97,9 @@ describe("FormProtocoloManual", () => {
   it("com nota divergente do espelho e certidões em dia, avisa a NF e pede para assumir e justificar", async () => {
     api.mockResolvedValue({ entidade: "Lotufo", pronto: true, itens: [] });
     const agir = vi.fn(async () => true);
-    const nota = { nota_id: 9, coligada: 1, numero: "2275", serie: null, emissao: null, valor_centavos: 18017069, recebido_centavos: 0,
+    const nota = { nota_id: 9, coligada: 1, numero: "2275", serie: null, emissao: null, valor_centavos: 20000000, recebido_centavos: 0,
       recebido_em: null, origem: "manual", regra: null, situacao: "ativa",
-      conferencia: [{ campo: "valor", espelho: 14800000, nota: 18017069, grau: "divergente" }] };
+      conferencia: [{ campo: "valor", espelho: 14800000, nota: 20000000, grau: "divergente" }] };
     render(<FormProtocoloManual contratoId={1} m={{ ...base, notas: [nota] }} salvando={false} agir={agir} aoFechar={() => {}} />);
     expect(await screen.findByText("NF 2275 diverge do espelho")).toBeTruthy();
     const apesar = screen.getByLabelText(/Protocolar apesar das pendências/);
@@ -139,7 +139,7 @@ describe("FormValor (CampoValor)", () => {
     const agir = vi.fn(async (fn: () => Promise<unknown>) => { await fn(); return true; });
     const m = { ...base, valor_protocolado_origem: null, valor_atestado_centavos: 12345 };
     const { rerender } = render(<FormValor m={m} campo="protocolado" salvando={false} agir={agir} aoFechar={() => {}} />);
-    expect((screen.getByLabelText("Valor (R$)") as HTMLInputElement).value).toBe("9.384.834,18");
+    expect((screen.getByLabelText("Valor (R$)") as HTMLInputElement).value).toBe("9.000.000,00");
     rerender(<FormValor m={m} campo="atestado" salvando={false} agir={agir} aoFechar={() => {}} />);
     expect((screen.getByLabelText("Valor (R$)") as HTMLInputElement).value).toBe("123,45");
     fireEvent.click(screen.getByRole("button", { name: "Salvar valor" }));
@@ -150,9 +150,9 @@ describe("FormValor (CampoValor)", () => {
   it("o valor gravado abre formatado e apagar tira o último dígito", () => {
     render(<FormValor m={base} campo="protocolado" salvando={false} agir={vi.fn()} aoFechar={() => {}} />);
     const valor = screen.getByLabelText("Valor (R$)") as HTMLInputElement;
-    expect(valor.value).toBe("9.384.834,18");
+    expect(valor.value).toBe("9.000.000,00");
     fireEvent.input(valor, { target: { value: valor.value.slice(0, -1) }, inputType: "deleteContentBackward" });
-    expect(valor.value).toBe("938.483,41");
+    expect(valor.value).toBe("900.000,00");
   });
 
   // rodada 2 da PR #193 (C3): o aviso de colar invalido segura o envio; nada de gravar o valor antigo calado

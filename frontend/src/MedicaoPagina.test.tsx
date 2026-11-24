@@ -1315,7 +1315,7 @@ describe("Página da obra em medição: passo 2, análise do órgão (issue #508
   beforeEach(() => window.history.replaceState(null, "", "/obras/1/medicoes/5"));
   afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
   const ENVIADA = { ...MEDICAO, estado: "planilha_enviada", com_envio_planilha: true, planilha_enviada_em: "2026-11-05",
-    dias_uteis_no_orgao: 1, valor_protocolado_centavos: 219815879 };
+    dias_uteis_no_orgao: 1, valor_protocolado_centavos: 200000000 };
   const PROC = { id: 4, codigo: "c", link: "https://siga.exemplo.com.br/p/4", numero: "PRO-2026/0001", nome: null, contrato_id: 1,
     obra: "Hospital", medicao_id: 5, medicao_titulo: "23ª Medição", protocolo_id: null, situacao: null, setor: "Fiscalização",
     caixa_entrada: false, com_quem: "fiscal do contrato", desde: "2026-11-06T13:20:00Z", dias_uteis: 1, hoje: 0, ultima: null, protocolado_em: null,
@@ -1334,7 +1334,7 @@ describe("Página da obra em medição: passo 2, análise do órgão (issue #508
     const faixa = (await screen.findByRole("heading", { name: "Com o órgão há 1 dia útil" })).closest("section")!;
     expect(within(faixa).getByText("Enviada em").nextElementSibling!.textContent).toBe("05/11/2026");
     expect(within(faixa).getByText("Processo SIGA").nextElementSibling!.textContent).toBe("PRO-2026/0001");
-    expect(within(faixa).getByText("Valor pedido").nextElementSibling!.textContent).toBe("R$ 2.198.158,79");
+    expect(within(faixa).getByText("Valor pedido").nextElementSibling!.textContent).toBe("R$ 2.000.000,00");
     await waitFor(() => expect(within(faixa).getByRole("link", { name: /Abrir no SIGA/ }).getAttribute("href")).toBe(PROC.link));
     const onde = screen.getByRole("heading", { name: "Onde está o processo" }).closest("section")!;
     expect(within(onde).getByText("Fiscalização")).toBeTruthy();

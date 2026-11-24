@@ -267,7 +267,7 @@ export const NOTAS_COM_DIVERGENCIA = {
 
 // A obra com cadastro de custo: a aba Medicoes ganha a coluna do custo lancado no RM por competencia.
 export const CUSTO_DA_OBRA = {
-  linhas: [{ competencia: "2025-04", custo_centavos: 35120044 }, { competencia: "2025-05", custo_centavos: 41877310 },
+  linhas: [{ competencia: "2025-04", custo_centavos: 35000000 }, { competencia: "2025-05", custo_centavos: 40000000 },
     { competencia: "2025-06", custo_centavos: 0 }],
 };
 
@@ -457,17 +457,17 @@ export const resumoEmQuadro = ({ contratante = null, vazio = false } = {}) => re
     abaixo_do_pedido_centavos: abaixo * REAIS, acima_do_pedido_centavos: acima * REAIS });
   const doMes = vazio ? [] : [
     linha(9001, "Avenida Alfa", "SINFRA", "29ª Medição", "em_analise", 500_000, 12, 9),
-    linha(9010, "Hospital Capa", "SES-MT", "5ª Medição", "em_analise", 169_000, 16, 11),
-    linha(9005, "Bairros Épsilon", "SINFRA", "12ª Medição", "boletim", 412_000, 0, 0, comPedido(414_000, 2_000)),
-    linha(9002, "Corredor Beta", "SINFRA", "16ª Medição", "nota", 3_270_000, 1, 1, comPedido(3_270_000)),
-    linha(9009, "Orla Iota", "Pref. Cuiabá", "30ª Medição", "nota", 828_000, 8, 6, comPedido(820_000, 0, 8_000)),
-    { ...linha(9007, "Trevo Eta", "MTPAR", "25ª Medição + Reajuste", "protocolado", 1_904_000, 6, 4, comPedido(1_904_000)), medicao_ids: [9690, 9691] },
-    linha(9008, "Anel Teta", "MTPAR", "8ª Medição", "protocolado", 592_000, 11, 8),
+    linha(9010, "Hospital Capa", "SES-MT", "5ª Medição", "em_analise", 200_000, 16, 11),
+    linha(9005, "Bairros Épsilon", "SINFRA", "11ª Medição", "boletim", 400_000, 0, 0, comPedido(401_000, 1_000)),
+    linha(9002, "Corredor Beta", "SINFRA", "6ª Medição", "nota", 3_000_000, 1, 1, comPedido(3_000_000)),
+    linha(9009, "Orla Iota", "Pref. Cuiabá", "30ª Medição", "nota", 800_000, 8, 6, comPedido(790_000, 0, 10_000)),
+    { ...linha(9007, "Trevo Eta", "MTPAR", "25ª Medição + Reajuste", "protocolado", 2_000_000, 6, 4, comPedido(2_000_000)), medicao_ids: [9690, 9691] },
+    linha(9008, "Anel Teta", "MTPAR", "8ª Medição", "protocolado", 600_000, 11, 8),
     // protocoladas com o prazo do orgao: dentro dele (a data esperada vai escrita) e alem dele (critico). O prazo curto
     // da segunda e' para o estado caber no mes da prova
-    linha(9004, "Quartel Delta", "SINFRA", "35ª Medição", "protocolado", 209_000, 12, 8, { prazo: [47, 35] }),
-    linha(9015, "Viaduto Ômicron", "SES-MT", "3ª Medição", "protocolado", 240_000, 16, 11, { prazo: [14, -2] }),
-    linha(9003, "Estações Gama", "SINFRA", "8ª Medição", "recebido", 14_629_000, 5, null, { ...comPedido(14_629_000), dias_da_nota_ao_recebimento: 4 }),
+    linha(9004, "Quartel Delta", "SINFRA", "14ª Medição", "protocolado", 200_000, 12, 8, { prazo: [47, 35] }),
+    linha(9015, "Viaduto Ômicron", "SES-MT", "3ª Medição", "protocolado", 250_000, 16, 11, { prazo: [14, -2] }),
+    linha(9003, "Estações Gama", "SINFRA", "8ª Medição", "recebido", 15_000_000, 5, null, { ...comPedido(15_000_000), dias_da_nota_ao_recebimento: 4 }),
     linha(9001, "Avenida Alfa", "SINFRA", "Reajuste da 28ª Medição", "recebido", 2_000_000, 9, null,
       { tipo: "reajuste", ...comPedido(2_500_000, 500_000), dias_da_nota_ao_recebimento: 31 }),
     // a planilha/carta gerada e ainda nao enviada: existe, sem valor e sem etapa
@@ -482,12 +482,12 @@ export const resumoEmQuadro = ({ contratante = null, vazio = false } = {}) => re
   ];
   const deAntes = (meses, ...linhas) => linhas.map(l => ({ ...l, competencia: mesAntes(mes, meses) }));
   const anteriores = vazio ? [] : [
-    ...deAntes(7, linha(9009, "Orla Iota", "Pref. Cuiabá", "23ª Medição", "protocolado", 905_000, 190, 128)),
-    ...deAntes(2, linha(9002, "Corredor Beta", "SINFRA", "14ª Medição", "protocolado", 2_790_000, 48, 33, comPedido(2_800_000, 10_000)),
+    ...deAntes(7, linha(9009, "Orla Iota", "Pref. Cuiabá", "23ª Medição", "protocolado", 900_000, 190, 128)),
+    ...deAntes(2, linha(9002, "Corredor Beta", "SINFRA", "14ª Medição", "protocolado", 3_000_000, 48, 33, comPedido(3_010_000, 10_000)),
       linha(9007, "Trevo Eta", "MTPAR", "23ª Medição", "protocolado", 4_000_000, 51, 35)),
     ...deAntes(1, linha(9001, "Avenida Alfa", "SINFRA", "28ª Medição", "protocolado", 5_000_000, 20, 14),
-      linha(9003, "Estações Gama", "SINFRA", "7ª Medição", "nota", 9_600_000, 15, 10),
-      linha(9008, "Anel Teta", "MTPAR", "7ª Medição", "em_analise", 610_000, 40, 28)),
+      linha(9003, "Estações Gama", "SINFRA", "7ª Medição", "nota", 10_000_000, 15, 10),
+      linha(9008, "Anel Teta", "MTPAR", "7ª Medição", "em_analise", 600_000, 40, 28)),
   ];
   const quantas = ls => ls.reduce((n, l) => n + l.medicao_ids.length, 0);
   const soma = ls => ls.reduce((n, l) => n + (l.valor_centavos ?? 0), 0);
@@ -548,32 +548,32 @@ const daCarteira = (id, nome, contratante, chave, x) => {
   };
 };
 const CARTEIRA = () => [
-  // SINFRA: devagar (40% e 18% do necessario), adiantada, em atencao, em encerramento e uma encerrada
+  // SINFRA: devagar (40% e 17% do necessario), adiantada, em atencao, em encerramento e uma encerrada
   daCarteira(9001, "Avenida Alfa", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 120_000_000, medido: 60_000_000,
     ritmo: 3_000_000, necessario: 7_500_000, mes: 4_000_000, antes: 5_000_000 }),
-  daCarteira(9002, "Corredor Beta", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", bp: 4900, vigente: 210_000_000, medido: 178_500_000,
-    ritmo: 4_100_000, necessario: 3_600_000, mes: 3_300_000, antes: 2_790_000, receber: 3_900_000, dias: 96 }),
+  daCarteira(9002, "Corredor Beta", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", bp: 4900, vigente: 210_000_000, medido: 180_000_000,
+    ritmo: 4_100_000, necessario: 3_600_000, mes: 3_300_000, antes: 2_800_000, receber: 3_900_000, dias: 90 }),
   daCarteira(9003, "Estações Gama", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", vigente: 180_000_000, medido: 63_000_000,
-    ritmo: 7_000_000, necessario: 38_700_000, mes: 14_600_000, antes: 9_600_000, dias: 40 }),
-  daCarteira(9004, "Quartel Delta", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 12_000_000, medido: 5_640_000,
+    ritmo: 7_000_000, necessario: 39_000_000, mes: 15_000_000, antes: 10_000_000, dias: 40 }),
+  daCarteira(9004, "Quartel Delta", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 12_000_000, medido: 5_600_000,
     ritmo: 500_000, necessario: 600_000, mes: 600_000, antes: 600_000, receber: 600_000, dias: 250 }),
-  daCarteira(9005, "Bairros Épsilon", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", vigente: 8_000_000, medido: 7_960_000,
-    ritmo: 300_000, necessario: null, mes: 200_000, antes: 510_000, dias: 4, encerramento: dataEm(hojeDaProva(), -20) }),
+  daCarteira(9005, "Bairros Épsilon", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", vigente: 8_000_000, medido: 7_900_000,
+    ritmo: 300_000, necessario: null, mes: 200_000, antes: 500_000, dias: 4, encerramento: dataEm(hojeDaProva(), -20) }),
   daCarteira(9006, "Travessia Zeta", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 30_000_000, medido: 30_000_000,
     estado: "encerrado", ritmo: null, necessario: null, dias: -400 }),
   // MTPAR, sem prazo de pagamento no sistema: uma com a execucao vencida e uma em atencao
-  daCarteira(9007, "Trevo Eta", "MTPAR", "mtpar", { vigente: 90_000_000, medido: 74_700_000, ritmo: 900_000, necessario: null,
-    mes: 3_100_000, antes: 4_000_000, receber: 7_100_000, dias: -24 }),
-  daCarteira(9008, "Anel Teta", "MTPAR", "mtpar", { vigente: 124_600_000, medido: 49_840_000, ritmo: 2_000_000, necessario: 2_500_000, dias: 900 }),
+  daCarteira(9007, "Trevo Eta", "MTPAR", "mtpar", { vigente: 90_000_000, medido: 75_000_000, ritmo: 900_000, necessario: null,
+    mes: 3_100_000, antes: 4_000_000, receber: 7_100_000, dias: -25 }),
+  daCarteira(9008, "Anel Teta", "MTPAR", "mtpar", { vigente: 125_000_000, medido: 50_000_000, ritmo: 2_000_000, necessario: 2_500_000, dias: 900 }),
   // Pref. Cuiaba: uma obra paralisada
-  daCarteira(9009, "Orla Iota", "Pref. Cuiabá", "pref-cuiaba", { vigente: 66_500_000, medido: 37_240_000, estado: "suspenso",
-    paralisada: dataEm(hojeDaProva(), -100), ritmo: 300_000, necessario: null, mes: 900_000, antes: 905_000, receber: 900_000 }),
+  daCarteira(9009, "Orla Iota", "Pref. Cuiabá", "pref-cuiaba", { vigente: 65_000_000, medido: 37_000_000, estado: "suspenso",
+    paralisada: dataEm(hojeDaProva(), -100), ritmo: 300_000, necessario: null, mes: 900_000, antes: 900_000, receber: 900_000 }),
   // SES-MT: uma obra adiantada, sem nada pendente e sem medicao no mes (o contratante fica "Em dia")
-  daCarteira(9010, "Hospital Capa", "SES-MT", "ses-mt", { vigente: 168_300_000, medido: 156_519_000, ritmo: 5_000_000, necessario: 4_000_000, dias: 75 }),
+  daCarteira(9010, "Hospital Capa", "SES-MT", "ses-mt", { vigente: 170_000_000, medido: 160_000_000, ritmo: 5_000_000, necessario: 4_000_000, dias: 75 }),
   // SINFRA, decisao do dono de 18/11/2026: devagar (40% do necessario) e sem aviso nenhum. Na pagina do contratante a
   // Situacao diz o motivo do andamento, e nao "Em dia"
   daCarteira(9016, "Ponte Pi", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 54_000_000, medido: 16_200_000,
-    ritmo: 3_000_000, necessario: 7_500_000, mes: 1_050_000, antes: 1_000_000, dias: 390 }),
+    ritmo: 3_000_000, necessario: 7_500_000, mes: 1_100_000, antes: 1_000_000, dias: 400 }),
 ];
 export const carteiraSimulada = () => CARTEIRA_INTEIRA();
 
@@ -584,20 +584,20 @@ const farolDaCarteira = (o, farol, motivos = []) => ({
   motivo: motivos.map(m => m[1]).join("; "),
   motivos: motivos.map(([nivel, texto]) => ({ tipo: "simulado", nivel, dias: null, valor_centavos: null, texto })) });
 const MOTIVOS = {
-  9001: ["vermelho", [["critico", "14ª Medição: aprovado 18,7% abaixo do pedido"], ["atencao", "garantia vence em 28 dias"]]],
-  9002: ["atencao", [["atencao", "prorrogação pedida há 9 dias"]]],
+  9001: ["vermelho", [["critico", "14ª Medição: aprovado 20% abaixo do pedido"], ["atencao", "garantia vence em 30 dias"]]],
+  9002: ["atencao", [["atencao", "prorrogação pedida há 10 dias"]]],
   9003: ["vermelho", [["critico", "garantia não cobre o fim da execução"], ["acao", "execução termina em 40 dias"], ["atencao", "reajuste esperando apostilamento"]]],
-  9005: ["acao", [["acao", "execução termina em 4 dias"]]],
-  9007: ["vermelho", [["critico", "execução venceu há 24 dias"]]],
+  9005: ["acao", [["acao", "execução termina em 5 dias"]]],
+  9007: ["vermelho", [["critico", "execução venceu há 25 dias"]]],
   9009: ["atencao", [["atencao", "obra paralisada há 100 dias"]]],
 };
 export const painelDaCarteira = painel => {
   const emAndamento = CARTEIRA_INTEIRA().filter(o => o.estado !== "encerrado");
   const obras = emAndamento.map(o => farolDaCarteira(o, ...(MOTIVOS[o.id] ?? ["verde", []])));
-  return { ...painel, obras, prazo_pagamento: { SINFRA: 47, "Pref. Cuiabá": 62, "SES-MT": 38 },
-    reajustes_apostilamento: { competencias: 3, valor_centavos: 41_250_000, obras: [
+  return { ...painel, obras, prazo_pagamento: { SINFRA: 45, "Pref. Cuiabá": 60, "SES-MT": 40 },
+    reajustes_apostilamento: { competencias: 3, valor_centavos: 40_000_000, obras: [
       { contrato_id: 9003, obra: "Estações Gama", competencias: 2, valor_centavos: 30_000_000 },
-      { contrato_id: 9004, obra: "Quartel Delta", competencias: 1, valor_centavos: 11_250_000 }] },
+      { contrato_id: 9004, obra: "Quartel Delta", competencias: 1, valor_centavos: 10_000_000 }] },
     avisos: obras.flatMap(o => o.motivos.map(m => ({ tipo: m.tipo, nivel: m.nivel, publico: ["diretoria"], contrato_id: o.contrato_id, obra: o.obra,
       dias: null, valor_centavos: null, mensagem: `${o.obra}: ${m.texto}`, destino: { tela: "contrato", id: o.contrato_id, aba: "prazos" } }))) };
 };
@@ -660,15 +660,15 @@ const leituraSimulada = (ritmo, necessario, fora) => {
   return { ...SEM_LEITURA, pct, situacao: pct >= 100 ? "adiantada" : pct >= 70 ? "atencao" : "devagar" };
 };
 const FORA_DA_REGUA = () => [
-  daCarteira(9011, "Viaduto Lambda", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", vigente: 64_000_000, medido: 55_040_000,
-    ritmo: 1_900_000, necessario: 8_960_000, mes: 2_100_000, antes: 1_700_000, dias: 12,
-    fora: { motivo: "prazo_no_fim", prorrogacao_pedida: true, execucao_fim: dataEm(hojeDaProva(), 12) } }),
-  daCarteira(9012, "Maternidade Mi", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 240_000_000, medido: 5_040_000,
-    ritmo: 840_000, necessario: 16_780_000, mes: 900_000, antes: 880_000, dias: 395, fora: { motivo: "prorrogacao_pedida", prorrogacao_pedida: true } }),
-  daCarteira(9013, "Complexo Ni", "MTPAR", "mtpar", { vigente: 52_000_000, medido: 47_476_000, ritmo: 750_000, necessario: 1_131_000,
-    dias: 110, fora: { motivo: "sem_medicao", sem_medicao_desde: competenciaHa(5) } }),
-  daCarteira(9014, "Praça Xi", "Pref. Cuiabá", "pref-cuiaba", { vigente: 9_500_000, medido: 6_650_000, ritmo: 410_000, necessario: 1_425_000,
-    mes: 380_000, antes: 400_000, dias: 43, fora: { motivo: "prazo_no_fim", execucao_fim: dataEm(hojeDaProva(), 43) } }),
+  daCarteira(9011, "Viaduto Lambda", "SINFRA", "sinfra", { orgao: "SINFRA - SUPU", sub: "SUPU", vigente: 64_000_000, medido: 55_000_000,
+    ritmo: 1_900_000, necessario: 9_000_000, mes: 2_100_000, antes: 1_700_000, dias: 10,
+    fora: { motivo: "prazo_no_fim", prorrogacao_pedida: true, execucao_fim: dataEm(hojeDaProva(), 10) } }),
+  daCarteira(9012, "Maternidade Mi", "SINFRA", "sinfra", { orgao: "SINFRA - SUEF II", sub: "SUEF II", vigente: 240_000_000, medido: 5_000_000,
+    ritmo: 800_000, necessario: 17_000_000, mes: 900_000, antes: 800_000, dias: 400, fora: { motivo: "prorrogacao_pedida", prorrogacao_pedida: true } }),
+  daCarteira(9013, "Complexo Ni", "MTPAR", "mtpar", { vigente: 52_000_000, medido: 47_000_000, ritmo: 750_000, necessario: 1_100_000,
+    dias: 100, fora: { motivo: "sem_medicao", sem_medicao_desde: competenciaHa(5) } }),
+  daCarteira(9014, "Praça Xi", "Pref. Cuiabá", "pref-cuiaba", { vigente: 9_500_000, medido: 6_500_000, ritmo: 400_000, necessario: 1_500_000,
+    mes: 400_000, antes: 400_000, dias: 45, fora: { motivo: "prazo_no_fim", execucao_fim: dataEm(hojeDaProva(), 45) } }),
 ];
 // a carteira que as telas recebem: a de sempre e as obras fora da regua
 const CARTEIRA_INTEIRA = () => [...CARTEIRA(), ...FORA_DA_REGUA()];
@@ -806,23 +806,23 @@ const somaDaFila = linhas => {
 export const filaSimulada = (resposta, reg) => {
   const mtpar = { contratante: "MTPAR", sub: null };
   const lotufo = [
-    linhaDaFila(reg, 1, "Maternidade Alfa", "5ª Medição", "lotufo", CINCO, 3, paradaDaFila(12, "critico"), 172_000, 172_000,
+    linhaDaFila(reg, 1, "Maternidade Alfa", "5ª Medição", "lotufo", CINCO, 3, paradaDaFila(12, "critico"), 170_000, 170_000,
       { acao: "gerar_espelho", contratante: "Pref. Várzea Grande", sub: null }),
-    linhaDaFila(reg, 2, "Corredor Beta", "30ª Medição + Reajuste", "lotufo", SEIS, 5, paradaDaFila(6, "breve"), 1_720_000, 1_660_000, { acao: "enviar_nota", sub: "SUPU" }),
-    linhaDaFila(reg, 3, "Estações Gama", "16ª Medição", "lotufo", SEIS, 3, paradaDaFila(4, "andamento"), 8_400_000, 8_380_000, { acao: "enviar_espelho", sub: "SUPU" }),
-    linhaDaFila(reg, 4, "Terminais Delta", "3ª Medição de Projeto", "lotufo", SEIS, 1, paradaDaFila(0, "feito"), 980_000, null, { acao: "enviar_planilha" }),
-    linhaDaFila(reg, 5, "Trevo Eta", "9ª Medição", "lotufo", CINCO, 2, paradaDaFila(null, null), 310_000, null, { acao: "registrar_boletim", ...mtpar }),
+    linhaDaFila(reg, 2, "Corredor Beta", "12ª Medição + Reajuste", "lotufo", SEIS, 5, paradaDaFila(6, "breve"), 1_700_000, 1_600_000, { acao: "enviar_nota", sub: "SUPU" }),
+    linhaDaFila(reg, 3, "Estações Gama", "6ª Medição", "lotufo", SEIS, 3, paradaDaFila(4, "andamento"), 8_000_000, 7_990_000, { acao: "enviar_espelho", sub: "SUPU" }),
+    linhaDaFila(reg, 4, "Terminais Delta", "3ª Medição de Projeto", "lotufo", SEIS, 1, paradaDaFila(0, "feito"), 1_000_000, null, { acao: "enviar_planilha" }),
+    linhaDaFila(reg, 5, "Trevo Eta", "9ª Medição", "lotufo", CINCO, 2, paradaDaFila(null, null), 300_000, null, { acao: "registrar_boletim", ...mtpar }),
   ];
   const faturamento = [
-    linhaDaFila(reg, 6, "Quartel Delta", "8ª Medição", "faturamento", SEIS, 4, paradaDaFila(7, "breve"), 593_000, 593_400),
-    linhaDaFila(reg, 7, "Anel Teta", "12ª Medição", "faturamento", CINCO, 4, paradaDaFila(1, "andamento"), 2_050_000, 2_050_000, mtpar),
+    linhaDaFila(reg, 6, "Quartel Delta", "8ª Medição", "faturamento", SEIS, 4, paradaDaFila(7, "breve"), 600_000, 600_100),
+    linhaDaFila(reg, 7, "Anel Teta", "11ª Medição", "faturamento", CINCO, 4, paradaDaFila(1, "andamento"), 2_000_000, 2_000_000, mtpar),
   ];
   const orgao = [
-    linhaDaFila(reg, 8, "Bairros Épsilon", "35ª Medição", "orgao", SEIS, 6, paradaDaFila(41, "critico", { prazo: 45, esperada: -9 }), 209_000, 209_000, { sub: "SUPU" }),
-    linhaDaFila(reg, 9, "Rodovia Capa", "29ª Medição", "orgao", SEIS, 2, paradaDaFila(11, "critico"), 856_000, null),
+    linhaDaFila(reg, 8, "Bairros Épsilon", "14ª Medição", "orgao", SEIS, 6, paradaDaFila(41, "critico", { prazo: 45, esperada: -9 }), 200_000, 200_000, { sub: "SUPU" }),
+    linhaDaFila(reg, 9, "Rodovia Capa", "29ª Medição", "orgao", SEIS, 2, paradaDaFila(11, "critico"), 800_000, null),
     linhaDaFila(reg, 10, "Avenida Alfa", "11ª Medição", "orgao", SEIS, 2, paradaDaFila(5, "breve"), 4_000_000, null),
-    linhaDaFila(reg, 11, "Complexo Lambda", "25ª Medição + Reajuste", "orgao", CINCO, 6, paradaDaFila(4, "andamento", { prazo: 45, esperada: 39 }), 1_904_000, 1_904_000, mtpar),
-    linhaDaFila(reg, 12, "Praça Mi", "2ª Medição", "orgao", TRES, 6, paradaDaFila(3, "andamento"), 77_000, 77_000, { contratante: "Pref. Cuiabá", sub: null }),
+    linhaDaFila(reg, 11, "Complexo Lambda", "10ª Medição + Reajuste", "orgao", CINCO, 6, paradaDaFila(4, "andamento", { prazo: 45, esperada: 39 }), 2_000_000, 2_000_000, mtpar),
+    linhaDaFila(reg, 12, "Praça Mi", "2ª Medição", "orgao", TRES, 6, paradaDaFila(3, "andamento"), 80_000, 80_000, { contratante: "Pref. Cuiabá", sub: null }),
   ];
   const doMes = [...lotufo, ...faturamento, ...orgao];
   const contar = ls => ({ quantidade: ls.length, criticas: ls.filter(l => l.parada.situacao === "critico").length,
@@ -849,10 +849,10 @@ export const filaSimulada = (resposta, reg) => {
   const quadro = contratantes.map(c => { const ls = doMes.filter(l => l.contratante === c); return { contratante: c, ...somaDaFila(ls), linhas: ls.map(noQuadro) }; })
     .sort((a, b) => b.linhas.length - a.linhas.length);
   const anteriores = [
-    linhaDaFila(reg, 13, "Corredor Beta", "29ª Medição", "lotufo", SEIS, 5, paradaDaFila(19, "critico"), 1_510_000, 1_480_000,
+    linhaDaFila(reg, 13, "Corredor Beta", "9ª Medição", "lotufo", SEIS, 5, paradaDaFila(19, "critico"), 1_500_000, 1_450_000,
       { acao: "enviar_nota", sub: "SUPU", competencia: competenciaHa(2) }),
-    linhaDaFila(reg, 14, "Trevo Eta", "8ª Medição", "faturamento", CINCO, 4, paradaDaFila(8, "breve"), 290_000, 290_000, { ...mtpar, competencia: competenciaHa(2) }),
-    linhaDaFila(reg, 15, "Rodovia Capa", "27ª Medição", "orgao", SEIS, 2, paradaDaFila(33, "critico"), 640_000, null, { competencia: competenciaHa(3) }),
+    linhaDaFila(reg, 14, "Trevo Eta", "8ª Medição", "faturamento", CINCO, 4, paradaDaFila(8, "breve"), 300_000, 300_000, { ...mtpar, competencia: competenciaHa(2) }),
+    linhaDaFila(reg, 15, "Rodovia Capa", "27ª Medição", "orgao", SEIS, 2, paradaDaFila(33, "critico"), 600_000, null, { competencia: competenciaHa(3) }),
   ];
   return {
     ...resposta,

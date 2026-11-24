@@ -481,7 +481,7 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
 
   it("tudo pronto: faixa verde e os cartões Notas fiscais e Documentos completos", () => {
     api.mockResolvedValue({ itens: [] });
-    montar([envio({ notas: [{ numero: "2351", natureza: "execucao", municipio: "Cuiabá", valor_centavos: 418330386 }],
+    montar([envio({ notas: [{ numero: "2351", natureza: "execucao", municipio: "Cuiabá", valor_centavos: 400000000 }],
       itens: [{ chave: "notas", rotulo: "Nota fiscal (1)", estado: "ok" },
         { chave: "frc:631", rotulo: "FRC assinada", estado: "ok" },
         { chave: "regularidade:lotufo", rotulo: "Regularidade mensal", detalhe: "09/2026", estado: "ok", entidade_id: 1 }] })]);
@@ -491,7 +491,7 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
     // #722: o municipio da nota vai na linha de baixo, como dado de apoio
     expect(within(notas).getByText("NF 2351")).toBeTruthy();
     expect(within(notas).getByText("Cuiabá").className).toBe("envio-item__apoio");
-    expect(within(notas).getByText("R$ 4.183.303,86")).toBeTruthy();
+    expect(within(notas).getByText("R$ 4.000.000,00")).toBeTruthy();
     expect(within(notas).getByText("FRC assinada")).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "Documentos" })).getByText("Regularidade mensal de 09/2026")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(false);
@@ -544,23 +544,23 @@ describe("Envio da nota: faixa e cartões (#514)", () => {
     api.mockResolvedValue({ itens: [] });
     montar([envio({
       divergencias: [
-        { medicao_id: 631, nota_id: 9, numero: 2275, campo: "valor", espelho: 14800001, nota: 18017069, grau: "divergente" },
-        { medicao_id: 631, nota_id: 9, numero: 2275, campo: "iss", espelho: 296000, nota: 360341, grau: "divergente" },
+        { medicao_id: 631, nota_id: 9, numero: 2275, campo: "valor", espelho: 14800001, nota: 20000000, grau: "divergente" },
+        { medicao_id: 631, nota_id: 9, numero: 2275, campo: "iss", espelho: 296000, nota: 400000, grau: "divergente" },
         { medicao_id: 631, nota_id: 9, numero: 2275, campo: "inss", espelho: 162800, nota: 162801, grau: "arredondamento" },
       ],
-      acima_da_medicao: [{ medicao_id: 631, nota_id: 9, numero: 2275, alocado_centavos: 18017069, medicao_centavos: 14800001 }],
+      acima_da_medicao: [{ medicao_id: 631, nota_id: 9, numero: 2275, alocado_centavos: 20000000, medicao_centavos: 14800001 }],
     })]);
     expect(screen.queryByText("Tudo pronto para enviar")).toBeNull();
     expect(screen.getByText("NF 2275 diverge do espelho")).toBeTruthy();
     const conf = screen.getByLabelText("Conferência das notas com o espelho");
     const valor = within(conf).getByText("Valor").closest("tr")!;
     expect(within(valor).getByText("R$ 148.000,01")).toBeTruthy();
-    expect(within(valor).getByText("R$ 180.170,69")).toBeTruthy();
-    expect(within(conf).getByText("ISS").closest("tr")!.textContent).toMatch(/R\$\s3\.603,41/);
+    expect(within(valor).getByText("R$ 200.000,00")).toBeTruthy();
+    expect(within(conf).getByText("ISS").closest("tr")!.textContent).toMatch(/R\$\s4\.000,00/);
     // o arredondamento de 1 centavo nao entra na tabela: avisa em atencao
     expect(within(conf).queryAllByRole("row").some(r => r.textContent?.includes("INSS"))).toBe(false);
     expect(within(conf).getByText(/NF 2275: INSS com diferença de arredondamento/)).toBeTruthy();
-    expect(within(conf).getByText("NF 2275 de R$ 180.170,69 é maior que a medição (R$ 148.000,01)")).toBeTruthy();
+    expect(within(conf).getByText("NF 2275 de R$ 200.000,00 é maior que a medição (R$ 148.000,01)")).toBeTruthy();
     const linha = screen.getAllByRole("row").find(r => r.textContent?.includes("7ª medição"))!;
     expect(within(linha).getByText("Nota divergente")).toBeTruthy();
     expect((within(linha).getByRole("button", { name: "Enviar a nota" }) as HTMLButtonElement).disabled).toBe(false);

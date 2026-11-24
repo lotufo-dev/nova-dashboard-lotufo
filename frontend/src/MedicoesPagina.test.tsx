@@ -48,11 +48,11 @@ const linha = (id: number, obra_: string, tem: number[], atual: number, extra: P
   parada: parada(3, "andamento"), ...valores(null, null), acao: null, ...extra });
 
 const SEIS = [1, 2, 3, 4, 5, 6];
-const ALFA = linha(12, "Estações Alfa", SEIS, 3, { parada: parada(12, "critico"), ...valores(1462998169, 1462998101), acao: "gerar_espelho" });
+const ALFA = linha(12, "Estações Alfa", SEIS, 3, { parada: parada(12, "critico"), ...valores(1500000100, 1500000000), acao: "gerar_espelho" });
 const BETA = linha(13, "Corredor Beta", SEIS, 5, { titulo: "30ª Medição + Reajuste", parada: parada(1, "andamento"),
   ...valores(172000000, 166000000), acao: "enviar_nota" });
 const ZETA = linha(14, "Complexo Zeta", [2, 3, 4, 5, 6], 4, { contratante: "MTPAR", orgao_sub: null, titulo: "24ª Medição", com_quem: "faturamento",
-  parada: parada(0, "feito"), ...valores(308126381, 308126481) });
+  parada: parada(0, "feito"), ...valores(300000000, 300000100) });
 const GAMA = linha(15, "Bairros Gama", SEIS, 6, { com_quem: "orgao", titulo: "35ª Medição",
   parada: parada(41, "critico", { prazo_orgao_dias: 45, esperada: "2026-11-09", alem_do_prazo: true }), ...valores(20900000, 20900000) });
 const DELTA = linha(16, "Rodovia Delta", SEIS, 2, { com_quem: "orgao", titulo: "29ª Medição", parada: parada(null, null), ...valores(85600000, null) });
@@ -65,10 +65,10 @@ const noQuadro = (l: LinhaFila, extra: Partial<LinhaDoQuadro> = {}): LinhaDoQuad
   passos: l.passos.map(p => passoQ(p.numero, p.situacao, { data: p.situacao === "feito" ? `2026-11-0${p.numero}` : null,
     medicao_id: p.situacao === "atual" ? l.medicao_id : null, parada: p.situacao === "atual" ? l.parada : null })), ...extra });
 const QUADRO: GrupoDoQuadro[] = [
-  { contratante: "SINFRA", pedido_centavos: 1741498169, aprovado_centavos: 1649898101, aprovado_com_pedido_centavos: 1649898101,
-    pedido_do_aprovado_centavos: 1655898169, abaixo_do_pedido_centavos: 6000068, linhas: [ALFA, BETA, GAMA, DELTA].map(l => noQuadro(l)) },
-  { contratante: "MTPAR", pedido_centavos: 308126381, aprovado_centavos: 308126481, aprovado_com_pedido_centavos: 308126481,
-    pedido_do_aprovado_centavos: 308126381, abaixo_do_pedido_centavos: 0, linhas: [noQuadro(ZETA)] },
+  { contratante: "SINFRA", pedido_centavos: 1778500100, aprovado_centavos: 1686900000, aprovado_com_pedido_centavos: 1686900000,
+    pedido_do_aprovado_centavos: 1692900100, abaixo_do_pedido_centavos: 6000100, linhas: [ALFA, BETA, GAMA, DELTA].map(l => noQuadro(l)) },
+  { contratante: "MTPAR", pedido_centavos: 300000000, aprovado_centavos: 300000100, aprovado_com_pedido_centavos: 300000100,
+    pedido_do_aprovado_centavos: 300000000, abaixo_do_pedido_centavos: 0, linhas: [noQuadro(ZETA)] },
 ];
 const ANTERIORES: Anteriores = {
   linhas: [linha(21, "MT Épsilon", SEIS, 5, { titulo: "29ª Medição", competencia: "2026-09", parada: parada(19, "critico"),
@@ -83,8 +83,8 @@ const FILA: FilaMedicoes = {
   limites: { dias_atencao: 5, dias_critico: 10, diferenca_critica_por_mil: 5 },
   numeros: { com: { lotufo: { quantidade: 2, criticas: 1, breves: 0, alem_do_prazo: 0 }, faturamento: { quantidade: 1, criticas: 0, breves: 0, alem_do_prazo: 0 },
     orgao: { quantidade: 2, criticas: 1, breves: 0, alem_do_prazo: 1 } }, concluidas: 1, sem_medicao: 2,
-    pedido_centavos: 2049624550, aprovado_centavos: 1958024582, aprovado_com_pedido_centavos: 1958024582, pedido_do_aprovado_centavos: 1964024550,
-    abaixo_do_pedido_centavos: 6000068 },
+    pedido_centavos: 2078500100, aprovado_centavos: 1987000100, aprovado_com_pedido_centavos: 1987000100, pedido_do_aprovado_centavos: 1992900100,
+    abaixo_do_pedido_centavos: 6000100 },
   grupos: [{ com_quem: "lotufo", linhas: [ALFA, BETA] }, { com_quem: "faturamento", linhas: [ZETA] }, { com_quem: "orgao", linhas: [GAMA, DELTA] }],
   concluidas: [{ contrato_id: 30, obra: "Ponte Ni", medicao_id: 300, titulo: "7ª Medição", recebida_em: "2026-11-10" }],
   sem_medicao: [{ contrato_id: 1, obra: "Cinco Bairros", contratante: "SINFRA" }, { contrato_id: 3, obra: "Complexo Gama", contratante: "MTPAR" }],
@@ -146,9 +146,9 @@ describe("Medições: fila de trabalho, quadro do mês e meses anteriores (#805)
     expect(texto(celulas[0].querySelector(".barra-passos__nome"))).toBe("Espelhos · , passo 3 de 6");
     expect(celulas[1].querySelector(".selo--critico .glifo--critico")).not.toBeNull();
     expect(texto(celulas[1])).toBe("12 dias úteis");
-    expect(texto(celulas[2])).toMatch(/14\.629\.981,69/);
+    expect(texto(celulas[2])).toMatch(/15\.000\.001,00/);
     // o corte de até 0,5% do pedido sai no tom da atenção
-    expect(texto(celulas[3])).toMatch(/14\.629\.981,01/);
+    expect(texto(celulas[3])).toMatch(/15\.000\.000,00/);
     expect(celulas[3].querySelector(".diferenca")?.className).toBe("diferenca diferenca--leve");
     // o botão é um link para a página da medição, no passo da vez
     const botao = within(alfa).getByRole("link", { name: "Gerar espelho: 8ª Medição de Estações Alfa" });
@@ -192,7 +192,7 @@ describe("Medições: fila de trabalho, quadro do mês e meses anteriores (#805)
     expect(numero("Concluídas no mês")).toBe("Concluídas no mês1");
     expect(numero("Sem medição")).toBe("Sem medição2");
     const aprovado = within(faixa).getByText("Aprovado em outubro").closest(".fila-numero") as HTMLElement;
-    expect(texto(aprovado)).toMatch(/19\.580\.245,82/);
+    expect(texto(aprovado)).toMatch(/19\.870\.001,00/);
     expect(aprovado.querySelector(".diferenca")?.className).toBe("diferenca diferenca--leve");
     expect(aprovado.querySelector(".marca-etapa__cor--boletim")).not.toBeNull();
   });
@@ -310,8 +310,8 @@ describe("Medições: fila de trabalho, quadro do mês e meses anteriores (#805)
       const grupos = [...tabela.querySelectorAll("tr.quadro__grupo")] as HTMLElement[];
       expect(grupos.map(g => texto(g.querySelector("th")))).toEqual(["SINFRA4 obras", "MTPAR1 obra"]);
       const sinfra = within(grupos[0]).getAllByRole("cell");
-      expect(texto(sinfra[0])).toMatch(/17\.414\.981,69/);
-      expect(texto(sinfra[1])).toMatch(/16\.498\.981,01/);
+      expect(texto(sinfra[0])).toMatch(/17\.785\.001,00/);
+      expect(texto(sinfra[1])).toMatch(/16\.869\.000,00/);
       expect(sinfra[1].querySelector(".diferenca")?.className).toBe("diferenca diferenca--leve");
       // no grupo só entra o corte: o aprovado acima do pedido da MT-PAR não aparece na linha que soma
       expect(texto(within(grupos[1]).getAllByRole("cell")[1].querySelector(".diferenca"))).toBe("= igual ao pedido");

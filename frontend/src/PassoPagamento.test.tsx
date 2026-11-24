@@ -17,18 +17,18 @@ const cota = (total: number | null, recebido: number | null, falta: number | nul
   ({ notas_faltam: 0, completo: total !== null, total_centavos: total, recebido_centavos: recebido, falta_centavos: falta, parcial, ...extra });
 // dados ficticios: consorcio com tres empresas, a Lotufo emite duas notas (Cuiaba e Varzea Grande), com retencao
 const MEDICAO = { id: 5, numero: 16, tipo: "execucao", competencia: "2026-10", estado: "protocolada",
-  valor_protocolado_centavos: 990529648, valor_protocolado_origem: null, valor_atestado_centavos: 990529648,
+  valor_protocolado_centavos: 900000000, valor_protocolado_origem: null, valor_atestado_centavos: 900000000,
   valor_atestado_origem: null, atestado_em: null, nf_emitida_em: null, recebida_em: null, congelada: 1,
   protocolos: [{ id: 9, data: "2026-11-14", numero_oficio: null, numero_processo: "PROC-0001", origem: "manual", protocolo_id: null }],
-  notas: [nota(1, "2351", 418330386, 384863955), nota(2, "2352", 67032113, 61669545)], notas_faltam: 0,
-  pagamento_cota: cota(446533500, 0, 446533500), documentos: [] } as unknown as Medicao;
+  notas: [nota(1, "2351", 400000000, 360000000), nota(2, "2352", 60000000, 55000000)], notas_faltam: 0,
+  pagamento_cota: cota(415000000, 0, 415000000), documentos: [] } as unknown as Medicao;
 const admin = { id: 1, nome: "Operação", email: "o@x", perfil: "admin" } as Usuario;
 const aqui = { tela: "medicao" as const, obra: 1, id: 5 };
 const com = (extra: Record<string, unknown>) => ({ ...MEDICAO, ...extra }) as unknown as Medicao;
 
 function montar(extra: Partial<Parameters<typeof PassoPagamento>[0]> = {}) {
   const props = { grupo: [MEDICAO], junta: false, usuario: admin, protocolos: [], aqui, percentualBp: 4900 as number | null,
-    total: 990529648 as number | null, aoReceber: vi.fn(), ...extra };
+    total: 900000000 as number | null, aoReceber: vi.fn(), ...extra };
   render(<PassoPagamento {...props} />);
   return props;
 }
@@ -40,14 +40,14 @@ describe("Passo Pagamento (#514)", () => {
   it("em consórcio: exibe o resumo do servidor (a receber, recebido de, barra) ao lado do total cheio e dos dias aguardando", () => {
     montar();
     expect(screen.getByText("A receber · cota da Lotufo")).toBeTruthy();
-    expect(screen.getByLabelText("A receber: R$ 4.465.335,00")).toBeTruthy();
-    expect(screen.getByText("R$ 9.905.296,48")).toBeTruthy();
+    expect(screen.getByLabelText("A receber: R$ 4.150.000,00")).toBeTruthy();
+    expect(screen.getByText("R$ 9.000.000,00")).toBeTruthy();
     expect(screen.getByText(/^8\sdias$/)).toBeTruthy();
     expect(screen.getByText("nota enviada em 14/11/2026")).toBeTruthy();
-    expect(screen.getByText("R$ 0,00 recebido de R$ 4.465.335,00")).toBeTruthy();
+    expect(screen.getByText("R$ 0,00 recebido de R$ 4.150.000,00")).toBeTruthy();
     expect(screen.getByText("0%")).toBeTruthy();
     // a NF aparece pelo valor nominal (bruto); a situacao de cada nota continua na linha dela
-    expect(screen.getByText("R$ 4.183.303,86")).toBeTruthy();
+    expect(screen.getByText("R$ 4.000.000,00")).toBeTruthy();
     expect(screen.getAllByText("em aberto")).toHaveLength(2);
     expect(screen.getByText("Aguardando o órgão")).toBeTruthy();
   });
@@ -92,17 +92,17 @@ describe("Passo Pagamento (#514)", () => {
   });
 
   it("consórcio com a nota da empresa ligada: a fatura do consórcio aparece sem valor e sem situação (#756)", () => {
-    montar({ grupo: [com({ notas: [nota(1, "2351", 418330386, 384863955),
-      nota(3, "21", 990529648, 911287276, 911287276, { coligada: 90, da_lotufo: false, da_cota: false, fora_da_conta: true })],
-      pagamento_cota: cota(384863955, 0, 384863955) })] });
+    montar({ grupo: [com({ notas: [nota(1, "2351", 400000000, 360000000),
+      nota(3, "21", 900000000, 820000000, 820000000, { coligada: 90, da_lotufo: false, da_cota: false, fora_da_conta: true })],
+      pagamento_cota: cota(360000000, 0, 360000000) })] });
     const linhas = within(screen.getByRole("region", { name: "Notas e pagamento" })).getAllByRole("row")
       .map(l => (l.textContent ?? "").replace(/ /g, " "));
-    expect(linhas.slice(1)).toEqual(["NF 2351R$ 4.183.303,86em aberto", "NF 21fatura do consórcio, não entra na conta"]);
-    expect(screen.getByLabelText("A receber: R$ 3.848.639,55")).toBeTruthy();
+    expect(linhas.slice(1)).toEqual(["NF 2351R$ 4.000.000,00em aberto", "NF 21fatura do consórcio, não entra na conta"]);
+    expect(screen.getByLabelText("A receber: R$ 3.600.000,00")).toBeTruthy();
   });
 
   it("nota sem título no RM: a linha mostra “—”; a nota de outra coligada é marcada na tabela, sem dizer que é a fatura", () => {
-    montar({ grupo: [com({ notas: [nota(1, "2351", 418330386, 0), nota(3, "21", 990529648, 911287276, 0, { coligada: 90, da_lotufo: false, da_cota: false })],
+    montar({ grupo: [com({ notas: [nota(1, "2351", 400000000, 0), nota(3, "21", 900000000, 820000000, 0, { coligada: 90, da_lotufo: false, da_cota: false })],
       pagamento_cota: cota(null, null, null) })] });
     expect(screen.getByLabelText("A receber: —")).toBeTruthy();
     expect(screen.getByText(/outra coligada/)).toBeTruthy();
@@ -113,16 +113,16 @@ describe("Passo Pagamento (#514)", () => {
   it("#755: título e nota excluídos no RM aparecem ditos como excluídos, e os números continuam os do servidor", () => {
     // a nota 2351 teve o titulo refeito (o antigo, de mesmo valor, parou de vir); a 2340 foi refeita inteira e saiu
     montar({ grupo: [com({
-      notas: [nota(1, "2351", 418330386, 384863955, 0, { titulos_excluidos_rm: [
-        { valor_original_centavos: 384863955, valor_baixado_centavos: 0, excluida_rm_em: "2026-11-17 18:00:00" }] })],
+      notas: [nota(1, "2351", 400000000, 360000000, 0, { titulos_excluidos_rm: [
+        { valor_original_centavos: 360000000, valor_baixado_centavos: 0, excluida_rm_em: "2026-11-17 18:00:00" }] })],
       notas_excluidas_rm: [{ nota_id: 7, coligada: 1, numero: "2340", serie: null, emissao: "2026-11-10",
-        valor_centavos: 67032113, excluida_rm_em: "2026-11-17 18:00:00" }],
-      pagamento_cota: cota(384863955, 0, 384863955) })] });
-    expect(screen.getByLabelText("A receber: R$ 3.848.639,55")).toBeTruthy();
-    expect(screen.getByText("R$ 0,00 recebido de R$ 3.848.639,55")).toBeTruthy();
+        valor_centavos: 60000000, excluida_rm_em: "2026-11-17 18:00:00" }],
+      pagamento_cota: cota(360000000, 0, 360000000) })] });
+    expect(screen.getByLabelText("A receber: R$ 3.600.000,00")).toBeTruthy();
+    expect(screen.getByText("R$ 0,00 recebido de R$ 3.600.000,00")).toBeTruthy();
     const linhas = within(screen.getByRole("table")).getAllByRole("row").map(r => r.textContent);
-    expect(linhas[1]).toMatch(/^NF 2351R\$\s4\.183\.303,86em aberto título de R\$\s3\.848\.639,55 excluído no RM$/);
-    expect(linhas[2]).toMatch(/^NF 2340R\$\s670\.321,13excluída no RM$/);
+    expect(linhas[1]).toMatch(/^NF 2351R\$\s4\.000\.000,00em aberto título de R\$\s3\.600\.000,00 excluído no RM$/);
+    expect(linhas[2]).toMatch(/^NF 2340R\$\s600\.000,00excluída no RM$/);
   });
 
   it("sem nada excluído no RM, a tabela não fala disso", () => {
@@ -131,7 +131,7 @@ describe("Passo Pagamento (#514)", () => {
   });
 
   it("espelho sem saída da Lotufo (cota zero, completa): A receber R$ 0,00, sem barra, sem “Recebido” nem “Aguardando o órgão”", () => {
-    montar({ grupo: [com({ notas: [nota(3, "21", 990529648, 911287276, 911287276, { coligada: 90, da_lotufo: false, da_cota: false })],
+    montar({ grupo: [com({ notas: [nota(3, "21", 900000000, 820000000, 820000000, { coligada: 90, da_lotufo: false, da_cota: false })],
       pagamento_cota: cota(0, 0, 0) })] });
     expect(screen.getByLabelText("A receber: R$ 0,00")).toBeTruthy();
     expect(screen.queryByText("Recebido")).toBeNull();
@@ -213,8 +213,8 @@ describe("Passo Pagamento: nota divergente (#562)", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
 
   it("o a receber que vem de nota divergente do espelho ganha o selo; sem divergência, não", () => {
-    montar({ grupo: [com({ pagamento_cota: cota(16647772, 0, 16647772, false, { falta_divergente_centavos: 16647772 }) })] });
-    expect(screen.getByLabelText("A receber: R$ 166.477,72")).toBeTruthy();
+    montar({ grupo: [com({ pagamento_cota: cota(15000000, 0, 15000000, false, { falta_divergente_centavos: 15000000 }) })] });
+    expect(screen.getByLabelText("A receber: R$ 150.000,00")).toBeTruthy();
     expect(screen.getByText("Nota divergente do espelho")).toBeTruthy();
     cleanup();
     montar();
@@ -222,7 +222,7 @@ describe("Passo Pagamento: nota divergente (#562)", () => {
   });
 
   it("nota divergente já paga (falta zero dela) ou resumo incompleto: sem selo (gate Sol, rodada 1 da PR #581)", () => {
-    montar({ grupo: [com({ pagamento_cota: cota(16647772, 100, 16647672, true, { falta_divergente_centavos: 0 }) })] });
+    montar({ grupo: [com({ pagamento_cota: cota(15000000, 100, 14999900, true, { falta_divergente_centavos: 0 }) })] });
     expect(screen.queryByText("Nota divergente do espelho")).toBeNull();
     cleanup();
     montar({ grupo: [com({ pagamento_cota: cota(null, null, null, false, { falta_divergente_centavos: null }) })] });
@@ -238,7 +238,7 @@ describe("contas do pagamento", () => {
   });
 
   it("aReceber só repassa o bloco do servidor; incompleto ou ausente vira null", () => {
-    expect(aReceber([MEDICAO])).toEqual({ falta: 446533500, recebido: 0, total: 446533500, parcial: false, completo: true });
+    expect(aReceber([MEDICAO])).toEqual({ falta: 415000000, recebido: 0, total: 415000000, parcial: false, completo: true });
     expect(aReceber([com({ pagamento_cota: cota(null, null, null, true) })])).toEqual({ falta: null, recebido: null, total: null, parcial: true, completo: false });
     expect(aReceber([com({ pagamento_cota: cota(0, 0, 0) })])).toEqual({ falta: 0, recebido: 0, total: 0, parcial: false, completo: true });
     expect(aReceber([com({ pagamento_cota: undefined })]).falta).toBeNull();
@@ -278,7 +278,7 @@ describe("Passo Pagamento: situações (#722)", () => {
     const numeros = passo.querySelector(".pag-numeros")!;
     expect([...numeros.querySelectorAll(".pag-numeros__rotulo")].map(x => x.textContent)).toEqual(["A receber · cota da Lotufo", "Total da medição", "Aguardando há"]);
     expect([...numeros.querySelectorAll(".pag-numeros__valor")].map(x => x.textContent)).toEqual(
-      [expect.stringMatching(/^R\$\s4\.465\.335,00$/), expect.stringMatching(/^R\$\s9\.905\.296,48$/), expect.stringMatching(/^8\sdias$/)]);
+      [expect.stringMatching(/^R\$\s4\.150\.000,00$/), expect.stringMatching(/^R\$\s9\.000\.000,00$/), expect.stringMatching(/^8\sdias$/)]);
     // os numeros vem antes das notas e do processo
     expect(numeros.compareDocumentPosition(screen.getByRole("region", { name: "Notas e pagamento" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const barra = screen.getByLabelText("Recebido");

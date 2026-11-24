@@ -10,11 +10,11 @@ vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api"
 const DESATUALIZADA = "As notas mudaram depois desta FRC: gere de novo na etapa 3 (Nota fiscal) antes de baixar";
 
 const item = (empresa: string, municipio: string, extra: Record<string, unknown> = {}) => ({
-  chave: `${empresa}-${municipio}`, empresa, municipio, esperado_centavos: 81887199, situacao: "falta", documento_id: null,
+  chave: `${empresa}-${municipio}`, empresa, municipio, esperado_centavos: 100000000, situacao: "falta", documento_id: null,
   nome: null, numero: null, problema: null, valores: null, ...extra });
 const anexada = (empresa: string, municipio: string, numero: string) => item(empresa, municipio, {
   situacao: "anexada", documento_id: 1, nome: "x.pdf", numero,
-  valores: { bruto: 81887199, inss: 3603036, irrf: 982646, iss: 1637744, retencoes: 6223426, liquido: 75663773 } });
+  valores: { bruto: 100000000, inss: 4000000, irrf: 1000000, iss: 2000000, retencoes: 7000000, liquido: 93000000 } });
 
 describe("FRC do consórcio (etapa 3)", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
@@ -56,8 +56,8 @@ describe("FRC do consórcio (etapa 3)", () => {
   const gerada = (desatualizada: boolean) => ({
     disponivel: true, consorcio: "Consórcio Integra BRT", motivo: null, completa: true, ultima: 22, sugerido: 22,
     itens: [anexada("Lotufo", "Cuiabá", "2284")], nao_lidas: [], sobras: [], bloqueio: null, assinada: false,
-    frc: { numero: 22, data_geracao: "2026-10-09", gerada_em: "", gerada_por: "Leo", bruto_centavos: 1210048928,
-           liquido_centavos: 1118085213, desatualizada } });
+    frc: { numero: 22, data_geracao: "2026-10-09", gerada_em: "", gerada_por: "Leo", bruto_centavos: 1200000000,
+           liquido_centavos: 1100000000, desatualizada } });
 
   it("FRC gerada: gerar de novo e os dois downloads", async () => {
     api.mockResolvedValue(gerada(false));

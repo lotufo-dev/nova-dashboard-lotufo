@@ -169,16 +169,16 @@ describe("CampoValor: edição pelo tipo do evento", () => {
   });
 
   it("A1: vários caracteres de uma vez substituem o valor, mesmo com começo e fim iguais ao anterior", () => {
-    render(<Campo inicial="9.384.834,18" />);
+    render(<Campo inicial="9.000.000,00" />);
     editar("9.500.000,00", "insertText", "9.500.000,00");   // tudo selecionado; comeca com "9." como o anterior
     expect(campo().value).toBe("9.500.000,00");
     apagar("");
-    digitar("938483418");
-    editar("9.384.834,189.500.000,00", "insertText", "9.500.000,00");
+    digitar("900000000");
+    editar("9.000.000,009.500.000,00", "insertText", "9.500.000,00");
     expect(campo().value).toBe("9.500.000,00");
-    editar("9.500.000,009.384.834,18", "insertFromDrop", "9.384.834,18");
-    expect(campo().value).toBe("9.384.834,18");
-    editar("9.384.834,189.500.000,00", "insertFromPaste", "9.500.000,00");
+    editar("9.500.000,009.000.000,00", "insertFromDrop", "9.000.000,00");
+    expect(campo().value).toBe("9.000.000,00");
+    editar("9.000.000,009.500.000,00", "insertFromPaste", "9.500.000,00");
     expect(campo().value).toBe("9.500.000,00");
   });
 

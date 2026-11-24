@@ -15,13 +15,13 @@ const saida = (chave: string, natureza: string, municipio: string, valor: number
   chave, natureza, rotulo: natureza === "medicao" ? "Medição" : "Reajuste", emissor: "lotufo", municipio,
   valor, mo: 1, material: 1, inss: 1, iss: 1, irrf: 1, ibs: null, cbs: null, liquido: valor - 3 });
 
-const PREVIA = { medicoes: [{ tipo: "execucao", valor_centavos: 63452958, existente: null },
-                            { tipo: "reajuste", valor_centavos: 3865583, existente: null }], avisos: [],
-  saidas: [saida("caceres-medicao", "medicao", "Cáceres", 52843623), saida("porto-medicao", "medicao", "Porto Esperidião", 10609335),
-           saida("caceres-reajuste", "reajuste", "Cáceres", 3219258), saida("porto-reajuste", "reajuste", "Porto Esperidião", 646325)] };
+const PREVIA = { medicoes: [{ tipo: "execucao", valor_centavos: 60000001, existente: null },
+                            { tipo: "reajuste", valor_centavos: 3000000, existente: null }], avisos: [],
+  saidas: [saida("caceres-medicao", "medicao", "Cáceres", 50000001), saida("porto-medicao", "medicao", "Porto Esperidião", 10000000),
+           saida("caceres-reajuste", "reajuste", "Cáceres", 2500000), saida("porto-reajuste", "reajuste", "Porto Esperidião", 500000)] };
 
 const ESPELHO = { id: 7, numero: 10, competencia: "2026-05", versao: 1, situacao: "vigente", criado_em: "2026-09-22 14:00:00",
-  entradas: { medicao: 63452958, reajuste: 3865583 },
+  entradas: { medicao: 60000001, reajuste: 3000000 },
   criado_por_nome: "Maria", motivo: null, saidas: PREVIA.saidas, medicoes: [{ id: 1, tipo: "execucao", estado: "espelho_gerado" }],
   arquivos: [{ documento_id: 3, saida: "caceres-medicao", nome: "ESPELHO - MT-388 - 10ª Medição (05.2026) - Cáceres.docx", tamanho: 29000 }],
   envio: null };
@@ -74,13 +74,13 @@ describe("Espelho", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Gerar espelho/ }));
     fireEvent.change(screen.getByLabelText("Nº da medição"), { target: { value: "10" } });
     fireEvent.change(screen.getByLabelText("Competência"), { target: { value: "052026" } });
-    fireEvent.change(screen.getByLabelText("Valor da medição"), { target: { value: "634.529,58" } });
-    fireEvent.change(screen.getByLabelText("Valor do reajuste"), { target: { value: "38.655,83" } });
+    fireEvent.change(screen.getByLabelText("Valor da medição"), { target: { value: "600.000,01" } });
+    fireEvent.change(screen.getByLabelText("Valor do reajuste"), { target: { value: "30.000,00" } });
     fireEvent.click(screen.getByRole("button", { name: "Conferir" }));
-    await waitFor(() => expect(screen.getAllByText(/528\.436,23/).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText(/500\.000,01/).length).toBeGreaterThan(0));
     expect(api).toHaveBeenLastCalledWith("/api/contratos/1/espelho/previa", expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ numero: 10, competencia: "2026-05", entradas: { medicao: "634.529,58", reajuste: "38.655,83" } }) }));
+      body: JSON.stringify({ numero: 10, competencia: "2026-05", entradas: { medicao: "600.000,01", reajuste: "30.000,00" } }) }));
     // #722: a conferencia e' um extrato -- uma coluna por nota e uma linha por valor, com o liquido no rodape
     expect(screen.getAllByRole("columnheader")).toHaveLength(1 + PREVIA.saidas.length);      // "Saída" + as notas
     expect(screen.getAllByRole("rowheader").map(x => x.textContent)).toEqual(["Valor", "Mão de obra", "Material", "INSS", "ISS", "IRRF", "Líquido"]);
@@ -179,7 +179,7 @@ describe("Espelho", () => {
     expect(screen.queryByText(/gerado em/)).toBeNull();
     // "Gerar de novo" parte dos valores da versao vigente
     fireEvent.click(screen.getByRole("button", { name: "Gerar de novo" }));
-    expect((screen.getByLabelText("Valor da medição") as HTMLInputElement).value).toBe("634.529,58");
+    expect((screen.getByLabelText("Valor da medição") as HTMLInputElement).value).toBe("600.000,01");
     expect((screen.getByLabelText("Nº da medição") as HTMLInputElement).value).toBe("10");
   });
 
@@ -313,12 +313,12 @@ describe("Espelho", () => {
   // issue #284: a prevista (ou planilha/carta) sem boletim so' gera o espelho com a justificativa
   it("medição sem boletim pede a justificativa e a manda ao gerar; o valor da medição aparece com a origem", async () => {
     const previa = { ...PREVIA, periodo: "01/05/2026 A 31/05/2026",
-      medicoes: [{ tipo: "execucao", valor_centavos: 63452958, existente: "prevista", sem_boletim: true }],
-      travados: [{ tipo: "execucao", valor_centavos: 63452958, fonte: "pedido", opcional: true, sem_boletim: true }] };
+      medicoes: [{ tipo: "execucao", valor_centavos: 60000001, existente: "prevista", sem_boletim: true }],
+      travados: [{ tipo: "execucao", valor_centavos: 60000001, fonte: "pedido", opcional: true, sem_boletim: true }] };
     api.mockResolvedValueOnce({ regra: REGRA, espelhos: [] });
     api.mockResolvedValueOnce(previa);
     render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} abrirForm inicial={{ numero: 10, competencia: "2026-05" }} />);
-    fireEvent.change(await screen.findByLabelText("Valor da medição"), { target: { value: "634.529,58" } });
+    fireEvent.change(await screen.findByLabelText("Valor da medição"), { target: { value: "600.000,01" } });
     fireEvent.click(screen.getByRole("button", { name: "Conferir" }));
     await screen.findByRole("button", { name: "Gerar" });
     expect(screen.getByText(/Sem o boletim do órgão: Medição 10 de execução/)).toBeTruthy();
@@ -341,14 +341,14 @@ describe("Espelho", () => {
 
   it("a origem do valor diz boletim só quando há boletim; o atestado digitado aparece como aprovado (#284)", async () => {
     const com = (fonte: string, sem_boletim: boolean) => ({ ...PREVIA, periodo: "01/05/2026 A 31/05/2026",
-      medicoes: [{ tipo: "execucao", valor_centavos: 63452958, existente: sem_boletim ? "planilha_enviada" : "boletim_recebido", sem_boletim }],
-      travados: [{ tipo: "execucao", valor_centavos: 63452958, fonte, opcional: sem_boletim, sem_boletim }] });
+      medicoes: [{ tipo: "execucao", valor_centavos: 60000001, existente: sem_boletim ? "planilha_enviada" : "boletim_recebido", sem_boletim }],
+      travados: [{ tipo: "execucao", valor_centavos: 60000001, fonte, opcional: sem_boletim, sem_boletim }] });
     for (const [fonte, sem, rotulo] of [["atestado", true, "(aprovado)"], ["boletim", false, "(aprovado do boletim)"]] as const) {
       cleanup(); api.mockReset();
       api.mockResolvedValueOnce({ regra: REGRA, espelhos: [] });
       api.mockResolvedValueOnce(com(fonte, sem));
       render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} abrirForm inicial={{ numero: 10, competencia: "2026-05" }} />);
-      fireEvent.change(await screen.findByLabelText("Valor da medição"), { target: { value: "634.529,58" } });
+      fireEvent.change(await screen.findByLabelText("Valor da medição"), { target: { value: "600.000,01" } });
       fireEvent.click(screen.getByRole("button", { name: "Conferir" }));
       await screen.findByRole("button", { name: "Gerar" });
       const linha = screen.getByText(/Medição 10 de execução \(/).textContent ?? "";
@@ -361,13 +361,13 @@ describe("Espelho", () => {
 // #514: passo Espelhos da pagina da obra
 describe("Espelho: o passo Espelhos (#514)", () => {
   afterEach(() => { cleanup(); api.mockReset(); apiForm.mockReset(); });
-  // total das saidas: 52.843.623 + 10.609.335 + 3.219.258 + 646.325 = 67.318.541 (centavo impar)
+  // total das saidas: 50.000.001 + 10.000.000 + 2.500.000 + 500.000 = 63.000.001 (centavo impar)
   const comDuas = { ...ESPELHO, medicoes: [{ id: 1, tipo: "execucao", estado: "espelho_gerado" }, { id: 2, tipo: "reajuste", estado: "espelho_gerado" }] };
 
   it("uma linha por nota (empresa, município, valor, espelho) e o total igual ao aprovado das medições do espelho", async () => {
     api.mockResolvedValue({ regra: REGRA, espelhos: [comDuas] });
     render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
-      referencias={{ 1: { valor: 63452958, fonte: "aprovado" }, 2: { valor: 3865583, fonte: "aprovado" } }} />);
+      referencias={{ 1: { valor: 60000001, fonte: "aprovado" }, 2: { valor: 3000000, fonte: "aprovado" } }} />);
     const tabela = await screen.findByRole("table", { name: "Espelhos da medição 10" });
     const linhas = within(tabela).getAllByRole("row");
     expect(linhas).toHaveLength(6);                        // cabecalho, 4 notas, total
@@ -376,15 +376,15 @@ describe("Espelho: o passo Espelhos (#514)", () => {
     // so' a saida com arquivo tem o "gerado", que baixa o espelho dela
     expect(within(linhas[1]).getByRole("link", { name: /Baixar o espelho/ }).getAttribute("href")).toBe("/api/espelhos/7/arquivos/3");
     expect(within(linhas[2]).queryByRole("link")).toBeNull();
-    expect(within(linhas[5]).getByText("R$ 673.185,41")).toBeTruthy();
+    expect(within(linhas[5]).getByText("R$ 630.000,01")).toBeTruthy();
     expect(within(linhas[5]).getByText("igual ao aprovado")).toBeTruthy();
   });
 
   it("total diferente diz o valor de referência; no misto (execução aprovada, reajuste pedido) a referência diz as duas", async () => {
     api.mockResolvedValue({ regra: REGRA, espelhos: [comDuas] });
     render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
-      referencias={{ 1: { valor: 63452957, fonte: "aprovado" }, 2: { valor: 3865583, fonte: "pedido" } }} />);
-    expect(await screen.findByText("diferente da referência (aprovado + pedido) (R$ 673.185,40)")).toBeTruthy();
+      referencias={{ 1: { valor: 60000000, fonte: "aprovado" }, 2: { valor: 3000000, fonte: "pedido" } }} />);
+    expect(await screen.findByText("diferente da referência (aprovado + pedido) (R$ 630.000,00)")).toBeTruthy();
     expect(screen.queryByText(/igual/)).toBeNull();
   });
 
@@ -392,7 +392,7 @@ describe("Espelho: o passo Espelhos (#514)", () => {
     api.mockResolvedValue({ regra: REGRA, espelhos: [comDuas] });
     const ver = async (r1: "aprovado" | "pedido", r2: "aprovado" | "pedido", texto: string) => {
       const { unmount } = render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
-        referencias={{ 1: { valor: 63452958, fonte: r1 }, 2: { valor: 3865583, fonte: r2 } }} />);
+        referencias={{ 1: { valor: 60000001, fonte: r1 }, 2: { valor: 3000000, fonte: r2 } }} />);
       expect(await screen.findByText(texto)).toBeTruthy();
       unmount();
     };
@@ -404,7 +404,7 @@ describe("Espelho: o passo Espelhos (#514)", () => {
   it("sem referência de uma das medições, o total aparece sem conferência", async () => {
     api.mockResolvedValue({ regra: REGRA, espelhos: [comDuas] });
     render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
-      referencias={{ 1: { valor: 63452958, fonte: "aprovado" } }} />);
+      referencias={{ 1: { valor: 60000001, fonte: "aprovado" } }} />);
     await screen.findByRole("table", { name: "Espelhos da medição 10" });
     expect(screen.queryByText(/igual ao|diferente do/)).toBeNull();
   });
@@ -568,13 +568,13 @@ describe("Espelho: o passo Espelhos (#514)", () => {
   it("obra própria ou consórcio que emite o cheio: uma linha só, rotulada Total, com a conferência (#558)", async () => {
     api.mockResolvedValue({ regra: REGRA, espelhos: [comDuas] });   // as notas somam o mesmo que as entradas
     render(<Espelho contratoId={1} podeEditar aoMudar={() => {}} medicao={{ id: 1, tipo: "execucao" }} parte="espelho"
-      referencias={{ 1: { valor: 63452958, fonte: "aprovado" }, 2: { valor: 3865583, fonte: "aprovado" } }} />);
+      referencias={{ 1: { valor: 60000001, fonte: "aprovado" }, 2: { valor: 3000000, fonte: "aprovado" } }} />);
     const tabela = await screen.findByRole("table", { name: "Espelhos da medição 10" });
     const linhas = within(tabela).getAllByRole("row");
     expect(linhas).toHaveLength(6);                        // cabecalho, 4 notas, uma linha de total
     const total = linhas[5];
     expect(within(total).getByText("Total")).toBeTruthy();
-    expect(within(total).getByText("R$ 673.185,41")).toBeTruthy();
+    expect(within(total).getByText("R$ 630.000,01")).toBeTruthy();
     expect(within(total).getByText("igual ao aprovado")).toBeTruthy();
     expect(within(tabela).queryByText("Total das notas")).toBeNull();
     expect(within(tabela).queryByText("Valor da medição")).toBeNull();
