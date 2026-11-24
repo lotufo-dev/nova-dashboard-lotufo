@@ -56,5 +56,5 @@ Decidimos duas coisas.
 - **Ficam no radar**: a lista de fontes e o estado de cada uma, as regras de alerta, o envio do e-mail e as regras
   do projeto dele (custo zero, nenhuma fonte desligada, senha só no cofre da máquina). A análise do edital continua
   fora da dashboard.
-- **Quem vê e quem decide** são duas permissões novas (`ver_licitacoes`, `editar_licitacoes`). Enquanto o dono não
-  disser outra coisa, o administrador vê e decide, a diretoria só vê e a engenharia não tem a área no menu.
+- **Quem vê e quem decide** são duas permissões novas (`ver_licitacoes`, `editar_licitacoes`). Decisão do dono em
+  24/11/2026: só o administrador tem as duas. Diretoria e engenharia não têm a área no menu e recebem 403 nas rotas.
