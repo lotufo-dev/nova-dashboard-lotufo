@@ -577,8 +577,6 @@ export const LOGIN = { id: "login", caminho: "/", espera: "form.entrar__form" };
 export const RESPOSTAS_ESPERADAS = [
   { metodo: "GET", caminho: /^\/api\/auth\/eu$/, status: 401, so: "login",
     motivo: "antes de entrar, a tela pergunta quem esta' logado e o servidor responde que ninguem" },
-  { metodo: "GET", caminho: /^\/api\/contratos\/\d+\/custo$/, status: 404,
-    motivo: "a obra sem cadastro de custo responde 404 e a aba Medicoes so' deixa de mostrar a coluna do custo (#748)" },
   { metodo: "GET", caminho: /^\/api\/correio\/assinatura$/, status: 404,
     motivo: "quem nao cadastrou assinatura responde 404 e o e-mail aberto mostra o aviso de que ela falta" },
 ];
