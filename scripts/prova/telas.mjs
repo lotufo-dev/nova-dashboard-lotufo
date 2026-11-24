@@ -24,6 +24,9 @@
 //   erro     true quando a tela DEVE mostrar o aviso de erro (a falha foi simulada); sem ele, aviso de erro reprova
 //   parou    true quando a tela DEVE cair na tela "A tela parou de responder" (a resposta simulada quebra o desenho)
 //   destino  o caminho em que a tela termina, quando ela so' leva a outra (`/notas/envio/:id` abre a pagina da medicao)
+//   medicaoQue  o ato que a tela abre (chave de ATOS_DA_MEDICAO): `:obra` e `:medicao` viram a primeira medicao que
+//            ainda aceita esse ato, e nao a primeira do banco (numa copia do banco ela esta' recebida e o botao nao
+//            existe). Sem medicao nesse estado a tela sai como "sem registro", que nao reprova. `--medicao` manda
 //
 // Todo item do menu de um perfil precisa de uma tela aqui para esse perfil: a prova reprova o item sem tela.
 import { avisosEmVolume, semAvisos, cabecalhoCom, cabecalhoEmDia, CUSTO_DA_OBRA, detalheDoEnvio, espelhoEnviadoPorFora, espelhoGerado, falha,
@@ -55,6 +58,23 @@ const OPERA = ["admin", "engenharia"];        // quem lanca medicao e envia e-ma
 const SO_ADMIN = ["admin"];
 
 const MEDICAO = "/obras/:obra/medicoes/:medicao";
+// A medicao que ainda aceita cada ato da pagina (`medicaoQue`), pelo mesmo criterio da pagina e do servidor:
+// `PROXIMOS` de frontend/src/medicao.ts (espelho de `medicoes.TRANSICOES`) para cancelar e desistir; o recebimento
+// manual (`PassoPagamento`: so' o admin) em `protocolada`, `nf_emitida` ou na que recebe sem protocolo (#743); o
+// protocolo feito fora (`MedicaoPagina`, passo "Envio da nota" ja' feito) nas protocoladas, se a obra tem esse passo.
+// `m` e' a linha de `/api/contratos/:id/medicoes`.
+const ACEITA = (estado, destino) => ({
+  prevista: ["cancelada", "desistida"], planilha_gerada: ["cancelada", "desistida"],
+  planilha_enviada: ["cancelada", "desistida"], boletim_recebido: ["cancelada", "desistida"],
+  espelho_gerado: ["cancelada"], espelho_enviado: ["cancelada"], nota_emitida: ["cancelada"],
+  protocolada: ["recebida", "cancelada", "desistida"], nf_emitida: ["recebida", "cancelada", "desistida"],
+}[estado] ?? []).includes(destino);
+export const ATOS_DA_MEDICAO = {
+  cancelar: m => ACEITA(m.estado, "cancelada"),
+  desistir: m => ACEITA(m.estado, "desistida"),
+  receber: m => ACEITA(m.estado, "recebida") || m.recebe_sem_protocolo === true,
+  "protocolo-fora": m => ["protocolada", "nf_emitida"].includes(m.estado) && (m.passos ?? [5]).includes(5),
+};
 const JANELA = "dialog[open] .iniciar__caixa";
 // issue #805: a carteira de quatro contratantes no lugar do cadastro de exemplo (ver simulados.mjs)
 const comCarteira = [
@@ -377,9 +397,9 @@ export const TELAS = [
   { rota: "medicao", id: "medicao-mais-acoes", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: "#conteudo .conta__item",
     passos: [{ clicar: '#conteudo button:has-text("Mais ações")' }] },
   { rota: "medicao", id: "medicao-cancelar", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
-    passos: maisAcoes("Cancelar a medição") },
+    medicaoQue: "cancelar", passos: maisAcoes("Cancelar a medição") },
   { rota: "medicao", id: "medicao-desistencia", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
-    passos: maisAcoes("Registrar desistência") },
+    medicaoQue: "desistir", passos: maisAcoes("Registrar desistência") },
   { rota: "medicao", id: "medicao-final", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
     passos: maisAcoes("Marcar como medição final") },
   { rota: "medicao", id: "medicao-boletim", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
@@ -387,7 +407,7 @@ export const TELAS = [
   { rota: "medicao", id: "medicao-atestado", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
     passos: maisAcoes("Editar o atestado") },
   { rota: "medicao", id: "medicao-protocolo-fora", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
-    passos: [...passo("Envio da nota"), { clicar: '#conteudo button:has-text("Registrar protocolo feito fora")' }] },
+    medicaoQue: "protocolo-fora", passos: [...passo("Envio da nota"), { clicar: '#conteudo button:has-text("Registrar protocolo feito fora")' }] },
   { rota: "medicao", id: "medicao-a-enviar", caminho: MEDICAO, perfis: TODOS, antes: "nav.passos", espera: "#passo-5 table",
     simular: comNotaAEnviar("sinfra"), passos: passo("Envio da nota") },
   // o espelho gerado e nao enviado, e o e-mail ao faturamento aberto (assunto comprido, anexo, aviso)
@@ -412,7 +432,7 @@ export const TELAS = [
   { rota: "medicao", id: "medicao-oficio", caminho: MEDICAO, perfis: OPERA, antes: "nav.passos", espera: JANELA,
     simular: comNotaAEnviar("mtpar"), passos: [...passo("Envio da nota"), { clicar: '#passo-5 button:has-text("Enviar a nota")' }] },
   { rota: "medicao", id: "medicao-recebimento", caminho: MEDICAO, perfis: SO_ADMIN, antes: "nav.passos", espera: JANELA,
-    passos: [{ clicar: '#conteudo button:has-text("Registrar recebimento")' }] },
+    medicaoQue: "receber", passos: [{ clicar: '#conteudo button:has-text("Registrar recebimento")' }] },
   // o passo do boletim da MT-PAR (#753): a pendencia na pagina, o formulario do boletim e o boletim anexado
   { rota: "medicao", id: "medicao-mtpar-sem-boletim", caminho: MEDICAO, perfis: TODOS, espera: "nav.passos",
     simular: [{ caminho: MEDICOES_DA_OBRA, ajustar: medicaoDaMtpar() }] },

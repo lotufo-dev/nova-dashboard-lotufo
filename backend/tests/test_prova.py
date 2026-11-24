@@ -87,10 +87,13 @@ def _instalacao(pasta):
     return pasta / "dados" / "dashboard.db"
 
 
-def _banco(caminho, contratos=0, usuarios=()):
-    """Um banco SQLite so' com o que a guarda le: a tabela de contratos e a de usuarios."""
+def _banco(caminho, contratos=0, usuarios=(), wal=False):
+    """Um banco SQLite so' com o que a guarda le: a tabela de contratos e a de usuarios. `wal`: em modo WAL, como o
+    de uma copia da producao (o modo fica gravado no arquivo; fechado, ele nao deixa `-wal` nem `-shm`)."""
     caminho.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(caminho)
+    if wal:
+        conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("CREATE TABLE contratos (id INTEGER PRIMARY KEY)")
     conn.execute("CREATE TABLE usuarios (id INTEGER PRIMARY KEY, email TEXT)")
     conn.executemany("INSERT INTO contratos DEFAULT VALUES", [()] * contratos)
@@ -223,7 +226,9 @@ def test_copia_pedida_sobre_arquivo_que_nao_existe_ou_nao_e_banco_recusa(repo):
 
 
 def _nada_nasceu_ao_lado(banco):
-    return sorted(p.name for p in banco.parent.iterdir() if p.name.startswith("prova-") or p.name == "correio-simulado")
+    """Tudo o que ha' na pasta do banco alem dele: a senha, o log, o correio, e tambem os auxiliares `-wal`, `-shm` e
+    `-journal` que a leitura do SQLite pode deixar. As pastas dos testes so' trazem o banco."""
+    return sorted(p.name for p in banco.parent.iterdir() if p != banco)
 
 
 def test_servidor_recusa_banco_de_instalacao_e_banco_com_contratos_antes_de_gravar(tmp_path):
@@ -239,6 +244,49 @@ def test_servidor_recusa_banco_de_instalacao_e_banco_com_contratos_antes_de_grav
                            copia=com_copia)
         assert banco.read_bytes() == antes[banco]
         assert _nada_nasceu_ao_lado(banco) == []        # nem a senha de teste
+
+
+def test_banco_em_modo_wal_recusado_nao_deixa_arquivo_ao_lado(tmp_path):
+    """A leitura de um banco WAL, mesmo so' para contar contratos, cria `-shm` e `-wal` vazios ao lado dele."""
+    copia = _banco(tmp_path / "temp" / "copia.db", contratos=2, wal=True)
+    assert _nada_nasceu_ao_lado(copia) == []            # o ponto de partida: so' o banco
+    antes = copia.read_bytes()
+    with pytest.raises(comum.Recusa, match="--copia"):
+        comum.conferir_copia(copia, False)
+    assert _nada_nasceu_ao_lado(copia) == [] and copia.read_bytes() == antes
+    with pytest.raises(comum.Recusa, match="--copia"):
+        servidor.subir({"DASH_DB_PATH": str(copia), "DASH_CADASTRO_DIR": str(comum.CADASTRO_EXEMPLO)}, com_frontend=False)
+    assert _nada_nasceu_ao_lado(copia) == [] and copia.read_bytes() == antes
+    # a leitura que passa (banco ja' preparado) tambem nao deixa nada
+    preparado = _banco(tmp_path / "pronto" / "prova.db", contratos=1, usuarios=USUARIOS_DE_TESTE, wal=True)
+    assert comum.conferir_copia(preparado, False) == "preparado"
+    assert _nada_nasceu_ao_lado(preparado) == []
+
+
+def test_banco_em_modo_wal_com_auxiliares_ja_existentes_nao_os_apaga(tmp_path):
+    """Os auxiliares de um servidor no ar nao sao da prova: ficam, com o que tiverem."""
+    banco = _banco(tmp_path / "temp" / "copia.db", contratos=2, wal=True)
+    aberto = sqlite3.connect(banco)                      # outro processo com o banco aberto: `-wal` e `-shm` existem
+    try:
+        aberto.execute("SELECT COUNT(*) FROM contratos").fetchone()
+        antes = _nada_nasceu_ao_lado(banco)
+        assert antes == ["copia.db-shm", "copia.db-wal"]
+        assert comum.estado_do_banco(banco)["contratos"] == 2
+        assert _nada_nasceu_ao_lado(banco) == antes
+    finally:
+        aberto.close()
+
+
+def test_dist_sem_index_html_recusa_antes_de_criar_pasta(tmp_path):
+    """`--dist` sem frontend montado e' recusado antes de qualquer `mkdir`: a pasta do banco nem nasce."""
+    dist = tmp_path / "dist-vazio"
+    dist.mkdir()
+    banco = tmp_path / "temp" / "prova.db"
+    ambiente = {"DASH_DB_PATH": str(banco), "DASH_CADASTRO_DIR": str(comum.CADASTRO_EXEMPLO)}
+    with pytest.raises(comum.Recusa, match="--dist não tem um frontend montado"):
+        servidor.subir(ambiente, dist=dist)
+    assert not banco.parent.exists()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["dist-vazio"]
 
 
 @pytest.mark.parametrize("onde, argumentos, frase", [
@@ -589,3 +637,49 @@ def test_retrato_com_caminho_dentro_do_repositorio_so_na_pasta_ignorada(repo):
 def test_retrato_no_repositorio_de_verdade_recusa_pasta_versionada(tmp_path):
     with pytest.raises(comum.Recusa, match="dentro do repositório"):
         retrato.pasta_do_retrato(tmp_path, str(RAIZ / "docs" / "retrato-antes"))
+
+
+# --- as telas de ato da medicao escolhem a medicao pelo estado ---------------------------------------------------
+
+def _atos_por_estado():
+    """O que `ATOS_DA_MEDICAO` (telas.mjs) responde para uma linha de medicao em cada estado do servidor."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("sem Node nesta máquina")
+    from app import medicoes
+    estados = sorted(medicoes.TRANSICOES)
+    roteiro = (
+        "import { ATOS_DA_MEDICAO as A } from './scripts/prova/telas.mjs';"
+        f"const e = {estados!r}; const s = {{}};"
+        "for (const [ato, f] of Object.entries(A)) s[ato] = Object.fromEntries(e.map(x => [x, f({ estado: x })]));"
+        "s.sem_protocolo = A.receber({ estado: 'nota_emitida', recebe_sem_protocolo: true });"
+        "s.sem_passo_5 = A['protocolo-fora']({ estado: 'protocolada', passos: [1, 2, 3, 4, 6] });"
+        "console.log(JSON.stringify(s));")
+    feito = subprocess.run([node, "--input-type=module", "-e", roteiro], cwd=RAIZ, capture_output=True, text=True,
+                           encoding="utf-8")
+    assert feito.returncode == 0, feito.stderr
+    import json
+    return json.loads(feito.stdout)
+
+
+def _proximos_da_pagina():
+    """`PROXIMOS` de frontend/src/medicao.ts: estado -> destinos que a pagina oferece."""
+    import re
+    fonte = (RAIZ / "frontend" / "src" / "medicao.ts").read_text(encoding="utf-8")
+    bloco = re.search(r"export const PROXIMOS[^=]*=\s*\{(.*?)\n\};", fonte, re.S).group(1)
+    return {m[0]: re.findall(r'"(\w+)"', m[1]) for m in re.findall(r"(\w+):\s*\[([^\]]*)\]", bloco)}
+
+
+def test_telas_de_ato_pedem_a_medicao_no_estado_que_a_pagina_aceita():
+    atos = _atos_por_estado()
+    proximos = _proximos_da_pagina()
+    for estado in atos["cancelar"]:
+        assert atos["cancelar"][estado] == ("cancelada" in proximos.get(estado, [])), estado
+        assert atos["desistir"][estado] == ("desistida" in proximos.get(estado, [])), estado
+        assert atos["receber"][estado] == ("recebida" in proximos.get(estado, [])), estado
+    # a recebida, a cancelada e a desistida ja' foram encerradas: nenhum ato serve (o que reprovava na copia do banco)
+    for estado in ("recebida", "cancelada", "desistida"):
+        assert not any(atos[ato][estado] for ato in ("cancelar", "desistir", "receber", "protocolo-fora")), estado
+    assert atos["sem_protocolo"] is True            # #743: nota emitida de obra sem o passo "Envio da nota" recebe
+    assert {e for e, ok in atos["protocolo-fora"].items() if ok} == {"protocolada", "nf_emitida"}
+    assert atos["sem_passo_5"] is False             # a obra sem o passo "Envio da nota" nao tem o botao

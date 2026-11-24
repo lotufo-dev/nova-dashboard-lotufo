@@ -18,6 +18,8 @@
 // "Carregando…"; mostra a tela de erro ("A tela parou de responder") ou um aviso de erro; cai no login ou em
 // outra tela; fica em branco; ou a pagina rola de lado. (A tela com `erro` ou `parou` e' a que DEVE mostrar isso.) Uma tela de `telas.mjs` pode trazer `passos` (cliques que
 // abrem uma janela ou um formulario) e `simular` (respostas da API trocadas, para ver a tela vazia ou a de erro).
+// A tela de um ato da medicao (`medicaoQue`, em telas.mjs) abre a primeira medicao que ainda aceita o ato; se o banco
+// nao tem nenhuma, a tela sai como "sem registro", que nao reprova.
 // A auditoria visual (`auditoria.mjs`: texto cortado, fora da vista ou sobreposto, letra e canto fora da fundacao)
 // roda em cada tela e largura e sai como aviso; o resumo do fim junta os achados por tipo.
 //
@@ -32,7 +34,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { auditar, REPROVA } from "./auditoria.mjs";
-import { LARGURAS, LOGIN, MENU, PERFIS, RESPOSTAS_ESPERADAS, ROTAS_FORA, TELAS, telasDoPerfil } from "./telas.mjs";
+import { ATOS_DA_MEDICAO, LARGURAS, LOGIN, MENU, PERFIS, RESPOSTAS_ESPERADAS, ROTAS_FORA, TELAS, telasDoPerfil } from "./telas.mjs";
 import { ESTADOS_DO_LOGIN } from "./telas.mjs";
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -270,7 +272,8 @@ const fotosDoLogin = new Set();
 function registrar(item) {
   relato.push(item);
   const onde = `${item.perfil} ${item.largura} ${item.tela} ${item.caminho ?? ""}`.trim();
-  if (item.problemas.length) console.log(`FALHA ${onde}\n` + item.problemas.map(p => `        ${p}`).join("\n"));
+  if (item.semRegistro) console.log(`sem registro ${onde}\n        ${item.semRegistro}`);
+  else if (item.problemas.length) console.log(`FALHA ${onde}\n` + item.problemas.map(p => `        ${p}`).join("\n"));
   else console.log(`ok    ${onde} (${item.ms} ms)` + item.avisos.map(a => `\n        aviso: ${a}`).join(""));
 }
 
@@ -357,6 +360,22 @@ async function abrirEstadosDoLogin(contexto, perfil, largura) {
   }
 }
 
+// A medicao de cada ato de `ATOS_DA_MEDICAO` (telas com `medicaoQue`): a primeira, na ordem das obras e da obra, que
+// ainda aceita o ato; `null` quando o banco nao tem. Com `--medicao` vale a pedida; com `--obra`, so' as dela.
+async function medicoesPorAto(contratos, medicoesDe, obra, medicao) {
+  const atos = {};
+  const quais = pedidos.obra === null ? contratos : contratos.filter(c => c.id === obra);
+  for (const [ato, aceita] of Object.entries(ATOS_DA_MEDICAO)) {
+    atos[ato] = null;
+    if (pedidos.medicao !== null) { if (medicao !== null) atos[ato] = { obra, medicao }; continue; }
+    for (const c of quais) {
+      const achada = (await medicoesDe(c.id)).find(aceita);
+      if (achada) { atos[ato] = { obra: c.id, medicao: achada.id }; break; }
+    }
+  }
+  return atos;
+}
+
 // Os registros que entram nos caminhos com `:obra`, `:medicao` e `:empresa`: lidos da API, com a sessao do perfil.
 async function registros(contexto) {
   const ler = async caminho => {
@@ -364,9 +383,14 @@ async function registros(contexto) {
     return r.ok() ? r.json() : [];
   };
   const contratos = await ler("/api/contratos");
+  const listas = new Map();
+  const medicoesDe = async id => {
+    if (!listas.has(id)) listas.set(id, await ler(`/api/contratos/${id}/medicoes`));
+    return listas.get(id);
+  };
   let obra = null, medicao = null;
   for (const c of contratos) {
-    const medicoes = await ler(`/api/contratos/${c.id}/medicoes`);
+    const medicoes = await medicoesDe(c.id);
     if (medicoes.length) { obra = c.id; medicao = medicoes[0].id; break; }
   }
   obra ??= contratos[0]?.id ?? null;
@@ -383,10 +407,23 @@ async function registros(contexto) {
   const empresa = empresas.find(e => (e.certidoes ?? []).some(c => c.exigida)) ?? empresas[0];
   const daEmpresa = pedidos.empresa === null ? empresa?.entidade_id ?? null
     : empresas.find(e => e.entidade_id === pedidos.empresa)?.entidade_id ?? null;
-  return { obra, medicao, empresa: daEmpresa };
+  // so' quando alguma tela pedida escolhe a medicao pelo ato: varrer as medicoes de todas as obras custa uma leitura por obra
+  const atos = TELAS.some(t => t.medicaoQue && idsDasTelas.includes(t.id))
+    ? await medicoesPorAto(contratos, medicoesDe, obra, medicao) : {};
+  return { obra, medicao, empresa: daEmpresa, atos };
 }
 
 async function abrirTela(contexto, perfil, largura, tela, reg) {
+  if (tela.medicaoQue) {
+    // a tela de um ato abre a medicao que ainda aceita o ato; o banco sem ela nao tem o que mostrar, e isso nao e' defeito
+    const achada = reg.atos[tela.medicaoQue];
+    if (!achada) {
+      registrar({ perfil, largura, tela: tela.id, caminho: tela.caminho, ms: 0, captura: null, problemas: [], avisos: [],
+        semRegistro: `o banco da prova não tem medição que aceite o ato "${tela.medicaoQue}"` });
+      return;
+    }
+    reg = { ...reg, ...achada };
+  }
   const faltam = [...tela.caminho.matchAll(/:(\w+)/g)].map(m => m[1]).filter(n => reg[n] == null);
   if (faltam.length) {
     // sem o registro nao ha' o que abrir; na conferencia isso reprova, para a tela nao sair da prova em silencio
@@ -491,7 +528,11 @@ if (porAchado.size) {
   }
 } else console.log("\nauditoria visual: nada achado");
 // conferencia que nao abriu tela nenhuma (fora o login) nao conferiu nada: reprova, em vez de passar vazia
-const semTela = !relato.some(i => i.tela !== LOGIN.id && !i.doLogin);
+const semRegistro = relato.filter(i => i.semRegistro);
+if (semRegistro.length) console.log(`\n${semRegistro.length} tela(s) sem registro no banco (não reprovam): `
+  + [...new Set(semRegistro.map(i => i.tela))].join(", "));
+// conferencia que so' teve telas sem registro tambem nao conferiu nada
+const semTela = !relato.some(i => i.tela !== LOGIN.id && !i.doLogin && !i.semRegistro);
 if (conferir && semTela) {
   console.log("  FALHA nenhuma tela foi aberta: --perfis ou --telas ficou vazio, ou nenhum perfil pedido tem as telas pedidas");
 }

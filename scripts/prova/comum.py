@@ -140,8 +140,14 @@ def estado_do_banco(banco: Path) -> dict:
             raise   # banco travado ou ilegivel: recusa abaixo, em vez de passar por vazio
 
     emails = [email_de_teste(p) for p in PERFIS]
+    real = banco.resolve()
+    # num banco em modo WAL, abrir ate' para ler cria `-wal` e `-shm` vazios ao lado dele. Sem nenhum dos dois, ninguem
+    # esta' com o banco aberto e ele esta' todo no arquivo principal: `immutable=1` le o mesmo e nao cria nada. Com
+    # algum deles, alguem o tem aberto: le como sempre (so' `mode=ro`) e nao mexe em arquivo nenhum
+    auxiliares = [real.with_name(real.name + sufixo) for sufixo in ("-wal", "-shm")]
+    so_leitura = "?mode=ro" if any(a.exists() for a in auxiliares) else "?mode=ro&immutable=1"
     try:
-        conn = sqlite3.connect(banco.resolve().as_uri() + "?mode=ro", uri=True)
+        conn = sqlite3.connect(real.as_uri() + so_leitura, uri=True)
         try:
             contratos = ler(conn, "SELECT COUNT(*) FROM contratos")
             usuarios = ler(conn, f"SELECT email FROM usuarios WHERE email IN ({','.join('?' * len(emails))})", emails)
