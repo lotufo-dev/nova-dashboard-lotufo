@@ -465,7 +465,7 @@ export const resumoEmQuadro = ({ contratante = null, vazio = false } = {}) => re
     linha(9008, "Anel Teta", "MTPAR", "8ª Medição", "protocolado", 600_000, 11, 8),
     // protocoladas com o prazo do orgao: dentro dele (a data esperada vai escrita) e alem dele (critico). O prazo curto
     // da segunda e' para o estado caber no mes da prova
-    linha(9004, "Quartel Delta", "SINFRA", "14ª Medição", "protocolado", 200_000, 12, 8, { prazo: [47, 35] }),
+    linha(9004, "Quartel Delta", "SINFRA", "14ª Medição", "protocolado", 200_000, 12, 8, { prazo: [45, 35] }),
     linha(9015, "Viaduto Ômicron", "SES-MT", "3ª Medição", "protocolado", 250_000, 16, 11, { prazo: [14, -2] }),
     linha(9003, "Estações Gama", "SINFRA", "8ª Medição", "recebido", 15_000_000, 5, null, { ...comPedido(15_000_000), dias_da_nota_ao_recebimento: 4 }),
     linha(9001, "Avenida Alfa", "SINFRA", "Reajuste da 28ª Medição", "recebido", 2_000_000, 9, null,
