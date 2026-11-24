@@ -28,7 +28,6 @@
 //            ainda aceita esse ato, e nao a primeira do banco (numa copia do banco ela esta' recebida e o botao nao
 //            existe). Sem medicao nesse estado a tela sai como "sem registro", que nao reprova. `--medicao` manda
 //
-
 // Todo item do menu de um perfil precisa de uma tela aqui para esse perfil: a prova reprova o item sem tela.
 import { avisosEmVolume, semAvisos, cabecalhoCom, cabecalhoEmDia, CUSTO_DA_OBRA, detalheDoEnvio, espelhoEnviadoPorFora, espelhoGerado, falha,
          fechamentoComValores, fichaComNecessario, inicioComAParte, inicioComVariacoes, semAvisoDePrazo,
