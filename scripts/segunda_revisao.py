@@ -4,7 +4,8 @@ Regra do CLAUDE.md: mudanca em dinheiro, envio ou banco passa por uma segunda re
 codigo, antes do merge. Aqui ela deixa de ser frase: o script compara os arquivos alterados na PR com os caminhos
 (`paths:`) de `.claude/rules/dinheiro.md`, `envio.md` e `banco.md` e, se algum bate, exige no corpo da PR o item
 "Segunda revisao independente" marcado (`- [x]`) e com texto depois dos dois-pontos. Vale qualquer revisor
-independente; o script nao confere quem revisou, so' que o item foi preenchido.
+independente; o script nao confere quem revisou, so' que o item foi preenchido. So' conta o item cujo rotulo (o texto
+antes dos dois-pontos) e' o da segunda revisao: citar as palavras em outro item nao o substitui (#800).
 
   - A lista de caminhos e' lida dos arquivos de regra, sem copia aqui. Com `--base`, vale a uniao dos caminhos da
     base e dos da propria PR: tirar um caminho da regra na mesma PR que mexe no arquivo nao dispensa a revisao.
@@ -118,9 +119,13 @@ def item_da_revisao(corpo: str) -> tuple:
     melhor = ("ausente", "")
     for i, linha in enumerate(linhas):
         m = _CAIXA.match(linha)
-        if not m or "segunda revisao" not in _plano(m["resto"]):
+        if not m:
             continue
-        _, dois_pontos, texto = m["resto"].partition(":")
+        # so' conta o item cujo ROTULO (o que vem antes dos dois-pontos) e' o da segunda revisao: a mencao as palavras
+        # em outro item ("O que nao foi conferido: a segunda revisao esta em aberto") nao e' o item (#800)
+        rotulo, dois_pontos, texto = m["resto"].partition(":")
+        if not re.sub(r"^\W+", "", _plano(rotulo)).startswith("segunda revisao"):
+            continue
         texto = _CHAMADA.sub("", texto, count=1) if dois_pontos else ""
         for seguinte in linhas[i + 1:]:
             if not seguinte.strip() or not seguinte[0].isspace():

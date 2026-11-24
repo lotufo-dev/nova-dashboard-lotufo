@@ -234,8 +234,9 @@ do rótulo, na etiqueta sob o valor ou na barra.
 - **De apagar ou revogar:** vermelho cheio do crítico.
 - **Campo:** borda fina cinza, cantos retos, 40 px. Com erro de validação, moldura grossa no tom do crítico.
 - **Foco:** contorno preto de 2 px no conteúdo; laranja dentro do menu escuro.
-- **Escolha entre opções** (filtro, vista, ano): fileira de botões de 40 px com moldura fina, a escolhida em tinta
-  cheia. Uma forma só no Fechamento, no QDOP, no SIGA, em Documentos e na Reconciliação (PRs #771, #772).
+- **Escolha entre opções** (filtro, ano): fileira de botões de 40 px com moldura fina, a escolhida em tinta
+  cheia. Uma forma só no Fechamento, no QDOP, no SIGA, em Documentos e na Reconciliação (PRs #771, #772). A vista de
+  uma página com endereço próprio não é escolha entre opções: é a aba (item "Abas", acima; decisão do dono de 19/11/2026).
 
 ## Casca e menu
 

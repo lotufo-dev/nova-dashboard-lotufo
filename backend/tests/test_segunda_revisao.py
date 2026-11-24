@@ -112,6 +112,13 @@ def test_o_modelo_de_pr_tem_o_item_que_o_script_procura():
     ("- [x] Segunda revisão independente: —", "vazio"),
     ("- [x] Segunda revisão independente: não se aplica, só muda um teste.", "nao_se_aplica"),
     ("- [x] Segunda revisão independente: quem revisou e o que achou: N/A", "nao_se_aplica"),
+    # rotulo em negrito ainda e' o item
+    ("- [x] **Segunda revisão independente**: agente separado, sem achados", "ok"),
+    # so' conta o item cujo rotulo e' o da segunda revisao (#800): citar as palavras em outro item nao o substitui
+    ("- [x] O que não foi conferido: a segunda revisão está em aberto", "ausente"),
+    ("- [ ] Segunda revisão independente:\n- [x] O que não foi conferido: a segunda revisão está em aberto",
+     "desmarcado"),
+    ("- [x] Revisão do código: feita; a segunda revisão independente: agente separado, sem achados", "ausente"),
     # item dentro de comentario HTML nao conta; fora de caixa de marcar tambem nao
     ("<!-- - [x] Segunda revisão independente: agente separado -->", "ausente"),
     ("Segunda revisão independente: agente separado, sem achados", "ausente"),
@@ -146,7 +153,28 @@ def test_pr_que_toca_com_a_revisao_preenchida_passa(padroes):
     assert passa and "está registrada" in linhas[0]
 
 
-@pytest.mark.parametrize("corpo", [SEM_ITEM, ITEM_VAZIO, ITEM_PREENCHIDO, MODELO, ""])
+# O corpo da PR #799 como estava (#800): o item da segunda revisao desmarcado e vazio, e outro item, marcado, citando o
+# termo. O check passava; tem de reprovar.
+CORPO_DA_799 = MODELO.replace("- [ ] O que não foi conferido:", "- [x] O que não foi conferido: a segunda revisão está em aberto")
+
+
+def test_o_corpo_da_799_tinha_o_item_desmarcado_e_outra_caixa_marcada_citando_o_termo():
+    assert "- [ ] Segunda revisão" in CORPO_DA_799
+    assert "- [x] O que não foi conferido: a segunda revisão está em aberto" in CORPO_DA_799
+
+
+def test_pr_que_toca_com_o_item_desmarcado_e_outra_caixa_citando_o_termo_reprova(padroes):
+    passa, linhas = sr.conferir(TOCA, CORPO_DA_799, padroes)
+    assert not passa and "está desmarcado" in linhas[0]
+
+
+def test_pr_que_toca_com_o_item_marcado_e_preenchido_passa_mesmo_com_outra_caixa_citando_o_termo(padroes):
+    corpo = ITEM_PREENCHIDO.replace("- [ ] O que não foi conferido:", "- [x] O que não foi conferido: a segunda revisão está em aberto")
+    passa, _ = sr.conferir(TOCA, corpo, padroes)
+    assert passa
+
+
+@pytest.mark.parametrize("corpo", [CORPO_DA_799, SEM_ITEM, ITEM_VAZIO, ITEM_PREENCHIDO, MODELO, ""])
 def test_pr_que_nao_toca_passa_sem_exigir_o_item(padroes, corpo):
     passa, linhas = sr.conferir(NAO_TOCA, corpo, padroes)
     assert passa and "não é exigida" in linhas[0]
@@ -169,6 +197,7 @@ def _rodar(tmp_path, arquivos, corpo, *extras, na_ci=False):
 @pytest.mark.parametrize("arquivos, corpo, codigo", [
     (TOCA, SEM_ITEM, 1), (TOCA, ITEM_VAZIO, 1), (TOCA, ITEM_PREENCHIDO, 0),
     (NAO_TOCA, SEM_ITEM, 0), (NAO_TOCA, ITEM_VAZIO, 0), (NAO_TOCA, ITEM_PREENCHIDO, 0),
+    (TOCA, CORPO_DA_799, 1), (NAO_TOCA, CORPO_DA_799, 0),
 ])
 def test_codigo_de_saida(tmp_path, arquivos, corpo, codigo):
     r = _rodar(tmp_path, arquivos, corpo)
