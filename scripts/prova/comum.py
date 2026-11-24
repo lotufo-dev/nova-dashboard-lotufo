@@ -141,12 +141,13 @@ def estado_do_banco(banco: Path) -> dict:
 
     emails = [email_de_teste(p) for p in PERFIS]
     real = banco.resolve()
-    # num banco em modo WAL, abrir ate' para ler cria `-wal` e `-shm` vazios ao lado dele; os que nasceram aqui saem
-    # no fim (os que ja' existiam sao de quem tem o banco aberto, e ficam)
+    # num banco em modo WAL, abrir ate' para ler cria `-wal` e `-shm` vazios ao lado dele. Sem nenhum dos dois, ninguem
+    # esta' com o banco aberto e ele esta' todo no arquivo principal: `immutable=1` le o mesmo e nao cria nada. Com
+    # algum deles, alguem o tem aberto: le como sempre (so' `mode=ro`) e nao mexe em arquivo nenhum
     auxiliares = [real.with_name(real.name + sufixo) for sufixo in ("-wal", "-shm")]
-    ja_existiam = [a for a in auxiliares if a.exists()]
+    so_leitura = "?mode=ro" if any(a.exists() for a in auxiliares) else "?mode=ro&immutable=1"
     try:
-        conn = sqlite3.connect(real.as_uri() + "?mode=ro", uri=True)
+        conn = sqlite3.connect(real.as_uri() + so_leitura, uri=True)
         try:
             contratos = ler(conn, "SELECT COUNT(*) FROM contratos")
             usuarios = ler(conn, f"SELECT email FROM usuarios WHERE email IN ({','.join('?' * len(emails))})", emails)
@@ -154,10 +155,6 @@ def estado_do_banco(banco: Path) -> dict:
             conn.close()
     except sqlite3.DatabaseError as e:
         raise Recusa(f"DASH_DB_PATH não abre como banco SQLite ({banco}): {e}") from None
-    finally:
-        for a in auxiliares:
-            if a not in ja_existiam:
-                a.unlink(missing_ok=True)
     return {"contratos": contratos[0][0] if contratos else 0, "usuarios_de_teste": sorted(u[0] for u in usuarios)}
 
 
