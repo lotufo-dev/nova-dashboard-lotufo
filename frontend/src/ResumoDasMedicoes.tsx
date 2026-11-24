@@ -243,7 +243,7 @@ export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: 
         // base do medido nao agem sobre ela, e saem; no lugar, o periodo que ela cobre (#870)
         <div className="rdm-cab">
           <div className="rdm-cab__mes">
-            <p className="rdm-cab__rotulo">Últimas 12 competências fechadas</p>
+            <p className="rdm-cab__rotulo">Últimas 12 competências</p>
             {matriz && matriz.competencias.length > 0 && (
               <h2>{maiuscula(mesPorExtenso(matriz.competencias[0]))} a {mesPorExtenso(matriz.competencias[matriz.competencias.length - 1])}</h2>
             )}
