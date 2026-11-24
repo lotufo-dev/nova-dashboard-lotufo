@@ -839,9 +839,12 @@ def edicoes_valor(conn: sqlite3.Connection, medicao_ids: list[int]) -> dict[int,
 
 
 def listar(conn: sqlite3.Connection, contrato_id: int) -> list[dict]:
-    ids = [r["id"] for r in conn.execute(
-        "SELECT id FROM medicoes WHERE contrato_id=? ORDER BY tipo, numero", (contrato_id,))]
-    return [detalhe(conn, i) for i in ids]
+    from app import fechamento      # import local: fechamento importa este modulo
+    # issue #825: um retrato so', com a base da cota em consorcio calculada uma vez para a lista inteira
+    with fechamento.base_da_cota_na_leitura(conn):
+        ids = [r["id"] for r in conn.execute(
+            "SELECT id FROM medicoes WHERE contrato_id=? ORDER BY tipo, numero", (contrato_id,))]
+        return [detalhe(conn, i) for i in ids]
 
 def definir_valor(conn, usuario_id: int, medicao_id: int, campo: str, centavos: int, origem: str,
                   data: str | None = None) -> None:

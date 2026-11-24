@@ -10,8 +10,10 @@ import type { Usuario } from "./Login";
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api, apiForm: vi.fn() }));
 // O atalho de iniciar a medição tem fluxo proprio (IniciarProxima.test.tsx); aqui so' importa que ele avise a pagina quando cria algo.
+// #825: e que receba a lista que a tabela leu (o nº de medicoes no `data-medicoes`), sem pedir outra.
 vi.mock("./IniciarProxima", () => ({
-  default: ({ aoCriar }: { aoCriar: () => void }) => <button type="button" onClick={aoCriar}>Gerar espelho (teste)</button>,
+  default: ({ aoCriar, medicoes }: { aoCriar: () => void; medicoes: unknown[] | null }) =>
+    <button type="button" onClick={aoCriar} data-medicoes={medicoes === null ? "nenhuma" : medicoes.length}>Gerar espelho (teste)</button>,
 }));
 
 const usuario = { id: 1, nome: "Admin Exemplo", email: "admin@exemplo.com.br", perfil: "admin" } as Usuario;
@@ -435,6 +437,22 @@ describe("Página da obra: o desenho novo", () => {
 
 describe("Página da obra: os cartões se atualizam entre si", () => {
   afterEach(() => { cleanup(); api.mockReset(); });
+
+  it("a lista de medições é pedida uma vez só, e o atalho de iniciar a medição recebe a mesma (#825)", async () => {
+    responder();
+    const base = api.getMockImplementation()!;
+    api.mockImplementation(async (url: string, o?: { method?: string }) => url.endsWith("/medicoes") ? [MEDICAO] : base(url, o));
+    render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+    const atalho = await screen.findByRole("button", { name: "Gerar espelho (teste)" });
+    await waitFor(() => expect(atalho.getAttribute("data-medicoes")).toBe("1"));
+    expect(leituras("/api/contratos/1/medicoes")).toHaveLength(1);
+    // criada uma medicao pelo atalho, a lista e' lida de novo uma vez, e o atalho recebe a nova
+    api.mockImplementation(async (url: string, o?: { method?: string }) =>
+      url.endsWith("/medicoes") ? [MEDICAO, { ...MEDICAO, id: 6, numero: 24 }] : base(url, o));
+    fireEvent.click(atalho);
+    await waitFor(() => expect(atalho.getAttribute("data-medicoes")).toBe("2"));
+    expect(leituras("/api/contratos/1/medicoes")).toHaveLength(2);
+  });
 
   it("depois de criar um protocolo, a tabela de medições é lida de novo", async () => {
     responder();

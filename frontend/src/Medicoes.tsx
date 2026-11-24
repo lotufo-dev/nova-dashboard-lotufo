@@ -153,7 +153,11 @@ function custoPorMedicao(itens: Medicao[], custo: CustoObra | null): Map<number,
 // Quantas anteriores aparecem antes do "ver todas": as recentes respondem quase tudo; o resto e' historico.
 const RECENTES = 6;
 
-export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId: number; busca: Busca; versao?: number }) {
+export default function Medicoes({ contratoId, busca, versao = 0, aoLer }: {
+  contratoId: number; busca: Busca; versao?: number;
+  // issue #825: a lista lida vai tambem para o atalho da pagina da obra (IniciarProxima), que nao a pede de novo
+  aoLer?: (lista: Medicao[]) => void;
+}) {
   const [itens, setItens] = useState<Medicao[]>([]);
   const [andamento, setAndamento] = useState<Map<number, LinhaAndamento>>(new Map());
   const [carregando, setCarregando] = useState(true);
@@ -168,6 +172,9 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
   const obraLida = useRef<number | null>(null);
   // #748: a coluna "Custo lançado no RM" so' existe na obra com cadastro de custo (a rota responde 404 nas outras)
   const [custo, setCusto] = useState<CustoObra | null>(null);
+  // a funcao mais recente da pagina, sem entrar nas dependencias da leitura (uma funcao nova a cada desenho a repetiria)
+  const aoLerAtual = useRef(aoLer);
+  useEffect(() => { aoLerAtual.current = aoLer; });
 
   useEffect(() => {
     geracao.current += 1;
@@ -180,6 +187,7 @@ export default function Medicoes({ contratoId, busca, versao = 0 }: { contratoId
     ]).then(([lista, abertas]) => {
       if (g !== geracao.current) return;
       setItens(lista); setAndamento(new Map(abertas.map(a => [a.id, a])));
+      aoLerAtual.current?.(lista);
     }).catch(e => { if (g === geracao.current) setErro(mensagemDeErro(e)); })
       .finally(() => { if (g === geracao.current) setCarregando(false); });
     api<Frescor>("/api/rm/status").then(f => { if (g === geracao.current) setFrescor(f); }).catch(() => {});
