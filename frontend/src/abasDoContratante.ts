@@ -27,7 +27,7 @@ export type MedicoesDoContratante = {
   hoje: string; mes: string; limites: Limites; grupos: GrupoFila[]; concluidas: Concluida[]; sem_medicao: SemMedicao[];
   quantidade: number;
 };
-/** GET /api/contratantes/<chave>/a-receber: o grupo dele na pagina A receber; sem o total liberado, so' a trava. */
+/** GET /api/contratantes/<chave>/a-receber: o grupo dele na pagina Em aberto; sem o total liberado, so' a trava. */
 export type AReceberDoContratante = {
   anos: string[]; total_a_receber_liberado: boolean; contratante?: ContratanteAReceber | null; quantidade?: number;
 };

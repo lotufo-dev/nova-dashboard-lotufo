@@ -6,8 +6,8 @@ pela mesma funcao e sem mudar nada nela:
   da tela Medicoes e do Resumo das medicoes): as linhas em andamento por quem tem de agir (cada grupo da mais parada
   para a menos, com a etapa, o tempo parado e a diferenca aprovado x pedido que a fila ja' traz), as concluidas no mes
   e as obras ativas sem medicao nele, so' as das obras do contratante.
-- A receber: o grupo do contratante na pagina A receber (`a_receber.a_receber`), o mesmo objeto, sem tirar nem por.
-  O subtotal e' o da pagina A receber filtrada por ele (`?contratante=<chave>`), ao centavo. Com o total a receber
+- Em aberto: o grupo do contratante na pagina Em aberto (`a_receber.a_receber`), o mesmo objeto, sem tirar nem por.
+  O subtotal e' o da pagina Em aberto filtrada por ele (`?contratante=<chave>`), ao centavo. Com o total a receber
   nao liberado, so' a trava, como la'.
 - Processos no SIGA: os processos vivos das obras do contratante, na leitura da tela SIGA (`siga.painel`), do mais
   parado para o menos (`siga._mais_parado`, a ordem da tela: dias sem movimentacao, #840). O encerrado continua so' na tela SIGA. Processo sem obra
@@ -15,13 +15,13 @@ pela mesma funcao e sem mudar nada nela:
   exige a permissao da tela (`api_contratante.py`).
 
 A chave e' a da pagina do contratante (`/obras/contratante/<chave>`): `fechamento._contratantes`, a mesma da lista de
-Obras (`diretoria.chave_do_contratante`) e do `?contratante=` da pagina A receber, comparada sem diferenca de
+Obras (`diretoria.chave_do_contratante`) e do `?contratante=` da pagina Em aberto, comparada sem diferenca de
 maiuscula, como la'. Chave que nenhuma obra tem e' `ContratanteDesconhecido` (a rota responde 404), antes de qualquer
 outra leitura: a pagina so' pede as abas do contratante que a lista de Obras conhece.
 
 `quantidade`, em cada aba, e' o numero de linhas que ela mostra; a tela o escreve ao lado do nome da aba. Em
-Medicoes: as linhas da fila mais as concluidas no mes (a obra sem medicao nao e' medicao e nao conta). Em A receber: as
-linhas do em aberto do contratante, a mesma quantidade da fileira de escolhas da pagina A receber. No SIGA: os
+Medicoes: as linhas da fila mais as concluidas no mes (a obra sem medicao nao e' medicao e nao conta). Na aba Em aberto: as
+linhas do em aberto do contratante, a mesma quantidade da fileira de escolhas da pagina Em aberto. No SIGA: os
 processos.
 """
 import datetime

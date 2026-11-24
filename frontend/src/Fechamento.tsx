@@ -25,7 +25,7 @@ import Falha from "./Falha";
 // "/fechamento" (mes a mes), "/fechamento/comparacao" (os dois anos lado a lado) e "/fechamento/contratantes" (cada
 // contratante no ano, com a participacao dele no medido). O ano escolhido vai na busca (?ano=2025; o mais novo e' o
 // padrao e nao entra), e ?mes=2026-10 abre a pagina com aquele mes aberto por obra. O em aberto nota a nota saiu
-// daqui: fica o total do ano, com o link para a pagina A receber. A aba e o ano saem do endereco (`useRota`), entao o
+// daqui: fica o total do ano, com o link para a pagina Em aberto. A aba e o ano saem do endereco (`useRota`), entao o
 // link guardado abre no mesmo lugar.
 //
 // O mes abre as obras, e a obra as medicoes, como linhas recuadas da mesma tabela (decisao do dono de 16/11/2026).
@@ -75,7 +75,7 @@ type Mes = Numeros & { competencia: string; obras: ObraLinha[]; medido_ano_anter
  *  pagina do contratante em Obras; sem orgao no cadastro, nao ha' chave nem pagina. */
 type DoContratante = Numeros & { contratante: string; contratante_chave: string | null; participacao_medido_por_mil: number | null };
 // O em aberto nota a nota nao e' mais desenhado aqui (#815): o servidor continua mandando `em_aberto`,
-// `em_aberto_anteriores` e `notas_sem_medicao`, que a pagina A receber (#816) reaproveita.
+// `em_aberto_anteriores` e `notas_sem_medicao`, que a pagina Em aberto (#816) reaproveita.
 /** (a) nota protocolada nao paga (a paga em parte, pelo que falta), (a') nota da empresa ao consorcio sem baixa em
  *  medicao que o orgao ja' pagou, ou (b) medicao protocolada sem nota ligada. */
 type EmAberto = {
@@ -124,7 +124,7 @@ const COLUNAS: { chave: Coluna; rotulo: string; curta?: boolean; etapa?: Etapa }
 const opcional = (c: { curta?: boolean }) => (c.curta ? "" : " fch-col-opcional");
 const COMPARAVEIS = COLUNAS.slice(0, 4);
 
-/** O endereco da pagina A receber (#816), onde mora o em aberto nota a nota. Vai escrito, e nao por `Rota`: a rota
+/** O endereco da pagina Em aberto (#816), onde mora o em aberto nota a nota. Vai escrito, e nao por `Rota`: a rota
  *  nasce na peca do menu em areas (#814). */
 const A_RECEBER = "/a-receber";
 
@@ -143,7 +143,7 @@ function doAcumulado(f: RespostaFechamento, ano: string): Numeros | null {
 
 /* ------------------------------------------------------------------ numeros do ano */
 
-/** Os cinco numeros do ano. O em aberto leva o link para a pagina A receber (#815), que tem as notas uma a uma: fica
+/** Os cinco numeros do ano. O em aberto leva o link para a pagina Em aberto (#815), que tem as notas uma a uma: fica
  *  ao lado do rotulo ("Em aberto · nota a nota"), para o bloco nao ganhar uma linha. Com a trava do total a receber
  *  nao ha' valor a abrir, e o link nao aparece. */
 function NumerosDoAno({ f, ano }: { f: RespostaFechamento; ano: string }) {

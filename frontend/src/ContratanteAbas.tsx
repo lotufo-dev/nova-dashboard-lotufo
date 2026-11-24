@@ -15,7 +15,7 @@ import "./contratante.css";
 
 // As abas Medicoes, A receber e Processos no SIGA da pagina do contratante (#818). Cada uma desenha, com as pecas da
 // tela de onde o dado vem, o recorte que o servidor manda (`app/contratante.py`): a fila de trabalho (MedicoesFila), a
-// pagina A receber (AReceber) e a tela SIGA (SigaPagina). Nada se soma nem se conta aqui. O invólucro de cada aba
+// pagina Em aberto (AReceber) e a tela SIGA (SigaPagina). Nada se soma nem se conta aqui. O invólucro de cada aba
 // leva a classe da pagina de origem (`medicoes`, `arc`, `siga`): as pecas medem a largura por ela, e no celular a
 // linha vira bloco como la'.
 
@@ -55,7 +55,7 @@ export function AbaMedicoes({ leitura, nome, opera }: { leitura: Leitura<Medicoe
   );
 }
 
-/** O em aberto do contratante, nota a nota: o mesmo grupo, o mesmo total e o mesmo "a' parte" da pagina A receber
+/** O em aberto do contratante, nota a nota: o mesmo grupo, o mesmo total e o mesmo "a' parte" da pagina Em aberto
  *  filtrada por ele, com as pecas dela. O cabecalho do grupo traz o prazo de pagamento do orgao e o subtotal. */
 export function AbaAReceber({ leitura, nome, ir }: { leitura: Leitura<AReceberDoContratante>; nome: string; ir: Ir }) {
   return (
@@ -65,7 +65,7 @@ export function AbaAReceber({ leitura, nome, ir }: { leitura: Leitura<AReceberDo
           return <div className="arc ct-aba"><CaixaAviso nivel="atencao" className="arc-aviso">{TRAVA}</CaixaAviso></div>;
         }
         const g = d.contratante ?? null;
-        // a vista de um contratante, como a da pagina A receber filtrada por ele (`vistaDe` em AReceber.tsx)
+        // a vista de um contratante, como a da pagina Em aberto filtrada por ele (`vistaDe` em AReceber.tsx)
         const v: Vista | null = g && { ...g, grupos: g.quantidade > 0 ? [g] : [], soltas: g.notas_sem_medicao,
           soltas_centavos: g.notas_sem_medicao_centavos };
         return (

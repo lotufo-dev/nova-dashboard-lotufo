@@ -1001,7 +1001,7 @@ export const medicoesDoContratante = (resposta, reg) => {
     quantidade: grupos.reduce((t, g) => t + g.linhas.length, 0) + f.concluidas.length };
 };
 
-/** A receber: o grupo de um contratante na pagina A receber simulada (`aReceberComNotas`). `de`: a chave do grupo
+/** Em aberto: o grupo de um contratante na pagina Em aberto simulada (`aReceberComNotas`). `de`: a chave do grupo
  *  tirado de la'; `como`: o nome e a chave com que ele vem (o contratante da carteira simulada que a pagina abre). */
 export const aReceberDoContratante = ({ trava = false, de = "sinfra", como = null } = {}) => reg => {
   const r = aReceberComNotas({ trava })(reg);

@@ -36,7 +36,7 @@ def medicoes_do_contratante(chave: str = CHAVE, _=Depends(exigir("ver_paineis", 
 @router.get("/api/contratantes/{chave}/a-receber")
 def a_receber_do_contratante(chave: str = CHAVE, _=Depends(exigir("ver_paineis", com_csrf=False)),
                              conn: sqlite3.Connection = Depends(conexao)):
-    """O grupo do contratante na pagina A receber; sem o total a receber liberado, so' a trava."""
+    """O grupo do contratante na pagina Em aberto; sem o total a receber liberado, so' a trava."""
     return _recorte(contratante.em_aberto, conn, chave)
 
 
