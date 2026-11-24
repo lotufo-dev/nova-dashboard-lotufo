@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FormAssinatura, FormProtocoloManual, FormRecebimento, FormValor, valorEditavel } from "./MedicaoAtos";
+import { FormAssinatura, FormMotivo, FormProtocoloManual, FormRecebimento, FormValor, valorEditavel } from "./MedicaoAtos";
 import type { Medicao } from "./Medicoes";
 
 const { api, apiForm } = vi.hoisted(() => ({ api: vi.fn(), apiForm: vi.fn() }));
@@ -267,5 +267,37 @@ describe("FormAssinatura (issue #287)", () => {
     render(<FormAssinatura m={base} salvando={false} agir={vi.fn(async () => false)} aoFechar={() => {}}
       erro="A data da assinatura não pode ser futura" />);
     expect(screen.getByRole("alert").textContent).toContain("A data da assinatura não pode ser futura");
+  });
+});
+
+// issue #11: o botão do motivo só fica apagado enquanto grava; o clique vazio diz o que falta no campo
+describe("FormMotivo", () => {
+  afterEach(() => { cleanup(); });
+
+  it("clicar sem o motivo mostra o erro no campo e não confirma; com o motivo, confirma o texto aparado", () => {
+    const aoConfirmar = vi.fn();
+    render(<FormMotivo id="campo-motivo-teste" titulo="Descartar este protocolo" rotulo="Motivo (obrigatório)"
+      acao="Descartar" acaoOcupada="Descartando…" ocupado={false} aoConfirmar={aoConfirmar} aoFechar={() => {}} />);
+    const botao = screen.getByRole("button", { name: "Descartar" }) as HTMLButtonElement;
+    expect(botao.disabled).toBe(false);
+    const campo = screen.getByLabelText("Motivo (obrigatório)");
+    fireEvent.change(campo, { target: { value: "   " } });
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.click(botao);
+    expect(aoConfirmar).not.toHaveBeenCalled();
+    expect(campo.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(campo.getAttribute("aria-describedby") ?? "")?.textContent).toContain("Escreva o motivo.");
+    expect(document.activeElement).toBe(campo);
+    fireEvent.change(campo, { target: { value: "  ofício em duplicidade " } });
+    expect(screen.queryByText("Escreva o motivo.")).toBeNull();
+    expect(campo.getAttribute("aria-invalid")).toBeNull();
+    fireEvent.click(botao);
+    expect(aoConfirmar).toHaveBeenCalledWith("ofício em duplicidade");
+  });
+
+  it("enquanto grava, o botão fica apagado", () => {
+    render(<FormMotivo id="campo-motivo-teste" titulo="t" rotulo="Motivo (obrigatório)"
+      acao="Descartar" acaoOcupada="Descartando…" ocupado aoConfirmar={vi.fn()} aoFechar={() => {}} />);
+    expect((screen.getByRole("button", { name: "Descartando…" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
