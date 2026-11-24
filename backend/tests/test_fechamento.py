@@ -1560,6 +1560,80 @@ def test_passo_pagamento_em_consorcio_conta_a_nota_da_empresa_ou_a_fatura_pela_c
     assert sincronizacao_rm.pagamento_cota(c, da_casa) is None and fora(da_casa) == [(EMPRESA, False)]
 
 
+def test_lista_de_medicoes_da_obra_calcula_a_base_da_cota_uma_vez_e_responde_como_o_detalhe(exemplo, monkeypatch):
+    """Issue #825: a lista de medicoes da obra (`medicoes.listar`, a rota da pagina da obra) calcula a base da escolha
+    da cota em consorcio (`fechamento._medicoes` e `_notas_por_medicao`) uma vez para a lista inteira, e cada medicao
+    sai igual ao detalhe dela pedido sozinho: o passo Pagamento, as notas fora da conta, tudo. Consorcio a 50%, com a
+    nota da empresa, a fatura preterida, a fatura vezes a cota com centavo impar, nota partilhada entre execucao e
+    reajuste do mesmo numero (a irma do par) e a obra propria ao lado."""
+    c, k = exemplo
+    aberta = medir(c, k, 1, "2026-09", "protocolada", 2_000_001, aprovado=2_000_001, protocolo="2026-10-02")
+    fat = nota(c, 2_400_003, [aberta], coligada=CONSORCIO, titulos=PAGO(2_232_003))
+    nota(c, 999_999, [aberta], coligada=EMPRESA, centro="5.001.001", titulos=[(929_999, 0, 0)])
+    fatura = medir(c, k, 2, "2026-09", "protocolada", 2_400_003, aprovado=2_400_003, protocolo="2026-10-06")
+    nota(c, 2_400_003, [fatura], coligada=CONSORCIO, titulos=[(2_232_003, 1_000_000, 4)])
+    exe = medir(c, k, 3, "2026-10", "protocolada", 1_400_001, aprovado=1_400_001, protocolo="2026-11-02")
+    rea = medir(c, k, 3, "2026-10", "protocolada", 300_003, aprovado=300_003, tipo="reajuste", protocolo="2026-11-02")
+    nota(c, 1_700_004, [exe, rea], coligada=CONSORCIO, titulos=[(1_581_005, 700_001, 4)], alocado=850_002)
+    c.execute("UPDATE nf_alocacoes SET partilhada=1 WHERE medicao_id IN (?, ?)", (exe, rea))
+    c.commit()
+    vazia = medir(c, k, 4, "2026-11", "protocolada", 200_001, aprovado=200_001, protocolo="2026-11-20")
+    da_casa = medir(c, _propria(c), 1, "2026-09", "protocolada", 500_001, aprovado=500_001, protocolo="2026-10-10")
+    nota(c, 500_001, [da_casa], coligada=EMPRESA)
+
+    chamadas = []
+    original = fechamento._medicoes
+    monkeypatch.setattr(fechamento, "_medicoes", lambda conn: chamadas.append(1) or original(conn))
+    sozinhas = [medicoes.detalhe(c, mid) for mid in (aberta, fatura, exe, rea, vazia)]
+    fora_da_lista = len(chamadas)
+    chamadas.clear()
+    lista = medicoes.listar(c, k)
+    assert len(chamadas) == 1 and fora_da_lista > len(sozinhas)        # sem a lista, uma (ou mais) por medicao
+    assert {m["id"]: m for m in lista} == {m["id"]: m for m in sozinhas}
+
+    por_id = {m["id"]: m for m in lista}
+    cota = lambda mid: {x: por_id[mid]["pagamento_cota"][x] for x in ("total_centavos", "recebido_centavos",   # noqa: E731
+                                                                      "falta_centavos", "parcial")}
+    fora = lambda mid: [(n["coligada"], n["fora_da_conta"]) for n in por_id[mid]["notas"]]                 # noqa: E731
+    assert cota(aberta) == {"total_centavos": 929_999, "recebido_centavos": 0, "falta_centavos": 929_999, "parcial": False}
+    assert fora(aberta) == [(CONSORCIO, True), (EMPRESA, False)]
+    assert [int(n["numero"]) for n in por_id[aberta]["notas"] if n["fora_da_conta"]] == [int(fat)]
+    # 2.232.003 x 50% = 1.116.001,5 -> 1.116.002; faltam 1.232.003 x 50% = 616.001,5 -> 616.002
+    assert cota(fatura) == {"total_centavos": 1_116_002, "recebido_centavos": 500_000, "falta_centavos": 616_002,
+                            "parcial": True}
+    # execucao e reajuste do mesmo numero: o resumo e' o do par (cada um conta a parte dele da nota partilhada)
+    assert cota(exe) == cota(rea) and cota(exe)["parcial"] is True
+    assert por_id[vazia]["pagamento_cota"] is None
+    # a base vive so' dentro da lista: depois dela, o que se grava aparece no detalhe seguinte
+    nota(c, 100_001, [vazia], coligada=EMPRESA, centro="5.001.001", titulos=[(93_001, 0, 0)])
+    assert medicoes.detalhe(c, vazia)["pagamento_cota"]["total_centavos"] == 93_001
+    assert next(m for m in medicoes.listar(c, k) if m["id"] == vazia)["pagamento_cota"]["total_centavos"] == 93_001
+
+
+def test_medicao_de_obra_propria_nao_le_as_notas_da_cota_em_consorcio_dentro_nem_fora_da_lista(exemplo, monkeypatch):
+    """Issue #825 (revisao da PR #891): a medicao fora de consorcio sai da escolha da cota antes das notas, como sempre:
+    nem o detalhe dela sozinho nem a lista da obra propria consultam as notas do sistema inteiro
+    (`_notas_por_medicao`). Na lista da obra em consorcio, elas sao lidas uma vez so'."""
+    c, k = exemplo
+    p = _propria(c)
+    da_casa = medir(c, p, 1, "2026-09", "protocolada", 500_001, aprovado=500_001, protocolo="2026-10-10")
+    nota(c, 500_001, [da_casa], coligada=EMPRESA)
+    medir(c, p, 2, "2026-10", "protocolada", 300_001, aprovado=300_001, protocolo="2026-11-10")
+    cons = medir(c, k, 1, "2026-09", "protocolada", 2_000_001, aprovado=2_000_001, protocolo="2026-10-02")
+    nota(c, 999_999, [cons], coligada=EMPRESA, centro="5.001.001", titulos=[(929_999, 0, 0)])
+    medir(c, k, 2, "2026-10", "protocolada", 2_400_003, aprovado=2_400_003, protocolo="2026-10-06")
+
+    chamadas = []
+    original = fechamento._notas_por_medicao
+    monkeypatch.setattr(fechamento, "_notas_por_medicao", lambda conn, ids: chamadas.append(1) or original(conn, ids))
+    assert medicoes.detalhe(c, da_casa)["pagamento_cota"] is None
+    assert len(medicoes.listar(c, p)) == 2
+    assert chamadas == []
+    assert medicoes.detalhe(c, cons)["pagamento_cota"]["total_centavos"] == 929_999 and len(chamadas) >= 1
+    chamadas.clear()
+    assert len(medicoes.listar(c, k)) == 2 and len(chamadas) == 1
+
+
 # --- issue #755 (docs/adr/0006): nota e titulo excluidos no RM ficam fora de todo numero do Fechamento ------------
 
 def _titulo(c, numero, k):

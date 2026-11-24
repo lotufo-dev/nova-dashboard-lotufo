@@ -6,7 +6,7 @@ import { IconeVoltar } from "./icones";
 import LegendaCor from "./LegendaCor";
 import type { Usuario } from "./Login";
 import IniciarProxima from "./IniciarProxima";
-import Medicoes from "./Medicoes";
+import Medicoes, { type Medicao } from "./Medicoes";
 import { ContratoObra, DocumentosObra } from "./ObraAbas";
 import Prazos from "./Prazos";
 import Reajuste from "./Reajuste";
@@ -86,6 +86,9 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
   // canal entre os cartoes, gerar/criar incrementa esta chave e a lista de medicoes e o
   // cartao de novo protocolo leem de novo.
   const [versaoMedicoes, setVersaoMedicoes] = useState(0);
+  // issue #825: a lista de medicoes que a tabela da aba leu, com a obra dela; o atalho de iniciar a medicao usa esta,
+  // em vez de pedir a mesma lista outra vez
+  const [lidas, setLidas] = useState<{ obra: number; itens: Medicao[] } | null>(null);
   // os avisos da obra: o cartao da lateral, em qualquer aba
   const [avisos, setAvisos] = useState<Aviso[] | null | undefined>(undefined);
   // o resumo do alto (contrato, execucao, prazo, medicoes, vencimentos); a falha (null) vira "indisponível" nos cartoes
@@ -189,8 +192,10 @@ export default function ContratoPagina({ contratoId, usuario, aba, origem, busca
                   {abaAtiva === "medicoes" && (
                     <div className="pilha">
                       {/* a medicao nasce do espelho, na etapa 1 da pagina dela (ou, no fluxo antigo, a mao): aqui so' o atalho */}
-                      {podeEditar && !c.sem_fluxo_medicao && <IniciarProxima contratoId={contratoId} versao={versaoMedicoes} inicial={medicaoDaBusca(busca)} aoCriar={() => setVersaoMedicoes(v => v + 1)} />}
-                      <Medicoes contratoId={contratoId} busca={busca} versao={versaoMedicoes} />
+                      {podeEditar && !c.sem_fluxo_medicao && <IniciarProxima contratoId={contratoId} versao={versaoMedicoes} inicial={medicaoDaBusca(busca)}
+                        medicoes={lidas?.obra === contratoId ? lidas.itens : null} aoCriar={() => setVersaoMedicoes(v => v + 1)} />}
+                      <Medicoes contratoId={contratoId} busca={busca} versao={versaoMedicoes}
+                        aoLer={itens => setLidas({ obra: contratoId, itens })} />
                       {podeEditar && <NovoProtocolo contratoId={contratoId} versao={versaoMedicoes} aoMudar={() => setVersaoMedicoes(v => v + 1)} />}
                     </div>
                   )}

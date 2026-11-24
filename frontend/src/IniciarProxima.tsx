@@ -13,18 +13,19 @@ import Falha from "./Falha";
 // isso: "Nova planilha/carta da Nª medição". #653: os dois destinos abrem o MESMO formulario do "Iniciar" do quadro do
 // mes, a Nova planilha/carta (PlanilhaCarta.tsx); sem competencia pedida, ela abre na sugestao da obra.
 
-export default function IniciarProxima({ contratoId, versao, aoCriar, inicial }: {
-  contratoId: number; versao: number; aoCriar: () => void; inicial?: { numero: string; competencia: string; tipo: "projeto" | "" };
+// Issue #825: a lista de medicoes chega pronta (`medicoes`), a mesma que a tabela da aba leu; o atalho nao a pede de novo.
+// `null` enquanto ela nao chegou ou se a leitura falhou.
+export default function IniciarProxima({ contratoId, versao, medicoes, aoCriar, inicial }: {
+  contratoId: number; versao: number; medicoes: Medicao[] | null; aoCriar: () => void;
+  inicial?: { numero: string; competencia: string; tipo: "projeto" | "" };
 }) {
   const [ativa, setAtiva] = useState<boolean | null>(null);
-  const [medicoes, setMedicoes] = useState<Medicao[] | null>(null);
   const [erro, setErro] = useState("");
   useEffect(() => {
     let vivo = true;
     api<{ regra: { situacao: string } | null }>(`/api/contratos/${contratoId}/espelho`)
       .then(r => { if (vivo) setAtiva(r.regra?.situacao === "ativa"); })
       .catch(e => { if (vivo) { setAtiva(null); setErro(mensagemDeErro(e)); } });
-    api<Medicao[]>(`/api/contratos/${contratoId}/medicoes`).then(l => { if (vivo) setMedicoes(l); }).catch(() => {});
     return () => { vivo = false; };
   }, [contratoId, versao]);
 

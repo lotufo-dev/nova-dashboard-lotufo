@@ -108,7 +108,9 @@ medido do contratante no medido do ano, em milesimos, repartida por `dinheiro.ra
 A ordem e' a do medido, o maior primeiro. Com a trava do total a receber, o recebido e o em aberto das linhas vem
 nulos, como nos outros niveis.
 """
+import contextvars
 import datetime
+from contextlib import contextmanager
 from decimal import ROUND_HALF_UP, Decimal
 
 from app import (avisos_medicao, cobranca_orgao, contratos, db, diretoria, dinheiro, medicoes, notas as notas_fiscais,
@@ -274,16 +276,68 @@ def notas_da_cota_em_consorcio(conn, medicao_id: int) -> tuple[list[dict], list[
     e' a leitura de `_recebimento`: nada em aberto na nota (os titulos baixados, faltando ate' a tolerancia, ou a
     fatura do consorcio de medicao recebida; a nota da empresa, so' pela baixa dos titulos dela). None quando a
     medicao nao e' de consorcio (ou ainda nao mede): ali o passo Pagamento segue a regra dele."""
-    ms = _medicoes(conn)
-    m = next((x for x in ms if x["id"] == medicao_id), None)
+    por_id = _medicoes_por_id(conn)
+    m = por_id.get(medicao_id)
     if m is None or not m["consorcio"] or m["coligada_empresa"] in (None, m["coligada"]):
         return None
-    # as notas de todas as medicoes, como a pagina le: o valor da nota ligada a mais de uma medicao depende dos
-    # outros vinculos dela (`_notas_por_medicao`)
-    contam, fora = _notas_da_conta(m, _notas_por_medicao(conn, {x["id"] for x in ms}).get(medicao_id, []))
+    # as notas so' depois da saida cedo: a medicao fora de consorcio nao paga a consulta das notas do sistema inteiro.
+    # Copia rasa de cada nota: a escolha devolve as da fatura preterida como vieram, e a base pode ser a da lista
+    # inteira (`base_da_cota_na_leitura`), que outra medicao ainda vai ler
+    contam, fora = _notas_da_conta(dict(m), [dict(x) for x in _notas_da_base(conn, por_id).get(medicao_id, [])])
     for x in contam:
         x["quitada"] = _recebimento(m, x, x["cota"])[1] == 0
     return contam, fora
+
+
+# Issue #825: a escolha da cota em consorcio parte de uma base do sistema inteiro (todas as medicoes no medido e as notas
+# de cobranca de todas elas, com a situacao nos titulos), a mesma para qualquer medicao. Na lista de medicoes da obra
+# ela era recalculada uma vez por medicao (e mais de uma: o passo Pagamento le a medicao e a irma do par, as notas da
+# medicao leem de novo): 203 vezes e 2,6 s na obra de 87 medicoes. Dentro de `base_da_cota_na_leitura` ela e' calculada
+# uma vez so', sobre o mesmo retrato do banco.
+_BASE_DA_COTA: contextvars.ContextVar[dict | None] = contextvars.ContextVar("fechamento_base_da_cota", default=None)
+
+
+@contextmanager
+def base_da_cota_na_leitura(conn):
+    """Um retrato so' do banco (`db.leitura`) em que a base de `notas_da_cota_em_consorcio` e' calculada uma vez, na
+    primeira medicao que a pede, e reaproveitada pelas outras. So' leitura dentro dele: a base nao ve o que se gravar
+    depois de calculada. Fora dele (e noutra conexao), cada chamada calcula a sua, como sempre."""
+    with db.leitura(conn):
+        marca = _BASE_DA_COTA.set({"conn": conn})
+        try:
+            yield conn
+        finally:
+            _BASE_DA_COTA.reset(marca)
+
+
+def _memo_da_base(conn) -> dict | None:
+    memo = _BASE_DA_COTA.get()
+    return memo if memo is not None and memo["conn"] is conn else None
+
+
+def _medicoes_por_id(conn) -> dict[int, dict]:
+    """As medicoes no medido por id (`_medicoes`): a primeira parte da base de `notas_da_cota_em_consorcio`, que toda
+    medicao le para saber se e' de consorcio."""
+    memo = _memo_da_base(conn)
+    if memo is not None and "medicoes" in memo:
+        return memo["medicoes"]
+    por_id = {x["id"]: x for x in _medicoes(conn)}
+    if memo is not None:
+        memo["medicoes"] = por_id
+    return por_id
+
+
+def _notas_da_base(conn, por_id: dict[int, dict]) -> dict[int, list[dict]]:
+    """As notas de cobranca ligadas a cada medicao no medido (`_notas_por_medicao`): a segunda parte da base, so' para
+    a medicao de consorcio. As de todas as medicoes, como a pagina le: o valor da nota ligada a mais de uma medicao
+    depende dos outros vinculos dela."""
+    memo = _memo_da_base(conn)
+    if memo is not None and "notas" in memo:
+        return memo["notas"]
+    notas = _notas_por_medicao(conn, set(por_id))
+    if memo is not None:
+        memo["notas"] = notas
+    return notas
 
 
 def _medicoes(conn) -> list[dict]:
