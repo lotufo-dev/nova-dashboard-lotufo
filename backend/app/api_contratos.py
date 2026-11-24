@@ -85,11 +85,14 @@ def detalhe(contrato_id: ID, usuario: dict = Depends(exigir("ver_paineis", com_c
 def custo(contrato_id: ID, _=Depends(exigir("ver_paineis", com_csrf=False)),
           conn: sqlite3.Connection = Depends(conexao)):
     """Issue #491 e #748: o custo lancado no RM por competencia da obra com cadastro de custo (a coluna "Custo lançado
-    no RM" da aba Medicoes da obra). 404 na obra sem cadastro: a pagina nao mostra a coluna."""
+    no RM" da aba Medicoes da obra). #804: a obra sem cadastro de custo responde 200, vazia e com o motivo
+    (`sem_cadastro`), e a pagina nao mostra a coluna; o 404 virava erro de console em toda pagina de obra. 404 so' na
+    obra inexistente."""
+    _existe(conn, contrato_id)
     try:
         return custo_obra.custo_da_obra(conn, contrato_id)
     except custo_obra.SemCadastro as e:
-        raise HTTPException(404, str(e)) from None
+        return {"contrato_id": contrato_id, "sem_cadastro": True, "motivo": str(e), "linhas": []}
     except custo_obra.RegraDesconhecida as e:
         raise HTTPException(422, str(e)) from None
     except custo_obra.CentroDisputado as e:
