@@ -29,3 +29,5 @@
 /* Medicoes: a competencia e a base dos valores numa linha so' */
 .ct-aba__cab { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-mini) var(--espaco-p); }
 .ct-aba__cab .medicoes__cab-rotulo, .ct-aba__cab .medicoes__mes { margin: 0; }
+/* Processos no SIGA: quantos processos da tela SIGA estao sem obra ligada (#845), numa linha, acima dos paineis */
+.ct-sem-obra { margin: 0; font-size: var(--texto-corpo); color: var(--cor-texto-secundario); }

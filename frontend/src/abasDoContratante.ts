@@ -22,7 +22,8 @@ export function abasDe(permissoes: readonly string[] = []): AbaContratante[] {
 // O dado de cada aba: o recorte, pelas obras do contratante, de uma tela que ja' existe (`app/contratante.py`). A
 // `quantidade` e' o numero de linhas da aba, que a faixa escreve ao lado do nome.
 
-/** GET /api/contratantes/<chave>/medicoes: a fila de trabalho da competencia em trabalho (`fila_medicoes.fila`). */
+/** GET /api/contratantes/<chave>/medicoes: a fila de trabalho da competencia em trabalho (`fila_medicoes.fila`), com
+ *  pedido, aprovado e diferenca na cota da Lotufo (#844). */
 export type MedicoesDoContratante = {
   hoje: string; mes: string; limites: Limites; grupos: GrupoFila[]; concluidas: Concluida[]; sem_medicao: SemMedicao[];
   quantidade: number;
@@ -31,9 +32,10 @@ export type MedicoesDoContratante = {
 export type AReceberDoContratante = {
   anos: string[]; total_a_receber_liberado: boolean; contratante?: ContratanteAReceber | null; quantidade?: number;
 };
-/** GET /api/contratantes/<chave>/siga: os processos vivos das obras dele, na leitura da tela SIGA. */
+/** GET /api/contratantes/<chave>/siga: os processos vivos das obras dele, na leitura da tela SIGA. `sem_obra` (#845):
+ *  quantos processos vivos da tela SIGA estao sem obra ligada (o total, de nenhum contratante). */
 export type SigaDoContratante = {
-  lido_em: string | null; limites: LimitesSiga; robo: Robo; processos: ProcessoSiga[]; quantidade: number;
+  lido_em: string | null; limites: LimitesSiga; robo: Robo; processos: ProcessoSiga[]; quantidade: number; sem_obra: number;
 };
 
 /** Uma leitura do servidor: lendo, pronta, falhou, ou fora (o perfil nao tem a aba e a pagina nem pede). */

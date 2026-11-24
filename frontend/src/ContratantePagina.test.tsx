@@ -101,7 +101,7 @@ const SIGA: SigaDoContratante = {
   // do mais parado para o menos, como o servidor manda
   processos: [noSiga(1, { dias_uteis: 12, situacao_tempo: "critico" }), noSiga(2, { dias_uteis: 3, contrato_id: 2, obra: "Cavalaria" }),
     noSiga(3, { categoria: "aditivos", o_que_e: "Aditivo de prazo", dias_uteis: 6, situacao_tempo: "breve" })],
-  quantidade: 3,
+  quantidade: 3, sem_obra: 0,
 };
 
 // o caminho é da barra do topo (#814): aqui ele entra ao lado da página, como a casca o desenha
@@ -421,7 +421,9 @@ describe("Página do contratante: as abas (#818)", () => {
     await screen.findByRole("heading", { level: 2, name: "outubro de 2026" });
     expect(abaAtual()).toEqual(["Medições"]);
     await waitFor(() => expect(document.title).toBe("SINFRA · Medições · grupolotufo"));
-    expect(screen.getByText("competência em trabalho · valor cheio")).toBeTruthy();
+    // #844: pedido e aprovado na cota da Lotufo, como o resto da página; o cabeçalho diz a base uma vez
+    expect(screen.getByText("competência em trabalho · cota da Lotufo")).toBeTruthy();
+    expect(screen.queryByText(/valor cheio/)).toBeNull();
     // a faixa de números é da aba Obras (os números das obras do contratante)
     expect(screen.queryByLabelText("Números de SINFRA")).toBeNull();
     // os grupos da fila, cada um com as linhas na ordem do servidor; a tabela de Obras não aparece nesta aba
@@ -520,6 +522,35 @@ describe("Página do contratante: as abas (#818)", () => {
     expect(window.location.pathname + window.location.search).toBe("/siga?processo=3");
   });
 
+  it("Processos no SIGA sem obra ligada (#845): a aba diz quantos são, com o link para a tela SIGA; sem nenhum, nada", async () => {
+    api.mockImplementation(servidor({ "/api/contratantes/sinfra/siga": { ...SIGA, sem_obra: 2 } }));
+    abrir("/obras/contratante/sinfra/siga", "engenharia");
+    await waitFor(() => expect(linhasDoSiga()).toHaveLength(3));
+    const linha = document.querySelector(".ct-sem-obra")!;
+    expect(limpo(linha.textContent)).toBe("2 processos em andamento sem obra ligada · Ver na tela SIGA");
+    // a contagem é de toda a tela SIGA: os processos sem obra não entram nas linhas nem na quantidade da aba
+    expect(abas()[3][1]).toBe("3");
+    fireEvent.click(within(linha as HTMLElement).getByRole("link", { name: "Ver na tela SIGA" }));
+    expect(window.location.pathname + window.location.search).toBe("/siga");
+    cleanup();
+
+    // o contratante sem processo nas obras dele: o zero da aba, e a linha diz que há processo sem obra na tela SIGA
+    api.mockImplementation(servidor({ "/api/contratantes/sinfra/siga": { ...SIGA, processos: [], quantidade: 0, sem_obra: 1 } }));
+    abrir("/obras/contratante/sinfra/siga", "diretoria");
+    expect(await screen.findByText("Nenhum processo em andamento nas obras de SINFRA.")).toBeTruthy();
+    expect(abas()[3][1]).toBe("0");
+    expect(limpo(document.querySelector(".ct-sem-obra")!.textContent)).toBe("1 processo em andamento sem obra ligada · Ver na tela SIGA");
+    expect(document.querySelector('.ct-aba a[href="/siga"]')).toBeTruthy();
+    cleanup();
+
+    // nenhum sem obra: nem a linha nem o link
+    api.mockImplementation(servidor());
+    abrir("/obras/contratante/sinfra/siga", "engenharia");
+    await waitFor(() => expect(linhasDoSiga()).toHaveLength(3));
+    expect(document.querySelector(".ct-sem-obra")).toBeNull();
+    expect(document.querySelector('.ct-aba a[href="/siga"]')).toBeNull();
+  });
+
   it("Processos no SIGA para a diretoria (#829): a aba abre, só leitura, sem botão nenhum", async () => {
     abrir("/obras/contratante/sinfra/siga", "diretoria");
     await waitFor(() => expect(linhasDoSiga()).toHaveLength(3));
@@ -534,6 +565,9 @@ describe("Página do contratante: as abas (#818)", () => {
     expect(abas().map(a => a[0])).not.toContain("Processos no SIGA");
     expect(document.querySelector(".sg-grupo, tr.sg__linha")).toBeNull();
     expect(api.mock.calls.map(c => String(c[0])).filter(c => c.endsWith("/siga"))).toEqual([]);
+    // nem a contagem dos processos sem obra nem o link para a tela SIGA (#845)
+    expect(document.querySelector(".ct-sem-obra, a[href='/siga']")).toBeNull();
+    expect(screen.queryByText(/sem obra ligada/)).toBeNull();
   });
 
   it("a aba que falhou diz a falha só nela; as outras e a quantidade delas continuam", async () => {

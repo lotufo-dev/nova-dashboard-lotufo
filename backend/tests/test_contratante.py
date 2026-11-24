@@ -8,7 +8,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app import a_receber, auth, contratante, fila_medicoes, permissoes, siga, tempo
+from app import a_receber, auth, contratante, fechamento, fila_medicoes, permissoes, siga, tempo
 from app.main import create_app
 from tests.test_fechamento import _lancar_dois_anos, contratantes  # noqa: F401  (a fixture `contratantes` vem de la')
 from tests.test_fila_medicoes import HOJE, MES, cenario, conn  # noqa: F401  (as fixtures `conn` e `cenario` vem de la')
@@ -47,9 +47,9 @@ def _ids_das_linhas(r):
 
 def test_medicoes_sao_as_linhas_da_fila_do_mes_em_trabalho_so_das_obras_do_contratante(conn, cenario):
     """A competencia e' a em trabalho (o mes anterior ao de hoje). As linhas sao as da fila, os mesmos objetos, na
-    mesma ordem e no mesmo grupo; a obra da MTPAR sai do recorte da SINFRA e vice-versa."""
+    mesma ordem e no mesmo grupo (lidas na cota, #844); a obra da MTPAR sai do recorte da SINFRA e vice-versa."""
     ids = cenario
-    fila = fila_medicoes.fila(conn, HOJE, MES)
+    fila = fila_medicoes.fila(conn, HOJE, MES, na_cota=True)
     r = contratante.medicoes(conn, "sinfra", HOJE)
     assert r["mes"] == MES == "2026-10" and r["hoje"] == "2026-11-18"
     assert r["limites"] == fila["limites"]
@@ -70,6 +70,71 @@ def test_medicoes_sao_as_linhas_da_fila_do_mes_em_trabalho_so_das_obras_do_contr
     assert (m["concluidas"], m["sem_medicao"], m["quantidade"]) == ([], [], 1)
     # nenhuma linha some e nenhuma aparece em dois contratantes
     assert sorted(_ids_das_linhas(r) + _ids_das_linhas(m)) == sorted(x["medicao_id"] for g in fila["grupos"] for x in g["linhas"])
+
+
+VALORES = ("pedido_centavos", "aprovado_centavos", *fila_medicoes._COMPARAVEIS)
+
+
+def test_medicoes_na_cota_a_obra_em_consorcio_e_a_fora_dele_fica_como_na_tela_medicoes(conn, cenario):
+    """Issue #844 (decisao do dono de 24/11/2026): pedido, aprovado e diferenca na cota da Lotufo, como o resto da
+    pagina. A Obra B e' consorcio de 50%: centavo impar no pedido, a cota arredonda uma vez, meio para cima. A obra
+    fora de consorcio sai igual a' tela Medicoes (o valor cheio e' a cota), e a tela Medicoes segue no valor cheio."""
+    ids = cenario
+    cheia = _linhas_por_medicao(fila_medicoes.fila(conn, HOJE, MES))
+    aba = _linhas_por_medicao(contratante.medicoes(conn, "sinfra", HOJE))
+    b = aba[ids["b12"]]
+    assert {k: b[k] for k in VALORES} == {
+        "pedido_centavos": 100002, "aprovado_centavos": 95000,              # 200003 e 190000 cheios, cota de 50%
+        "aprovado_com_pedido_centavos": 95000, "pedido_do_aprovado_centavos": 100002,
+        "abaixo_do_pedido_centavos": 5002, "acima_do_pedido_centavos": 0}
+    assert all(isinstance(b[k], int) for k in VALORES)
+    # a tela Medicoes continua no valor cheio
+    assert (cheia[ids["b12"]]["pedido_centavos"], cheia[ids["b12"]]["aprovado_centavos"]) == (200003, 190000)
+    # fora do consorcio, a linha inteira e' a da tela Medicoes; na de consorcio, so' os valores mudam
+    for mid, x in aba.items():
+        if mid == ids["b12"]:
+            assert {k: v for k, v in x.items() if k not in VALORES} == {k: v for k, v in cheia[mid].items() if k not in VALORES}
+        else:
+            assert x == cheia[mid]
+
+
+def _linhas_por_medicao(r):
+    return {x["medicao_id"]: x for g in r["grupos"] for x in g["linhas"]}
+
+
+def test_medicoes_na_cota_somam_por_medicao_como_o_medido_da_aba_obras(conn, cenario):
+    """O aprovado (e, sem boletim, o pedido) da linha e' o "Medido no mes" que a aba Obras mostra para a mesma obra
+    (`fechamento.medido_do_mes_fechado`, a mesma conta por medicao). Na linha de medicao + reajuste, cada uma
+    arredonda a sua cota e depois soma: com a cota de 33,33%, o pedido da linha fica um centavo abaixo da cota da soma
+    (o residuo do rateio), e e' esse o numero que a aba Obras soma."""
+    ids = cenario
+    conn.execute("UPDATE contratos SET percentual_direito_bp=3333 WHERE id=?", (ids["a"],))
+    conn.commit()
+    aba = _linhas_por_medicao(contratante.medicoes(conn, "sinfra", HOJE))
+    medido = fechamento.medido_do_mes_fechado(conn, HOJE)
+    assert medido["competencia"] == MES
+    a = aba[ids["a5"]]
+    # execucao 100001 / 99997 e reajuste 3001 / 3001, cheios: 33330 + 1000 e 33329 + 1000
+    assert (a["pedido_centavos"], a["aprovado_centavos"]) == (34330, 34329)
+    assert 34330 == 33330 + 1000 != 34331                                    # a cota de 103002 seria 34331
+    assert (a["pedido_do_aprovado_centavos"], a["abaixo_do_pedido_centavos"]) == (34330, 0)   # 4 centavos: igual
+    for obra, linha in (("a", "a5"), ("b", "b12"), ("f", "f2"), ("g", "g9"), ("h", "h4")):
+        assert aba[ids[linha]]["aprovado_centavos"] == medido["por_obra"][ids[obra]]
+    # sem boletim, o medido e' o pedido
+    assert aba[ids["c3"]]["pedido_centavos"] == medido["por_obra"][ids["c"]] == 70001
+
+
+def test_rota_das_medicoes_na_cota_bate_com_o_medido_no_mes_da_lista_de_obras(conn, cenario, monkeypatch):
+    """As duas rotas para a mesma obra em consorcio: o aprovado da linha na aba Medicoes e o `medido_mes` da lista de
+    Obras (de onde a aba Obras da pagina do contratante le)."""
+    ids = cenario
+    _relogio(monkeypatch, datetime.datetime(2026, 11, 18, 15, 0, tzinfo=UTC))
+    with _cliente(monkeypatch) as cliente:
+        _entrar(cliente, "eng@exemplo.com.br")
+        obras = {o["id"]: o for o in cliente.get("/api/contratos").json()}
+        linhas = _linhas_por_medicao(cliente.get("/api/contratantes/sinfra/medicoes").json())
+    assert obras[ids["b"]]["medido_mes"]["competencia"] == MES
+    assert linhas[ids["b12"]]["aprovado_centavos"] == obras[ids["b"]]["medido_mes"]["valor_centavos"] == 95000
 
 
 def test_chave_sem_diferenca_de_maiuscula_e_chave_que_nenhuma_obra_tem_e_desconhecida(conn, cenario):
@@ -214,6 +279,29 @@ def test_siga_os_processos_vivos_do_contratante_do_mais_parado_para_o_menos(proc
     assert p["sem_obra"] not in todos and p["encerrado"] not in todos
 
 
+def test_siga_diz_quantos_processos_vivos_estao_sem_obra_ligada(processos):
+    """Issue #845 (decisao do dono de 24/11/2026): o processo sem obra nao entra na aba, mas a aba diz quantos ha' na
+    tela SIGA, o mesmo numero em todo contratante (nao se adivinha o contratante pelo texto). O encerrado sem obra nao
+    conta; ligado a' obra, sai da contagem e entra na aba do contratante dela."""
+    c, ids, p = processos
+    vivos_sem_obra = [x["id"] for x in siga.painel(c, AGORA)["processos"] if x["contrato_id"] is None and not x["encerrado"]]
+    assert vivos_sem_obra == [p["sem_obra"]]
+    for chave in ("sinfra", "orgao-x", "companhia-y"):
+        r = contratante.processos_no_siga(c, chave, AGORA)
+        assert r["sem_obra"] == 1 and p["sem_obra"] not in [x["id"] for x in r["processos"]]
+    # um segundo sem obra, encerrado a' mao: fica fora da contagem, como fica fora da aba
+    c.execute("INSERT INTO siga_processos (numero, nome) VALUES ('ORGAO-PRO-2026/00008', 'Processo encerrado')")
+    encerrado = c.execute("SELECT id FROM siga_processos WHERE numero='ORGAO-PRO-2026/00008'").fetchone()[0]
+    c.commit()
+    uid = auth.criar_usuario(c, "Engenharia", "engenharia@exemplo.com.br", SENHA, "engenharia")
+    siga.encerrar(c, uid, encerrado, "Arquivado no órgão")
+    assert contratante.processos_no_siga(c, "sinfra", AGORA)["sem_obra"] == 1
+    _ligar(c, "ORGAO-PRO-2026/00005", ids["Estrada"])
+    c.commit()
+    r = contratante.processos_no_siga(c, "sinfra", AGORA)
+    assert r["sem_obra"] == 0 and p["sem_obra"] in [x["id"] for x in r["processos"]]
+
+
 def test_rota_do_siga_e_de_quem_tem_ver_siga(processos, monkeypatch):
     """Issue #829 (decisao do dono de 19/11/2026): a aba Processos no SIGA e' de quem tem `ver_siga`, os tres perfis (a
     diretoria so' para ler). O perfil sem a permissao (simulado tirando-a da diretoria) recebe 403, sem processo no
@@ -227,6 +315,7 @@ def test_rota_do_siga_e_de_quem_tem_ver_siga(processos, monkeypatch):
             m.setitem(permissoes.PERFIS, "diretoria", permissoes.PERFIS["diretoria"] - {permissoes.VER_SIGA})
             negado = cliente.get("/api/contratantes/sinfra/siga")
             assert negado.status_code == 403 and "processos" not in negado.json() and "ORGAO-PRO" not in negado.text
+            assert "sem_obra" not in negado.json()
             assert cliente.get("/api/contratantes/sinfra/medicoes").status_code == 200
             assert cliente.get("/api/contratantes/sinfra/a-receber").status_code == 200
         for email in ("diretoria@exemplo.com.br", "engenharia@exemplo.com.br", "adm@exemplo.com.br"):
@@ -234,7 +323,7 @@ def test_rota_do_siga_e_de_quem_tem_ver_siga(processos, monkeypatch):
             r = cliente.get("/api/contratantes/sinfra/siga")
             assert r.status_code == 200, r.text
             assert [x["id"] for x in r.json()["processos"]] == [p["sete"], p["dois"], p["nunca"]]
-            assert r.json()["quantidade"] == 3
+            assert r.json()["quantidade"] == 3 and r.json()["sem_obra"] == 1
             assert cliente.get("/api/contratantes/orgao-que-nao-existe/siga").status_code == 404
 
 

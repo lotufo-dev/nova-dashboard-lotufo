@@ -30,11 +30,14 @@ DIFERENCA aprovado x pedido: a conta e' a do Fechamento (`fechamento.aprovado_co
 dois valores gravados, a partir do boletim; o corte soma so' o aprovado abaixo do pedido; ate' R$ 0,05 e' igual) e o
 limite e' o do aviso (`avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL`). A BASE e' outra: aqui Pedido e Aprovado sao o VALOR
 CHEIO gravado na medicao (`valor_protocolado_centavos` e `valor_atestado_centavos`), como a tela Medicoes sempre
-mostrou; o Fechamento mostra a cota. Em obra propria os dois sao iguais.
+mostrou; o Fechamento mostra a cota. Em obra propria os dois sao iguais. Com `na_cota` (a aba Medicoes da pagina do
+contratante, issue #844, que e' toda na cota), os mesmos numeros saem na cota da empresa: cada medicao pela
+`contratos.cota` do contrato dela, arredondada uma vez por medicao, como o medido do Fechamento e o "Medido no mes"
+da lista de Obras (`fechamento.medido_na_cota`), e a diferenca pela mesma conta com o `pct`.
 """
 import datetime
 
-from app import avisos_medicao, diretoria, fechamento, feriados, medicoes, siga, tempo
+from app import avisos_medicao, contratos, diretoria, fechamento, feriados, medicoes, siga, tempo
 
 COM_QUEM = ("lotufo", "faturamento", "orgao")       # a ordem dos grupos na fila
 _DO_PASSO = {1: "lotufo", 2: "orgao", 3: "lotufo", 4: "faturamento", 5: "lotufo", 6: "orgao"}
@@ -105,15 +108,21 @@ def paradas(conn, hoje: datetime.date, obras: dict[int, dict] | None = None) -> 
     return out
 
 
-def _comparar(ms: list[dict]) -> dict:
+def _comparar(ms: list[dict], na_cota: bool = False) -> dict:
     """Pedido, aprovado e a diferenca entre eles de um conjunto de medicoes (a linha, a obra, o contratante, o mes),
-    no valor cheio. Pedido e aprovado somam as medicoes que tem cada valor (nulo sem nenhuma), como o quadro do mes
-    sempre fez; os comparaveis, so' as que tem os dois (`fechamento.aprovado_contra_o_pedido`), e ficam nulos quando
-    nenhuma tem: a tela nao desenha diferenca do que nao se compara."""
-    pedidos = [m["valor_protocolado_centavos"] for m in ms if m["valor_protocolado_centavos"] is not None]
-    aprovados = [m["valor_atestado_centavos"] for m in ms if m["valor_atestado_centavos"] is not None]
+    no valor cheio; com `na_cota`, na cota da empresa (cada medicao pela cota do contrato dela, arredondada uma vez
+    por medicao, e so' depois somada; ver o cabecalho). Pedido e aprovado somam as medicoes que tem cada valor (nulo
+    sem nenhuma), como o quadro do mes sempre fez; os comparaveis, so' as que tem os dois
+    (`fechamento.aprovado_contra_o_pedido`), e ficam nulos quando nenhuma tem: a tela nao desenha diferenca do que
+    nao se compara."""
+    def base(m: dict, centavos: int) -> int:
+        return contratos.cota(centavos, m["pct"]) if na_cota else centavos
+
+    pedidos = [base(m, m["valor_protocolado_centavos"]) for m in ms if m["valor_protocolado_centavos"] is not None]
+    aprovados = [base(m, m["valor_atestado_centavos"]) for m in ms if m["valor_atestado_centavos"] is not None]
     comparadas = [c for c in (fechamento.aprovado_contra_o_pedido(
-        m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"]) for m in ms) if c]
+        m["estado"], m["valor_protocolado_centavos"], m["valor_atestado_centavos"], m["pct"] if na_cota else None)
+        for m in ms) if c]
     return {"pedido_centavos": sum(pedidos) if pedidos else None,
             "aprovado_centavos": sum(aprovados) if aprovados else None,
             **{k: sum(c[k] for c in comparadas) if comparadas else None for k in _COMPARAVEIS}}
@@ -132,9 +141,12 @@ def _contagem(linhas: list[dict]) -> dict:
             "alem_do_prazo": sum(1 for x in linhas if x["parada"]["alem_do_prazo"])}
 
 
-def fila(conn, hoje: datetime.date | None = None, mes: str | None = None, com_siga: bool = True) -> dict:
+def fila(conn, hoje: datetime.date | None = None, mes: str | None = None, com_siga: bool = True,
+         na_cota: bool = False) -> dict:
     """A resposta da tela Medicoes na competencia `mes` (AAAA-MM; padrao, o mes de hoje, como `medicoes.resumo`).
-    `com_siga` (#853): sem ele, o quadro sai sem a posicao do processo no SIGA (`medicoes.resumo`)."""
+    `com_siga` (#853): sem ele, o quadro sai sem a posicao do processo no SIGA (`medicoes.resumo`). `na_cota` (#844):
+    pedido, aprovado e diferenca na cota da empresa, em vez do valor cheio (ver o cabecalho); a tela Medicoes nao o
+    pede."""
     hoje = hoje or tempo.hoje_local()
     base = medicoes.resumo(conn, hoje, mes, com_siga=com_siga)
     mes = base["mes"]
@@ -155,7 +167,7 @@ def fila(conn, hoje: datetime.date | None = None, mes: str | None = None, com_si
                 "passos": [{"numero": p, "nome": medicoes.PASSOS[p - 1],
                             "situacao": "feito" if p < n else "atual" if p == n else "futuro"} for p in tem],
                 "parada": _parada_da_linha(x, ms, hoje, prazos),
-                **_comparar(ms), "acao": acao(n, m["estado"])}
+                **_comparar(ms, na_cota), "acao": acao(n, m["estado"])}
 
     abertas = [linha(x) for x in medicoes.linhas_em_andamento(conn, hoje) if x["competencia"]]
     do_mes = sorted((x for x in abertas if x["competencia"] == mes), key=_mais_parada)
@@ -175,20 +187,20 @@ def fila(conn, hoje: datetime.date | None = None, mes: str | None = None, com_si
             "limites": {"dias_atencao": siga.DIAS_ATENCAO, "dias_critico": siga.DIAS_ACAO,
                         "diferenca_critica_por_mil": avisos_medicao.ABAIXO_DO_PEDIDO_POR_MIL},
             "numeros": {"com": {quem: _contagem([x for x in do_mes if x["com_quem"] == quem]) for quem in COM_QUEM},
-                        "concluidas": len(concluidas), "sem_medicao": len(sem_medicao), **_soma_do_mes(da_competencia)},
+                        "concluidas": len(concluidas), "sem_medicao": len(sem_medicao), **_soma_do_mes(da_competencia, na_cota)},
             "grupos": grupos, "concluidas": concluidas, "sem_medicao": sem_medicao,
-            "quadro": _quadro(base["quadro"], de, abertas),
+            "quadro": _quadro(base["quadro"], de, abertas, na_cota),
             "anteriores": _anteriores(mes, abertas)}
 
 
-def _soma_do_mes(ms: list[dict]) -> dict:
+def _soma_do_mes(ms: list[dict], na_cota: bool = False) -> dict:
     """O pedido, o aprovado e o corte da competencia. O `acima` nao soma (so' aparece na linha da medicao)."""
-    soma = _comparar(ms)
+    soma = _comparar(ms, na_cota)
     del soma["acima_do_pedido_centavos"]
     return soma
 
 
-def _quadro(quadro: list[dict], de: dict[int, dict], abertas: list[dict]) -> list[dict]:
+def _quadro(quadro: list[dict], de: dict[int, dict], abertas: list[dict], na_cota: bool = False) -> list[dict]:
     """O quadro do mes de `medicoes.resumo`, agrupado por contratante (o que tem mais obras primeiro; empate, pelo
     nome), sem as obras sem medicao (vao para `sem_medicao`). Cada obra ganha a diferenca aprovado x pedido das
     medicoes dela na competencia, e o passo da vez, o `parada` da medicao que esta' nele. O grupo leva o pedido, o
@@ -200,10 +212,10 @@ def _quadro(quadro: list[dict], de: dict[int, dict], abertas: list[dict]) -> lis
             continue
         ms = [de[m["id"]] for m in x["medicoes"]]
         passos = [{**p, "parada": parada_de.get(p["medicao_id"]) if p["situacao"] == "atual" else None} for p in x["passos"]]
-        por.setdefault(x["contratante"], []).append({**x, "passos": passos, **_comparar(ms), "_ms": ms})
+        por.setdefault(x["contratante"], []).append({**x, "passos": passos, **_comparar(ms, na_cota), "_ms": ms})
     grupos = []
     for nome, linhas in sorted(por.items(), key=lambda g: (-len(g[1]), medicoes._chave_nome(g[0]))):
-        grupos.append({"contratante": nome, **_soma_do_mes([m for x in linhas for m in x["_ms"]]),
+        grupos.append({"contratante": nome, **_soma_do_mes([m for x in linhas for m in x["_ms"]], na_cota),
                        "linhas": [{k: v for k, v in x.items() if k != "_ms"} for x in linhas]})
     return grupos
 

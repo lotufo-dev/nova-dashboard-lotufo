@@ -533,6 +533,9 @@ export const TELAS = [
   { rota: "contratante", id: "contratante-siga", caminho: "/obras/contratante/sinfra/siga", perfis: OPERA, espera: ".ct-aba.siga" },
   { rota: "contratante", id: "contratante-siga-processos", caminho: "/obras/contratante/sinfra/siga", perfis: OPERA, espera: ".ct-aba .sg-grupo",
     simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/siga$/, corpo: SIGA_DO_CONTRATANTE }] },
+  // #845: o contratante sem processo nas obras dele, com processo sem obra ligada na tela SIGA (a linha e o link)
+  { rota: "contratante", id: "contratante-siga-sem-obra", caminho: "/obras/contratante/sinfra/siga", perfis: OPERA, espera: ".ct-aba .ct-sem-obra",
+    simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/siga$/, corpo: { ...SIGA_DO_CONTRATANTE, processos: [], quantidade: 0, sem_obra: 3 } }] },
   // #829 (decisao do dono de 19/11/2026): a diretoria tem a aba do SIGA, so' para ler (a aba nao tem botao)
   { rota: "contratante", id: "contratante-siga-diretoria", caminho: "/obras/contratante/sinfra/siga", perfis: ["diretoria"],
     espera: ".ct-aba .sg-grupo", simular: [...comCarteira, { caminho: /^\/api\/contratantes\/sinfra\/siga$/, corpo: SIGA_DO_CONTRATANTE }] },

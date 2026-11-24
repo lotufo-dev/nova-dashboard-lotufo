@@ -135,7 +135,7 @@ export default function ContratantePagina({ chave, aba = "obras", perfil, permis
 
             {atual === "medicoes" && <AbaMedicoes leitura={medicoes} nome={nome} opera={perfil !== "diretoria"} />}
             {atual === "a-receber" && <AbaAReceber leitura={aReceber} nome={nome} ir={ir} />}
-            {atual === "siga" && <AbaSiga leitura={siga} />}
+            {atual === "siga" && <AbaSiga leitura={siga} nome={nome} ir={ir} />}
 
             {/* a aba Obras: os numeros do contratante (das obras em andamento dele), o que pede atencao e a tabela */}
             {atual === "obras" && <>

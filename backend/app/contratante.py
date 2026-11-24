@@ -1,18 +1,22 @@
 """Pagina do contratante (issue #805), abas Medicoes, A receber e Processos no SIGA (issue #818). So' leitura.
 
-Nenhuma conta nova. Cada aba e' o RECORTE, pelas obras do contratante, de uma resposta que outra tela ja' mostra, lida
-pela mesma funcao e sem mudar nada nela:
+Cada aba e' o RECORTE, pelas obras do contratante, de uma resposta que outra tela ja' mostra, lida pela mesma funcao:
 - Medicoes: a fila de trabalho (`fila_medicoes.fila`) na competencia em trabalho, o mes anterior ao de hoje (a mesma
   da tela Medicoes e do Resumo das medicoes): as linhas em andamento por quem tem de agir (cada grupo da mais parada
-  para a menos, com a etapa, o tempo parado e a diferenca aprovado x pedido que a fila ja' traz), as concluidas no mes
-  e as obras ativas sem medicao nele, so' as das obras do contratante.
+  para a menos, com a etapa, o tempo parado e a diferenca aprovado x pedido), as concluidas no mes e as obras ativas
+  sem medicao nele, so' as das obras do contratante. Pedido, aprovado e diferenca saem na COTA da empresa, como o
+  resto da pagina (issue #844, decisao do dono de 24/11/2026): a fila lida com `na_cota`, a mesma conta por medicao
+  do "Medido no mes" da aba Obras (`fechamento.medido_na_cota`). O valor cheio fica na pagina da medicao e na tela
+  Medicoes, que continua lendo a fila sem `na_cota`. Em obra sem consorcio a cota e' o valor cheio.
 - Em aberto: o grupo do contratante na pagina Em aberto (`a_receber.a_receber`), o mesmo objeto, sem tirar nem por.
   O subtotal e' o da pagina Em aberto filtrada por ele (`?contratante=<chave>`), ao centavo. Com o total a receber
   nao liberado, so' a trava, como la'.
 - Processos no SIGA: os processos vivos das obras do contratante, na leitura e na ordem da tela SIGA (`siga.painel`:
   do mais parado para o menos, #840 e #861). O encerrado continua so' na tela SIGA. Processo sem obra
   nao tem contratante e nao entra em aba nenhuma. Quem nao abre a tela SIGA (a diretoria) nao recebe esta aba: a rota
-  exige a permissao da tela (`api_contratante.py`).
+  exige a permissao da tela (`api_contratante.py`). A aba diz quantos processos vivos estao sem obra ligada
+  (`sem_obra`, issue #845), o total da tela SIGA, para o zero da aba nao dizer que nao ha' processo: o caminho e'
+  ligar o processo a' obra na tela SIGA. O contratante nao se adivinha pelo texto do processo.
 
 A chave e' a da pagina do contratante (`/obras/contratante/<chave>`): `fechamento._contratantes`, a mesma da lista de
 Obras (`diretoria.chave_do_contratante`) e do `?contratante=` da pagina Em aberto, comparada sem diferenca de
@@ -49,7 +53,7 @@ def obras_do(conn, chave: str) -> set[int]:
 def medicoes(conn, chave: str, hoje: datetime.date | None = None) -> dict:
     ids = obras_do(conn, chave)
     hoje = hoje or tempo.hoje_local()
-    f = fila_medicoes.fila(conn, hoje, diretoria._mes(hoje, -1))
+    f = fila_medicoes.fila(conn, hoje, diretoria._mes(hoje, -1), na_cota=True)
     grupos = [{"com_quem": g["com_quem"], "linhas": [x for x in g["linhas"] if x["contrato_id"] in ids]} for g in f["grupos"]]
     grupos = [g for g in grupos if g["linhas"]]
     concluidas = [x for x in f["concluidas"] if x["contrato_id"] in ids]
@@ -71,9 +75,10 @@ def em_aberto(conn, chave: str, hoje: datetime.date | None = None) -> dict:
 def processos_no_siga(conn, chave: str, agora: datetime.datetime | None = None) -> dict:
     ids = obras_do(conn, chave)
     p = siga.painel(conn, agora)
-    processos = [x for x in p["processos"] if x["contrato_id"] in ids and not x["encerrado"]]
+    vivos = [x for x in p["processos"] if not x["encerrado"]]
+    processos = [x for x in vivos if x["contrato_id"] in ids]
     deles = {x["id"] for x in processos}
     # do robo, so' o que as linhas mostram: a rodada em andamento e o "nao lido" de cada processo da aba
     robo = {**p["robo"], "avisos": [a for a in p["robo"]["avisos"] if a["processo_id"] in deles]}
     return {"lido_em": p["lido_em"], "limites": p["limites"], "robo": robo, "processos": processos,
-            "quantidade": len(processos)}
+            "quantidade": len(processos), "sem_obra": sum(x["contrato_id"] is None for x in vivos)}
