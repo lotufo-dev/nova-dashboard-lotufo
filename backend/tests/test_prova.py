@@ -589,3 +589,49 @@ def test_retrato_com_caminho_dentro_do_repositorio_so_na_pasta_ignorada(repo):
 def test_retrato_no_repositorio_de_verdade_recusa_pasta_versionada(tmp_path):
     with pytest.raises(comum.Recusa, match="dentro do repositório"):
         retrato.pasta_do_retrato(tmp_path, str(RAIZ / "docs" / "retrato-antes"))
+
+
+# --- as telas de ato da medicao escolhem a medicao pelo estado ---------------------------------------------------
+
+def _atos_por_estado():
+    """O que `ATOS_DA_MEDICAO` (telas.mjs) responde para uma linha de medicao em cada estado do servidor."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("sem Node nesta máquina")
+    from app import medicoes
+    estados = sorted(medicoes.TRANSICOES)
+    roteiro = (
+        "import { ATOS_DA_MEDICAO as A } from './scripts/prova/telas.mjs';"
+        f"const e = {estados!r}; const s = {{}};"
+        "for (const [ato, f] of Object.entries(A)) s[ato] = Object.fromEntries(e.map(x => [x, f({ estado: x })]));"
+        "s.sem_protocolo = A.receber({ estado: 'nota_emitida', recebe_sem_protocolo: true });"
+        "s.sem_passo_5 = A['protocolo-fora']({ estado: 'protocolada', passos: [1, 2, 3, 4, 6] });"
+        "console.log(JSON.stringify(s));")
+    feito = subprocess.run([node, "--input-type=module", "-e", roteiro], cwd=RAIZ, capture_output=True, text=True,
+                           encoding="utf-8")
+    assert feito.returncode == 0, feito.stderr
+    import json
+    return json.loads(feito.stdout)
+
+
+def _proximos_da_pagina():
+    """`PROXIMOS` de frontend/src/medicao.ts: estado -> destinos que a pagina oferece."""
+    import re
+    fonte = (RAIZ / "frontend" / "src" / "medicao.ts").read_text(encoding="utf-8")
+    bloco = re.search(r"export const PROXIMOS[^=]*=\s*\{(.*?)\n\};", fonte, re.S).group(1)
+    return {m[0]: re.findall(r'"(\w+)"', m[1]) for m in re.findall(r"(\w+):\s*\[([^\]]*)\]", bloco)}
+
+
+def test_telas_de_ato_pedem_a_medicao_no_estado_que_a_pagina_aceita():
+    atos = _atos_por_estado()
+    proximos = _proximos_da_pagina()
+    for estado in atos["cancelar"]:
+        assert atos["cancelar"][estado] == ("cancelada" in proximos.get(estado, [])), estado
+        assert atos["desistir"][estado] == ("desistida" in proximos.get(estado, [])), estado
+        assert atos["receber"][estado] == ("recebida" in proximos.get(estado, [])), estado
+    # a recebida, a cancelada e a desistida ja' foram encerradas: nenhum ato serve (o que reprovava na copia do banco)
+    for estado in ("recebida", "cancelada", "desistida"):
+        assert not any(atos[ato][estado] for ato in ("cancelar", "desistir", "receber", "protocolo-fora")), estado
+    assert atos["sem_protocolo"] is True            # #743: nota emitida de obra sem o passo "Envio da nota" recebe
+    assert {e for e, ok in atos["protocolo-fora"].items() if ok} == {"protocolada", "nf_emitida"}
+    assert atos["sem_passo_5"] is False             # a obra sem o passo "Envio da nota" nao tem o botao
