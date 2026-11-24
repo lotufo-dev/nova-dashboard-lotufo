@@ -1,3 +1,6 @@
+/// <reference types="node" />
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Caminho from "./Caminho";
@@ -542,5 +545,19 @@ describe("Página do contratante: as abas (#818)", () => {
     expect(window.location.pathname).toBe("/obras/contratante/sinfra/a-receber");
     await screen.findByRole("region", { name: "Em aberto de SINFRA" });
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+// #846: a faixa de abas do contratante a 390 px. O jsdom nao mede layout: aqui so' a regra; a medida foi conferida no navegador.
+describe("faixa de abas do contratante no celular (#846)", () => {
+  const css = readFileSync(join(process.cwd(), "src", "contratante.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const celular = /@container obras-pagina \(max-width: 620px\) \{([\s\S]*?)\n\}/.exec(css)![1];
+
+  it("as abas e o link dos Avisos correm juntos na faixa: a lista de abas não é uma caixa e os Avisos vão para a ponta", () => {
+    // sem `display: contents`, a lista quebra em duas linhas e os Avisos, que nao cabem ao lado dela, descem para a terceira
+    expect(/\.ct-abas \{([^}]*)\}/.exec(celular)![1]).toContain("display: contents");
+    expect(/\.ct-atalhos \{([^}]*)\}/.exec(celular)![1]).toContain("margin-left: auto");
+    // a pagina nao rola de lado: nada de largura fixa nem de rolagem escrita na faixa
+    expect(celular).not.toMatch(/overflow-x|min-width:\s*\d/);
   });
 });
