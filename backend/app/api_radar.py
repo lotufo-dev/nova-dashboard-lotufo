@@ -6,7 +6,8 @@ repositorio; lido a cada pedido, entao trocar o token nao pede reinicio). Sem a 
 monitor do SIGA (`api_siga.py`), com token proprio: quem tem um nao entra pelo outro.
 
 Uma rodada sao tres passos: `GET /api/radar/estado` (o que a dashboard ja' tem), `POST /api/radar/certames` (so' os
-que mudaram, em pedidos abaixo do teto geral de 2 MB) e `POST /api/radar/leituras` (fecha a rodada).
+que mudaram, em pedidos abaixo do teto geral de 2 MB) e `POST /api/radar/leituras` (fecha a rodada). Depois do corte
+o radar tambem busca as decisoes em `GET /api/radar/decisoes`, e o fechamento com decisoes e' recusado (409).
 """
 import datetime
 import hmac
@@ -19,7 +20,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import AwareDatetime, BaseModel, Field
 
-from app import licitacoes
+from app import licitacoes, licitacoes_decisoes
 from app.api_auth import conexao
 
 router = APIRouter()
@@ -168,10 +169,17 @@ class FavoritaIn(BaseModel):
     autor: str | None = Field(default=None, max_length=120)
 
 
+class DescartadaIn(BaseModel):
+    chave: Chave
+    motivo: Literal["tipo de obra", "local", "valor", "órgão", "outro"]
+    autor: str | None = Field(default=None, max_length=120)
+
+
 class DecisoesIn(BaseModel):
     # obrigatoria: `decisoes: {}` nao vale por lista vazia (que tira todas as favoritas). Quem nao leu as proprias
     # favoritas omite `decisoes`, e ai' nada mexe
     favoritas: list[FavoritaIn] = Field(max_length=2000)
+    descartadas: list[DescartadaIn] | None = Field(default=None, max_length=5000)   # ausente: nao mexe nas que existem
 
 
 class LeituraIn(BaseModel):
@@ -197,5 +205,13 @@ def fechar_leitura(dados: LeituraIn, conn: sqlite3.Connection = Depends(conexao)
     try:
         return licitacoes.fechar_leitura(conn, dados.lido_em, dados.chaves,
                                          [f.model_dump(mode="json") for f in dados.fontes], decisoes)
+    except licitacoes.DecisoesNaDashboard as e:
+        raise HTTPException(409, str(e)) from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
+
+
+@router.get("/api/radar/decisoes", dependencies=[Depends(exigir_radar)], include_in_schema=False)
+def decisoes(conn: sqlite3.Connection = Depends(conexao)):
+    """Depois do corte o radar busca aqui as favoritas e as descartadas, antes de cada leitura."""
+    return licitacoes_decisoes.para_o_radar(conn)

@@ -8,9 +8,10 @@ def test_perfis():
     assert not tem("engenharia", "administrar")
     assert tem("diretoria", "ver_paineis")
     assert not tem("diretoria", "editar_cadastros")
-    # licitacoes (#908, decisao do dono de 24/11/2026): so' o administrador ve
-    assert tem("admin", "ver_licitacoes")
-    assert not tem("diretoria", "ver_licitacoes") and not tem("engenharia", "ver_licitacoes")
+    # licitacoes (#908 e #909, decisao do dono de 24/11/2026): so' o administrador ve e decide
+    assert tem("admin", "ver_licitacoes") and tem("admin", "editar_licitacoes")
+    for perfil in ("diretoria", "engenharia"):
+        assert not tem(perfil, "ver_licitacoes") and not tem(perfil, "editar_licitacoes")
 
 
 # --- testes adicionais (nao previstos no brief) -------------------------------
@@ -22,7 +23,8 @@ from fastapi import Depends
 from app import auth, cli, db
 from app.permissoes import exigir
 
-PERMISSOES = {"ver_paineis", "ver_siga", "ver_licitacoes", "editar_cadastros", "editar_config_fiscal", "administrar"}
+PERMISSOES = {"ver_paineis", "ver_siga", "ver_licitacoes", "editar_licitacoes", "editar_cadastros", "editar_config_fiscal",
+              "administrar"}
 
 
 def test_ver_siga_e_dos_tres_perfis_e_so_quem_edita_cadastros_escreve_no_siga():

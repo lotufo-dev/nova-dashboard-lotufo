@@ -6,10 +6,10 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, Query
 
-from app import avisos, fila_medicoes, inicio as pagina_inicio, medicoes
+from app import avisos, fila_medicoes, inicio as pagina_inicio, licitacoes, medicoes
 from app.api_auth import conexao
 from app.api_medicoes import MAX_INT64
-from app.permissoes import VER_SIGA, exigir, tem
+from app.permissoes import VER_LICITACOES, VER_SIGA, exigir, tem
 
 router = APIRouter()
 
@@ -19,8 +19,10 @@ def inicio(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
            conn: sqlite3.Connection = Depends(conexao)):
     publico = "diretoria" if usuario.get("perfil") == "diretoria" else "operacao"
     # #881: os avisos do SIGA (o processo parado, o protocolo novo, o monitor sem leitura) so' para quem tem `ver_siga`
+    # fatia 2 da #906: a linha das licitacoes, so' para quem tem `ver_licitacoes`; os numeros sao os da Triagem
     return {"avisos": avisos.listar(conn, publico=publico, com_siga=tem(usuario["perfil"], VER_SIGA)),
-            "resumo": avisos.resumo_mes(conn)}
+            "resumo": avisos.resumo_mes(conn),
+            "licitacoes": licitacoes.resumo(conn) if tem(usuario["perfil"], VER_LICITACOES) else None}
 
 
 @router.get("/api/inicio/painel")

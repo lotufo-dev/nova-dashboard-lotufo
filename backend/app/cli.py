@@ -44,6 +44,29 @@ def _legado(args) -> int:
     return 0
 
 
+def _licitacoes(args) -> int:
+    """`licitacoes corte [--ensaio]`: passa as decisoes das licitacoes (favorita, etapa, descarte) do radar para a
+    dashboard (docs/adr/0018). Um ato so': rodar de novo diz quando foi feito e nao muda nada."""
+    from app import licitacoes_decisoes, tempo
+    conn = db.get_conn()
+    try:
+        db.migrate(conn)
+        u = conn.execute("SELECT id FROM usuarios WHERE email=? AND ativo=1", (args.usuario,)).fetchone()
+        if u is None:
+            print(f"Usuário não encontrado ou inativo: {args.usuario}")
+            return 1
+        rel = licitacoes_decisoes.corte(conn, u["id"], ensaio=args.ensaio)
+    finally:
+        conn.close()
+    if rel["ja_feito_em"]:
+        print(f"O corte já foi feito em {tempo.iso_utc(rel['ja_feito_em'])}; nada mudou.")
+    else:
+        print("ENSAIO (nada foi gravado)" if rel["ensaio"] else "CORTE FEITO: as decisões passam a ser da dashboard")
+    print(f"  favoritas em vigor: {rel['favoritas']}")
+    print(f"  descartadas em vigor: {rel['descartadas']}")
+    return 0
+
+
 def _documentos(args) -> int:
     """`documentos importar <pasta> [--ensaio]`: carga das certidoes vigentes de uma pasta LOCAL (bloco 4).
     O sistema nao le SharePoint: quem roda baixa a biblioteca `Certidoes` para uma pasta antes."""
@@ -740,6 +763,10 @@ def main(argv: list[str] | None = None) -> int:
     cad.add_argument("--raiz", help="pasta do cadastro (padrão: DASH_CADASTRO_DIR, ou cadastro-exemplo/)")
     cad.add_argument("--usuario", help="e-mail de quem aplica (obrigatório em `aplicar`)")
     cad.add_argument("--ensaio", action="store_true", help="mostra o que mudaria e não grava")
+    lic = sub.add_parser("licitacoes", help="corte das licitações: as decisões passam do radar para a dashboard")
+    lic.add_argument("acao", choices=["corte"])
+    lic.add_argument("--usuario", required=True, help="e-mail de quem faz o corte")
+    lic.add_argument("--ensaio", action="store_true", help="mostra o que passa a valer e não grava")
     leg = sub.add_parser("legado", help="remapeia os estados do legado (bloco 3)")
     leg.add_argument("acao", choices=["remapear"])
     leg.add_argument("--usuario", required=True, help="e-mail de quem aplica")
@@ -830,6 +857,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cadastro(args)
     if args.cmd == "legado":
         return _legado(args)
+    if args.cmd == "licitacoes":
+        return _licitacoes(args)
     if args.cmd == "conciliacao":
         return _conciliacao(args)
     if args.cmd == "rm":

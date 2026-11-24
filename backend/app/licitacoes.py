@@ -2,8 +2,9 @@
 
 A dashboard nao le fonte nenhuma. O radar, de fora, manda os certames ja' classificados (tipo de obra, distancia,
 nota e motivo das Recomendadas, rotulo de cada mudanca) e fecha a rodada com a lista do que mostra hoje, a situacao
-das fontes e, ate' o corte, as favoritas dele. Aqui se grava como veio e se calcula so' o que depende do dia (dias
-uteis ate' a sessao, sessao passada) e das decisoes (favorita). Nada se apaga.
+das fontes e, ate' o corte, as favoritas e as descartadas dele. Aqui se grava como veio e se calcula so' o que
+depende do dia (dias uteis ate' a sessao, sessao passada) e das decisoes (favorita, descartada, mudanca vista), que
+depois do corte sao gravadas por `licitacoes_decisoes.py`. Nada se apaga.
 """
 import datetime
 import json
@@ -26,6 +27,11 @@ LEITURA_ANTIGA = "Leitura mais antiga que a última gravada"
 LEITURA_FORA_DA_FAIXA = "Data da leitura fora da faixa aceita"
 ANO_MINIMO_DA_LEITURA = 2020
 CHAVE_DESCONHECIDA = "Licitação que a dashboard ainda não recebeu: "
+DECISOES_NA_DASHBOARD = "As decisões das licitações estão na dashboard desde "
+
+
+class DecisoesNaDashboard(Exception):
+    """Depois do corte o radar nao manda decisao: busca (a rota responde 409)."""
 
 _UM_DIA = datetime.timedelta(days=1)
 _COLUNAS = ("resumo", "dados", "uf", "data_sessao", "valor_centavos", "encerrada", "nova", "grande_vulto", "nota")
@@ -33,9 +39,20 @@ _COLUNAS = ("resumo", "dados", "uf", "data_sessao", "valor_centavos", "encerrada
 
 # --- o que o radar entrega ---------------------------------------------------------------------------------
 
+def corte_em(conn) -> str | None:
+    """Quando as decisoes passaram do radar para a dashboard (UTC); None = ainda estao com o radar."""
+    r = conn.execute("SELECT corte_em FROM lic_estado WHERE id=1").fetchone()
+    return r["corte_em"] if r else None
+
+
+def _lado_das_decisoes(conn) -> str:
+    return "dashboard" if corte_em(conn) else "radar"
+
+
 def estado(conn) -> dict:
     """O que o radar pergunta antes de mandar: o resumo de cada certame gravado e de que lado estao as decisoes."""
-    return {"decisoes": "radar", "corte_em": None,
+    corte = corte_em(conn)
+    return {"decisoes": "dashboard" if corte else "radar", "corte_em": tempo.iso_utc(corte) if corte else None,
             "resumos": {r["chave"]: r["resumo"] for r in conn.execute("SELECT chave, resumo FROM lic_certames")}}
 
 
@@ -71,8 +88,9 @@ def _utc(dt: datetime.datetime) -> str:
 
 def fechar_leitura(conn, lido_em: datetime.datetime, chaves: list[str], fontes: list[dict],
                    decisoes: dict | None) -> dict:
-    """Fecha a rodada do radar: o que ele lista hoje, a situacao das fontes e, ate' o corte, as favoritas dele.
-    Confere tudo antes de gravar: chave que a dashboard nao recebeu recusa o fechamento inteiro."""
+    """Fecha a rodada do radar: o que ele lista hoje, a situacao das fontes e, ate' o corte, as favoritas e as
+    descartadas dele. Confere tudo antes de gravar: chave que a dashboard nao recebeu recusa o fechamento inteiro, e
+    decisao mandada depois do corte tambem."""
     if lido_em.year < ANO_MINIMO_DA_LEITURA:            # antes de qualquer conta com fuso, que estouraria no ano 1
         raise ValueError(LEITURA_FORA_DA_FAIXA)
     if lido_em > tempo.agora_utc() + FOLGA_FUTURO:
@@ -80,12 +98,19 @@ def fechar_leitura(conn, lido_em: datetime.datetime, chaves: list[str], fontes: 
     lido = _utc(lido_em)
     listadas = set(chaves)
     favoritas = None if decisoes is None else {f["chave"]: f for f in decisoes.get("favoritas") or []}
+    # `descartadas` ausente (radar que ainda nao as manda) nao e' lista vazia: nao mexe nas que existem
+    descartadas = (None if decisoes is None or decisoes.get("descartadas") is None
+                   else {d["chave"]: d for d in decisoes["descartadas"]})
     with db.mutacao(conn):
+        corte = corte_em(conn)
+        if decisoes is not None and corte:
+            dia = tempo.para_local(datetime.datetime.fromisoformat(corte)).strftime("%d/%m/%Y")
+            raise DecisoesNaDashboard(DECISOES_NA_DASHBOARD + dia)
         ultima = conn.execute("SELECT MAX(lido_em) FROM lic_leituras").fetchone()[0]
         if ultima and lido < ultima:
             raise ValueError(LEITURA_ANTIGA)
         gravados = {r["chave"]: r["fora_desde"] for r in conn.execute("SELECT chave, fora_desde FROM lic_certames")}
-        for chave in sorted((listadas | set(favoritas or ())) - set(gravados)):
+        for chave in sorted((listadas | set(favoritas or ()) | set(descartadas or ())) - set(gravados)):
             raise ValueError(CHAVE_DESCONHECIDA + chave)
         saiu = [(lido, k) for k, fora in gravados.items() if fora is None and k not in listadas]
         voltou = [(k,) for k, fora in gravados.items() if fora is not None and k in listadas]
@@ -96,7 +121,25 @@ def fechar_leitura(conn, lido_em: datetime.datetime, chaves: list[str], fontes: 
                      "ON CONFLICT(lido_em) DO UPDATE SET certames=excluded.certames, fontes=excluded.fontes",
                      (lido, len(listadas), json.dumps(fontes, ensure_ascii=False)))
         espelhadas = _espelhar_favoritas(conn, favoritas, lido) if favoritas is not None else None
-    return {"listados": len(listadas), "fora": len(saiu), "favoritas": espelhadas}
+        descartes = _espelhar_descartes(conn, descartadas, lido) if descartadas is not None else None
+    return {"listados": len(listadas), "fora": len(saiu), "favoritas": espelhadas, "descartadas": descartes}
+
+
+def _espelhar_descartes(conn, descartadas: dict[str, dict], lido: str) -> int:
+    """Ate' o corte as descartadas tambem sao espelho do radar: entra a que falta, o motivo acompanha, e a que ele
+    nao manda mais e' desfeita, com a data."""
+    ativos = {r["chave"]: r for r in conn.execute(
+        "SELECT id, chave, motivo FROM lic_descartes WHERE desfeito_em IS NULL AND origem='radar'")}
+    for chave, d in descartadas.items():
+        atual = ativos.get(chave)
+        if atual is None:
+            conn.execute("INSERT INTO lic_descartes (chave, motivo, origem, autor_radar) VALUES (?,?,'radar',?)",
+                         (chave, d["motivo"], d.get("autor")))
+        elif atual["motivo"] != d["motivo"]:
+            conn.execute("UPDATE lic_descartes SET motivo=? WHERE id=?", (d["motivo"], atual["id"]))
+    conn.executemany("UPDATE lic_descartes SET desfeito_em=? WHERE id=?",
+                     [(lido, r["id"]) for chave, r in ativos.items() if chave not in descartadas])
+    return len(descartadas)
 
 
 def _espelhar_favoritas(conn, favoritas: dict[str, dict], lido: str) -> int:
@@ -187,20 +230,28 @@ def _prazos(dados: dict, hoje: datetime.date) -> list[dict]:
     return prazos
 
 
+def mudancas(dados: dict, fav) -> list[dict]:
+    """As mudancas do certame desde o dia em que foi favoritado, da mais recente para a mais antiga. `vista`: a
+    data dela nao passa do dia ate' onde alguem marcou as mudancas como vistas."""
+    vistas_ate = fav["mudancas_vistas_ate"] or ""
+    lista = [{"data": h["data"], "texto": h["texto"], "rotulo": h["rotulo"], "vista": h["data"] <= vistas_ate}
+             for h in dados.get("historico") or [] if h.get("rotulo") and h["data"] >= fav["desde"]]
+    lista.sort(key=lambda m: m["data"], reverse=True)
+    return lista
+
+
 def _favorita(fav, dados: dict, hoje: datetime.date, encerrada: bool) -> dict:
     dossie = dados.get("dossie")
     etapa = (dossie or {}).get("etapa") or fav["etapa"] or ETAPA_PADRAO
     prazos = _prazos(dados, hoje)
     if encerrada:                                       # licitacao encerrada nao tem prazo correndo
         prazos = [{**p, "situacao": None} for p in prazos]
-    mudancas = [{"data": h["data"], "texto": h["texto"], "rotulo": h["rotulo"]}
-                for h in dados.get("historico") or [] if h.get("rotulo") and h["data"] >= fav["desde"]]
-    mudancas.sort(key=lambda m: m["data"], reverse=True)
+    lista = mudancas(dados, fav)
     return {"desde": fav["desde"], "etapa": etapa, "etapa_rotulo": ROTULO_ETAPA[etapa],
             "etapa_do_dossie": bool(dossie and dossie.get("etapa")), "dossie": (dossie or {}).get("pasta"),
             "selos": (dossie or {}).get("selos") or [],
             "prazos": prazos, "proximo_prazo": next((p for p in prazos if not p["passado"]), None),
-            "mudancas": mudancas}
+            "mudancas": lista, "mudancas_novas": sum(1 for m in lista if not m["vista"])}
 
 
 def _linha(row, hoje: datetime.date, fav=None) -> dict:
@@ -210,7 +261,8 @@ def _linha(row, hoje: datetime.date, fav=None) -> dict:
     sessao = _data(dados.get("data_sessao"))
     du = dias_uteis_ate(hoje, sessao) if sessao else None
     encerrada = bool(dados["encerrada"]) or (sessao is not None and sessao < hoje)   # pela data: ver situacao_do_prazo
-    linha = {"chave": row["chave"], **{k: dados.get(k) for k in _DA_LINHA}, "dias_uteis": du, "sessao_hoje": sessao == hoje,
+    linha = {"id": row["id"], "chave": row["chave"], **{k: dados.get(k) for k in _DA_LINHA}, "dias_uteis": du,
+             "sessao_hoje": sessao == hoje,
              "prazo": None if encerrada else situacao_do_prazo(du), "encerrada": encerrada, "favorita": None}
     if fav is not None:
         linha["favorita"] = _favorita(fav, dados, hoje, encerrada)
@@ -220,8 +272,8 @@ def _linha(row, hoje: datetime.date, fav=None) -> dict:
 def _linhas_das_favoritas(conn, hoje: datetime.date) -> list[dict]:
     """As favoritas ativas: as em aberto primeiro, pela sessao mais proxima; as encerradas depois."""
     linhas = [_linha(r, hoje, r) for r in conn.execute(
-        "SELECT c.chave, c.dados, f.desde, f.etapa FROM lic_favoritas f JOIN lic_certames c ON c.chave=f.chave "
-        "WHERE f.removida_em IS NULL")]
+        "SELECT c.id, c.chave, c.dados, f.desde, f.etapa, f.mudancas_vistas_ate FROM lic_favoritas f "
+        "JOIN lic_certames c ON c.chave=f.chave WHERE f.removida_em IS NULL")]
     linhas.sort(key=lambda l: (l["encerrada"], l["dias_uteis"] if l["dias_uteis"] is not None else 9999,
                                -(l["valor_centavos"] or 0), l["chave"]))
     return linhas
@@ -229,18 +281,23 @@ def _linhas_das_favoritas(conn, hoje: datetime.date) -> list[dict]:
 
 def favoritas(conn) -> dict:
     with db.leitura(conn):
-        return {"leitura": leitura(conn), "favoritas": _linhas_das_favoritas(conn, tempo.hoje_local())}
+        return {"leitura": leitura(conn), "decisoes": _lado_das_decisoes(conn),
+                "favoritas": _linhas_das_favoritas(conn, tempo.hoje_local())}
 
 
-def _pede_atencao(linha: dict, hoje: datetime.date) -> bool:
-    """A favorita em aberto entra na Triagem com prazo em ate' 15 dias uteis ou com mudanca nos ultimos 7 dias."""
+def _pede_atencao(linha: dict, hoje: datetime.date, cortado: bool) -> bool:
+    """A favorita em aberto entra na Triagem com prazo em ate' 15 dias uteis ou com mudanca que ninguem viu. Antes do
+    corte ninguem marca mudanca como vista (a tela nao grava): vale a mudanca dos ultimos 7 dias."""
     if linha["encerrada"]:
         return False
     fav = linha["favorita"]
-    corte = (hoje - datetime.timedelta(days=MUDANCA_RECENTE)).isoformat()
     proximo = fav["proximo_prazo"]
-    return (proximo is not None and proximo["dias_uteis"] <= PRAZO_BREVE) or any(
-        m["data"] >= corte for m in fav["mudancas"])
+    if proximo is not None and proximo["dias_uteis"] <= PRAZO_BREVE:
+        return True
+    if cortado:
+        return fav["mudancas_novas"] > 0
+    recente = (hoje - datetime.timedelta(days=MUDANCA_RECENTE)).isoformat()
+    return any(m["data"] >= recente for m in fav["mudancas"])
 
 
 def _novas_desde(conn, novas: list[dict]) -> dict | None:
@@ -262,28 +319,36 @@ def _novas_desde(conn, novas: list[dict]) -> dict | None:
 
 
 def triagem(conn) -> dict:
-    """O que pede decisao agora: as favoritas com prazo chegando ou mudanca recente e as recomendadas que ainda nao
-    sao favoritas. As contagens do alto saem das mesmas linhas."""
+    """O que pede decisao agora: as favoritas com prazo chegando ou mudanca nao vista e as recomendadas que ainda nao
+    sao favoritas nem foram descartadas. Decidiu, sai. As contagens do alto saem das mesmas linhas."""
     with db.leitura(conn):
         hoje = tempo.hoje_local()
+        lado = _lado_das_decisoes(conn)
         favs = _linhas_das_favoritas(conn, hoje)
-        chaves_favoritas = {l["chave"] for l in favs}
+        decididas = {l["chave"] for l in favs} | {r["chave"] for r in conn.execute(
+            "SELECT chave FROM lic_descartes WHERE desfeito_em IS NULL")}
         listadas = [(r["nova"], _linha(r, hoje)) for r in conn.execute(
-            "SELECT chave, dados, nova FROM lic_certames WHERE fora_desde IS NULL AND (nova=1 OR nota IS NOT NULL)")]
+            "SELECT id, chave, dados, nova FROM lic_certames WHERE fora_desde IS NULL AND (nova=1 OR nota IS NOT NULL)")]
         abertas = [(nova, l) for nova, l in listadas if not l["encerrada"]]
-        recomendadas = [l for _, l in abertas if l["recomendada"] and l["chave"] not in chaves_favoritas]
+        recomendadas = [l for _, l in abertas if l["recomendada"] and l["chave"] not in decididas]
         recomendadas.sort(key=lambda l: (-l["recomendada"]["nota"], -(l["valor_centavos"] or 0),
                                          l["recomendada"]["km"] if l["recomendada"]["km"] is not None else 9999,
                                          l["dias_uteis"] if l["dias_uteis"] is not None else 9999, l["chave"]))
-        atencao = [l for l in favs if _pede_atencao(l, hoje)]
+        atencao = [l for l in favs if _pede_atencao(l, hoje, lado == "dashboard")]
         atencao.sort(key=lambda l: (l["favorita"]["proximo_prazo"] or {}).get("dias_uteis", 9999))
         novas = [l for nova, l in abertas if nova]
         por_orgao: dict[str, int] = {}
         for l in novas:
             if l["orgao_de_interesse"]:
                 por_orgao[l["grupo_orgao"]] = por_orgao.get(l["grupo_orgao"], 0) + 1
-        return {"leitura": leitura(conn),
+        return {"leitura": leitura(conn), "decisoes": lado,
                 "contagens": {"recomendadas": len(recomendadas), "favoritas": len(favs), "novas": len(novas),
                               "novas_desde": _novas_desde(conn, novas),
                               "por_orgao": [{"orgao": o, "novas": n} for o, n in sorted(por_orgao.items())]},
                 "favoritas": atencao, "recomendadas": recomendadas}
+
+
+def resumo(conn) -> dict:
+    """A linha das licitacoes na Inicio: os numeros sao os da Triagem, pela mesma funcao."""
+    t = triagem(conn)
+    return {"leitura": t["leitura"], "recomendadas": t["contagens"]["recomendadas"], "favoritas": len(t["favoritas"])}

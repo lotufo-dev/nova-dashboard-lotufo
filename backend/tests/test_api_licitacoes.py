@@ -55,6 +55,7 @@ def test_banco_vazio(client):
     _entrar(client, "admin")
     assert client.get("/api/licitacoes/triagem").json() == {
         "leitura": {"lido_em": None, "atrasada": True, "fontes_com_problema": 0},
+        "decisoes": "radar", "pode_decidir": False,
         "contagens": {"recomendadas": 0, "favoritas": 0, "novas": 0, "novas_desde": None, "por_orgao": []},
         "favoritas": [], "recomendadas": []}
     assert client.get("/api/licitacoes/favoritas").json()["favoritas"] == []
@@ -177,11 +178,13 @@ def test_favorita_com_dossie_tem_a_etapa_os_prazos_e_as_mudancas(client, com_tok
         ("esclarecimento", 3, "critico"), ("sessao", 12, "breve")]
     assert fa["selos"] == ["Diretoria: interesse"]
     assert fa["proximo_prazo"]["codigo"] == "esclarecimento"
-    assert fa["mudancas"] == [{"data": "2026-11-20", "texto": "publicou adiamento", "rotulo": "Sessão adiada"}]
+    assert fa["mudancas"] == [{"data": "2026-11-20", "texto": "publicou adiamento", "rotulo": "Sessão adiada",
+                               "vista": False}]
+    assert fa["mudancas_novas"] == 1
 
     fb = b["favorita"]
-    assert (fb["etapa"], fb["etapa_do_dossie"], fb["dossie"], fb["selos"], fb["mudancas"]) == (
-        "proposta_enviada", False, None, [], [])
+    assert (fb["etapa"], fb["etapa_do_dossie"], fb["dossie"], fb["selos"], fb["mudancas"], fb["mudancas_novas"]) == (
+        "proposta_enviada", False, None, [], [], 0)
     assert [(p["codigo"], p["rotulo"], p["data"], p["situacao"]) for p in fb["prazos"]] == [
         ("sessao", "Sessão", "2027-03-01", None)]
 
