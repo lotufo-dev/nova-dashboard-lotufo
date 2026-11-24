@@ -250,6 +250,47 @@ def test_consorcio_com_varias_faturas_o_protocolado_fecha_com_o_aprovado(cenario
     assert fechamento._cotas([], 5000) == [] and fechamento._cotas([0, 0], 5000) == [0, 0]
 
 
+def test_varias_faturas_o_centavo_do_rm_por_mes_nao_aparece_em_numero_comparavel_ao_do_fechamento(cenario):
+    """Linha do backlog de 17/11/2026 ("Cota em consorcio com varias faturas na mesma medicao"). O Fechamento arredonda
+    a cota das faturas de uma medicao uma vez, na soma (`_cotas`); `diretoria.rm_por_mes` e `recebido_rm_no_mes`
+    arredondam nota a nota e baixa a baixa. A diferenca existe, mas nao aparece em numero que a tela compare com o do
+    Fechamento:
+    - o faturado por mes (um centavo acima do protocolado do Fechamento) nao tem tela desde a #756 e cai no mes da
+      emissao, nao na competencia;
+    - o recebido do Inicio e' o LIQUIDO baixado, pelo mes da baixa; o do Fechamento, o BRUTO, pela competencia. Entre
+      os dois ha' as retencoes, nao um centavo: nenhum dos dois e' o outro arredondado de outro jeito;
+    - o recebido do mes e o dos 12 meses do Inicio sao a mesma conta e fecham entre si; o do mes nao abre por
+      contratante.
+    E a baixa a baixa e' o que mantem o recebido de um mes fechado: a baixa de outra fatura da mesma medicao, em outro
+    mes, nao mexe no centavo do mes que ja' passou (com a cota da soma das baixas da medicao, mexeria)."""
+    c, ids = cenario
+    k = ids["consorcio"]
+    mid = medir(c, k, 1, "2026-04", "recebida", 3_000_003, aprovado=3_000_003, protocolo="2026-04-30")
+    for _ in range(3):                                       # emitidas em 03/2026; titulos liquidos baixados em 05/2026
+        nota(c, 1_000_001, [mid], coligada=12, titulos=PAGO(930_001))
+    md = _medicao(fechamento.fechamento(c), mid)
+    # Fechamento, bruto, pela competencia: a cota da soma (3.000.003 x 50% = 1.500.001,5 -> 1.500.002), repartida
+    assert (md["protocolado_centavos"], md["recebido_centavos"]) == (1_500_002, 1_500_002)
+    faturado, recebido = diretoria.rm_por_mes(c)
+    # faturado do RM, nota a nota: 3 x 500.001 = 1.500.003, um centavo acima; sem tela, e em outro mes (o da emissao)
+    assert faturado == {"2026-03": 1_500_003}
+    # recebido do RM, baixa a baixa e liquido: 3 x 465.001 (930.001 x 50%, meio para cima) = 1.395.003. A cota da soma
+    # das baixas seria 1.395.002 (2.790.003 x 50% = 1.395.001,5); nenhuma tela mostra um numero que deva dar esse valor
+    assert recebido == {"2026-05": 1_395_003}
+    assert diretoria.recebido_rm_no_mes(c, "2026-05") == {"valor_centavos": 1_395_003, "notas": 3}
+    p = inicio.painel(c, datetime.date(2026, 5, 20))
+    assert next(x for x in p["ciclo"] if x["etapa"] == "recebido_mes")["valor_centavos"] == 1_395_003
+    assert p["recebido_12m"][-1] == {"mes": "2026-05", "valor_centavos": 1_395_003}
+    # o que separa o recebido do Inicio do recebido do Fechamento sao as retencoes (3 x 70.000 na cota), nao o centavo
+    assert md["recebido_centavos"] - recebido["2026-05"] == 104_999
+
+    # mais uma fatura da mesma medicao, baixada em junho: maio nao muda; junho leva so' a cota da baixa dele
+    nota(c, 1_000_001, [mid], coligada=12, titulos=PAGO(930_001))
+    c.execute("UPDATE baixas SET data_baixa='2026-06-10' WHERE nota_id=(SELECT MAX(id) FROM notas_fiscais)"); c.commit()
+    assert diretoria.rm_por_mes(c)[1] == {"2026-05": 1_395_003, "2026-06": 465_001}
+    assert diretoria.recebido_rm_no_mes(c, "2026-05")["valor_centavos"] == 1_395_003
+
+
 def test_consorcio_com_varias_faturas_e_uma_delas_partilhada_com_outra_medicao(cenario):
     """As duas regras juntas: a cota das faturas do consorcio e' a da soma delas (um arredondamento, repartido), e a
     fatura que cobre duas medicoes entra em cada uma pelo valor da PARTE (docs/adr/0005), nao inteira. A execucao tem
