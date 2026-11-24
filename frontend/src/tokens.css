@@ -1796,18 +1796,21 @@ td.col-num .campo__nota { font-family: var(--fonte-texto); }
 .obra-grade > * > * { min-width: 0; }
 @media (min-width: 1281px) { .obra-grade__lateral { position: sticky; top: 40px; } }
 
-/* Secoes em abas: a faixa dentro do cartao; o conteudo de cada aba (cartoes de hoje) fica num painel com respiro */
-.abas--obra { padding: 0 12px; overflow-x: auto; scrollbar-width: none; }
-.abas--obra .aba { flex: none; white-space: nowrap; height: 44px; padding: 0 14px; }
-.painel-aba { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 20px; }
+/* Secoes em abas da pagina da obra: a faixa direto na pagina, sob a regua de secao; os paineis da aba (cada um um
+   cartao com a sombra da pagina) ficam embaixo, sem caixa em volta. O respiro e a letra da aba sao variaveis da
+   variante (`obra.css` as troca na pagina estreita), para a pagina nao reescrever a regra da aba */
+.abas--obra { --aba-respiro: var(--espaco-m); --aba-letra: var(--texto-corpo); padding: 0; overflow-x: auto; scrollbar-width: none; border-bottom: var(--regua-secao); }
+.abas--obra .aba { flex: none; white-space: nowrap; height: var(--alvo-minimo); padding: 0 var(--aba-respiro); font-size: var(--aba-letra); }
+.abas--obra .aba:first-child { padding-left: 0; }
+.painel-aba { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-entre-blocos); }
 .painel-aba > * { min-width: 0; }
 .painel-aba .cartao { box-shadow: none; }
-@media (max-width: 640px) { .painel-aba { padding: 12px; } }
+.painel-aba > .cartao, .painel-aba > .pilha > .cartao { box-shadow: var(--sombra-painel); }
 
 /* Execucao do contrato: duas linhas do tempo */
 .linhas-tempo { display: grid; }
-.lt { padding: 18px 20px 16px; }
-.lt + .lt { border-top: 1px solid var(--cor-linha); }
+.lt { padding: var(--espaco-mini) 0 var(--espaco-p); }
+.lt + .lt { border-top: var(--borda-linha); padding-top: var(--espaco-p); }
 .lt__titulo { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 30px; font-size: var(--texto-titulo-sub); font-weight: 600; }
 .lt__titulo .selo { font-weight: 500; }
 .lt__trilho { position: relative; height: 8px; border-radius: var(--raio-selo); background: var(--cor-contador-neutro); }

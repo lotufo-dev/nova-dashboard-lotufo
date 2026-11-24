@@ -78,6 +78,21 @@ describe("Página da obra: o desenho novo", () => {
     expect(screen.queryByRole("button", { name: "Gerar espelho (teste)" })).toBeNull();
   });
 
+  it("a obra encerrada ou rescindida não oferece iniciar a medição; suspensa e em encerramento continuam como hoje", async () => {
+    responderCompleto();
+    const base = api.getMockImplementation()!;
+    for (const [status, oferece] of [["encerrado", false], ["rescindido", false], ["suspenso", true], ["em_encerramento", true]] as const) {
+      api.mockImplementation(async (url: string, o?: { method?: string }) =>
+        url.endsWith("/cabecalho") ? { ...CABECALHO_COMPLETO, status } : base(url, o));
+      const { unmount } = render(<ContratoPagina contratoId={1} usuario={usuario} aba="medicoes" origem={null} busca={{}} />);
+      await screen.findByRole("region", { name: "Seções da obra" });
+      await waitFor(() => expect(leituras("/api/contratos/1/medicoes").length).toBeGreaterThan(0));
+      expect(screen.queryByRole("button", { name: "Gerar espelho (teste)" }) !== null, status).toBe(oferece);
+      unmount();
+      api.mockClear();
+    }
+  });
+
   it("página única: /obras/:id mostra o resumo e as abas juntos, sem 'ver contrato' nem 'Ficha da obra' (#646)", async () => {
     responderCompleto();
     render(<ContratoPagina contratoId={1} usuario={usuario} aba="ficha" origem={null} busca={{}} />);
