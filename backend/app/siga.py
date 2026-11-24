@@ -1071,12 +1071,19 @@ def _em_lotes(ids, tamanho: int = 500):
 
 
 def _mais_parado(posicao: dict) -> tuple:
-    """Chave de ordem da tela SIGA (`ordenar` em siga.ts), pela leitura de "parado" (#840): mais dias uteis sem
-    movimentacao, depois a ultima movimentacao mais antiga; sem movimentacao nenhuma, no fim. #841: o sobrestado
-    nao esta' parado: vai depois dos outros."""
+    """A ordem do mais parado, pela leitura de "parado" (#840): mais dias uteis sem movimentacao, depois a ultima
+    movimentacao mais antiga; sem movimentacao nenhuma, no fim. #841: o sobrestado nao esta' parado: vai depois dos
+    outros. E' a UNICA conta da ordem (#861): o quadro do mes (`mais_parado`), a lista da tela SIGA (`painel`, que a
+    tela so' segue) e a aba do contratante (o recorte dessa lista)."""
     dias = posicao["dias_sem_movimentacao"]
     return (posicao.get("situacao_tempo") == "sobrestado", -(dias if dias is not None else -1),
             posicao["ultima_em"] or "9", posicao["processo_id"])
+
+
+def _mais_parado_do_painel(p: dict) -> tuple:
+    """`_mais_parado` de um processo da lista de `painel`."""
+    return _mais_parado({"dias_sem_movimentacao": p["dias_sem_movimentacao"], "situacao_tempo": p["situacao_tempo"],
+                         "ultima_em": p["ultima"]["data"] if p["ultima"] else None, "processo_id": p["id"]})
 
 
 def mais_parado(posicoes: list[dict]) -> dict | None:
@@ -1214,6 +1221,8 @@ def painel(conn, agora: datetime.datetime | None = None) -> dict:
             "situacao_tempo": None if encerrado else parado(derivado),
             "movimentacoes": movs,
         })
+    # #861: a lista sai do mais parado para o menos; a tela e a aba do contratante so' seguem esta ordem
+    saida.sort(key=_mais_parado_do_painel)
     fora = {p["id"]: p["encerrado"] for p in saida if p["encerrado"]}
     robo = situacao_robo(conn, agora, fora)
     vivos = [p for p in saida if not p["encerrado"]]

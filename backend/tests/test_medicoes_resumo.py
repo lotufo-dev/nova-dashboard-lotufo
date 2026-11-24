@@ -556,7 +556,7 @@ def test_quadro_mostra_setor_e_dias_uteis_no_passo_em_que_o_processo_corre(conn,
     assert (painel[pid]["setor"], painel[pid]["dias_uteis"], painel[pid]["desde"]) == ("COFIN", 8, b[6]["desde"])
     # movimentacao de hoje no processo: a tela SIGA escreve "hoje" no lugar dos dias, e o quadro recebe a mesma conta
     c.execute("INSERT INTO siga_movimentacoes (processo_id, data, evento) VALUES (?, '2026-10-30 08:00:00', 'Juntada')", (pid,))
-    assert _siga(_linha(c, "Obra B"))[6]["hoje"] == siga.painel(c, agora)["processos"][0]["hoje"] == 1
+    assert _siga(_linha(c, "Obra B"))[6]["hoje"] == {p["id"]: p for p in siga.painel(c, agora)["processos"]}[pid]["hoje"] == 1
     # as outras obras continuam sem nada
     assert all(v is None for v in _siga(_linha(c, "Obra A")).values())
 

@@ -104,21 +104,12 @@ const instante = (iso: string | null, vazio: number): number => {
   return Number.isNaN(t) ? vazio : t;
 };
 
-/** Do mais parado ao menos, na ordem do servidor (`siga._mais_parado`, #840): mais dias sem movimentacao, empate
- *  pela ultima movimentacao mais antiga; sem movimentacao nenhuma vai para o fim. #841: o sobrestado, depois dos outros. */
-export function ordenar(processos: ProcessoSiga[]): ProcessoSiga[] {
-  const sob = (p: ProcessoSiga) => (p.situacao_tempo === "sobrestado" ? 1 : 0);
-  return [...processos].sort((a, b) => {
-    return sob(a) - sob(b) || (b.dias_sem_movimentacao ?? -1) - (a.dias_sem_movimentacao ?? -1)
-      || instante(a.ultima?.data ?? null, Infinity) - instante(b.ultima?.data ?? null, Infinity) || a.id - b.id;
-  });
-}
-
-/** As secoes da tabela principal (#663): uma por categoria, na ordem fixa, cada uma do mais parado ao menos; a
- *  categoria sem processo nao aparece. */
+/** As secoes da tabela principal (#663): uma por categoria, na ordem fixa; a categoria sem processo nao aparece.
+ *  Dentro de cada uma, a ordem em que o servidor mandou, do mais parado ao menos (`siga._mais_parado`, #861): a
+ *  tela nao refaz a conta. */
 export function porCategoria(processos: ProcessoSiga[]): { categoria: Categoria; rotulo: string; processos: ProcessoSiga[] }[] {
   return CATEGORIAS
-    .map(c => ({ ...c, processos: ordenar(processos.filter(p => p.categoria === c.categoria)) }))
+    .map(c => ({ ...c, processos: processos.filter(p => p.categoria === c.categoria) }))
     .filter(s => s.processos.length > 0);
 }
 
