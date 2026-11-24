@@ -114,14 +114,14 @@ describe("confirmação do boletim com o par (issue #625)", () => {
   }
 
   it("registrado também no reajuste: nomeia o par e o valor", async () => {
-    expect(await registrar(M, { id: 1, par: { medicao_id: 6, tipo: "reajuste", numero: 7, aprovado_centavos: 9586401 } }))
-      .toBe("Boletim registrado na 7ª medição e no reajuste (R$ 95.864,01).");
+    expect(await registrar(M, { id: 1, par: { medicao_id: 6, tipo: "reajuste", numero: 7, aprovado_centavos: 8000001 } }))
+      .toBe("Boletim registrado na 7ª medição e no reajuste (R$ 80.000,01).");
   });
 
   it("registrado no reajuste e também na medição", async () => {
     expect(await registrar({ ...M, tipo: "reajuste" } as Medicao,
-      { id: 1, par: { medicao_id: 4, tipo: "execucao", numero: 7, aprovado_centavos: 151140495 } }))
-      .toBe("Boletim registrado no reajuste e na medição (R$ 1.511.404,95).");
+      { id: 1, par: { medicao_id: 4, tipo: "execucao", numero: 7, aprovado_centavos: 120000005 } }))
+      .toBe("Boletim registrado no reajuste e na medição (R$ 1.200.000,05).");
   });
 
   it("par de fora: o motivo numa linha", async () => {

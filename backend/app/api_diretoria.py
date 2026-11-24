@@ -1,5 +1,5 @@
 """Numeros da diretoria (bloco 8; spec 2026-09-21 §10.5): o Resumo e o QDOP da lista de Obras, a exportacao do QDOP,
-a pagina Fechamento (issue #748), a pagina A receber (issue #816) e a pagina Resumo das medicoes (issue #749). So'
+a pagina Fechamento (issue #748), a pagina Em aberto (issue #816) e a pagina Resumo das medicoes (issue #749). So'
 leitura; a operacao tambem ve."""
 import sqlite3
 

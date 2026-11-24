@@ -9,8 +9,8 @@ const medicao = { id: 1, numero: 27, tipo: "execucao", competencia: "2026-08", e
 
 const DADOS = {
   esperadas: [
-    { chave: "medicao", natureza: "medicao", emissor: "lotufo", municipio: "Cuiabá", valor: 71919072,
-      iss: 1438381, inss: 3164439, irrf: 863029, ibs: null, cbs: null, liquido: 66352723, nota_id: null },
+    { chave: "medicao", natureza: "medicao", emissor: "lotufo", municipio: "Cuiabá", valor: 50000000,
+      iss: 1000000, inss: 2000000, irrf: 500000, ibs: null, cbs: null, liquido: 46500000, nota_id: null },
   ],
   notas: [],
   faltam: 1,
@@ -24,7 +24,7 @@ describe("Notas", () => {
     api.mockResolvedValueOnce(DADOS);
     render(<Notas medicao={medicao} podeEditar aoMudar={() => {}} />);
     await waitFor(() => expect(screen.getByText(/Cuiabá/)).toBeTruthy());
-    expect(screen.getAllByText(/719\.190,72/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/500\.000,00/).length).toBeGreaterThan(0);
     expect(screen.getByText("0 de 1")).toBeTruthy();
     // #514: sem nota ainda, a celula diz "aguardando" e oferece anexar a nota daquela linha
     expect(screen.getByText("aguardando")).toBeTruthy();
@@ -38,9 +38,9 @@ describe("Notas", () => {
     api.mockResolvedValueOnce({
       ...DADOS, faltam: 0,
       esperadas: [{ ...DADOS.esperadas[0], nota_id: 5 }],
-      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 71919072,
-                valor_pdf_centavos: 71919072, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
-                conferencia: [{ campo: "iss", espelho: 1438381, nota: 1438581, grau: "divergente" }],
+      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 50000000,
+                valor_pdf_centavos: 50000000, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
+                conferencia: [{ campo: "iss", espelho: 1000000, nota: 1000200, grau: "divergente" }],
                 justificativa: null, leitura: "cuiaba", municipio: "Cuiabá", regra: "pdf", recebido_centavos: 0 }],
       pode_declarar: false,
     });
@@ -67,9 +67,9 @@ describe("Notas", () => {
     api.mockResolvedValueOnce({
       ...DADOS, faltam: 0,
       esperadas: [{ ...DADOS.esperadas[0], nota_id: 5 }],
-      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 71919072,
-                valor_pdf_centavos: 71919072, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
-                conferencia: [{ campo: "iss", espelho: 1438381, nota: 1438581, grau: "divergente" }],
+      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 50000000,
+                valor_pdf_centavos: 50000000, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
+                conferencia: [{ campo: "iss", espelho: 1000000, nota: 1000200, grau: "divergente" }],
                 justificativa: null, leitura: "cuiaba", municipio: "Cuiabá", regra: "pdf", recebido_centavos: 0 }],
       pode_declarar: false,
     });
@@ -87,10 +87,10 @@ describe("Notas", () => {
     api.mockResolvedValueOnce({
       ...DADOS, faltam: 0,
       esperadas: [{ ...DADOS.esperadas[0], nota_id: 5 }],
-      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 71919072,
-                valor_pdf_centavos: 71919072, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
-                conferencia: [{ campo: "iss", espelho: 1438381, nota: 1438581, grau: "divergente" },
-                              { campo: "irrf", espelho: 863029, nota: 863030, grau: "arredondamento" }],
+      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 50000000,
+                valor_pdf_centavos: 50000000, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
+                conferencia: [{ campo: "iss", espelho: 1000000, nota: 1000200, grau: "divergente" },
+                              { campo: "irrf", espelho: 500000, nota: 500001, grau: "arredondamento" }],
                 justificativa: null, leitura: "cuiaba", municipio: "Cuiabá", regra: "pdf", recebido_centavos: 0 }],
       pode_declarar: false,
     });
@@ -99,8 +99,8 @@ describe("Notas", () => {
     const linha = screen.getByRole("table").querySelector("tbody tr")!;
     const destacadas = Array.from(linha.querySelectorAll("td.notas__celula--diverge"));
     expect(destacadas).toHaveLength(1);
-    expect(destacadas[0].textContent).toContain("14.383,81");
-    expect(destacadas[0].textContent).toMatch(/na nota.*14\.385,81/);
+    expect(destacadas[0].textContent).toContain("10.000,00");
+    expect(destacadas[0].textContent).toMatch(/na nota.*10\.002,00/);
     expect(linha.querySelector(".notas__celula--diverge:not(td)")).toBeNull();     // municipio confere
     // o arredondamento de 1 centavo nao vira frase
     expect(screen.queryByText(/arredondamento de 1 centavo/)).toBeNull();
@@ -110,9 +110,9 @@ describe("Notas", () => {
     api.mockResolvedValueOnce({
       ...DADOS, faltam: 0,
       esperadas: [{ ...DADOS.esperadas[0], nota_id: 5 }],
-      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 71919072,
-                valor_pdf_centavos: 71919072, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
-                conferencia: [{ campo: "liquido", espelho: 66352723, nota: 66357723, grau: "divergente" }],
+      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 50000000,
+                valor_pdf_centavos: 50000000, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
+                conferencia: [{ campo: "liquido", espelho: 46500000, nota: 46505000, grau: "divergente" }],
                 justificativa: null, leitura: "cuiaba", municipio: "Cuiabá", regra: "pdf", recebido_centavos: 0 }],
       pode_declarar: false,
     });
@@ -120,17 +120,17 @@ describe("Notas", () => {
     await waitFor(() => expect(screen.getByText(/nº 2288/)).toBeTruthy());
     const destacadas = Array.from(screen.getByRole("table").querySelectorAll("td.notas__celula--diverge"));
     expect(destacadas).toHaveLength(1);
-    expect(destacadas[0].textContent).toMatch(/663\.527,23 no espelho; na nota .*663\.577,23/);
+    expect(destacadas[0].textContent).toMatch(/465\.000,00 no espelho; na nota .*465\.050,00/);
     expect(screen.getByText(/diverge do espelho: líquido/)).toBeTruthy();
   });
 
   it("conferência antiga que hoje bate com o espelho (versão nova) não destaca dois valores iguais", async () => {
     api.mockResolvedValueOnce({
       ...DADOS, faltam: 0,
-      esperadas: [{ ...DADOS.esperadas[0], iss: 1438581, nota_id: 5 }],     // espelho novo: ISS igual ao da nota
-      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 71919072,
-                valor_pdf_centavos: 71919072, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
-                conferencia: [{ campo: "iss", espelho: 1438381, nota: 1438581, grau: "divergente" }],
+      esperadas: [{ ...DADOS.esperadas[0], iss: 1000200, nota_id: 5 }],     // espelho novo: ISS igual ao da nota
+      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 50000000,
+                valor_pdf_centavos: 50000000, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
+                conferencia: [{ campo: "iss", espelho: 1000000, nota: 1000200, grau: "divergente" }],
                 justificativa: null, leitura: "cuiaba", municipio: "Cuiabá", regra: "pdf", recebido_centavos: 0 }],
       pode_declarar: false,
     });
@@ -143,8 +143,8 @@ describe("Notas", () => {
     api.mockResolvedValueOnce({
       ...DADOS, faltam: 0,
       esperadas: [{ ...DADOS.esperadas[0], nota_id: 5 }],
-      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 71919072,
-                valor_pdf_centavos: 71919072, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
+      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 50000000,
+                valor_pdf_centavos: 50000000, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
                 conferencia: [{ campo: "municipio", espelho: "Cuiabá", nota: "Várzea Grande", grau: "divergente" }],
                 justificativa: null, leitura: "cuiaba", municipio: "Várzea Grande", regra: "pdf", recebido_centavos: 0 }],
       pode_declarar: false,
@@ -164,9 +164,9 @@ describe("Notas: só o botão da ação em curso troca o rótulo", () => {
   const COM_DIVERGENCIA = {
     ...DADOS, faltam: 1, pode_declarar: true,
     esperadas: [{ ...DADOS.esperadas[0], nota_id: 5 }],
-    notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 71919072,
-              valor_pdf_centavos: 71919072, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
-              conferencia: [{ campo: "iss", espelho: 1438381, nota: 1438581, grau: "divergente" }],
+    notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 50000000,
+              valor_pdf_centavos: 50000000, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
+              conferencia: [{ campo: "iss", espelho: 1000000, nota: 1000200, grau: "divergente" }],
               justificativa: null, leitura: "cuiaba", municipio: "Cuiabá", regra: "pdf", recebido_centavos: 0 }],
   };
 
@@ -206,7 +206,7 @@ describe("Notas: só o botão da ação em curso troca o rótulo", () => {
     await screen.findByRole("button", { name: "Registrar nota" });
     fireEvent.change(screen.getByLabelText("Número da nota"), { target: { value: "2290" } });
     fireEvent.change(screen.getByLabelText("Emissão"), { target: { value: "2026-09-14" } });
-    fireEvent.change(screen.getByLabelText(/^Valor/), { target: { value: "719190,72" } });
+    fireEvent.change(screen.getByLabelText(/^Valor/), { target: { value: "500000,00" } });
     fireEvent.click(screen.getByRole("button", { name: "Registrar nota" }));
     const botao = await screen.findByRole("button", { name: "Registrando…" }) as HTMLButtonElement;
     expect(botao.disabled).toBe(true);
@@ -262,7 +262,7 @@ describe("Notas: valor da nota manual (CampoValor)", () => {
     ...DADOS, faltam: 0, pode_declarar: false,
     esperadas: [{ ...DADOS.esperadas[0], nota_id: 5 }],
     notas: [{ alocacao_id: 77, nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14",
-              valor_centavos: 71919072, valor_pdf_centavos: 71919072, origem_nota: "rm", confirmacao: "so_rm",
+              valor_centavos: 50000000, valor_pdf_centavos: 50000000, origem_nota: "rm", confirmacao: "so_rm",
               documento_id: null, conferencia: [], justificativa: null, leitura: null, municipio: "Cuiabá",
               regra: "valor_exato", recebido_centavos: 0 }],
   };
@@ -317,9 +317,9 @@ describe("Notas: o passo Notas (#514)", () => {
 
   it("nota com ISS divergente traz as colunas dos impostos, com a célula do ISS destacada", async () => {
     api.mockResolvedValueOnce({ ...DADOS, faltam: 0, esperadas: [{ ...DADOS.esperadas[0], nota_id: 5 }],
-      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 71919072,
-                valor_pdf_centavos: 71919072, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
-                conferencia: [{ campo: "iss", espelho: 1438381, nota: 1438581, grau: "divergente" }],
+      notas: [{ nota_id: 5, coligada: 1, numero: "2288", serie: null, emissao: "2026-09-14", valor_centavos: 50000000,
+                valor_pdf_centavos: 50000000, origem_nota: "pdf", confirmacao: "aguardando_rm", documento_id: 3,
+                conferencia: [{ campo: "iss", espelho: 1000000, nota: 1000200, grau: "divergente" }],
                 justificativa: null, leitura: "cuiaba", municipio: "Cuiabá", regra: "pdf", recebido_centavos: 0 }],
       pode_declarar: false });
     render(<Notas medicao={{ ...medicao, estado: "nota_emitida" }} podeEditar aoMudar={() => {}} />);

@@ -151,7 +151,7 @@ describe("Enviar a nota", () => {
   it("nota divergente do espelho: o envio pede o motivo e o manda com a confirmação", async () => {
     const DIVERGE = "23ª Medição: NF 2275 diverge do espelho em valor, ISS";
     const d = { ...det, pendencias: [DIVERGE], exige_justificativa: true,
-      envio: { ...det.envio, divergencias: [{ medicao_id: 631, nota_id: 9, numero: 2275, campo: "valor", espelho: 14800000, nota: 18017069, grau: "divergente" }] } };
+      envio: { ...det.envio, divergencias: [{ medicao_id: 631, nota_id: 9, numero: 2275, campo: "valor", espelho: 14800000, nota: 20000000, grau: "divergente" }] } };
     api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? d : {}));
     render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
     const botao = await screen.findByRole("button", { name: "Enviar o e-mail" });

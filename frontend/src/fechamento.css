@@ -33,7 +33,7 @@
   display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--espaco-m) var(--espaco-g);
   margin: 0;
 }
-/* o rotulo em cima e o valor embaixo; o link do em aberto para a pagina A receber (#815) vai ao lado do rotulo */
+/* o rotulo em cima e o valor embaixo; o link do em aberto para a pagina Em aberto (#815) vai ao lado do rotulo */
 .fch-numero { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--espaco-pp); align-items: baseline; }
 .fch-numero__rotulo { grid-area: 1 / 1; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 .fch-numero__valor {

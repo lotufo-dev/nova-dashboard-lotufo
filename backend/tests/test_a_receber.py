@@ -1,4 +1,4 @@
-"""Pagina A receber (issue #816): o em aberto do Fechamento nota a nota, por contratante e pela data do protocolo. O
+"""Pagina Em aberto (issue #816): o em aberto do Fechamento nota a nota, por contratante e pela data do protocolo. O
 total, o subtotal de cada contratante e cada linha sao os do Fechamento, ao centavo; a' parte, fora do total, a nota
 sem medicao ligada e o em aberto de antes de 2025. Dados ficticios (os cenarios de test_fechamento), centavos impares."""
 import datetime

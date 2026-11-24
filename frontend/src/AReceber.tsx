@@ -236,7 +236,7 @@ export function APartes({ v, anos, comSemNota }: { v: Vista; anos: string[]; com
       <div className="arc-painel__cab"><h2 id="arc-aparte">À parte, fora do total</h2></div>
       {v.soltas.length > 0 && <>
         <h3 className="arc-subtitulo" id="arc-soltas">Nota sem medição ligada</h3>
-        {comSemNota && (
+        {comSemNota && v.soltas.some(n => !n.ligada_a_medicao_nao_enviada) && (
           <CaixaAviso nivel="atencao" className="arc-aviso">
             Medição sem nota ligada e nota sem medição ligada podem ser a mesma cobrança enquanto o vínculo não for feito.
           </CaixaAviso>

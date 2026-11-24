@@ -1,6 +1,6 @@
 """Abas da pagina do contratante (issue #818): Medicoes, A receber e Processos no SIGA, cada uma o recorte, pelas obras
 do contratante, de uma resposta que outra tela ja' mostra. Nenhuma conta nova: as linhas sao as mesmas, o subtotal a
-receber e' o da pagina A receber filtrada, ao centavo, e a aba do SIGA e' de quem tem `ver_siga`. Obras, orgaos, processos
+receber e' o da pagina Em aberto filtrada, ao centavo, e a aba do SIGA e' de quem tem `ver_siga`. Obras, orgaos, processos
 e valores ficticios (os cenarios de test_fila_medicoes e test_fechamento)."""
 import datetime
 import json
@@ -82,13 +82,13 @@ def test_chave_sem_diferenca_de_maiuscula_e_chave_que_nenhuma_obra_tem_e_desconh
 # --- A receber ---------------------------------------------------------------------------------------------------
 
 def _da_pagina(r, chave):
-    """O contratante da pagina A receber filtrada por `chave` (como AReceber.tsx acha o `?contratante=`)."""
+    """O contratante da pagina Em aberto filtrada por `chave` (como AReceber.tsx acha o `?contratante=`)."""
     return next(g for g in r["contratantes"] if g["chave"] is not None and g["chave"].lower() == chave.lower())
 
 
 def test_a_receber_e_o_grupo_da_pagina_a_receber_filtrada_ao_centavo(contratantes):
     """O subtotal de cada contratante (com consorcio, nota partilhada entre dois contratantes, paga em parte e medicao
-    sem nota) e' o da pagina A receber filtrada por ele; o grupo inteiro, linha a linha, e' o mesmo objeto."""
+    sem nota) e' o da pagina Em aberto filtrada por ele; o grupo inteiro, linha a linha, e' o mesmo objeto."""
     c, ids = contratantes
     _lancar_dois_anos(c, ids)
     pagina = a_receber.a_receber(c, HOJE)
@@ -111,7 +111,7 @@ def test_a_receber_e_o_grupo_da_pagina_a_receber_filtrada_ao_centavo(contratante
 def test_a_receber_sem_o_total_liberado_so_a_trava_e_contratante_sem_grupo(contratantes):
     c, ids = contratantes
     _lancar_dois_anos(c, ids)
-    # o contratante cujas obras estao todas encerradas e sem nada em aberto nao tem grupo na pagina A receber
+    # o contratante cujas obras estao todas encerradas e sem nada em aberto nao tem grupo na pagina Em aberto
     c.execute("UPDATE contratos SET estado='encerrado' WHERE id=?", (ids["Galpão"],))
     c.commit()
     assert all(g["chave"] != "companhia-y" for g in a_receber.a_receber(c, HOJE)["contratantes"])

@@ -56,7 +56,7 @@ def test_fechamento_so_leitura_e_401_sem_sessao(client, monkeypatch):
 
 
 def test_a_receber_para_quem_ve_o_fechamento_e_so_a_trava_sem_o_total_liberado(client, monkeypatch):
-    """Issue #816: a pagina A receber e' de quem ve o Fechamento (`ver_paineis`: os tres perfis), so' leitura. Sem o
+    """Issue #816: a pagina Em aberto e' de quem ve o Fechamento (`ver_paineis`: os tres perfis), so' leitura. Sem o
     total a receber liberado, a resposta e' so' a trava; liberado, o total e os contratantes."""
     from app import permissoes
     assert client.get("/api/a-receber").status_code == 401
