@@ -18,7 +18,9 @@ router = APIRouter()
 def inicio(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
            conn: sqlite3.Connection = Depends(conexao)):
     publico = "diretoria" if usuario.get("perfil") == "diretoria" else "operacao"
-    return {"avisos": avisos.listar(conn, publico=publico), "resumo": avisos.resumo_mes(conn)}
+    # #881: os avisos do SIGA (o processo parado, o protocolo novo, o monitor sem leitura) so' para quem tem `ver_siga`
+    return {"avisos": avisos.listar(conn, publico=publico, com_siga=tem(usuario["perfil"], VER_SIGA)),
+            "resumo": avisos.resumo_mes(conn)}
 
 
 @router.get("/api/inicio/painel")

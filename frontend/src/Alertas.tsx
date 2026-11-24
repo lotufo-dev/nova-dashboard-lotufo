@@ -45,6 +45,8 @@ export function destinoDoAviso(a: Aviso): { para: Rota; secao?: string; busca?: 
   if (d.aba === "notas" && a.medicao_id) return { para: { tela: "medicao", obra: d.id, id: a.medicao_id }, secao: "notas" };
   // #359: o aprovado mudou depois do espelho: o espelho da medicao, para gerar de novo
   if (d.aba === "espelho" && a.medicao_id) return { para: { tela: "medicao", obra: d.id, id: a.medicao_id }, secao: "espelho" };
+  // #881: a medicao que pede o protocolo novo: a pagina dela, onde a caixa diz em que passo colar o link
+  if (d.aba === "medicao" && a.medicao_id) return { para: { tela: "medicao", obra: d.id, id: a.medicao_id } };
   if (d.aba === "reajuste" && a.data_base_mes) return { para: { tela: "obra", id: d.id, aba: "reajuste" }, secao: `db-${a.data_base_mes}` };
   const aba = (ABAS_OBRA.includes(d.aba) ? d.aba : "medicoes") as AbaObra;
   // na aba Medicoes, as medicoes em andamento, nao o resumo do topo

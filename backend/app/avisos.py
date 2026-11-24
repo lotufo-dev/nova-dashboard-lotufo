@@ -144,11 +144,14 @@ FONTES = [_de_documentos, _de_notas, _de_prazos, _de_reajuste, _de_garantias, _d
           _de_capa_smo]
 
 
-def listar(conn, hoje: datetime.date | None = None, publico: str = "operacao", natureza: str = "fato") -> list[dict]:
+def listar(conn, hoje: datetime.date | None = None, publico: str = "operacao", natureza: str = "fato",
+           com_siga: bool = True) -> list[dict]:
     """A fila de avisos do perfil. So' os de `natureza` "fato" (issue #649): os de "ausencia" nao aparecem para
-    ninguem na tela Avisos nem no Inicio; quem os le e' `pendencias_cadastro`."""
+    ninguem na tela Avisos nem no Inicio; quem os le e' `pendencias_cadastro`. `com_siga` (#881): os avisos que leem
+    o SIGA (`_de_siga`) so' para quem tem `ver_siga`, a regra unica de quem le o SIGA (#829)."""
     hoje = hoje or tempo.hoje_local()
-    todos = [_com_dias(a, hoje) for fonte in FONTES for a in fonte(conn, hoje) if a.get("natureza", "fato") == natureza]
+    fontes = FONTES if com_siga else [f for f in FONTES if f is not _de_siga]
+    todos = [_com_dias(a, hoje) for fonte in fontes for a in fonte(conn, hoje) if a.get("natureza", "fato") == natureza]
     if publico != "todos":
         todos = [a for a in todos if publico in a["publico"]]
     # nivel; depois o mais atrasado primeiro (os piores no topo do nivel); sem data nem dias, no fim

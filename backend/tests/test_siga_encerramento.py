@@ -6,6 +6,7 @@ Processos, obras, setores e datas sao ficticios (repositorio publico); pessoa, s
 import pytest
 
 from app import auth, siga, tempo
+from app import avisos as registro_avisos
 from tests.test_siga import (MOVS, SITUACAO_COFIN, SITUACAO_GABIN, _banco, _br, _conta, _cuiaba, _encerrado, _leitura,
                              _mov, _protocolo_enviado, conn, relogio)  # noqa: F401  (fixtures)
 
@@ -217,8 +218,8 @@ def test_proposta_usa_a_obra_ja_escolhida_no_processo(conn):
 
 def test_processo_no_quadro_ganha_proposta_e_ligado_a_medicao_recebida_encerra(conn):
     """O processo que ja' esta' no quadro (Medicoes pelo nome) traz a proposta; ligado (a funcao da rota da tela), com
-    quem e quando, encerra quando a medicao e' recebida. Desfeito, volta, fica em Medicoes e o robo nao o religa pelo
-    numero igual. O teste pela rota esta' em test_api_siga.py."""
+    quem e quando, encerra quando a medicao e' recebida. Desfeito, volta, fica em Medicoes, nao ganha de novo a mesma
+    medicao como proposta (#881) e o robo nao o religa pelo numero igual. O teste pela rota esta' em test_api_siga.py."""
     uid = _usuario(conn)
     _obra_exemplo(conn)
     proc = {"codigo": "PRC777", "numero": "ORGAO-PRO-2026/00020", "nome": "7ª Medição - Ponte do Exemplo - IC 517/2031",
@@ -240,7 +241,8 @@ def test_processo_no_quadro_ganha_proposta_e_ligado_a_medicao_recebida_encerra(c
     siga.desfazer_vinculo(conn, uid, p["id"])
     p = _painel_de(conn, agora, "PRC777")
     assert (p["medicao_id"], p["categoria"], p["encerrado"], p["vinculo"]) == (None, "medicoes", None, None)
-    assert p["medicao_proposta"]["id"] == 71                                  # a proposta volta
+    assert p["medicao_proposta"] is None                                      # #881: a desfeita nao volta
+    assert p["o_que_e"] == "7ª Medição"                                       # #881: o nome nao perde o numero
     with pytest.raises(ValueError, match="não está ligado"):
         siga.desfazer_vinculo(conn, uid, p["id"])
     # o numero do processo passa a ser o de um envio por fora da medicao 81: o robo nao religa o que a pessoa desfez
@@ -250,6 +252,58 @@ def test_processo_no_quadro_ganha_proposta_e_ligado_a_medicao_recebida_encerra(c
     assert _painel_de(conn, agora, "PRC777")["medicao_id"] is None
     acoes = [r[0] for r in conn.execute("SELECT acao FROM audit_log WHERE entidade='siga_processo' ORDER BY id")]
     assert acoes == ["siga.vinculo_medicao", "siga.vinculo_desfeito"]
+
+
+def _processo_da_7a(conn, codigo="PRC777", numero="ORGAO-PRO-2026/00020"):
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), [
+        {"codigo": codigo, "numero": numero, "nome": "7ª Medição - Ponte do Exemplo - IC 517/2031",
+         "situacao": SITUACAO_COFIN, "movimentacoes": []}])
+    return _pid(conn, codigo)
+
+
+def test_vinculo_desfeito_tira_so_o_par_processo_e_medicao_da_proposta(conn):
+    """#881: a exclusao vale para o par. O mesmo processo, com o nome passando a dizer a 8ª, ganha a 8ª; outro
+    processo com a 7ª no nome ainda ganha a 7ª como proposta."""
+    uid = _usuario(conn)
+    _obra_exemplo(conn)
+    pid = _processo_da_7a(conn)
+    _processo_da_7a(conn, "PRC888", "ORGAO-PRO-2026/00021")
+    siga.vincular_medicao(conn, uid, pid, 71)
+    siga.desfazer_vinculo(conn, uid, pid)
+    agora = _cuiaba(2026, 10, 28, 11)
+    assert _painel_de(conn, agora, "PRC777")["medicao_proposta"] is None
+    assert _painel_de(conn, agora, "PRC888")["medicao_proposta"]["id"] == 71         # a mesma em outro processo
+    conn.execute("UPDATE siga_processos SET nome='8ª Medição - Ponte do Exemplo' WHERE id=?", (pid,)); conn.commit()
+    p = _painel_de(conn, agora, "PRC777")
+    assert (p["medicao_proposta"]["id"], p["o_que_e"]) == (81, "8ª Medição")          # outra da mesma obra
+
+
+def test_medicao_desfeita_ainda_se_liga_a_mao_e_desfeita_de_novo_continua_fora(conn):
+    """#881: a recusa e' so' da proposta. Ligar a' mao a medicao desfeita funciona; desfeita outra vez, a proposta
+    continua sem ela, e o nome sem medicao continua com o numero do SIGA."""
+    uid = _usuario(conn)
+    _obra_exemplo(conn)
+    pid = _processo_da_7a(conn)
+    agora = _cuiaba(2026, 10, 28, 11)
+    siga.vincular_medicao(conn, uid, pid, 71)
+    siga.desfazer_vinculo(conn, uid, pid)
+    siga.vincular_medicao(conn, uid, pid, 71)
+    p = _painel_de(conn, agora, "PRC777")
+    assert (p["medicao_id"], p["medicao_proposta"], p["o_que_e"]) == (71, None, "7ª Medição")
+    siga.desfazer_vinculo(conn, uid, pid)
+    p = _painel_de(conn, agora, "PRC777")
+    assert (p["medicao_id"], p["medicao_proposta"], p["o_que_e"]) == (None, None, "7ª Medição")
+    acoes = [r[0] for r in conn.execute("SELECT acao FROM audit_log WHERE entidade='siga_processo' ORDER BY id")]
+    assert acoes == ["siga.vinculo_medicao", "siga.vinculo_desfeito"] * 2
+
+
+def test_processo_de_medicoes_sem_numero_no_nome_continua_medicao(conn):
+    """Sem numero no nome do SIGA, o processo de Medicoes sem medicao continua "<obra> · Medição"."""
+    _obra_exemplo(conn)
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), [{"codigo": "PRC777", "numero": None, "nome": "Pleito da obra",
+                                                           "situacao": SITUACAO_COFIN, "movimentacoes": []}])
+    conn.execute("UPDATE siga_processos SET contrato_id=9, categoria='medicoes'"); conn.commit()
+    assert _painel_de(conn, _cuiaba(2026, 10, 28, 11), "PRC777")["o_que_e"] == "Medição"
 
 
 def test_classificar_em_medicoes_grava_quem_e_quando_ligou(conn):
@@ -302,3 +356,40 @@ def test_processo_de_medicao_nao_recebida_arquivado_ou_juntado_pede_o_protocolo_
     assert siga.protocolo_novo_pendente(conn, [31]) == {31}
     conn.execute("UPDATE medicoes SET estado='recebida' WHERE id=31"); conn.commit()
     assert siga.protocolo_novo_pendente(conn, [31]) == set()                 # recebida: nao ha' o que pedir
+
+
+@pytest.mark.parametrize("situacao,houve", [("1º Volume - Arquivado [PROTOC, [X]]", "arquivado"),
+                                            ("1º Volume - Juntado [PROTOC, [X]]", "juntado a outro processo")])
+def test_pendencia_do_protocolo_novo_tambem_aparece_em_avisos(conn, situacao, houve):
+    """#881: a medicao que pede o protocolo novo ganha o aviso `siga_protocolo_novo` na fila, com a data do ultimo
+    andamento do processo (o cancelado nao conta) e o clique na pagina da medicao. Some com o processo novo vivo e
+    com a medicao recebida, como a caixa da pagina."""
+    _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
+    proc = _leitura(numero="SINFRA-PRO-2026/00001")[:1]
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 10), proc)
+    hoje = _cuiaba(2026, 10, 30, 10)
+
+    def novos():
+        return [a for a in siga.avisos(conn, hoje.date(), hoje) if a["tipo"] == "siga_protocolo_novo"]
+
+    assert novos() == []                                                     # vivo: nada a pedir
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), [{**proc[0], "situacao": situacao}])
+    [aviso] = novos()
+    assert aviso["mensagem"] == f"3ª Medição: processo do SIGA {houve}, falta o protocolo novo"
+    assert (aviso["nivel"], aviso["publico"], aviso["contrato_id"], aviso["obra"], aviso["medicao_id"]) == (
+        "atencao", ["operacao"], 7, "Obra Alfa", 31)
+    assert aviso["destino"] == {"tela": "contrato", "id": 7, "aba": "medicao"}
+    assert (aviso["data"], aviso["sentido"]) == ("2026-10-28", "desde")     # o Despacho; o cancelado depois nao conta
+    # na fila do registro unico, com os dias pela data
+    [na_fila] = [a for a in registro_avisos.listar(conn, hoje.date()) if a["tipo"] == "siga_protocolo_novo"]
+    assert na_fila["dias"] == 2
+    assert [a for a in registro_avisos.listar(conn, hoje.date(), com_siga=False) if a["tipo"].startswith("siga")] == []
+    # o processo novo da medicao, vivo, resolve; a medicao recebida tambem
+    novo = conn.execute("INSERT INTO siga_processos (codigo, nome, medicao_id, contrato_id, categoria) "
+                        "VALUES ('NOVO11', 'Novo', 31, 7, 'medicoes')").lastrowid
+    conn.commit()
+    assert novos() == []
+    conn.execute("DELETE FROM siga_processos WHERE id=?", (novo,)); conn.commit()
+    assert len(novos()) == 1
+    conn.execute("UPDATE medicoes SET estado='recebida' WHERE id=31"); conn.commit()
+    assert novos() == []

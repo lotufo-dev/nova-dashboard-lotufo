@@ -19,7 +19,7 @@ from app import cronograma, db, medicoes, paineis
 from app.api_auth import conexao
 from app.api_medicoes import ID
 from app.dinheiro import format_brl
-from app.permissoes import exigir
+from app.permissoes import VER_SIGA, exigir, tem
 
 router = APIRouter()
 
@@ -65,7 +65,7 @@ def _contrato_existe(conn: sqlite3.Connection, contrato_id: int) -> None:
 @router.get("/api/paineis/alertas")
 def alertas(usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
             conn: sqlite3.Connection = Depends(conexao)):
-    return paineis.alertas(conn)
+    return paineis.alertas(conn, com_siga=tem(usuario["perfil"], VER_SIGA))     # #881: SIGA so' com `ver_siga`
 
 
 @router.get("/api/contratos/{contrato_id}/curva")

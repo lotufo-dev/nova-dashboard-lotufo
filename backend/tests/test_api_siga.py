@@ -977,3 +977,27 @@ def test_medicao_com_o_processo_arquivado_pede_o_protocolo_novo(api, com_token):
     assert cl.get(f"/api/medicoes/{mid}").json()["siga_protocolo_novo"] is True
     lista = cl.get(f"/api/contratos/{cid}/medicoes").json()
     assert next(m for m in lista if m["id"] == mid)["siga_protocolo_novo"] is True
+
+
+def test_protocolo_novo_aparece_em_avisos_so_para_quem_tem_ver_siga(api, monkeypatch):
+    """Issue #881: a medicao cujo processo do SIGA foi arquivado ganha o aviso `siga_protocolo_novo` na fila da tela
+    Avisos (`/api/inicio`) e nos alertas (`/api/paineis/alertas`), com a medicao para o clique; a pagina da medicao
+    continua com a caixa. Sem `ver_siga` (simulado tirando-a do admin), nenhuma das duas rotas traz aviso do SIGA."""
+    cl, cid, _mid = api
+    mid = _medicao_no_pagamento_com_processo_vivo(cid)
+    conn = db.get_conn()
+    conn.execute("INSERT INTO siga_leituras (processo_id, lido_em, situacao) SELECT id, '2026-10-28 12:00:00', "
+                 "'1º Volume - Arquivado [PROTOC, [X]]' FROM siga_processos WHERE medicao_id=?", (mid,))
+    conn.commit(); conn.close()
+    rotas = {"/api/inicio": lambda r: r["avisos"], "/api/paineis/alertas": lambda r: r}
+    for rota, avisos_de in rotas.items():
+        [aviso] = [a for a in avisos_de(cl.get(rota).json()) if a["tipo"] == "siga_protocolo_novo"]
+        assert (aviso["medicao_id"], aviso["contrato_id"], aviso["destino"]) == (
+            mid, cid, {"tela": "contrato", "id": cid, "aba": "medicao"}), rota
+        assert aviso["mensagem"] == "41ª Medição: processo do SIGA arquivado, falta o protocolo novo"
+    assert cl.get(f"/api/medicoes/{mid}").json()["siga_protocolo_novo"] is True
+    monkeypatch.setitem(permissoes.PERFIS, "admin", permissoes.PERFIS["admin"] - {permissoes.VER_SIGA})
+    for rota, avisos_de in rotas.items():
+        r = cl.get(rota)
+        assert r.status_code == 200, rota
+        assert [a for a in avisos_de(r.json()) if a["tipo"].startswith("siga_")] == [], rota
