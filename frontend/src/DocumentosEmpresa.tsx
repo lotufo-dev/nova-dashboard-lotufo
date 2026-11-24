@@ -17,6 +17,7 @@ import { VoltarOrigem } from "./Topo";
 import { AnexarCertidoes, CnpjCopiar, EmDia, Pilula, Ponto, SituacaoSelo, type AnexarRef } from "./documentosComum";
 import { cnpjBR, competenciaDoNome, ROTULO_TIPO, useCopiarCnpj, usePainel } from "./documentosDados";
 import Falha from "./Falha";
+import ErroCampo from "./ErroCampo";
 
 /* A pagina de UMA empresa em Documentos (#161): cabecalho com nome, CNPJ e situacao; tres abas, cada uma com
  * endereco (Certidoes, Regularidade do mes, Garantia por obra). A tabela de certidoes traz Emitir, Anexar e Ver
@@ -66,17 +67,22 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
   const [gravandoReg, setGravandoReg] = useState(false);
   const [erroReg, setErroReg] = useState("");
   const [gravada, setGravada] = useState("");
+  // O botao nao fica apagado esperando o PDF (issue #11): o clique diz o que falta, junto do campo.
+  const [tentouReg, setTentouReg] = useState(false);
+  const erroArquivoReg = tentouReg && !arquivoReg ? "Escolha o PDF da regularidade." : undefined;
 
   const e = painel?.empresas.find(x => x.entidade_id === id) ?? null;
   const porId = new Map((painel?.empresas ?? []).map(x => [x.entidade_id, x]));
   useEffect(() => { document.title = `${e ? e.entidade : "Empresa"} · Documentos · grupolotufo`; }, [e]);
   useNomesDoCaminho({ empresa: e?.entidade });
 
-  const limparReg = () => { setArquivoReg(null); setCompReg(null); setChaveReg(k => k + 1); setErroReg(""); };
+  const limparReg = () => { setArquivoReg(null); setCompReg(null); setChaveReg(k => k + 1); setErroReg(""); setTentouReg(false); };
 
   const enviarRegularidade = async (ev: React.FormEvent, emp: EmpresaDoc) => {
     ev.preventDefault();
-    if (!arquivoReg || !emp.regularidade) return;
+    setTentouReg(true);
+    if (!arquivoReg) { document.getElementById("reg-arquivo")?.focus(); return; }
+    if (!emp.regularidade) return;
     const competencia = compReg ?? emp.regularidade.esperada;
     setGravandoReg(true); setErroReg(""); setGravada("");
     const fd = new FormData();
@@ -285,21 +291,25 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                           <h3>Anexar regularidade</h3>
                           {erroReg && <Falha>{erroReg}</Falha>}
                           <div className="form-inline">
-                            <label className="btn btn--pequeno espelho__anexar">
-                              <span className="arquivo-nome" title={arquivoReg?.name}>{arquivoReg ? arquivoReg.name : "Escolher PDF"}</span>
-                              <span className="sr-only"> da regularidade de {e.entidade}</span>
-                              <input key={chaveReg} type="file" accept="application/pdf" className="espelho__arquivo"
-                                onChange={ev => {
-                                  const f = ev.currentTarget.files?.[0] ?? null;
-                                  setArquivoReg(f);
-                                  setCompReg((f && competenciaDoNome(f.name)) || compReg);
-                                }} />
-                            </label>
+                            <div className="campo">
+                              <label className="btn btn--pequeno espelho__anexar">
+                                <span className="arquivo-nome" title={arquivoReg?.name}>{arquivoReg ? arquivoReg.name : "Escolher PDF"}</span>
+                                <span className="sr-only"> da regularidade de {e.entidade}</span>
+                                <input key={chaveReg} id="reg-arquivo" type="file" accept="application/pdf" className="espelho__arquivo"
+                                  {...(erroArquivoReg ? { "aria-invalid": true as const, "aria-describedby": "reg-arquivo-erro" } : {})}
+                                  onChange={ev => {
+                                    const f = ev.currentTarget.files?.[0] ?? null;
+                                    setArquivoReg(f);
+                                    setCompReg((f && competenciaDoNome(f.name)) || compReg);
+                                  }} />
+                              </label>
+                              <ErroCampo id="reg-arquivo-erro" erro={erroArquivoReg} />
+                            </div>
                             <div className="campo">
                               <label className="campo__rotulo" htmlFor="reg-comp">Competência</label>
                               <CampoCompetencia id="reg-comp" value={compReg ?? e.regularidade.esperada} onChange={setCompReg} />
                             </div>
-                            <button type="submit" className="btn btn--primario btn--pequeno" disabled={gravandoReg || !arquivoReg}>
+                            <button type="submit" className="btn btn--primario btn--pequeno" disabled={gravandoReg}>
                               {gravandoReg ? "Gravando…" : "Gravar regularidade"}
                             </button>
                             <button type="button" className="btn btn--pequeno" disabled={gravandoReg} onClick={limparReg}>Limpar</button>
