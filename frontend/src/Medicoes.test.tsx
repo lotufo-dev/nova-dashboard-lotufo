@@ -122,7 +122,8 @@ describe("Medições da obra", () => {
     expect(abertas.querySelector("tfoot")).toBeNull();
     cleanup();
     api.mockImplementation(async (url: string) => {
-      if (url === "/api/contratos/3/custo") throw new Error("Esta obra não tem cadastro de custo.");
+      // #804: a obra sem cadastro de custo responde sem erro, vazia e com o motivo
+      if (url === "/api/contratos/3/custo") return { contrato_id: 3, sem_cadastro: true, motivo: "Esta obra não tem cadastro de custo.", linhas: [] };
       if (url === "/api/rm/status") return { configurado: false, ultima_sincronizacao: null, ultimo_erro: null };
       return url.startsWith("/api/medicoes/andamento") ? [] : lista;
     });
