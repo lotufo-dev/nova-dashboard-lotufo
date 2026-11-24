@@ -225,3 +225,58 @@ def test_favoritas_sao_espelho_do_radar(client, com_token):
     fechar(client, [CHAVE_A, CHAVE_B], lido_em="2026-11-24T10:45:00-04:00", decisoes={"favoritas": favs})
     assert len(_linhas("SELECT 1 FROM lic_favoritas WHERE chave=?", CHAVE_B)) == 2
     assert len(_linhas("SELECT 1 FROM lic_favoritas WHERE removida_em IS NULL")) == 2
+
+
+# --- achados da segunda revisao -----------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("errado", [
+    {"data_sessao": "9999-12-31"}, {"data_sessao": "0001-01-01"}, {"data_publicacao": "1999-12-31"},
+    {"primeira_vez": "2101-01-01"}, {"hora_sessao": "99:99"}, {"fontes": ["x" * 81]},
+    {"historico": [{"data": "9999-12-31", "fonte": "pncp", "texto": "x", "rotulo": None}]},
+    {"dossie": {"pasta": "p", "etapa": None, "selos": ["y" * 61], "prazos": []}},
+    {"dossie": {"pasta": "p", "etapa": None, "prazos": [
+        {"codigo": "sessao", "rotulo": "Sessão", "data": "9999-12-31", "hora": None, "aviso": ""}]}},
+])
+def test_data_fora_da_faixa_e_texto_de_lista_sem_teto_sao_recusados(client, com_token, errado):
+    """A conta de dias uteis anda dia a dia: uma data no ano 9999 derrubava as telas, e no ano 1 as travava."""
+    r = client.post("/api/radar/certames", json={"certames": [certame(**errado)]}, headers=radar())
+    assert r.status_code == 422
+    assert _linhas("SELECT 1 FROM lic_certames") == []
+
+
+@pytest.mark.parametrize("lido_em", ["0001-01-01T00:00:00+14:00", "0001-01-01T00:00:00Z", "2019-12-31T23:00:00-04:00"])
+def test_leitura_de_data_absurda_e_recusada(client, com_token, lido_em):
+    r = fechar(client, [], lido_em=lido_em)
+    assert r.status_code == 422 and r.json()["detail"] == "Data da leitura fora da faixa aceita"
+    assert _linhas("SELECT 1 FROM lic_leituras") == []
+
+
+def test_chave_e_desde_invalidos_no_fechamento(client, com_token):
+    mandar(client, certame())
+    assert fechar(client, [CHAVE_A, "x" * 201]).status_code == 422
+    assert fechar(client, [CHAVE_A], decisoes={"favoritas": [{"chave": CHAVE_A, "desde": "9999-12-31"}]}).status_code == 422
+    assert _linhas("SELECT 1 FROM lic_leituras") == []
+
+
+def test_a_mesma_rodada_de_novo_vale_pelo_que_diz_agora(client, com_token):
+    mandar(client, certame(), certame(CHAVE_B, "b" * 16))
+    caiu = [{"fonte": "siag", "nome": "SIAG", "problema": "caiu"}]
+    assert fechar(client, [CHAVE_A, CHAVE_B], fontes=caiu).status_code == 200
+    voltou = [{"fonte": "siag", "nome": "SIAG", "problema": None, "lidos": 12, "hora": "09:04"}]
+    assert fechar(client, [CHAVE_A], fontes=voltou).status_code == 200
+    (leitura,) = _linhas("SELECT certames, fontes FROM lic_leituras")
+    assert leitura["certames"] == 1 and json.loads(leitura["fontes"])[0]["problema"] is None
+
+
+def test_o_dia_e_o_autor_da_favorita_acompanham_o_radar(client, com_token):
+    mandar(client, certame())
+    fechar(client, [CHAVE_A], decisoes={"favoritas": [{"chave": CHAVE_A, "desde": "2026-11-01", "autor": "a"}]})
+    fechar(client, [CHAVE_A], lido_em="2026-11-24T10:00:00-04:00",
+           decisoes={"favoritas": [{"chave": CHAVE_A, "desde": "2026-11-20", "autor": "b"}]})
+    assert _linhas("SELECT desde, autor_radar, removida_em FROM lic_favoritas") == [
+        {"desde": "2026-11-20", "autor_radar": "b", "removida_em": None}]
+
+
+def test_leitura_no_limite_da_folga_de_dez_minutos(client, com_token):
+    assert fechar(client, [], lido_em="2026-11-24T11:10:00-04:00").status_code == 200       # agora + 10 min: vale
+    assert fechar(client, [], lido_em="2026-11-24T11:10:01-04:00").status_code == 422

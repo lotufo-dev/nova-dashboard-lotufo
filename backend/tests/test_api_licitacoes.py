@@ -199,3 +199,94 @@ def test_favorita_longe_do_prazo_entra_na_triagem_so_com_mudanca_recente(client,
     _entrar(client, "admin")
     t = client.get("/api/licitacoes/triagem").json()
     assert [l["chave"] for l in t["favoritas"]] == [CHAVE_A]              # mudou ha' 7 dias: entra; ha' 8: nao
+
+
+# --- achados da segunda revisao -----------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("agora", [(2026, 11, 28, 11), (2026, 11, 29, 11)])          # sabado e domingo
+def test_sessao_de_sexta_vista_no_fim_de_semana_e_passada(client, com_token, monkeypatch, agora):
+    """De sexta para sabado nao ha' dia util: "passada" se decide pela data, nao pelo sinal dos dias uteis."""
+    mandar(client, certame(data_sessao="2026-11-27"), certame(CHAVE_B, "b" * 16, data_sessao="2026-11-27"))
+    fechar(client, [CHAVE_A, CHAVE_B], decisoes={"favoritas": [{"chave": CHAVE_B, "desde": "2026-11-12"}]})
+    _agora(monkeypatch, *agora)
+    _entrar(client, "admin")
+    t = client.get("/api/licitacoes/triagem").json()
+    assert t["recomendadas"] == [] and t["favoritas"] == [] and t["contagens"]["novas"] == 0
+    (fav,) = client.get("/api/licitacoes/favoritas").json()["favoritas"]
+    assert (fav["dias_uteis"], fav["prazo"], fav["encerrada"]) == (0, None, True)
+    assert [(p["passado"], p["situacao"]) for p in fav["favorita"]["prazos"]] == [(True, None)]
+    assert fav["favorita"]["proximo_prazo"] is None
+
+
+def test_sessao_no_domingo_vista_na_sexta_continua_em_aberto(client, com_token, monkeypatch):
+    mandar(client, certame(data_sessao="2026-11-29"))
+    fechar(client, [CHAVE_A])
+    _agora(monkeypatch, 2026, 11, 27, 11)                                # sexta
+    _entrar(client, "admin")
+    (linha,) = client.get("/api/licitacoes/triagem").json()["recomendadas"]
+    assert (linha["dias_uteis"], linha["prazo"], linha["encerrada"]) == (0, "critico", False)
+
+
+@pytest.mark.parametrize("prazos", [[], [{"codigo": "esclarecimento", "rotulo": "Esclarecimento",
+                                          "data": "2026-11-10", "hora": None, "aviso": ""}]])
+def test_dossie_sem_a_sessao_nao_esconde_a_sessao_da_favorita(client, com_token, prazos):
+    mandar(client, certame(data_sessao="2026-11-27", dossie={"pasta": "2026-CE-001-exemplo", "etapa": None,
+                                                              "prazos": prazos}))
+    fechar(client, [CHAVE_A], decisoes={"favoritas": [{"chave": CHAVE_A, "desde": "2026-11-12"}]})
+    _entrar(client, "admin")
+    (linha,) = client.get("/api/licitacoes/triagem").json()["favoritas"]           # sessao em 3 dias uteis: entra
+    fav = linha["favorita"]
+    assert [p["codigo"] for p in fav["prazos"]] == [p["codigo"] for p in prazos] + ["sessao"]
+    assert (fav["proximo_prazo"]["codigo"], fav["proximo_prazo"]["situacao"]) == ("sessao", "critico")
+    assert (fav["etapa"], fav["etapa_do_dossie"], fav["dossie"]) == ("acompanhando", False, "2026-CE-001-exemplo")
+
+
+def test_novas_desde_conta_do_ultimo_dia_anterior_mesmo_com_duas_rodadas_no_dia(client, com_token):
+    mandar(client, certame(primeira_vez="2026-11-24"), certame(CHAVE_B, "b" * 16, primeira_vez="2026-11-20"))
+    fechar(client, [CHAVE_A, CHAVE_B], lido_em="2026-11-23T09:00:00-04:00")
+    _entrar(client, "admin")
+    assert client.get("/api/licitacoes/triagem").json()["contagens"]["novas_desde"] is None       # um dia so'
+    fechar(client, [CHAVE_A, CHAVE_B], lido_em="2026-11-24T09:05:00-04:00")
+    esperado = {"desde": "2026-11-23", "quantas": 1}
+    assert client.get("/api/licitacoes/triagem").json()["contagens"]["novas_desde"] == esperado
+    fechar(client, [CHAVE_A, CHAVE_B], lido_em="2026-11-24T10:30:00-04:00")                         # a rodada da tarde
+    assert client.get("/api/licitacoes/triagem").json()["contagens"]["novas_desde"] == esperado
+
+
+def test_o_que_a_tela_mostra_acompanha_o_que_o_radar_manda(client, com_token):
+    """Os tres criterios da issue vistos na resposta da tela: o objeto novo aparece, o certame que saiu da lista some
+    e volta, e a favorita tirada no radar some das Favoritas."""
+    mandar(client, certame(), certame(CHAVE_B, "b" * 16))
+    fechar(client, [CHAVE_A, CHAVE_B], decisoes={"favoritas": [{"chave": CHAVE_B, "desde": "2026-11-12"}]})
+    _entrar(client, "admin")
+    triagem = lambda: client.get("/api/licitacoes/triagem").json()                                   # noqa: E731
+    favoritas = lambda: [l["chave"] for l in client.get("/api/licitacoes/favoritas").json()["favoritas"]]  # noqa: E731
+    assert [l["objeto"] for l in triagem()["recomendadas"]] == ["Pavimentação de vias urbanas no bairro Alfa"]
+    assert favoritas() == [CHAVE_B]
+
+    mandar(client, certame(resumo="c" * 16, objeto="Objeto retificado"))
+    assert [l["objeto"] for l in triagem()["recomendadas"]] == ["Objeto retificado"]
+
+    fechar(client, [CHAVE_B], lido_em="2026-11-24T10:00:00-04:00",
+           decisoes={"favoritas": [{"chave": CHAVE_B, "desde": "2026-11-12"}]})
+    assert triagem()["recomendadas"] == [] and favoritas() == [CHAVE_B]
+    fechar(client, [CHAVE_A, CHAVE_B], lido_em="2026-11-24T10:30:00-04:00", decisoes={"favoritas": []})
+    assert [l["chave"] for l in triagem()["recomendadas"]] == [CHAVE_A, CHAVE_B] and favoritas() == []
+
+
+def test_favoritas_da_triagem_saem_pelo_prazo_mais_proximo(client, com_token):
+    mandar(client, certame(data_sessao="2026-12-10"), certame(CHAVE_B, "b" * 16, data_sessao="2026-11-27"),
+           certame(CHAVE_C, "c" * 16, data_sessao="2026-12-01"))
+    fechar(client, [CHAVE_A, CHAVE_B, CHAVE_C], decisoes={"favoritas": [
+        {"chave": k, "desde": "2026-11-12"} for k in (CHAVE_A, CHAVE_B, CHAVE_C)]})
+    _entrar(client, "admin")
+    assert [l["chave"] for l in client.get("/api/licitacoes/triagem").json()["favoritas"]] == [CHAVE_B, CHAVE_C, CHAVE_A]
+
+
+def test_leitura_de_hoje_e_esperada_a_partir_das_10h_em_ponto(client, com_token, monkeypatch):
+    assert fechar(client, [], lido_em="2026-11-23T13:00:00-04:00").status_code == 200       # segunda
+    _entrar(client, "admin")
+    monkeypatch.setattr(tempo, "agora_utc", lambda: datetime.datetime(2026, 11, 24, 13, 59, tzinfo=UTC))   # 9h59
+    assert client.get("/api/licitacoes/triagem").json()["leitura"]["atrasada"] is False
+    monkeypatch.setattr(tempo, "agora_utc", lambda: datetime.datetime(2026, 11, 24, 14, 0, tzinfo=UTC))    # 10h00
+    assert client.get("/api/licitacoes/triagem").json()["leitura"]["atrasada"] is True

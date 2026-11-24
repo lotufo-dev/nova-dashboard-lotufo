@@ -14,7 +14,7 @@ import logging
 import os
 import sqlite3
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import AwareDatetime, BaseModel, Field
@@ -31,8 +31,11 @@ TOKEN_INVALIDO = "Token do radar de licitações inválido ou ausente"
 Etapa = Literal["acompanhando", "em_analise", "proposta_enviada", "vencida", "perdida", "desistida", "encerrada"]
 # o link vira `href` na tela: so' endereco da internet, inteiro, sem espaco nem caractere de controle
 LINK = r"^(https?://[^\s\x00-\x1f\x7f]+)?$"
-HORA = r"^\d{2}:\d{2}$"
+HORA = r"^([01]\d|2[0-3]):[0-5]\d$"
 CHAVE = r"^\S(.*\S)?$"
+# data de documento: fora desta faixa e' erro de leitura, e a conta de dias uteis anda dia a dia
+Data = Annotated[datetime.date, Field(ge=datetime.date(2000, 1, 1), le=datetime.date(2100, 12, 31))]
+Chave = Annotated[str, Field(min_length=1, max_length=200, pattern=CHAVE)]
 
 
 def _token_esperado() -> bytes:
@@ -76,7 +79,7 @@ class RecomendadaIn(BaseModel):
 
 
 class EventoIn(BaseModel):
-    data: datetime.date
+    data: Data
     fonte: str = Field(default="", max_length=80)
     texto: str = Field(max_length=600)
     rotulo: str | None = Field(default=None, max_length=40)       # so' o evento que e' mudanca do certame tem
@@ -90,7 +93,7 @@ class EspelhoIn(BaseModel):
 class PrazoIn(BaseModel):
     codigo: str = Field(max_length=30)
     rotulo: str = Field(max_length=60)
-    data: datetime.date
+    data: Data
     hora: str | None = Field(default=None, pattern=HORA)
     aviso: str = Field(default="", max_length=200)
 
@@ -98,12 +101,12 @@ class PrazoIn(BaseModel):
 class DossieIn(BaseModel):
     pasta: str = Field(max_length=200)
     etapa: Etapa | None = None
-    selos: list[str] = Field(default_factory=list, max_length=5)   # o que o dossie diz alem da etapa ("Diretoria: interesse")
+    selos: list[Annotated[str, Field(max_length=60)]] = Field(default_factory=list, max_length=5)   # o que o dossie diz alem da etapa ("Diretoria: interesse")
     prazos: list[PrazoIn] = Field(default_factory=list, max_length=12)
 
 
 class CertameIn(BaseModel):
-    chave: str = Field(min_length=1, max_length=200, pattern=CHAVE)
+    chave: Chave
     resumo: str = Field(min_length=8, max_length=64, pattern=r"^[0-9a-f]+$")
     orgao: str = Field(max_length=300)
     unidade: str = Field(default="", max_length=300)
@@ -127,15 +130,15 @@ class CertameIn(BaseModel):
     situacao: str = Field(default="", max_length=300)
     situacao_grupo: str = Field(default="", max_length=60)
     encerrada: bool = False
-    data_publicacao: datetime.date | None = None
-    data_sessao: datetime.date | None = None
+    data_publicacao: Data | None = None
+    data_sessao: Data | None = None
     hora_sessao: str | None = Field(default=None, pattern=HORA)
-    primeira_vez: datetime.date | None = None
+    primeira_vez: Data | None = None
     link: str = Field(default="", max_length=2000, pattern=LINK)
     portal: str = Field(default="", max_length=60)
     modo_disputa: str = Field(default="", max_length=60)
     srp: bool | None = None
-    fontes: list[str] = Field(default_factory=list, max_length=30)
+    fontes: list[Annotated[str, Field(max_length=80)]] = Field(default_factory=list, max_length=30)
     nova: bool = False
     grande_vulto: bool = False
     recomendada: RecomendadaIn | None = None
@@ -159,8 +162,8 @@ class FonteIn(BaseModel):
 
 
 class FavoritaIn(BaseModel):
-    chave: str = Field(min_length=1, max_length=200, pattern=CHAVE)
-    desde: datetime.date
+    chave: Chave
+    desde: Data
     etapa: Etapa | None = None
     autor: str | None = Field(default=None, max_length=120)
 
@@ -171,7 +174,7 @@ class DecisoesIn(BaseModel):
 
 class LeituraIn(BaseModel):
     lido_em: AwareDatetime
-    chaves: list[str] = Field(max_length=20000)
+    chaves: list[Chave] = Field(max_length=20000)
     fontes: list[FonteIn] = Field(default_factory=list, max_length=60)
     decisoes: DecisoesIn | None = None
 

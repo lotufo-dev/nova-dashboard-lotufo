@@ -23,6 +23,8 @@ FOLGA_FUTURO = datetime.timedelta(minutes=10)
 
 LEITURA_NO_FUTURO = "Data da leitura no futuro: confira o relógio da máquina do radar"
 LEITURA_ANTIGA = "Leitura mais antiga que a última gravada"
+LEITURA_FORA_DA_FAIXA = "Data da leitura fora da faixa aceita"
+ANO_MINIMO_DA_LEITURA = 2020
 CHAVE_DESCONHECIDA = "Licitação que a dashboard ainda não recebeu: "
 
 _UM_DIA = datetime.timedelta(days=1)
@@ -71,6 +73,8 @@ def fechar_leitura(conn, lido_em: datetime.datetime, chaves: list[str], fontes: 
                    decisoes: dict | None) -> dict:
     """Fecha a rodada do radar: o que ele lista hoje, a situacao das fontes e, ate' o corte, as favoritas dele.
     Confere tudo antes de gravar: chave que a dashboard nao recebeu recusa o fechamento inteiro."""
+    if lido_em.year < ANO_MINIMO_DA_LEITURA:            # antes de qualquer conta com fuso, que estouraria no ano 1
+        raise ValueError(LEITURA_FORA_DA_FAIXA)
     if lido_em > tempo.agora_utc() + FOLGA_FUTURO:
         raise ValueError(LEITURA_NO_FUTURO)
     lido = _utc(lido_em)
@@ -87,25 +91,31 @@ def fechar_leitura(conn, lido_em: datetime.datetime, chaves: list[str], fontes: 
         voltou = [(k,) for k, fora in gravados.items() if fora is not None and k in listadas]
         conn.executemany("UPDATE lic_certames SET fora_desde=? WHERE chave=?", saiu)
         conn.executemany("UPDATE lic_certames SET fora_desde=NULL WHERE chave=?", voltou)
-        conn.execute("INSERT OR IGNORE INTO lic_leituras (lido_em, certames, fontes) VALUES (?,?,?)",
+        # a mesma rodada mandada de novo nao cria linha, mas vale o que ela diz agora
+        conn.execute("INSERT INTO lic_leituras (lido_em, certames, fontes) VALUES (?,?,?) "
+                     "ON CONFLICT(lido_em) DO UPDATE SET certames=excluded.certames, fontes=excluded.fontes",
                      (lido, len(listadas), json.dumps(fontes, ensure_ascii=False)))
         espelhadas = _espelhar_favoritas(conn, favoritas, lido) if favoritas is not None else None
     return {"listados": len(listadas), "fora": len(saiu), "favoritas": espelhadas}
 
 
 def _espelhar_favoritas(conn, favoritas: dict[str, dict], lido: str) -> int:
-    """Ate' o corte as favoritas sao espelho do radar: entra a que falta, a etapa acompanha, e a que ele nao manda
-    mais sai, com a data. A linha da que saiu fica."""
+    """Ate' o corte as favoritas sao espelho do radar: entra a que falta, a etapa, o dia e o autor acompanham, e a
+    que ele nao manda mais sai, com a data. A linha da que saiu fica."""
     ativas = {r["chave"]: r for r in conn.execute(
-        "SELECT id, chave, etapa FROM lic_favoritas WHERE removida_em IS NULL AND origem='radar'")}
+        "SELECT id, chave, desde, etapa, autor_radar FROM lic_favoritas WHERE removida_em IS NULL AND origem='radar'")}
     for chave, f in favoritas.items():
-        desde, etapa = f["desde"], f.get("etapa")
+        desde, etapa, autor = f["desde"], f.get("etapa"), f.get("autor")
         atual = ativas.get(chave)
         if atual is None:
             conn.execute("INSERT INTO lic_favoritas (chave, desde, etapa, etapa_em, origem, autor_radar) "
-                         "VALUES (?,?,?,?,'radar',?)", (chave, desde, etapa, lido if etapa else None, f.get("autor")))
-        elif atual["etapa"] != etapa:
+                         "VALUES (?,?,?,?,'radar',?)", (chave, desde, etapa, lido if etapa else None, autor))
+            continue
+        if atual["etapa"] != etapa:
             conn.execute("UPDATE lic_favoritas SET etapa=?, etapa_em=? WHERE id=?", (etapa, lido, atual["id"]))
+        if (atual["desde"], atual["autor_radar"]) != (desde, autor):
+            # tirada e favoritada de novo no radar entre duas rodadas: vale o dia novo
+            conn.execute("UPDATE lic_favoritas SET desde=?, autor_radar=? WHERE id=?", (desde, autor, atual["id"]))
     conn.executemany("UPDATE lic_favoritas SET removida_em=? WHERE id=?",
                      [(lido, r["id"]) for chave, r in ativas.items() if chave not in favoritas])
     return len(favoritas)
@@ -120,9 +130,10 @@ def dias_uteis_ate(hoje: datetime.date, data: datetime.date) -> int:
     return -feriados.dias_uteis_entre(data + _UM_DIA, hoje + _UM_DIA)
 
 
-def situacao_do_prazo(dias_uteis: int | None) -> str | None:
-    """Critico ate' 5 dias uteis, vence em breve ate' 15; acima disso, passado ou sem data, sem situacao."""
-    if dias_uteis is None or dias_uteis < 0:
+def situacao_do_prazo(dias_uteis: int | None, passado: bool = False) -> str | None:
+    """Critico ate' 5 dias uteis, vence em breve ate' 15; acima disso, passado ou sem data, sem situacao. Passado se
+    decide pela data, nao pelos dias uteis: de sexta para sabado nao ha' dia util nenhum."""
+    if dias_uteis is None or passado:
         return None
     return "critico" if dias_uteis <= PRAZO_CRITICO else "breve" if dias_uteis <= PRAZO_BREVE else None
 
@@ -160,19 +171,17 @@ def _data(texto: str | None) -> datetime.date | None:
 
 
 def _prazos(dados: dict, hoje: datetime.date) -> list[dict]:
-    """Os prazos da favorita, em ordem de data: os do dossie, quando ha'; senao so' a sessao."""
-    dossie = dados.get("dossie")
-    if dossie:
-        brutos = dossie["prazos"]
-    elif dados.get("data_sessao"):
-        brutos = [{"codigo": "sessao", "rotulo": "Sessão", "data": dados["data_sessao"],
-                   "hora": dados.get("hora_sessao"), "aviso": ""}]
-    else:
-        brutos = []
+    """Os prazos da favorita, em ordem de data: os do dossie, quando ha', e a sessao, que nunca falta (o dossie
+    pode vir sem prazo nenhum, ou sem a sessao)."""
+    brutos = list((dados.get("dossie") or {}).get("prazos") or [])
+    if dados.get("data_sessao") and not any(p["codigo"] == "sessao" for p in brutos):
+        brutos.append({"codigo": "sessao", "rotulo": "Sessão", "data": dados["data_sessao"],
+                       "hora": dados.get("hora_sessao"), "aviso": ""})
     prazos = []
     for p in sorted(brutos, key=lambda p: (p["data"], p.get("hora") or "99:99")):
-        du = dias_uteis_ate(hoje, _data(p["data"]))
-        prazos.append({**p, "dias_uteis": du, "situacao": situacao_do_prazo(du)})
+        data = _data(p["data"])
+        du, passado = dias_uteis_ate(hoje, data), data < hoje
+        prazos.append({**p, "dias_uteis": du, "passado": passado, "situacao": situacao_do_prazo(du, passado)})
     return prazos
 
 
@@ -188,7 +197,7 @@ def _favorita(fav, dados: dict, hoje: datetime.date, encerrada: bool) -> dict:
     return {"desde": fav["desde"], "etapa": etapa, "etapa_rotulo": ROTULO_ETAPA[etapa],
             "etapa_do_dossie": bool(dossie and dossie.get("etapa")), "dossie": (dossie or {}).get("pasta"),
             "selos": (dossie or {}).get("selos") or [],
-            "prazos": prazos, "proximo_prazo": next((p for p in prazos if p["dias_uteis"] >= 0), None),
+            "prazos": prazos, "proximo_prazo": next((p for p in prazos if not p["passado"]), None),
             "mudancas": mudancas}
 
 
@@ -198,7 +207,7 @@ def _linha(row, hoje: datetime.date, fav=None) -> dict:
     dados = json.loads(row["dados"])
     sessao = _data(dados.get("data_sessao"))
     du = dias_uteis_ate(hoje, sessao) if sessao else None
-    encerrada = bool(dados["encerrada"]) or (du is not None and du < 0)
+    encerrada = bool(dados["encerrada"]) or (sessao is not None and sessao < hoje)   # pela data: ver situacao_do_prazo
     linha = {"chave": row["chave"], **{k: dados.get(k) for k in _DA_LINHA}, "dias_uteis": du,
              "prazo": None if encerrada else situacao_do_prazo(du), "encerrada": encerrada, "favorita": None}
     if fav is not None:
@@ -233,11 +242,13 @@ def _pede_atencao(linha: dict, hoje: datetime.date) -> bool:
 
 
 def _novas_desde(conn, novas: list[dict]) -> dict | None:
-    """Quantas das novas apareceram depois do dia da leitura anterior a' ultima; sem duas leituras, nada."""
-    anteriores = [r["lido_em"] for r in conn.execute("SELECT lido_em FROM lic_leituras ORDER BY lido_em DESC LIMIT 2")]
-    if len(anteriores) < 2:
+    """Quantas das novas apareceram depois do ultimo dia de leitura anterior ao da ultima (o radar le mais de uma
+    vez por dia: a rodada da tarde nao pode zerar a conta da manha); sem leitura em dia anterior, nada."""
+    dias = [tempo.para_local(datetime.datetime.fromisoformat(r["lido_em"])).date().isoformat()
+            for r in conn.execute("SELECT lido_em FROM lic_leituras ORDER BY lido_em DESC LIMIT 30")]
+    desde = next((d for d in dias if d < dias[0]), None) if dias else None
+    if desde is None:
         return None
-    desde = tempo.para_local(datetime.datetime.fromisoformat(anteriores[1])).date().isoformat()
     return {"desde": desde, "quantas": sum(1 for l in novas if (l["primeira_vez"] or "") > desde)}
 
 

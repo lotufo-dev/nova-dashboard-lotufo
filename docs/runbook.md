@@ -1178,6 +1178,9 @@ administrador e diretoria).
    desligá-la. Dashboard parada, sem token ou token recusado: o radar registra a falha no log dele e a coleta e o
    e-mail dele seguem normais; a rodada seguinte manda o que ficou para trás, porque o que ele manda sai da
    comparação dos resumos.
+   As favoritas são espelho: a lista que o radar manda em `decisoes.favoritas` substitui a anterior, e a lista vazia
+   tira todas (as linhas ficam, com a data). O radar que não conseguiu ler as próprias favoritas manda o fechamento
+   **sem** `decisoes`, e nada muda.
 5. **Conferir pela tela**: Licitações › Triagem mostra a hora da última leitura. "O radar não lê desde …" aparece
    quando a última leitura é de antes do dia esperado: hoje, se hoje é dia útil e já passou das 10h; senão, o dia
    útil anterior. O radar depende de sessão aberta na máquina em que roda: dia sem sessão é dia sem leitura, e a
