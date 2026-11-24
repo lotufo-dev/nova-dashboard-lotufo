@@ -140,8 +140,13 @@ def estado_do_banco(banco: Path) -> dict:
             raise   # banco travado ou ilegivel: recusa abaixo, em vez de passar por vazio
 
     emails = [email_de_teste(p) for p in PERFIS]
+    real = banco.resolve()
+    # num banco em modo WAL, abrir ate' para ler cria `-wal` e `-shm` vazios ao lado dele; os que nasceram aqui saem
+    # no fim (os que ja' existiam sao de quem tem o banco aberto, e ficam)
+    auxiliares = [real.with_name(real.name + sufixo) for sufixo in ("-wal", "-shm")]
+    ja_existiam = [a for a in auxiliares if a.exists()]
     try:
-        conn = sqlite3.connect(banco.resolve().as_uri() + "?mode=ro", uri=True)
+        conn = sqlite3.connect(real.as_uri() + "?mode=ro", uri=True)
         try:
             contratos = ler(conn, "SELECT COUNT(*) FROM contratos")
             usuarios = ler(conn, f"SELECT email FROM usuarios WHERE email IN ({','.join('?' * len(emails))})", emails)
@@ -149,6 +154,10 @@ def estado_do_banco(banco: Path) -> dict:
             conn.close()
     except sqlite3.DatabaseError as e:
         raise Recusa(f"DASH_DB_PATH não abre como banco SQLite ({banco}): {e}") from None
+    finally:
+        for a in auxiliares:
+            if a not in ja_existiam:
+                a.unlink(missing_ok=True)
     return {"contratos": contratos[0][0] if contratos else 0, "usuarios_de_teste": sorted(u[0] for u in usuarios)}
 
 

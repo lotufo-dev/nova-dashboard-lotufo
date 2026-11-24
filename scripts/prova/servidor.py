@@ -157,6 +157,8 @@ def subir(ambiente=os.environ, porta: int | None = None, dist: Path | None = Non
     o_que_e = comum.conferir_copia(banco, copia)
     if porta:
         exigir_porta_livre(porta)
+    if com_frontend and dist is not None and not (dist / "index.html").exists():
+        raise comum.Recusa(f"--dist não tem um frontend montado (falta index.html): {dist}")
     banco.parent.mkdir(parents=True, exist_ok=True)
 
     if not com_frontend:
@@ -164,8 +166,6 @@ def subir(ambiente=os.environ, porta: int | None = None, dist: Path | None = Non
     elif dist is None:
         dist = arquivos["dist"]
         montar_frontend(dist)
-    elif not (dist / "index.html").exists():
-        raise comum.Recusa(f"--dist não tem um frontend montado (falta index.html): {dist}")
 
     python = comum.python_do_backend()
     env = comum.ambiente_do_servidor(ambiente, banco, cadastro, dist)

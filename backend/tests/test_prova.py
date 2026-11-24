@@ -87,10 +87,13 @@ def _instalacao(pasta):
     return pasta / "dados" / "dashboard.db"
 
 
-def _banco(caminho, contratos=0, usuarios=()):
-    """Um banco SQLite so' com o que a guarda le: a tabela de contratos e a de usuarios."""
+def _banco(caminho, contratos=0, usuarios=(), wal=False):
+    """Um banco SQLite so' com o que a guarda le: a tabela de contratos e a de usuarios. `wal`: em modo WAL, como o
+    de uma copia da producao (o modo fica gravado no arquivo; fechado, ele nao deixa `-wal` nem `-shm`)."""
     caminho.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(caminho)
+    if wal:
+        conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("CREATE TABLE contratos (id INTEGER PRIMARY KEY)")
     conn.execute("CREATE TABLE usuarios (id INTEGER PRIMARY KEY, email TEXT)")
     conn.executemany("INSERT INTO contratos DEFAULT VALUES", [()] * contratos)
@@ -223,7 +226,9 @@ def test_copia_pedida_sobre_arquivo_que_nao_existe_ou_nao_e_banco_recusa(repo):
 
 
 def _nada_nasceu_ao_lado(banco):
-    return sorted(p.name for p in banco.parent.iterdir() if p.name.startswith("prova-") or p.name == "correio-simulado")
+    """Tudo o que ha' na pasta do banco alem dele: a senha, o log, o correio, e tambem os auxiliares `-wal`, `-shm` e
+    `-journal` que a leitura do SQLite pode deixar. As pastas dos testes so' trazem o banco."""
+    return sorted(p.name for p in banco.parent.iterdir() if p != banco)
 
 
 def test_servidor_recusa_banco_de_instalacao_e_banco_com_contratos_antes_de_gravar(tmp_path):
@@ -239,6 +244,49 @@ def test_servidor_recusa_banco_de_instalacao_e_banco_com_contratos_antes_de_grav
                            copia=com_copia)
         assert banco.read_bytes() == antes[banco]
         assert _nada_nasceu_ao_lado(banco) == []        # nem a senha de teste
+
+
+def test_banco_em_modo_wal_recusado_nao_deixa_arquivo_ao_lado(tmp_path):
+    """A leitura de um banco WAL, mesmo so' para contar contratos, cria `-shm` e `-wal` vazios ao lado dele."""
+    copia = _banco(tmp_path / "temp" / "copia.db", contratos=2, wal=True)
+    assert _nada_nasceu_ao_lado(copia) == []            # o ponto de partida: so' o banco
+    antes = copia.read_bytes()
+    with pytest.raises(comum.Recusa, match="--copia"):
+        comum.conferir_copia(copia, False)
+    assert _nada_nasceu_ao_lado(copia) == [] and copia.read_bytes() == antes
+    with pytest.raises(comum.Recusa, match="--copia"):
+        servidor.subir({"DASH_DB_PATH": str(copia), "DASH_CADASTRO_DIR": str(comum.CADASTRO_EXEMPLO)}, com_frontend=False)
+    assert _nada_nasceu_ao_lado(copia) == [] and copia.read_bytes() == antes
+    # a leitura que passa (banco ja' preparado) tambem nao deixa nada
+    preparado = _banco(tmp_path / "pronto" / "prova.db", contratos=1, usuarios=USUARIOS_DE_TESTE, wal=True)
+    assert comum.conferir_copia(preparado, False) == "preparado"
+    assert _nada_nasceu_ao_lado(preparado) == []
+
+
+def test_banco_em_modo_wal_com_auxiliares_ja_existentes_nao_os_apaga(tmp_path):
+    """Os auxiliares de um servidor no ar nao sao da prova: ficam, com o que tiverem."""
+    banco = _banco(tmp_path / "temp" / "copia.db", contratos=2, wal=True)
+    aberto = sqlite3.connect(banco)                      # outro processo com o banco aberto: `-wal` e `-shm` existem
+    try:
+        aberto.execute("SELECT COUNT(*) FROM contratos").fetchone()
+        antes = _nada_nasceu_ao_lado(banco)
+        assert antes == ["copia.db-shm", "copia.db-wal"]
+        assert comum.estado_do_banco(banco)["contratos"] == 2
+        assert _nada_nasceu_ao_lado(banco) == antes
+    finally:
+        aberto.close()
+
+
+def test_dist_sem_index_html_recusa_antes_de_criar_pasta(tmp_path):
+    """`--dist` sem frontend montado e' recusado antes de qualquer `mkdir`: a pasta do banco nem nasce."""
+    dist = tmp_path / "dist-vazio"
+    dist.mkdir()
+    banco = tmp_path / "temp" / "prova.db"
+    ambiente = {"DASH_DB_PATH": str(banco), "DASH_CADASTRO_DIR": str(comum.CADASTRO_EXEMPLO)}
+    with pytest.raises(comum.Recusa, match="--dist não tem um frontend montado"):
+        servidor.subir(ambiente, dist=dist)
+    assert not banco.parent.exists()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["dist-vazio"]
 
 
 @pytest.mark.parametrize("onde, argumentos, frase", [
