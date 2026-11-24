@@ -537,6 +537,26 @@ describe("Página da medição: as etapas se atualizam entre si", () => {
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/notas/5/numero-orgao", { method: "POST", body: JSON.stringify({ numero: "2026.10.004512" }) }));
   });
 
+  // issue #11: o Salvar do nº do órgão não fica apagado; o clique vazio diz o que falta, no campo
+  it("salvar o nº do órgão vazio mostra o erro no campo e não grava", async () => {
+    abrirEtapa(4);
+    responder({ "/api/contratos/1/medicoes": [{ ...MEDICAO, protocolos: [REGISTRADO] }] });
+    pagina();
+    const campo = await screen.findByLabelText("Nº do protocolo no órgão");
+    const salvar = screen.getByRole("button", { name: "Salvar" }) as HTMLButtonElement;
+    expect(salvar.disabled).toBe(false);
+    fireEvent.change(campo, { target: { value: "   " } });
+    fireEvent.click(salvar);
+    expect(api.mock.calls.some(c => String(c[0]).endsWith("/numero-orgao"))).toBe(false);
+    expect(campo.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(campo.getAttribute("aria-describedby") ?? "")?.textContent).toContain("Informe o número do protocolo no órgão.");
+    expect(document.activeElement).toBe(campo);
+    fireEvent.change(campo, { target: { value: "2026.10.004512" } });
+    expect(screen.queryByText("Informe o número do protocolo no órgão.")).toBeNull();
+    fireEvent.click(salvar);
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/notas/5/numero-orgao", { method: "POST", body: JSON.stringify({ numero: "2026.10.004512" }) }));
+  });
+
   // o reprotocolo: outro protocolo feito fora numa medição já protocolada, com a conferência das certidões
   it("etapa 4 já feita: “Registrar protocolo feito fora” confere as certidões e grava com a justificativa das pendências", async () => {
     abrirEtapa(4);
