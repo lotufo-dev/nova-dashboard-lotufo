@@ -280,6 +280,35 @@ describe("Enviar a nota", () => {
     expect(document.body.innerHTML).not.toMatch(/[a-z0-9-]+(-my)?\.sharepoint\.com/i);
   });
 
+  // issue #11: o Adicionar link não fica apagado esperando os campos; o clique diz o que falta, junto do campo
+  it("Adicionar link sem nome e sem link mostra o erro nos campos e não grava; com os dois, grava como antes", async () => {
+    api.mockImplementation((caminho: string) => Promise.resolve(caminho === "/api/notas/envio/3" ? det : {}));
+    render(<EnviarNota protocoloId={3} podeEditar embutido={{ aoConcluir: () => {}, aoTrocar: () => {} }} />);
+    const botao = await screen.findByRole("button", { name: "Adicionar link" }) as HTMLButtonElement;
+    expect(botao.disabled).toBe(false);
+    const nome = screen.getByLabelText("Nome do arquivo");
+    const url = screen.getByLabelText("Link do OneDrive");
+    fireEvent.click(botao);
+    const links = () => api.mock.calls.filter(c => c[0] === "/api/protocolos/3/links");
+    expect(links()).toHaveLength(0);
+    expect(nome.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(nome.getAttribute("aria-describedby") ?? "")?.textContent).toContain("Escreva o nome do arquivo.");
+    expect(document.getElementById(url.getAttribute("aria-describedby") ?? "")?.textContent).toContain("Cole o link do OneDrive.");
+    expect(document.activeElement).toBe(nome);
+    fireEvent.change(nome, { target: { value: " Projeto executivo " } });
+    expect(screen.queryByText("Escreva o nome do arquivo.")).toBeNull();
+    fireEvent.click(botao);
+    expect(links()).toHaveLength(0);
+    expect(document.activeElement).toBe(url);
+    fireEvent.change(url, { target: { value: " https://exemplo.sharepoint.com/x " } });
+    expect(screen.queryByText("Cole o link do OneDrive.")).toBeNull();
+    fireEvent.click(botao);
+    await waitFor(() => expect(links()).toHaveLength(1));
+    expect(JSON.parse(links()[0][1].body)).toEqual({ nome: "Projeto executivo", url: "https://exemplo.sharepoint.com/x" });
+    await waitFor(() => expect((screen.getByLabelText("Nome do arquivo") as HTMLInputElement).value).toBe(""));
+    expect(screen.queryByText("Escreva o nome do arquivo.")).toBeNull();
+  });
+
   // issue #100: como no protocolo (PR #92), o Enviar leva os anexos que a prévia mostrou, para o servidor recusar se mudaram
   describe("anexos da prévia", () => {
     const NF = { nome: "NFS 2301.pdf", origem: "nota", tamanho: 10 };
