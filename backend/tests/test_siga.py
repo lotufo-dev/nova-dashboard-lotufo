@@ -639,7 +639,7 @@ def test_processo_que_o_robo_liga_a_medicao_entra_em_medicoes_e_os_demais_em_out
     _protocolo_enviado(conn, "SINFRA-PRO-2026/00001")
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura(numero="SINFRA-PRO-2026/00001"))
     assert _categorias(conn) == [("SINFRA-PRO-2026/00001", "medicoes"), ("ORGAO-PRO-2026/00011", "outros")]
-    alfa, beta = siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"]
+    alfa, beta = sorted(siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"], key=lambda p: p["id"])
     assert (alfa["categoria"], alfa["o_que_e"], alfa["obra"]) == ("medicoes", "3ª Medição", "Obra Alfa")
     assert (beta["categoria"], beta["o_que_e"], beta["obra"], beta["nome"]) == ("outros", "Outro", None, "Processo Beta")
     assert (alfa["categoria_sugerida"], beta["categoria_sugerida"]) == (False, False)
@@ -760,6 +760,29 @@ def test_painel_traz_os_numeros_da_faixa_os_limites_e_a_leitura_do_tempo_de_cada
     assert [a["processo_id"] for a in d["robo"]["avisos"] if a["tipo"] == "nao_lido"] == [beta]
 
 
+def test_painel_manda_os_processos_do_mais_parado_para_o_menos(conn):
+    """Issue #861: a ordem da tela SIGA nasce no servidor (`siga._mais_parado`, a mesma do quadro do mes) e a tela so'
+    a segue. Mais dias sem movimentacao primeiro; empate, a ultima movimentacao mais antiga; sem movimentacao, no fim;
+    o sobrestado (#841), depois dos outros, por mais parado que esteja. A ordem de gravacao e' outra, de proposito."""
+    def proc(numero, nome, situacao, *datas):
+        return {"codigo": None, "numero": numero, "nome": nome, "situacao": situacao,
+                "movimentacoes": [{**_mov(d, "Recebimento", at_lotacao="GABIN/ORGAO"), "data": _br(d)} for d in datas]}
+    sobrestado = "1º Volume - Sobrestado [GABIN, [X]]"
+    siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), [
+        proc("ORGAO-PRO-2026/00031", "Processo Hoje", SITUACAO_GABIN, "2026-10-28 09:00:00"),
+        proc("ORGAO-PRO-2026/00032", "Processo Sobrestado", sobrestado, "2026-09-01 09:00:00"),
+        proc("ORGAO-PRO-2026/00033", "Processo Seis Tarde", SITUACAO_GABIN, "2026-10-20 15:00:00"),
+        proc("ORGAO-PRO-2026/00034", "Processo Doze", SITUACAO_GABIN, "2026-10-09 09:00:00"),
+        proc("ORGAO-PRO-2026/00035", "Processo Seis Cedo", SITUACAO_GABIN, "2026-10-20 08:00:00"),
+        proc("ORGAO-PRO-2026/00036", "Processo Nunca Andou", SITUACAO_GABIN),
+    ])
+    d = siga.painel(conn, _cuiaba(2026, 10, 28, 11))
+    assert [(p["nome"], p["dias_sem_movimentacao"]) for p in d["processos"]] == [
+        ("Processo Doze", 12), ("Processo Seis Cedo", 6), ("Processo Seis Tarde", 6), ("Processo Hoje", 0),
+        ("Processo Nunca Andou", None), ("Processo Sobrestado", 39)]
+    assert d["processos"] == sorted(d["processos"], key=siga._mais_parado_do_painel)
+
+
 def test_painel_sem_processo_tem_a_faixa_zerada(conn):
     d = siga.painel(conn, _cuiaba(2026, 10, 28, 11))
     assert d["numeros"] == {"acompanhados": 0, "parados": 0, "andaram_hoje": 0, "nao_lidos": 0}
@@ -771,7 +794,7 @@ def test_painel_diz_o_contratante_da_obra_do_processo(conn):
     conn.execute("UPDATE contratos SET orgao_id=(SELECT id FROM orgaos WHERE chave='sinfra-suef2') WHERE id=7")
     conn.commit()
     siga.gravar_leitura(conn, _cuiaba(2026, 10, 28, 11), _leitura(numero="SINFRA-PRO-2026/00001"))
-    alfa, beta = siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"]
+    alfa, beta = sorted(siga.painel(conn, _cuiaba(2026, 10, 28, 11))["processos"], key=lambda p: p["id"])
     assert (alfa["obra"], alfa["contratante"], alfa["orgao_sub"]) == ("Obra Alfa", "SINFRA", "SUEF II")
     assert (beta["obra"], beta["contratante"], beta["orgao_sub"]) == (None, None, None)   # sem obra, sem contratante
 

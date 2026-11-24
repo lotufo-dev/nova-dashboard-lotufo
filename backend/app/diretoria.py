@@ -497,11 +497,15 @@ def _complemento_na_cota(conn, compl: dict[int, dict[str, int]]) -> dict[str, in
     return out
 
 
+# o contratante das telas da diretoria quando o contrato nao tem orgao no cadastro (`_contratante`)
+SEM_ORGAO = "sem órgão"
+
+
 def _contratante(m: dict) -> str:
     """O contratante de uma medicao ou nota: a sigla de Medicoes e de Obras ("SINFRA" para a familia toda, sem separar
     por superintendencia; decisao do dono de 06/11/2026 para as telas da diretoria)."""
     return medicoes.contratante(m.get("orgao_familia"), m.get("orgao_chave"), m.get("orgao_nome"), None)[0] \
-        if m.get("orgao_nome") else "sem órgão"
+        if m.get("orgao_nome") else SEM_ORGAO
 
 
 def chave_do_contratante(familia: str | None, chave: str | None) -> str | None:
@@ -510,6 +514,25 @@ def chave_do_contratante(familia: str | None, chave: str | None) -> str | None:
     superintendencias); nos outros, a chave do orgao no cadastro (`orgaos.chave`). Contrato sem orgao no cadastro nao
     tem chave (nem pagina de contratante)."""
     return "sinfra" if familia == "sinfra" else chave or None
+
+
+def linha_do_contratante(nome: str, familia: str | None, chave: str | None) -> tuple[str, str | None]:
+    """Issue #864: a linha de um contratante nas telas da diretoria que abrem um total por contratante (a aba "Por
+    contratante" do Fechamento, a pagina Em aberto e o ciclo por contratante do Inicio): o par (nome, chave da pagina
+    dele, `chave_do_contratante`), nunca o nome sozinho. Assim dois orgaos do cadastro com o mesmo nome e chaves
+    diferentes ficam em duas linhas, e o contrato sem orgao no cadastro cujo texto e' igual a' sigla de um contratante
+    ("SINFRA") fica na linha dele, sem chave, e nao dentro da do contratante de verdade (que perderia a chave, o link e
+    o filtro quando o sem orgao chegasse primeiro). `nome` e' o que a tela escreve; `familia` e `chave` sao as do orgao
+    do contrato no cadastro (nulas no contrato sem orgao)."""
+    return nome, chave_do_contratante(familia, chave)
+
+
+def ordem_do_contratante(linha: tuple[str, str | None]) -> tuple[str, str]:
+    """Issue #864: o desempate entre duas linhas de contratante com o mesmo valor, nas tres telas de
+    `linha_do_contratante`: o nome sem acento e sem caixa (`medicoes._chave_nome`), depois a chave (a linha sem chave
+    primeiro)."""
+    nome, chave = linha
+    return medicoes._chave_nome(nome), chave or ""
 
 
 def contratante_da_obra(conn, contrato_id: int) -> dict:

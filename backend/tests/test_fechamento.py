@@ -2031,21 +2031,43 @@ def test_por_contratante_obra_sem_orgao_no_cadastro_fica_com_o_texto_do_contrato
     _confere_soma(f)
 
 
-def test_por_contratante_obra_sem_orgao_com_o_texto_igual_a_uma_sigla_fica_na_linha_dela(contratantes):
+@pytest.mark.parametrize("sem_orgao_primeiro", [True, False])
+def test_por_contratante_obra_sem_orgao_com_o_texto_igual_a_uma_sigla_fica_na_linha_dela(contratantes, sem_orgao_primeiro):
     """Revisao da #815 (ajuste 6): o contrato sem orgao no cadastro cujo texto e' igual a' sigla de um contratante
     (\"SINFRA\") nao entra na linha do contratante de verdade. Sao duas linhas, cada uma com a sua chave (a do
-    contratante leva a' pagina dele; a do texto, a nenhuma), em qualquer ordem de chegada das medicoes, e o total do
-    ano nao muda."""
+    contratante leva a' pagina dele; a do texto, a nenhuma), em qualquer ordem de chegada das medicoes (issue #864: as
+    duas ordens), e o total do ano nao muda."""
     c, ids = contratantes
     c.execute("UPDATE contratos SET orgao_id=NULL, orgao='SINFRA' WHERE id=?", (ids["Galpão"],))
     c.commit()
-    # a medicao do contrato sem orgao chega primeiro (id menor e competencia mais antiga)
-    medir(c, ids["Galpão"], 1, "2026-01", "planilha_enviada", 10_001)
-    medir(c, ids["Estrada"], 1, "2026-02", "planilha_enviada", 20_003)
+    # a medicao que chega primeiro tem o id menor e a competencia mais antiga
+    primeira, segunda = ("Galpão", "Estrada") if sem_orgao_primeiro else ("Estrada", "Galpão")
+    medir(c, ids[primeira], 1, "2026-01", "planilha_enviada", 10_001)
+    medir(c, ids[segunda], 1, "2026-02", "planilha_enviada", 20_003)
     f = fechamento.fechamento(c)
     linhas = sorted((g["contratante"], g["contratante_chave"] or "", g["medido_centavos"]) for g in f["por_contratante"]["2026"])
-    assert linhas == [("SINFRA", "", 10_001), ("SINFRA", "sinfra", 20_003)]
+    sem_orgao, sinfra = (10_001, 20_003) if sem_orgao_primeiro else (20_003, 10_001)
+    assert linhas == [("SINFRA", "", sem_orgao), ("SINFRA", "sinfra", sinfra)]
     assert sum(g["medido_centavos"] for g in f["por_contratante"]["2026"]) == f["por_ano"]["2026"]["medido_centavos"] == 30_004
+    _confere_soma(f)
+
+
+def test_por_contratante_dois_orgaos_de_mesmo_nome_ficam_em_duas_linhas(contratantes):
+    """Issue #864: dois orgaos do cadastro com o mesmo nome e chaves diferentes ("Secretaria X" e a Companhia Y
+    renomeada para "Secretaria X") sao duas linhas, cada uma com a sua chave, e a soma das linhas e' o total do ano.
+    Consorcio a 33,33% com centavo impar (rateio com residuo) numa delas; com o mesmo medido, a chave desempata."""
+    c, ids = contratantes
+    c.execute("UPDATE orgaos SET nome='Secretaria X' WHERE chave='companhia-y'")
+    c.commit()
+    medir(c, ids["Hospital"], 1, "2026-01", "planilha_enviada", 90_001)          # 90.001 x 33,33% = 29.997,33
+    medir(c, ids["Galpão"], 1, "2026-02", "planilha_enviada", 30_004)
+    medir(c, ids["Escola"], 1, "2026-02", "planilha_enviada", 7)
+    f = fechamento.fechamento(c)
+    linhas = [(g["contratante"], g["contratante_chave"], g["medido_centavos"]) for g in f["por_contratante"]["2026"]]
+    # o mesmo nome e o mesmo medido: a chave desempata (o Hospital, de chave maior, chegou primeiro)
+    assert linhas == [("Secretaria X", "companhia-y", 30_004), ("Secretaria X", "orgao-x", 29_997 + 7)]
+    assert sum(g["medido_centavos"] for g in f["por_contratante"]["2026"]) == f["por_ano"]["2026"]["medido_centavos"]
+    assert sum(g["participacao_medido_por_mil"] for g in f["por_contratante"]["2026"]) == 1000
     _confere_soma(f)
 
 

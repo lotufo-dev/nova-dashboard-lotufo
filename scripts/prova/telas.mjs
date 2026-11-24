@@ -509,7 +509,7 @@ export const TELAS = [
     simular: [{ caminho: /^\/api\/busca$/, corpo: BUSCA_CHEIA }], passos: abrirBusca("15") },
   { rota: "inicio", id: "busca-sem-resultado", caminho: "/inicio", perfis: OPERA, antes: ".ini", espera: ".busca__vazio",
     simular: [{ caminho: /^\/api\/busca$/, corpo: BUSCA_VAZIA }], passos: abrirBusca("xyzw") },
-  { rota: "inicio", id: "busca-sem-siga", caminho: "/inicio", perfis: ["diretoria"], antes: ".ini", espera: ".busca__opcao",
+  { rota: "inicio", id: "busca-diretoria", caminho: "/inicio", perfis: ["diretoria"], antes: ".ini", espera: ".busca__opcao",
     passos: abrirBusca("1") },
   // ---- As abas Medicoes, A receber e Processos no SIGA da pagina do contratante (#818). Cada uma com o servidor de
   // verdade (o cadastro de exemplo: um contratante so', quase nada em cada aba) e com o recorte simulado da carteira de

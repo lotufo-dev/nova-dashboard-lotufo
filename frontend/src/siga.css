@@ -75,13 +75,20 @@
    "No setor há" fica com a largura do selo de duas palavras numa linha, e "Com quem", com a de um nome sem partir. */
 /* #840: nove colunas. "No setor há" virou texto comum (estreita); "Dias sem movimentação" leva o selo, com a largura
    dele em duas linhas; "Última movimentação" e' "dd/mm hh:mm" (quebra entre a data e a hora) e o tipo, uma palavra
-   ("Recebimento" numa linha a 1024 px). No cabecalho, "movimentação" nao cabe inteira a 1024 px: separa em silabas
-   (`hyphens`, a pagina e' pt-BR) em vez de invadir a coluna vizinha. */
-.sg__c-proc { width: 18%; } .sg__c-contr { width: 10%; } .sg__c-onde { width: 10%; } .sg__c-quem { width: 11%; }
-.sg__c-setor { width: 8%; } .sg__c-parado { width: 14%; } .sg__c-ultima { width: 11%; } .sg__c-tipo { width: 14%; }
+   ("Recebimento" numa linha a 1024 px).
+   #859: as larguras saem da MEDIDA das palavras que nao podem partir, no painel de ~724 px (1024 px com o menu aberto):
+   "movimentação" nos tres cabecalhos, "Contratante", a sigla do setor (quebra so' no hifen, nunca no meio) e "Recebimento".
+   O cabecalho nao separa em silabas (`hyphens: manual`) nem quebra no meio da palavra: cada coluna tem a largura da
+   maior palavra dele. Em pagina de tamanho medio (a regra de container mais abaixo) o cabecalho vai na letra miuda e o respiro entre
+   colunas encolhe, que e' o que faz caber. */
+/* os nomes das colunas: `onde` e' a coluna "Setor" (a sigla), `quem` e' "Com quem" e `setor` e' "No setor há" */
+.sg__c-proc { width: 18%; } .sg__c-contr { width: 10%; } .sg__c-onde { width: 12%; } .sg__c-quem { width: 9%; }
+.sg__c-setor { width: 8%; } .sg__c-parado { width: 14%; } .sg__c-ultima { width: 12%; } .sg__c-tipo { width: 13%; }
 .sg__c-seta { width: 4%; }
-.sg__tabela thead th, .sg__tabela td[data-rotulo="Tipo de movimentação"] { hyphens: auto; }
-.sg__tabela thead th { overflow-wrap: anywhere; }
+.sg__tabela td[data-rotulo="Tipo de movimentação"] { hyphens: manual; }
+.sg__tabela thead th { hyphens: manual; overflow-wrap: normal; }
+/* a sigla do setor: com hifen quebra no hifen; sem hifen nao parte no meio da palavra */
+.sg__tabela td[data-rotulo="Setor"] { overflow-wrap: normal; hyphens: manual; }
 .sg__tabela td.sg__seta { text-align: right; color: var(--cor-texto-secundario); }
 .sg__seta .icone { width: var(--tamanho-icone); height: var(--tamanho-icone); }
 
@@ -154,6 +161,15 @@
 .sg__pulsa { display: inline-flex; animation: sg-pulsar 1.4s ease-in-out infinite; }
 @keyframes sg-pulsar { 50% { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .sg__pulsa { animation: none; } }
+
+/* pagina de tamanho medio (1024 px com o menu aberto: o painel tem ~724 px): o cabecalho na letra miuda e o respiro
+   entre as colunas encolhido, para as nove colunas caberem com as palavras inteiras (#859) */
+@container sg-pagina (max-width: 900px) {
+  .sg__tabela:not(.sg__tabela--hist) thead th { font-size: var(--texto-mini); }
+  .sg__tabela:not(.sg__tabela--hist) :is(th, td):not(:first-child, :last-child) { padding-left: var(--espaco-mini); padding-right: var(--espaco-mini); }
+  .sg__tabela:not(.sg__tabela--hist) :is(th, td):first-child { padding-right: var(--espaco-mini); }
+  .sg__tabela:not(.sg__tabela--hist) :is(th, td):last-child { padding-left: var(--espaco-mini); }
+}
 
 /* pagina media: a faixa de numeros em duas colunas quando os quatro rotulos nao cabem lado a lado */
 @container sg-pagina (max-width: 620px) {

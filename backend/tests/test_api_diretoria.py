@@ -141,7 +141,7 @@ def test_inicio_por_contratante_e_medido_fecham_com_as_outras_telas(client, monk
     assert sum(serie.values()) == sum(do_fechamento.values()) == f["por_ano"]["2025"]["medido_centavos"] + f["por_ano"]["2026"]["medido_centavos"]
 
 
-def test_custo_da_obra_404_sem_cadastro_e_403_sem_ver_paineis(client, monkeypatch):
+def test_custo_da_obra_vazio_sem_cadastro_404_inexistente_e_403_sem_ver_paineis(client, monkeypatch):
     """Issue #491 e #748: o custo da obra (coluna da aba Medicoes); so' obra com cadastro de custo, so' quem tem
     `ver_paineis`."""
     import json
@@ -166,8 +166,10 @@ def test_custo_da_obra_404_sem_cadastro_e_403_sem_ver_paineis(client, monkeypatc
         "grupo": "G", "item": "1.1", "descricao": None, "unidade": "m³", "quantidade_acumulada": None,
         "medicao": None, "custo_centavos": 0, "custo_unitario_centavos": None, "preco_unitario_centavos": None,
         "diferenca_centavos": None, "situacao": "sem_medicao"}]
+    # issue #804: obra sem cadastro de custo responde sem erro, vazia e com o motivo (o 404 virava erro de console)
     r = client.get(f"/api/contratos/{sem}/custo")
-    assert r.status_code == 404 and r.json()["detail"] == "Esta obra não tem cadastro de custo."
+    assert r.status_code == 200 and r.json() == {"contrato_id": sem, "sem_cadastro": True,
+                                                 "motivo": "Esta obra não tem cadastro de custo.", "linhas": []}
     assert client.get("/api/contratos/9999/custo").status_code == 404
     # outra obra com cadastro de custo no mesmo centro: 409 com as obras que disputam, sem valores
     c = db.get_conn()

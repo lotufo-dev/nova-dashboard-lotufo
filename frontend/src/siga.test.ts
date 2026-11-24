@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  casaComBusca, categoriaDaBusca, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, naoLidoDe, nomeDoProcesso, ordenar, periodoDe, porCategoria, situacaoDoAtraso,
+  casaComBusca, categoriaDaBusca, contagemPorTipo, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, naoLidoDe, nomeDoProcesso, periodoDe, porCategoria, situacaoDoAtraso,
   roboAtivo, setorPessoa, situacaoDoBotao, tempoNoSetor, textoSemMovimentacao, dataHoraCurta, tituloDoEvento, volumeDe, type Movimentacao, type ProcessoSiga, type Robo,
 } from "./siga";
 
@@ -24,12 +24,9 @@ describe("siga", () => {
     expect(textoSemMovimentacao(p({}))).toBe("—");
   });
 
-  it("sobrestado (#841): a palavra no lugar dos dias, sem marca de atraso no quadro de Medições, e depois dos parados", () => {
+  it("sobrestado (#841): a palavra no lugar dos dias, sem marca de atraso no quadro de Medições", () => {
     expect(textoSemMovimentacao(p({ situacao_tempo: "sobrestado", dias_sem_movimentacao: 30 }))).toBe("Sobrestado");
     expect(situacaoDoAtraso({ situacao_tempo: "sobrestado" })).toBeUndefined();
-    const sob = p({ id: 1, situacao_tempo: "sobrestado", dias_sem_movimentacao: 30 });
-    const parado = p({ id: 2, situacao_tempo: "breve", dias_sem_movimentacao: 5 });
-    expect(ordenar([sob, parado]).map(x => x.id)).toEqual([2, 1]);
   });
 
   it("Última movimentação em data e hora; o ano só quando não é o de hoje (#840)", () => {
@@ -66,19 +63,6 @@ describe("siga", () => {
     expect(tempoNoSetor(p({ desde: "2026-10-24T09:00:00-04:00", dias_uteis: 0 }), agora)).toBe("menos de 1 dia útil");
     expect(tempoNoSetor(p({ desde: null, dias_uteis: null }), agora)).toBe("—");
     expect(tempoNoSetor(p({ desde: "ilegível", dias_uteis: 0 }), agora)).toBe("—");
-  });
-
-  it("ordem: do mais parado ao menos (dias sem movimentação, #840), empate pela última movimentação mais antiga; o tempo no setor não conta; sem movimentação vai para o fim", () => {
-    const ultima = (data: string): Movimentacao => ({ data, evento: "Recebimento", tipo: "recebimento", cad_lotacao: "", cad_pessoa: "", at_lotacao: "", at_pessoa: "" });
-    const lista = [
-      p({ id: 1, dias_sem_movimentacao: 6, ultima: ultima("2026-10-20T10:00:00-04:00") }),
-      p({ id: 2, dias_sem_movimentacao: 6, ultima: ultima("2026-10-19T10:00:00-04:00") }),
-      p({ id: 3, hoje: 1, dias_uteis: 40, dias_sem_movimentacao: 0, ultima: ultima("2026-10-28T09:00:00-04:00") }),
-      p({ id: 4, dias_sem_movimentacao: null }),
-      p({ id: 5, dias_uteis: 12, dias_sem_movimentacao: 12, ultima: ultima("2026-10-10T10:00:00-04:00") }),
-    ];
-    expect(ordenar(lista).map(x => x.id)).toEqual([5, 2, 1, 3, 4]);
-    expect(lista.map(x => x.id)).toEqual([1, 2, 3, 4, 5]);   // não mexe na lista de entrada
   });
 
   // issue #512: histórico do processo
@@ -140,14 +124,15 @@ describe("siga", () => {
     expect(tituloDoEvento(null)).toBe("");
   });
 
-  it("seções por categoria na ordem fixa, cada uma do mais parado ao menos; a vazia não aparece (#663)", () => {
+  it("seções por categoria na ordem fixa, cada uma na ordem do servidor, sem refazer a conta; a vazia não aparece (#663, #861)", () => {
+    // a ordem da lista e' a do servidor (`siga._mais_parado`); aqui, de proposito, o contrario dos dias: a tela segue
     const lista = [
       p({ id: 1, categoria: "outros", dias_sem_movimentacao: 1 }), p({ id: 2, categoria: "medicoes", dias_sem_movimentacao: 2 }),
       p({ id: 3, categoria: "outros", dias_sem_movimentacao: 9 }), p({ id: 4, categoria: "medicoes", dias_sem_movimentacao: 7 }),
       p({ id: 5, categoria: "aditivos", dias_sem_movimentacao: 30 }),
     ];
     expect(porCategoria(lista).map(s => [s.rotulo, s.processos.map(x => x.id)])).toEqual(
-      [["Medições", [4, 2]], ["Aditivos", [5]], ["Outros", [3, 1]]]);
+      [["Medições", [2, 4]], ["Aditivos", [5]], ["Outros", [1, 3]]]);
     expect(porCategoria([])).toEqual([]);
   });
 

@@ -9,8 +9,8 @@ pela mesma funcao e sem mudar nada nela:
 - Em aberto: o grupo do contratante na pagina Em aberto (`a_receber.a_receber`), o mesmo objeto, sem tirar nem por.
   O subtotal e' o da pagina Em aberto filtrada por ele (`?contratante=<chave>`), ao centavo. Com o total a receber
   nao liberado, so' a trava, como la'.
-- Processos no SIGA: os processos vivos das obras do contratante, na leitura da tela SIGA (`siga.painel`), do mais
-  parado para o menos (`siga._mais_parado`, a ordem da tela: dias sem movimentacao, #840). O encerrado continua so' na tela SIGA. Processo sem obra
+- Processos no SIGA: os processos vivos das obras do contratante, na leitura e na ordem da tela SIGA (`siga.painel`:
+  do mais parado para o menos, #840 e #861). O encerrado continua so' na tela SIGA. Processo sem obra
   nao tem contratante e nao entra em aba nenhuma. Quem nao abre a tela SIGA (a diretoria) nao recebe esta aba: a rota
   exige a permissao da tela (`api_contratante.py`).
 
@@ -68,15 +68,10 @@ def em_aberto(conn, chave: str, hoje: datetime.date | None = None) -> dict:
     return {"anos": r["anos"], "total_a_receber_liberado": True, "contratante": g, "quantidade": g["quantidade"] if g else 0}
 
 
-def _mais_parado(p: dict) -> tuple:
-    return siga._mais_parado({"dias_sem_movimentacao": p["dias_sem_movimentacao"], "situacao_tempo": p["situacao_tempo"],
-                              "ultima_em": p["ultima"]["data"] if p["ultima"] else None, "processo_id": p["id"]})
-
-
 def processos_no_siga(conn, chave: str, agora: datetime.datetime | None = None) -> dict:
     ids = obras_do(conn, chave)
     p = siga.painel(conn, agora)
-    processos = sorted((x for x in p["processos"] if x["contrato_id"] in ids and not x["encerrado"]), key=_mais_parado)
+    processos = [x for x in p["processos"] if x["contrato_id"] in ids and not x["encerrado"]]
     deles = {x["id"] for x in processos}
     # do robo, so' o que as linhas mostram: a rodada em andamento e o "nao lido" de cada processo da aba
     robo = {**p["robo"], "avisos": [a for a in p["robo"]["avisos"] if a["processo_id"] in deles]}

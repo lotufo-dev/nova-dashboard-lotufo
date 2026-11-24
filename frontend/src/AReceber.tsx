@@ -160,11 +160,14 @@ function CabecaDoGrupo({ g, aberto, alternar, id }: { g: ContratanteAReceber; ab
   );
 }
 
+/** O grupo e' o par (nome, chave) que o servidor manda (#864): dois contratantes de mesmo nome sao dois grupos. */
+const idDoGrupo = (g: ContratanteAReceber) => `${g.contratante}|${g.chave ?? ""}`;
+
 export function Tabela({ grupos, recolhidos, ir }: { grupos: ContratanteAReceber[]; recolhidos: boolean; ir: Ir }) {
   const [abertos, setAbertos] = useState<ReadonlySet<string>>(() => new Set());
-  const alternar = (nome: string) => setAbertos(a => {
+  const alternar = (grupo: string) => setAbertos(a => {
     const novo = new Set(a);
-    if (!novo.delete(nome)) novo.add(nome);
+    if (!novo.delete(grupo)) novo.add(grupo);
     return novo;
   });
   return (
@@ -179,11 +182,11 @@ export function Tabela({ grupos, recolhidos, ir }: { grupos: ContratanteAReceber
         </thead>
         {grupos.map((g, i) => {
           const id = `arc-grupo-${i}`;
-          const aberto = !recolhidos || abertos.has(g.contratante);
+          const aberto = !recolhidos || abertos.has(idDoGrupo(g));
           return (
-            <Fragment key={g.contratante}>
+            <Fragment key={idDoGrupo(g)}>
               <tbody>
-                <CabecaDoGrupo g={g} aberto={aberto} alternar={recolhidos ? () => alternar(g.contratante) : null} id={id} />
+                <CabecaDoGrupo g={g} aberto={aberto} alternar={recolhidos ? () => alternar(idDoGrupo(g)) : null} id={id} />
               </tbody>
               {/* as linhas do grupo, que o botao do nome abre e fecha (`aria-controls`) */}
               <tbody id={id}>
@@ -310,7 +313,7 @@ export default function AReceber({ busca = {}, ir }: { busca?: Busca; ir: Ir }) 
             Todos <span className="escolha__n num">{tudo.quantidade.toLocaleString("pt-BR")}</span>
           </Link>
           {opcoes.map(g => (
-            <Link key={g.contratante} className="escolha" para={AQUI} busca={{ contratante: g.chave ?? "" }} ir={ir}
+            <Link key={idDoGrupo(g)} className="escolha" para={AQUI} busca={{ contratante: g.chave ?? "" }} ir={ir}
               aria-current={um === g ? "true" : undefined}>
               {g.contratante} <span className="escolha__n num">{g.quantidade.toLocaleString("pt-BR")}</span>
             </Link>

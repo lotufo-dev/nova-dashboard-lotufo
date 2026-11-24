@@ -200,11 +200,14 @@ export function IconeTraco(p: Props) {
 }
 
 /* Menu em areas (#814): as paginas que nasceram com ele. */
-/* Em aberto (a pagina das notas que ainda nao foram pagas; o endereco segue /a-receber): a nota, com o pe' picotado.
-   Antes era uma seta descendo ate' uma linha, quase o IconeBaixar dos botoes de exportar (19/11/2026). */
+/* Em aberto (a pagina das notas que ainda nao foram pagas; o endereco segue /a-receber): a nota com o pe' picotado e o
+   relogio dentro, o que espera o pagamento. Sem linhas de texto, para nao se confundir com os icones dos documentos
+   (Certidoes, Regularidade mensal), que sao folhas com linhas e o canto dobrado: a 16 px o que separa os dois e' o
+   circulo no meio. Antes era uma seta descendo ate' uma linha, quase o IconeBaixar (19/11/2026), e depois uma nota com
+   tres linhas, parecida com a de Certidoes (23/11/2026). */
 export function IconeAReceber(p: Props) {
   return <Svg {...p}>
-    <path d="M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5-2 1.5z" /><path d="M9 8h6" /><path d="M9 12h6" /><path d="M9 16h3" />
+    <path d="M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5-2 1.5z" /><circle cx="12" cy="10.5" r="3.5" /><path d="M12 8.6v2l1.3.9" />
   </Svg>;
 }
 

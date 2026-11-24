@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from app import avisos, fila_medicoes, inicio as pagina_inicio, medicoes
 from app.api_auth import conexao
 from app.api_medicoes import MAX_INT64
-from app.permissoes import exigir
+from app.permissoes import VER_SIGA, exigir, tem
 
 router = APIRouter()
 
@@ -36,17 +36,21 @@ def andamento(contrato_id: int | None = Query(None, ge=1, le=MAX_INT64), estado:
 
 @router.get("/api/medicoes/resumo")
 def resumo(mes: str | None = Query(None, pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$"),
-           _=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
+           usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+           conn: sqlite3.Connection = Depends(conexao)):
     """Medicoes (09/10/2026; redesenho 2026-11, #507): contagens, linhas em andamento (passo e com quem) e as obras
     ativas, com `sem_no_mes` para a competencia `mes` (AAAA-MM; padrao, o mes de hoje). #643: o `quadro` da
-    competencia (uma linha por obra, um passo por coluna) e as medicoes abertas dos meses `anteriores`."""
-    return medicoes.resumo(conn, mes=mes)
+    competencia (uma linha por obra, um passo por coluna) e as medicoes abertas dos meses `anteriores`. #853: a
+    posicao do processo no SIGA, em cada passo do quadro, so' para quem tem `ver_siga` (a regra unica do SIGA)."""
+    return medicoes.resumo(conn, mes=mes, com_siga=tem(usuario["perfil"], VER_SIGA))
 
 
 @router.get("/api/medicoes/fila")
 def fila(mes: str | None = Query(None, pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$"),
-         _=Depends(exigir("ver_paineis", com_csrf=False)), conn: sqlite3.Connection = Depends(conexao)):
+         usuario: dict = Depends(exigir("ver_paineis", com_csrf=False)),
+         conn: sqlite3.Connection = Depends(conexao)):
     """Tela Medicoes como fila de trabalho (issue #805): a competencia `mes` (AAAA-MM; padrao, o mes de hoje) em tres
     vistas: a fila por quem tem de agir, o quadro do mes por contratante e os meses anteriores que pedem acao
-    (`fila_medicoes.fila`). So' leitura, para todo perfil que ve os paineis."""
-    return fila_medicoes.fila(conn, mes=mes)
+    (`fila_medicoes.fila`). So' leitura, para todo perfil que ve os paineis; a posicao do processo no SIGA, no quadro,
+    so' para quem tem `ver_siga` (#853)."""
+    return fila_medicoes.fila(conn, mes=mes, com_siga=tem(usuario["perfil"], VER_SIGA))
