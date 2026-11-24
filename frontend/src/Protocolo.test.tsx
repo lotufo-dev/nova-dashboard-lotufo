@@ -424,6 +424,24 @@ describe("Protocolo", () => {
       expect(within(linha).getByRole("link", { name: "Abrir no SIGA" })).toBeTruthy();
     });
 
+    it("zero dias sem movimentação, em andamento: “menos de 1 dia útil”, o texto do quadro do SIGA (#860)", async () => {
+      // a ultima movimentacao caiu no fim de semana depois do ultimo dia util: o servidor manda zero
+      tela({ ...ENVIADO, siga: { ...SIGA, setor: "COFIN", com_quem: "Fulano", dias_uteis: 3, dias_sem_movimentacao: 0,
+        situacao_tempo: "andamento", lido_em: "2026-10-28T15:00:00+00:00" } });
+      expect(await screen.findByText("No SIGA: COFIN · com Fulano · sem movimentação há menos de 1 dia útil")).toBeTruthy();
+      expect(screen.queryByText(/0 dias úteis/)).toBeNull();
+    });
+
+    it("andou hoje e sobrestado: a palavra no lugar dos dias, como no quadro do SIGA", async () => {
+      tela({ ...ENVIADO, siga: { ...SIGA, setor: "COFIN", dias_uteis: 0, dias_sem_movimentacao: 0,
+        situacao_tempo: "feito", lido_em: "2026-10-28T15:00:00+00:00" } });
+      expect(await screen.findByText("No SIGA: COFIN · andou hoje")).toBeTruthy();
+      cleanup();
+      tela({ ...ENVIADO, siga: { ...SIGA, setor: "COFIN", dias_uteis: 30, dias_sem_movimentacao: 30,
+        situacao_tempo: "sobrestado", lido_em: "2026-10-28T15:00:00+00:00" } });
+      expect(await screen.findByText("No SIGA: COFIN · sobrestado")).toBeTruthy();
+    });
+
     it("na caixa de entrada não há “com quem”, e um dia útil fica no singular", async () => {
       tela({ ...ENVIADO, siga: { ...SIGA, setor: "GABIN", dias_uteis: 1, dias_sem_movimentacao: 1, situacao_tempo: "andamento",
         lido_em: "2026-10-28T15:00:00+00:00" } });
