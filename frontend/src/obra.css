@@ -50,8 +50,6 @@
 /* o estado da obra que nao tem prazo correndo (paralisada, em encerramento, encerrada): palavras, nao numero */
 .obra-prazo__numero--estado { font-size: var(--texto-valor-menor); align-items: baseline; }
 /* as linhas do tempo dentro do painel: sem o respiro lateral de quando eram um cartao */
-.obra-prazo .lt { padding: var(--espaco-mini) 0 var(--espaco-p); }
-.obra-prazo .lt + .lt { border-top: var(--borda-linha); padding-top: var(--espaco-p); }
 .obra-prazo .lt__titulo { align-items: center; min-height: var(--altura-contador); margin-bottom: var(--espaco-gg); }
 .obra-prazo .lt__trilho { height: var(--altura-barra-etapa); }
 .obra-prazo .lt__feito { background: var(--cor-barra-recebido); }
@@ -92,13 +90,9 @@
 
 /* ------------------------------------------------------------ as secoes (abas): a faixa na pagina e os paineis embaixo */
 .obra-secoes { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--espaco-entre-blocos); min-width: 0; }
-.obra-secoes .abas--obra { padding: 0; border-bottom: var(--regua-secao); }
-.obra-secoes .abas--obra .aba { height: var(--alvo-minimo); padding: 0 var(--espaco-m); font-size: var(--texto-corpo); }
-.obra-secoes .abas--obra .aba:first-child { padding-left: 0; }
-.obra-secoes .painel-aba { padding: 0; gap: var(--espaco-entre-blocos); }
+/* a faixa de abas (.abas--obra) e o painel da aba (.painel-aba) sao de tokens.css; os paineis da aba levam a sombra da
+   pagina e o que mora dentro de outro painel segue sem ela */
 .obra-secoes .pilha { gap: var(--espaco-entre-blocos); }
-/* os paineis da aba sao paineis da pagina: voltam a ter a sombra; o que mora dentro de outro painel segue sem ela */
-.obra-secoes .painel-aba > .cartao, .obra-secoes .painel-aba > .pilha > .cartao { box-shadow: var(--sombra-painel); }
 .obra-secoes .cartao .cartao { box-shadow: none; }
 .obra-secoes .medicoes__acoes { justify-content: flex-start; }
 .obra-secoes .medicoes__iniciar { max-width: 100%; height: auto; min-height: var(--alvo-minimo); padding-top: var(--espaco-pp); padding-bottom: var(--espaco-pp); white-space: normal; text-align: left; }
@@ -163,7 +157,7 @@
   .obra-agora__lista { grid-template-columns: minmax(0, 1fr); padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
   .obra-agora__lista > div + div { border-left: 0; border-top: var(--borda-linha); padding: var(--espaco-p) 0 var(--espaco-mini); }
   .obra .cartao__cabeca { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
-  .obra-secoes .abas--obra .aba { padding: 0 var(--espaco-p); font-size: var(--texto-meta); }
+  .obra .abas--obra { --aba-respiro: var(--espaco-p); --aba-letra: var(--texto-meta); }
 
   /* a lista de medicoes vira um bloco por medicao, com o rotulo da coluna ao lado do valor */
   .obra-medicoes, .obra-medicoes :is(tbody, tr, td) { display: block; width: 100%; }
