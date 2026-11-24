@@ -291,20 +291,17 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                           <h3>Anexar regularidade</h3>
                           {erroReg && <Falha>{erroReg}</Falha>}
                           <div className="form-inline">
-                            <div className="campo">
-                              <label className="btn btn--pequeno espelho__anexar">
-                                <span className="arquivo-nome" title={arquivoReg?.name}>{arquivoReg ? arquivoReg.name : "Escolher PDF"}</span>
-                                <span className="sr-only"> da regularidade de {e.entidade}</span>
-                                <input key={chaveReg} id="reg-arquivo" type="file" accept="application/pdf" className="espelho__arquivo"
-                                  {...(erroArquivoReg ? { "aria-invalid": true as const, "aria-describedby": "reg-arquivo-erro" } : {})}
-                                  onChange={ev => {
-                                    const f = ev.currentTarget.files?.[0] ?? null;
-                                    setArquivoReg(f);
-                                    setCompReg((f && competenciaDoNome(f.name)) || compReg);
-                                  }} />
-                              </label>
-                              <ErroCampo id="reg-arquivo-erro" erro={erroArquivoReg} />
-                            </div>
+                            <label className="btn btn--pequeno espelho__anexar">
+                              <span className="arquivo-nome" title={arquivoReg?.name}>{arquivoReg ? arquivoReg.name : "Escolher PDF"}</span>
+                              <span className="sr-only"> da regularidade de {e.entidade}</span>
+                              <input key={chaveReg} id="reg-arquivo" type="file" accept="application/pdf" className="espelho__arquivo"
+                                {...(erroArquivoReg ? { "aria-invalid": true as const, "aria-describedby": "reg-arquivo-erro" } : {})}
+                                onChange={ev => {
+                                  const f = ev.currentTarget.files?.[0] ?? null;
+                                  setArquivoReg(f);
+                                  setCompReg((f && competenciaDoNome(f.name)) || compReg);
+                                }} />
+                            </label>
                             <div className="campo">
                               <label className="campo__rotulo" htmlFor="reg-comp">Competência</label>
                               <CampoCompetencia id="reg-comp" value={compReg ?? e.regularidade.esperada} onChange={setCompReg} />
@@ -314,6 +311,8 @@ export default function DocumentosEmpresa({ usuario, id, aba = "certidoes", orig
                             </button>
                             <button type="button" className="btn btn--pequeno" disabled={gravandoReg} onClick={limparReg}>Limpar</button>
                           </div>
+                          {/* abaixo da fileira: dentro dela a caixa alargava o botao do PDF e jogava a competencia para baixo */}
+                          <ErroCampo id="reg-arquivo-erro" erro={erroArquivoReg} />
                         </form>
                       )}
                       <div className="doc-reg__bloco">

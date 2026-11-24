@@ -137,7 +137,7 @@ export default function RegistrarFora({ envios, medicaoId, aoFechar, aoFeito, ao
   return (
     <Janela titulo="Registrar envio feito fora do sistema" aoFechar={fechar}>
       <form className="pilha" onSubmit={registrar} noValidate>
-        <div className="form-inline">
+        <div className="form-inline porfora__linha">
           <div className="campo">
             <label className="campo__rotulo" htmlFor="porfora-data">Data do envio (obrigatória)</label>
             <input id="porfora-data" type="date" required autoFocus className="entrada--media" value={data} max={hojeLocal()}

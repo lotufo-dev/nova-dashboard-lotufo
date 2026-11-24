@@ -108,7 +108,8 @@
 .notas-v3 .nota-justificativa textarea { width: 100%; max-width: none; box-sizing: border-box; border-color: var(--nota-campo); border-radius: var(--raio-canto); }
 .notas-v3 .nota-justificativa .campo__nota { font-size: var(--texto-meta); }
 /* documentos complementares (09/10/2026): lista + area de arrastar e soltar */
-.notas-v3 .nota-complementares { display: flex; flex-direction: column; gap: 8px; padding-top: 16px; border-top: 1px solid var(--cor-linha); }
+.notas-v3 .nota-complementares { display: flex; flex-direction: column; gap: 8px; padding-top: 16px; border-top: 1px solid var(--cor-linha);
+  container-type: inline-size; }
 .notas-v3 .nota-complementares .campo__rotulo { font-size: var(--texto-meta); font-weight: 500; color: var(--cor-tinta); }
 .notas-v3 .nota-complementares .campo__nota { font-size: var(--texto-meta); }
 .notas-v3 .nota-complementares__lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -118,7 +119,17 @@
   min-height: 64px; padding: 12px; border: 1.5px dashed var(--cor-borda-controle); border-radius: var(--raio-canto); color: var(--cor-texto-secundario);
   transition: border-color .15s, background .15s; }
 .notas-v3 .nota-complementares__subtitulo { margin-top: 8px; }
-.notas-v3 .nota-complementares__link { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+/* "Registrar envio feito fora do sistema": a fileira da data, do oficio e do processo (sem botao) alinha por cima, e o
+   erro da data (issue #11) fica na largura do campo, sem alargar a coluna nem tirar os outros dois da linha */
+.form-inline.porfora__linha, .janela .form-inline.porfora__linha { align-items: flex-start; }
+.porfora__linha > .campo > .aviso { width: 0; min-width: 100%; }
+/* a fileira alinha por cima e o botao desce a altura do rotulo (mais o vao do campo): a mensagem de erro embaixo de um
+   campo (issue #11) cresce para baixo sem tirar o outro campo e o botao da linha das entradas. Abaixo de 640 px a
+   fileira quebra (200 + 280 + o botao) e o botao vai sozinho para baixo, sem a descida */
+.notas-v3 .nota-complementares__link { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; }
+@container (min-width: 640px) {
+  .notas-v3 .nota-complementares__link > .btn { margin-top: calc(var(--texto-meta) * var(--entrelinha) + 4px); }
+}
 .notas-v3 .nota-complementares__link .campo { display: flex; flex-direction: column; gap: 4px; flex: 1 1 200px; min-width: 0; margin: 0; }
 .notas-v3 .nota-complementares__link .nota-complementares__url { flex: 2 1 280px; }
 .notas-v3 .nota-complementares__link input { width: 100%; box-sizing: border-box; }
