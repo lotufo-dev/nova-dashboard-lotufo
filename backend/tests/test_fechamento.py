@@ -1610,6 +1610,30 @@ def test_lista_de_medicoes_da_obra_calcula_a_base_da_cota_uma_vez_e_responde_com
     assert next(m for m in medicoes.listar(c, k) if m["id"] == vazia)["pagamento_cota"]["total_centavos"] == 93_001
 
 
+def test_medicao_de_obra_propria_nao_le_as_notas_da_cota_em_consorcio_dentro_nem_fora_da_lista(exemplo, monkeypatch):
+    """Issue #825 (revisao da PR #891): a medicao fora de consorcio sai da escolha da cota antes das notas, como sempre:
+    nem o detalhe dela sozinho nem a lista da obra propria consultam as notas do sistema inteiro
+    (`_notas_por_medicao`). Na lista da obra em consorcio, elas sao lidas uma vez so'."""
+    c, k = exemplo
+    p = _propria(c)
+    da_casa = medir(c, p, 1, "2026-09", "protocolada", 500_001, aprovado=500_001, protocolo="2026-10-10")
+    nota(c, 500_001, [da_casa], coligada=EMPRESA)
+    medir(c, p, 2, "2026-10", "protocolada", 300_001, aprovado=300_001, protocolo="2026-11-10")
+    cons = medir(c, k, 1, "2026-09", "protocolada", 2_000_001, aprovado=2_000_001, protocolo="2026-10-02")
+    nota(c, 999_999, [cons], coligada=EMPRESA, centro="5.001.001", titulos=[(929_999, 0, 0)])
+    medir(c, k, 2, "2026-10", "protocolada", 2_400_003, aprovado=2_400_003, protocolo="2026-10-06")
+
+    chamadas = []
+    original = fechamento._notas_por_medicao
+    monkeypatch.setattr(fechamento, "_notas_por_medicao", lambda conn, ids: chamadas.append(1) or original(conn, ids))
+    assert medicoes.detalhe(c, da_casa)["pagamento_cota"] is None
+    assert len(medicoes.listar(c, p)) == 2
+    assert chamadas == []
+    assert medicoes.detalhe(c, cons)["pagamento_cota"]["total_centavos"] == 929_999 and len(chamadas) >= 1
+    chamadas.clear()
+    assert len(medicoes.listar(c, k)) == 2 and len(chamadas) == 1
+
+
 # --- issue #755 (docs/adr/0006): nota e titulo excluidos no RM ficam fora de todo numero do Fechamento ------------
 
 def _titulo(c, numero, k):

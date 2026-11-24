@@ -276,13 +276,14 @@ def notas_da_cota_em_consorcio(conn, medicao_id: int) -> tuple[list[dict], list[
     e' a leitura de `_recebimento`: nada em aberto na nota (os titulos baixados, faltando ate' a tolerancia, ou a
     fatura do consorcio de medicao recebida; a nota da empresa, so' pela baixa dos titulos dela). None quando a
     medicao nao e' de consorcio (ou ainda nao mede): ali o passo Pagamento segue a regra dele."""
-    por_id, notas = _base_da_cota(conn)
+    por_id = _medicoes_por_id(conn)
     m = por_id.get(medicao_id)
     if m is None or not m["consorcio"] or m["coligada_empresa"] in (None, m["coligada"]):
         return None
-    # copia rasa de cada nota: a escolha devolve as da fatura preterida como vieram, e a base pode ser a da lista
+    # as notas so' depois da saida cedo: a medicao fora de consorcio nao paga a consulta das notas do sistema inteiro.
+    # Copia rasa de cada nota: a escolha devolve as da fatura preterida como vieram, e a base pode ser a da lista
     # inteira (`base_da_cota_na_leitura`), que outra medicao ainda vai ler
-    contam, fora = _notas_da_conta(dict(m), [dict(x) for x in notas.get(medicao_id, [])])
+    contam, fora = _notas_da_conta(dict(m), [dict(x) for x in _notas_da_base(conn, por_id).get(medicao_id, [])])
     for x in contam:
         x["quitada"] = _recebimento(m, x, x["cota"])[1] == 0
     return contam, fora
@@ -309,18 +310,34 @@ def base_da_cota_na_leitura(conn):
             _BASE_DA_COTA.reset(marca)
 
 
-def _base_da_cota(conn) -> tuple[dict[int, dict], dict[int, list[dict]]]:
-    """(as medicoes no medido por id, as notas de cobranca ligadas a cada uma): a base de `notas_da_cota_em_consorcio`.
-    As notas sao as de todas as medicoes, como a pagina le: o valor da nota ligada a mais de uma medicao depende dos
-    outros vinculos dela (`_notas_por_medicao`)."""
+def _memo_da_base(conn) -> dict | None:
     memo = _BASE_DA_COTA.get()
-    if memo is not None and memo["conn"] is conn and "base" in memo:
-        return memo["base"]
-    ms = _medicoes(conn)
-    base = ({x["id"]: x for x in ms}, _notas_por_medicao(conn, {x["id"] for x in ms}))
-    if memo is not None and memo["conn"] is conn:
-        memo["base"] = base
-    return base
+    return memo if memo is not None and memo["conn"] is conn else None
+
+
+def _medicoes_por_id(conn) -> dict[int, dict]:
+    """As medicoes no medido por id (`_medicoes`): a primeira parte da base de `notas_da_cota_em_consorcio`, que toda
+    medicao le para saber se e' de consorcio."""
+    memo = _memo_da_base(conn)
+    if memo is not None and "medicoes" in memo:
+        return memo["medicoes"]
+    por_id = {x["id"]: x for x in _medicoes(conn)}
+    if memo is not None:
+        memo["medicoes"] = por_id
+    return por_id
+
+
+def _notas_da_base(conn, por_id: dict[int, dict]) -> dict[int, list[dict]]:
+    """As notas de cobranca ligadas a cada medicao no medido (`_notas_por_medicao`): a segunda parte da base, so' para
+    a medicao de consorcio. As de todas as medicoes, como a pagina le: o valor da nota ligada a mais de uma medicao
+    depende dos outros vinculos dela."""
+    memo = _memo_da_base(conn)
+    if memo is not None and "notas" in memo:
+        return memo["notas"]
+    notas = _notas_por_medicao(conn, set(por_id))
+    if memo is not None:
+        memo["notas"] = notas
+    return notas
 
 
 def _medicoes(conn) -> list[dict]:
