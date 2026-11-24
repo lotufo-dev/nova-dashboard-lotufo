@@ -361,9 +361,16 @@ describe("SigaPagina", () => {
     const largura = (col: string) => Number(new RegExp(`\\.sg__c-${col}\\s*\\{\\s*width:\\s*(\\d+)%`).exec(css)?.[1]);
     const colunas = ["proc", "contr", "onde", "quem", "setor", "parado", "ultima", "tipo", "seta"];
     expect(colunas.reduce((soma, c) => soma + largura(c), 0)).toBe(100);
-    expect(largura("parado")).toBeGreaterThanOrEqual(14);     // o selo "25 dias úteis" em duas linhas no painel de ~724 px
-    expect(largura("contr")).toBeGreaterThanOrEqual(10);      // "Contratante" no cabeçalho, separada em sílabas, sem encostar na vizinha
-    expect(largura("quem")).toBeGreaterThanOrEqual(11);       // um nome sem partir a 1024 px
+    expect(largura("parado")).toBeGreaterThanOrEqual(14);     // o selo "25 dias úteis" em duas linhas e "movimentação" sem separar
+    expect(largura("tipo")).toBeGreaterThanOrEqual(13);       // "Recebimento" e "movimentação" inteiras
+    expect(largura("ultima")).toBeGreaterThanOrEqual(12);     // "movimentação" inteira no cabeçalho
+    expect(largura("contr")).toBeGreaterThanOrEqual(10);      // "Contratante" inteira no cabeçalho
+    expect(largura("onde")).toBeGreaterThanOrEqual(12);       // a coluna Setor: a sigla "NUCLEO-ADM" ou "GSAGPM" sem partir no meio (#859)
+    expect(largura("quem")).toBeGreaterThanOrEqual(9);        // um nome sem partir a 1024 px
+    // #859: o cabeçalho não é separado em sílabas, a sigla do setor só quebra no hífen
+    expect(css).not.toMatch(/\.sg__tabela thead th[^{]*\{[^}]*hyphens:\s*auto/);
+    expect(css).toMatch(/\.sg__tabela thead th\s*\{[^}]*hyphens:\s*manual;\s*overflow-wrap:\s*normal/);
+    expect(css).toMatch(/td\[data-rotulo="Setor"\]\s*\{[^}]*overflow-wrap:\s*normal/);
     mostrar(painel([ALFA]));
     const alfa = await screen.findByRole("row", { name: /Obra Alfa/ });
     expect(within(alfa).getByText("01/10/2026").className).toBe("num");
