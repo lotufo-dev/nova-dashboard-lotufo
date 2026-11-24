@@ -20,7 +20,6 @@ PRAZO_BREVE = 15                  # vence em breve ate' aqui; e' tambem o corte 
 MUDANCA_RECENTE = 7               # dias corridos em que a mudanca de uma favorita fica na Triagem
 HORA_DA_LEITURA = 10              # antes dessa hora (Cuiaba) a leitura de hoje ainda nao e' esperada
 FOLGA_FUTURO = datetime.timedelta(minutes=10)
-ORGAOS_SEM_GRUPO = "Outros órgãos"
 
 LEITURA_NO_FUTURO = "Data da leitura no futuro: confira o relógio da máquina do radar"
 LEITURA_ANTIGA = "Leitura mais antiga que a última gravada"
@@ -151,7 +150,7 @@ def leitura(conn) -> dict:
 
 # --- as linhas das telas -----------------------------------------------------------------------------------
 
-_DA_LINHA = ("orgao", "sigla_orgao", "grupo_orgao", "esfera", "municipio", "uf", "cidade", "km", "edital",
+_DA_LINHA = ("orgao", "sigla_orgao", "grupo_orgao", "orgao_de_interesse", "esfera", "municipio", "uf", "cidade", "km", "edital",
              "modalidade", "objeto", "tipo_obra", "valor_centavos", "valor_rotulo", "situacao", "data_publicacao",
              "data_sessao", "hora_sessao", "primeira_vez", "link", "portal", "fontes", "recomendada")
 
@@ -188,6 +187,7 @@ def _favorita(fav, dados: dict, hoje: datetime.date, encerrada: bool) -> dict:
     mudancas.sort(key=lambda m: m["data"], reverse=True)
     return {"desde": fav["desde"], "etapa": etapa, "etapa_rotulo": ROTULO_ETAPA[etapa],
             "etapa_do_dossie": bool(dossie and dossie.get("etapa")), "dossie": (dossie or {}).get("pasta"),
+            "selos": (dossie or {}).get("selos") or [],
             "prazos": prazos, "proximo_prazo": next((p for p in prazos if p["dias_uteis"] >= 0), None),
             "mudancas": mudancas}
 
@@ -253,14 +253,14 @@ def triagem(conn) -> dict:
         abertas = [(nova, l) for nova, l in listadas if not l["encerrada"]]
         recomendadas = [l for _, l in abertas if l["recomendada"] and l["chave"] not in chaves_favoritas]
         recomendadas.sort(key=lambda l: (-l["recomendada"]["nota"], -(l["valor_centavos"] or 0),
-                                         l["km"] if l["km"] is not None else 9999,
+                                         l["recomendada"]["km"] if l["recomendada"]["km"] is not None else 9999,
                                          l["dias_uteis"] if l["dias_uteis"] is not None else 9999, l["chave"]))
         atencao = [l for l in favs if _pede_atencao(l, hoje)]
         atencao.sort(key=lambda l: (l["favorita"]["proximo_prazo"] or {}).get("dias_uteis", 9999))
         novas = [l for nova, l in abertas if nova]
         por_orgao: dict[str, int] = {}
         for l in novas:
-            if l["grupo_orgao"] and l["grupo_orgao"] != ORGAOS_SEM_GRUPO:
+            if l["orgao_de_interesse"]:
                 por_orgao[l["grupo_orgao"]] = por_orgao.get(l["grupo_orgao"], 0) + 1
         return {"leitura": leitura(conn),
                 "contagens": {"recomendadas": len(recomendadas), "favoritas": len(favs), "novas": len(novas),

@@ -29,8 +29,8 @@ def certame(chave=CHAVE_A, resumo="a1b2c3d4e5f60718", **outros):
         "data_publicacao": "2026-11-10", "data_sessao": "2026-12-10", "hora_sessao": "09:00",
         "primeira_vez": "2026-11-11", "link": "https://exemplo.com.br/editais/1", "portal": "Site do órgão",
         "modo_disputa": "Aberto", "srp": False, "fontes": ["PNCP"], "nova": True, "grande_vulto": False,
-        "recomendada": {"nota": 7, "pontos": {"valor": 3, "distancia": 2, "acervo": 2},
-                        "motivo": "concorrência · R$ 123,4 mi · Exemplo · 120 km · 2 atestados"},
+        "recomendada": {"nota": 7, "pontos": {"valor": 3, "distancia": 2, "acervo": 2}, "km": 120,
+                        "cidade": "Exemplo", "motivo": "concorrência · R$ 123,4 mi · Exemplo · 120 km · 2 atestados"},
         "historico": [{"data": "2026-11-11", "fonte": "pncp", "texto": "visto pela primeira vez", "rotulo": None}],
         "espelhos": [], "dossie": None,
     }

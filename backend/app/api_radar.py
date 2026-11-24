@@ -70,6 +70,9 @@ class RecomendadaIn(BaseModel):
     nota: int = Field(ge=0, le=60)
     pontos: PontosIn
     motivo: str = Field(max_length=600)
+    # o local da obra pelo radar: o municipio do orgao ou, na obra do Estado e da Uniao, o que o objeto cita
+    km: int | None = Field(default=None, ge=0, le=10000)
+    cidade: str = Field(default="", max_length=120)
 
 
 class EventoIn(BaseModel):
@@ -95,6 +98,7 @@ class PrazoIn(BaseModel):
 class DossieIn(BaseModel):
     pasta: str = Field(max_length=200)
     etapa: Etapa | None = None
+    selos: list[str] = Field(default_factory=list, max_length=5)   # o que o dossie diz alem da etapa ("Diretoria: interesse")
     prazos: list[PrazoIn] = Field(default_factory=list, max_length=12)
 
 
@@ -105,6 +109,7 @@ class CertameIn(BaseModel):
     unidade: str = Field(default="", max_length=300)
     sigla_orgao: str = Field(default="", max_length=60)
     grupo_orgao: str = Field(default="", max_length=60)
+    orgao_de_interesse: bool = False                      # um dos orgaos que o dono acompanha de perto
     esfera: str | None = Field(default=None, max_length=20)
     municipio: str = Field(default="", max_length=120)
     uf: str = Field(default="", max_length=2)

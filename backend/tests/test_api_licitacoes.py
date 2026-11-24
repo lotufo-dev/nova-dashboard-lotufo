@@ -8,7 +8,7 @@ from tests.test_api_radar import CHAVE_A, CHAVE_B, UTC, certame, com_token, fech
 
 SENHA = "senha-forte-123"
 CHAVE_C = "98765432000198-1-000003/2026"
-DOSSIE = {"pasta": "2026-CE-001-exemplo-pavimentacao", "etapa": "em_analise", "prazos": [
+DOSSIE = {"pasta": "2026-CE-001-exemplo-pavimentacao", "etapa": "em_analise", "selos": ["Diretoria: interesse"], "prazos": [
     {"codigo": "esclarecimento", "rotulo": "Esclarecimento", "data": "2026-11-27", "hora": None, "aviso": ""},
     {"codigo": "sessao", "rotulo": "Sessão", "data": "2026-12-10", "hora": "09:00", "aviso": ""}]}
 
@@ -114,29 +114,39 @@ def test_leitura_atrasada(client, com_token, monkeypatch, agora, lido_em, atrasa
 # --- triagem e favoritas ------------------------------------------------------------------------------------------
 
 def test_recomendadas_na_ordem_da_nota_sem_as_favoritas_e_sem_quem_saiu_da_lista(client, com_token):
-    def rec(nota):
-        return {"nota": nota, "pontos": {"valor": 3, "distancia": 2, "acervo": nota - 5}, "motivo": "inventado"}
+    def rec(nota, km=120):
+        return {"nota": nota, "pontos": {"valor": 3, "distancia": 2, "acervo": nota - 5}, "motivo": "inventado",
+                "km": km, "cidade": "Exemplo"}
     d = "11444777000161-1-000004/2026"
     e = "11444777000161-1-000005/2026"
     f = "11444777000161-1-000006/2026"
+    g = "11444777000161-1-000007/2026"
+    h = "11444777000161-1-000008/2026"
     mandar(client, certame(recomendada=rec(7)), certame(CHAVE_B, "b" * 16, recomendada=rec(9)),
            certame(CHAVE_C, "c" * 16, recomendada=rec(9), valor_centavos=None),
-           certame(d, "d" * 16, recomendada=None, grupo_orgao="SINFRA-MT", primeira_vez="2026-11-24"),
-           certame(e, "e" * 16, recomendada=rec(10)), certame(f, "f" * 16, recomendada=rec(10), nova=False))
-    fechar(client, [CHAVE_A, CHAVE_B, CHAVE_C, d, e, f], lido_em="2026-11-23T09:00:00-04:00")
+           certame(d, "d" * 16, recomendada=None, grupo_orgao="SINFRA-MT", orgao_de_interesse=True,
+                   primeira_vez="2026-11-24"),
+           certame(e, "e" * 16, recomendada=rec(10)), certame(f, "f" * 16, recomendada=rec(10), nova=False),
+           certame(g, "9" * 16, recomendada=rec(9, km=None), valor_centavos=None),
+           certame(h, "8" * 16, recomendada=rec(9, km=30), valor_centavos=None, km=900))
+    fechar(client, [CHAVE_A, CHAVE_B, CHAVE_C, d, e, f, g, h], lido_em="2026-11-23T09:00:00-04:00")
     # hoje: a `e` saiu da lista do radar; a `f` continua (recomendada mesmo fora das novas); a A virou favorita
-    fechar(client, [CHAVE_A, CHAVE_B, CHAVE_C, d, f], decisoes={"favoritas": [{"chave": CHAVE_A, "desde": "2026-11-24"}]})
+    fechar(client, [CHAVE_A, CHAVE_B, CHAVE_C, d, f, g, h],
+           decisoes={"favoritas": [{"chave": CHAVE_A, "desde": "2026-11-24"}]})
     _entrar(client, "diretoria")
     t = client.get("/api/licitacoes/triagem").json()
-    assert [l["chave"] for l in t["recomendadas"]] == [f, CHAVE_B, CHAVE_C]       # nota, depois o valor maior
+    # nota; depois o valor maior; depois o mais perto, pelo local da obra que o radar mandou; sem local, no fim
+    assert [l["chave"] for l in t["recomendadas"]] == [f, CHAVE_B, h, CHAVE_C, g]
     assert all(l["favorita"] is None for l in t["recomendadas"])
-    assert t["contagens"] == {"recomendadas": 3, "favoritas": 1, "novas": 4,
+    assert t["contagens"] == {"recomendadas": 5, "favoritas": 1, "novas": 6,
                               "novas_desde": {"desde": "2026-11-23", "quantas": 1},
                               "por_orgao": [{"orgao": "SINFRA-MT", "novas": 1}]}
     linha = t["recomendadas"][1]
     assert (linha["orgao"], linha["edital"], linha["valor_centavos"], linha["km"], linha["link"]) == (
         "Prefeitura Municipal de Exemplo", "CE 001/2026", 123456789, 120, "https://exemplo.com.br/editais/1")
-    assert linha["recomendada"]["nota"] == 9 and "historico" not in linha and "objeto_completo" not in linha
+    assert linha["recomendada"] == {"nota": 9, "pontos": {"valor": 3, "distancia": 2, "acervo": 4},
+                                    "motivo": "inventado", "km": 120, "cidade": "Exemplo"}
+    assert "historico" not in linha and "objeto_completo" not in linha
 
 
 def test_favorita_com_dossie_tem_a_etapa_os_prazos_e_as_mudancas(client, com_token):
@@ -159,11 +169,13 @@ def test_favorita_com_dossie_tem_a_etapa_os_prazos_e_as_mudancas(client, com_tok
         "2026-11-13", "em_analise", "Em análise", True, "2026-CE-001-exemplo-pavimentacao")
     assert [(p["codigo"], p["dias_uteis"], p["situacao"]) for p in fa["prazos"]] == [
         ("esclarecimento", 3, "critico"), ("sessao", 12, "breve")]
+    assert fa["selos"] == ["Diretoria: interesse"]
     assert fa["proximo_prazo"]["codigo"] == "esclarecimento"
     assert fa["mudancas"] == [{"data": "2026-11-20", "texto": "publicou adiamento", "rotulo": "Sessão adiada"}]
 
     fb = b["favorita"]
-    assert (fb["etapa"], fb["etapa_do_dossie"], fb["dossie"], fb["mudancas"]) == ("proposta_enviada", False, None, [])
+    assert (fb["etapa"], fb["etapa_do_dossie"], fb["dossie"], fb["selos"], fb["mudancas"]) == (
+        "proposta_enviada", False, None, [], [])
     assert [(p["codigo"], p["rotulo"], p["data"], p["situacao"]) for p in fb["prazos"]] == [
         ("sessao", "Sessão", "2027-03-01", None)]
 
