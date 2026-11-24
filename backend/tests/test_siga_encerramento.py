@@ -192,6 +192,23 @@ def test_proposta_de_medicao_pela_obra_e_pelo_numero_do_nome(conn, nome, esperad
     assert (proposta["id"] if proposta else None) == esperada
 
 
+@pytest.mark.parametrize("nome,esperado", [
+    ("Processo 2026 Medição da obra", None),             # #880: o fim do ano nao e' a 26ª
+    ("IC 517/2031 medicao final", None),                  # #880: o fim do instrumento nao e' a 31ª
+    ("Processo 2026 - 3ª Medição", (3, "execucao")),      # o ano antes nao atrapalha o numero que vem depois
+    ("7ª Medição - IC 517/2031", (7, "execucao")),
+    ("7 medicao", (7, "execucao")),
+    ("12ª Medição", (12, "execucao")),
+    ("Reajuste da 15ª Medição", (15, "reajuste")),
+    ("Reajuste do 15º medicao", (15, "reajuste")),
+    ("3ª Medição de Projeto", (3, "projeto")),
+    ("CT-099 - 8ª Medição", (8, "execucao")),
+    ("Aditivo de prazo", None),
+])
+def test_numero_da_medicao_no_nome_nao_le_numero_colado_a_outro(nome, esperado):
+    assert siga._medicao_do_nome(nome) == esperado
+
+
 def test_proposta_usa_a_obra_ja_escolhida_no_processo(conn):
     _obra_exemplo(conn)
     proc = [{"id": 1, "nome": "8ª Medição", "contrato_id": 9, "medicao_id": None, "protocolo_id": None}]

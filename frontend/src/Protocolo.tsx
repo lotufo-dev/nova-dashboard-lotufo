@@ -13,6 +13,7 @@ import { protocolosDa } from "./medicao";
 import { Link } from "./Link";
 import { fmtCompetencia, fmtDataHora } from "./tempo";
 import Selo from "./Selo";
+import { textoSemMovimentacao } from "./siga";
 import type { Situacao } from "./situacao";
 import Pendencias from "./Pendencias";
 import LiberarEnvio, { envioReservado, type Reserva } from "./LiberarEnvio";
@@ -198,9 +199,12 @@ function Cartao({ p, pecasCfg, podeEditar, aoMudar, marcado, aoMarcar }: {
 function NoSiga({ siga }: { siga?: SigaDoProtocolo | null }) {
   const dias = siga?.dias_sem_movimentacao ?? null;
   if (!siga || (!siga.link && dias === null && !siga.setor)) return null;
+  // #860: o tempo no texto do quadro do SIGA (`textoSemMovimentacao`): zero dias e' "menos de 1 dia útil"
+  const tempo = textoSemMovimentacao({ dias_sem_movimentacao: dias, hoje: siga.situacao_tempo === "feito" ? 1 : 0,
+    situacao_tempo: siga.situacao_tempo ?? null });
   const partes = [siga.setor, siga.com_quem && `com ${siga.com_quem}`,
-    siga.situacao_tempo === "sobrestado" ? "sobrestado" : siga.situacao_tempo === "feito" ? "andou hoje"
-      : dias === null ? null : `sem movimentação há ${dias} ${dias === 1 ? "dia útil" : "dias úteis"}`].filter(Boolean);
+    tempo === "—" ? null : siga.situacao_tempo === "sobrestado" || siga.situacao_tempo === "feito" ? tempo.toLowerCase()
+      : `sem movimentação há ${tempo}`].filter(Boolean);
   const selo = siga.situacao_tempo === "critico" ? <Selo situacao="critico">Crítico</Selo>
     : siga.situacao_tempo === "breve" ? <Selo situacao="breve">Atenção</Selo> : null;
   return (

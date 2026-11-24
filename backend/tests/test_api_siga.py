@@ -697,6 +697,58 @@ def test_perfil_sem_ver_siga_nao_le_o_siga(api, com_token, monkeypatch):
     assert r.status_code == 403 and "ver_siga" in r.json()["detail"] and "processos" not in r.json()
 
 
+def _medicao_no_pagamento_com_processo_vivo(cid):
+    """Medicao protocolada (passo Pagamento) na competencia 09/2026, com um processo do SIGA lido e parado no setor."""
+    conn = db.get_conn()
+    mid = conn.execute("INSERT INTO medicoes (contrato_id, numero, tipo, competencia, estado, valor_protocolado_centavos) "
+                       "VALUES (?, 41, 'execucao', '2026-09', 'protocolada', 12345)", (cid,)).lastrowid
+    pid = conn.execute("INSERT INTO siga_processos (codigo, medicao_id, categoria) VALUES ('PoS853', ?, 'medicoes')",
+                       (mid,)).lastrowid
+    conn.execute("INSERT INTO siga_leituras (processo_id, lido_em, situacao) VALUES "
+                 "(?, '2026-10-28 11:00:00', '1º Volume - Aguardando Andamento [COFIN, [X]]')", (pid,))
+    conn.execute("INSERT INTO siga_movimentacoes (processo_id, data, evento, at_lotacao) "
+                 "VALUES (?, '2026-10-19 10:00:00', 'Transferência', 'COFIN/ORGAO')", (pid,))
+    conn.commit(); conn.close()
+    return mid
+
+
+def _sem_siga_nos_passos(corpo):
+    """A resposta com o `siga` de todo passo do quadro anulado (o quadro de `resumo` e as linhas do de `fila`)."""
+    linhas = corpo["quadro"] if corpo["quadro"] and "passos" in corpo["quadro"][0] else \
+        [x for g in corpo["quadro"] for x in g["linhas"]]
+    for x in linhas:
+        for p in x["passos"]:
+            p["siga"] = None
+    return corpo
+
+
+def test_posicao_do_siga_no_quadro_das_medicoes_so_para_quem_tem_ver_siga(api, monkeypatch):
+    """Issue #853: a posicao do processo no SIGA (setor e tempo), no quadro de `/api/medicoes/resumo` e de
+    `/api/medicoes/fila`, e' leitura do SIGA e segue `ver_siga`. Com a permissao, o passo traz o setor; sem ela (a
+    diretoria sem `ver_siga`, simulada), o `siga` de todo passo vem nulo e o resto da resposta e' o mesmo, ao campo.
+    `/api/medicoes/andamento` nao traz posicao do SIGA e nao muda."""
+    cl, cid, _mid = api
+    mid = _medicao_no_pagamento_com_processo_vivo(cid)
+    _diretoria(cl)
+    rotas = ("/api/medicoes/resumo?mes=2026-09", "/api/medicoes/fila?mes=2026-09", "/api/medicoes/andamento")
+    com = {r: cl.get(r).json() for r in rotas}
+    # a medicao nova divide a linha da obra com a do fixture (no Envio da nota): o Pagamento mostra o processo dela
+    [linha] = [x for x in com[rotas[0]]["quadro"] if mid in {m["id"] for m in x["medicoes"]}]
+    assert {p["numero"]: p["siga"]["setor"] for p in linha["passos"] if p["siga"]} == {6: "COFIN"}
+    [linha] = [x for g in com[rotas[1]]["quadro"] for x in g["linhas"] if mid in {m["id"] for m in x["medicoes"]}]
+    assert {p["numero"]: p["siga"]["setor"] for p in linha["passos"] if p["siga"]} == {6: "COFIN"}
+    assert "siga" not in str(com[rotas[2]])
+
+    monkeypatch.setitem(permissoes.PERFIS, "diretoria", permissoes.PERFIS["diretoria"] - {permissoes.VER_SIGA})
+    sem = {r: cl.get(r) for r in rotas}
+    assert all(r.status_code == 200 for r in sem.values())
+    sem = {r: x.json() for r, x in sem.items()}
+    assert "COFIN" not in str(sem[rotas[0]]) and "COFIN" not in str(sem[rotas[1]])
+    assert sem[rotas[0]] == _sem_siga_nos_passos(com[rotas[0]])
+    assert sem[rotas[1]] == _sem_siga_nos_passos(com[rotas[1]])
+    assert sem[rotas[2]] == com[rotas[2]]
+
+
 def test_diretoria_le_o_siga_e_toda_rota_que_grava_nega_ela(api, com_token, schtasks):
     """Issue #829: a diretoria abre a tela (200, com os processos) e cada rota de escrita do SIGA pela tela responde 403,
     sem gravar nada: colar link, corrigir a categoria, ligar o link a' medicao e pedir leitura."""

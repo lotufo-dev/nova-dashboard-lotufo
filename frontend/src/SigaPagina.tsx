@@ -11,7 +11,7 @@ import { FINAIS, tituloMedicao } from "./medicao";
 import { useNomesDoCaminho } from "./nomesDoCaminho";
 import { ir, trocarBusca, type Busca } from "./rota";
 import {
-  CATEGORIAS, categoriaDaBusca, contagemPorTipo, dataHoraCurta, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, naoLidoDe, nomeDoProcesso, ordenar,
+  CATEGORIAS, categoriaDaBusca, contagemPorTipo, dataHoraCurta, detalheDoEvento, ehEntradaNoSetorAtual, filtrarMovimentacoes, naoLidoDe, nomeDoProcesso,
   periodoDe, porCategoria, roboAtivo, ROTULO_ENCERRADO, setorPessoa, situacaoDaLinha, situacaoDoBotao, tempoNoSetor, textoSemMovimentacao, tituloDoEvento, TIPOS, volumeDe,
   type Categoria, type LimitesSiga, type Movimentacao, type PainelSiga, type ProcessoSiga, type Robo, type TipoMovimentacao,
 } from "./siga";
@@ -192,7 +192,7 @@ function Linha({ p, agora, robo, categoria, podeEditar = false, aoGravar }: {
 }
 
 /** O painel de uma categoria (#805): o cabecalho de grupo forte, com quantos processos ela tem e quantos estao sem
- *  movimentacao alem do limite critico (#840), e as linhas do mais parado ao menos (a ordem de `porCategoria`). */
+ *  movimentacao alem do limite critico (#840), e as linhas do mais parado ao menos (a ordem do servidor, #861). */
 export function PainelDaCategoria({ secao, limites, agora, robo, categoria, podeEditar = false }: {
   secao: { categoria: Categoria; rotulo: string; processos: ProcessoSiga[] }; limites: LimitesSiga; agora: Date; robo: Robo;
   categoria: Categoria | null; podeEditar?: boolean;
@@ -586,7 +586,8 @@ export default function SigaPagina({ busca, agora, podeEditar = true }: { busca:
     return () => window.clearInterval(relogio);
   }, [carregar, comRobo]);
 
-  const processos = useMemo(() => ordenar(dados?.processos ?? []), [dados]);
+  // #861: a lista vem do servidor do mais parado para o menos; a tela so' segue
+  const processos = dados?.processos ?? [];
 
   // processo que nao existe: sai o ?processo= da URL (a barra volta a ter o h1 da secao)
   const idPedido = /^\d+$/.test(busca.processo ?? "") ? Number(busca.processo) : null;
