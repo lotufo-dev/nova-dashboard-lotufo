@@ -31,7 +31,8 @@ O que a tela mostra nasce aqui, pronto:
   `diretoria.prazos_do_orgao`; nulo = sem previsao), quantas linhas, o subtotal, o subtotal de cada ano, quantas
   linhas passaram da data esperada e o que fica a' parte. Entram os contratantes com alguma linha (no total ou a'
   parte) e os de contrato ativo ou suspenso sem nada em aberto, com zero, para a opcao continuar na fileira do filtro.
-  A ordem: o maior em aberto primeiro, empate pelo nome;
+  O contratante e' o par (nome, chave), como na aba "Por contratante" do Fechamento (`diretoria.linha_do_contratante`,
+  issue #864). A ordem: o maior em aberto primeiro, empate pelo nome e depois pela chave;
 - por linha: o tempo parado (`parada`) desde o protocolo (sem protocolo, na obra sem o passo "Envio da nota", desde a
   emissao da nota), pela regra do passo Pagamento da fila de Medicoes (`fila_medicoes._parada`): critico so' depois da
   data esperada do recebimento (`diretoria.esperada`: o primeiro protocolo + o prazo do orgao, o mesmo "Atrasado" do
@@ -102,11 +103,14 @@ def _a_receber(conn, hoje: datetime.date) -> dict:
     das_medicoes = diretoria._medicoes(conn)
     de = {m["id"]: m for m in das_medicoes}
     prazos = diretoria.prazos_do_orgao(das_medicoes, hoje)
-    grupos: dict[str, dict] = {}
+    # issue #864: o grupo e' o par (nome, chave), a linha do contratante na aba "Por contratante" do Fechamento
+    # (`diretoria.linha_do_contratante`), nao o nome: o contrato sem orgao no cadastro cujo texto e' igual a' sigla de
+    # um contratante fica no grupo dele, sem chave, e o subtotal de cada grupo e' o da linha do mesmo par no Fechamento
+    grupos: dict[tuple[str, str | None], dict] = {}
 
     def grupo_de(contrato_id: int) -> dict:
         nome, chave = contratante_de[contrato_id]
-        return grupos.setdefault(nome, _grupo(nome, chave))
+        return grupos.setdefault((nome, chave), _grupo(nome, chave))
 
     for x in fechamento._linhas_das_medicoes(conn):
         ano = x["competencia"][:4]
@@ -142,10 +146,13 @@ def _a_receber(conn, hoje: datetime.date) -> dict:
             grupo_de(contrato_id)
     for g in grupos.values():
         g["linhas"].sort(key=fechamento.ordem_do_em_aberto)
-        # o contratante sem linha no total tambem tem prazo (o da pagina dele em Obras)
+        # o contratante sem linha no total tambem tem prazo (o da pagina dele em Obras). O prazo e' pelo nome de
+        # `diretoria._contratante`, que chama de `SEM_ORGAO` o contrato sem orgao no cadastro: o grupo sem chave nao
+        # pega o prazo do contratante de verdade so' porque o texto do contrato e' igual a' sigla dele (issue #864)
         if g["prazo_orgao_dias"] is None:
-            g["prazo_orgao_dias"] = prazos.get(g["contratante"])
-    lista = sorted(grupos.values(), key=lambda g: (-g["em_aberto_centavos"], medicoes._chave_nome(g["contratante"])))
+            g["prazo_orgao_dias"] = prazos.get(g["contratante"] if g["chave"] is not None else diretoria.SEM_ORGAO)
+    lista = sorted(grupos.values(), key=lambda g: (-g["em_aberto_centavos"],
+                                                   *diretoria.ordem_do_contratante((g["contratante"], g["chave"]))))
     return {"anos": anos, "total_a_receber_liberado": True,
             "em_aberto_centavos": sum(g["em_aberto_centavos"] for g in lista),
             "por_ano": {a: sum(g["por_ano"][a] for g in lista) for a in anos},
