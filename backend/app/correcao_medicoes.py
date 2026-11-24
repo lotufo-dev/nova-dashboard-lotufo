@@ -797,8 +797,10 @@ def _espelho_parcial(conn, m, novo: int, recusas: list[str]) -> dict:
     dela; o pedido nasceu do espelho e ficou so' com essa parte. A declaracao `espelho_parcial: true` vence as recusas
     do espelho (`_recusas_do_espelho`) e so' elas: vale com mais de uma nota ligada e com o pedido novo igual a' soma
     das notas vigentes ligadas a ela (de uma coligada, pela conta de `medicoes.valor_do_par`, a mesma do pedido sem
-    boletim), e com todo espelho da medicao abaixo do pedido novo (ele cobre so' parte). O espelho nao muda. Devolve os
-    detalhes do ensaio e o registro da auditoria (a declaracao, as recusas vencidas, as notas somadas e os espelhos)."""
+    boletim), e com todo espelho da medicao abaixo do pedido novo (ele cobre so' parte). O valor da medicao em cada
+    espelho e' o de `espelhos.valor_no_espelho` (a coluna, senao as entradas do espelho de antes dela); espelho sem
+    valor que se leia recusa, sem adivinhar. O espelho nao muda. Devolve os detalhes do ensaio e o registro da
+    auditoria (a declaracao, as recusas vencidas, as notas somadas e os espelhos, com a origem do valor)."""
     if not recusas:
         raise ValueError("espelho_parcial vence só as recusas do espelho (pedido que veio do espelho, espelho gerado a "
                          "partir do pedido) e esta medição não tem nenhuma: tire espelho_parcial")
@@ -819,17 +821,33 @@ def _espelho_parcial(conn, m, novo: int, recusas: list[str]) -> dict:
                                      for col, ns in por_coligada.items())
                          + f"), e {dinheiro.format_brl(novo)} não é")
     soma = sum(n["valor_vinculo"] for n in somadas)
-    espelhos = [dict(r) for r in conn.execute(
-        "SELECT e.versao, e.situacao, COALESCE(em.valor_com_sinal_centavos, em.valor_centavos) AS valor_centavos "
-        "FROM espelho_medicoes em JOIN espelhos e ON e.id=em.espelho_id WHERE em.medicao_id=? ORDER BY e.versao, e.id",
-        (m["id"],))]
-    if not espelhos:
+    from app import espelhos as espelhos_   # import local: espelhos importa o envio e o correio
+    linhas = conn.execute("SELECT e.id, e.versao, e.situacao FROM espelho_medicoes em JOIN espelhos e "
+                          "ON e.id=em.espelho_id WHERE em.medicao_id=? ORDER BY e.versao, e.id", (m["id"],)).fetchall()
+    if not linhas:
         raise ValueError("espelho_parcial vale na medição com espelho gerado, e esta não tem espelho")
-    for e in espelhos:
-        if e["valor_centavos"] is None or not 0 < e["valor_centavos"] < novo:
-            valor = "sem valor gravado" if e["valor_centavos"] is None else dinheiro.format_brl(e["valor_centavos"])
+    espelhos = []
+    for r in linhas:
+        # o valor desta medicao no espelho: a coluna de `espelho_medicoes`, senao as entradas do espelho (o de antes
+        # da coluna), pela leitura de `espelhos.desatualizadas`; a auditoria guarda de onde veio
+        v = espelhos_.valor_no_espelho(conn, r["id"], m["id"])
+        if v["valor_centavos"] is None:
+            outras = [medicoes.ROTULO_TIPO.get(t, t) for (t,) in conn.execute(
+                "SELECT x.tipo FROM espelho_medicoes em JOIN medicoes x ON x.id=em.medicao_id "
+                "WHERE em.espelho_id=? AND em.medicao_id<>? ORDER BY x.tipo", (r["id"], m["id"]))]
             raise ValueError(f"espelho_parcial diz que o espelho cobre só parte da medição, e o espelho versão "
-                             f"{e['versao']} leva {valor}, não uma parte de {dinheiro.format_brl(novo)}")
+                             f"{r['versao']} não tem o valor desta medição gravado nem lido das entradas dele ("
+                             f"{v['sem_valor']}"
+                             + (f"; ele leva também a medição de {' e '.join(outras)}" if outras else "")
+                             + "): sem saber quanto o espelho leva desta medição, não dá para conferir que ele é "
+                               "só uma parte dela")
+        espelhos.append({"versao": r["versao"], "situacao": r["situacao"], "valor_centavos": v["valor_centavos"],
+                         "origem": v["origem"]})
+    for e in espelhos:
+        if not 0 < e["valor_centavos"] < novo:
+            raise ValueError(f"espelho_parcial diz que o espelho cobre só parte da medição, e o espelho versão "
+                             f"{e['versao']} leva {dinheiro.format_brl(e['valor_centavos'])}, não uma parte de "
+                             f"{dinheiro.format_brl(novo)}")
     detalhes = ["espelho_parcial declarado: vence a recusa “" + "” e a recusa “".join(recusas) + "”",
                 "o pedido novo é a soma das notas ligadas: " + " + ".join(_fmt_nf(n) for n in somadas)
                 + f" = {dinheiro.format_brl(soma)}" + (f" (coligada {coligada})" if len(por_coligada) > 1 else "")]
@@ -838,7 +856,8 @@ def _espelho_parcial(conn, m, novo: int, recusas: list[str]) -> dict:
                          f"dá {dinheiro.format_brl(novo)}")
     for e in espelhos:
         bate = _somas_de_notas(somadas, medicoes.valor_do_par(conn, m["id"], e["valor_centavos"]))
-        detalhes.append(f"o espelho versão {e['versao']} leva {dinheiro.format_brl(e['valor_centavos'])} e não muda"
+        detalhes.append(f"o espelho versão {e['versao']} leva {dinheiro.format_brl(e['valor_centavos'])}"
+                        + (" (lido das entradas do espelho)" if e["origem"] == "entradas" else "") + " e não muda"
                         + (f": é a parte da {' + '.join(_fmt_nf(n) for n in bate)}" if bate and len(bate) < len(somadas)
                            else ""))
         if not bate or len(bate) == len(somadas):

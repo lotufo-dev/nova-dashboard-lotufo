@@ -344,7 +344,7 @@ def test_espelho_parcial_corrige_com_a_soma_das_notas_e_audita_a_declaracao(cena
     assert [(n["nota_id"], n["valor_vinculo_centavos"]) for n in p["notas_somadas"]] == [(na, 600_003), (nb, 400_002)]
     assert len(p["recusas_vencidas"]) == 2
     assert "veio do espelho" in p["recusas_vencidas"][0] and "gerado a partir do pedido" in p["recusas_vencidas"][1]
-    assert p["espelhos"] == [{"versao": 1, "situacao": "vigente", "valor_centavos": 600_003}]
+    assert p["espelhos"] == [{"versao": 1, "situacao": "vigente", "valor_centavos": 600_003, "origem": "coluna"}]
 
 
 def test_espelho_parcial_o_ensaio_diz_a_recusa_vencida_e_nao_grava(cenario):
@@ -468,4 +468,113 @@ def test_espelho_parcial_nao_soma_notas_de_coligadas_diferentes(cenario):
     assert rel["erros"] == 1, rel
     erro = rel["itens"][0]["erro"]
     assert "coligada 1: NF 801, idmov 1701 (R$ 6.000,03) = R$ 6.000,03" in erro and "coligada 90:" in erro, erro
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 600_003
+
+
+# ------------------------------------------------------------------ #883, ensaio na producao: espelho sem valor gravado
+
+REGRA_DUAS_FONTES = {"entradas": [{"chave": "fonte-a", "natureza": "medicao", "rotulo": "Fonte A"},
+                                  {"chave": "fonte-b", "natureza": "medicao", "rotulo": "Fonte B"},
+                                  {"chave": "reajuste", "natureza": "reajuste", "rotulo": "Reajuste"}]}
+
+
+def _so_nas_entradas(c, cid, eid, entradas, sha_espelho="sha-exemplo", sha_regra="sha-exemplo"):
+    """O espelho de antes da coluna 065: `espelho_medicoes` sem valor e o valor so' nas entradas do proprio espelho,
+    lidas pela regra da obra (de mesmo sha256, ou de outro, quando a regra mudou depois)."""
+    c.execute("UPDATE espelho_medicoes SET valor_centavos=NULL, valor_com_sinal_centavos=NULL WHERE espelho_id=?",
+              (eid,))
+    c.execute("UPDATE espelhos SET entradas=?, regra_sha256=? WHERE id=?", (json.dumps(entradas), sha_espelho, eid))
+    c.execute("INSERT OR REPLACE INTO espelho_regras (contrato_id, situacao, regra, modelos, sha256) "
+              "VALUES (?,'ativa',?,'{}',?)", (cid, json.dumps(REGRA_DUAS_FONTES), sha_regra))
+    c.commit()
+
+
+def test_espelho_parcial_le_o_valor_das_entradas_do_espelho_sem_valor_gravado(cenario):
+    """O caso da producao: as duas colunas de `espelho_medicoes` nulas e o valor do espelho so' nas entradas dele. A
+    declaracao passa, o ensaio diz de onde leu e a auditoria guarda a origem."""
+    c, cid, uid = cenario
+    mid, eid, na, nb = _medicao_de_duas_fontes(c, cid)
+    _so_nas_entradas(c, cid, eid, {"fonte-a": 600_003})
+    rel = _rodar(c, uid, [_op_parcial(mid)], ensaio=True)
+    assert rel["feitos"] == 1 and rel["erros"] == 0, rel
+    detalhes = rel["itens"][0]["detalhes"]
+    assert ("o espelho versão 1 leva R$ 6.000,03 (lido das entradas do espelho) e não muda: é a parte da NF 801, "
+            "idmov 1701 (R$ 6.000,03)") in detalhes, detalhes
+    assert not any(d.startswith("AVISO: o valor do espelho") for d in detalhes)
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 600_003
+    rel = _rodar(c, uid, [_op_parcial(mid)])
+    assert rel["feitos"] == 1 and rel["erros"] == 0, rel
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 1_000_005
+    _, d = _correcoes(c, mid)[0]
+    assert d["espelho_parcial"]["espelhos"] == [{"versao": 1, "situacao": "vigente", "valor_centavos": 600_003,
+                                                 "origem": "entradas"}]
+    # o espelho nao muda: segue sem valor gravado
+    assert tuple(c.execute("SELECT valor_centavos, valor_com_sinal_centavos FROM espelho_medicoes WHERE espelho_id=?",
+                           (eid,)).fetchone()) == (None, None)
+
+
+def test_espelho_parcial_das_entradas_que_leva_o_valor_inteiro_e_recusado(cenario):
+    c, cid, uid = cenario
+    mid, eid, _, _ = _medicao_de_duas_fontes(c, cid)
+    _so_nas_entradas(c, cid, eid, {"fonte-a": 600_003, "fonte-b": 400_002})
+    rel = _rodar(c, uid, [_op_parcial(mid)])
+    assert rel["erros"] == 1, rel
+    assert "o espelho versão 1 leva R$ 10.000,05, não uma parte de R$ 10.000,05" in rel["itens"][0]["erro"]
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 600_003
+
+
+def test_espelho_parcial_espelho_sem_valor_em_lugar_nenhum_e_recusado(cenario):
+    """Sem valor na coluna e sem valor da medicao nas entradas (ou com a regra da obra mudada depois do espelho, que
+    deixa as entradas sem dizer de qual medicao e' cada valor): nao se adivinha, recusa."""
+    c, cid, uid = cenario
+    mid, eid, _, _ = _medicao_de_duas_fontes(c, cid)
+    _so_nas_entradas(c, cid, eid, {"reajuste": 50_001})
+    rel = _rodar(c, uid, [_op_parcial(mid)])
+    assert rel["erros"] == 1, rel
+    erro = rel["itens"][0]["erro"]
+    assert erro.startswith("espelho_parcial diz que o espelho cobre só parte da medição, e o espelho versão 1 não tem "
+                           "o valor desta medição gravado nem lido das entradas dele (as entradas do espelho não têm "
+                           "valor de execução)"), erro
+    _so_nas_entradas(c, cid, eid, {"fonte-a": 600_003}, sha_regra="sha-regra-nova")
+    rel = _rodar(c, uid, [_op_parcial(mid)])
+    assert rel["erros"] == 1, rel
+    assert "(a regra do espelho da obra não é mais a que gerou este espelho" in rel["itens"][0]["erro"]
+    c.execute("DELETE FROM espelho_regras WHERE contrato_id=?", (cid,))
+    c.commit()
+    rel = _rodar(c, uid, [_op_parcial(mid)])
+    assert rel["erros"] == 1 and "a regra do espelho da obra não é mais" in rel["itens"][0]["erro"], rel
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 600_003
+    assert _correcoes(c, mid) == []
+
+
+def test_espelho_parcial_espelho_de_execucao_e_reajuste_sem_valor_por_medicao(cenario):
+    """Espelho que leva a execucao e o reajuste, sem valor por medicao na coluna: as entradas, pela regra que gerou o
+    espelho, separam o valor de cada medicao pela natureza (so' a execucao conta). Com a regra mudada, nao da' para
+    saber quanto e' de cada uma: recusa, dizendo que o espelho leva tambem o reajuste."""
+    c, cid, uid = cenario
+    mid, eid, _, _ = _medicao_de_duas_fontes(c, cid)
+    rid = _medicao(c, cid, 22, estado="recebida", tipo="reajuste", valor=50_001)
+    c.execute("INSERT INTO espelho_medicoes (espelho_id, medicao_id) VALUES (?,?)", (eid, rid))
+    _so_nas_entradas(c, cid, eid, {"fonte-a": 600_003, "reajuste": 50_001})
+    rel = _rodar(c, uid, [_op_parcial(mid)], ensaio=True)
+    assert rel["feitos"] == 1 and rel["erros"] == 0, rel
+    assert any(d.startswith("o espelho versão 1 leva R$ 6.000,03 (lido das entradas do espelho) e não muda: é a parte "
+                            "da NF 801") for d in rel["itens"][0]["detalhes"]), rel
+    _so_nas_entradas(c, cid, eid, {"fonte-a": 600_003, "reajuste": 50_001}, sha_regra="sha-regra-nova")
+    rel = _rodar(c, uid, [_op_parcial(mid)])
+    assert rel["erros"] == 1, rel
+    erro = rel["itens"][0]["erro"]
+    assert "a regra do espelho da obra não é mais a que gerou este espelho" in erro, erro
+    assert "; ele leva também a medição de reajuste)" in erro, erro
+    assert _linha(c, mid)["valor_protocolado_centavos"] == 600_003
+
+
+def test_sem_a_declaracao_espelho_sem_valor_gravado_recusa_como_sempre(cenario):
+    c, cid, uid = cenario
+    mid, eid, _, _ = _medicao_de_duas_fontes(c, cid)
+    _so_nas_entradas(c, cid, eid, {"fonte-a": 600_003})
+    rel = _rodar(c, uid, [_op(mid, pedido="10.000,05")])
+    assert rel["erros"] == 1 and rel["itens"][0]["erro"] == (
+        "o pedido desta medição veio do espelho: o espelho é documento que saiu, e o valor dele muda gerando o "
+        "espelho de novo (antes do protocolo), não por aqui"), rel
     assert _linha(c, mid)["valor_protocolado_centavos"] == 600_003

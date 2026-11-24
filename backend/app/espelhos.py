@@ -465,6 +465,44 @@ _VALOR_NO_ESPELHO = ("CASE WHEN em.valor_centavos IS NULL AND em.valor_com_sinal
                      "THEN em.valor_com_sinal_centavos ELSE em.valor_centavos END")
 
 
+def _valor_pelas_entradas(crua: tuple | None, regra_sha256: str | None, entradas: str, tipo: str) -> int | None:
+    """O valor da medicao `tipo` no espelho de antes da 065, pelas entradas gravadas nele (JSON por chave da regra),
+    somadas por natureza (`espelho.valor_por_natureza`, a conta da geracao). So' com a regra da obra que ainda e' a do
+    espelho (mesmo sha256): com outra regra, as chaves das entradas podem nao dizer a mesma natureza. `crua` e' a linha
+    de `_regra_crua`. Sem valor daquela natureza (ou com outra regra), None."""
+    if crua is None or crua[3] != regra_sha256:
+        return None
+    return espelho.valor_por_natureza(json.loads(crua[1]), json.loads(entradas)).get(tipo)
+
+
+def valor_no_espelho(conn, espelho_id: int, medicao_id: int) -> dict:
+    """Issue #883: o valor de uma medicao num espelho e de onde ele veio, pela mesma leitura de `desatualizadas`: a
+    coluna de `espelho_medicoes` (065, e a 078 para o negativo do reajuste), senao as entradas do proprio espelho
+    pela regra da obra, se ainda for a dele. Sem o fallback de `desatualizadas` (o aprovado de entao, senao o pedido):
+    aquilo e' o que o espelho travou, nao o que ele leva. No espelho de mais de uma medicao (execucao e reajuste), as
+    entradas separam o valor de cada uma pela natureza da regra.
+
+    Devolve {valor_centavos, origem ('coluna' | 'entradas' | None), sem_valor (por que nao ha' valor, ou None)}."""
+    r = conn.execute(
+        f"SELECT {_VALOR_NO_ESPELHO} AS valor, e.contrato_id, e.entradas, e.regra_sha256, m.tipo "
+        "FROM espelho_medicoes em JOIN espelhos e ON e.id=em.espelho_id JOIN medicoes m ON m.id=em.medicao_id "
+        "WHERE em.espelho_id=? AND em.medicao_id=?", (espelho_id, medicao_id)).fetchone()
+    if r is None:
+        raise ValueError(f"a medição {medicao_id} não está no espelho {espelho_id}")
+    if r["valor"] is not None:
+        return {"valor_centavos": r["valor"], "origem": "coluna", "sem_valor": None}
+    crua = _regra_crua(conn, r["contrato_id"])
+    valor = _valor_pelas_entradas(crua, r["regra_sha256"], r["entradas"], r["tipo"])
+    if valor is not None:
+        return {"valor_centavos": valor, "origem": "entradas", "sem_valor": None}
+    if crua is None or crua[3] != r["regra_sha256"]:
+        porque = ("a regra do espelho da obra não é mais a que gerou este espelho, e sem ela as entradas não dizem "
+                  "de qual medição é cada valor")
+    else:
+        porque = f"as entradas do espelho não têm valor de {medicoes.ROTULO_TIPO.get(r['tipo'], r['tipo'])}"
+    return {"valor_centavos": None, "origem": None, "sem_valor": porque}
+
+
 def desatualizadas(conn, medicao_id: int | None = None) -> list[dict]:
     """Medicoes com espelho gerado, enviado ou nota emitida cujo aprovado vigente difere do valor delas no espelho
     vigente mais novo (`situacao` APROVADO_MUDOU, ou NOTA_EMITIDA na nota emitida, onde o espelho nao se gera mais).
@@ -504,9 +542,7 @@ def desatualizadas(conn, medicao_id: int | None = None) -> list[dict]:
         if valor is None:
             if r["contrato_id"] not in regras:
                 regras[r["contrato_id"]] = _regra_crua(conn, r["contrato_id"])
-            crua = regras[r["contrato_id"]]
-            if crua is not None and crua[3] == r["regra_sha256"]:
-                valor = espelho.valor_por_natureza(json.loads(crua[1]), json.loads(r["entradas"])).get(r["tipo"])
+            valor = _valor_pelas_entradas(regras[r["contrato_id"]], r["regra_sha256"], r["entradas"], r["tipo"])
             if valor is None:
                 # o que o espelho travou ao ser gerado (#284): o aprovado de entao, senao o pedido
                 valor = r["aprovado_no_espelho"] if r["aprovado_no_espelho"] is not None else r["pedido"]
