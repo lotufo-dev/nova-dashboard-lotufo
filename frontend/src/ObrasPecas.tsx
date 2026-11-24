@@ -144,7 +144,15 @@ export function SituacaoDaObra({ obra, ir, andamento, leitura }: {
     );
   }
   const prazoNoFim = obra.farol === "verde" ? prazoNoFimNaSituacao(leitura) : null;
-  if (prazoNoFim) return <span className="obras-situacao__prazo">{prazoNoFim}</span>;
+  if (prazoNoFim) {
+    // dois trechos que nao quebram por dentro: a frase so' quebra no "·", e a data nunca fica sozinha na segunda linha (#848)
+    const [inicio, ate] = prazoNoFim.split(" · ");
+    return (
+      <span className="obras-situacao__prazo">
+        {ate === undefined ? inicio : <><span className="obras-situacao__trecho">{inicio} ·</span> <span className="obras-situacao__trecho">{ate}</span></>}
+      </span>
+    );
+  }
   if (obra.farol === "verde") return <span className="obras-situacao__emdia">Em dia</span>;
   const { visiveis, mais } = motivosDaLinha(obra.motivos, 1);
   return (

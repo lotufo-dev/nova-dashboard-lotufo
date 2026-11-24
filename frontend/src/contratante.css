@@ -11,10 +11,15 @@
 .ct-abas { flex-wrap: wrap; border-bottom: 0; }
 .ct-abas .aba { flex: none; gap: var(--espaco-pp); margin-bottom: -1px; white-space: nowrap; }
 .ct-atalhos { padding: var(--espaco-pp) 0; }
-/* no celular as abas ficam juntas, sem o respiro lateral, como as do Fechamento: as tres da diretoria numa linha */
+/* no celular as abas ficam juntas, sem o respiro lateral, como as do Fechamento (#846): a lista de abas deixa de ser uma
+   caixa (`display: contents`, a pagina nao tem rolagem lateral) e as abas e o link dos Avisos correm juntos na faixa, que
+   quebra em duas linhas no maximo: as tres primeiras abas, e na de baixo a quarta com os Avisos na ponta. Antes a lista
+   quebrava em duas e os Avisos, que nao cabiam ao lado dela, desciam para a terceira */
 @container obras-pagina (max-width: 620px) {
-  .ct-abas { column-gap: var(--espaco-p); }
+  .ct-faixa { column-gap: var(--espaco-p); }
+  .ct-abas { display: contents; }
   .ct-abas .aba { gap: var(--espaco-mini); padding: 0; }
+  .ct-atalhos { margin-left: auto; white-space: nowrap; }
 }
 
 /* a aba: os blocos um embaixo do outro, com o respiro da pagina. O invólucro leva tambem a classe da pagina de onde as

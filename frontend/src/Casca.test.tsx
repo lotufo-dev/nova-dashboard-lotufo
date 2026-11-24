@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BarraSuperior, Trilho } from "./Casca";
-import { IconeAReceber, IconeBaixar } from "./icones";
+import { IconeAReceber, IconeBaixar, IconeDocumento, IconeDocumentoVisto } from "./icones";
 import type { Usuario } from "./Login";
 
 // as permissoes que /api/auth/eu informa (backend/app/permissoes.py); o item SIGA e' de quem tem `ver_siga` (#829)
@@ -204,5 +204,19 @@ describe("ícone da página Em aberto", () => {
     expect(aReceber).not.toBe(baixar);
     // nem a seta para baixo de antes
     expect(aReceber).not.toContain("M7 10.5l5 5 5-5");
+  });
+
+  // 23/11/2026 (#865): sem as linhas de texto, que eram o que a aproximava do ícone de Certidões
+  it("o item do menu não tem o desenho de Certidões nem o de Regularidade mensal, e não é uma folha com linhas", () => {
+    render(<Trilho perfil="admin" marcado={null} ir={vi.fn()} />);
+    const desenhoDe = (nome: RegExp) => screen.getByRole("link", { name: nome }).querySelector("svg")!.innerHTML;
+    const emAberto = desenhoDe(/A receber|Em aberto/);
+    const { container } = render(<><IconeDocumento /><IconeDocumentoVisto /></>);
+    const [certidoes, regularidade] = [...container.querySelectorAll("svg")].map(svg => svg.innerHTML);
+    expect(emAberto).not.toBe(certidoes);
+    expect(emAberto).not.toBe(regularidade);
+    expect(emAberto).not.toBe(desenhoDe(/Certidões/));
+    // nenhuma das linhas horizontais de texto da nota de antes (M9 8h6, M9 12h6, M9 16h3)
+    expect(emAberto).not.toMatch(/M9 (8|12|16)h/);
   });
 });

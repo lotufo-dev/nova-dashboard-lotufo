@@ -394,6 +394,12 @@ describe("Resumo das medições em quadro por etapa (#749, #805)", () => {
     expect(api).toHaveBeenCalledWith("/api/resumo-medicoes/matriz");
     expect(screen.getByRole("link", { name: "Últimos 12 meses" }).getAttribute("aria-current")).toBe("page");
     expect(within(regiao).getByRole("link", { name: "Obra Própria, 09/2026: Protocolado" }).getAttribute("href")).toBe("/obras/7/medicoes/71");
+    // 23/11/2026 (#870): a troca de competencia, o CSV e a base do medido nao agem sobre a matriz e saem; fica o periodo dela
+    expect(screen.queryByRole("group", { name: "Trocar a competência" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Mês anterior" })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Exportar CSV/ })).toBeNull();
+    expect(screen.queryByText(/Medido das medições de cada etapa/)).toBeNull();
+    expect(screen.getByRole("heading", { name: "Outubro de 2025 a setembro de 2026" })).toBeTruthy();
     // o filtro por contratante, a vista e os blocos do mes nao aparecem aqui
     expect(screen.queryByRole("navigation", { name: "Contratante" })).toBeNull();
     expect(screen.queryByRole("navigation", { name: "Vista do mês" })).toBeNull();
@@ -404,7 +410,19 @@ describe("Resumo das medições em quadro por etapa (#749, #805)", () => {
     abrir("/resumo-medicoes?aba=12-meses");
     expect((await screen.findByRole("alert")).textContent).toBe(
       "Não foi possível carregar as medições dos últimos 12 meses. Recarregue a página para tentar de novo.");
-    expect(screen.getByRole("heading", { name: "Outubro de 2026" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Mês a mês no Fechamento" })).toBeTruthy();
+  });
+
+  it("23/11/2026 (#870): as outras abas seguem com a troca de competência, o CSV e a base do medido", async () => {
+    api.mockResolvedValue(RESUMO);
+    abrir();
+    expect(await screen.findByRole("group", { name: "Trocar a competência" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Exportar CSV/ })).toBeTruthy();
+    expect(screen.getByText(/Medido das medições de cada etapa/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("link", { name: /Meses anteriores/ }));
+    expect(await screen.findByRole("table", { name: /competências anteriores/ })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Trocar a competência" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Exportar CSV/ })).toBeTruthy();
   });
 
   it("o filtro por contratante fica na URL, lista quem tem medição na aba e recorta no servidor", async () => {

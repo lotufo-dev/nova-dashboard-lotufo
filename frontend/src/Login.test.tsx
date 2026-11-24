@@ -112,10 +112,29 @@ describe("Login: a marca ocupa o lado escuro, parada (#821)", () => {
     expect(Object.keys({ ...pacote.dependencies, ...pacote.devDependencies }).filter(n => /(^|\/)three$/.test(n))).toEqual([]);
   });
 
-  it("o formulário não sobe quando a caixa de recusa aparece: o bloco fica preso pelo alto, não centrado", () => {
-    const painel = [...css.matchAll(/\.entrar__painel \{([^}]*)\}/g)].map(m => m[1]).find(r => r.includes("justify-content: flex-start"));
-    expect(painel).toBeDefined();
-    expect(painel).toContain("var(--altura-bloco-entrar)");
+  it("o formulário não sobe quando a caixa de recusa aparece: o bloco é centrado e a caixa sai do fluxo, sem altura escrita à mão (#866)", () => {
+    // o painel centra o bloco pela altura dele, sem medida fixa; nenhum token nem número de altura do bloco
+    const painel = [...css.matchAll(/\.entrar__painel,?\s*\{([^}]*)\}/g)].map(m => m[1]);
+    expect(painel.some(r => r.includes("justify-content: center"))).toBe(true);
+    expect(css).not.toContain("altura-bloco-entrar");
+    expect(readFileSync(join(process.cwd(), "src", "tokens.css"), "utf8")).not.toContain("altura-bloco-entrar");
+    // a caixa de recusa não conta na altura do bloco: sai do fluxo embaixo dele (e volta ao fluxo no celular)
+    const emFluxo = css.split("@media")[0];
+    expect(/\.entrar__bloco \{([^}]*)\}/.exec(emFluxo)![1]).toContain("position: relative");
+    expect(/\.entrar__form \.aviso--falha \{([^}]*)\}/.exec(emFluxo)![1]).toContain("position: absolute");
+    expect(/\.entrar__form \.aviso--falha \{([^}]*)\}/.exec(css.split("@media")[1])![1]).toContain("position: static");
+  });
+
+  it("a recusa continua no formulário, antes do botão, para o leitor de tela", async () => {
+    api.mockRejectedValue(new ApiErro(401, "nope"));
+    const { container } = render(<Login aoEntrar={() => {}} />);
+    fireEvent.change(screen.getByLabelText("E-mail"), { target: { value: "a@b.c" } });
+    fireEvent.change(screen.getByLabelText("Senha"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Entrar" }));
+    const alerta = await screen.findByRole("alert");
+    const form = container.querySelector(".entrar__form")!;
+    expect(form.contains(alerta)).toBe(true);
+    expect(alerta.compareDocumentPosition(form.querySelector("button")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("no celular o formulário vem primeiro e a marca embaixo, em uma coluna", () => {
