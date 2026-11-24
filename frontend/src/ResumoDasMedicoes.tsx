@@ -238,26 +238,42 @@ export default function ResumoDasMedicoes({ ir, busca = {} }: { ir: Ir; busca?: 
 
   return (
     <div className="rdm" aria-busy={carregando || undefined}>
-      <div className="rdm-cab">
-        <div className="rdm-cab__mes">
-          <p className="rdm-cab__rotulo">{emTrabalho ? "Competência em trabalho" : "Competência"}</p>
-          <div className="rdm-cab__troca">
-            <h2 aria-live="polite">{maiuscula(nomeMes)}</h2>
-            <div className="rdm-botoes" role="group" aria-label="Trocar a competência">
-              <button type="button" className="btn btn--pequeno" aria-label="Mês anterior" onClick={() => irPara(somarMes(d.mes, -1))}>‹</button>
-              <button type="button" className="btn btn--pequeno" aria-label="Mês seguinte" onClick={() => irPara(somarMes(d.mes, 1))}>›</button>
-              {!emTrabalho && <button type="button" className="btn btn--pequeno" onClick={() => irPara(d.em_trabalho)}>Voltar à competência em trabalho</button>}
-            </div>
+      {aba === "12-meses" ? (
+        // a matriz e' sempre das 12 ultimas competencias fechadas: a troca de competencia, o CSV (que e' o resumo do mes) e a
+        // base do medido nao agem sobre ela, e saem; no lugar, o periodo que ela cobre (#870)
+        <div className="rdm-cab">
+          <div className="rdm-cab__mes">
+            <p className="rdm-cab__rotulo">Últimas 12 competências fechadas</p>
+            {matriz && matriz.competencias.length > 0 && (
+              <h2>{maiuscula(mesPorExtenso(matriz.competencias[0]))} a {mesPorExtenso(matriz.competencias[matriz.competencias.length - 1])}</h2>
+            )}
+          </div>
+          <div className="rdm-cab__acoes">
+            <Link className="link" para={{ tela: "fechamento" }} ir={ir}>Mês a mês no Fechamento</Link>
           </div>
         </div>
-        <div className="rdm-cab__acoes">
-          <Link className="link" para={{ tela: "fechamento" }} ir={ir}>Mês a mês no Fechamento</Link>
-          <a className="btn btn--pequeno" href={`/api/resumo-medicoes.csv?${exportar}`}>
-            <IconeBaixar className="icone icone--p" /> Exportar CSV
-          </a>
+      ) : <>
+        <div className="rdm-cab">
+          <div className="rdm-cab__mes">
+            <p className="rdm-cab__rotulo">{emTrabalho ? "Competência em trabalho" : "Competência"}</p>
+            <div className="rdm-cab__troca">
+              <h2 aria-live="polite">{maiuscula(nomeMes)}</h2>
+              <div className="rdm-botoes" role="group" aria-label="Trocar a competência">
+                <button type="button" className="btn btn--pequeno" aria-label="Mês anterior" onClick={() => irPara(somarMes(d.mes, -1))}>‹</button>
+                <button type="button" className="btn btn--pequeno" aria-label="Mês seguinte" onClick={() => irPara(somarMes(d.mes, 1))}>›</button>
+                {!emTrabalho && <button type="button" className="btn btn--pequeno" onClick={() => irPara(d.em_trabalho)}>Voltar à competência em trabalho</button>}
+              </div>
+            </div>
+          </div>
+          <div className="rdm-cab__acoes">
+            <Link className="link" para={{ tela: "fechamento" }} ir={ir}>Mês a mês no Fechamento</Link>
+            <a className="btn btn--pequeno" href={`/api/resumo-medicoes.csv?${exportar}`}>
+              <IconeBaixar className="icone icone--p" /> Exportar CSV
+            </a>
+          </div>
         </div>
-      </div>
-      <Atualizacao a={d.atualizacao} />
+        <Atualizacao a={d.atualizacao} />
+      </>}
       {erro && <Falha className="rdm-aviso">Não foi possível carregar {mes ? mesPorExtenso(mes) : "a competência"}: {erro}</Falha>}
 
       <nav className="abas rdm-abas" aria-label="Resumo das medições">
