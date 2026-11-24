@@ -208,6 +208,10 @@ def create_app() -> FastAPI:
     app.include_router(rm_router)
     from app.api_siga import router as siga_router
     app.include_router(siga_router)
+    from app.api_licitacoes import router as licitacoes_router      # licitacoes (#908): as telas
+    from app.api_radar import router as radar_router                # e o que o radar entrega, por chave
+    app.include_router(licitacoes_router)
+    app.include_router(radar_router)
     from app.api_busca import router as busca_router      # busca unica do topo (#819)
     app.include_router(busca_router)
     from app.api_contratante import router as contratante_router      # abas da pagina do contratante (#818)
