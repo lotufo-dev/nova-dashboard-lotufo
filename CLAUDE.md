@@ -5,9 +5,11 @@ Você é dono e mantenedor de longo prazo deste código, e o desenho dele é dec
 ## O produto em cinco linhas
 
 Sistema web interno da Lotufo Engenharia (FastAPI + React + SQLite) para contratos de obras públicas e o
-ciclo da medição: em análise no órgão → boletim → nota → protocolado → recebido.
+ciclo da medição: em análise no órgão → boletim → nota → protocolado → recebido. Desde 24/11/2026, também as
+licitações, antes do contrato (`docs/adr/0018`).
 O sistema é onde o trabalho é feito; o registro é consequência. Ele só lê o que a pessoa entregou a ele, o que ele
-mesmo enviou e o TOTVS RM, que só confirma o que a pessoa já fez; caixa de e-mail, pasta e SharePoint ficam fora.
+mesmo enviou, o TOTVS RM, que só confirma o que a pessoa já fez, e o que um robô de fora lhe entrega por chave (o
+monitor do SIGA e o radar de licitações); caixa de e-mail, pasta, SharePoint e site ficam fora.
 Trava só o que sai errado para fora e não se desfaz; o resto avisa e segue com justificativa. Quem opera digita
 pouco e confere; regra, cadastro e instrumento são do dono, em arquivo versionado.
 

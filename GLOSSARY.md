@@ -1,7 +1,7 @@
 # Dashboard Lotufo
 
-O vocabulário do sistema de contratos de obras públicas e do ciclo da medição: do pedido ao órgão até o
-recebimento. Cada termo tem um significado só, usado na tela, nas issues, nos testes e nas conversas.
+O vocabulário do sistema de contratos de obras públicas, do ciclo da medição (do pedido ao órgão até o
+recebimento) e das licitações. Cada termo tem um significado só, usado na tela, nas issues, nos testes e nas conversas.
 
 ## Language
 
@@ -248,6 +248,60 @@ O custo que o RM registra para uma obra. Não é margem nem lucro.
 Quanto do medido do ano, na cota, é de um contratante, em percentual com uma casa. As participações de um ano somam
 100%. Aparece na aba Por contratante do Fechamento. Sem medido no ano, não há participação.
 _Avoid_: fatia, share, peso
+
+### Licitações
+
+**Licitação**:
+O certame de um órgão, da publicação do edital ao resultado. Na tela é "licitação"; no código e no radar o registro
+se chama certame.
+_Avoid_: edital para a licitação (edital é o documento), oportunidade
+
+**Radar**:
+O programa, fora deste repositório, que lê as fontes, junta os repetidos, classifica e entrega a leitura à dashboard
+(`docs/adr/0018`).
+_Avoid_: robô das licitações, monitor
+
+**Fonte**:
+Cada lugar que o radar lê: o PNCP, o agregador e as páginas de órgãos e diários.
+
+**Leitura do radar**:
+O que o radar entrega a cada rodada: as licitações que mudaram, a situação de cada fonte e a hora em que leu.
+_Avoid_: coleta (é o nome dentro do radar), sincronização
+
+**Triagem**:
+A fila do que pede decisão agora: a favorita que mudou ou tem prazo chegando e a recomendada ainda sem decisão.
+Decidiu, sai da fila.
+
+**Recomendada**:
+A licitação que entra no perfil que o dono definiu para o radar (obra, modalidade, valor, distância), com a nota e o
+motivo que o radar manda.
+
+**Favorita**:
+A licitação que alguém decidiu acompanhar. Tem etapa e prazos.
+_Avoid_: de interesse, vale olhar
+
+**Descartada**:
+A recomendada que alguém tirou da fila, com o motivo.
+
+**Etapa da licitação**:
+Onde a favorita está: Acompanhando, Em análise, Proposta enviada, Vencida, Perdida, Desistida ou Encerrada.
+_Avoid_: status; ganhamos, perdemos
+
+**Dossiê**:
+A pasta de análise da licitação, fora da dashboard. Quando existe, a etapa e os prazos da favorita vêm dele, pelo
+radar, e a tela não os muda.
+
+**Conferência**:
+A resposta "é o mesmo" ou "é outro" para um par de registros que o radar achou parecidos e não conseguiu provar
+iguais.
+_Avoid_: provável como nome da tela
+
+**Grande vulto**:
+Obra de R$ 150 milhões ou mais, de qualquer estado. Lista à parte, fora das contagens de Mato Grosso.
+
+**Corte das licitações**:
+O ato, um só, que passa as decisões (favorita, etapa, descarte, conferência) do radar para a dashboard. Antes dele a
+tela só mostra; depois dele só a dashboard grava.
 
 ### Tela
 
