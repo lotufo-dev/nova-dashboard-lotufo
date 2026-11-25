@@ -2,7 +2,7 @@ import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Aviso } from "./Alertas";
 import AvisosPagina from "./AvisosPagina";
-import Inicio, { saudacao, type PainelInicio } from "./Inicio";
+import Inicio, { saudacao, type LicitacoesNaInicio, type PainelInicio } from "./Inicio";
 import MarcaEtapa from "./MarcaEtapa";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
@@ -724,5 +724,51 @@ describe("Início", () => {
     expect(saudacao(new Date("2026-10-09T13:00:00Z"))).toBe("Bom dia");        // 09h em Cuiabá
     expect(saudacao(new Date("2026-10-09T17:00:00Z"))).toBe("Boa tarde");      // 13h
     expect(saudacao(new Date("2026-10-10T01:00:00Z"))).toBe("Boa noite");      // 21h
+  });
+});
+
+// Fatia 2 da #906: quem tem `ver_licitacoes` vê na Início uma linha com os números da Triagem. Eles vêm em GET
+// /api/inicio (`licitacoes`), pela mesma função do servidor que monta a Triagem; para quem não tem a permissão, nulo.
+describe("Início: a linha das licitações", () => {
+  const LIDA = { lido_em: "2026-10-09T13:05:00+00:00", atrasada: false, fontes_com_problema: 0 };
+  const servir = (licitacoes: LicitacoesNaInicio | undefined) => api.mockImplementation(async (caminho: string) =>
+    caminho === "/api/inicio" ? { avisos: [], licitacoes } : painel());
+  const numeros = (regiao: HTMLElement) => [...regiao.querySelectorAll(".ini-aviso")].map(d => [limpo(d.querySelector("dt")), limpo(d.querySelector("dd"))]);
+  afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
+
+  it("quantas recomendadas esperam decisão e quantas favoritas pedem atenção, com os rótulos da Triagem e a porta para ela", async () => {
+    servir({ leitura: LIDA, recomendadas: 1234, favoritas: 2 });
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: "Licitações" });
+    expect(numeros(regiao)).toEqual([["Recomendadas a decidir", "1.234"], ["Favoritas que pedem atenção", "2"]]);
+    expect(regiao.querySelectorAll(".contador")).toHaveLength(2);
+    expect(regiao.querySelector("[class*='contador--'], .glifo")).toBeNull();           // contagem não é situação
+    expect(within(regiao).queryByRole("status")).toBeNull();
+    const porta = within(regiao).getByRole("link", { name: "Ver a triagem das licitações" });
+    expect([porta.textContent, porta.getAttribute("href")]).toEqual(["Ver a triagem", "/licitacoes"]);
+    // fica depois dos avisos, no fim da página
+    expect([...document.querySelector(".ini-grade")!.children].map(b => b.className).slice(-2)).toEqual(
+      ["cartao ini-painel ini-avisos", "cartao ini-painel ini-licitacoes"]);
+  });
+
+  it("com a leitura atrasada, a linha diz desde quando o radar não lê", async () => {
+    servir({ leitura: { ...LIDA, lido_em: "2026-10-05T13:05:00+00:00", atrasada: true }, recomendadas: 3, favoritas: 0 });
+    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    const regiao = await screen.findByRole("region", { name: "Licitações" });
+    const aviso = within(regiao).getByRole("status");
+    expect(aviso.textContent).toBe("Atenção: O radar não lê desde 05/10 às 09:05.");
+    expect(aviso.className).toBe("aviso");
+    expect(numeros(regiao)).toEqual([["Recomendadas a decidir", "3"], ["Favoritas que pedem atenção", "0"]]);
+  });
+
+  it("quem não tem `ver_licitacoes` não vê a linha; nem quem tem, enquanto o radar nunca entregou leitura", async () => {
+    for (const licitacoes of [null, undefined, { leitura: { lido_em: null, atrasada: true, fontes_com_problema: 0 }, recomendadas: 0, favoritas: 0 }]) {
+      servir(licitacoes);
+      const { unmount } = render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+      await screen.findByText("Nenhum aviso.");                                   // a rota dos avisos (e da linha) já respondeu
+      expect(screen.queryByRole("region", { name: "Licitações" })).toBeNull();
+      expect(document.querySelector(".ini-licitacoes")).toBeNull();
+      unmount();
+    }
   });
 });

@@ -245,6 +245,12 @@
 .ini-aviso dt { margin: 0; font-size: var(--texto-titulo-sub); font-weight: var(--peso-forte); }
 .ini-aviso dd { margin: 0; }
 
+/* LICITACOES (fatia 2 da #906): a linha de quem tem `ver_licitacoes`, depois dos avisos e com o desenho deles: os dois
+   numeros da Triagem, cada um sob a regua fina, e a porta para ela. Nao tem area na grade: entra numa linha propria, na
+   largura toda, so' quando existe (uma area vazia deixaria o vao dela no fim da pagina de quem nao ve a linha). */
+.ini-licitacoes { grid-column: 1 / -1; }
+.ini-licitacoes .aviso { margin: 0 0 var(--espaco-p); }
+
 /* ================================================================ CELULAR
    Em tela estreita o painel perde a sombra e aperta o respiro, os blocos ficam mais proximos e o titulo desce um
    passo. */

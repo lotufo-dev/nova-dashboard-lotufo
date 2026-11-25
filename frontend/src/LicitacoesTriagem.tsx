@@ -1,19 +1,32 @@
+import { useState } from "react";
 import Contador from "./Contador";
+import Falha from "./Falha";
 import { contar } from "./formato";
-import { fmtKm, useLicitacoes, type LinhaLicitacao, type Recomendada, type RespostaTriagem } from "./licitacoes";
-import { Etapa, LeituraDoRadarLinha, Licitacao, Mudanca, Prazo, SemLeitura, Traco, Valor } from "./LicitacoesPecas";
+import {
+  fmtKm, nomeDaLicitacao, useDecisoes, useLicitacoes,
+  type AnaliseDoEdital, type FalhaDaDecisao, type LinhaLicitacao, type Recomendada, type RespostaTriagem,
+} from "./licitacoes";
+import {
+  Etapa, FalhaAoAtualizar, JanelaDaAnalise, JanelaDoDescarte, LeituraDoRadarLinha, Licitacao, Mudanca, Prazo, SemLeitura, Traco, Valor,
+} from "./LicitacoesPecas";
 import { Link } from "./Link";
 import Rolagem from "./Rolagem";
 import { Glifo } from "./Selo";
 import type { Situacao } from "./situacao";
 import { fmtDiaNoAno } from "./tempo";
 
-// TRIAGEM (#908, docs/adr/0018): a pagina padrao da area Licitacoes ("/licitacoes"). Responde "o que pede decisao
-// agora": as favoritas com prazo chegando ou mudanca recente e as recomendadas que ainda nao tem decisao. So' leitura
-// nesta fatia: ninguem decide nada pela tela (favoritar, descartar e etapa chegam na fatia 2).
+// TRIAGEM (#908 e fatia 2 da #906, docs/adr/0018): a pagina padrao da area Licitacoes ("/licitacoes"). Responde "o que
+// pede decisao agora": as favoritas com prazo chegando ou mudanca que ninguem viu e as recomendadas que ainda nao tem
+// decisao. E' a fila que esvazia: decidiu, a linha sai.
 //
 // Tudo vem pronto de GET /api/licitacoes/triagem: as contagens do alto, as duas listas ja' na ordem, os dias uteis ate'
 // cada prazo e a situacao dele. A tela nao conta, nao ordena e nao compara data com limite.
+//
+// AS DECISOES (fatia 2): so' com `pode_decidir`, que o servidor manda depois do corte e a quem decide; antes dele as
+// decisoes sao espelho do radar e a pagina nao tem botao. Na recomendada: Favoritar (a acao principal da linha), Analisar
+// o edital (favorita e devolve o comando para a sessao de analise) e Descartar (com o motivo). Na favorita com mudanca
+// nao vista: Marcar como vista. Depois de cada decisao a pagina le a rota de novo: a linha sai pelo que o servidor diz, e
+// nao por conta da tela. A recusa do servidor aparece junto da linha, ou dentro da janela aberta.
 //
 // Os numeros do alto e os titulos dos blocos tem o mesmo rotulo quando sao a mesma conta ("Recomendadas a decidir"). O
 // bloco das favoritas tem outro titulo que o numero "Favoritas": o numero conta todas as favoritas (e e' a porta para a
@@ -21,6 +34,13 @@ import { fmtDiaNoAno } from "./tempo";
 //
 // O motivo da recomendacao vai sob o objeto, e nao numa coluna: com ele em coluna as sete nao cabiam em 792 px (1024 com
 // o menu aberto), e ele e' uma frase, nao um valor que se compara entre linhas.
+
+/** O que as linhas precisam para decidir; nulo quando a pagina e' so' de leitura. */
+type Decisoes = {
+  ocupada: number | null; falha: FalhaDaDecisao | null;
+  favoritar: (l: LinhaLicitacao) => void; analisar: (l: LinhaLicitacao) => void; descartar: (l: LinhaLicitacao) => void;
+  marcarVista: (l: LinhaLicitacao) => void;
+};
 
 /** Um numero da faixa: o rotulo (com o simbolo da situacao, so' quando ha' o que contar), o numero em tinta e o apoio. */
 function Numero({ rotulo, situacao, apoio, children }: {
@@ -44,7 +64,19 @@ function Local({ rec }: { rec: Recomendada }) {
   return <>{rec.cidade && <span className="lic-cidade">{rec.cidade}</span>}{km && <span className="num lic-km">{km}</span>}</>;
 }
 
-function FavoritasQuePedemAtencao({ linhas }: { linhas: LinhaLicitacao[] }) {
+/** A celula das decisoes de uma linha: os botoes e, embaixo, a recusa do servidor para esta licitacao. */
+function CelulaDeDecisao({ l, falha, children }: { l: LinhaLicitacao; falha: FalhaDaDecisao | null; children?: React.ReactNode }) {
+  return (
+    <td className="lic-c-decisao">
+      {children && <div className="lic-acoes">{children}</div>}
+      {falha?.id === l.id && <Falha className="lic-falha">{falha.texto}</Falha>}
+    </td>
+  );
+}
+
+function FavoritasQuePedemAtencao({ linhas, decisoes }: { linhas: LinhaLicitacao[]; decisoes: Decisoes | null }) {
+  // a coluna das decisoes so' existe quando alguma linha tem o que decidir: a mudanca que ninguem viu
+  const comDecisao = decisoes !== null && linhas.some(l => (l.favorita?.mudancas_novas ?? 0) > 0);
   return (
     <section className="cartao lic-bloco" aria-labelledby="lic-atencao">
       <header className="cartao__cabeca">
@@ -53,10 +85,13 @@ function FavoritasQuePedemAtencao({ linhas }: { linhas: LinhaLicitacao[] }) {
       </header>
       {linhas.length === 0 ? <div className="vazio vazio--curto"><p>Nenhuma favorita pede atenção.</p></div> : (
         <Rolagem rotulo="Favoritas que pedem atenção">
-          <table className="tabela lic-tabela">
+          <table className={`tabela lic-tabela${comDecisao ? " lic-tabela--decide" : ""}`}>
             <caption className="sr-only">Favoritas com prazo chegando ou mudança recente, do prazo mais próximo ao mais distante</caption>
             <thead>
-              <tr><th scope="col">Licitação</th><th scope="col">Etapa</th><th scope="col">Próximo prazo</th><th scope="col">Mudança</th></tr>
+              <tr>
+                <th scope="col">Licitação</th><th scope="col">Etapa</th><th scope="col">Próximo prazo</th><th scope="col">Mudança</th>
+                {comDecisao && <th scope="col">Decisão</th>}
+              </tr>
             </thead>
             <tbody>
               {linhas.map(l => {
@@ -68,6 +103,17 @@ function FavoritasQuePedemAtencao({ linhas }: { linhas: LinhaLicitacao[] }) {
                     <td data-rotulo="Etapa"><Etapa f={f} /></td>
                     <td data-rotulo="Próximo prazo">{f.proximo_prazo ? <span className="lic-prazo"><Prazo p={f.proximo_prazo} /></span> : <Traco />}</td>
                     <td data-rotulo="Mudança">{f.mudancas.length > 0 ? <Mudanca m={f.mudancas[0]} /> : <Traco />}</td>
+                    {comDecisao && decisoes && (
+                      <CelulaDeDecisao l={l} falha={decisoes.falha}>
+                        {f.mudancas_novas > 0 && (
+                          <button type="button" className="btn btn--pequeno" disabled={decisoes.ocupada === l.id}
+                            aria-label={`${f.mudancas_novas === 1 ? "Marcar como vista" : "Marcar como vistas"}: ${nomeDaLicitacao(l)}`}
+                            onClick={() => decisoes.marcarVista(l)}>
+                            {f.mudancas_novas === 1 ? "Marcar como vista" : "Marcar como vistas"}
+                          </button>
+                        )}
+                      </CelulaDeDecisao>
+                    )}
                   </tr>
                 );
               })}
@@ -79,7 +125,7 @@ function FavoritasQuePedemAtencao({ linhas }: { linhas: LinhaLicitacao[] }) {
   );
 }
 
-function RecomendadasADecidir({ linhas }: { linhas: LinhaLicitacao[] }) {
+function RecomendadasADecidir({ linhas, decisoes }: { linhas: LinhaLicitacao[]; decisoes: Decisoes | null }) {
   return (
     <section className="cartao lic-bloco" aria-labelledby="lic-recomendadas">
       <header className="cartao__cabeca">
@@ -88,18 +134,20 @@ function RecomendadasADecidir({ linhas }: { linhas: LinhaLicitacao[] }) {
       </header>
       {linhas.length === 0 ? <div className="vazio vazio--curto"><p>Nenhuma recomendada a decidir.</p></div> : (
         <Rolagem rotulo="Recomendadas a decidir">
-          <table className="tabela lic-tabela lic-tabela--nota">
+          <table className={`tabela lic-tabela lic-tabela--nota${decisoes ? " lic-tabela--decide" : ""}`}>
             <caption className="sr-only">Recomendadas ainda sem decisão, da nota maior para a menor</caption>
             <thead>
               <tr>
                 <th scope="col" className="col-num">Nota</th><th scope="col">Licitação</th><th scope="col">Tipo de obra</th>
                 <th scope="col">Local</th><th scope="col" className="col-num">Valor</th><th scope="col">Sessão</th>
+                {decisoes && <th scope="col">Decisão</th>}
               </tr>
             </thead>
             <tbody>
               {linhas.map(l => {
                 const rec = l.recomendada;
                 if (!rec) return null;
+                const nome = nomeDaLicitacao(l);
                 return (
                   <tr key={l.chave}>
                     <td className="col-num lic-c-nota" data-rotulo="Nota">{rec.nota.toLocaleString("pt-BR")}</td>
@@ -116,6 +164,16 @@ function RecomendadasADecidir({ linhas }: { linhas: LinhaLicitacao[] }) {
                         ? <span className="lic-prazo"><Prazo p={{ data: l.data_sessao, hora: l.hora_sessao, dias_uteis: l.dias_uteis, passado: l.encerrada, hoje: l.sessao_hoje, situacao: l.prazo }} /></span>
                         : <Traco />}
                     </td>
+                    {decisoes && (
+                      <CelulaDeDecisao l={l} falha={decisoes.falha}>
+                        <button type="button" className="btn btn--pequeno btn--primario" disabled={decisoes.ocupada === l.id}
+                          aria-label={`Favoritar: ${nome}`} onClick={() => decisoes.favoritar(l)}>Favoritar</button>
+                        <button type="button" className="btn btn--pequeno" disabled={decisoes.ocupada === l.id}
+                          aria-label={`Analisar o edital: ${nome}`} onClick={() => decisoes.analisar(l)}>Analisar o edital</button>
+                        <button type="button" className="btn btn--pequeno" disabled={decisoes.ocupada === l.id}
+                          aria-label={`Descartar: ${nome}`} onClick={() => decisoes.descartar(l)}>Descartar</button>
+                      </CelulaDeDecisao>
+                    )}
                   </tr>
                 );
               })}
@@ -129,7 +187,20 @@ function RecomendadasADecidir({ linhas }: { linhas: LinhaLicitacao[] }) {
 
 export default function LicitacoesTriagem() {
   const { dados, erro, tentar } = useLicitacoes<RespostaTriagem>("/api/licitacoes/triagem");
-  if (!dados) return <SemLeitura erro={erro} tentar={tentar} />;
+  const { ocupada, falha, decidir, limparFalha } = useDecisoes(tentar);
+  // as janelas guardam a licitacao: a linha dela sai da lista quando a leitura nova chega, e a janela continua aberta
+  const [descarte, setDescarte] = useState<LinhaLicitacao | null>(null);
+  const [analise, setAnalise] = useState<{ l: LinhaLicitacao; resposta: AnaliseDoEdital } | null>(null);
+  if (!dados) return <SemLeitura erro={erro} tentar={() => void tentar()} />;
+
+  const decisoes: Decisoes | null = dados.pode_decidir ? {
+    // a recusa do descarte aparece dentro da janela dele, e nao na linha
+    ocupada, falha: descarte ? null : falha,
+    favoritar: l => void decidir(l.id, "favorita"),
+    analisar: l => void decidir<AnaliseDoEdital>(l.id, "analise").then(resposta => { if (resposta) setAnalise({ l, resposta }); }),
+    descartar: l => { limparFalha(); setDescarte(l); },
+    marcarVista: l => void decidir(l.id, "mudancas-vistas"),
+  } : null;
 
   const c = dados.contagens;
   const desde = c.novas_desde ? fmtDiaNoAno(c.novas_desde.desde) : null;
@@ -160,8 +231,16 @@ export default function LicitacoesTriagem() {
         </div>
       )}
       <LeituraDoRadarLinha leitura={dados.leitura} />
-      <FavoritasQuePedemAtencao linhas={dados.favoritas} />
-      <RecomendadasADecidir linhas={dados.recomendadas} />
+      <FalhaAoAtualizar erro={erro} tentar={() => void tentar()} />
+      <FavoritasQuePedemAtencao linhas={dados.favoritas} decisoes={decisoes} />
+      <RecomendadasADecidir linhas={dados.recomendadas} decisoes={decisoes} />
+      {descarte && (
+        <JanelaDoDescarte l={descarte} motivos={dados.motivos_descarte} ocupada={ocupada === descarte.id}
+          falha={falha?.id === descarte.id ? falha.texto : null}
+          aoDescartar={motivo => void decidir(descarte.id, "descarte", { motivo }).then(feito => { if (feito) setDescarte(null); })}
+          aoFechar={() => { limparFalha(); setDescarte(null); }} />
+      )}
+      {analise && <JanelaDaAnalise l={analise.l} analise={analise.resposta} aoFechar={() => setAnalise(null)} />}
     </div>
   );
 }

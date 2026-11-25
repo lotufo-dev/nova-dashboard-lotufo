@@ -245,6 +245,23 @@ describe("o caminho de cada rota (#814)", () => {
     expect(com({ tela: "licitacoes-favoritas" }).map(t => [!!t.area, !!t.titulo])).toEqual([[true, false], [false, true]]);
   });
 
+  it("as vistas das Favoritas (fatia 2 da #906): o quadro e o calendário são o último trecho, e o menu continua em Favoritas", () => {
+    const com = (r: Rota) => trechosDe(r, { perfil: "admin", permissoes: PERMISSOES.admin });
+    const quadro: Rota = { tela: "licitacoes-favoritas", vista: "quadro" }, calendario: Rota = { tela: "licitacoes-favoritas", vista: "calendario" };
+    expect(rotulos(com(quadro))).toEqual(["Licitações", "Favoritas", "Quadro"]);
+    expect(enderecos(com(quadro))).toEqual(["/licitacoes", "/licitacoes/favoritas", "/licitacoes/favoritas/quadro"]);
+    expect(rotulos(com(calendario))).toEqual(["Licitações", "Favoritas", "Calendário"]);
+    expect(com(calendario).map(t => !!t.titulo)).toEqual([false, true, false]);
+    // a lista é a vista padrão: não entra no caminho, como não entra na URL
+    expect(rotulos(com({ tela: "licitacoes-favoritas", vista: "lista" }))).toEqual(["Licitações", "Favoritas"]);
+    expect([vistaDe(quadro), vistaDe(calendario), vistaDe({ tela: "licitacoes-favoritas" }), vistaDe({ tela: "licitacoes-favoritas", vista: "lista" })])
+      .toEqual(["Quadro", "Calendário", undefined, undefined]);
+    for (const r of [quadro, calendario]) {
+      expect(itemDe(r)).toBe("licitacoes-favoritas");
+      expect(areaDe(r)).toBe("licitacoes");
+    }
+  });
+
   it("tela sem área no menu não derruba o topo: sai só o nome dela", () => {
     const semArea = { tela: "tela-que-ainda-nao-existe" } as unknown as Rota;
     expect(() => de(semArea)).not.toThrow();

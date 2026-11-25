@@ -43,6 +43,8 @@ export type PaginaDocumentos = "certidoes" | "regularidade" | "garantias";
 export type AbaContratante = "obras" | "medicoes" | "a-receber" | "siga" | "avisos";
 // Abas do Fechamento (#815). "Mes a mes" e' a padrao e nao entra na URL.
 export type AbaFechamento = "meses" | "comparacao" | "contratantes";
+// Vistas das Favoritas das Licitacoes (fatia 2 da #906). A lista e' a padrao e nao entra na URL.
+export type VistaFavoritas = "lista" | "quadro" | "calendario";
 
 export type Rota =
   | { tela: "raiz" }
@@ -51,10 +53,12 @@ export type Rota =
   | { tela: "resumo-medicoes" }
   | { tela: "avisos" }
   | { tela: "siga" }
-  // Licitacoes (#908): duas paginas so' de leitura, cada uma no proprio endereco. "/licitacoes" e' a Triagem (a pagina
-  // padrao da area) e "/licitacoes/favoritas", as Favoritas. As duas sao de quem tem `ver_licitacoes` (permissoes.ts)
+  // Licitacoes (#908): duas paginas, cada uma no proprio endereco. "/licitacoes" e' a Triagem (a pagina padrao da
+  // area) e "/licitacoes/favoritas", as Favoritas. As duas sao de quem tem `ver_licitacoes` (permissoes.ts). As
+  // Favoritas tem tres vistas (fatia 2 da #906): a lista e' a padrao e nao entra na URL; "/licitacoes/favoritas/quadro"
+  // e "/licitacoes/favoritas/calendario", com o mes na busca (?mes=2026-12)
   | { tela: "licitacoes" }
-  | { tela: "licitacoes-favoritas" }
+  | { tela: "licitacoes-favoritas"; vista?: VistaFavoritas }
   | { tela: "documentos"; pagina?: PaginaDocumentos }
   | { tela: "documentos-empresa"; id: number; aba?: AbaDocumentos }
   | { tela: "obras"; aba?: AbaObras }
@@ -162,6 +166,11 @@ export function parseRota(pathname: string): Rota {
   // App troca a URL pela canonica).
   if (a === "licitacoes" && partes.length === 2 && b === "favoritas") return { tela: "licitacoes-favoritas" };
   if (a === "licitacoes" && partes.length === 2 && b === "triagem") return { tela: "licitacoes" };
+  // As vistas das Favoritas (fatia 2 da #906): o quadro e o calendario; ".../lista" abre a lista, a forma canonica
+  if (a === "licitacoes" && partes.length === 3 && b === "favoritas" && (c === "quadro" || c === "calendario")) {
+    return { tela: "licitacoes-favoritas", vista: c };
+  }
+  if (a === "licitacoes" && partes.length === 3 && b === "favoritas" && c === "lista") return { tela: "licitacoes-favoritas" };
   // As vistas de Obras (#805): "/obras/todas", "/obras/andamento", "/obras/qdop"; "Por contratante" e' "/obras". Os
   // enderecos de antes ("/obras/posicao", "/obras/resumo") abrem a vista que ficou no lugar.
   if (a === "obras" && partes.length === 2) {
@@ -241,7 +250,7 @@ export function caminhoDe(r: Rota): string {
     case "admin": return r.aba && r.aba !== "saude" ? `/admin/${r.aba}` : "/admin";
     case "notas-envio": return `/notas/envio/${r.id}`;
     case "fechamento": return r.aba && r.aba !== "meses" ? `/fechamento/${r.aba}` : "/fechamento";
-    case "licitacoes-favoritas": return "/licitacoes/favoritas";
+    case "licitacoes-favoritas": return r.vista && r.vista !== "lista" ? `/licitacoes/favoritas/${r.vista}` : "/licitacoes/favoritas";
     default: return `/${r.tela}`;
   }
 }
@@ -389,6 +398,12 @@ export function buscaDosAvisos(busca: Busca): Busca {
 
 /** O número, a competência e a série que a janela "Iniciar processo" (#151) manda pela busca da URL
  *  (?numero=25&competencia=2026-10&tipo=projeto). Valor fora do padrão vira "" (ignorado). */
+/** O mes do calendario das Favoritas das Licitacoes (?mes=2026-12). Fora do padrao vira "" (o servidor mostra o mes
+ *  de hoje). */
+export function mesDaBusca(busca: Busca): string {
+  return /^2\d{3}-(0[1-9]|1[0-2])$/.test(busca.mes ?? "") ? busca.mes : "";
+}
+
 export function medicaoDaBusca(busca: Busca): { numero: string; competencia: string; tipo: "projeto" | "" } {
   return {
     numero: /^[1-9][0-9]{0,2}$/.test(busca.numero ?? "") ? busca.numero : "",

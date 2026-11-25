@@ -1,5 +1,5 @@
 import { pode } from "./permissoes";
-import type { AbaContratante, AbaDocumentos, AbaFechamento, Busca, PaginaDocumentos, Rota } from "./rota";
+import type { AbaContratante, AbaDocumentos, AbaFechamento, Busca, PaginaDocumentos, Rota, VistaFavoritas } from "./rota";
 
 // Menu, entrada e caminho por perfil. Funcoes puras: a casca (Casca.tsx, Caminho.tsx) so' desenha o que sai daqui.
 //
@@ -186,6 +186,8 @@ const ABAS_DA_ADMINISTRACAO: Record<string, string> = {
 // A aba de comparacao do Fechamento se chama pelos anos que o servidor manda ("2026 × 2025"): a pagina publica o nome
 // (`NomesDoCaminho.vista`) quando o dado chega; ate' la', e se a leitura falhar, o caminho diz "Comparação".
 const VISTAS_DO_FECHAMENTO: Record<Exclude<AbaFechamento, "meses">, string> = { comparacao: "Comparação", contratantes: "Por contratante" };
+// As vistas das Favoritas das Licitacoes (fatia 2 da #906); a lista e' a padrao
+export const VISTAS_DAS_FAVORITAS: Record<VistaFavoritas, string> = { lista: "Lista", quadro: "Quadro", calendario: "Calendário" };
 
 /** O nome da vista da rota, quando ela nao e' a padrao: e' o ultimo trecho do caminho e entra no titulo da aba do
  *  navegador ("Obras · QDOP"). `nomes.vista`: o nome que a pagina publicou, para a vista que se chama pelo dado. */
@@ -199,6 +201,7 @@ export function vistaDe(r: Rota, nomes: NomesDoCaminho = {}): string | undefined
     case "fechamento":
       if (r.aba === "comparacao") return nomes.vista || VISTAS_DO_FECHAMENTO.comparacao;
       return r.aba === "contratantes" ? VISTAS_DO_FECHAMENTO.contratantes : undefined;
+    case "licitacoes-favoritas": return r.vista && r.vista !== "lista" ? VISTAS_DAS_FAVORITAS[r.vista] : undefined;
     default: return undefined;
   }
 }

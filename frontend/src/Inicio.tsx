@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import type { Aviso } from "./Alertas";
 import { api, mensagemDeErro } from "./api";
 import { daAgenda, porSecao, type Secao } from "./avisos";
+import CaixaAviso from "./CaixaAviso";
 import Contador from "./Contador";
 import EmAbertoAParte from "./EmAbertoAParte";
 import Falha from "./Falha";
 import { brl, contar } from "./formato";
 import LegendaCor from "./LegendaCor";
+import { avisoDaLeitura, type LeituraDoRadar } from "./licitacoes";
 import type { Usuario } from "./Login";
 import MarcaEtapa from "./MarcaEtapa";
 import Rolagem from "./Rolagem";
@@ -384,19 +386,50 @@ function CaixaAvisos({ avisos, ir }: { avisos: Aviso[] | null | undefined; ir: I
   );
 }
 
+/** A linha das licitacoes em GET /api/inicio (fatia 2 da #906): os numeros da Triagem, pela mesma funcao do servidor
+ *  (`licitacoes.resumo`). Nulo para quem nao tem `ver_licitacoes`. */
+export type LicitacoesNaInicio = { leitura: LeituraDoRadar; recomendadas: number; favoritas: number } | null;
+
+/** A linha das licitacoes: quantas recomendadas esperam decisao e quantas favoritas pedem atencao, com a porta para a
+ *  Triagem; com a leitura atrasada, desde quando o radar nao le. Os rotulos sao os da Triagem, porque os numeros sao os
+ *  mesmos. Enquanto o radar nunca entregou leitura (a area ainda nao esta' em uso), a linha nao aparece: o aviso de que
+ *  falta a primeira leitura fica na Triagem. */
+function LinhaDasLicitacoes({ licitacoes, ir }: { licitacoes: LicitacoesNaInicio | undefined; ir: Ir }) {
+  if (!licitacoes || licitacoes.leitura.lido_em === null) return null;
+  const numeros: [string, number][] = [["Recomendadas a decidir", licitacoes.recomendadas], ["Favoritas que pedem atenção", licitacoes.favoritas]];
+  return (
+    <section aria-labelledby="ini-licitacoes" className="cartao ini-painel ini-licitacoes">
+      <header className="ini-painel__cab">
+        <h2 id="ini-licitacoes">Licitações</h2>
+        <Link para={{ tela: "licitacoes" }} ir={ir} className="ini-ver-todos" aria-label="Ver a triagem das licitações">Ver a triagem</Link>
+      </header>
+      {licitacoes.leitura.atrasada && <CaixaAviso nivel="atencao" role="status">{avisoDaLeitura(licitacoes.leitura)}</CaixaAviso>}
+      <dl className="ini-avisos__secoes">
+        {numeros.map(([rotulo, n]) => (
+          <div key={rotulo} className="ini-aviso">
+            <dt>{rotulo}</dt>
+            <dd><Contador>{n.toLocaleString("pt-BR")}</Contador></dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
 export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
   const [p, setP] = useState<PainelInicio | null>(null);
   const [erro, setErro] = useState("");
   const [avisos, setAvisos] = useState<Aviso[] | null | undefined>(undefined);
+  const [licitacoes, setLicitacoes] = useState<LicitacoesNaInicio | undefined>(undefined);
 
   useEffect(() => {
     let vivo = true;
     api<PainelInicio>("/api/inicio/painel")
       .then(d => { if (vivo) setP(d); })
       .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
-    // a fila da tela Avisos; se falhar, so' a caixa mostra o erro
-    api<{ avisos: Aviso[] }>("/api/inicio")
-      .then(d => { if (vivo) setAvisos(d.avisos); })
+    // a fila da tela Avisos e a linha das licitacoes; se falhar, so' a caixa dos avisos mostra o erro
+    api<{ avisos: Aviso[]; licitacoes?: LicitacoesNaInicio }>("/api/inicio")
+      .then(d => { if (vivo) { setAvisos(d.avisos); setLicitacoes(d.licitacoes); } })
       .catch(() => { if (vivo) setAvisos(null); });
     return () => { vivo = false; };
   }, []);
@@ -466,6 +499,7 @@ export default function Inicio({ usuario, ir }: { usuario: Usuario; ir: Ir }) {
         <Recebido12Meses meses={p.recebido_12m} />
         <Medido12Meses meses={p.medido_12m} ir={ir} />
         <CaixaAvisos avisos={avisos} ir={ir} />
+        <LinhaDasLicitacoes licitacoes={licitacoes} ir={ir} />
       </div>
     </div>
   );

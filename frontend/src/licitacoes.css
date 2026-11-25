@@ -1,4 +1,5 @@
-/* Licitacoes (#908): a Triagem (LicitacoesTriagem.tsx) e as Favoritas (LicitacoesFavoritas.tsx), com as pecas que as
+/* Licitacoes (#908 e fatia 2 da #906): a Triagem (LicitacoesTriagem.tsx) e as Favoritas (LicitacoesFavoritas.tsx, com o
+   quadro em LicitacoesQuadro.tsx e o calendario em LicitacoesCalendario.tsx), com as pecas que as
    duas dividem (LicitacoesPecas.tsx). A moldura do painel (.cartao), a tabela (.tabela em .tabela-wrap), o selo, o
    glifo, o contador, a linha de vazio e a caixa de aviso sao pecas de base de tokens.css. Cor, familia, tamanho, espaco
    e borda so' por variavel; tudo debaixo de `.lic` e `.lic-*`. */
@@ -135,4 +136,132 @@
   .lic-cidade + .lic-km { display: inline; }
   .lic-cidade + .lic-km::before { content: " · "; }
   .lic-bloco .cartao__cabeca, .lic-bloco .vazio { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
+}
+
+/* ================================================================ fatia 2 da #906: decidir, quadro e calendario */
+
+/* ---------------------------------------------------------------- as decisoes da linha */
+/* os botoes da linha, lado a lado enquanto couberem; o que nao cabe desce. Embaixo, a recusa do servidor */
+.lic-acoes { display: flex; flex-wrap: wrap; gap: var(--espaco-mini); }
+/* na tabela (pagina larga), um embaixo do outro e da mesma largura: a coluna das decisoes fica estreita e alinhada */
+@container lic-pagina (min-width: 901px) {
+  .lic-acoes { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+}
+.lic-falha { margin: var(--espaco-mini) 0 0; white-space: normal; }
+/* a etapa que se troca: o controle na altura do botao de linha, com o que o dossie diz ao lado */
+.lic-etapa { align-items: center; }
+.lic-etapa__escolha { max-width: 100%; height: var(--alvo-menor); font-size: var(--texto-meta); }
+
+/* as janelas das decisoes: a licitacao de que se trata, o comando para copiar e o que foi feito */
+.lic-janela__nome { margin: 0; }
+.lic-comando { width: 100%; }
+.lic-janela__dito { margin: 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.lic-janela__dito:empty { display: none; }
+
+/* ---------------------------------------------------------------- quadro por etapa */
+/* uma coluna por etapa, todas da mesma largura. Na pagina larga, as sete numa fileira; na media, as que nao cabem
+   descem para a fileira de baixo, na mesma ordem; na estreita, um bloco embaixo do outro. O quadro nunca rola de lado */
+.lic-quadro {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--alvo-minimo) * 5.5)), 1fr)); align-items: start;
+  gap: var(--espaco-p); margin: 0; padding: 0; list-style: none;
+}
+@container lic-pagina (min-width: 1040px) {
+  .lic-quadro { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--espaco-pp); }
+}
+.lic-coluna { min-width: 0; border: var(--borda-painel); background: var(--cor-superficie); }
+/* o cabecalho de grupo forte: a faixa de tinta, o nome a' esquerda e a contagem a' direita */
+.lic-coluna__cabeca {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--espaco-pp);
+  padding: var(--espaco-pp) var(--espaco-p); background: var(--cor-tinta); color: var(--cor-papel);
+}
+/* o nome da etapa na letra de apoio: "Acompanhando" cabe ao lado da contagem na coluna mais estreita */
+.lic-coluna__nome { margin: 0; min-width: 0; color: inherit; font-size: var(--texto-meta); overflow-wrap: anywhere; }
+.lic-coluna__cabeca .contador { flex: none; }
+.lic-coluna__vazia { margin: 0; padding: var(--espaco-p); }
+.lic-cartoes { margin: 0; padding: 0; list-style: none; }
+.lic-cartao { display: grid; gap: var(--espaco-mini); min-width: 0; padding: var(--espaco-p); border-bottom: var(--borda-linha); font-size: var(--texto-meta); }
+.lic-cartao:last-child { border-bottom: 0; }
+
+/* ---------------------------------------------------------------- calendario dos prazos */
+.lic-cal__cabeca {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--espaco-pp) var(--espaco-m);
+  padding: var(--espaco-p) var(--espaco-g);
+}
+.lic-cal__mes { margin: 0; font-size: var(--texto-titulo-bloco); }
+.lic-cal__mes::first-letter { text-transform: uppercase; }
+.lic-cal__troca { display: flex; flex-wrap: wrap; gap: var(--espaco-mini); }
+/* a grade: sete colunas iguais, um dia por celula; o dia sem prazo fica com a altura minima */
+.lic-cal__grade { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.lic-cal__grade th {
+  padding: var(--espaco-mini) var(--espaco-pp); border-top: var(--regua-secao); color: var(--cor-texto-secundario);
+  font-size: var(--texto-mini); font-weight: var(--peso-medio); text-align: left;
+}
+.lic-cal__grade abbr { text-decoration: none; }
+.lic-dia {
+  height: calc(var(--alvo-minimo) * 2); padding: var(--espaco-mini) var(--espaco-pp) var(--espaco-pp); border: var(--borda-linha);
+  vertical-align: top; font-size: var(--texto-meta); overflow-wrap: anywhere;
+}
+.lic-cal__grade :is(th, td):first-child { border-left: 0; }
+.lic-cal__grade :is(th, td):last-child { border-right: 0; }
+.lic-cal__grade tbody tr:last-child td { border-bottom: 0; }
+.lic-dia__data { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--espaco-mini); color: var(--cor-texto-secundario); font-size: var(--texto-mini); }
+.lic-dia__extenso { display: none; }
+/* o dia de fora do mes: papel sombreado e o numero mais fraco */
+.lic-dia--fora { background: var(--cor-papel-sombreado); }
+.lic-dia--fora .lic-dia__numero { color: var(--cor-texto-terciario); }
+/* hoje: o numero em tinta cheia e a palavra ao lado (nunca so' a cor) */
+.lic-dia--hoje .lic-dia__numero { padding: 0 var(--espaco-mini); background: var(--cor-tinta); color: var(--cor-papel); font-weight: var(--peso-forte); }
+.lic-dia__hoje { color: var(--cor-tinta); font-weight: var(--peso-forte); }
+.lic-dia__prazos { display: grid; gap: var(--espaco-pp); margin: var(--espaco-mini) 0 0; padding: 0; list-style: none; }
+.lic-dia__prazo { display: grid; justify-items: start; gap: var(--espaco-traco); min-width: 0; }
+.lic-dia__prazo .selo { max-width: 100%; }
+.lic-dia__licitacao .lic-nome { color: var(--cor-texto-secundario); font-size: var(--texto-mini); font-weight: var(--peso-normal); }
+
+/* pagina media e estreita: o calendario vira a lista dos dias que tem prazo, com o dia da semana e a data escritos */
+@container lic-pagina (max-width: 900px) {
+  .lic-cal__grade, .lic-cal__grade tbody, .lic-cal__grade tr { display: block; }
+  .lic-cal__grade thead { position: absolute; width: var(--espaco-fio); height: var(--espaco-fio); overflow: hidden; clip: rect(0 0 0 0); }
+  .lic-cal__grade td.lic-dia {
+    display: grid; grid-template-columns: calc(var(--alvo-minimo) * 2.25) minmax(0, 1fr); gap: var(--espaco-pp); height: auto;
+    padding: var(--espaco-p) var(--espaco-g); border: 0; border-top: var(--borda-linha);
+  }
+  .lic-cal__grade td:is(.lic-dia--vazio, .lic-dia--fora) { display: none; }
+  .lic-dia__data { display: block; color: var(--cor-tinta); font-size: var(--texto-meta); font-weight: var(--peso-medio); }
+  .lic-dia__numero { display: none; }
+  .lic-dia__extenso { display: inline; }
+  .lic-dia__hoje { display: block; }
+  .lic-dia__prazos { margin: 0; }
+  .lic-dia__licitacao .lic-nome { font-size: var(--texto-meta); }
+}
+
+/* COM AS DECISOES a tabela so' cabe na pagina larga (a coluna a mais nao entra em 724 px, a pagina de 1024 com o menu
+   aberto): ate' 900 px ela vira um bloco por licitacao, com as regras do bloco da pagina estreita (acima) e os botoes
+   no pe' do bloco, sem o nome da coluna. Sem as decisoes a tabela continua tabela a 1024, como na fatia 1. */
+@container lic-pagina (max-width: 900px) {
+  .lic .lic-tabela--decide, .lic .lic-tabela--decide tbody { display: block; width: 100%; }
+  .lic .lic-tabela--decide thead { position: absolute; width: var(--espaco-fio); height: var(--espaco-fio); overflow: hidden; clip: rect(0 0 0 0); }
+  .lic .lic-tabela--decide tbody tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--espaco-mini) var(--espaco-p); align-items: start;
+    padding: var(--espaco-p) var(--espaco-m); border-bottom: var(--borda-linha);
+  }
+  .lic .lic-tabela--decide tbody tr:last-child { border-bottom: 0; }
+  .lic .lic-tabela.lic-tabela--decide.tabela tbody tr > :is(th, td) {
+    display: block; grid-column: 1 / -1; min-width: 0; padding: 0; border: 0; text-align: left; white-space: normal;
+  }
+  .lic .lic-tabela.lic-tabela--decide.lic-tabela--nota.tabela tbody tr > .lic-c-licitacao { grid-row: 1; grid-column: 1; }
+  .lic .lic-tabela.lic-tabela--decide.lic-tabela--nota.tabela tbody tr > .lic-c-nota { grid-row: 1; grid-column: 2; white-space: nowrap; }
+  .lic .lic-tabela--decide [data-rotulo]::before {
+    content: attr(data-rotulo) " "; margin-right: var(--espaco-mini); color: var(--cor-texto-secundario);
+    font-family: var(--fonte-texto); font-stretch: var(--largura-texto); font-size: var(--texto-mini); font-weight: var(--peso-normal);
+  }
+  .lic-tabela--decide .lic-cidade + .lic-km { display: inline; }
+  .lic-tabela--decide .lic-cidade + .lic-km::before { content: " · "; }
+  .lic .lic-tabela.lic-tabela--decide.tabela tbody tr > .lic-c-decisao { margin-top: var(--espaco-mini); }
+  .lic .lic-tabela.lic-tabela--decide.tabela tbody tr > .lic-c-decisao:empty { display: none; }
+}
+
+@container lic-pagina (max-width: 640px) {
+  .lic-cal__cabeca { padding: var(--espaco-p) var(--espaco-m); }
+  .lic-cal__grade td.lic-dia { grid-template-columns: minmax(0, 1fr); gap: var(--espaco-mini); padding: var(--espaco-p) var(--espaco-m); }
+  .lic-dia__hoje { display: inline; }
 }

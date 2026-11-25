@@ -1,15 +1,30 @@
+import { useState } from "react";
 import Contador from "./Contador";
+import Falha from "./Falha";
 import { contar } from "./formato";
-import { useLicitacoes, type LinhaLicitacao, type RespostaFavoritas } from "./licitacoes";
-import { Etapa, LeituraDoRadarLinha, Licitacao, Mudanca, Prazo, SemLeitura, Traco, Valor } from "./LicitacoesPecas";
+import {
+  nomeDaLicitacao, useDecisoes, useLicitacoes,
+  type EtapaDaFavorita, type FalhaDaDecisao, type LinhaLicitacao, type RespostaFavoritas,
+} from "./licitacoes";
+import LicitacoesCalendario from "./LicitacoesCalendario";
+import {
+  AbasDasFavoritas, Etapa, FalhaAoAtualizar, JanelaDeTirarAFavorita, LeituraDoRadarLinha, Licitacao, Mudanca, Prazo, SemLeitura, Traco, Valor,
+} from "./LicitacoesPecas";
+import LicitacoesQuadro from "./LicitacoesQuadro";
 import Rolagem from "./Rolagem";
+import type { Busca, VistaFavoritas } from "./rota";
+import Selo from "./Selo";
 
-// FAVORITAS (#908, docs/adr/0018): "/licitacoes/favoritas". Responde "em que etapa esta' cada uma e o que vence": todas
-// as favoritas ativas, cada uma com a etapa, todos os prazos e as mudancas desde que foi favoritada. So' leitura nesta
-// fatia: as favoritas sao espelho do que o radar manda.
+// FAVORITAS (#908 e fatia 2 da #906, docs/adr/0018): "/licitacoes/favoritas". Responde "em que etapa esta' cada uma e o
+// que vence", em tres vistas com endereco proprio: a lista (a padrao), o quadro por etapa ("/quadro",
+// LicitacoesQuadro.tsx) e o calendario dos prazos ("/calendario", LicitacoesCalendario.tsx).
 //
-// Tudo vem pronto de GET /api/licitacoes/favoritas: a ordem (as em aberto primeiro, pela sessao; as encerradas no fim),
-// a etapa com o rotulo, os dias uteis e a situacao de cada prazo.
+// A lista e o quadro leem GET /api/licitacoes/favoritas, que manda tudo pronto: a ordem (as em aberto primeiro, pela
+// sessao; as encerradas no fim), a etapa com o rotulo, os dias uteis e a situacao de cada prazo, e as etapas na ordem.
+//
+// AS DECISOES (fatia 2), so' na lista e so' com `pode_decidir` (depois do corte, a quem decide): a etapa da favorita
+// sem etapa de dossie troca num controle de escolha, com as etapas que o servidor manda; a que tem etapa de dossie so'
+// mostra, e diz que vem do dossie. Tirar a favorita pede confirmacao. Depois de cada decisao a pagina le a rota de novo.
 //
 // As encerradas ficam num grupo recolhido no fim, como os encerrados do SIGA: nao tem prazo correndo, e a pagina
 // responde o que vence. Nelas o prazo e' so' o nome e a data, sem os dias e sem cor (o servidor ja' manda sem situacao).
@@ -17,15 +32,41 @@ import Rolagem from "./Rolagem";
 /** Quantas mudancas a linha mostra; o resto vira a contagem ("e mais 2"). */
 const MUDANCAS_A_VISTA = 3;
 
-function Tabela({ linhas, legenda, encerradas = false }: { linhas: LinhaLicitacao[]; legenda: string; encerradas?: boolean }) {
+/** O que as linhas precisam para decidir; nulo quando a pagina e' so' de leitura. */
+type Decisoes = {
+  etapas: EtapaDaFavorita[]; ocupada: number | null; falha: FalhaDaDecisao | null;
+  mudarEtapa: (l: LinhaLicitacao, etapa: string) => void; tirar: (l: LinhaLicitacao) => void;
+};
+
+/** A etapa na lista de quem decide: o controle de escolha na favorita sem etapa de dossie; na que tem, o selo e de onde
+ *  ela vem. O que o dossie diz alem da etapa continua ao lado. */
+function EtapaQueSeDecide({ l, decisoes }: { l: LinhaLicitacao; decisoes: Decisoes }) {
+  const f = l.favorita;
+  if (!f) return null;
+  if (f.etapa_do_dossie) return <><Etapa f={f} /><span className="lic-sub">do dossiê</span></>;
+  return (
+    <span className="lic-etapa">
+      <select className="lic-etapa__escolha" aria-label={`Etapa: ${nomeDaLicitacao(l)}`} value={f.etapa} disabled={decisoes.ocupada === l.id}
+        onChange={ev => decisoes.mudarEtapa(l, ev.target.value)}>
+        {decisoes.etapas.map(e => <option key={e.etapa} value={e.etapa}>{e.rotulo}</option>)}
+      </select>
+      {f.selos.map((s, i) => <Selo key={`${i}-${s}`}>{s}</Selo>)}
+    </span>
+  );
+}
+
+function Tabela({ linhas, legenda, encerradas = false, decisoes }: {
+  linhas: LinhaLicitacao[]; legenda: string; encerradas?: boolean; decisoes: Decisoes | null;
+}) {
   return (
     <Rolagem rotulo={legenda}>
-      <table className="tabela lic-tabela">
+      <table className={`tabela lic-tabela${decisoes ? " lic-tabela--decide" : ""}`}>
         <caption className="sr-only">{legenda}</caption>
         <thead>
           <tr>
             <th scope="col">Licitação</th><th scope="col">Etapa</th><th scope="col">Prazos</th>
             <th scope="col" className="col-num">Valor</th><th scope="col">Mudanças</th>
+            {decisoes && <th scope="col">Decisão</th>}
           </tr>
         </thead>
         <tbody>
@@ -36,7 +77,7 @@ function Tabela({ linhas, legenda, encerradas = false }: { linhas: LinhaLicitaca
             return (
               <tr key={l.chave}>
                 <th scope="row" className="lic-c-licitacao"><Licitacao l={l} /></th>
-                <td data-rotulo="Etapa"><Etapa f={f} /></td>
+                <td data-rotulo="Etapa">{decisoes ? <EtapaQueSeDecide l={l} decisoes={decisoes} /> : <Etapa f={f} />}</td>
                 <td data-rotulo="Prazos">
                   {f.prazos.length === 0 ? <Traco /> : (
                     <ul className="lic-prazos">
@@ -53,6 +94,15 @@ function Tabela({ linhas, legenda, encerradas = false }: { linhas: LinhaLicitaca
                     </ul>
                   )}
                 </td>
+                {decisoes && (
+                  <td className="lic-c-decisao">
+                    <div className="lic-acoes">
+                      <button type="button" className="btn btn--pequeno" disabled={decisoes.ocupada === l.id}
+                        aria-label={`Tirar a favorita: ${nomeDaLicitacao(l)}`} onClick={() => decisoes.tirar(l)}>Tirar a favorita</button>
+                    </div>
+                    {decisoes.falha?.id === l.id && <Falha className="lic-falha">{decisoes.falha.texto}</Falha>}
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -62,29 +112,57 @@ function Tabela({ linhas, legenda, encerradas = false }: { linhas: LinhaLicitaca
   );
 }
 
-export default function LicitacoesFavoritas() {
-  const { dados, erro, tentar } = useLicitacoes<RespostaFavoritas>("/api/licitacoes/favoritas");
-  if (!dados) return <SemLeitura erro={erro} tentar={tentar} />;
-
+function Lista({ dados, decisoes }: { dados: RespostaFavoritas; decisoes: Decisoes | null }) {
   const abertas = dados.favoritas.filter(l => !l.encerrada);
   const encerradas = dados.favoritas.filter(l => l.encerrada);
   return (
-    <div className="pagina lic">
-      <LeituraDoRadarLinha leitura={dados.leitura} />
+    <>
       {/* o nome da pagina ja' esta' no alto: o painel nao o repete como titulo */}
       <section className="cartao lic-bloco" aria-label="Favoritas em aberto">
         {abertas.length === 0
           ? <div className="vazio vazio--curto"><p>{encerradas.length === 0 ? "Nenhuma favorita." : "Nenhuma favorita em aberto."}</p></div>
-          : <Tabela linhas={abertas} legenda="Favoritas em aberto" />}
+          : <Tabela linhas={abertas} legenda="Favoritas em aberto" decisoes={decisoes} />}
       </section>
       {encerradas.length > 0 && (
         <details className="lic-encerradas">
           <summary>Encerradas <Contador rotulo={contar(encerradas.length, "favorita encerrada", "favoritas encerradas")}>{encerradas.length.toLocaleString("pt-BR")}</Contador></summary>
           <section className="cartao lic-bloco" aria-label="Favoritas encerradas">
-            <Tabela linhas={encerradas} legenda="Favoritas encerradas" encerradas />
+            <Tabela linhas={encerradas} legenda="Favoritas encerradas" encerradas decisoes={decisoes} />
           </section>
         </details>
       )}
+    </>
+  );
+}
+
+/** A lista e o quadro: os mesmos dados, uma leitura so' (trocar de uma vista para a outra nao le de novo). */
+function ListaOuQuadro({ vista }: { vista: "lista" | "quadro" }) {
+  const { dados, erro, tentar } = useLicitacoes<RespostaFavoritas>("/api/licitacoes/favoritas");
+  const { ocupada, falha, decidir, limparFalha } = useDecisoes(tentar);
+  const [tirar, setTirar] = useState<LinhaLicitacao | null>(null);
+  if (!dados) return <SemLeitura erro={erro} tentar={() => void tentar()}><AbasDasFavoritas atual={vista} /></SemLeitura>;
+
+  const decisoes: Decisoes | null = dados.pode_decidir ? {
+    // a recusa de tirar a favorita aparece dentro da janela, e nao na linha
+    etapas: dados.etapas, ocupada, falha: tirar ? null : falha,
+    mudarEtapa: (l, etapa) => void decidir(l.id, "etapa", { etapa }),
+    tirar: l => { limparFalha(); setTirar(l); },
+  } : null;
+  return (
+    <div className="pagina lic">
+      <AbasDasFavoritas atual={vista} />
+      <LeituraDoRadarLinha leitura={dados.leitura} />
+      <FalhaAoAtualizar erro={erro} tentar={() => void tentar()} />
+      {vista === "quadro" ? <LicitacoesQuadro dados={dados} /> : <Lista dados={dados} decisoes={decisoes} />}
+      {tirar && (
+        <JanelaDeTirarAFavorita l={tirar} ocupada={ocupada === tirar.id} falha={falha?.id === tirar.id ? falha.texto : null}
+          aoConfirmar={() => void decidir(tirar.id, "favorita/remover").then(feito => { if (feito) setTirar(null); })}
+          aoFechar={() => { limparFalha(); setTirar(null); }} />
+      )}
     </div>
   );
+}
+
+export default function LicitacoesFavoritas({ vista = "lista", busca = {} }: { vista?: VistaFavoritas; busca?: Busca }) {
+  return vista === "calendario" ? <LicitacoesCalendario busca={busca} /> : <ListaOuQuadro vista={vista} />;
 }
