@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RespostaFavoritas } from "./licitacoes";
 import LicitacoesFavoritas from "./LicitacoesFavoritas";
-import { favorita, HOJE_DO_TESTE, leitura, linha, mudanca, prazo } from "./licitacoesTeste";
+import { ETAPAS, favorita, HOJE_DO_TESTE, leitura, linha, mudanca, prazo } from "./licitacoesTeste";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
@@ -32,7 +32,7 @@ const REVOGADA = linha(9, {
     prazos: [prazo("Sessão", "2026-12-10", 12, null, { hora: "09:00", aviso: "dossiê diz 11/12/2026, conferir" })] }) });
 
 const favoritas = (linhas = [EM_ANALISE, PROPOSTA_ENVIADA, SEM_DATA, VENCIDA, REVOGADA], extra: Partial<RespostaFavoritas> = {}): RespostaFavoritas => ({
-  leitura: leitura(), favoritas: linhas, ...extra });
+  leitura: leitura(), decisoes: "radar", pode_decidir: false, etapas: ETAPAS, favoritas: linhas, ...extra });
 const mostrar = (dados: RespostaFavoritas) => { api.mockResolvedValue(dados); return render(<LicitacoesFavoritas />); };
 const bloco = (nome: string) => screen.getByRole("region", { name: nome });
 const linhasDe = (nome: string) => within(bloco(nome)).getAllByRole("row").slice(1);

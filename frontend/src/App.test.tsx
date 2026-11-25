@@ -153,7 +153,9 @@ describe("App: a área Licitações (#908)", () => {
     if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, permissoes, csrf: "x" };
     if (caminho === "/api/licitacoes/triagem") return { leitura: LEITURA, favoritas: [], recomendadas: [],
       contagens: { recomendadas: 0, favoritas: 0, novas: 0, novas_desde: null, por_orgao: [] } };
-    if (caminho === "/api/licitacoes/favoritas") return { leitura: LEITURA, favoritas: [] };
+    if (caminho === "/api/licitacoes/favoritas") return { leitura: LEITURA, etapas: [{ etapa: "acompanhando", rotulo: "Acompanhando" }], favoritas: [] };
+    if (caminho.startsWith("/api/licitacoes/calendario")) return { leitura: LEITURA, mes: "2026-12", anterior: "2026-11", proximo: "2027-01",
+      mes_atual: false, prazos: 0, semanas: [] };
     if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
     return [];
   });
@@ -211,7 +213,50 @@ describe("App: a área Licitações (#908)", () => {
     expect(window.location.pathname).toBe("/licitacoes");
   });
 
-  it.each([["/licitacoes"], ["/licitacoes/favoritas"]])(
+  // fatia 2 da #906: as Favoritas têm três vistas, cada uma com endereço; o item do menu continua aceso nas três
+  it("/licitacoes/favoritas/quadro abre o quadro, com Favoritas acesa no menu e a vista no caminho e no título", async () => {
+    entrar("admin", permissoesDe("admin"));
+    window.history.replaceState(null, "", "/licitacoes/favoritas/quadro");
+    render(<App />);
+    expect(await screen.findByRole("list", { name: "Favoritas por etapa" })).toBeTruthy();
+    expect(api).toHaveBeenCalledWith("/api/licitacoes/favoritas");
+    expect(trilho().getByRole("link", { name: "Favoritas" }).getAttribute("aria-current")).toBe("page");
+    expect(trechos()).toEqual(["Licitações", "Favoritas", "Quadro"]);
+    expect(screen.getByRole("heading", { level: 1, name: "Favoritas" })).toBeTruthy();
+    expect(document.title).toBe("Favoritas · Quadro · grupolotufo");
+    expect(window.location.pathname).toBe("/licitacoes/favoritas/quadro");
+    // a aba Lista leva à vista padrão, sem ler de novo: a lista e o quadro são os mesmos dados
+    const leituras = api.mock.calls.filter(c => c[0] === "/api/licitacoes/favoritas").length;
+    await act(async () => { fireEvent.click(within(screen.getByRole("navigation", { name: "Vistas das Favoritas" })).getByRole("link", { name: "Lista" })); });
+    expect(window.location.pathname).toBe("/licitacoes/favoritas");
+    expect(await screen.findByText("Nenhuma favorita.")).toBeTruthy();
+    expect(api.mock.calls.filter(c => c[0] === "/api/licitacoes/favoritas")).toHaveLength(leituras);
+  });
+
+  it("/licitacoes/favoritas/calendario abre o calendário no mês da busca, com Favoritas acesa no menu", async () => {
+    entrar("admin", permissoesDe("admin"));
+    window.history.replaceState(null, "", "/licitacoes/favoritas/calendario?mes=2026-12");
+    render(<App />);
+    expect(await screen.findByText("Nenhum prazo em dezembro de 2026.")).toBeTruthy();
+    expect(api).toHaveBeenCalledWith("/api/licitacoes/calendario?mes=2026-12");
+    expect(trilho().getByRole("link", { name: "Favoritas" }).getAttribute("aria-current")).toBe("page");
+    expect(trechos()).toEqual(["Licitações", "Favoritas", "Calendário"]);
+    expect(document.title).toBe("Favoritas · Calendário · grupolotufo");
+    // o link do mês seguinte troca só a busca, e o calendário pede o mês novo
+    await act(async () => { fireEvent.click(screen.getByRole("link", { name: "Próximo mês" })); });
+    expect(window.location.pathname + window.location.search).toBe("/licitacoes/favoritas/calendario?mes=2027-01");
+    expect(api).toHaveBeenCalledWith("/api/licitacoes/calendario?mes=2027-01");
+  });
+
+  it("a lista por extenso (/licitacoes/favoritas/lista) abre as Favoritas no endereço canônico", async () => {
+    entrar("admin", permissoesDe("admin"));
+    window.history.replaceState(null, "", "/licitacoes/favoritas/lista");
+    render(<App />);
+    expect(await screen.findByText("Nenhuma favorita.")).toBeTruthy();
+    expect(window.location.pathname).toBe("/licitacoes/favoritas");
+  });
+
+  it.each([["/licitacoes"], ["/licitacoes/favoritas"], ["/licitacoes/favoritas/quadro"], ["/licitacoes/favoritas/calendario?mes=2026-12"]])(
     "quem não tem `ver_licitacoes` (a engenharia) não tem a área, e %s aberto à mão cai na entrada do perfil", async (url) => {
     entrar("engenharia", permissoesDe("engenharia"));
     window.history.replaceState(null, "", url);

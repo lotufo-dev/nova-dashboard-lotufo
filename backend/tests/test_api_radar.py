@@ -78,6 +78,7 @@ def _linhas(sql, *args):
     ("get", "/api/radar/estado", None),
     ("post", "/api/radar/certames", {"certames": []}),
     ("post", "/api/radar/leituras", {"lido_em": LIDO, "chaves": []}),
+    ("get", "/api/radar/decisoes", None),
 ])
 def test_sem_variavel_503_sem_token_401_com_token_200(client, tmp_path, monkeypatch, metodo, rota, corpo):
     pedir = lambda **kw: getattr(client, metodo)(rota, **({"json": corpo} if corpo is not None else {}), **kw)  # noqa: E731
@@ -165,7 +166,7 @@ def test_fechar_marca_quem_saiu_e_tira_a_marca_de_quem_voltou(client, com_token)
               {"fonte": "siag", "nome": "SIAG", "estado": "ativa", "lidos": None, "hora": None,
                "problema": "não foi lida hoje"}]
     r = fechar(client, [CHAVE_A], fontes=fontes)
-    assert r.status_code == 200 and r.json() == {"listados": 1, "fora": 1, "favoritas": None}
+    assert r.status_code == 200 and r.json() == {"listados": 1, "fora": 1, "favoritas": None, "descartadas": None}
     assert _linhas("SELECT chave, fora_desde FROM lic_certames ORDER BY chave") == [
         {"chave": CHAVE_A, "fora_desde": None}, {"chave": CHAVE_B, "fora_desde": "2026-11-24 13:05:00"}]
     (leitura,) = _linhas("SELECT lido_em, certames, fontes FROM lic_leituras")
@@ -176,7 +177,7 @@ def test_fechar_marca_quem_saiu_e_tira_a_marca_de_quem_voltou(client, com_token)
     assert len(_linhas("SELECT 1 FROM lic_leituras")) == 1
 
     r = fechar(client, [CHAVE_A, CHAVE_B], lido_em="2026-11-24T10:30:00-04:00")
-    assert r.json() == {"listados": 2, "fora": 0, "favoritas": None}
+    assert r.json() == {"listados": 2, "fora": 0, "favoritas": None, "descartadas": None}
     assert _linhas("SELECT fora_desde FROM lic_certames") == [{"fora_desde": None}, {"fora_desde": None}]
     assert len(_linhas("SELECT 1 FROM lic_leituras")) == 2
 

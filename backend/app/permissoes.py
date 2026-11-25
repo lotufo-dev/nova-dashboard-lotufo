@@ -12,15 +12,17 @@ from app.api_auth import exigir_csrf, usuario_atual
 # (`permissoes`), para o menu e a rota. A diretoria le e nao escreve: as rotas do SIGA que gravam, inclusive pedir
 # leitura ao robo, exigem `editar_cadastros`.
 VER_SIGA = "ver_siga"
-# `ver_licitacoes` (issue #908, docs/adr/0018): abrir a area Licitacoes. Decisao do dono de 24/11/2026: so' o
-# administrador ve; a diretoria e a engenharia nao tem a area. A tela le a mesma regra em `/api/auth/eu`, como no
-# SIGA. Decidir pela tela (favoritar, descartar, etapa) chega com a permissao propria, na fatia seguinte.
+# `ver_licitacoes` (issue #908, docs/adr/0018): abrir a area Licitacoes. `editar_licitacoes` (fatia 2, #909): decidir
+# nela (favoritar, descartar, etapa, pedir a analise, marcar mudanca como vista). Decisao do dono de 24/11/2026: so' o
+# administrador ve e decide; a diretoria e a engenharia nao tem a area. A tela le a mesma regra em `/api/auth/eu`,
+# como no SIGA.
 VER_LICITACOES = "ver_licitacoes"
+EDITAR_LICITACOES = "editar_licitacoes"
 PERFIS: dict[str, frozenset[str]] = {
     "diretoria": frozenset({"ver_paineis", VER_SIGA}),
     "engenharia": frozenset({"ver_paineis", VER_SIGA, "editar_cadastros"}),
-    "admin": frozenset({"ver_paineis", VER_SIGA, VER_LICITACOES, "editar_cadastros", "editar_config_fiscal",
-                        "administrar"}),
+    "admin": frozenset({"ver_paineis", VER_SIGA, VER_LICITACOES, EDITAR_LICITACOES, "editar_cadastros",
+                        "editar_config_fiscal", "administrar"}),
 }
 
 _VAZIO: frozenset[str] = frozenset()

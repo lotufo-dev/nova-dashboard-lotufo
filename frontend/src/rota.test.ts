@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buscaDosAvisos, caminhoDe, hrefDe, origemPara, parseRota, substituir, type Rota } from "./rota";
+import { buscaDosAvisos, caminhoDe, hrefDe, mesDaBusca, origemPara, parseRota, substituir, type Rota } from "./rota";
 
 describe("rota", () => {
   it("toda rota tem um caminho canônico e volta igual", () => {
@@ -183,9 +183,33 @@ describe("rota: as páginas de Licitações (#908)", () => {
   });
 
   it("caminho desconhecido dentro de Licitações vira raiz", () => {
-    for (const c of ["/licitacoes/outra", "/licitacoes/favoritas/x", "/licitacoes/triagem/x", "/licitacoes-favoritas", "/favoritas"]) {
+    for (const c of ["/licitacoes/outra", "/licitacoes/favoritas/x", "/licitacoes/triagem/x", "/licitacoes-favoritas", "/favoritas",
+      "/licitacoes/quadro", "/licitacoes/calendario", "/licitacoes/favoritas/quadro/x", "/licitacoes/favoritas/calendario/2026-12"]) {
       expect(parseRota(c)).toEqual({ tela: "raiz" });
     }
+  });
+
+  // fatia 2 da #906: as Favoritas ganham o quadro e o calendário, cada um no próprio endereço; a lista é a padrão
+  it("as vistas das Favoritas: o quadro e o calendário têm endereço próprio; a lista não entra na URL", () => {
+    expect(parseRota("/licitacoes/favoritas/quadro")).toEqual({ tela: "licitacoes-favoritas", vista: "quadro" });
+    expect(parseRota("/licitacoes/favoritas/calendario")).toEqual({ tela: "licitacoes-favoritas", vista: "calendario" });
+    expect(caminhoDe({ tela: "licitacoes-favoritas", vista: "quadro" })).toBe("/licitacoes/favoritas/quadro");
+    expect(caminhoDe({ tela: "licitacoes-favoritas", vista: "calendario" })).toBe("/licitacoes/favoritas/calendario");
+    for (const r of [{ tela: "licitacoes-favoritas", vista: "quadro" }, { tela: "licitacoes-favoritas", vista: "calendario" }] as Rota[]) {
+      expect(parseRota(caminhoDe(r))).toEqual(r);
+    }
+    // a lista por extenso abre a lista, e a URL vira a canônica
+    expect(parseRota("/licitacoes/favoritas/lista")).toEqual({ tela: "licitacoes-favoritas" });
+    expect(caminhoDe({ tela: "licitacoes-favoritas", vista: "lista" })).toBe("/licitacoes/favoritas");
+    // o mês do calendário vai na busca
+    expect(hrefDe({ tela: "licitacoes-favoritas", vista: "calendario" }, { mes: "2026-12" })).toBe("/licitacoes/favoritas/calendario?mes=2026-12");
+  });
+
+  it("o mês do calendário só vale no formato AAAA-MM; fora dele, o servidor mostra o mês de hoje", () => {
+    expect(mesDaBusca({ mes: "2026-12" })).toBe("2026-12");
+    expect(mesDaBusca({ mes: "2027-01" })).toBe("2027-01");
+    for (const mes of ["", "2026-13", "2026-00", "2026-1", "26-12", "1999-12", "2026-12-01", "dezembro", "2026-12&x=1"]) expect(mesDaBusca({ mes })).toBe("");
+    expect(mesDaBusca({})).toBe("");
   });
 });
 

@@ -1082,11 +1082,13 @@ const licPrazo = (codigo, rotulo, dias, diasUteis, situacao, extra = {}) => ({
   codigo, rotulo, data: licDia(dias), hora: null, aviso: "", dias_uteis: diasUteis, passado: dias < 0, hoje: dias === 0, situacao, ...extra });
 const licFavorita = (etapa, etapaRotulo, prazos, extra = {}) => ({
   desde: licDia(-12), etapa, etapa_rotulo: etapaRotulo, etapa_do_dossie: false, dossie: null, selos: [], prazos,
-  proximo_prazo: prazos.find(p => !p.passado) ?? null, mudancas: [], ...extra });
-const licMudanca = (dias, rotulo, texto) => ({ data: licDia(dias), texto, rotulo });
+  proximo_prazo: prazos.find(p => !p.passado) ?? null, mudancas: [],
+  mudancas_novas: (extra.mudancas ?? []).filter(m => !m.vista).length, ...extra });
+// `chave`: a identidade que o servidor da' a' mudanca; `vista`: alguem ja' a marcou como vista (so' depois do corte)
+const licMudanca = (dias, rotulo, texto, vista = false) => ({ chave: `${licDia(dias)}-${rotulo}`, data: licDia(dias), texto, rotulo, vista });
 const licRecomendada = (nota, motivo, cidade, km) => ({ nota, pontos: { valor: 3, distancia: 2, acervo: nota - 5 }, motivo, km, cidade });
 const licitacao = (n, extra = {}) => comSessaoHoje({
-  chave: `11444777000161-1-${String(n).padStart(6, "0")}/2026`, orgao: "Prefeitura Municipal de Vila Exemplo", sigla_orgao: "",
+  id: n, chave: `11444777000161-1-${String(n).padStart(6, "0")}/2026`, orgao: "Prefeitura Municipal de Vila Exemplo", sigla_orgao: "",
   grupo_orgao: "Outros órgãos", orgao_de_interesse: false, esfera: "Municipal", municipio: "Vila Exemplo", uf: "MT", cidade: "Vila Exemplo",
   km: 120, edital: `CE ${String(n).padStart(3, "0")}/2026`, modalidade: "Concorrência", objeto: "Pavimentação asfáltica e drenagem de vias urbanas",
   tipo_obra: "Pavimentação", valor_centavos: 1234567890, valor_rotulo: "", situacao: "Divulgada no PNCP", data_publicacao: licDia(-14),
@@ -1112,8 +1114,8 @@ const licFavoritas = () => [
         licPrazo("sessao", "Sessão", 16, 12, "breve", { hora: "09:00", aviso: `dossiê diz ${dataBR(licDia(17))}, conferir` })],
       { etapa_do_dossie: true, dossie: "2026-CE-012-exemplo-duplicacao", selos: ["Diretoria: interesse"], mudancas: [
         licMudanca(-4, "Sessão adiada", "publicou adiamento"), licMudanca(-6, "Novo anexo", "anexou a planilha orçamentária"),
-        licMudanca(-7, "Esclarecimento publicado", "publicou resposta a pedido de esclarecimento"),
-        licMudanca(-10, "Edital retificado", "publicou errata")] }) }),
+        licMudanca(-7, "Esclarecimento publicado", "publicou resposta a pedido de esclarecimento", true),
+        licMudanca(-10, "Edital retificado", "publicou errata", true)] }) }),
   licitacao(7, { ...DER, objeto: "Restauração de pavimento em rodovia estadual", valor_centavos: null, valor_rotulo: "sigiloso",
     data_sessao: licDia(97), hora_sessao: null, dias_uteis: 65, prazo: null,
     favorita: licFavorita("proposta_enviada", "Proposta enviada", [licPrazo("sessao", "Sessão", 97, 65, null)]) }),
@@ -1152,21 +1154,66 @@ const licRecomendadas = () => [
 const licLeitura = ({ atrasada = false, problemas = 2 } = {}) => ({
   lido_em: `${licDia(atrasada ? -4 : 0)}T13:05:00+00:00`, atrasada, fontes_com_problema: problemas });
 
-/** GET /api/licitacoes/triagem. `vazia`: a leitura chegou e nada pede decisao; `atrasada`: o radar nao le ha' dias. */
-export const licitacoesTriagem = ({ vazia = false, atrasada = false } = {}) => () => {
+// fatia 2 da #906: de que lado estao as decisoes. `decide`: depois do corte, para quem decide (a tela acende os botoes);
+// sem ele, as decisoes ainda sao espelho do radar, como no banco da prova. As etapas e os motivos vem do servidor.
+const licPoder = decide => ({ decisoes: decide ? "dashboard" : "radar", pode_decidir: decide });
+const LIC_ETAPAS = [["acompanhando", "Acompanhando"], ["em_analise", "Em análise"], ["proposta_enviada", "Proposta enviada"],
+  ["vencida", "Vencida"], ["perdida", "Perdida"], ["desistida", "Desistida"], ["encerrada", "Encerrada"]].map(([etapa, rotulo]) => ({ etapa, rotulo }));
+const LIC_MOTIVOS = [["tipo de obra", "Tipo de obra"], ["local", "Local"], ["valor", "Valor"], ["órgão", "Órgão"], ["outro", "Outro"]]
+  .map(([motivo, rotulo]) => ({ motivo, rotulo }));
+
+/** GET /api/licitacoes/triagem. `vazia`: a leitura chegou e nada pede decisao; `atrasada`: o radar nao le ha' dias;
+ *  `decide`: depois do corte, com os botoes. */
+export const licitacoesTriagem = ({ vazia = false, atrasada = false, decide = false } = {}) => () => {
   if (vazia) {
-    return { leitura: licLeitura({ problemas: 0 }), favoritas: [], recomendadas: [],
+    return { leitura: licLeitura({ problemas: 0 }), ...licPoder(decide), motivos_descarte: LIC_MOTIVOS, favoritas: [], recomendadas: [],
       contagens: { recomendadas: 0, favoritas: 0, novas: 0, novas_desde: null, por_orgao: [] } };
   }
   const favoritas = licFavoritas(), recomendadas = licRecomendadas();
-  return { leitura: licLeitura({ atrasada }), recomendadas,
+  return { leitura: licLeitura({ atrasada }), ...licPoder(decide), motivos_descarte: LIC_MOTIVOS, recomendadas,
     // as que pedem atencao: prazo em ate' 15 dias uteis ou mudanca recente; a de prazo mais proximo primeiro
     favoritas: favoritas.filter(l => !l.encerrada && l.favorita.etapa !== "proposta_enviada"),
     contagens: { recomendadas: recomendadas.length, favoritas: favoritas.length, novas: 506,
       novas_desde: { desde: licDia(-1), quantas: 12 }, por_orgao: [{ orgao: "DER-EX", novas: 2 }, { orgao: "SEOBRAS-EX", novas: 4 }] } };
 };
 
-/** GET /api/licitacoes/favoritas, com os mesmos estados. */
-export const licitacoesFavoritas = ({ vazia = false, atrasada = false } = {}) => () => (vazia
-  ? { leitura: licLeitura({ problemas: 0 }), favoritas: [] }
-  : { leitura: licLeitura({ atrasada }), favoritas: licFavoritas() });
+/** GET /api/licitacoes/favoritas, com os mesmos estados (a lista e o quadro leem daqui). */
+export const licitacoesFavoritas = ({ vazia = false, atrasada = false, decide = false } = {}) => () => (vazia
+  ? { leitura: licLeitura({ problemas: 0 }), ...licPoder(decide), etapas: LIC_ETAPAS, favoritas: [] }
+  : { leitura: licLeitura({ atrasada }), ...licPoder(decide), etapas: LIC_ETAPAS, favoritas: licFavoritas() });
+
+/** GET /api/licitacoes/calendario: o mes da prova em semanas de domingo a sabado, com os prazos das favoritas acima no
+ *  dia de cada um, como o servidor monta. `vazio`: o mes sem prazo nenhum. */
+export const licitacoesCalendario = ({ vazio = false } = {}) => () => {
+  const hoje = dataEm(hojeDaProva()), mes = hoje.slice(0, 7);
+  const outroMes = n => new Date(Date.UTC(Number(mes.slice(0, 4)), Number(mes.slice(5, 7)) - 1 + n, 1)).toISOString().slice(0, 7);
+  const porDia = {};
+  for (const l of vazio ? [] : licFavoritas()) {
+    for (const p of l.favorita.prazos.filter(p => p.data.startsWith(mes))) {
+      (porDia[p.data] ??= []).push({ ...p, licitacao: { id: l.id, chave: l.chave, orgao: l.orgao, sigla_orgao: l.sigla_orgao, edital: l.edital,
+        modalidade: l.modalidade, objeto: l.objeto, link: l.link, encerrada: l.encerrada } });
+    }
+  }
+  const primeiro = Date.parse(`${mes}-01T00:00:00Z`);
+  const semanas = [];
+  for (let dia = primeiro - new Date(primeiro).getUTCDay() * DIA; dataEm(dia).slice(0, 7) <= mes;) {
+    const semana = [];
+    for (let i = 0; i < 7; i += 1, dia += DIA) {
+      const data = dataEm(dia);
+      semana.push({ data, do_mes: data.startsWith(mes), hoje: data === hoje, prazos: porDia[data] ?? [] });
+    }
+    semanas.push(semana);
+  }
+  return { leitura: licLeitura({ problemas: 0 }), ...licPoder(false), mes, anterior: outroMes(-1), proximo: outroMes(1), mes_atual: true,
+    prazos: Object.values(porDia).flat().length, semanas };
+};
+
+/** POST /api/licitacoes/{id}/analise: o comando que o servidor devolve; `semLink`: sem o link do edital, com o aviso. */
+export const licitacaoAnalisada = ({ semLink = false } = {}) => ({
+  id: 31, favoritou: true, comando: semLink ? "/analisar-edital" : "/analisar-edital https://exemplo.com.br/editais/31",
+  aviso: semLink ? "Esta licitação não tem link de edital: baixe o edital e passe o arquivo ao comando" : null });
+
+/** GET /api/licitacoes/resumo: a linha das licitacoes na Inicio (os numeros da Triagem acima). `atrasada`: o radar
+ *  nao le ha' dias. */
+export const resumoDasLicitacoes = ({ atrasada = false } = {}) => () => ({
+  leitura: licLeitura({ atrasada }), recomendadas: licRecomendadas().length, favoritas: 3 });

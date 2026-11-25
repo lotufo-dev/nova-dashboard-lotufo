@@ -15,8 +15,8 @@
 //   espera   seletor do conteudo principal: sem ele visivel, a tela nao carregou
 //   menu     so' quando o link do menu e' outro endereco que leva a esta tela (hoje nenhuma: todo item abre o proprio)
 //   passos   o que fazer depois de a tela abrir, para chegar ao ESTADO a conferir (janela, formulario, aba):
-//            { clicar: seletor }, { preencher: [seletor, texto] } ou { arquivo: [seletor do campo, nome do PDF] }.
-//            Com passos, `espera` e' o seletor do estado ja' aberto
+//            { clicar: seletor }, { preencher: [seletor, texto] }, { escolher: [seletor do <select>, valor] } ou
+//            { arquivo: [seletor do campo, nome do PDF] }. Com passos, `espera` e' o seletor do estado ja' aberto
 //   simular  respostas da API trocadas so' nesta tela: { caminho: /regex do caminho/, metodo: "GET", status: 200,
 //            corpo: {...} }. Serve para a tela vazia, a tela de erro e o que o cadastro de exemplo nao alcanca.
 //            `corpo` pode ser funcao dos registros da prova, e `ajustar: (resposta, registros) => resposta` muda a
@@ -24,6 +24,8 @@
 //   erro     true quando a tela DEVE mostrar o aviso de erro (a falha foi simulada); sem ele, aviso de erro reprova
 //   parou    true quando a tela DEVE cair na tela "A tela parou de responder" (a resposta simulada quebra o desenho)
 //   destino  o caminho em que a tela termina, quando ela so' leva a outra (`/notas/envio/:id` abre a pagina da medicao)
+//   emHttp   true abre a tela sem `navigator.clipboard`, como na producao, que roda em http (a prova roda em
+//            localhost, onde o navegador o da'): para a copia que precisa funcionar sem ele
 //   medicaoQue  o ato que a tela abre (chave de ATOS_DA_MEDICAO): `:obra` e `:medicao` viram a primeira medicao que
 //            ainda aceita esse ato, e nao a primeira do banco (numa copia do banco ela esta' recebida e o botao nao
 //            existe). Sem medicao nesse estado a tela sai como "sem registro", que nao reprova. `--medicao` manda
@@ -617,6 +619,56 @@ export const TELAS = [
     espera: "#conteudo [role=alert]", erro: true, simular: falha(/^\/api\/licitacoes\/favoritas$/) },
   { rota: "licitacoes-favoritas", id: "licitacoes-favoritas-sem-permissao", caminho: "/licitacoes/favoritas", destino: "/inicio",
     perfis: SEM_LICITACOES, espera: ".ini" },
+
+  // ---- Licitacoes, fatia 2 da #906: decidir pela tela, o quadro, o calendario e a linha da Inicio. No banco da prova
+  // o corte nao foi feito (as decisoes sao do radar): com o servidor de verdade as paginas abrem sem botao, o quadro
+  // com as colunas vazias e o calendario sem prazo. Simulados (ver simulados.mjs): depois do corte, com os botoes; as
+  // janelas do descarte, do comando da analise (com e sem link) e de tirar a favorita; o quadro e o calendario com
+  // favoritas; e a linha das licitacoes na Inicio, em dia e com a leitura atrasada. So' o administrador tem a area.
+  { rota: "licitacoes", id: "licitacoes-decidir", caminho: "/licitacoes", perfis: VE_LICITACOES, espera: ".lic .lic-tabela--decide .lic-acoes .btn--primario",
+    simular: comTriagem({ decide: true }) },
+  { rota: "licitacoes", id: "licitacoes-descartar", caminho: "/licitacoes", perfis: VE_LICITACOES, antes: ".lic .lic-tabela--decide",
+    espera: "dialog[open] input[type=radio]", simular: comTriagem({ decide: true }),
+    passos: [{ clicar: '#conteudo button:has-text("Descartar")' }] },
+  { rota: "licitacoes", id: "licitacoes-analisar", caminho: "/licitacoes", perfis: VE_LICITACOES, antes: ".lic .lic-tabela--decide",
+    espera: "dialog[open] .lic-comando", simular: [...comTriagem({ decide: true }), comAnalise()],
+    passos: [{ clicar: '#conteudo button:has-text("Analisar o edital")' }] },
+  { rota: "licitacoes", id: "licitacoes-analisar-sem-link", caminho: "/licitacoes", perfis: VE_LICITACOES, antes: ".lic .lic-tabela--decide",
+    espera: "dialog[open] .aviso", simular: [...comTriagem({ decide: true }), comAnalise({ semLink: true })],
+    passos: [{ clicar: '#conteudo button:has-text("Analisar o edital")' }] },
+  // o Copiar da janela, como na producao (http): so' diz "Comando copiado." se copiou do campo de dentro da janela
+  { rota: "licitacoes", id: "licitacoes-analisar-copiado", caminho: "/licitacoes", perfis: VE_LICITACOES, antes: ".lic .lic-tabela--decide",
+    espera: 'dialog[open] .lic-janela__dito:has-text("Comando copiado.")', simular: [...comTriagem({ decide: true }), comAnalise()],
+    emHttp: true, passos: [{ clicar: '#conteudo button:has-text("Analisar o edital")' }, { clicar: 'dialog[open] button:has-text("Copiar")' }] },
+  { rota: "licitacoes-favoritas", id: "licitacoes-favoritas-decidir", caminho: "/licitacoes/favoritas", perfis: VE_LICITACOES,
+    espera: ".lic .lic-tabela--decide .lic-etapa__escolha", simular: comFavoritas({ decide: true }) },
+  // a etapa escolhida e ainda nao gravada: o botao Gravar ao lado do controle
+  { rota: "licitacoes-favoritas", id: "licitacoes-favoritas-etapa", caminho: "/licitacoes/favoritas", perfis: VE_LICITACOES,
+    antes: ".lic .lic-tabela--decide .lic-etapa__escolha", espera: '.lic-etapa button:has-text("Gravar")', simular: comFavoritas({ decide: true }),
+    passos: [{ escolher: [".lic-etapa__escolha", "proposta_enviada"] }] },
+  { rota: "licitacoes-favoritas", id: "licitacoes-favoritas-tirar", caminho: "/licitacoes/favoritas", perfis: VE_LICITACOES,
+    antes: ".lic .lic-tabela--decide", espera: "dialog[open] .iniciar__rodape", simular: comFavoritas({ decide: true }),
+    passos: [{ clicar: '#conteudo button:has-text("Tirar a favorita")' }] },
+  { rota: "licitacoes-favoritas", id: "licitacoes-quadro", caminho: "/licitacoes/favoritas/quadro", perfis: VE_LICITACOES,
+    espera: ".lic .lic-quadro .lic-coluna__vazia" },
+  { rota: "licitacoes-favoritas", id: "licitacoes-quadro-dados", caminho: "/licitacoes/favoritas/quadro", perfis: VE_LICITACOES,
+    espera: ".lic .lic-quadro .lic-cartao", simular: comFavoritas() },
+  { rota: "licitacoes-favoritas", id: "licitacoes-quadro-sem-permissao", caminho: "/licitacoes/favoritas/quadro", destino: "/inicio",
+    perfis: SEM_LICITACOES, espera: ".ini" },
+  { rota: "licitacoes-favoritas", id: "licitacoes-calendario", caminho: "/licitacoes/favoritas/calendario", perfis: VE_LICITACOES,
+    espera: ".lic .lic-cal .vazio" },
+  { rota: "licitacoes-favoritas", id: "licitacoes-calendario-dados", caminho: "/licitacoes/favoritas/calendario", perfis: VE_LICITACOES,
+    espera: ".lic .lic-cal__grade .lic-dia__prazo", simular: comCalendario() },
+  { rota: "licitacoes-favoritas", id: "licitacoes-calendario-vazio", caminho: "/licitacoes/favoritas/calendario", perfis: VE_LICITACOES,
+    espera: ".lic .lic-cal .vazio", simular: comCalendario({ vazio: true }) },
+  { rota: "licitacoes-favoritas", id: "licitacoes-calendario-erro", caminho: "/licitacoes/favoritas/calendario", perfis: VE_LICITACOES,
+    espera: "#conteudo [role=alert]", erro: true, simular: falha(/^\/api\/licitacoes\/calendario$/) },
+  { rota: "licitacoes-favoritas", id: "licitacoes-calendario-sem-permissao", caminho: "/licitacoes/favoritas/calendario", destino: "/inicio",
+    perfis: SEM_LICITACOES, espera: ".ini" },
+  { rota: "inicio", id: "inicio-licitacoes", caminho: "/inicio", perfis: VE_LICITACOES, espera: ".ini-licitacoes .ini-aviso",
+    simular: [{ caminho: /^\/api\/licitacoes\/resumo$/, corpo: resumoDasLicitacoes() }] },
+  { rota: "inicio", id: "inicio-licitacoes-atrasada", caminho: "/inicio", perfis: VE_LICITACOES, espera: ".ini-licitacoes .aviso",
+    simular: [{ caminho: /^\/api\/licitacoes\/resumo$/, corpo: resumoDasLicitacoes({ atrasada: true }) }] },
 ];
 
 // Rotas do roteador que a prova nao abre, cada uma com o motivo.
@@ -672,12 +724,19 @@ import { ABAS_DA_CARTEIRA, aReceberDoContratante, medicoesDoContratante, SIGA_DO
 // ---- Criterio de encerramento do SIGA (#841): o quadro, os encerrados, o historico e a medicao (ver simulados.mjs)
 import { medicaoComProtocoloNovo, SIGA_ENCERRAMENTO } from "./simulados.mjs";
 
-// ---- Licitacoes (#908): quem tem `ver_licitacoes` e as respostas simuladas das duas paginas (ver simulados.mjs)
-import { licitacoesFavoritas, licitacoesTriagem } from "./simulados.mjs";
+// ---- Licitacoes (#908 e fatia 2 da #906): quem tem `ver_licitacoes` e as respostas simuladas das paginas (ver simulados.mjs)
+import { licitacaoAnalisada, licitacoesCalendario, licitacoesFavoritas, licitacoesTriagem, resumoDasLicitacoes } from "./simulados.mjs";
 
 function comTriagem(opcoes) {
   return [{ caminho: /^\/api\/licitacoes\/triagem$/, corpo: licitacoesTriagem(opcoes) }];
 }
 function comFavoritas(opcoes) {
   return [{ caminho: /^\/api\/licitacoes\/favoritas$/, corpo: licitacoesFavoritas(opcoes) }];
+}
+function comCalendario(opcoes) {
+  return [{ caminho: /^\/api\/licitacoes\/calendario$/, corpo: licitacoesCalendario(opcoes) }];
+}
+// o pedido de analise do edital, aceito: o servidor devolve o comando (a leitura seguinte e' a Triagem simulada)
+function comAnalise(opcoes) {
+  return { caminho: /^\/api\/licitacoes\/\d+\/analise$/, metodo: "POST", corpo: licitacaoAnalisada(opcoes) };
 }

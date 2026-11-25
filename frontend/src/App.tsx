@@ -154,9 +154,9 @@ export default function App() {
           {rota.tela === "medicoes" && <MedicoesPagina usuario={usuario} aba={rota.aba} busca={busca} />}
           {/* a diretoria le o SIGA sem botao de escrita: o servidor nega a ela toda rota que grava (#829) */}
           {rota.tela === "siga" && pode(usuario, "ver_siga") && <SigaPagina busca={busca} podeEditar={pode(usuario, "editar_cadastros")} />}
-          {/* Licitacoes (#908): duas paginas so' de leitura, de quem tem `ver_licitacoes` */}
+          {/* Licitacoes (#908 e fatia 2 da #906), de quem tem `ver_licitacoes`: a Triagem e as tres vistas das Favoritas */}
           {rota.tela === "licitacoes" && pode(usuario, "ver_licitacoes") && <LicitacoesTriagem />}
-          {rota.tela === "licitacoes-favoritas" && pode(usuario, "ver_licitacoes") && <LicitacoesFavoritas />}
+          {rota.tela === "licitacoes-favoritas" && pode(usuario, "ver_licitacoes") && <LicitacoesFavoritas vista={rota.vista} busca={busca} />}
           {rota.tela === "ancoras-docusign" && usuario.perfil !== "diretoria" && <div className="pagina"><AncorasDocusign /></div>}
           {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}
           {rota.tela === "fechamento" && <div className="pagina"><Fechamento ir={ir} /></div>}

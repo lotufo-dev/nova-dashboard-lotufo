@@ -2,10 +2,12 @@
 
 A dashboard nao le fonte nenhuma. O radar, de fora, manda os certames ja' classificados (tipo de obra, distancia,
 nota e motivo das Recomendadas, rotulo de cada mudanca) e fecha a rodada com a lista do que mostra hoje, a situacao
-das fontes e, ate' o corte, as favoritas dele. Aqui se grava como veio e se calcula so' o que depende do dia (dias
-uteis ate' a sessao, sessao passada) e das decisoes (favorita). Nada se apaga.
+das fontes e, ate' o corte, as favoritas e as descartadas dele. Aqui se grava como veio e se calcula so' o que
+depende do dia (dias uteis ate' a sessao, sessao passada) e das decisoes (favorita, descartada, mudanca vista), que
+depois do corte sao gravadas por `licitacoes_decisoes.py`. Nada se apaga.
 """
 import datetime
+import hashlib
 import json
 
 from app import db, feriados, tempo
@@ -24,8 +26,14 @@ FOLGA_FUTURO = datetime.timedelta(minutes=10)
 LEITURA_NO_FUTURO = "Data da leitura no futuro: confira o relógio da máquina do radar"
 LEITURA_ANTIGA = "Leitura mais antiga que a última gravada"
 LEITURA_FORA_DA_FAIXA = "Data da leitura fora da faixa aceita"
+DESCARTE_FORA_DA_FAIXA = "Data do descarte fora da faixa aceita: "
 ANO_MINIMO_DA_LEITURA = 2020
 CHAVE_DESCONHECIDA = "Licitação que a dashboard ainda não recebeu: "
+DECISOES_NA_DASHBOARD = "As decisões das licitações estão na dashboard desde "
+
+
+class DecisoesNaDashboard(Exception):
+    """Depois do corte o radar nao manda decisao: busca (a rota responde 409)."""
 
 _UM_DIA = datetime.timedelta(days=1)
 _COLUNAS = ("resumo", "dados", "uf", "data_sessao", "valor_centavos", "encerrada", "nova", "grande_vulto", "nota")
@@ -33,9 +41,20 @@ _COLUNAS = ("resumo", "dados", "uf", "data_sessao", "valor_centavos", "encerrada
 
 # --- o que o radar entrega ---------------------------------------------------------------------------------
 
+def corte_em(conn) -> str | None:
+    """Quando as decisoes passaram do radar para a dashboard (UTC); None = ainda estao com o radar."""
+    r = conn.execute("SELECT corte_em FROM lic_estado WHERE id=1").fetchone()
+    return r["corte_em"] if r else None
+
+
+def _lado_das_decisoes(conn) -> str:
+    return "dashboard" if corte_em(conn) else "radar"
+
+
 def estado(conn) -> dict:
     """O que o radar pergunta antes de mandar: o resumo de cada certame gravado e de que lado estao as decisoes."""
-    return {"decisoes": "radar", "corte_em": None,
+    corte = corte_em(conn)
+    return {"decisoes": "dashboard" if corte else "radar", "corte_em": tempo.iso_utc(corte) if corte else None,
             "resumos": {r["chave"]: r["resumo"] for r in conn.execute("SELECT chave, resumo FROM lic_certames")}}
 
 
@@ -71,21 +90,35 @@ def _utc(dt: datetime.datetime) -> str:
 
 def fechar_leitura(conn, lido_em: datetime.datetime, chaves: list[str], fontes: list[dict],
                    decisoes: dict | None) -> dict:
-    """Fecha a rodada do radar: o que ele lista hoje, a situacao das fontes e, ate' o corte, as favoritas dele.
-    Confere tudo antes de gravar: chave que a dashboard nao recebeu recusa o fechamento inteiro."""
+    """Fecha a rodada do radar: o que ele lista hoje, a situacao das fontes e, ate' o corte, as favoritas e as
+    descartadas dele. Confere tudo antes de gravar: chave que a dashboard nao recebeu recusa o fechamento inteiro, e
+    decisao mandada depois do corte tambem."""
     if lido_em.year < ANO_MINIMO_DA_LEITURA:            # antes de qualquer conta com fuso, que estouraria no ano 1
         raise ValueError(LEITURA_FORA_DA_FAIXA)
     if lido_em > tempo.agora_utc() + FOLGA_FUTURO:
         raise ValueError(LEITURA_NO_FUTURO)
+    agora = tempo.agora_utc()
+    for d in (decisoes or {}).get("descartadas") or []:
+        quando = datetime.datetime.fromisoformat(d["quando"]) if d.get("quando") else None
+        # o ano primeiro, sem conta com fuso (que estouraria no ano 1 e no 9999); depois, nada no futuro
+        if quando and (not ANO_MINIMO_DA_LEITURA <= quando.year <= agora.year or quando > agora + FOLGA_FUTURO):
+            raise ValueError(DESCARTE_FORA_DA_FAIXA + d["chave"])
     lido = _utc(lido_em)
     listadas = set(chaves)
     favoritas = None if decisoes is None else {f["chave"]: f for f in decisoes.get("favoritas") or []}
+    # `descartadas` ausente (radar que ainda nao as manda) nao e' lista vazia: nao mexe nas que existem
+    descartadas = (None if decisoes is None or decisoes.get("descartadas") is None
+                   else {d["chave"]: d for d in decisoes["descartadas"]})
     with db.mutacao(conn):
+        corte = corte_em(conn)
+        if decisoes is not None and corte:
+            dia = tempo.para_local(datetime.datetime.fromisoformat(corte)).strftime("%d/%m/%Y")
+            raise DecisoesNaDashboard(DECISOES_NA_DASHBOARD + dia)
         ultima = conn.execute("SELECT MAX(lido_em) FROM lic_leituras").fetchone()[0]
         if ultima and lido < ultima:
             raise ValueError(LEITURA_ANTIGA)
         gravados = {r["chave"]: r["fora_desde"] for r in conn.execute("SELECT chave, fora_desde FROM lic_certames")}
-        for chave in sorted((listadas | set(favoritas or ())) - set(gravados)):
+        for chave in sorted((listadas | set(favoritas or ()) | set(descartadas or ())) - set(gravados)):
             raise ValueError(CHAVE_DESCONHECIDA + chave)
         saiu = [(lido, k) for k, fora in gravados.items() if fora is None and k not in listadas]
         voltou = [(k,) for k, fora in gravados.items() if fora is not None and k in listadas]
@@ -96,7 +129,30 @@ def fechar_leitura(conn, lido_em: datetime.datetime, chaves: list[str], fontes: 
                      "ON CONFLICT(lido_em) DO UPDATE SET certames=excluded.certames, fontes=excluded.fontes",
                      (lido, len(listadas), json.dumps(fontes, ensure_ascii=False)))
         espelhadas = _espelhar_favoritas(conn, favoritas, lido) if favoritas is not None else None
-    return {"listados": len(listadas), "fora": len(saiu), "favoritas": espelhadas}
+        descartes = _espelhar_descartes(conn, descartadas, lido) if descartadas is not None else None
+    return {"listados": len(listadas), "fora": len(saiu), "favoritas": espelhadas, "descartadas": descartes}
+
+
+def _espelhar_descartes(conn, descartadas: dict[str, dict], lido: str) -> int:
+    """Ate' o corte as descartadas tambem sao espelho do radar: entra a que falta, com a data que tinha no radar
+    (`quando`; sem ela, a hora deste espelho), o motivo e a data acompanham, e a que ele nao manda mais e' desfeita,
+    com a data."""
+    ativos = {r["chave"]: r for r in conn.execute(
+        "SELECT id, chave, motivo, criado_em FROM lic_descartes WHERE desfeito_em IS NULL AND origem='radar'")}
+    for chave, d in descartadas.items():
+        atual = ativos.get(chave)
+        quando = _utc(datetime.datetime.fromisoformat(d["quando"])) if d.get("quando") else None
+        if atual is None:
+            conn.execute("INSERT INTO lic_descartes (chave, motivo, origem, autor_radar, criado_em) "
+                         "VALUES (?,?,'radar',?,COALESCE(?, datetime('now')))", (chave, d["motivo"], d.get("autor"), quando))
+            continue
+        if atual["motivo"] != d["motivo"]:
+            conn.execute("UPDATE lic_descartes SET motivo=? WHERE id=?", (d["motivo"], atual["id"]))
+        if quando is not None and atual["criado_em"] != quando:
+            conn.execute("UPDATE lic_descartes SET criado_em=? WHERE id=?", (quando, atual["id"]))
+    conn.executemany("UPDATE lic_descartes SET desfeito_em=? WHERE id=?",
+                     [(lido, r["id"]) for chave, r in ativos.items() if chave not in descartadas])
+    return len(descartadas)
 
 
 def _espelhar_favoritas(conn, favoritas: dict[str, dict], lido: str) -> int:
@@ -187,20 +243,38 @@ def _prazos(dados: dict, hoje: datetime.date) -> list[dict]:
     return prazos
 
 
+def chave_da_mudanca(h: dict) -> str:
+    """A identidade de uma mudanca: resumo curto e estavel da data, do rotulo e do texto. O que foi visto se marca por
+    ela, e nao pela data: a mudanca que o radar traz depois com a data de outra ja' vista (ele le mais de uma vez por
+    dia) nasce nao vista."""
+    return hashlib.sha256("\n".join((h["data"], h["rotulo"], h.get("texto") or "")).encode()).hexdigest()[:16]
+
+
+def mudancas(dados: dict, fav) -> list[dict]:
+    """As mudancas do certame desde o dia em que foi favoritado, da mais recente para a mais antiga, cada uma com a
+    `chave` dela. `vista`: a chave esta' na lista das que alguem ja' marcou como vistas."""
+    vistas = set(json.loads(fav["mudancas_vistas"] or "[]"))
+    lista: dict[str, dict] = {}                      # por chave: o mesmo evento lido em duas fontes e' uma mudanca so'
+    for h in dados.get("historico") or []:
+        if h.get("rotulo") and h["data"] >= fav["desde"]:
+            chave = chave_da_mudanca(h)
+            lista.setdefault(chave, {"chave": chave, "data": h["data"], "texto": h["texto"], "rotulo": h["rotulo"],
+                                     "vista": chave in vistas})
+    return sorted(lista.values(), key=lambda m: m["data"], reverse=True)
+
+
 def _favorita(fav, dados: dict, hoje: datetime.date, encerrada: bool) -> dict:
     dossie = dados.get("dossie")
     etapa = (dossie or {}).get("etapa") or fav["etapa"] or ETAPA_PADRAO
     prazos = _prazos(dados, hoje)
     if encerrada:                                       # licitacao encerrada nao tem prazo correndo
         prazos = [{**p, "situacao": None} for p in prazos]
-    mudancas = [{"data": h["data"], "texto": h["texto"], "rotulo": h["rotulo"]}
-                for h in dados.get("historico") or [] if h.get("rotulo") and h["data"] >= fav["desde"]]
-    mudancas.sort(key=lambda m: m["data"], reverse=True)
+    lista = mudancas(dados, fav)
     return {"desde": fav["desde"], "etapa": etapa, "etapa_rotulo": ROTULO_ETAPA[etapa],
             "etapa_do_dossie": bool(dossie and dossie.get("etapa")), "dossie": (dossie or {}).get("pasta"),
             "selos": (dossie or {}).get("selos") or [],
             "prazos": prazos, "proximo_prazo": next((p for p in prazos if not p["passado"]), None),
-            "mudancas": mudancas}
+            "mudancas": lista, "mudancas_novas": sum(1 for m in lista if not m["vista"])}
 
 
 def _linha(row, hoje: datetime.date, fav=None) -> dict:
@@ -209,38 +283,98 @@ def _linha(row, hoje: datetime.date, fav=None) -> dict:
     dados = json.loads(row["dados"])
     sessao = _data(dados.get("data_sessao"))
     du = dias_uteis_ate(hoje, sessao) if sessao else None
-    encerrada = bool(dados["encerrada"]) or (sessao is not None and sessao < hoje)   # pela data: ver situacao_do_prazo
-    linha = {"chave": row["chave"], **{k: dados.get(k) for k in _DA_LINHA}, "dias_uteis": du, "sessao_hoje": sessao == hoje,
-             "prazo": None if encerrada else situacao_do_prazo(du), "encerrada": encerrada, "favorita": None}
+    passou = sessao is not None and sessao < hoje                        # pela data: ver situacao_do_prazo
+    # a favorita com prazo do dossie que ainda nao passou (recurso, assinatura, depois da sessao) continua em aberto:
+    # a proposta enviada tem prazo correndo. O que o radar diz encerrado continua encerrado.
+    corre = fav is not None and any(p["data"] >= hoje.isoformat() for p in (dados.get("dossie") or {}).get("prazos") or [])
+    encerrada = bool(dados["encerrada"]) or (passou and not corre)
+    linha = {"id": row["id"], "chave": row["chave"], **{k: dados.get(k) for k in _DA_LINHA}, "dias_uteis": du,
+             "sessao_hoje": sessao == hoje,
+             "prazo": None if encerrada else situacao_do_prazo(du, passou), "encerrada": encerrada, "favorita": None}
     if fav is not None:
         linha["favorita"] = _favorita(fav, dados, hoje, encerrada)
     return linha
 
 
 def _linhas_das_favoritas(conn, hoje: datetime.date) -> list[dict]:
-    """As favoritas ativas: as em aberto primeiro, pela sessao mais proxima; as encerradas depois."""
+    """As favoritas ativas: as em aberto primeiro, pela sessao mais proxima (a em aberto com a sessao ja' passada, pelo
+    proximo prazo do dossie); as encerradas depois."""
     linhas = [_linha(r, hoje, r) for r in conn.execute(
-        "SELECT c.chave, c.dados, f.desde, f.etapa FROM lic_favoritas f JOIN lic_certames c ON c.chave=f.chave "
-        "WHERE f.removida_em IS NULL")]
-    linhas.sort(key=lambda l: (l["encerrada"], l["dias_uteis"] if l["dias_uteis"] is not None else 9999,
-                               -(l["valor_centavos"] or 0), l["chave"]))
+        "SELECT c.id, c.chave, c.dados, f.desde, f.etapa, f.mudancas_vistas FROM lic_favoritas f "
+        "JOIN lic_certames c ON c.chave=f.chave WHERE f.removida_em IS NULL")]
+
+    def dias(l: dict) -> int:
+        proximo = l["favorita"]["proximo_prazo"]
+        if not l["encerrada"] and proximo is not None and l["data_sessao"] and l["data_sessao"] < hoje.isoformat():
+            return proximo["dias_uteis"]
+        return l["dias_uteis"] if l["dias_uteis"] is not None else 9999
+
+    linhas.sort(key=lambda l: (l["encerrada"], dias(l), -(l["valor_centavos"] or 0), l["chave"]))
     return linhas
 
 
 def favoritas(conn) -> dict:
+    """As favoritas ativas, para a lista e para o quadro: `etapas` sao as colunas do quadro e as opcoes de etapa da
+    tela, na ordem, com os rotulos."""
     with db.leitura(conn):
-        return {"leitura": leitura(conn), "favoritas": _linhas_das_favoritas(conn, tempo.hoje_local())}
+        return {"leitura": leitura(conn), "decisoes": _lado_das_decisoes(conn),
+                "etapas": [{"etapa": e, "rotulo": r} for e, r in ETAPAS],
+                "favoritas": _linhas_das_favoritas(conn, tempo.hoje_local())}
 
 
-def _pede_atencao(linha: dict, hoje: datetime.date) -> bool:
-    """A favorita em aberto entra na Triagem com prazo em ate' 15 dias uteis ou com mudanca nos ultimos 7 dias."""
+_DO_PRAZO_NO_CALENDARIO = ("id", "chave", "orgao", "sigla_orgao", "edital", "modalidade", "objeto", "link", "encerrada")
+
+
+def _mes(primeiro: datetime.date, meses: int) -> str:
+    """O mes a `meses` de distancia do dia 1 dado, AAAA-MM."""
+    n = primeiro.year * 12 + primeiro.month - 1 + meses
+    return f"{n // 12:04d}-{n % 12 + 1:02d}"
+
+
+def calendario(conn, mes: str | None = None) -> dict:
+    """O mes (AAAA-MM; sem ele, o de hoje em Cuiaba) com cada prazo das favoritas no dia dele. Os prazos sao os da
+    lista, pela mesma funcao; aqui so' se arrumam em semanas, de domingo a sabado. A tela nao faz conta com data: o
+    mes anterior e o proximo, o dia de hoje, os dias fora do mes e se o mes e' o de hoje (`mes_atual`) vem escritos."""
+    with db.leitura(conn):
+        hoje = tempo.hoje_local()
+        primeiro = datetime.date.fromisoformat(f"{mes}-01") if mes else hoje.replace(day=1)
+        do_mes = primeiro.isoformat()[:7]
+        por_dia: dict[str, list[dict]] = {}
+        for l in _linhas_das_favoritas(conn, hoje):
+            for p in l["favorita"]["prazos"]:
+                if p["data"][:7] == do_mes:
+                    por_dia.setdefault(p["data"], []).append(
+                        {**p, "licitacao": {k: l[k] for k in _DO_PRAZO_NO_CALENDARIO}})
+        for prazos in por_dia.values():
+            prazos.sort(key=lambda p: (p.get("hora") or "99:99", p["licitacao"]["chave"], p["codigo"]))
+        dia = primeiro - datetime.timedelta(days=(primeiro.weekday() + 1) % 7)       # o domingo da primeira semana
+        semanas = []
+        while dia.isoformat()[:7] <= do_mes:
+            semana = []
+            for _ in range(7):
+                data = dia.isoformat()
+                semana.append({"data": data, "do_mes": data[:7] == do_mes, "hoje": dia == hoje,
+                               "prazos": por_dia.get(data, [])})
+                dia += _UM_DIA
+            semanas.append(semana)
+        return {"leitura": leitura(conn), "decisoes": _lado_das_decisoes(conn), "mes": do_mes,
+                "anterior": _mes(primeiro, -1), "proximo": _mes(primeiro, 1), "mes_atual": do_mes == hoje.isoformat()[:7],
+                "prazos": sum(len(p) for p in por_dia.values()), "semanas": semanas}
+
+
+def _pede_atencao(linha: dict, hoje: datetime.date, cortado: bool) -> bool:
+    """A favorita em aberto entra na Triagem com prazo em ate' 15 dias uteis ou com mudanca que ninguem viu. Antes do
+    corte ninguem marca mudanca como vista (a tela nao grava): vale a mudanca dos ultimos 7 dias."""
     if linha["encerrada"]:
         return False
     fav = linha["favorita"]
-    corte = (hoje - datetime.timedelta(days=MUDANCA_RECENTE)).isoformat()
     proximo = fav["proximo_prazo"]
-    return (proximo is not None and proximo["dias_uteis"] <= PRAZO_BREVE) or any(
-        m["data"] >= corte for m in fav["mudancas"])
+    if proximo is not None and proximo["dias_uteis"] <= PRAZO_BREVE:
+        return True
+    if cortado:
+        return fav["mudancas_novas"] > 0
+    recente = (hoje - datetime.timedelta(days=MUDANCA_RECENTE)).isoformat()
+    return any(m["data"] >= recente for m in fav["mudancas"])
 
 
 def _novas_desde(conn, novas: list[dict]) -> dict | None:
@@ -262,28 +396,36 @@ def _novas_desde(conn, novas: list[dict]) -> dict | None:
 
 
 def triagem(conn) -> dict:
-    """O que pede decisao agora: as favoritas com prazo chegando ou mudanca recente e as recomendadas que ainda nao
-    sao favoritas. As contagens do alto saem das mesmas linhas."""
+    """O que pede decisao agora: as favoritas com prazo chegando ou mudanca nao vista e as recomendadas que ainda nao
+    sao favoritas nem foram descartadas. Decidiu, sai. As contagens do alto saem das mesmas linhas."""
     with db.leitura(conn):
         hoje = tempo.hoje_local()
+        lado = _lado_das_decisoes(conn)
         favs = _linhas_das_favoritas(conn, hoje)
-        chaves_favoritas = {l["chave"] for l in favs}
+        decididas = {l["chave"] for l in favs} | {r["chave"] for r in conn.execute(
+            "SELECT chave FROM lic_descartes WHERE desfeito_em IS NULL")}
         listadas = [(r["nova"], _linha(r, hoje)) for r in conn.execute(
-            "SELECT chave, dados, nova FROM lic_certames WHERE fora_desde IS NULL AND (nova=1 OR nota IS NOT NULL)")]
+            "SELECT id, chave, dados, nova FROM lic_certames WHERE fora_desde IS NULL AND (nova=1 OR nota IS NOT NULL)")]
         abertas = [(nova, l) for nova, l in listadas if not l["encerrada"]]
-        recomendadas = [l for _, l in abertas if l["recomendada"] and l["chave"] not in chaves_favoritas]
+        recomendadas = [l for _, l in abertas if l["recomendada"] and l["chave"] not in decididas]
         recomendadas.sort(key=lambda l: (-l["recomendada"]["nota"], -(l["valor_centavos"] or 0),
                                          l["recomendada"]["km"] if l["recomendada"]["km"] is not None else 9999,
                                          l["dias_uteis"] if l["dias_uteis"] is not None else 9999, l["chave"]))
-        atencao = [l for l in favs if _pede_atencao(l, hoje)]
+        atencao = [l for l in favs if _pede_atencao(l, hoje, lado == "dashboard")]
         atencao.sort(key=lambda l: (l["favorita"]["proximo_prazo"] or {}).get("dias_uteis", 9999))
         novas = [l for nova, l in abertas if nova]
         por_orgao: dict[str, int] = {}
         for l in novas:
             if l["orgao_de_interesse"]:
                 por_orgao[l["grupo_orgao"]] = por_orgao.get(l["grupo_orgao"], 0) + 1
-        return {"leitura": leitura(conn),
+        return {"leitura": leitura(conn), "decisoes": lado,
                 "contagens": {"recomendadas": len(recomendadas), "favoritas": len(favs), "novas": len(novas),
                               "novas_desde": _novas_desde(conn, novas),
                               "por_orgao": [{"orgao": o, "novas": n} for o, n in sorted(por_orgao.items())]},
                 "favoritas": atencao, "recomendadas": recomendadas}
+
+
+def resumo(conn) -> dict:
+    """A linha das licitacoes na Inicio: os numeros sao os da Triagem, pela mesma funcao."""
+    t = triagem(conn)
+    return {"leitura": t["leitura"], "recomendadas": t["contagens"]["recomendadas"], "favoritas": len(t["favoritas"])}

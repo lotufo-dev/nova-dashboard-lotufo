@@ -64,7 +64,7 @@ def test_fluxo_login_eu_logout(client):
     assert r.json()["email"] == "leo@lotufo.com"
     assert "senha_hash" not in r.json()
     # #829: as permissoes do perfil, para a tela decidir o menu e a rota pela regra do servidor
-    assert r.json()["permissoes"] == ["administrar", "editar_cadastros", "editar_config_fiscal", "ver_licitacoes", "ver_paineis",
+    assert r.json()["permissoes"] == ["administrar", "editar_cadastros", "editar_config_fiscal", "editar_licitacoes", "ver_licitacoes", "ver_paineis",
                                       "ver_siga"]
     # /eu devolve o csrf da sessao: e assim que o front o recupera depois de um F5
     assert r.json()["csrf"] == corpo["csrf"]

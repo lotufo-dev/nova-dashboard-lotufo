@@ -1,10 +1,11 @@
-// Licitacoes (#908, docs/adr/0018): o que GET /api/licitacoes/triagem e GET /api/licitacoes/favoritas devolvem, e o
-// texto que as duas paginas escrevem com isso. Tudo vem pronto do servidor (`backend/app/licitacoes.py`): os dias uteis
-// ate' cada prazo, a situacao do prazo, a etapa com o rotulo, a ordem das linhas e as contagens. Aqui nao ha' limite nem
-// conta: so' formato.
+// Licitacoes (#908 e fatia 2 da #906, docs/adr/0018): o que GET /api/licitacoes/triagem, /favoritas e /calendario
+// devolvem, o texto que as paginas escrevem com isso e o pedido de cada decisao. Tudo vem pronto do servidor
+// (`backend/app/licitacoes.py`): os dias uteis ate' cada prazo, a situacao do prazo, a etapa com o rotulo, a ordem das
+// linhas, as contagens, as etapas, os motivos de descarte e as semanas do calendario. Aqui nao ha' limite nem conta: so'
+// formato.
 
-import { useEffect, useState } from "react";
-import { api, mensagemDeErro } from "./api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, ApiErro, mensagemDeErro } from "./api";
 import type { Situacao } from "./situacao";
 import { fmtData, fmtDataPura, fmtDiaNoAno, fmtHora } from "./tempo";
 
@@ -21,7 +22,10 @@ export type PrazoDaFavorita = {
   codigo: string; rotulo: string; data: string; hora: string | null; aviso: string; dias_uteis: number; passado: boolean;
   hoje: boolean; situacao: SituacaoDoPrazo;
 };
-export type MudancaDaFavorita = { data: string; texto: string; rotulo: string };
+/** Uma mudanca da favorita. `chave`: a identidade dela, que a tela devolve ao marcar como vista; `vista`: alguem ja'
+ *  a marcou (so' depois do corte). A mais recente pode estar vista e uma anterior nao: o radar traz mudanca com a
+ *  data de outra que ja' foi vista. */
+export type MudancaDaFavorita = { chave: string; data: string; texto: string; rotulo: string; vista: boolean };
 
 /** A favorita: a licitacao que se decidiu acompanhar. A etapa vem do dossie quando ha' dossie (`etapa_do_dossie`). */
 export type Favorita = {
@@ -29,6 +33,8 @@ export type Favorita = {
   /** o que o dossie diz alem da etapa ("Diretoria: interesse", "Suspensa"); pode vir vazia */
   selos: string[];
   prazos: PrazoDaFavorita[]; proximo_prazo: PrazoDaFavorita | null; mudancas: MudancaDaFavorita[];
+  /** quantas das mudancas ninguem marcou como vistas */
+  mudancas_novas: number;
 };
 
 /** A recomendacao: a nota, o motivo e o local da obra pelo radar (`cidade`, que pode vir vazia, e `km`). */
@@ -40,6 +46,8 @@ export type Recomendada = {
 /** Uma licitacao, com a mesma forma nas duas rotas. `orgao_de_interesse`: um dos orgaos que o dono acompanha de perto
  *  (as novas deles ja' vem contadas em `contagens.por_orgao`). */
 export type LinhaLicitacao = {
+  /** o numero pelo qual as decisoes enderecam a licitacao */
+  id: number;
   chave: string; orgao: string; sigla_orgao: string; grupo_orgao: string; orgao_de_interesse: boolean; esfera: string | null;
   municipio: string; uf: string;
   cidade: string; km: number | null; edital: string; modalidade: string; objeto: string; tipo_obra: string;
@@ -53,7 +61,13 @@ export type LinhaLicitacao = {
   prazo: SituacaoDoPrazo; encerrada: boolean; favorita: Favorita | null;
 };
 
-export type RespostaTriagem = {
+/** De que lado estao as decisoes (`docs/adr/0018`): ate' o corte sao espelho do radar e a tela nao tem botao.
+ *  `pode_decidir`: depois do corte, e so' para quem decide; e' o que acende os botoes. */
+type Poder = { decisoes: "radar" | "dashboard"; pode_decidir: boolean };
+export type MotivoDeDescarte = { motivo: string; rotulo: string };
+export type EtapaDaFavorita = { etapa: string; rotulo: string };
+
+export type RespostaTriagem = Poder & {
   leitura: LeituraDoRadar;
   contagens: {
     recomendadas: number; favoritas: number; novas: number;
@@ -61,21 +75,106 @@ export type RespostaTriagem = {
     por_orgao: { orgao: string; novas: number }[];
   };
   favoritas: LinhaLicitacao[]; recomendadas: LinhaLicitacao[];
+  /** os motivos que a janela do descarte oferece, na ordem */
+  motivos_descarte: MotivoDeDescarte[];
 };
-export type RespostaFavoritas = { leitura: LeituraDoRadar; favoritas: LinhaLicitacao[] };
+/** `etapas`: as colunas do quadro e as opcoes do controle de etapa, na ordem. */
+export type RespostaFavoritas = Poder & { leitura: LeituraDoRadar; etapas: EtapaDaFavorita[]; favoritas: LinhaLicitacao[] };
 
-/** Le uma rota de Licitacoes ao abrir a pagina; `tentar` le de novo depois da falha. */
+/** Um prazo no calendario: o da lista, com a licitacao a que pertence. */
+export type PrazoNoCalendario = PrazoDaFavorita & {
+  licitacao: Pick<LinhaLicitacao, "id" | "chave" | "orgao" | "sigla_orgao" | "edital" | "modalidade" | "objeto" | "link" | "encerrada">;
+};
+export type DiaDoCalendario = { data: string; do_mes: boolean; hoje: boolean; prazos: PrazoNoCalendario[] };
+/** O mes das favoritas, em semanas de domingo a sabado. `prazos`: quantos ha' no mes. */
+export type RespostaCalendario = Poder & {
+  leitura: LeituraDoRadar; mes: string; anterior: string; proximo: string; mes_atual: boolean; prazos: number;
+  semanas: DiaDoCalendario[][];
+};
+
+/** O que POST /api/licitacoes/{id}/analise devolve: o comando para colar na sessao de analise e, sem link de edital, o
+ *  aviso. */
+export type AnaliseDoEdital = { id: number; favoritou: boolean; comando: string; aviso: string | null };
+
+/** Le uma rota de Licitacoes ao abrir a pagina; `tentar` le de novo (depois da falha, ou depois de uma decisao) e
+ *  termina quando a leitura chega. So' a resposta do ultimo pedido vale. */
 export function useLicitacoes<T>(caminho: string) {
   const [dados, setDados] = useState<T | null>(null);
   const [erro, setErro] = useState("");
-  const [tentativa, setTentativa] = useState(0);
+  const pedido = useRef(0);
+  const tentar = useCallback((): Promise<void> => {
+    const n = ++pedido.current;
+    return api<T>(caminho).then(
+      d => { if (n === pedido.current) { setDados(d); setErro(""); } },
+      e => { if (n === pedido.current) setErro(mensagemDeErro(e)); });
+  }, [caminho]);
   useEffect(() => {
-    let vivo = true;
-    api<T>(caminho).then(d => { if (vivo) { setDados(d); setErro(""); } })
-      .catch(e => { if (vivo) setErro(mensagemDeErro(e)); });
-    return () => { vivo = false; };
-  }, [caminho, tentativa]);
-  return { dados, erro, tentar: () => setTentativa(n => n + 1) };
+    void tentar();
+    return () => { pedido.current += 1; };
+  }, [tentar]);
+  return { dados, erro, tentar };
+}
+
+/** A recusa de uma decisao, junto da licitacao a que se refere. `nome`: para dizer de qual e' quando a linha dela ja'
+ *  saiu da lista. */
+export type FalhaDaDecisao = { id: number; nome: string; texto: string };
+
+/** As decisoes da pagina (favoritar, descartar, etapa...): POST /api/licitacoes/{id}/{decisao} e, aceito, a leitura de
+ *  novo, para a linha sair pelo que o servidor diz (a tela nao mexe na lista). Uma decisao por vez na pagina: `ocupada`
+ *  diz que ha' pedido em curso, e os botoes de decisao ficam desligados ate' a leitura nova chegar. `falha`: a recusa
+ *  do servidor, nas palavras dele. Recusa 409 ou 404 quer dizer que a pagina esta' atrasada (outra aba, outra pessoa,
+ *  resposta perdida na rede): a pagina le de novo, e a recusa continua dita. */
+export function useDecisoes(recarregar: () => Promise<void>) {
+  const [ocupada, setOcupada] = useState(false);
+  const emCurso = useRef(false);
+  const [falha, setFalha] = useState<FalhaDaDecisao | null>(null);
+  const decidir = async <R = unknown>(
+    l: Pick<LinhaLicitacao, "id" | "orgao" | "sigla_orgao" | "edital" | "modalidade">, decisao: string,
+    corpo: Record<string, string | string[]> = {},
+  ): Promise<R | null> => {
+    if (emCurso.current) return null;
+    emCurso.current = true;
+    setOcupada(true);
+    setFalha(null);
+    try {
+      const resposta = await api<R>(`/api/licitacoes/${l.id}/${decisao}`, { method: "POST", body: JSON.stringify(corpo) });
+      await recarregar();
+      return resposta;
+    } catch (e) {
+      setFalha({ id: l.id, nome: nomeDaLicitacao(l), texto: mensagemDeErro(e) });
+      if (e instanceof ApiErro && (e.status === 409 || e.status === 404)) await recarregar();
+      return null;
+    } finally {
+      emCurso.current = false;
+      setOcupada(false);
+    }
+  };
+  return { ocupada, falha, decidir, limparFalha: () => setFalha(null) };
+}
+
+/** O que GET /api/licitacoes/resumo devolve para a linha da Inicio: os numeros da Triagem, pela mesma funcao do
+ *  servidor (`licitacoes.resumo`). A rota e' de quem tem `ver_licitacoes`. */
+export type ResumoDasLicitacoes = { leitura: LeituraDoRadar; recomendadas: number; favoritas: number };
+
+/** O nome curto da licitacao, para o titulo da janela e o nome dos botoes: "SEOBRAS-EX · CE 012/2026". */
+export function nomeDaLicitacao(l: Pick<LinhaLicitacao, "orgao" | "sigla_orgao" | "edital" | "modalidade">): string {
+  const edital = l.edital || l.modalidade;
+  return `${orgaoDaLinha(l)}${edital ? ` · ${edital}` : ""}`;
+}
+
+/** Copia o texto de um campo. `navigator.clipboard` so' existe em contexto seguro, e a producao roda em http: sem ele,
+ *  a copia antiga (selecionar e execCommand), feita no proprio campo. O campo esta' dentro da janela: com um <dialog>
+ *  modal aberto, o que fica fora dele e' inerte, nao recebe foco nem selecao, e o execCommand responde que copiou sem
+ *  ter copiado nada. Por isso so' devolve que copiou quando o campo ficou mesmo com o foco e o texto todo selecionado. */
+export async function copiarTexto(campo: HTMLInputElement): Promise<boolean> {
+  const texto = campo.value;
+  try {
+    if (navigator.clipboard) { await navigator.clipboard.writeText(texto); return true; }
+  } catch { /* cai na copia antiga */ }
+  campo.focus();
+  campo.select();
+  if (document.activeElement !== campo || campo.selectionStart !== 0 || campo.selectionEnd !== texto.length) return false;
+  try { return document.execCommand("copy"); } catch { return false; }
 }
 
 /** O endereco do edital, so' quando e' http ou https: o servidor ja' valida, e a tela nao confia. */

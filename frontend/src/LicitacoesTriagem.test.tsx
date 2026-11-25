@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RespostaTriagem } from "./licitacoes";
-import { favorita, HOJE_DO_TESTE, leitura, linha, mudanca, prazo, recomendada } from "./licitacoesTeste";
+import { favorita, HOJE_DO_TESTE, leitura, linha, MOTIVOS, mudanca, prazo, recomendada } from "./licitacoesTeste";
 import LicitacoesTriagem from "./LicitacoesTriagem";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
@@ -11,7 +11,7 @@ vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api"
 const triagem = (extra: Partial<RespostaTriagem> = {}): RespostaTriagem => ({
   leitura: leitura(),
   contagens: { recomendadas: 0, favoritas: 0, novas: 0, novas_desde: null, por_orgao: [] },
-  favoritas: [], recomendadas: [], ...extra });
+  favoritas: [], recomendadas: [], decisoes: "radar", pode_decidir: false, motivos_descarte: MOTIVOS, ...extra });
 
 const FAVORITA_COM_DOSSIE = linha(1, {
   sigla_orgao: "SEOBRAS-EX", favorita: favorita({
