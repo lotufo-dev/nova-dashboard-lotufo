@@ -46,7 +46,7 @@ function Dia({ d, coluna }: { d: DiaDoCalendario; coluna: number }) {
       </span>
       {d.prazos.length > 0 && (
         <ul className="lic-dia__prazos">
-          {d.prazos.map(p => <PrazoDoDia key={`${p.licitacao.chave}-${p.codigo}`} p={p} />)}
+          {d.prazos.map((p, i) => <PrazoDoDia key={`${i}-${p.licitacao.chave}-${p.codigo}`} p={p} />)}
         </ul>
       )}
     </td>

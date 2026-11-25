@@ -5,7 +5,7 @@
 // formato.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, mensagemDeErro } from "./api";
+import { api, ApiErro, mensagemDeErro } from "./api";
 import type { Situacao } from "./situacao";
 import { fmtData, fmtDataPura, fmtDiaNoAno, fmtHora } from "./tempo";
 
@@ -115,27 +115,38 @@ export function useLicitacoes<T>(caminho: string) {
   return { dados, erro, tentar };
 }
 
-/** A recusa de uma decisao, junto da licitacao a que se refere. */
-export type FalhaDaDecisao = { id: number; texto: string };
+/** A recusa de uma decisao, junto da licitacao a que se refere. `nome`: para dizer de qual e' quando a linha dela ja'
+ *  saiu da lista. */
+export type FalhaDaDecisao = { id: number; nome: string; texto: string };
 
 /** As decisoes da pagina (favoritar, descartar, etapa...): POST /api/licitacoes/{id}/{decisao} e, aceito, a leitura de
- *  novo, para a linha sair pelo que o servidor diz (a tela nao mexe na lista). `ocupada`: a licitacao com pedido em
- *  curso, cujos botoes ficam desligados ate' a leitura nova chegar. `falha`: a recusa do servidor, nas palavras dele. */
+ *  novo, para a linha sair pelo que o servidor diz (a tela nao mexe na lista). Uma decisao por vez na pagina: `ocupada`
+ *  diz que ha' pedido em curso, e os botoes de decisao ficam desligados ate' a leitura nova chegar. `falha`: a recusa
+ *  do servidor, nas palavras dele. Recusa 409 ou 404 quer dizer que a pagina esta' atrasada (outra aba, outra pessoa,
+ *  resposta perdida na rede): a pagina le de novo, e a recusa continua dita. */
 export function useDecisoes(recarregar: () => Promise<void>) {
-  const [ocupada, setOcupada] = useState<number | null>(null);
+  const [ocupada, setOcupada] = useState(false);
+  const emCurso = useRef(false);
   const [falha, setFalha] = useState<FalhaDaDecisao | null>(null);
-  const decidir = async <R = unknown>(id: number, decisao: string, corpo: Record<string, string | string[]> = {}): Promise<R | null> => {
-    setOcupada(id);
+  const decidir = async <R = unknown>(
+    l: Pick<LinhaLicitacao, "id" | "orgao" | "sigla_orgao" | "edital" | "modalidade">, decisao: string,
+    corpo: Record<string, string | string[]> = {},
+  ): Promise<R | null> => {
+    if (emCurso.current) return null;
+    emCurso.current = true;
+    setOcupada(true);
     setFalha(null);
     try {
-      const resposta = await api<R>(`/api/licitacoes/${id}/${decisao}`, { method: "POST", body: JSON.stringify(corpo) });
+      const resposta = await api<R>(`/api/licitacoes/${l.id}/${decisao}`, { method: "POST", body: JSON.stringify(corpo) });
       await recarregar();
       return resposta;
     } catch (e) {
-      setFalha({ id, texto: mensagemDeErro(e) });
+      setFalha({ id: l.id, nome: nomeDaLicitacao(l), texto: mensagemDeErro(e) });
+      if (e instanceof ApiErro && (e.status === 409 || e.status === 404)) await recarregar();
       return null;
     } finally {
-      setOcupada(null);
+      emCurso.current = false;
+      setOcupada(false);
     }
   };
   return { ocupada, falha, decidir, limparFalha: () => setFalha(null) };
@@ -151,19 +162,19 @@ export function nomeDaLicitacao(l: Pick<LinhaLicitacao, "orgao" | "sigla_orgao" 
   return `${orgaoDaLinha(l)}${edital ? ` · ${edital}` : ""}`;
 }
 
-/** Copia um texto. `navigator.clipboard` so' existe em contexto seguro, e a producao roda em http: sem ele, a copia
- *  antiga (textarea + execCommand), como a do CNPJ em Documentos. Devolve se copiou. */
-export async function copiarTexto(texto: string): Promise<boolean> {
+/** Copia o texto de um campo. `navigator.clipboard` so' existe em contexto seguro, e a producao roda em http: sem ele,
+ *  a copia antiga (selecionar e execCommand), feita no proprio campo. O campo esta' dentro da janela: com um <dialog>
+ *  modal aberto, o que fica fora dele e' inerte, nao recebe foco nem selecao, e o execCommand responde que copiou sem
+ *  ter copiado nada. Por isso so' devolve que copiou quando o campo ficou mesmo com o foco e o texto todo selecionado. */
+export async function copiarTexto(campo: HTMLInputElement): Promise<boolean> {
+  const texto = campo.value;
   try {
     if (navigator.clipboard) { await navigator.clipboard.writeText(texto); return true; }
   } catch { /* cai na copia antiga */ }
-  const area = document.createElement("textarea");
-  area.value = texto; area.setAttribute("readonly", ""); area.style.position = "fixed"; area.style.opacity = "0";
-  document.body.appendChild(area); area.select();
-  let ok = false;
-  try { ok = document.execCommand("copy"); } catch { ok = false; }
-  area.remove();
-  return ok;
+  campo.focus();
+  campo.select();
+  if (document.activeElement !== campo || campo.selectionStart !== 0 || campo.selectionEnd !== texto.length) return false;
+  try { return document.execCommand("copy"); } catch { return false; }
 }
 
 /** O endereco do edital, so' quando e' http ou https: o servidor ja' valida, e a tela nao confia. */

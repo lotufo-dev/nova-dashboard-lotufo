@@ -7,7 +7,8 @@ import {
   type AnaliseDoEdital, type FalhaDaDecisao, type Favorita, type LinhaLicitacao, type Recomendada, type RespostaTriagem,
 } from "./licitacoes";
 import {
-  Etapa, FalhaAoAtualizar, JanelaDaAnalise, JanelaDoDescarte, LeituraDoRadarLinha, Licitacao, Mudanca, Prazo, SemLeitura, Traco, Valor,
+  Etapa, FalhaAoAtualizar, JanelaDaAnalise, JanelaDoDescarte, LeituraDoRadarLinha, Licitacao, Mudanca, Prazo, RecusaSemLinha,
+  SemLeitura, Traco, Valor,
 } from "./LicitacoesPecas";
 import { Link } from "./Link";
 import Rolagem from "./Rolagem";
@@ -27,7 +28,8 @@ import { fmtDiaNoAno } from "./tempo";
 // o edital (favorita e devolve o comando para a sessao de analise) e Descartar (com o motivo). Na favorita com mudanca
 // nao vista: Marcar como vista, que manda as chaves das mudancas que a linha mostrou (a que chegar depois continua nao
 // vista). Depois de cada decisao a pagina le a rota de novo: a linha sai pelo que o servidor diz, e nao por conta da
-// tela. A recusa do servidor aparece junto da linha, ou dentro da janela aberta.
+// tela. A recusa do servidor aparece junto da linha, ou dentro da janela aberta; se a linha ja' saiu (outra pessoa
+// decidiu antes), no alto da pagina. Uma decisao por vez: com uma em curso, os botoes de todas as linhas ficam desligados.
 //
 // A MUDANCA DA LINHA: depois do corte, as que ninguem viu (todas: sao elas que poem a favorita aqui, e a mais recente
 // pode ja' estar vista); sem nenhuma, a mais recente, na letra de apoio. Antes do corte ninguem marca nada: a mais
@@ -40,9 +42,9 @@ import { fmtDiaNoAno } from "./tempo";
 // O motivo da recomendacao vai sob o objeto, e nao numa coluna: com ele em coluna as sete nao cabiam em 792 px (1024 com
 // o menu aberto), e ele e' uma frase, nao um valor que se compara entre linhas.
 
-/** O que as linhas precisam para decidir; nulo quando a pagina e' so' de leitura. */
+/** O que as linhas precisam para decidir; nulo quando a pagina e' so' de leitura. `ocupada`: ha' decisao em curso. */
 type Decisoes = {
-  ocupada: number | null; falha: FalhaDaDecisao | null;
+  ocupada: boolean; falha: FalhaDaDecisao | null;
   favoritar: (l: LinhaLicitacao) => void; analisar: (l: LinhaLicitacao) => void; descartar: (l: LinhaLicitacao) => void;
   marcarVista: (l: LinhaLicitacao) => void;
 };
@@ -120,7 +122,7 @@ function FavoritasQuePedemAtencao({ linhas, decisoes, cortado }: { linhas: Linha
                     {comDecisao && decisoes && (
                       <CelulaDeDecisao l={l} falha={decisoes.falha}>
                         {f.mudancas_novas > 0 && (
-                          <button type="button" className="btn btn--pequeno" disabled={decisoes.ocupada === l.id}
+                          <button type="button" className="btn btn--pequeno" disabled={decisoes.ocupada}
                             aria-label={`${f.mudancas_novas === 1 ? "Marcar como vista" : "Marcar como vistas"}: ${nomeDaLicitacao(l)}`}
                             onClick={() => decisoes.marcarVista(l)}>
                             {f.mudancas_novas === 1 ? "Marcar como vista" : "Marcar como vistas"}
@@ -180,11 +182,11 @@ function RecomendadasADecidir({ linhas, decisoes }: { linhas: LinhaLicitacao[]; 
                     </td>
                     {decisoes && (
                       <CelulaDeDecisao l={l} falha={decisoes.falha}>
-                        <button type="button" className="btn btn--pequeno btn--primario" disabled={decisoes.ocupada === l.id}
+                        <button type="button" className="btn btn--pequeno btn--primario" disabled={decisoes.ocupada}
                           aria-label={`Favoritar: ${nome}`} onClick={() => decisoes.favoritar(l)}>Favoritar</button>
-                        <button type="button" className="btn btn--pequeno" disabled={decisoes.ocupada === l.id}
+                        <button type="button" className="btn btn--pequeno" disabled={decisoes.ocupada}
                           aria-label={`Analisar o edital: ${nome}`} onClick={() => decisoes.analisar(l)}>Analisar o edital</button>
-                        <button type="button" className="btn btn--pequeno" disabled={decisoes.ocupada === l.id}
+                        <button type="button" className="btn btn--pequeno" disabled={decisoes.ocupada}
                           aria-label={`Descartar: ${nome}`} onClick={() => decisoes.descartar(l)}>Descartar</button>
                       </CelulaDeDecisao>
                     )}
@@ -210,11 +212,11 @@ export default function LicitacoesTriagem() {
   const decisoes: Decisoes | null = dados.pode_decidir ? {
     // a recusa do descarte aparece dentro da janela dele, e nao na linha
     ocupada, falha: descarte ? null : falha,
-    favoritar: l => void decidir(l.id, "favorita"),
-    analisar: l => void decidir<AnaliseDoEdital>(l.id, "analise").then(resposta => { if (resposta) setAnalise({ l, resposta }); }),
+    favoritar: l => void decidir(l, "favorita"),
+    analisar: l => void decidir<AnaliseDoEdital>(l, "analise").then(resposta => { if (resposta) setAnalise({ l, resposta }); }),
     descartar: l => { limparFalha(); setDescarte(l); },
     // as mudancas nao vistas que a linha mostrou: a que o radar trouxer depois desta leitura continua nao vista
-    marcarVista: l => void decidir(l.id, "mudancas-vistas", { chaves: (l.favorita?.mudancas ?? []).filter(m => !m.vista).map(m => m.chave) }),
+    marcarVista: l => void decidir(l, "mudancas-vistas", { chaves: (l.favorita?.mudancas ?? []).filter(m => !m.vista).map(m => m.chave) }),
   } : null;
 
   const c = dados.contagens;
@@ -247,12 +249,13 @@ export default function LicitacoesTriagem() {
       )}
       <LeituraDoRadarLinha leitura={dados.leitura} />
       <FalhaAoAtualizar erro={erro} tentar={() => void tentar()} />
+      <RecusaSemLinha falha={decisoes?.falha ?? null} linhas={[...dados.favoritas, ...dados.recomendadas]} />
       <FavoritasQuePedemAtencao linhas={dados.favoritas} decisoes={decisoes} cortado={dados.decisoes === "dashboard"} />
       <RecomendadasADecidir linhas={dados.recomendadas} decisoes={decisoes} />
       {descarte && (
-        <JanelaDoDescarte l={descarte} motivos={dados.motivos_descarte} ocupada={ocupada === descarte.id}
+        <JanelaDoDescarte l={descarte} motivos={dados.motivos_descarte} ocupada={ocupada}
           falha={falha?.id === descarte.id ? falha.texto : null}
-          aoDescartar={motivo => void decidir(descarte.id, "descarte", { motivo }).then(feito => { if (feito) setDescarte(null); })}
+          aoDescartar={motivo => void decidir(descarte, "descarte", { motivo }).then(feito => { if (feito) setDescarte(null); })}
           aoFechar={() => { limparFalha(); setDescarte(null); }} />
       )}
       {analise && <JanelaDaAnalise l={analise.l} analise={analise.resposta} aoFechar={() => setAnalise(null)} />}

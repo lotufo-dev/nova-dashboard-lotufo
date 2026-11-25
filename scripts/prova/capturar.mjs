@@ -244,6 +244,7 @@ async function darPassos(pagina, passos) {
   for (const passo of passos) {
     if (passo.clicar) await pagina.locator(passo.clicar).first().click({ timeout: ESPERA });
     else if (passo.preencher) await pagina.locator(passo.preencher[0]).first().fill(passo.preencher[1], { timeout: ESPERA });
+    else if (passo.escolher) await pagina.locator(passo.escolher[0]).first().selectOption(passo.escolher[1], { timeout: ESPERA });
     else if (passo.arquivo) {
       await pagina.locator(passo.arquivo[0]).first().setInputFiles(
         { name: passo.arquivo[1], mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n% arquivo de prova, sem conteudo\n") },
@@ -451,6 +452,8 @@ async function abrirTela(contexto, perfil, largura, tela, reg) {
         return rota.fulfill({ status: s.status ?? 200, contentType: "application/json", body: JSON.stringify(corpo) });
       });
     }
+    // `emHttp`: a producao roda em http, onde o navegador nao da' `navigator.clipboard`; a prova roda em localhost, onde da'
+    if (tela.emHttp) await pagina.addInitScript(() => Object.defineProperty(Navigator.prototype, "clipboard", { get: () => undefined }));
     await pagina.goto(BASE + caminho, { waitUntil: "load" });
     await assentar(pagina, tela.passos ? (tela.antes ?? "#conteudo") : tela.espera, problemas);
     if (tela.passos) {

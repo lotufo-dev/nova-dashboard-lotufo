@@ -43,7 +43,9 @@ describe("Triagem: decidir pela tela", () => {
     prazos: [prazo("Sessão", "2026-11-27", 3, "critico")], mudancas: [mudanca("2026-11-18", "Novo anexo", true)] }) });
 
   beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(HOJE_DO_TESTE); });
-  afterEach(() => { cleanup(); api.mockReset(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+  afterEach(() => {
+    cleanup(); api.mockReset(); vi.useRealTimers(); vi.unstubAllGlobals(); Reflect.deleteProperty(document, "execCommand");
+  });
 
   it("com `pode_decidir`, cada recomendada tem Favoritar (a ação principal), Analisar o edital e Descartar", async () => {
     servidor([triagem({ recomendadas: [NOVE, SETE] })]);
@@ -79,17 +81,54 @@ describe("Triagem: decidir pela tela", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("a recusa do servidor aparece junto da linha, nas palavras dele, e a lista não muda", async () => {
+  it("a recusa do servidor aparece junto da linha, nas palavras dele; no 409 a página lê de novo", async () => {
     servidor([triagem({ recomendadas: [NOVE, SETE] })],
       { "/api/licitacoes/4/favorita": new ApiErro(409, "Esta licitação acabou de ser decidida por outra pessoa: atualize a página") });
     render(<LicitacoesTriagem />);
     fireEvent.click(await screen.findByRole("button", { name: "Favoritar: PME · CE 004/2026" }));
+    await waitFor(() => expect(leituras()).toBe(2));
+    // o servidor ainda manda a linha: a recusa fica junto dela, e só dela
     const [nove, sete] = linhasDe("Recomendadas a decidir");
     expect((await within(nove).findByRole("alert")).textContent).toBe("Esta licitação acabou de ser decidida por outra pessoa: atualize a página");
     expect(within(sete).queryByRole("alert")).toBeNull();
-    expect(leituras()).toBe(1);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
     // o botão volta a valer depois da recusa
-    expect((within(nove).getByRole("button", { name: /^Favoritar/ }) as HTMLButtonElement).disabled).toBe(false);
+    await waitFor(() => expect((within(nove).getByRole("button", { name: /^Favoritar/ }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("se a linha recusada saiu na leitura nova (outra pessoa decidiu antes), a recusa fica no alto, com o nome dela", async () => {
+    servidor([triagem({ recomendadas: [NOVE, SETE] }), triagem({ recomendadas: [SETE] })],
+      { "/api/licitacoes/4/favorita": new ApiErro(409, "Esta licitação já é favorita") });
+    render(<LicitacoesTriagem />);
+    fireEvent.click(await screen.findByRole("button", { name: "Favoritar: PME · CE 004/2026" }));
+    await waitFor(() => expect(linhasDe("Recomendadas a decidir")).toHaveLength(1));
+    expect(screen.getByRole("alert").textContent).toBe("PME · CE 004/2026: Esta licitação já é favorita");
+    expect(within(bloco("Recomendadas a decidir")).queryByRole("alert")).toBeNull();
+    expect(leituras()).toBe(2);
+    // a decisão seguinte limpa a recusa
+    fireEvent.click(screen.getByRole("button", { name: "Favoritar: PME · CE 005/2026" }));
+    await waitFor(() => expect(leituras()).toBe(3));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("uma decisão por vez: com uma em curso, os botões de todas as linhas ficam desligados e o segundo clique não grava", async () => {
+    let responder: (resposta: unknown) => void = () => {};
+    let n = 0;
+    api.mockImplementation((_caminho: string, opcoes?: RequestInit) => {
+      if (opcoes?.method === "POST") return new Promise(resolve => { responder = resolve; });
+      return Promise.resolve(n++ === 0 ? triagem({ recomendadas: [NOVE, SETE] }) : triagem({ recomendadas: [SETE] }));
+    });
+    render(<LicitacoesTriagem />);
+    const desligados = () => (within(bloco("Recomendadas a decidir")).getAllByRole("button") as HTMLButtonElement[]).map(b => b.disabled);
+    fireEvent.click(await screen.findByRole("button", { name: "Favoritar: PME · CE 004/2026" }));
+    await waitFor(() => expect(desligados()).toEqual([true, true, true, true, true, true]));
+    fireEvent.click(screen.getByRole("button", { name: "Favoritar: PME · CE 005/2026" }));
+    fireEvent.click(screen.getByRole("button", { name: "Descartar: PME · CE 005/2026" }));
+    expect(gravados()).toHaveLength(1);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    responder({ id: 4 });
+    await waitFor(() => expect(linhasDe("Recomendadas a decidir")).toHaveLength(1));
+    await waitFor(() => expect(desligados()).toEqual([false, false, false]));
   });
 
   it("Descartar abre a janela com os motivos do servidor, grava o escolhido e a linha sai", async () => {
@@ -147,6 +186,28 @@ describe("Triagem: decidir pela tela", () => {
     // a janela fecha pelo botão de fechar dela (ou pelo Esc)
     fireEvent.click(within(janela).getByRole("button", { name: "Fechar" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("em http não há `navigator.clipboard`: Copiar seleciona o campo da própria janela e copia dele", async () => {
+    vi.stubGlobal("navigator", {});
+    const comandoDoNavegador = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, "execCommand", { value: comandoDoNavegador, configurable: true });
+    servidor([triagem({ recomendadas: [NOVE] }), triagem()],
+      { "/api/licitacoes/4/analise": { id: 4, favoritou: true, comando: "/analisar-edital https://exemplo.com.br/editais/4", aviso: null } });
+    render(<LicitacoesTriagem />);
+    fireEvent.click(await screen.findByRole("button", { name: "Analisar o edital: PME · CE 004/2026" }));
+    const janela = await screen.findByRole("dialog", { name: "Analisar o edital" });
+    const campo = within(janela).getByLabelText("Comando para a sessão de análise") as HTMLInputElement;
+    fireEvent.click(within(janela).getByRole("button", { name: "Copiar" }));
+    await waitFor(() => expect(within(janela).getByRole("status").textContent).toBe("Comando copiado."));
+    expect(comandoDoNavegador).toHaveBeenCalledWith("copy");
+    // o que se copia é a seleção do campo que está dentro da janela: fora de uma janela modal nada recebe foco
+    expect([document.activeElement === campo, campo.selectionStart, campo.selectionEnd]).toEqual([true, 0, campo.value.length]);
+    expect(document.querySelector("textarea")).toBeNull();
+    // o navegador que não copia: a tela não diz que copiou
+    comandoDoNavegador.mockReturnValue(false);
+    fireEvent.click(within(janela).getByRole("button", { name: "Copiar" }));
+    await waitFor(() => expect(within(janela).getByRole("status").textContent).toBe("Não deu para copiar: selecione o comando."));
   });
 
   it("sem link de edital o comando vem sem ele, com o aviso do servidor", async () => {
@@ -251,23 +312,41 @@ describe("Favoritas: decidir pela tela", () => {
     expect([...etapa(dossieSemEtapa).querySelectorAll(".selo")].map(s => s.textContent)).toEqual(["Suspensa"]);
   });
 
-  it("trocar a etapa grava a escolhida e lê de novo; a recusa aparece junto da linha", async () => {
+  it("a etapa escolhida só grava no botão Gravar, uma vez, e a página lê de novo; a recusa aparece junto da linha", async () => {
     const depois = { ...SEM_DOSSIE, favorita: { ...SEM_DOSSIE.favorita!, etapa: "proposta_enviada", etapa_rotulo: "Proposta enviada" } };
     servidor([favoritas(), favoritas([COM_DOSSIE, depois, DOSSIE_SEM_ETAPA])],
       { "/api/licitacoes/3/etapa": new ApiErro(409, "A etapa desta licitação vem do dossiê e não se muda pela tela") });
     render(<LicitacoesFavoritas />);
     await screen.findByRole("region", { name: "Favoritas em aberto" });
-    fireEvent.change(within(linhasDe("Favoritas em aberto")[1]).getByRole("combobox"), { target: { value: "proposta_enviada" } });
+    const controle = (n: number) => within(linhasDe("Favoritas em aberto")[n]).getByRole("combobox") as HTMLSelectElement;
+    const gravar = (n: number) => within(linhasDe("Favoritas em aberto")[n]).queryByRole("button", { name: /^Gravar a etapa: / }) as HTMLButtonElement | null;
+    expect(gravar(1)).toBeNull();
+    // pelo teclado o controle passa por uma etapa a cada seta: nenhuma grava sozinha, e o controle não desliga
+    fireEvent.change(controle(1), { target: { value: "em_analise" } });
+    fireEvent.change(controle(1), { target: { value: "proposta_enviada" } });
+    expect(gravados()).toEqual([]);
+    expect([controle(1).value, controle(1).disabled]).toEqual(["proposta_enviada", false]);
+    expect(gravar(1)!.getAttribute("aria-label")).toBe("Gravar a etapa: PME · CE 002/2026");
+    // voltar à etapa do servidor tira o botão: não há o que gravar
+    fireEvent.change(controle(1), { target: { value: "acompanhando" } });
+    expect(gravar(1)).toBeNull();
+    fireEvent.change(controle(1), { target: { value: "proposta_enviada" } });
+    fireEvent.click(gravar(1)!);
     await waitFor(() => expect(leituras()).toBe(2));
     expect(gravados()).toEqual([["/api/licitacoes/2/etapa", { etapa: "proposta_enviada" }]]);
-    await waitFor(() => expect((within(linhasDe("Favoritas em aberto")[1]).getByRole("combobox") as HTMLSelectElement).value).toBe("proposta_enviada"));
+    // gravou: o botão some, a etapa é a do servidor e o foco volta para o controle
+    await waitFor(() => expect(gravar(1)).toBeNull());
+    expect(controle(1).value).toBe("proposta_enviada");
+    expect(document.activeElement).toBe(controle(1));
 
-    fireEvent.change(within(linhasDe("Favoritas em aberto")[2]).getByRole("combobox"), { target: { value: "vencida" } });
+    fireEvent.change(controle(2), { target: { value: "vencida" } });
+    fireEvent.click(gravar(2)!);
     expect((await within(linhasDe("Favoritas em aberto")[2]).findByRole("alert")).textContent).toBe(
       "A etapa desta licitação vem do dossiê e não se muda pela tela");
-    // a etapa mostrada continua a do servidor
-    expect((within(linhasDe("Favoritas em aberto")[2]).getByRole("combobox") as HTMLSelectElement).value).toBe("acompanhando");
-    expect(leituras()).toBe(2);
+    // 409: a página lê de novo; a escolha não gravada continua no controle, com o botão ao lado
+    await waitFor(() => expect(leituras()).toBe(3));
+    await waitFor(() => expect(gravar(2)!.disabled).toBe(false));
+    expect(controle(2).value).toBe("vencida");
   });
 
   it("Tirar a favorita pede confirmação: Cancelar não grava; confirmar grava, lê de novo e a linha sai", async () => {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Contador from "./Contador";
 import Falha from "./Falha";
 import { contar } from "./formato";
@@ -8,7 +8,8 @@ import {
 } from "./licitacoes";
 import LicitacoesCalendario from "./LicitacoesCalendario";
 import {
-  AbasDasFavoritas, Etapa, FalhaAoAtualizar, JanelaDeTirarAFavorita, LeituraDoRadarLinha, Licitacao, Mudanca, Prazo, SemLeitura, Traco, Valor,
+  AbasDasFavoritas, Etapa, FalhaAoAtualizar, JanelaDeTirarAFavorita, LeituraDoRadarLinha, Licitacao, Mudanca, Prazo, RecusaSemLinha,
+  SemLeitura, Traco, Valor,
 } from "./LicitacoesPecas";
 import LicitacoesQuadro from "./LicitacoesQuadro";
 import Rolagem from "./Rolagem";
@@ -23,8 +24,9 @@ import Selo from "./Selo";
 // sessao; as encerradas no fim), a etapa com o rotulo, os dias uteis e a situacao de cada prazo, e as etapas na ordem.
 //
 // AS DECISOES (fatia 2), so' na lista e so' com `pode_decidir` (depois do corte, a quem decide): a etapa da favorita
-// sem etapa de dossie troca num controle de escolha, com as etapas que o servidor manda; a que tem etapa de dossie so'
-// mostra, e diz que vem do dossie. Tirar a favorita pede confirmacao. Depois de cada decisao a pagina le a rota de novo.
+// sem etapa de dossie troca num controle de escolha, com as etapas que o servidor manda, e grava no botao Gravar que
+// aparece ao lado quando a escolha muda; a que tem etapa de dossie so' mostra, e diz que vem do dossie. Tirar a favorita
+// pede confirmacao. Depois de cada decisao a pagina le a rota de novo. Uma decisao por vez na pagina.
 //
 // As encerradas ficam num grupo recolhido no fim, como os encerrados do SIGA: nao tem prazo correndo, e a pagina
 // responde o que vence. Nelas o prazo e' so' o nome e a data, sem os dias e sem cor (o servidor ja' manda sem situacao).
@@ -32,24 +34,40 @@ import Selo from "./Selo";
 /** Quantas mudancas a linha mostra; o resto vira a contagem ("e mais 2"). */
 const MUDANCAS_A_VISTA = 3;
 
-/** O que as linhas precisam para decidir; nulo quando a pagina e' so' de leitura. */
+/** O que as linhas precisam para decidir; nulo quando a pagina e' so' de leitura. `ocupada`: ha' decisao em curso.
+ *  `mudarEtapa` devolve se gravou. */
 type Decisoes = {
-  etapas: EtapaDaFavorita[]; ocupada: number | null; falha: FalhaDaDecisao | null;
-  mudarEtapa: (l: LinhaLicitacao, etapa: string) => void; tirar: (l: LinhaLicitacao) => void;
+  etapas: EtapaDaFavorita[]; ocupada: boolean; falha: FalhaDaDecisao | null;
+  mudarEtapa: (l: LinhaLicitacao, etapa: string) => Promise<boolean>; tirar: (l: LinhaLicitacao) => void;
 };
 
 /** A etapa na lista de quem decide: o controle de escolha na favorita sem etapa de dossie; na que tem, o selo e de onde
- *  ela vem. O que o dossie diz alem da etapa continua ao lado. */
+ *  ela vem. O que o dossie diz alem da etapa continua ao lado.
+ *
+ *  A escolha nao grava sozinha: pelo teclado o controle fechado muda a cada seta, e cada passagem viraria uma etapa
+ *  gravada que ninguem escolheu. A etapa escolhida fica no controle e o botao Gravar aparece ao lado enquanto ela for
+ *  outra que a do servidor; o controle nao desliga enquanto grava, para o foco nao cair. */
 function EtapaQueSeDecide({ l, decisoes }: { l: LinhaLicitacao; decisoes: Decisoes }) {
+  const [escolhida, setEscolhida] = useState<string | null>(null);
+  const controle = useRef<HTMLSelectElement>(null);
   const f = l.favorita;
   if (!f) return null;
   if (f.etapa_do_dossie) return <><Etapa f={f} /><span className="lic-sub">do dossiê</span></>;
+  const nome = nomeDaLicitacao(l);
+  const gravar = (etapa: string) => void decisoes.mudarEtapa(l, etapa).then(gravou => {
+    if (gravou) setEscolhida(null);
+    controle.current?.focus();                       // o botao some (ou desliga): o foco volta para o controle
+  });
   return (
     <span className="lic-etapa">
-      <select className="lic-etapa__escolha" aria-label={`Etapa: ${nomeDaLicitacao(l)}`} value={f.etapa} disabled={decisoes.ocupada === l.id}
-        onChange={ev => decisoes.mudarEtapa(l, ev.target.value)}>
+      <select ref={controle} className="lic-etapa__escolha" aria-label={`Etapa: ${nome}`} value={escolhida ?? f.etapa}
+        onChange={ev => setEscolhida(ev.target.value)}>
         {decisoes.etapas.map(e => <option key={e.etapa} value={e.etapa}>{e.rotulo}</option>)}
       </select>
+      {escolhida !== null && escolhida !== f.etapa && (
+        <button type="button" className="btn btn--pequeno" disabled={decisoes.ocupada} aria-label={`Gravar a etapa: ${nome}`}
+          onClick={() => gravar(escolhida)}>Gravar</button>
+      )}
       {f.selos.map((s, i) => <Selo key={`${i}-${s}`}>{s}</Selo>)}
     </span>
   );
@@ -97,7 +115,7 @@ function Tabela({ linhas, legenda, encerradas = false, decisoes }: {
                 {decisoes && (
                   <td className="lic-c-decisao">
                     <div className="lic-acoes">
-                      <button type="button" className="btn btn--pequeno" disabled={decisoes.ocupada === l.id}
+                      <button type="button" className="btn btn--pequeno" disabled={decisoes.ocupada}
                         aria-label={`Tirar a favorita: ${nomeDaLicitacao(l)}`} onClick={() => decisoes.tirar(l)}>Tirar a favorita</button>
                     </div>
                     {decisoes.falha?.id === l.id && <Falha className="lic-falha">{decisoes.falha.texto}</Falha>}
@@ -145,7 +163,7 @@ function ListaOuQuadro({ vista }: { vista: "lista" | "quadro" }) {
   const decisoes: Decisoes | null = dados.pode_decidir ? {
     // a recusa de tirar a favorita aparece dentro da janela, e nao na linha
     etapas: dados.etapas, ocupada, falha: tirar ? null : falha,
-    mudarEtapa: (l, etapa) => void decidir(l.id, "etapa", { etapa }),
+    mudarEtapa: (l, etapa) => decidir(l, "etapa", { etapa }).then(resposta => resposta !== null),
     tirar: l => { limparFalha(); setTirar(l); },
   } : null;
   return (
@@ -153,10 +171,11 @@ function ListaOuQuadro({ vista }: { vista: "lista" | "quadro" }) {
       <AbasDasFavoritas atual={vista} />
       <LeituraDoRadarLinha leitura={dados.leitura} />
       <FalhaAoAtualizar erro={erro} tentar={() => void tentar()} />
+      <RecusaSemLinha falha={decisoes?.falha ?? null} linhas={dados.favoritas} />
       {vista === "quadro" ? <LicitacoesQuadro dados={dados} /> : <Lista dados={dados} decisoes={decisoes} />}
       {tirar && (
-        <JanelaDeTirarAFavorita l={tirar} ocupada={ocupada === tirar.id} falha={falha?.id === tirar.id ? falha.texto : null}
-          aoConfirmar={() => void decidir(tirar.id, "favorita/remover").then(feito => { if (feito) setTirar(null); })}
+        <JanelaDeTirarAFavorita l={tirar} ocupada={ocupada} falha={falha?.id === tirar.id ? falha.texto : null}
+          aoConfirmar={() => void decidir(tirar, "favorita/remover").then(feito => { if (feito) setTirar(null); })}
           aoFechar={() => { limparFalha(); setTirar(null); }} />
       )}
     </div>

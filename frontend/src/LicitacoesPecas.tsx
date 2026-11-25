@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { comPontoFinal } from "./api";
 import CaixaAviso from "./CaixaAviso";
 import Falha from "./Falha";
@@ -7,7 +7,7 @@ import { IconeLinkExterno } from "./icones";
 import Janela from "./Janela";
 import {
   avisoDaLeitura, copiarTexto, dataDoPrazo, emDiasUteis, linkExterno, nomeDaLicitacao, orgaoDaLinha, quandoLeu,
-  type AnaliseDoEdital, type Favorita, type LeituraDoRadar, type LinhaLicitacao, type MotivoDeDescarte, type MudancaDaFavorita,
+  type AnaliseDoEdital, type FalhaDaDecisao, type Favorita, type LeituraDoRadar, type LinhaLicitacao, type MotivoDeDescarte, type MudancaDaFavorita,
   type SituacaoDoPrazo,
 } from "./licitacoes";
 import { VISTAS_DAS_FAVORITAS } from "./navegacao";
@@ -129,6 +129,13 @@ export function FalhaAoAtualizar({ erro, tentar }: { erro: string; tentar: () =>
   );
 }
 
+/** A recusa de uma decisao cuja linha ja' nao esta' na lista (outra pessoa, ou outra aba, decidiu antes): no alto da
+ *  pagina, com o nome da licitacao. Com a linha na lista, a recusa aparece junto dela, e aqui nada. */
+export function RecusaSemLinha({ falha, linhas }: { falha: FalhaDaDecisao | null; linhas: LinhaLicitacao[] }) {
+  if (!falha || linhas.some(l => l.id === falha.id)) return null;
+  return <Falha>{falha.nome}: {falha.texto}</Falha>;
+}
+
 /* ------------------------------------------------------------------ Favoritas: as tres vistas */
 
 const VISTAS: readonly VistaFavoritas[] = ["lista", "quadro", "calendario"];
@@ -201,6 +208,7 @@ export function JanelaDeTirarAFavorita({ l, ocupada, falha, aoConfirmar, aoFecha
  *  fora da dashboard). Sem link de edital, o comando vem sem ele e o servidor manda o aviso. */
 export function JanelaDaAnalise({ l, analise, aoFechar }: { l: LinhaLicitacao; analise: AnaliseDoEdital; aoFechar: () => void }) {
   const [copiou, setCopiou] = useState<boolean | null>(null);
+  const campo = useRef<HTMLInputElement>(null);
   const dito = copiou === null ? (analise.favoritou ? "A licitação agora é favorita." : "")
     : copiou ? "Comando copiado." : "Não deu para copiar: selecione o comando.";
   return (
@@ -209,11 +217,13 @@ export function JanelaDaAnalise({ l, analise, aoFechar }: { l: LinhaLicitacao; a
       {analise.aviso && <CaixaAviso nivel="atencao">{comPontoFinal(analise.aviso)}</CaixaAviso>}
       <div className="campo">
         <label className="campo__rotulo" htmlFor="lic-comando">Comando para a sessão de análise</label>
-        <input id="lic-comando" className="lic-comando" readOnly value={analise.comando} onFocus={ev => ev.currentTarget.select()} />
+        <input ref={campo} id="lic-comando" className="lic-comando" readOnly value={analise.comando} onFocus={ev => ev.currentTarget.select()} />
       </div>
-      <p className="lic-janela__dito" role="status">{dito}</p>
       <div className="iniciar__rodape">
-        <button type="button" className="btn btn--primario" onClick={() => void copiarTexto(analise.comando).then(setCopiou)}>Copiar</button>
+        <button type="button" className="btn btn--primario"
+          onClick={() => { if (campo.current) void copiarTexto(campo.current).then(setCopiou); }}>Copiar</button>
+        {/* sempre na pagina, mesmo vazio: a regiao que so' aparece junto com o texto nem sempre e' anunciada */}
+        <p className="lic-janela__dito" role="status">{dito}</p>
       </div>
     </Janela>
   );

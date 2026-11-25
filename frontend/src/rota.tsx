@@ -396,14 +396,14 @@ export function buscaDosAvisos(busca: Busca): Busca {
   return nova;
 }
 
-/** O número, a competência e a série que a janela "Iniciar processo" (#151) manda pela busca da URL
- *  (?numero=25&competencia=2026-10&tipo=projeto). Valor fora do padrão vira "" (ignorado). */
 /** O mes do calendario das Favoritas das Licitacoes (?mes=2026-12). Fora do padrao vira "" (o servidor mostra o mes
  *  de hoje). */
 export function mesDaBusca(busca: Busca): string {
   return /^2\d{3}-(0[1-9]|1[0-2])$/.test(busca.mes ?? "") ? busca.mes : "";
 }
 
+/** O número, a competência e a série que a janela "Iniciar processo" (#151) manda pela busca da URL
+ *  (?numero=25&competencia=2026-10&tipo=projeto). Valor fora do padrão vira "" (ignorado). */
 export function medicaoDaBusca(busca: Busca): { numero: string; competencia: string; tipo: "projeto" | "" } {
   return {
     numero: /^[1-9][0-9]{0,2}$/.test(busca.numero ?? "") ? busca.numero : "",

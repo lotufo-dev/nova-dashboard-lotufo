@@ -155,8 +155,7 @@
 /* as janelas das decisoes: a licitacao de que se trata, o comando para copiar e o que foi feito */
 .lic-janela__nome { margin: 0; }
 .lic-comando { width: 100%; }
-.lic-janela__dito { margin: 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
-.lic-janela__dito:empty { display: none; }
+.lic-janela__dito { margin: 0; align-self: center; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
 
 /* ---------------------------------------------------------------- quadro por etapa */
 /* uma coluna por etapa, todas da mesma largura. Na pagina larga, as sete numa fileira; na media, as que nao cabem

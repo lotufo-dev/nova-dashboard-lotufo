@@ -15,8 +15,8 @@
 //   espera   seletor do conteudo principal: sem ele visivel, a tela nao carregou
 //   menu     so' quando o link do menu e' outro endereco que leva a esta tela (hoje nenhuma: todo item abre o proprio)
 //   passos   o que fazer depois de a tela abrir, para chegar ao ESTADO a conferir (janela, formulario, aba):
-//            { clicar: seletor }, { preencher: [seletor, texto] } ou { arquivo: [seletor do campo, nome do PDF] }.
-//            Com passos, `espera` e' o seletor do estado ja' aberto
+//            { clicar: seletor }, { preencher: [seletor, texto] }, { escolher: [seletor do <select>, valor] } ou
+//            { arquivo: [seletor do campo, nome do PDF] }. Com passos, `espera` e' o seletor do estado ja' aberto
 //   simular  respostas da API trocadas so' nesta tela: { caminho: /regex do caminho/, metodo: "GET", status: 200,
 //            corpo: {...} }. Serve para a tela vazia, a tela de erro e o que o cadastro de exemplo nao alcanca.
 //            `corpo` pode ser funcao dos registros da prova, e `ajustar: (resposta, registros) => resposta` muda a
@@ -24,6 +24,8 @@
 //   erro     true quando a tela DEVE mostrar o aviso de erro (a falha foi simulada); sem ele, aviso de erro reprova
 //   parou    true quando a tela DEVE cair na tela "A tela parou de responder" (a resposta simulada quebra o desenho)
 //   destino  o caminho em que a tela termina, quando ela so' leva a outra (`/notas/envio/:id` abre a pagina da medicao)
+//   emHttp   true abre a tela sem `navigator.clipboard`, como na producao, que roda em http (a prova roda em
+//            localhost, onde o navegador o da'): para a copia que precisa funcionar sem ele
 //   medicaoQue  o ato que a tela abre (chave de ATOS_DA_MEDICAO): `:obra` e `:medicao` viram a primeira medicao que
 //            ainda aceita esse ato, e nao a primeira do banco (numa copia do banco ela esta' recebida e o botao nao
 //            existe). Sem medicao nesse estado a tela sai como "sem registro", que nao reprova. `--medicao` manda
@@ -634,8 +636,16 @@ export const TELAS = [
   { rota: "licitacoes", id: "licitacoes-analisar-sem-link", caminho: "/licitacoes", perfis: VE_LICITACOES, antes: ".lic .lic-tabela--decide",
     espera: "dialog[open] .aviso", simular: [...comTriagem({ decide: true }), comAnalise({ semLink: true })],
     passos: [{ clicar: '#conteudo button:has-text("Analisar o edital")' }] },
+  // o Copiar da janela, como na producao (http): so' diz "Comando copiado." se copiou do campo de dentro da janela
+  { rota: "licitacoes", id: "licitacoes-analisar-copiado", caminho: "/licitacoes", perfis: VE_LICITACOES, antes: ".lic .lic-tabela--decide",
+    espera: 'dialog[open] .lic-janela__dito:has-text("Comando copiado.")', simular: [...comTriagem({ decide: true }), comAnalise()],
+    emHttp: true, passos: [{ clicar: '#conteudo button:has-text("Analisar o edital")' }, { clicar: 'dialog[open] button:has-text("Copiar")' }] },
   { rota: "licitacoes-favoritas", id: "licitacoes-favoritas-decidir", caminho: "/licitacoes/favoritas", perfis: VE_LICITACOES,
     espera: ".lic .lic-tabela--decide .lic-etapa__escolha", simular: comFavoritas({ decide: true }) },
+  // a etapa escolhida e ainda nao gravada: o botao Gravar ao lado do controle
+  { rota: "licitacoes-favoritas", id: "licitacoes-favoritas-etapa", caminho: "/licitacoes/favoritas", perfis: VE_LICITACOES,
+    antes: ".lic .lic-tabela--decide .lic-etapa__escolha", espera: '.lic-etapa button:has-text("Gravar")', simular: comFavoritas({ decide: true }),
+    passos: [{ escolher: [".lic-etapa__escolha", "proposta_enviada"] }] },
   { rota: "licitacoes-favoritas", id: "licitacoes-favoritas-tirar", caminho: "/licitacoes/favoritas", perfis: VE_LICITACOES,
     antes: ".lic .lic-tabela--decide", espera: "dialog[open] .iniciar__rodape", simular: comFavoritas({ decide: true }),
     passos: [{ clicar: '#conteudo button:has-text("Tirar a favorita")' }] },

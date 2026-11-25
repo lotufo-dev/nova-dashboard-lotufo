@@ -76,6 +76,10 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 - 2026-11-25 #909, licitações, da segunda revisão: a mudança vista é guardada pela chave (data, rótulo e texto); se o radar reescrever o texto de mudanças antigas (troca de formato), elas voltam todas como não vistas de uma vez. Erra para o lado de mostrar de novo; se acontecer, o radar manda uma identidade própria da mudança.
 - 2026-11-25 #909, licitações: a favorita com etapa final ("Perdida", "Desistida") e prazo distante no dossiê fica em aberto até ele passar e entra na Triagem quando faltarem 15 dias úteis (`licitacoes._linha`). A etapa nunca encerrou favorita; decidir se a etapa final encerra.
 - 2026-11-25 #909, licitações: `lic_favoritas.mudancas_vistas` com JSON inválido (só por edição manual do banco) derruba a Triagem, as Favoritas, o calendário e a linha da Início com erro (`licitacoes.mudancas`).
+- 2026-11-25 #909, licitações, da revisão das telas: "Analisar o edital" só existe na Triagem; fechada a janela, o comando não volta pela tela, porque a linha já virou favorita e a lista das Favoritas não tem o botão. O servidor já devolve o comando para quem é favorita (`POST /api/licitacoes/{id}/analise`).
+- 2026-11-25 #909, licitações: o descarte não se desfaz pela tela. A rota `descarte/desfazer` existe, mas nenhuma página lista as descartadas.
+- 2026-11-25 #909, peça `Janela`, em todas as telas: o botão "Cancelar" de dentro da janela desmonta o `<dialog>` sem `close()`, e o foco cai no começo da página em vez de voltar ao botão que abriu (pelo X e pelo Esc ele volta). Nas licitações, a linha que sai depois de uma decisão também leva o foco embora. Devolver o foco no cleanup de um efeito não serve: no modo estrito do dev o efeito desmonta e remonta ao abrir (`ComporEmail.tsx` guarda quem tinha o foco e o devolve nos comandos de fechar).
+- 2026-11-25 #909, licitações: o 403 de quem perdeu a permissão no meio da sessão diz "a ação é da engenharia ou da administração" (`api.ts`, texto geral), e as licitações são só do administrador.
 
 ## Cadastro (dono)
 

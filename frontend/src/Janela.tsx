@@ -15,9 +15,13 @@ export default function Janela({ titulo, aoFechar, children }: { titulo: string;
     if (typeof d.showModal === "function") d.showModal(); else d.setAttribute("open", "");
   }, []);
   const fechar = () => { const d = ref.current; if (d && typeof d.close === "function") d.close(); else aoFechar(); };
+  // o clique no fundo fecha, mas so' o que comecou no fundo: quem seleciona um texto arrastando e solta o mouse fora
+  // da caixa tambem gera um clique no <dialog>, e a janela nao pode fechar por isso
+  const apertouNoFundo = useRef(false);
   return (
     <dialog ref={ref} className="iniciar janela" aria-labelledby="janela-titulo" onClose={aoFechar}
-      onClick={ev => { if (ev.target === ev.currentTarget) fechar(); }}>
+      onMouseDown={ev => { apertouNoFundo.current = ev.target === ev.currentTarget; }}
+      onClick={ev => { if (ev.target === ev.currentTarget && apertouNoFundo.current) fechar(); }}>
       <div className="iniciar__caixa">
         <div className="iniciar__cabeca">
           <h2 className="iniciar__titulo" id="janela-titulo">{titulo}</h2>
