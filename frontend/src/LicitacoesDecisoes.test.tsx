@@ -111,6 +111,20 @@ describe("Triagem: decidir pela tela", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("a recusa acompanha a linha que mudou de bloco, mesmo sem mais nada a decidir nele", async () => {
+    // a recomendada foi favoritada em outra aba e tem a sessão chegando: na leitura nova ela vem entre as favoritas
+    const viraFavorita = { ...NOVE, recomendada: null, favorita: favorita({ prazos: [prazo("Sessão", "2026-11-27", 3, "critico")] }) };
+    servidor([triagem({ recomendadas: [NOVE, SETE] }), triagem({ favoritas: [viraFavorita], recomendadas: [SETE] })],
+      { "/api/licitacoes/4/favorita": new ApiErro(409, "Esta licitação já é favorita") });
+    render(<LicitacoesTriagem />);
+    fireEvent.click(await screen.findByRole("button", { name: "Favoritar: PME · CE 004/2026" }));
+    await waitFor(() => expect(linhasDe("Favoritas que pedem atenção")).toHaveLength(1));
+    const [aLinha] = linhasDe("Favoritas que pedem atenção");
+    expect(within(aLinha).getByRole("alert").textContent).toBe("Esta licitação já é favorita");
+    expect(botoes(aLinha)).toEqual([]);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
   it("uma decisão por vez: com uma em curso, os botões de todas as linhas ficam desligados e o segundo clique não grava", async () => {
     let responder: (resposta: unknown) => void = () => {};
     let n = 0;

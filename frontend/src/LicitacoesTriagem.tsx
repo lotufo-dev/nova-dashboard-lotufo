@@ -91,8 +91,9 @@ function MudancaDaLinha({ f, cortado }: { f: Favorita; cortado: boolean }) {
 }
 
 function FavoritasQuePedemAtencao({ linhas, decisoes, cortado }: { linhas: LinhaLicitacao[]; decisoes: Decisoes | null; cortado: boolean }) {
-  // a coluna das decisoes so' existe quando alguma linha tem o que decidir: a mudanca que ninguem viu
-  const comDecisao = decisoes !== null && linhas.some(l => (l.favorita?.mudancas_novas ?? 0) > 0);
+  // a coluna das decisoes so' existe quando alguma linha tem o que decidir (a mudanca que ninguem viu) ou o que dizer:
+  // a recusa de uma linha que veio parar neste bloco (a recomendada que outra pessoa favoritou antes)
+  const comDecisao = decisoes !== null && linhas.some(l => (l.favorita?.mudancas_novas ?? 0) > 0 || decisoes.falha?.id === l.id);
   return (
     <section className="cartao lic-bloco" aria-labelledby="lic-atencao">
       <header className="cartao__cabeca">

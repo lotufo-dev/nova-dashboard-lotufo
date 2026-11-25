@@ -56,7 +56,8 @@ function EtapaQueSeDecide({ l, decisoes }: { l: LinhaLicitacao; decisoes: Deciso
   const nome = nomeDaLicitacao(l);
   const gravar = (etapa: string) => void decisoes.mudarEtapa(l, etapa).then(gravou => {
     if (gravou) setEscolhida(null);
-    controle.current?.focus();                       // o botao some (ou desliga): o foco volta para o controle
+    // o botao sumiu e o foco ficou sem dono: volta para o controle. Quem ja' foi para outro lugar fica onde esta'
+    if (document.activeElement === document.body) controle.current?.focus();
   });
   return (
     <span className="lic-etapa">
