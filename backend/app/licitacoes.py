@@ -26,6 +26,7 @@ FOLGA_FUTURO = datetime.timedelta(minutes=10)
 LEITURA_NO_FUTURO = "Data da leitura no futuro: confira o relógio da máquina do radar"
 LEITURA_ANTIGA = "Leitura mais antiga que a última gravada"
 LEITURA_FORA_DA_FAIXA = "Data da leitura fora da faixa aceita"
+DESCARTE_FORA_DA_FAIXA = "Data do descarte fora da faixa aceita: "
 ANO_MINIMO_DA_LEITURA = 2020
 CHAVE_DESCONHECIDA = "Licitação que a dashboard ainda não recebeu: "
 DECISOES_NA_DASHBOARD = "As decisões das licitações estão na dashboard desde "
@@ -96,6 +97,12 @@ def fechar_leitura(conn, lido_em: datetime.datetime, chaves: list[str], fontes: 
         raise ValueError(LEITURA_FORA_DA_FAIXA)
     if lido_em > tempo.agora_utc() + FOLGA_FUTURO:
         raise ValueError(LEITURA_NO_FUTURO)
+    agora = tempo.agora_utc()
+    for d in (decisoes or {}).get("descartadas") or []:
+        quando = datetime.datetime.fromisoformat(d["quando"]) if d.get("quando") else None
+        # o ano primeiro, sem conta com fuso (que estouraria no ano 1 e no 9999); depois, nada no futuro
+        if quando and (not ANO_MINIMO_DA_LEITURA <= quando.year <= agora.year or quando > agora + FOLGA_FUTURO):
+            raise ValueError(DESCARTE_FORA_DA_FAIXA + d["chave"])
     lido = _utc(lido_em)
     listadas = set(chaves)
     favoritas = None if decisoes is None else {f["chave"]: f for f in decisoes.get("favoritas") or []}
@@ -247,14 +254,13 @@ def mudancas(dados: dict, fav) -> list[dict]:
     """As mudancas do certame desde o dia em que foi favoritado, da mais recente para a mais antiga, cada uma com a
     `chave` dela. `vista`: a chave esta' na lista das que alguem ja' marcou como vistas."""
     vistas = set(json.loads(fav["mudancas_vistas"] or "[]"))
-    lista = []
+    lista: dict[str, dict] = {}                      # por chave: o mesmo evento lido em duas fontes e' uma mudanca so'
     for h in dados.get("historico") or []:
         if h.get("rotulo") and h["data"] >= fav["desde"]:
             chave = chave_da_mudanca(h)
-            lista.append({"chave": chave, "data": h["data"], "texto": h["texto"], "rotulo": h["rotulo"],
-                          "vista": chave in vistas})
-    lista.sort(key=lambda m: m["data"], reverse=True)
-    return lista
+            lista.setdefault(chave, {"chave": chave, "data": h["data"], "texto": h["texto"], "rotulo": h["rotulo"],
+                                     "vista": chave in vistas})
+    return sorted(lista.values(), key=lambda m: m["data"], reverse=True)
 
 
 def _favorita(fav, dados: dict, hoje: datetime.date, encerrada: bool) -> dict:

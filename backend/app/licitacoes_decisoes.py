@@ -32,6 +32,8 @@ JA_DESCARTADA = "Esta licitação já foi descartada"
 NAO_DESCARTADA = "Esta licitação não está descartada"
 SEM_MUDANCA_NOVA = "Esta favorita não tem mudança nova"
 SEM_LINK = "Esta licitação não tem link de edital: baixe o edital e passe o arquivo ao comando"
+LINK_FORA_DO_COMANDO = ("O link do edital tem caractere que não vai no comando: baixe o edital pelo link da licitação e "
+                        "passe o arquivo ao comando")
 CORTE_SEM_ESTADO = "O corte não foi gravado: falta a linha de estado das licitações (rode as migrações)"
 
 
@@ -239,7 +241,7 @@ def analisar(conn, usuario_id: int, certame_id: int) -> dict:
     link = (json.loads(c["dados"]).get("link") or "").strip()
     tem_link = bool(_LINK.fullmatch(link))
     return {"favoritou": favoritou, "comando": f"{COMANDO_ANALISAR} {link}" if tem_link else COMANDO_ANALISAR,
-            "aviso": None if tem_link else SEM_LINK}
+            "aviso": None if tem_link else LINK_FORA_DO_COMANDO if link else SEM_LINK}
 
 
 def marcar_mudancas_vistas(conn, usuario_id: int, certame_id: int, chaves: list[str]) -> None:

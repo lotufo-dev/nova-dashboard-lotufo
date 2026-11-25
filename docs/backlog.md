@@ -73,6 +73,9 @@ Limpeza de 30/10/2026 (#350): saiu o registro do trabalho já entregue, o que pe
 - 2026-11-25 #909, licitações: a favorita encerrada (sessão passada sem prazo do dossiê por vir, ou encerrada pelo radar) com mudança não vista nunca entra na Triagem (`licitacoes._pede_atencao`): o resultado publicado depois da sessão só aparece na lista das Favoritas.
 - 2026-11-25 #909, corte das licitações: o `--ensaio` não confere se o último espelho do radar é recente nem se trouxe as descartadas (`licitacoes_decisoes.corte`); e cortar antes da fatia 4 fecha o canal `decisoes` do fechamento da rodada, por onde as conferências ("é o mesmo / é outro") ainda teriam de chegar.
 - 2026-11-25 #909, linha das licitações na Início: `GET /api/licitacoes/resumo` monta a Triagem inteira para contar, e os dias úteis de cada certame andam dia a dia nos feriados (`licitacoes.dias_uteis_ate`): cerca de 250 ms com 1.200 certames na máquina de desenvolvimento.
+- 2026-11-25 #909, licitações, da segunda revisão: a mudança vista é guardada pela chave (data, rótulo e texto); se o radar reescrever o texto de mudanças antigas (troca de formato), elas voltam todas como não vistas de uma vez. Erra para o lado de mostrar de novo; se acontecer, o radar manda uma identidade própria da mudança.
+- 2026-11-25 #909, licitações: a favorita com etapa final ("Perdida", "Desistida") e prazo distante no dossiê fica em aberto até ele passar e entra na Triagem quando faltarem 15 dias úteis (`licitacoes._linha`). A etapa nunca encerrou favorita; decidir se a etapa final encerra.
+- 2026-11-25 #909, licitações: `lic_favoritas.mudancas_vistas` com JSON inválido (só por edição manual do banco) derruba a Triagem, as Favoritas, o calendário e a linha da Início com erro (`licitacoes.mudancas`).
 
 ## Cadastro (dono)
 

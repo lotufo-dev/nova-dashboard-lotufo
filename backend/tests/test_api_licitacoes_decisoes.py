@@ -323,6 +323,12 @@ def test_descarte_espelhado_entra_com_a_data_que_tinha_no_radar(admin):
     assert _linhas("SELECT criado_em FROM lic_descartes WHERE chave=? AND desfeito_em IS NULL", CHAVE_A) == [
         {"criado_em": "2026-11-11 12:00:00"}]
     assert rodada("09:40", [{"chave": CHAVE_A, "motivo": "valor", "quando": "2026-11-11 08:00:00"}]).status_code == 422   # sem fuso
+    # fora da faixa (ano 1, ano 9999, no futuro): recusa a rodada, e nao derruba o servidor
+    for quando in ("0001-01-01T00:00:00+05:00", "9999-12-31T23:59:59-05:00", "2031-01-01T00:00:00-04:00"):
+        r = rodada("09:50", [{"chave": CHAVE_A, "motivo": "valor", "quando": quando}])
+        assert r.status_code == 422 and r.json()["detail"] == "Data do descarte fora da faixa aceita: " + CHAVE_A, quando
+    assert _linhas("SELECT criado_em FROM lic_descartes WHERE chave=? AND desfeito_em IS NULL", CHAVE_A) == [
+        {"criado_em": "2026-11-11 12:00:00"}]
     _cortar()
     (d,) = admin.get("/api/radar/decisoes", headers=radar()).json()["descartadas"]
     assert (d["chave"], d["quando"]) == (CHAVE_A, "2026-11-11T12:00:00+00:00")
@@ -424,7 +430,8 @@ def test_link_estranho_nao_entra_no_comando_da_analise(admin, link):
     r = _decidir(admin, ids[CHAVE_B], "analise")
     assert r.status_code == 200, r.text
     assert r.json() == {"id": ids[CHAVE_B], "favoritou": True, "comando": "/analisar-edital",
-                        "aviso": "Esta licitação não tem link de edital: baixe o edital e passe o arquivo ao comando"}
+                        "aviso": "O link do edital tem caractere que não vai no comando: baixe o edital pelo link da "
+                                 "licitação e passe o arquivo ao comando"}
 
 
 @pytest.mark.parametrize("link", ["https://exemplo.com.br/editais/2026/CE-001_v2.pdf?id=12#anexos",
@@ -434,6 +441,21 @@ def test_link_comum_entra_no_comando_da_analise(admin, link):
     ids = _ids()
     _cortar()
     assert _decidir(admin, ids[CHAVE_B], "analise").json()["comando"] == f"/analisar-edital {link}"
+
+
+def test_o_mesmo_evento_lido_em_duas_fontes_e_uma_mudanca_so(admin):
+    repetido = [{"data": "2026-11-23", "fonte": fonte, "texto": "publicou adiamento", "rotulo": "Sessão adiada"}
+                for fonte in ("iomat", "pncp")]
+    outro = {"data": "2026-11-23", "fonte": "pncp", "texto": "publicou retificação", "rotulo": "Retificada"}
+    mandar(admin, certame(CHAVE_C, "c1" * 8, data_sessao="2027-03-01", historico=[*repetido, outro]))
+    conn = db.get_conn()
+    conn.execute("INSERT INTO lic_favoritas (chave, desde, origem) VALUES (?, '2026-11-01', 'radar')", (CHAVE_C,))
+    conn.commit(); conn.close()
+    _cortar()
+    (linha,) = _triagem(admin)["favoritas"]
+    mudancas = linha["favorita"]["mudancas"]
+    assert sorted(m["rotulo"] for m in mudancas) == ["Retificada", "Sessão adiada"]
+    assert len({m["chave"] for m in mudancas}) == 2 and linha["favorita"]["mudancas_novas"] == 2
 
 
 def test_mudanca_vista_tira_a_favorita_da_triagem_e_mudanca_nova_a_traz_de_volta(admin):
