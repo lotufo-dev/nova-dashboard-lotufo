@@ -8,9 +8,9 @@ def test_perfis():
     assert not tem("engenharia", "administrar")
     assert tem("diretoria", "ver_paineis")
     assert not tem("diretoria", "editar_cadastros")
-    # licitacoes (#908): o administrador e a diretoria veem; a engenharia nao tem a area
-    assert tem("admin", "ver_licitacoes") and tem("diretoria", "ver_licitacoes")
-    assert not tem("engenharia", "ver_licitacoes")
+    # licitacoes (#908, decisao do dono de 24/11/2026): so' o administrador ve
+    assert tem("admin", "ver_licitacoes")
+    assert not tem("diretoria", "ver_licitacoes") and not tem("engenharia", "ver_licitacoes")
 
 
 # --- testes adicionais (nao previstos no brief) -------------------------------
@@ -33,7 +33,7 @@ def test_ver_siga_e_dos_tres_perfis_e_so_quem_edita_cadastros_escreve_no_siga():
     assert not tem("desconhecido", "ver_siga")
     assert not tem("diretoria", "editar_cadastros")
     from app.permissoes import do_perfil
-    assert do_perfil("diretoria") == ["ver_licitacoes", "ver_paineis", "ver_siga"]
+    assert do_perfil("diretoria") == ["ver_paineis", "ver_siga"]
     assert do_perfil("desconhecido") == []
 
 def _seed(email="leo@lotufo.com", senha="senha-forte-123", perfil="admin"):

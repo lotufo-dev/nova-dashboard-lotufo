@@ -29,7 +29,7 @@ def _agora(monkeypatch, ano, mes, dia, hora_cuiaba):
 
 # --- quem ve ---------------------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("perfil,status", [("admin", 200), ("diretoria", 200), ("engenharia", 403)])
+@pytest.mark.parametrize("perfil,status", [("admin", 200), ("diretoria", 403), ("engenharia", 403)])
 def test_as_telas_sao_de_quem_tem_ver_licitacoes(client, perfil, status):
     for rota in ("/api/licitacoes/triagem", "/api/licitacoes/favoritas"):
         assert client.get(rota).status_code == 401
@@ -46,7 +46,7 @@ def test_sem_a_permissao_ninguem_ve(client, monkeypatch):
 
 
 def test_banco_vazio(client):
-    _entrar(client, "diretoria")
+    _entrar(client, "admin")
     assert client.get("/api/licitacoes/triagem").json() == {
         "leitura": {"lido_em": None, "atrasada": True, "fontes_com_problema": 0},
         "contagens": {"recomendadas": 0, "favoritas": 0, "novas": 0, "novas_desde": None, "por_orgao": []},
@@ -133,7 +133,7 @@ def test_recomendadas_na_ordem_da_nota_sem_as_favoritas_e_sem_quem_saiu_da_lista
     # hoje: a `e` saiu da lista do radar; a `f` continua (recomendada mesmo fora das novas); a A virou favorita
     fechar(client, [CHAVE_A, CHAVE_B, CHAVE_C, d, f, g, h],
            decisoes={"favoritas": [{"chave": CHAVE_A, "desde": "2026-11-24"}]})
-    _entrar(client, "diretoria")
+    _entrar(client, "admin")
     t = client.get("/api/licitacoes/triagem").json()
     # nota; depois o valor maior; depois o mais perto, pelo local da obra que o radar mandou; sem local, no fim
     assert [l["chave"] for l in t["recomendadas"]] == [f, CHAVE_B, h, CHAVE_C, g]
