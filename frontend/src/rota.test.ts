@@ -167,6 +167,28 @@ describe("rota", () => {
   });
 });
 
+// Licitações (#908): a Triagem em "/licitacoes" (a página padrão da área) e as Favoritas em "/licitacoes/favoritas".
+describe("rota: as páginas de Licitações (#908)", () => {
+  it("cada página tem um caminho canônico e volta igual", () => {
+    expect(caminhoDe({ tela: "licitacoes" })).toBe("/licitacoes");
+    expect(caminhoDe({ tela: "licitacoes-favoritas" })).toBe("/licitacoes/favoritas");
+    expect(parseRota("/licitacoes")).toEqual({ tela: "licitacoes" });
+    expect(parseRota("/licitacoes/favoritas")).toEqual({ tela: "licitacoes-favoritas" });
+    for (const r of [{ tela: "licitacoes" }, { tela: "licitacoes-favoritas" }] as Rota[]) expect(parseRota(caminhoDe(r))).toEqual(r);
+  });
+
+  it("a página padrão por extenso (/licitacoes/triagem) abre a Triagem, e a URL vira a canônica", () => {
+    expect(parseRota("/licitacoes/triagem")).toEqual({ tela: "licitacoes" });
+    expect(caminhoDe(parseRota("/licitacoes/triagem"))).toBe("/licitacoes");
+  });
+
+  it("caminho desconhecido dentro de Licitações vira raiz", () => {
+    for (const c of ["/licitacoes/outra", "/licitacoes/favoritas/x", "/licitacoes/triagem/x", "/licitacoes-favoritas", "/favoritas"]) {
+      expect(parseRota(c)).toEqual({ tela: "raiz" });
+    }
+  });
+});
+
 // As rotas que nasceram com o menu em áreas (#814): A receber, as três páginas de Documentos e as abas do contratante.
 describe("rota: as páginas novas do menu em áreas (#814)", () => {
   it("cada rota nova tem um caminho canônico e volta igual", () => {

@@ -56,6 +56,8 @@ export const MENU = "nav.menu a.menu__item";
 const TODOS = PERFIS;
 const OPERA = ["admin", "engenharia"];        // quem lanca medicao e envia e-mail
 const SO_ADMIN = ["admin"];
+const VE_LICITACOES = ["admin"];                // quem tem `ver_licitacoes` (backend/app/permissoes.py, #908)
+const SEM_LICITACOES = ["engenharia", "diretoria"];
 
 const MEDICAO = "/obras/:obra/medicoes/:medicao";
 // A medicao que ainda aceita cada ato da pagina (`medicaoQue`), pelo mesmo criterio da pagina e do servidor:
@@ -585,6 +587,36 @@ export const TELAS = [
     simular: comSiga(SIGA_ENCERRAMENTO) },
   { rota: "medicao", id: "medicao-841-protocolo-novo", caminho: MEDICAO, perfis: TODOS, espera: "nav.passos",
     simular: [{ caminho: MEDICOES_DA_OBRA, ajustar: medicaoComProtocoloNovo }] },
+
+  // ---- Licitacoes (#908): a Triagem e as Favoritas, so' leitura, de quem tem `ver_licitacoes` (so' o
+  // administrador, decisao do dono de 24/11/2026). Com o servidor de verdade o banco da prova nunca recebeu leitura do radar: a pagina abre com o aviso
+  // "O radar ainda não entregou leitura" e as listas vazias. Simulados (ver simulados.mjs): com dados, com a leitura em
+  // dia e nada a mostrar, com a leitura atrasada e com a falha de leitura; nas Favoritas, tambem as encerradas abertas.
+  // A engenharia e a diretoria nao tem a area: o endereco aberto a' mao cai na entrada do perfil.
+  { rota: "licitacoes", id: "licitacoes", caminho: "/licitacoes", perfis: VE_LICITACOES, espera: ".lic .lic-leitura .aviso" },
+  { rota: "licitacoes", id: "licitacoes-dados", caminho: "/licitacoes", perfis: VE_LICITACOES, espera: ".lic .lic-tabela--nota",
+    simular: comTriagem() },
+  { rota: "licitacoes", id: "licitacoes-vazia", caminho: "/licitacoes", perfis: VE_LICITACOES, espera: ".lic .lic-lido",
+    simular: comTriagem({ vazia: true }) },
+  { rota: "licitacoes", id: "licitacoes-atrasada", caminho: "/licitacoes", perfis: VE_LICITACOES, espera: ".lic .lic-leitura .aviso",
+    simular: comTriagem({ atrasada: true }) },
+  { rota: "licitacoes", id: "licitacoes-erro", caminho: "/licitacoes", perfis: VE_LICITACOES, espera: "#conteudo [role=alert]", erro: true,
+    simular: falha(/^\/api\/licitacoes\/triagem$/) },
+  { rota: "licitacoes", id: "licitacoes-sem-permissao", caminho: "/licitacoes", destino: "/inicio", perfis: SEM_LICITACOES, espera: ".ini" },
+  { rota: "licitacoes-favoritas", id: "licitacoes-favoritas", caminho: "/licitacoes/favoritas", perfis: VE_LICITACOES,
+    espera: ".lic .lic-leitura .aviso" },
+  { rota: "licitacoes-favoritas", id: "licitacoes-favoritas-dados", caminho: "/licitacoes/favoritas", perfis: VE_LICITACOES,
+    espera: ".lic .lic-tabela .lic-prazos", simular: comFavoritas() },
+  { rota: "licitacoes-favoritas", id: "licitacoes-favoritas-encerradas", caminho: "/licitacoes/favoritas", perfis: VE_LICITACOES,
+    antes: ".lic .lic-tabela", espera: ".lic-encerradas[open] table", simular: comFavoritas(), passos: [{ clicar: ".lic-encerradas > summary" }] },
+  { rota: "licitacoes-favoritas", id: "licitacoes-favoritas-vazia", caminho: "/licitacoes/favoritas", perfis: VE_LICITACOES,
+    espera: ".lic .lic-bloco .vazio", simular: comFavoritas({ vazia: true }) },
+  { rota: "licitacoes-favoritas", id: "licitacoes-favoritas-atrasada", caminho: "/licitacoes/favoritas", perfis: VE_LICITACOES,
+    espera: ".lic .lic-leitura .aviso", simular: comFavoritas({ atrasada: true }) },
+  { rota: "licitacoes-favoritas", id: "licitacoes-favoritas-erro", caminho: "/licitacoes/favoritas", perfis: VE_LICITACOES,
+    espera: "#conteudo [role=alert]", erro: true, simular: falha(/^\/api\/licitacoes\/favoritas$/) },
+  { rota: "licitacoes-favoritas", id: "licitacoes-favoritas-sem-permissao", caminho: "/licitacoes/favoritas", destino: "/inicio",
+    perfis: SEM_LICITACOES, espera: ".ini" },
 ];
 
 // Rotas do roteador que a prova nao abre, cada uma com o motivo.
@@ -639,3 +671,13 @@ import { ABAS_DA_CARTEIRA, aReceberDoContratante, medicoesDoContratante, SIGA_DO
 
 // ---- Criterio de encerramento do SIGA (#841): o quadro, os encerrados, o historico e a medicao (ver simulados.mjs)
 import { medicaoComProtocoloNovo, SIGA_ENCERRAMENTO } from "./simulados.mjs";
+
+// ---- Licitacoes (#908): quem tem `ver_licitacoes` e as respostas simuladas das duas paginas (ver simulados.mjs)
+import { licitacoesFavoritas, licitacoesTriagem } from "./simulados.mjs";
+
+function comTriagem(opcoes) {
+  return [{ caminho: /^\/api\/licitacoes\/triagem$/, corpo: licitacoesTriagem(opcoes) }];
+}
+function comFavoritas(opcoes) {
+  return [{ caminho: /^\/api\/licitacoes\/favoritas$/, corpo: licitacoesFavoritas(opcoes) }];
+}

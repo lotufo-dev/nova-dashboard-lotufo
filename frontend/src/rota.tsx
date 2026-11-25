@@ -51,6 +51,10 @@ export type Rota =
   | { tela: "resumo-medicoes" }
   | { tela: "avisos" }
   | { tela: "siga" }
+  // Licitacoes (#908): duas paginas so' de leitura, cada uma no proprio endereco. "/licitacoes" e' a Triagem (a pagina
+  // padrao da area) e "/licitacoes/favoritas", as Favoritas. As duas sao de quem tem `ver_licitacoes` (permissoes.ts)
+  | { tela: "licitacoes" }
+  | { tela: "licitacoes-favoritas" }
   | { tela: "documentos"; pagina?: PaginaDocumentos }
   | { tela: "documentos-empresa"; id: number; aba?: AbaDocumentos }
   | { tela: "obras"; aba?: AbaObras }
@@ -94,7 +98,7 @@ const ABA_ANTIGA: Record<string, AbaObra> = { ficha: "ficha", protocolo: "medico
 
 // Telas de um segmento so' ("/medicoes"), sem parametro, e os nomes antigos de cada uma.
 // Bloco 9: "/engenharia" e "/sugestoes" sairam; por nao estarem aqui, caem na raiz (entrada do perfil).
-const SIMPLES = ["inicio", "medicoes", "resumo-medicoes", "avisos", "siga", "documentos", "obras", "fechamento", "ancoras-docusign", "admin", "conta"] as const;
+const SIMPLES = ["inicio", "medicoes", "resumo-medicoes", "avisos", "siga", "licitacoes", "documentos", "obras", "fechamento", "ancoras-docusign", "admin", "conta"] as const;
 type Simples = (typeof SIMPLES)[number];
 const SIMPLES_ANTIGAS: Record<string, Simples> = {
   certidoes: "documentos",   // bloco 4: Certidoes virou Documentos de protocolo
@@ -154,6 +158,10 @@ export function parseRota(pathname: string): Rota {
   if (partes.length === 1 && Object.prototype.hasOwnProperty.call(SIMPLES_ANTIGAS, a)) return { tela: SIMPLES_ANTIGAS[a] };
   if (partes.length === 1 && (a === "carteira" || a === "painel" || a === "diretoria")) return CARTEIRA_ANTIGA.resumo;
   if (a === "carteira" && partes.length === 2 && Object.prototype.hasOwnProperty.call(CARTEIRA_ANTIGA, b)) return CARTEIRA_ANTIGA[b];
+  // Licitacoes (#908): "/licitacoes/favoritas"; a Triagem e' "/licitacoes" ("/licitacoes/triagem" tambem a abre, e o
+  // App troca a URL pela canonica).
+  if (a === "licitacoes" && partes.length === 2 && b === "favoritas") return { tela: "licitacoes-favoritas" };
+  if (a === "licitacoes" && partes.length === 2 && b === "triagem") return { tela: "licitacoes" };
   // As vistas de Obras (#805): "/obras/todas", "/obras/andamento", "/obras/qdop"; "Por contratante" e' "/obras". Os
   // enderecos de antes ("/obras/posicao", "/obras/resumo") abrem a vista que ficou no lugar.
   if (a === "obras" && partes.length === 2) {
@@ -233,6 +241,7 @@ export function caminhoDe(r: Rota): string {
     case "admin": return r.aba && r.aba !== "saude" ? `/admin/${r.aba}` : "/admin";
     case "notas-envio": return `/notas/envio/${r.id}`;
     case "fechamento": return r.aba && r.aba !== "meses" ? `/fechamento/${r.aba}` : "/fechamento";
+    case "licitacoes-favoritas": return "/licitacoes/favoritas";
     default: return `/${r.tela}`;
   }
 }

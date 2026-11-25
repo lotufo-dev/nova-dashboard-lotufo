@@ -4,7 +4,7 @@ import type { AbaContratante, AbaDocumentos, AbaFechamento, Busca, PaginaDocumen
 // Menu, entrada e caminho por perfil. Funcoes puras: a casca (Casca.tsx, Caminho.tsx) so' desenha o que sai daqui.
 //
 // MENU EM AREAS (decisao do dono de 18/11/2026, #805; issue #814): o menu tem areas, cada uma com o nome escrito e as
-// paginas dentro, na ordem Painel, Medicoes, Obras, Financeiro, Prazos e avisos, Orgaos, Documentos e Sistema. Esta
+// paginas dentro, na ordem Painel, Medicoes, Obras, Financeiro, Prazos e avisos, Orgaos, Licitacoes (#908), Documentos e Sistema. Esta
 // decisao SUBSTITUI a de 09/10/2026 (o "trilho de icones": uma lista so', sem rotulos de grupo), que valeu ate' aqui.
 // Continuam valendo: cada perfil ve o recorte dele (DO_PERFIL); as Notas nao estao no menu (sao da pagina da
 // medicao); os Avisos tem pagina propria ("/avisos"). Custos entra na area Financeiro quando a #804 tiver dado.
@@ -17,12 +17,13 @@ export type Perfil = "engenharia" | "diretoria" | "admin";
 
 /** As paginas do menu. */
 export type ItemMenu = "inicio" | "medicoes" | "resumo-medicoes" | "obras" | "fechamento" | "a-receber" | "avisos" | "siga"
-  | "certidoes" | "regularidade" | "garantias" | "ancoras-docusign" | "admin" | "conta";
-export type IdArea = "painel" | "medicoes" | "obras" | "financeiro" | "prazos" | "orgaos" | "documentos" | "sistema";
+  | "licitacoes" | "licitacoes-favoritas" | "certidoes" | "regularidade" | "garantias" | "ancoras-docusign" | "admin" | "conta";
+export type IdArea = "painel" | "medicoes" | "obras" | "financeiro" | "prazos" | "orgaos" | "licitacoes" | "documentos" | "sistema";
 
 export const ROTULO: Record<ItemMenu, string> = {
   inicio: "Início", medicoes: "Medições", "resumo-medicoes": "Resumo das medições", obras: "Obras", fechamento: "Fechamento",
-  "a-receber": "Em aberto", avisos: "Avisos", siga: "SIGA", certidoes: "Certidões", regularidade: "Regularidade mensal",
+  "a-receber": "Em aberto", avisos: "Avisos", siga: "SIGA", licitacoes: "Triagem", "licitacoes-favoritas": "Favoritas",
+  certidoes: "Certidões", regularidade: "Regularidade mensal",
   garantias: "Garantias", "ancoras-docusign": "Âncoras DocuSign", admin: "Administração", conta: "Minha conta",
 };
 
@@ -36,6 +37,8 @@ export const AREAS: readonly Area[] = [
   { id: "financeiro", rotulo: "Financeiro", paginas: ["fechamento", "a-receber"] },
   { id: "prazos", rotulo: "Prazos e avisos", paginas: ["avisos"] },
   { id: "orgaos", rotulo: "Órgãos", paginas: ["siga"] },
+  // Licitacoes (#908): depois de Orgaos e antes de Documentos; a Triagem e' a pagina padrao da area ("/licitacoes")
+  { id: "licitacoes", rotulo: "Licitações", paginas: ["licitacoes", "licitacoes-favoritas"] },
   { id: "documentos", rotulo: "Documentos", paginas: ["certidoes", "regularidade", "garantias"] },
   { id: "sistema", rotulo: "Sistema", paginas: ["ancoras-docusign", "admin", "conta"] },
 ];
@@ -48,7 +51,11 @@ export const AREAS: readonly Area[] = [
 // O Inicio voltou (decisao do dono, 08/10/2026): e' a entrada de todos os perfis, no alto do menu.
 // O SIGA (#829, decisao do dono de 19/11/2026) nao e' recorte de perfil: e' a permissao `ver_siga` que o servidor
 // informa em /api/auth/eu (permissoes.ts), a mesma que decide a rota da tela, a busca e a aba do contratante.
-type Recorte = "inicio" | "medicoes" | "resumo-medicoes" | "obras" | "avisos" | "siga" | "documentos" | "fechamento" | "ancoras-docusign" | "admin";
+// As Licitacoes (#908) tambem: a area e as duas paginas dela (Triagem e Favoritas) sao de quem tem `ver_licitacoes`.
+// Por decisao do dono de 24/11/2026 (#906), o servidor a da' so' ao administrador; a diretoria e a engenharia nao tem
+// a area.
+type Recorte = "inicio" | "medicoes" | "resumo-medicoes" | "obras" | "avisos" | "siga" | "licitacoes" | "documentos" | "fechamento"
+  | "ancoras-docusign" | "admin";
 const DO_PERFIL: Record<Perfil, readonly Recorte[]> = {
   engenharia: ["inicio", "medicoes", "resumo-medicoes", "avisos", "documentos", "obras", "fechamento", "ancoras-docusign"],
   diretoria: ["inicio", "resumo-medicoes", "avisos", "documentos", "obras", "fechamento"],
@@ -59,7 +66,8 @@ const DO_PERFIL: Record<Perfil, readonly Recorte[]> = {
 // Garantias eram as tres abas de Documentos; a Minha conta sempre foi de todos (pelo avatar do topo).
 const RECORTE_DA_PAGINA: Record<ItemMenu, Recorte | null> = {
   inicio: "inicio", medicoes: "medicoes", "resumo-medicoes": "resumo-medicoes", obras: "obras", fechamento: "fechamento",
-  "a-receber": "fechamento", avisos: "avisos", siga: "siga", certidoes: "documentos", regularidade: "documentos",
+  "a-receber": "fechamento", avisos: "avisos", siga: "siga", licitacoes: "licitacoes", "licitacoes-favoritas": "licitacoes",
+  certidoes: "documentos", regularidade: "documentos",
   garantias: "documentos", "ancoras-docusign": "ancoras-docusign", admin: "admin", conta: null,
 };
 
@@ -72,10 +80,12 @@ export function entradaDe(_perfil: string): Rota {
   return { tela: "inicio" };
 }
 
-/** O perfil tem a pagina no menu? `permissoes`: as que o servidor informou (o SIGA e' de quem tem `ver_siga`). */
+/** O perfil tem a pagina no menu? `permissoes`: as que o servidor informou (o SIGA e' de quem tem `ver_siga`; as
+ *  Licitacoes, de quem tem `ver_licitacoes`). */
 export function temPagina(perfil: string, i: ItemMenu, permissoes: readonly string[] = []): boolean {
   const recorte = RECORTE_DA_PAGINA[i];
   if (recorte === "siga") return pode({ permissoes }, "ver_siga");
+  if (recorte === "licitacoes") return pode({ permissoes }, "ver_licitacoes");
   return recorte === null || DO_PERFIL[perfilDe(perfil)].includes(recorte);
 }
 

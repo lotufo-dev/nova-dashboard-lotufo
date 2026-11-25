@@ -477,7 +477,7 @@ repositório "Autoridades de Certificação Raiz Confiáveis" pelo thumbprint.
 - **Rollback para um commit anterior à migração 097** (critério de encerramento do SIGA, issue #841, PR #879; automático do `deploy.ps1` ou à mão): não precisa de passo no banco. O código antigo sobe sobre o banco já migrado (o executor de migrações só aplica arquivo que existe e ainda não está em `schema_migrations`, e a 097 continua registrada lá) e simplesmente não conhece `siga_encerramentos`, `siga_leituras.sem_movimentacoes` nem as colunas `siga_processos.medicao_vinculada_*`. O que muda no quadro do SIGA enquanto o código antigo estiver no ar: (1) os processos **encerrados à mão** voltam ao quadro, porque o código antigo só reconhece como encerrado o ligado a medição recebida e o arquivado; o **juntado** e o **sobrestado** (que a #879 passou a ler da situação) também deixam de valer; (2) a **leitura vazia** deixa de ser descartada: a última leitura, mesmo sem movimentações, volta a valer como a situação do processo; (3) o vínculo que alguém desfez pela tela deixa de ser respeitado: a próxima leitura do robô pode religá-lo pelo número igual, e o processo sem vínculo volta a ser lido como "Outros". Nada se perde: os encerramentos, os vínculos (com quem e quando) e as leituras ficam gravados, e as leituras vazias seguem marcadas. Ao voltar o código novo, o encerramento ainda em aberto e sem movimentação posterior volta a valer, e a leitura vazia volta a ser descartada. **Não confirmado no código:** a leitura que o código antigo gravar durante o recuo entra com `sem_movimentacoes = 0` (o padrão da coluna), então uma leitura vazia gravada nesse intervalo vale como situação também depois da volta, e um vínculo feito pelo código antigo fica sem a marca de quem e quando; e o efeito na tela (o que a pessoa vê no quadro) foi deduzido do código, não visto rodando o commit anterior sobre o banco migrado.
 
 ## Variáveis de ambiente
-`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db` e sobe a instalação como `dev`), `DASH_INSTALACAO_ARQUIVO` (troca o caminho do arquivo da instalação assinada), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`; só com `-SemTls`, fora da produção desde o corte da issue #425), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_CHAVE_PUBLICA_DONO` (cópia do dono), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_CONSULTA_CUSTO` / `DASH_RM_CONSULTA_ESTOQUE` (padrão `DASH25` / `DASH26`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste; a resposta simulada do órgão é um `.json` em `respostas/<conversa>/`), `DASH_EMAIL_REAL_EM_DEV=1` (só com `DASH_DEV=1`: libera o e-mail real em dev, que sem ela e sem simulador é recusado; issue #707). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
+`DASH_DB_PATH` (obrigatória fora de dev), `DASH_DEV` (só dev; libera o caminho padrão `dados/dashboard.db` e sobe a instalação como `dev`), `DASH_INSTALACAO_ARQUIVO` (troca o caminho do arquivo da instalação assinada), `DASH_SEM_TLS` (produção HTTP: cookie sem `secure`; só com `-SemTls`, fora da produção desde o corte da issue #425), `DASH_LOG_DIR` (logs em arquivo), `DASH_BACKUP_EXTERNO` (cópia diária), `DASH_CHAVE_PUBLICA_DONO` (cópia do dono), `DASH_SEM_JOBS`, `DASH_SEM_FRONTEND`, `DASH_DIST_PATH`. RM (fase 5): `DASH_RM_URL`, `DASH_RM_USUARIO`, `DASH_RM_SENHA_ARQUIVO` (ou `DASH_RM_SENHA`, só dev), `DASH_RM_SISTEMA` (padrão `F`), `DASH_RM_HTTP_INSEGURO=1` (aceita URL http://, ver seção TOTVS RM), `DASH_RM_CONSULTA_NF` / `DASH_RM_CONSULTA_BAIXA` (padrão `DASH10` / `DASH11`), `DASH_RM_CONSULTA_CUSTO` / `DASH_RM_CONSULTA_ESTOQUE` (padrão `DASH25` / `DASH26`), `DASH_RM_SIMULADOR` (pasta com `<CODIGO>.json`, dev/teste). Microsoft 365 (só envio de e-mail): `DASH_GRAPH_CLIENT_ID`, `DASH_GRAPH_TENANT` (passar o tenant explícito, ver "Envio de e-mail"), `DASH_GRAPH_TOKENS_DIR` (um token por pessoa), `DASH_GRAPH_SIMULADOR` (pasta onde o envio é gravado em vez de sair, dev/teste; a resposta simulada do órgão é um `.json` em `respostas/<conversa>/`), `DASH_EMAIL_REAL_EM_DEV=1` (só com `DASH_DEV=1`: libera o e-mail real em dev, que sem ela e sem simulador é recusado; issue #707). Links de arquivo grande no protocolo: `DASH_SHAREPOINT_HOSTS` (hosts do OneDrive/SharePoint aceitos, separados por vírgula; sem ela todo link é recusado, ver "Envio de e-mail", item 9). Monitor do SIGA: `DASH_SIGA_TOKEN_ARQUIVO`, `DASH_SIGA_LINK_MODELO`, `DASH_SIGA_TAREFA` (ver "Monitor do SIGA"). Radar de licitações: `DASH_RADAR_TOKEN_ARQUIVO` (ver "Radar de licitações"). Nenhuma chave de serviço pago: o produto não chama API paga (spec §15); o RM e o Microsoft 365 já são da empresa.
 
 ## TOTVS RM (fase 5, leitura)
 A sincronização roda a cada hora (e no boot) quando `DASH_RM_URL`, `DASH_RM_USUARIO` e a senha estão definidos; sem eles o sistema segue com NF e recebimento registrados à mão. Botão "Sincronizar agora" e reconciliação em Administração → TOTVS RM.
@@ -1148,6 +1148,48 @@ ainda em aberto não cria outro pedido, mas dispara de novo.
    monitor do SIGA não lê desde …", ou que nunca foi lido), e
    rodada iniciada há mais de 12 minutos sem fim (só a mais recente; o Windows encerra o robô aos 10). Cada aviso de rodada vale até
    a próxima rodada terminar sem aquele problema; o do disparo, até o próximo disparo aceito.
+
+## Radar de licitações (issue #908)
+
+O radar de licitações (fora deste repositório; o porquê está no `docs/adr/0018`) lê as fontes, junta, classifica e
+entrega a leitura à dashboard, que só guarda e mostra. Uma rodada são três pedidos, todos com
+`Authorization: Bearer <token>`: `GET /api/radar/estado` (o resumo de cada certame que a dashboard já tem),
+`POST /api/radar/certames` (só os certames novos ou de resumo diferente) e `POST /api/radar/leituras` (fecha a
+rodada: a hora da leitura, as chaves que o radar lista hoje, a situação das fontes e as favoritas dele). Cada pedido
+tem o teto geral de 2 MB: o radar divide os certames em pedidos de até 1 MB. Nada se apaga: o certame que sai da
+lista do radar fica gravado com a data em que saiu, e a favorita que o radar deixa de mandar fica gravada como
+tirada. As telas leem `GET /api/licitacoes/triagem` e `GET /api/licitacoes/favoritas` (sessão e `ver_licitacoes`:
+só o administrador).
+
+1. **Token em arquivo**: `C:\DashboardLotufo\segredos\radar-token.txt` (uma linha, UTF-8, ao menos 32 caracteres
+   aleatórios), gerado e gravado sem BOM como o do SIGA (seção "Monitor do SIGA", item 1, trocando o nome do
+   arquivo). É outro token: o do SIGA não abre as rotas do radar, nem o contrário. Nunca no repositório nem na tarefa
+   agendada.
+2. **Variável** `DASH_RADAR_TOKEN_ARQUIVO` com o caminho do arquivo, no nível da máquina, e reiniciar a tarefa de
+   `<servidor>` pela skill `deploy`. O arquivo é lido a cada pedido: trocar o token não pede reinício. Sem a variável
+   (ou com o arquivo vazio ou ilegível), as três rotas do radar respondem 503 "Radar de licitações não configurado";
+   token errado ou ausente, 401.
+3. Conferir, de uma máquina com o certificado importado (seção "Certificado nos navegadores"):
+   `Invoke-RestMethod https://<vm>:8080/api/radar/estado -Headers @{Authorization = "Bearer <token>"}` devolve
+   `decisoes: radar` e a lista de resumos (vazia antes da primeira rodada).
+4. **Lado do radar**: o radar guarda o token no cofre de credenciais do Windows da conta em que a tarefa dele roda
+   e fala com a dashboard pelo endereço configurado no projeto dele. Ele precisa confiar no certificado da dashboard
+   (como o robô do SIGA, seção "Monitor do SIGA", item 4): apontar a verificação para uma cópia do `cert.pem`, nunca
+   desligá-la. Dashboard parada, sem token ou token recusado: o radar registra a falha no log dele e a coleta e o
+   e-mail dele seguem normais; a rodada seguinte manda o que ficou para trás, porque o que ele manda sai da
+   comparação dos resumos.
+   As favoritas são espelho: a lista que o radar manda em `decisoes.favoritas` substitui a anterior, e a lista vazia
+   tira todas (as linhas ficam, com a data). O radar que não conseguiu ler as próprias favoritas manda o fechamento
+   **sem** `decisoes`, e nada muda.
+5. **Conferir pela tela**: Licitações › Triagem mostra a hora da última leitura. "O radar não lê desde …" aparece
+   quando a última leitura é de antes do dia esperado: hoje, se hoje é dia útil e já passou das 10h; senão, o dia
+   útil anterior. O radar depende de sessão aberta na máquina em que roda: dia sem sessão é dia sem leitura, e a
+   dashboard não lê no lugar dele.
+6. **Trocar o token**: gerar o arquivo de novo (item 1) e gravar o valor novo no cofre do lado do radar. Trocado só
+   de um lado, o radar registra 401 e a leitura para de chegar; nada se perde.
+
+**Banco restaurado de backup**: nenhum passo. A rodada seguinte compara os resumos com o banco restaurado e manda de
+novo o que falta.
 
 ## Tela inicial e avisos (bloco 6)
 

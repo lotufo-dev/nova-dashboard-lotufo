@@ -1071,3 +1071,102 @@ export const SIGA_ENCERRAMENTO = painelDoSiga(PROCESSOS_DO_ENCERRAMENTO);
 // a medicao da prova com o processo do SIGA arquivado (o pleito): a pendencia do protocolo novo no alto da pagina
 export const medicaoComProtocoloNovo = (medicoes, reg) => medicoes.map(m => (m.id === reg.medicao
   ? { ...m, siga_protocolo_novo: true } : m));
+
+// ---- Licitacoes (#908): a Triagem e as Favoritas com o que o cadastro de exemplo nao tem (o banco da prova nunca
+// recebeu leitura do radar). Orgaos, editais, objetos, valores e pastas inventados; o CNPJ das chaves e' o ficticio de
+// digito valido. As datas saem do dia da prova, e os dias uteis e a situacao de cada prazo vem escritos, como o
+// servidor os manda: a tela so' desenha.
+const licDia = dias => dataEm(hojeDaProva(), dias);
+// `passado` e' do servidor, pela data (nunca pelo sinal dos dias uteis): aqui, o prazo de antes do dia da prova
+const licPrazo = (codigo, rotulo, dias, diasUteis, situacao, extra = {}) => ({
+  codigo, rotulo, data: licDia(dias), hora: null, aviso: "", dias_uteis: diasUteis, passado: dias < 0, hoje: dias === 0, situacao, ...extra });
+const licFavorita = (etapa, etapaRotulo, prazos, extra = {}) => ({
+  desde: licDia(-12), etapa, etapa_rotulo: etapaRotulo, etapa_do_dossie: false, dossie: null, selos: [], prazos,
+  proximo_prazo: prazos.find(p => !p.passado) ?? null, mudancas: [], ...extra });
+const licMudanca = (dias, rotulo, texto) => ({ data: licDia(dias), texto, rotulo });
+const licRecomendada = (nota, motivo, cidade, km) => ({ nota, pontos: { valor: 3, distancia: 2, acervo: nota - 5 }, motivo, km, cidade });
+const licitacao = (n, extra = {}) => comSessaoHoje({
+  chave: `11444777000161-1-${String(n).padStart(6, "0")}/2026`, orgao: "Prefeitura Municipal de Vila Exemplo", sigla_orgao: "",
+  grupo_orgao: "Outros órgãos", orgao_de_interesse: false, esfera: "Municipal", municipio: "Vila Exemplo", uf: "MT", cidade: "Vila Exemplo",
+  km: 120, edital: `CE ${String(n).padStart(3, "0")}/2026`, modalidade: "Concorrência", objeto: "Pavimentação asfáltica e drenagem de vias urbanas",
+  tipo_obra: "Pavimentação", valor_centavos: 1234567890, valor_rotulo: "", situacao: "Divulgada no PNCP", data_publicacao: licDia(-14),
+  data_sessao: licDia(16), hora_sessao: "09:00", primeira_vez: licDia(-13), link: `https://exemplo.com.br/editais/${n}`, portal: "Site do órgão",
+  fontes: ["PNCP"], recomendada: null, dias_uteis: 12, prazo: "breve", encerrada: false, favorita: null, ...extra });
+// `sessao_hoje` e' do servidor, pela data: aqui, a sessao no dia da prova
+const comSessaoHoje = l => ({ ...l, sessao_hoje: l.data_sessao === licDia(0) });
+const SEOBRAS = { orgao: "Secretaria de Obras de Exemplo", sigla_orgao: "SEOBRAS-EX", grupo_orgao: "SEOBRAS-EX", orgao_de_interesse: true, esfera: "Estadual" };
+const DER = { orgao: "Departamento de Estradas de Exemplo", sigla_orgao: "DER-EX", grupo_orgao: "DER-EX", orgao_de_interesse: true, esfera: "Estadual" };
+
+// as favoritas, na ordem do servidor: as em aberto pela sessao mais proxima (sem data, no fim); as encerradas depois.
+// De tudo um pouco: a etapa do dossie com os selos dele, tres prazos (um com o aviso de data diferente no dossie),
+// quatro mudancas (a tela mostra tres e conta o resto), a sessao de hoje, a sem data e sem link, o valor sigiloso e o
+// valor com o rotulo de onde veio; encerradas, uma vencida e uma perdida com o dossie descartado.
+const licFavoritas = () => [
+  licitacao(3, { objeto: "Construção de unidade escolar com doze salas de aula, quadra coberta e urbanização do entorno, no distrito de Serra Alfa",
+    tipo_obra: "Edificação", valor_centavos: 234567890, valor_rotulo: "valor do lote 2", data_sessao: licDia(0), hora_sessao: "14:30", dias_uteis: 0,
+    prazo: "critico", favorita: licFavorita("acompanhando", "Acompanhando", [licPrazo("sessao", "Sessão", 0, 0, "critico", { hora: "14:30" })],
+      { mudancas: [licMudanca(-1, "Esclarecimento publicado", "publicou resposta a pedido de esclarecimento")] }) }),
+  licitacao(12, { ...SEOBRAS, objeto: "Duplicação de rodovia estadual, trecho do entroncamento ao distrito industrial", tipo_obra: "Rodovia",
+    valor_centavos: 4875000000, favorita: licFavorita("em_analise", "Em análise", [
+        licPrazo("esclarecimento", "Esclarecimento", 3, 3, "critico"), licPrazo("impugnacao", "Impugnação", 8, 6, "breve"),
+        licPrazo("sessao", "Sessão", 16, 12, "breve", { hora: "09:00", aviso: `dossiê diz ${dataBR(licDia(17))}, conferir` })],
+      { etapa_do_dossie: true, dossie: "2026-CE-012-exemplo-duplicacao", selos: ["Diretoria: interesse"], mudancas: [
+        licMudanca(-4, "Sessão adiada", "publicou adiamento"), licMudanca(-6, "Novo anexo", "anexou a planilha orçamentária"),
+        licMudanca(-7, "Esclarecimento publicado", "publicou resposta a pedido de esclarecimento"),
+        licMudanca(-10, "Edital retificado", "publicou errata")] }) }),
+  licitacao(7, { ...DER, objeto: "Restauração de pavimento em rodovia estadual", valor_centavos: null, valor_rotulo: "sigiloso",
+    data_sessao: licDia(97), hora_sessao: null, dias_uteis: 65, prazo: null,
+    favorita: licFavorita("proposta_enviada", "Proposta enviada", [licPrazo("sessao", "Sessão", 97, 65, null)]) }),
+  licitacao(21, { edital: "", modalidade: "Concorrência", link: "", objeto: "Reforma e ampliação do terminal rodoviário", tipo_obra: "Edificação",
+    valor_centavos: null, valor_rotulo: "sem valor", data_sessao: null, hora_sessao: null, dias_uteis: null, prazo: null,
+    favorita: licFavorita("acompanhando", "Acompanhando", [], { etapa_do_dossie: true, dossie: "2026-CE-021-exemplo-terminal",
+      selos: ["Suspensa", "Diretoria: interesse"], mudancas: [licMudanca(-2, "Licitação suspensa", "publicou a suspensão")] }) }),
+  licitacao(2, { ...SEOBRAS, objeto: "Construção de ponte de concreto sobre o Rio Modelo", tipo_obra: "Obra de arte especial",
+    valor_centavos: 987654321, data_sessao: licDia(-19), dias_uteis: -13, prazo: null, encerrada: true, situacao: "Homologada",
+    favorita: licFavorita("vencida", "Vencida", [licPrazo("sessao", "Sessão", -19, -13, null, { hora: "09:00" })],
+      { mudancas: [licMudanca(-5, "Resultado publicado", "publicou a homologação")] }) }),
+  licitacao(5, { ...DER, objeto: "Implantação e pavimentação de rodovia, lote 3", valor_centavos: 15600000000, data_sessao: licDia(-33),
+    dias_uteis: -22, prazo: null, encerrada: true, situacao: "Homologada",
+    favorita: licFavorita("perdida", "Perdida", [licPrazo("sessao", "Sessão", -33, -22, null, { hora: "10:00" })],
+      { etapa_do_dossie: true, dossie: "2026-CE-005-exemplo-rodovia", selos: ["Diretoria: descartada"] }) }),
+];
+
+// as recomendadas, da nota maior para a menor: com e sem valor, com e sem sessao, sem link, sem distancia e sem local,
+// e o objeto e o motivo compridos
+const licRecomendadas = () => [
+  licitacao(31, { ...SEOBRAS, objeto: "Pavimentação de rodovia estadual, com obras de arte correntes", tipo_obra: "Rodovia", valor_centavos: 12340000000,
+    data_sessao: licDia(4), dias_uteis: 3, prazo: "critico",
+    recomendada: licRecomendada(9, "concorrência · R$ 123,4 mi · Porto Modelo · 85 km · 3 atestados", "Porto Modelo", 85) }),
+  licitacao(32, { objeto: "Construção de hospital municipal com cento e vinte leitos, centro cirúrgico, unidade de terapia intensiva e central de material esterilizado",
+    tipo_obra: "Edificação", valor_centavos: 8765432100, recomendada: licRecomendada(8,
+      "concorrência · R$ 87,7 mi · Vila Exemplo · 120 km · 2 atestados de edificação hospitalar e 1 de instalações especiais", "Vila Exemplo", 120) }),
+  licitacao(33, { ...DER, link: "", objeto: "Recuperação de pontes de madeira", tipo_obra: "Obra de arte especial", valor_centavos: null,
+    valor_rotulo: "sigiloso", data_sessao: licDia(41), hora_sessao: null, dias_uteis: 28, prazo: null,
+    recomendada: licRecomendada(7, "concorrência · valor sigiloso · Serra Alfa · 310 km · 1 atestado", "Serra Alfa", 310) }),
+  licitacao(34, { objeto: "Urbanização de praça e ciclovia", tipo_obra: "Urbanização", valor_centavos: 456789000, data_sessao: null, hora_sessao: null,
+    dias_uteis: null, prazo: null, recomendada: licRecomendada(7, "concorrência · R$ 4,6 mi · Vila Exemplo · 1 atestado", "Vila Exemplo", null) }),
+  licitacao(35, { ...SEOBRAS, objeto: "Drenagem e contenção de encostas", tipo_obra: "", valor_centavos: 2100000000, recomendada:
+    licRecomendada(5, "concorrência · R$ 21,0 mi · 1 atestado", "", null) }),
+];
+
+const licLeitura = ({ atrasada = false, problemas = 2 } = {}) => ({
+  lido_em: `${licDia(atrasada ? -4 : 0)}T13:05:00+00:00`, atrasada, fontes_com_problema: problemas });
+
+/** GET /api/licitacoes/triagem. `vazia`: a leitura chegou e nada pede decisao; `atrasada`: o radar nao le ha' dias. */
+export const licitacoesTriagem = ({ vazia = false, atrasada = false } = {}) => () => {
+  if (vazia) {
+    return { leitura: licLeitura({ problemas: 0 }), favoritas: [], recomendadas: [],
+      contagens: { recomendadas: 0, favoritas: 0, novas: 0, novas_desde: null, por_orgao: [] } };
+  }
+  const favoritas = licFavoritas(), recomendadas = licRecomendadas();
+  return { leitura: licLeitura({ atrasada }), recomendadas,
+    // as que pedem atencao: prazo em ate' 15 dias uteis ou mudanca recente; a de prazo mais proximo primeiro
+    favoritas: favoritas.filter(l => !l.encerrada && l.favorita.etapa !== "proposta_enviada"),
+    contagens: { recomendadas: recomendadas.length, favoritas: favoritas.length, novas: 506,
+      novas_desde: { desde: licDia(-1), quantas: 12 }, por_orgao: [{ orgao: "DER-EX", novas: 2 }, { orgao: "SEOBRAS-EX", novas: 4 }] } };
+};
+
+/** GET /api/licitacoes/favoritas, com os mesmos estados. */
+export const licitacoesFavoritas = ({ vazia = false, atrasada = false } = {}) => () => (vazia
+  ? { leitura: licLeitura({ problemas: 0 }), favoritas: [] }
+  : { leitura: licLeitura({ atrasada }), favoritas: licFavoritas() });
