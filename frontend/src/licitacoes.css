@@ -167,6 +167,8 @@
 }
 @container lic-pagina (min-width: 1040px) {
   .lic-quadro { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--espaco-pp); }
+  /* sete colunas numa fileira: o nome da etapa na letra menor, para "Acompanhando" caber inteiro ao lado da contagem */
+  .lic-quadro .lic-coluna__nome { font-size: var(--texto-mini); }
 }
 .lic-coluna { min-width: 0; border: var(--borda-painel); background: var(--cor-superficie); }
 /* o cabecalho de grupo forte: a faixa de tinta, o nome a' esquerda e a contagem a' direita */
@@ -174,8 +176,7 @@
   display: flex; align-items: center; justify-content: space-between; gap: var(--espaco-pp);
   padding: var(--espaco-pp) var(--espaco-p); background: var(--cor-tinta); color: var(--cor-papel);
 }
-/* o nome da etapa na letra de apoio: "Acompanhando" cabe ao lado da contagem na coluna mais estreita */
-.lic-coluna__nome { margin: 0; min-width: 0; color: inherit; font-size: var(--texto-meta); overflow-wrap: anywhere; }
+.lic-coluna__nome { margin: 0; min-width: 0; color: inherit; font-size: var(--texto-meta); }
 .lic-coluna__cabeca .contador { flex: none; }
 .lic-coluna__vazia { margin: 0; padding: var(--espaco-p); }
 .lic-cartoes { margin: 0; padding: 0; list-style: none; }
