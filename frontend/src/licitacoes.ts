@@ -22,8 +22,10 @@ export type PrazoDaFavorita = {
   codigo: string; rotulo: string; data: string; hora: string | null; aviso: string; dias_uteis: number; passado: boolean;
   hoje: boolean; situacao: SituacaoDoPrazo;
 };
-/** Uma mudanca da favorita. `vista`: alguem ja' a marcou como vista (so' depois do corte). */
-export type MudancaDaFavorita = { data: string; texto: string; rotulo: string; vista: boolean };
+/** Uma mudanca da favorita. `chave`: a identidade dela, que a tela devolve ao marcar como vista; `vista`: alguem ja'
+ *  a marcou (so' depois do corte). A mais recente pode estar vista e uma anterior nao: o radar traz mudanca com a
+ *  data de outra que ja' foi vista. */
+export type MudancaDaFavorita = { chave: string; data: string; texto: string; rotulo: string; vista: boolean };
 
 /** A favorita: a licitacao que se decidiu acompanhar. A etapa vem do dossie quando ha' dossie (`etapa_do_dossie`). */
 export type Favorita = {
@@ -122,7 +124,7 @@ export type FalhaDaDecisao = { id: number; texto: string };
 export function useDecisoes(recarregar: () => Promise<void>) {
   const [ocupada, setOcupada] = useState<number | null>(null);
   const [falha, setFalha] = useState<FalhaDaDecisao | null>(null);
-  const decidir = async <R = unknown>(id: number, decisao: string, corpo: Record<string, string> = {}): Promise<R | null> => {
+  const decidir = async <R = unknown>(id: number, decisao: string, corpo: Record<string, string | string[]> = {}): Promise<R | null> => {
     setOcupada(id);
     setFalha(null);
     try {
@@ -138,6 +140,10 @@ export function useDecisoes(recarregar: () => Promise<void>) {
   };
   return { ocupada, falha, decidir, limparFalha: () => setFalha(null) };
 }
+
+/** O que GET /api/licitacoes/resumo devolve para a linha da Inicio: os numeros da Triagem, pela mesma funcao do
+ *  servidor (`licitacoes.resumo`). A rota e' de quem tem `ver_licitacoes`. */
+export type ResumoDasLicitacoes = { leitura: LeituraDoRadar; recomendadas: number; favoritas: number };
 
 /** O nome curto da licitacao, para o titulo da janela e o nome dos botoes: "SEOBRAS-EX · CE 012/2026". */
 export function nomeDaLicitacao(l: Pick<LinhaLicitacao, "orgao" | "sigla_orgao" | "edital" | "modalidade">): string {

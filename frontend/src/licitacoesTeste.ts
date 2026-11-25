@@ -18,8 +18,9 @@ export const prazo = (rotulo: string, data: string, dias_uteis: number, situacao
   codigo: rotulo.toLowerCase(), rotulo, data, hora: null, aviso: "", dias_uteis, passado: false, hoje: data === DIA_DO_TESTE,
   situacao, ...extra });
 
+/** `chave`: a identidade que o servidor da' a' mudanca; aqui, a data e o rotulo. */
 export const mudanca = (data: string, rotulo: string, vista = false): MudancaDaFavorita => ({
-  data, rotulo, texto: "texto que o radar leu", vista });
+  chave: `${data}-${rotulo}`, data, rotulo, texto: "texto que o radar leu", vista });
 
 /** As etapas e os motivos de descarte como o servidor os manda (fatia 2 da #906), na ordem dele. */
 export const ETAPAS: EtapaDaFavorita[] = [

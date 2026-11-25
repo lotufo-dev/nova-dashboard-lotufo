@@ -177,8 +177,31 @@ describe("Triagem: decidir pela tela", () => {
     fireEvent.click(within(comMudanca).getByRole("button", { name: "Marcar como vista: PME · CE 001/2026" }));
     // sem mudança nova em linha nenhuma, a coluna das decisões some
     await waitFor(() => expect(screen.queryByRole("columnheader", { name: "Decisão" })).toBeNull());
-    expect(gravados()).toEqual([["/api/licitacoes/1/mudancas-vistas", {}]]);
+    // o pedido leva as chaves das mudanças não vistas que a linha mostrou
+    expect(gravados()).toEqual([["/api/licitacoes/1/mudancas-vistas", { chaves: ["2026-11-20-Sessão adiada"] }]]);
     expect(screen.queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("a mudança da linha são as que ninguém viu, mesmo com a mais recente já vista; o botão manda as chaves delas", async () => {
+    // o radar trouxe depois uma mudança do mesmo dia da que já foi vista e outra de um dia anterior
+    const VOLTOU = linha(3, { favorita: favorita({ prazos: [prazo("Sessão", "2027-03-01", 65, null)], mudancas: [
+      mudanca("2026-11-23", "Sessão adiada", true), mudanca("2026-11-23", "Retificada"), mudanca("2026-11-21", "Suspensa")] }) });
+    servidor([triagem({ favoritas: [VOLTOU] }), triagem()]);
+    render(<LicitacoesTriagem />);
+    await screen.findByRole("region", { name: "Favoritas que pedem atenção" });
+    const [voltou] = linhasDe("Favoritas que pedem atenção");
+    expect([...voltou.querySelectorAll("td[data-rotulo='Mudança'] li")].map(li => li.textContent)).toEqual(["Retificada 23/11", "Suspensa 21/11"]);
+    fireEvent.click(within(voltou).getByRole("button", { name: "Marcar como vistas: PME · CE 003/2026" }));
+    await waitFor(() => expect(leituras()).toBe(2));
+    expect(gravados()).toEqual([["/api/licitacoes/3/mudancas-vistas", { chaves: ["2026-11-23-Retificada", "2026-11-21-Suspensa"] }]]);
+  });
+
+  it("antes do corte ninguém marca nada: a linha mostra só a mudança mais recente", async () => {
+    servidor([triagem({ decisoes: "radar", pode_decidir: false, favoritas: [linha(3, { favorita: favorita({ mudancas: [
+      mudanca("2026-11-23", "Sessão adiada"), mudanca("2026-11-21", "Suspensa")] }) })] })]);
+    render(<LicitacoesTriagem />);
+    await screen.findByRole("region", { name: "Favoritas que pedem atenção" });
+    expect(linhasDe("Favoritas que pedem atenção")[0].querySelector("td[data-rotulo='Mudança']")!.textContent).toBe("Sessão adiada 23/11");
   });
 
   it("a leitura que falha depois da decisão é dita, e a página continua com o que tinha", async () => {

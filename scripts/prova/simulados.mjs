@@ -1084,8 +1084,8 @@ const licFavorita = (etapa, etapaRotulo, prazos, extra = {}) => ({
   desde: licDia(-12), etapa, etapa_rotulo: etapaRotulo, etapa_do_dossie: false, dossie: null, selos: [], prazos,
   proximo_prazo: prazos.find(p => !p.passado) ?? null, mudancas: [],
   mudancas_novas: (extra.mudancas ?? []).filter(m => !m.vista).length, ...extra });
-// `vista`: alguem ja' marcou a mudanca como vista (so' depois do corte)
-const licMudanca = (dias, rotulo, texto, vista = false) => ({ data: licDia(dias), texto, rotulo, vista });
+// `chave`: a identidade que o servidor da' a' mudanca; `vista`: alguem ja' a marcou como vista (so' depois do corte)
+const licMudanca = (dias, rotulo, texto, vista = false) => ({ chave: `${licDia(dias)}-${rotulo}`, data: licDia(dias), texto, rotulo, vista });
 const licRecomendada = (nota, motivo, cidade, km) => ({ nota, pontos: { valor: 3, distancia: 2, acervo: nota - 5 }, motivo, km, cidade });
 const licitacao = (n, extra = {}) => comSessaoHoje({
   id: n, chave: `11444777000161-1-${String(n).padStart(6, "0")}/2026`, orgao: "Prefeitura Municipal de Vila Exemplo", sigla_orgao: "",
@@ -1213,6 +1213,7 @@ export const licitacaoAnalisada = ({ semLink = false } = {}) => ({
   id: 31, favoritou: true, comando: semLink ? "/analisar-edital" : "/analisar-edital https://exemplo.com.br/editais/31",
   aviso: semLink ? "Esta licitação não tem link de edital: baixe o edital e passe o arquivo ao comando" : null });
 
-/** GET /api/inicio com a linha das licitacoes (os numeros da Triagem acima). `atrasada`: o radar nao le ha' dias. */
-export const inicioComLicitacoes = ({ atrasada = false } = {}) => inicio => ({
-  ...inicio, licitacoes: { leitura: licLeitura({ atrasada }), recomendadas: licRecomendadas().length, favoritas: 3 } });
+/** GET /api/licitacoes/resumo: a linha das licitacoes na Inicio (os numeros da Triagem acima). `atrasada`: o radar
+ *  nao le ha' dias. */
+export const resumoDasLicitacoes = ({ atrasada = false } = {}) => () => ({
+  leitura: licLeitura({ atrasada }), recomendadas: licRecomendadas().length, favoritas: 3 });

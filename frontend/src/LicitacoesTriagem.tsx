@@ -4,7 +4,7 @@ import Falha from "./Falha";
 import { contar } from "./formato";
 import {
   fmtKm, nomeDaLicitacao, useDecisoes, useLicitacoes,
-  type AnaliseDoEdital, type FalhaDaDecisao, type LinhaLicitacao, type Recomendada, type RespostaTriagem,
+  type AnaliseDoEdital, type FalhaDaDecisao, type Favorita, type LinhaLicitacao, type Recomendada, type RespostaTriagem,
 } from "./licitacoes";
 import {
   Etapa, FalhaAoAtualizar, JanelaDaAnalise, JanelaDoDescarte, LeituraDoRadarLinha, Licitacao, Mudanca, Prazo, SemLeitura, Traco, Valor,
@@ -25,8 +25,13 @@ import { fmtDiaNoAno } from "./tempo";
 // AS DECISOES (fatia 2): so' com `pode_decidir`, que o servidor manda depois do corte e a quem decide; antes dele as
 // decisoes sao espelho do radar e a pagina nao tem botao. Na recomendada: Favoritar (a acao principal da linha), Analisar
 // o edital (favorita e devolve o comando para a sessao de analise) e Descartar (com o motivo). Na favorita com mudanca
-// nao vista: Marcar como vista. Depois de cada decisao a pagina le a rota de novo: a linha sai pelo que o servidor diz, e
-// nao por conta da tela. A recusa do servidor aparece junto da linha, ou dentro da janela aberta.
+// nao vista: Marcar como vista, que manda as chaves das mudancas que a linha mostrou (a que chegar depois continua nao
+// vista). Depois de cada decisao a pagina le a rota de novo: a linha sai pelo que o servidor diz, e nao por conta da
+// tela. A recusa do servidor aparece junto da linha, ou dentro da janela aberta.
+//
+// A MUDANCA DA LINHA: depois do corte, as que ninguem viu (todas: sao elas que poem a favorita aqui, e a mais recente
+// pode ja' estar vista); sem nenhuma, a mais recente, na letra de apoio. Antes do corte ninguem marca nada: a mais
+// recente, como na fatia 1.
 //
 // Os numeros do alto e os titulos dos blocos tem o mesmo rotulo quando sao a mesma conta ("Recomendadas a decidir"). O
 // bloco das favoritas tem outro titulo que o numero "Favoritas": o numero conta todas as favoritas (e e' a porta para a
@@ -74,7 +79,16 @@ function CelulaDeDecisao({ l, falha, children }: { l: LinhaLicitacao; falha: Fal
   );
 }
 
-function FavoritasQuePedemAtencao({ linhas, decisoes }: { linhas: LinhaLicitacao[]; decisoes: Decisoes | null }) {
+/** A mudanca da favorita na Triagem: depois do corte, as que ninguem viu; sem nenhuma (ou antes do corte), a mais
+ *  recente. */
+function MudancaDaLinha({ f, cortado }: { f: Favorita; cortado: boolean }) {
+  const novas = cortado ? f.mudancas.filter(m => !m.vista) : [];
+  if (novas.length > 1) return <ul className="lic-mudancas">{novas.map(m => <li key={m.chave}><Mudanca m={m} /></li>)}</ul>;
+  const mostrada = novas[0] ?? f.mudancas[0];
+  return mostrada ? <Mudanca m={mostrada} /> : <Traco />;
+}
+
+function FavoritasQuePedemAtencao({ linhas, decisoes, cortado }: { linhas: LinhaLicitacao[]; decisoes: Decisoes | null; cortado: boolean }) {
   // a coluna das decisoes so' existe quando alguma linha tem o que decidir: a mudanca que ninguem viu
   const comDecisao = decisoes !== null && linhas.some(l => (l.favorita?.mudancas_novas ?? 0) > 0);
   return (
@@ -102,7 +116,7 @@ function FavoritasQuePedemAtencao({ linhas, decisoes }: { linhas: LinhaLicitacao
                     <th scope="row" className="lic-c-licitacao"><Licitacao l={l} /></th>
                     <td data-rotulo="Etapa"><Etapa f={f} /></td>
                     <td data-rotulo="Próximo prazo">{f.proximo_prazo ? <span className="lic-prazo"><Prazo p={f.proximo_prazo} /></span> : <Traco />}</td>
-                    <td data-rotulo="Mudança">{f.mudancas.length > 0 ? <Mudanca m={f.mudancas[0]} /> : <Traco />}</td>
+                    <td data-rotulo="Mudança"><MudancaDaLinha f={f} cortado={cortado} /></td>
                     {comDecisao && decisoes && (
                       <CelulaDeDecisao l={l} falha={decisoes.falha}>
                         {f.mudancas_novas > 0 && (
@@ -199,7 +213,8 @@ export default function LicitacoesTriagem() {
     favoritar: l => void decidir(l.id, "favorita"),
     analisar: l => void decidir<AnaliseDoEdital>(l.id, "analise").then(resposta => { if (resposta) setAnalise({ l, resposta }); }),
     descartar: l => { limparFalha(); setDescarte(l); },
-    marcarVista: l => void decidir(l.id, "mudancas-vistas"),
+    // as mudancas nao vistas que a linha mostrou: a que o radar trouxer depois desta leitura continua nao vista
+    marcarVista: l => void decidir(l.id, "mudancas-vistas", { chaves: (l.favorita?.mudancas ?? []).filter(m => !m.vista).map(m => m.chave) }),
   } : null;
 
   const c = dados.contagens;
@@ -232,7 +247,7 @@ export default function LicitacoesTriagem() {
       )}
       <LeituraDoRadarLinha leitura={dados.leitura} />
       <FalhaAoAtualizar erro={erro} tentar={() => void tentar()} />
-      <FavoritasQuePedemAtencao linhas={dados.favoritas} decisoes={decisoes} />
+      <FavoritasQuePedemAtencao linhas={dados.favoritas} decisoes={decisoes} cortado={dados.decisoes === "dashboard"} />
       <RecomendadasADecidir linhas={dados.recomendadas} decisoes={decisoes} />
       {descarte && (
         <JanelaDoDescarte l={descarte} motivos={dados.motivos_descarte} ocupada={ocupada === descarte.id}

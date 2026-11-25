@@ -2,7 +2,8 @@ import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Aviso } from "./Alertas";
 import AvisosPagina from "./AvisosPagina";
-import Inicio, { saudacao, type LicitacoesNaInicio, type PainelInicio } from "./Inicio";
+import Inicio, { saudacao, type PainelInicio } from "./Inicio";
+import type { ResumoDasLicitacoes } from "./licitacoes";
 import MarcaEtapa from "./MarcaEtapa";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
@@ -727,19 +728,25 @@ describe("Início", () => {
   });
 });
 
-// Fatia 2 da #906: quem tem `ver_licitacoes` vê na Início uma linha com os números da Triagem. Eles vêm em GET
-// /api/inicio (`licitacoes`), pela mesma função do servidor que monta a Triagem; para quem não tem a permissão, nulo.
+// Fatia 2 da #906: quem tem `ver_licitacoes` vê na Início uma linha com os números da Triagem. Eles vêm de GET
+// /api/licitacoes/resumo, pela mesma função do servidor que monta a Triagem; a rota é só de quem tem a permissão, e só
+// a Início de quem a tem a pede.
 describe("Início: a linha das licitações", () => {
   const LIDA = { lido_em: "2026-10-09T13:05:00+00:00", atrasada: false, fontes_com_problema: 0 };
-  const servir = (licitacoes: LicitacoesNaInicio | undefined) => api.mockImplementation(async (caminho: string) =>
-    caminho === "/api/inicio" ? { avisos: [], licitacoes } : painel());
+  const ADMIN = { ...USUARIO, permissoes: ["ver_paineis", "ver_licitacoes"] };
+  /** `licitacoes`: o que a rota do resumo responde; um erro, a falha dela. */
+  const servir = (licitacoes: ResumoDasLicitacoes | Error) => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/licitacoes/resumo") { if (licitacoes instanceof Error) throw licitacoes; return licitacoes; }
+    return caminho === "/api/inicio" ? { avisos: [] } : painel();
+  });
   const numeros = (regiao: HTMLElement) => [...regiao.querySelectorAll(".ini-aviso")].map(d => [limpo(d.querySelector("dt")), limpo(d.querySelector("dd"))]);
   afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
 
   it("quantas recomendadas esperam decisão e quantas favoritas pedem atenção, com os rótulos da Triagem e a porta para ela", async () => {
     servir({ leitura: LIDA, recomendadas: 1234, favoritas: 2 });
-    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    render(<Inicio usuario={ADMIN} ir={vi.fn()} />);
     const regiao = await screen.findByRole("region", { name: "Licitações" });
+    expect(api).toHaveBeenCalledWith("/api/licitacoes/resumo");
     expect(numeros(regiao)).toEqual([["Recomendadas a decidir", "1.234"], ["Favoritas que pedem atenção", "2"]]);
     expect(regiao.querySelectorAll(".contador")).toHaveLength(2);
     expect(regiao.querySelector("[class*='contador--'], .glifo")).toBeNull();           // contagem não é situação
@@ -753,7 +760,7 @@ describe("Início: a linha das licitações", () => {
 
   it("com a leitura atrasada, a linha diz desde quando o radar não lê", async () => {
     servir({ leitura: { ...LIDA, lido_em: "2026-10-05T13:05:00+00:00", atrasada: true }, recomendadas: 3, favoritas: 0 });
-    render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
+    render(<Inicio usuario={ADMIN} ir={vi.fn()} />);
     const regiao = await screen.findByRole("region", { name: "Licitações" });
     const aviso = within(regiao).getByRole("status");
     expect(aviso.textContent).toBe("Atenção: O radar não lê desde 05/10 às 09:05.");
@@ -761,14 +768,34 @@ describe("Início: a linha das licitações", () => {
     expect(numeros(regiao)).toEqual([["Recomendadas a decidir", "3"], ["Favoritas que pedem atenção", "0"]]);
   });
 
-  it("quem não tem `ver_licitacoes` não vê a linha; nem quem tem, enquanto o radar nunca entregou leitura", async () => {
-    for (const licitacoes of [null, undefined, { leitura: { lido_em: null, atrasada: true, fontes_com_problema: 0 }, recomendadas: 0, favoritas: 0 }]) {
-      servir(licitacoes);
-      const { unmount } = render(<Inicio usuario={USUARIO} ir={vi.fn()} />);
-      await screen.findByText("Nenhum aviso.");                                   // a rota dos avisos (e da linha) já respondeu
+  it("quem não tem `ver_licitacoes` não vê a linha nem pede a rota dela", async () => {
+    servir({ leitura: LIDA, recomendadas: 5, favoritas: 2 });
+    for (const usuario of [USUARIO, { ...USUARIO, perfil: "diretoria", permissoes: ["ver_paineis", "ver_siga"] }]) {
+      const { unmount } = render(<Inicio usuario={usuario} ir={vi.fn()} />);
+      await screen.findByText("Nenhum aviso.");
+      await screen.findByRole("region", { name: CICLO });
       expect(screen.queryByRole("region", { name: "Licitações" })).toBeNull();
-      expect(document.querySelector(".ini-licitacoes")).toBeNull();
+      expect(api).not.toHaveBeenCalledWith("/api/licitacoes/resumo");
       unmount();
     }
+  });
+
+  it("enquanto o radar nunca entregou leitura, a linha não aparece", async () => {
+    servir({ leitura: { lido_em: null, atrasada: true, fontes_com_problema: 0 }, recomendadas: 0, favoritas: 0 });
+    render(<Inicio usuario={ADMIN} ir={vi.fn()} />);
+    await screen.findByText("Nenhum aviso.");
+    await screen.findByRole("region", { name: CICLO });
+    expect(api).toHaveBeenCalledWith("/api/licitacoes/resumo");
+    expect(document.querySelector(".ini-licitacoes")).toBeNull();
+  });
+
+  it("a falha da rota das licitações não derruba a Início: a linha não aparece e o resto segue", async () => {
+    servir(new Error("rede"));
+    render(<Inicio usuario={ADMIN} ir={vi.fn()} />);
+    expect(await screen.findByText("Nenhum aviso.")).toBeTruthy();
+    expect(await screen.findByRole("region", { name: CICLO })).toBeTruthy();
+    expect(api).toHaveBeenCalledWith("/api/licitacoes/resumo");
+    expect(screen.queryByRole("region", { name: "Licitações" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

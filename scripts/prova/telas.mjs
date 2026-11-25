@@ -656,9 +656,9 @@ export const TELAS = [
   { rota: "licitacoes-favoritas", id: "licitacoes-calendario-sem-permissao", caminho: "/licitacoes/favoritas/calendario", destino: "/inicio",
     perfis: SEM_LICITACOES, espera: ".ini" },
   { rota: "inicio", id: "inicio-licitacoes", caminho: "/inicio", perfis: VE_LICITACOES, espera: ".ini-licitacoes .ini-aviso",
-    simular: [{ caminho: /^\/api\/inicio$/, ajustar: inicioComLicitacoes() }] },
+    simular: [{ caminho: /^\/api\/licitacoes\/resumo$/, corpo: resumoDasLicitacoes() }] },
   { rota: "inicio", id: "inicio-licitacoes-atrasada", caminho: "/inicio", perfis: VE_LICITACOES, espera: ".ini-licitacoes .aviso",
-    simular: [{ caminho: /^\/api\/inicio$/, ajustar: inicioComLicitacoes({ atrasada: true }) }] },
+    simular: [{ caminho: /^\/api\/licitacoes\/resumo$/, corpo: resumoDasLicitacoes({ atrasada: true }) }] },
 ];
 
 // Rotas do roteador que a prova nao abre, cada uma com o motivo.
@@ -715,7 +715,7 @@ import { ABAS_DA_CARTEIRA, aReceberDoContratante, medicoesDoContratante, SIGA_DO
 import { medicaoComProtocoloNovo, SIGA_ENCERRAMENTO } from "./simulados.mjs";
 
 // ---- Licitacoes (#908 e fatia 2 da #906): quem tem `ver_licitacoes` e as respostas simuladas das paginas (ver simulados.mjs)
-import { inicioComLicitacoes, licitacaoAnalisada, licitacoesCalendario, licitacoesFavoritas, licitacoesTriagem } from "./simulados.mjs";
+import { licitacaoAnalisada, licitacoesCalendario, licitacoesFavoritas, licitacoesTriagem, resumoDasLicitacoes } from "./simulados.mjs";
 
 function comTriagem(opcoes) {
   return [{ caminho: /^\/api\/licitacoes\/triagem$/, corpo: licitacoesTriagem(opcoes) }];
