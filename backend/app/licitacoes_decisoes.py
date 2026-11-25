@@ -31,6 +31,11 @@ SEM_MUDANCA_NOVA = "Esta favorita não tem mudança nova"
 SEM_LINK = "Esta licitação não tem link de edital: baixe o edital e passe o arquivo ao comando"
 
 
+def motivos_de_descarte() -> list[dict]:
+    """Os motivos que a tela oferece ao descartar, na ordem, com o rotulo."""
+    return [{"motivo": m, "rotulo": m[0].upper() + m[1:]} for m in MOTIVOS_DESCARTE]
+
+
 class Recusa(Exception):
     """A decisao nao cabe no estado em que a licitacao esta' (a rota responde 409)."""
 

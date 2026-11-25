@@ -260,29 +260,83 @@ def _linha(row, hoje: datetime.date, fav=None) -> dict:
     dados = json.loads(row["dados"])
     sessao = _data(dados.get("data_sessao"))
     du = dias_uteis_ate(hoje, sessao) if sessao else None
-    encerrada = bool(dados["encerrada"]) or (sessao is not None and sessao < hoje)   # pela data: ver situacao_do_prazo
+    passou = sessao is not None and sessao < hoje                        # pela data: ver situacao_do_prazo
+    # a favorita com prazo do dossie que ainda nao passou (recurso, assinatura, depois da sessao) continua em aberto:
+    # a proposta enviada tem prazo correndo. O que o radar diz encerrado continua encerrado.
+    corre = fav is not None and any(p["data"] >= hoje.isoformat() for p in (dados.get("dossie") or {}).get("prazos") or [])
+    encerrada = bool(dados["encerrada"]) or (passou and not corre)
     linha = {"id": row["id"], "chave": row["chave"], **{k: dados.get(k) for k in _DA_LINHA}, "dias_uteis": du,
              "sessao_hoje": sessao == hoje,
-             "prazo": None if encerrada else situacao_do_prazo(du), "encerrada": encerrada, "favorita": None}
+             "prazo": None if encerrada else situacao_do_prazo(du, passou), "encerrada": encerrada, "favorita": None}
     if fav is not None:
         linha["favorita"] = _favorita(fav, dados, hoje, encerrada)
     return linha
 
 
 def _linhas_das_favoritas(conn, hoje: datetime.date) -> list[dict]:
-    """As favoritas ativas: as em aberto primeiro, pela sessao mais proxima; as encerradas depois."""
+    """As favoritas ativas: as em aberto primeiro, pela sessao mais proxima (a em aberto com a sessao ja' passada, pelo
+    proximo prazo do dossie); as encerradas depois."""
     linhas = [_linha(r, hoje, r) for r in conn.execute(
         "SELECT c.id, c.chave, c.dados, f.desde, f.etapa, f.mudancas_vistas_ate FROM lic_favoritas f "
         "JOIN lic_certames c ON c.chave=f.chave WHERE f.removida_em IS NULL")]
-    linhas.sort(key=lambda l: (l["encerrada"], l["dias_uteis"] if l["dias_uteis"] is not None else 9999,
-                               -(l["valor_centavos"] or 0), l["chave"]))
+
+    def dias(l: dict) -> int:
+        proximo = l["favorita"]["proximo_prazo"]
+        if not l["encerrada"] and proximo is not None and l["data_sessao"] and l["data_sessao"] < hoje.isoformat():
+            return proximo["dias_uteis"]
+        return l["dias_uteis"] if l["dias_uteis"] is not None else 9999
+
+    linhas.sort(key=lambda l: (l["encerrada"], dias(l), -(l["valor_centavos"] or 0), l["chave"]))
     return linhas
 
 
 def favoritas(conn) -> dict:
+    """As favoritas ativas, para a lista e para o quadro: `etapas` sao as colunas do quadro e as opcoes de etapa da
+    tela, na ordem, com os rotulos."""
     with db.leitura(conn):
         return {"leitura": leitura(conn), "decisoes": _lado_das_decisoes(conn),
+                "etapas": [{"etapa": e, "rotulo": r} for e, r in ETAPAS],
                 "favoritas": _linhas_das_favoritas(conn, tempo.hoje_local())}
+
+
+_DO_PRAZO_NO_CALENDARIO = ("id", "chave", "orgao", "sigla_orgao", "edital", "modalidade", "objeto", "link", "encerrada")
+
+
+def _mes(primeiro: datetime.date, meses: int) -> str:
+    """O mes a `meses` de distancia do dia 1 dado, AAAA-MM."""
+    n = primeiro.year * 12 + primeiro.month - 1 + meses
+    return f"{n // 12:04d}-{n % 12 + 1:02d}"
+
+
+def calendario(conn, mes: str | None = None) -> dict:
+    """O mes (AAAA-MM; sem ele, o de hoje em Cuiaba) com cada prazo das favoritas no dia dele. Os prazos sao os da
+    lista, pela mesma funcao; aqui so' se arrumam em semanas, de domingo a sabado. A tela nao faz conta com data: o
+    mes anterior e o proximo, o dia de hoje, os dias fora do mes e se o mes e' o de hoje (`mes_atual`) vem escritos."""
+    with db.leitura(conn):
+        hoje = tempo.hoje_local()
+        primeiro = datetime.date.fromisoformat(f"{mes}-01") if mes else hoje.replace(day=1)
+        do_mes = primeiro.isoformat()[:7]
+        por_dia: dict[str, list[dict]] = {}
+        for l in _linhas_das_favoritas(conn, hoje):
+            for p in l["favorita"]["prazos"]:
+                if p["data"][:7] == do_mes:
+                    por_dia.setdefault(p["data"], []).append(
+                        {**p, "licitacao": {k: l[k] for k in _DO_PRAZO_NO_CALENDARIO}})
+        for prazos in por_dia.values():
+            prazos.sort(key=lambda p: (p.get("hora") or "99:99", p["licitacao"]["chave"], p["codigo"]))
+        dia = primeiro - datetime.timedelta(days=(primeiro.weekday() + 1) % 7)       # o domingo da primeira semana
+        semanas = []
+        while dia.isoformat()[:7] <= do_mes:
+            semana = []
+            for _ in range(7):
+                data = dia.isoformat()
+                semana.append({"data": data, "do_mes": data[:7] == do_mes, "hoje": dia == hoje,
+                               "prazos": por_dia.get(data, [])})
+                dia += _UM_DIA
+            semanas.append(semana)
+        return {"leitura": leitura(conn), "decisoes": _lado_das_decisoes(conn), "mes": do_mes,
+                "anterior": _mes(primeiro, -1), "proximo": _mes(primeiro, 1), "mes_atual": do_mes == hoje.isoformat()[:7],
+                "prazos": sum(len(p) for p in por_dia.values()), "semanas": semanas}
 
 
 def _pede_atencao(linha: dict, hoje: datetime.date, cortado: bool) -> bool:

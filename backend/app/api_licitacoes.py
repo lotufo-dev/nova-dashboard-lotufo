@@ -6,7 +6,7 @@ espelho do radar). O certame e' enderecado pelo `id` que as linhas trazem.
 """
 import sqlite3
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app import licitacoes, licitacoes_decisoes
@@ -25,13 +25,23 @@ def _com_poder(dados: dict, usuario: dict) -> dict:
 @router.get("/api/licitacoes/triagem")
 def triagem(conn: sqlite3.Connection = Depends(conexao),
             usuario: dict = Depends(exigir(VER_LICITACOES, com_csrf=False))):
-    return _com_poder(licitacoes.triagem(conn), usuario)
+    # os motivos do descarte vao com a fila em que se descarta: a tela nao tem a lista
+    return {**_com_poder(licitacoes.triagem(conn), usuario),
+            "motivos_descarte": licitacoes_decisoes.motivos_de_descarte()}
 
 
 @router.get("/api/licitacoes/favoritas")
 def favoritas(conn: sqlite3.Connection = Depends(conexao),
               usuario: dict = Depends(exigir(VER_LICITACOES, com_csrf=False))):
     return _com_poder(licitacoes.favoritas(conn), usuario)
+
+
+@router.get("/api/licitacoes/calendario")
+def calendario(mes: str | None = Query(None, pattern=r"^2[0-9]{3}-(0[1-9]|1[0-2])$"),
+               conn: sqlite3.Connection = Depends(conexao),
+               usuario: dict = Depends(exigir(VER_LICITACOES, com_csrf=False))):
+    """O calendario das favoritas: o mes `mes` (AAAA-MM; padrao, o de hoje) com cada prazo no dia dele."""
+    return _com_poder(licitacoes.calendario(conn, mes), usuario)
 
 
 # --- decisoes -------------------------------------------------------------------------------------------------

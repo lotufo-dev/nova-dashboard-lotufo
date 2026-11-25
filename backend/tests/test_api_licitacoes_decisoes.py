@@ -126,6 +126,20 @@ def test_depois_do_corte_o_radar_nao_manda_decisao_e_busca_as_da_dashboard(admin
     assert d["descartadas"] == [{"chave": CHAVE_B, "motivo": "órgão", "quando": "2026-11-24T15:00:00+00:00",
                                  "autor": "Admin"}]
 
+    # pendencia da revisao da fatia 1: o espelho do radar nunca roda por cima de uma favorita gravada pela tela. A
+    # favorita de origem `dashboard` so' existe depois do corte, e ai' a rodada com decisoes e' recusada inteira, antes
+    # de qualquer gravacao (o indice "uma ativa por chave" nao chega a ser tocado)
+    antes = _linhas("SELECT chave, desde, etapa, origem, removida_em FROM lic_favoritas ORDER BY id")
+    assert [f["origem"] for f in antes] == ["dashboard"]
+    r = fechar(admin, [CHAVE_A, CHAVE_B, CHAVE_C], lido_em="2026-11-24T10:30:00-04:00", decisoes={
+        "favoritas": [{"chave": CHAVE_A, "desde": "2026-11-12", "etapa": "acompanhando"}],
+        "descartadas": [{"chave": CHAVE_B, "motivo": "local"}]})
+    assert r.status_code == 409
+    assert _linhas("SELECT chave, desde, etapa, origem, removida_em FROM lic_favoritas ORDER BY id") == antes
+    assert _linhas("SELECT motivo, origem FROM lic_descartes WHERE desfeito_em IS NULL") == [
+        {"motivo": "órgão", "origem": "dashboard"}]
+    assert len(_linhas("SELECT 1 FROM lic_leituras")) == 2
+
 
 def test_espelho_das_descartadas_antes_do_corte(admin):
     def rodada(hora, descartadas):

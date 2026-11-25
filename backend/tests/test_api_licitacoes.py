@@ -13,6 +13,9 @@ DOSSIE = {"pasta": "2026-CE-001-exemplo-pavimentacao", "etapa": "em_analise", "s
     {"codigo": "sessao", "rotulo": "Sessão", "data": "2026-12-10", "hora": "09:00", "aviso": ""}]}
 
 
+ROTAS_DE_LEITURA = ("/api/licitacoes/triagem", "/api/licitacoes/favoritas", "/api/licitacoes/calendario")
+
+
 def _entrar(client, perfil):
     conn = db.get_conn()
     auth.criar_usuario(conn, perfil.title(), f"{perfil}@exemplo.com.br", SENHA, perfil)
@@ -37,11 +40,11 @@ def _agora(monkeypatch, ano, mes, dia, hora_cuiaba):
 
 @pytest.mark.parametrize("perfil,status", [("admin", 200), ("diretoria", 403), ("engenharia", 403)])
 def test_as_telas_sao_de_quem_tem_ver_licitacoes(client, perfil, status):
-    for rota in ("/api/licitacoes/triagem", "/api/licitacoes/favoritas"):
+    for rota in ROTAS_DE_LEITURA:
         assert client.get(rota).status_code == 401
     eu = _entrar(client, perfil)
     assert ("ver_licitacoes" in eu["permissoes"]) is (status == 200)
-    for rota in ("/api/licitacoes/triagem", "/api/licitacoes/favoritas"):
+    for rota in ROTAS_DE_LEITURA:
         assert client.get(rota).status_code == status
 
 
@@ -57,8 +60,21 @@ def test_banco_vazio(client):
         "leitura": {"lido_em": None, "atrasada": True, "fontes_com_problema": 0},
         "decisoes": "radar", "pode_decidir": False,
         "contagens": {"recomendadas": 0, "favoritas": 0, "novas": 0, "novas_desde": None, "por_orgao": []},
-        "favoritas": [], "recomendadas": []}
-    assert client.get("/api/licitacoes/favoritas").json()["favoritas"] == []
+        "favoritas": [], "recomendadas": [],
+        "motivos_descarte": [{"motivo": "tipo de obra", "rotulo": "Tipo de obra"}, {"motivo": "local", "rotulo": "Local"},
+                             {"motivo": "valor", "rotulo": "Valor"}, {"motivo": "órgão", "rotulo": "Órgão"},
+                             {"motivo": "outro", "rotulo": "Outro"}]}
+    favoritas = client.get("/api/licitacoes/favoritas").json()
+    assert favoritas["favoritas"] == []
+    # as etapas do quadro e do controle de etapa, na ordem, com os rotulos: a tela nao tem a lista
+    assert favoritas["etapas"] == [
+        {"etapa": "acompanhando", "rotulo": "Acompanhando"}, {"etapa": "em_analise", "rotulo": "Em análise"},
+        {"etapa": "proposta_enviada", "rotulo": "Proposta enviada"}, {"etapa": "vencida", "rotulo": "Vencida"},
+        {"etapa": "perdida", "rotulo": "Perdida"}, {"etapa": "desistida", "rotulo": "Desistida"},
+        {"etapa": "encerrada", "rotulo": "Encerrada"}]
+    # o calendario sem favorita: o mes de hoje, sem prazo
+    cal = client.get("/api/licitacoes/calendario").json()
+    assert (cal["mes"], cal["mes_atual"], cal["prazos"], cal["pode_decidir"]) == ("2026-11", True, 0, False)
 
 
 # --- o que depende do dia ---------------------------------------------------------------------------------------
@@ -321,3 +337,97 @@ def test_leitura_de_hoje_e_esperada_a_partir_das_10h_em_ponto(client, com_token,
     assert client.get("/api/licitacoes/triagem").json()["leitura"]["atrasada"] is False
     monkeypatch.setattr(tempo, "agora_utc", lambda: datetime.datetime(2026, 11, 24, 14, 0, tzinfo=UTC))    # 10h00
     assert client.get("/api/licitacoes/triagem").json()["leitura"]["atrasada"] is True
+
+
+# --- prazo do dossie depois da sessao (pendencia da revisao da fatia 1) ---------------------------------------------
+
+DEPOIS_DA_SESSAO = {"pasta": "2026-CE-001-exemplo-pavimentacao", "etapa": "proposta_enviada", "selos": [], "prazos": [
+    {"codigo": "sessao", "rotulo": "Sessão", "data": "2026-11-20", "hora": "09:00", "aviso": ""},
+    {"codigo": "recurso", "rotulo": "Recurso", "data": "2026-11-27", "hora": None, "aviso": ""}]}
+
+
+def test_favorita_com_prazo_do_dossie_depois_da_sessao_continua_em_aberto(client, com_token, monkeypatch):
+    """A proposta enviada tem prazo correndo depois da sessao (recurso, assinatura): a favorita nao sai como
+    encerrada enquanto ele nao passa, o prazo tem situacao e ela entra na Triagem."""
+    mandar(client, certame(data_sessao="2026-11-20", dossie=DEPOIS_DA_SESSAO),
+           certame(CHAVE_B, "b" * 16, data_sessao="2026-11-26"),
+           certame(CHAVE_C, "c" * 16, data_sessao="2026-11-20", encerrada=True, dossie=DEPOIS_DA_SESSAO))
+    fechar(client, [CHAVE_A, CHAVE_B, CHAVE_C], decisoes={"favoritas": [
+        {"chave": k, "desde": "2026-11-13"} for k in (CHAVE_A, CHAVE_B, CHAVE_C)]})
+    _entrar(client, "admin")
+    b, a, c = client.get("/api/licitacoes/favoritas").json()["favoritas"]
+    # em aberto, na ordem do que vem primeiro: a sessao de B (2 dias uteis) antes do recurso de A (3)
+    assert [l["chave"] for l in (b, a, c)] == [CHAVE_B, CHAVE_A, CHAVE_C]
+    assert (a["encerrada"], a["dias_uteis"], a["prazo"]) == (False, -2, None)      # a sessao passou: ela nao tem situacao
+    assert [(p["codigo"], p["passado"], p["dias_uteis"], p["situacao"]) for p in a["favorita"]["prazos"]] == [
+        ("sessao", True, -2, None), ("recurso", False, 3, "critico")]
+    assert a["favorita"]["proximo_prazo"]["codigo"] == "recurso"
+    # o que o radar diz encerrado continua encerrado, com os prazos sem situacao
+    assert c["encerrada"] is True and [p["situacao"] for p in c["favorita"]["prazos"]] == [None, None]
+    assert [l["chave"] for l in client.get("/api/licitacoes/triagem").json()["favoritas"]] == [CHAVE_B, CHAVE_A]
+    # no calendario, o recurso aparece no dia dele com a mesma situacao
+    dias = {d["data"]: d for s in client.get("/api/licitacoes/calendario").json()["semanas"] for d in s}
+    assert [(p["codigo"], p["situacao"], p["licitacao"]["encerrada"]) for p in dias["2026-11-27"]["prazos"]] == [
+        ("recurso", "critico", False), ("recurso", None, True)]
+
+    # passado o ultimo prazo do dossie, a sessao passada volta a encerrar
+    _agora(monkeypatch, 2026, 11, 30, 11)
+    favoritas = {l["chave"]: l for l in client.get("/api/licitacoes/favoritas").json()["favoritas"]}
+    assert favoritas[CHAVE_A]["encerrada"] is True and favoritas[CHAVE_A]["favorita"]["proximo_prazo"] is None
+    assert client.get("/api/licitacoes/triagem").json()["favoritas"] == []
+
+
+def test_recomendada_com_dossie_e_sessao_passada_continua_fora_da_triagem(client, com_token):
+    """O prazo do dossie so' segura a favorita: a que nao e' favorita sai pela sessao passada, como antes."""
+    mandar(client, certame(data_sessao="2026-11-20", dossie=DEPOIS_DA_SESSAO))
+    fechar(client, [CHAVE_A])
+    _entrar(client, "admin")
+    assert client.get("/api/licitacoes/triagem").json()["recomendadas"] == []
+
+
+# --- o calendario das favoritas (fatia 2 da #906) ------------------------------------------------------------------
+
+def test_calendario_poe_cada_prazo_no_dia_dele_e_os_prazos_sao_os_da_lista(client, com_token):
+    mandar(client, certame(dossie=DOSSIE), certame(CHAVE_B, "b" * 16, data_sessao="2026-12-10", hora_sessao="14:00"),
+           certame(CHAVE_C, "c" * 16, data_sessao="2027-01-04", hora_sessao=None))
+    fechar(client, [CHAVE_A, CHAVE_B, CHAVE_C], decisoes={"favoritas": [
+        {"chave": k, "desde": "2026-11-13"} for k in (CHAVE_A, CHAVE_B, CHAVE_C)]})
+    _entrar(client, "admin")
+    lista = {l["chave"]: l for l in client.get("/api/licitacoes/favoritas").json()["favoritas"]}
+
+    nov = client.get("/api/licitacoes/calendario").json()                  # sem `mes`: o de hoje (24/11/2026)
+    assert (nov["mes"], nov["anterior"], nov["proximo"], nov["mes_atual"], nov["prazos"]) == (
+        "2026-11", "2026-10", "2026-12", True, 1)
+    # semanas de domingo a sabado, cobrindo o mes: 01/11/2026 e' domingo e 30/11, segunda
+    assert [len(s) for s in nov["semanas"]] == [7] * 5
+    assert (nov["semanas"][0][0]["data"], nov["semanas"][-1][-1]["data"]) == ("2026-11-01", "2026-12-05")
+    dias = {d["data"]: d for s in nov["semanas"] for d in s}
+    assert [d for d, v in dias.items() if v["hoje"]] == ["2026-11-24"]
+    assert [d for d, v in dias.items() if not v["do_mes"]] == [f"2026-12-0{n}" for n in range(1, 6)]
+    # o prazo do dossie no dia certo, igual ao da lista, com a licitacao a que pertence
+    (esclarecimento,) = dias["2026-11-27"]["prazos"]
+    assert {k: v for k, v in esclarecimento.items() if k != "licitacao"} == lista[CHAVE_A]["favorita"]["prazos"][0]
+    assert (esclarecimento["codigo"], esclarecimento["dias_uteis"], esclarecimento["situacao"]) == ("esclarecimento", 3, "critico")
+    assert esclarecimento["licitacao"] == {k: lista[CHAVE_A][k] for k in (
+        "id", "chave", "orgao", "sigla_orgao", "edital", "modalidade", "objeto", "link", "encerrada")}
+    assert sum(len(d["prazos"]) for d in dias.values()) == nov["prazos"]
+
+    dez = client.get("/api/licitacoes/calendario?mes=2026-12").json()
+    assert (dez["mes"], dez["anterior"], dez["proximo"], dez["mes_atual"], dez["prazos"]) == (
+        "2026-12", "2026-11", "2027-01", False, 2)
+    assert (dez["semanas"][0][0]["data"], dez["semanas"][-1][-1]["data"]) == ("2026-11-29", "2027-01-02")
+    dias = {d["data"]: d for s in dez["semanas"] for d in s}
+    # dois prazos no mesmo dia: pela hora
+    assert [(p["hora"], p["licitacao"]["chave"]) for p in dias["2026-12-10"]["prazos"]] == [("09:00", CHAVE_A), ("14:00", CHAVE_B)]
+    # o dia de fora do mes nao leva prazo, mesmo havendo um nele (a sessao de 04/01 e' de janeiro)
+    assert all(not d["prazos"] for d in dias.values() if not d["do_mes"]) and not any(d["hoje"] for d in dias.values())
+
+    jan = client.get("/api/licitacoes/calendario?mes=2027-01").json()
+    assert (jan["anterior"], jan["proximo"], jan["prazos"]) == ("2026-12", "2027-02", 1)
+    assert client.get("/api/licitacoes/calendario?mes=2026-02").json()["prazos"] == 0
+
+
+@pytest.mark.parametrize("mes", ["2026-13", "2026-1", "26-12", "0001-01", "9999-12", "2026-12-01", "dezembro"])
+def test_calendario_recusa_mes_fora_do_formato(client, mes):
+    _entrar(client, "admin")
+    assert client.get(f"/api/licitacoes/calendario?mes={mes}").status_code == 422
