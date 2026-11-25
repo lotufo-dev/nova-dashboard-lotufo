@@ -181,7 +181,9 @@ def _prazos(dados: dict, hoje: datetime.date) -> list[dict]:
     for p in sorted(brutos, key=lambda p: (p["data"], p.get("hora") or "99:99")):
         data = _data(p["data"])
         du, passado = dias_uteis_ate(hoje, data), data < hoje
-        prazos.append({**p, "dias_uteis": du, "passado": passado, "situacao": situacao_do_prazo(du, passado)})
+        # `hoje` vai escrito: zero dias uteis tambem e' o prazo de sabado visto na sexta, e a tela nao compara data
+        prazos.append({**p, "dias_uteis": du, "passado": passado, "hoje": data == hoje,
+                       "situacao": situacao_do_prazo(du, passado)})
     return prazos
 
 
@@ -208,7 +210,7 @@ def _linha(row, hoje: datetime.date, fav=None) -> dict:
     sessao = _data(dados.get("data_sessao"))
     du = dias_uteis_ate(hoje, sessao) if sessao else None
     encerrada = bool(dados["encerrada"]) or (sessao is not None and sessao < hoje)   # pela data: ver situacao_do_prazo
-    linha = {"chave": row["chave"], **{k: dados.get(k) for k in _DA_LINHA}, "dias_uteis": du,
+    linha = {"chave": row["chave"], **{k: dados.get(k) for k in _DA_LINHA}, "dias_uteis": du, "sessao_hoje": sessao == hoje,
              "prazo": None if encerrada else situacao_do_prazo(du), "encerrada": encerrada, "favorita": None}
     if fav is not None:
         linha["favorita"] = _favorita(fav, dados, hoje, encerrada)

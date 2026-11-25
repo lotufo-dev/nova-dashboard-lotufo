@@ -42,6 +42,8 @@ export function LeituraDoRadarLinha({ leitura }: { leitura: LeituraDoRadar }) {
 export function Licitacao({ l, children }: { l: LinhaLicitacao; children?: React.ReactNode }) {
   const href = linkExterno(l.link);
   const edital = l.edital || l.modalidade || (href ? "Edital" : "");
+  // o icone anda junto com o fim do numero (nunca sozinho na linha de baixo); o comeco quebra onde precisar
+  const fim = edital.lastIndexOf(" ") + 1;
   return (
     <>
       <span className="lic-nome">
@@ -49,7 +51,8 @@ export function Licitacao({ l, children }: { l: LinhaLicitacao; children?: React
         {edital && " · "}
         {edital && (href
           ? <a className="lic-edital" href={href} target="_blank" rel="noopener noreferrer">
-              {edital}<IconeLinkExterno className="icone icone--p" /><span className="sr-only"> (abre em outra aba)</span>
+              {edital.slice(0, fim)}<span className="lic-edital__fim">{edital.slice(fim)}<IconeLinkExterno className="icone icone--p" /></span>
+              <span className="sr-only"> (abre em outra aba)</span>
             </a>
           : edital)}
       </span>
@@ -65,20 +68,21 @@ export function Etapa({ f }: { f: Favorita }) {
   return (
     <span className="lic-etapa">
       <Selo>{f.etapa_rotulo}</Selo>
-      {f.selos.map(s => <Selo key={s}>{s}</Selo>)}
+      {f.selos.map((s, i) => <Selo key={`${i}-${s}`}>{s}</Selo>)}
     </span>
   );
 }
 
 type PrazoNaTela = {
-  rotulo?: string; data: string; hora: string | null; dias_uteis: number | null; passado: boolean; situacao: SituacaoDoPrazo; aviso?: string;
+  rotulo?: string; data: string; hora: string | null; dias_uteis: number | null; passado: boolean; hoje: boolean;
+  situacao: SituacaoDoPrazo; aviso?: string;
 };
 
 /** Um prazo: o nome, a data com a hora e os dias uteis que faltam, no selo da situacao que o servidor leu (sem
  *  situacao, so' o texto). O prazo que passou (`passado`, do servidor) fica so' com o nome e a data. `corre`: falso na
  *  licitacao encerrada, que nao tem prazo correndo: tambem so' o nome e a data. */
 export function Prazo({ p, corre = true }: { p: PrazoNaTela; corre?: boolean }) {
-  const dias = corre && !p.passado ? emDiasUteis(p.dias_uteis, p.data) : null;
+  const dias = corre && !p.passado ? emDiasUteis(p.dias_uteis, p.hoje) : null;
   return (
     <>
       {p.rotulo && <span className="lic-prazo__rotulo">{p.rotulo}</span>}
@@ -86,7 +90,7 @@ export function Prazo({ p, corre = true }: { p: PrazoNaTela; corre?: boolean }) 
       {dias && (p.situacao
         ? <Selo situacao={p.situacao} className="lic-dias">{dias}</Selo>
         : <span className="lic-prazo__dias">{dias}</span>)}
-      {p.aviso && <span className="lic-prazo__aviso">{corre && <Glifo situacao="breve" />}{p.aviso}</span>}
+      {p.aviso && <span className="lic-prazo__aviso">{corre && !p.passado && <Glifo situacao="breve" />}{p.aviso}</span>}
     </>
   );
 }

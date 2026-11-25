@@ -1079,19 +1079,21 @@ export const medicaoComProtocoloNovo = (medicoes, reg) => medicoes.map(m => (m.i
 const licDia = dias => dataEm(hojeDaProva(), dias);
 // `passado` e' do servidor, pela data (nunca pelo sinal dos dias uteis): aqui, o prazo de antes do dia da prova
 const licPrazo = (codigo, rotulo, dias, diasUteis, situacao, extra = {}) => ({
-  codigo, rotulo, data: licDia(dias), hora: null, aviso: "", dias_uteis: diasUteis, passado: dias < 0, situacao, ...extra });
+  codigo, rotulo, data: licDia(dias), hora: null, aviso: "", dias_uteis: diasUteis, passado: dias < 0, hoje: dias === 0, situacao, ...extra });
 const licFavorita = (etapa, etapaRotulo, prazos, extra = {}) => ({
   desde: licDia(-12), etapa, etapa_rotulo: etapaRotulo, etapa_do_dossie: false, dossie: null, selos: [], prazos,
   proximo_prazo: prazos.find(p => !p.passado) ?? null, mudancas: [], ...extra });
 const licMudanca = (dias, rotulo, texto) => ({ data: licDia(dias), texto, rotulo });
 const licRecomendada = (nota, motivo, cidade, km) => ({ nota, pontos: { valor: 3, distancia: 2, acervo: nota - 5 }, motivo, km, cidade });
-const licitacao = (n, extra = {}) => ({
+const licitacao = (n, extra = {}) => comSessaoHoje({
   chave: `11444777000161-1-${String(n).padStart(6, "0")}/2026`, orgao: "Prefeitura Municipal de Vila Exemplo", sigla_orgao: "",
   grupo_orgao: "Outros órgãos", orgao_de_interesse: false, esfera: "Municipal", municipio: "Vila Exemplo", uf: "MT", cidade: "Vila Exemplo",
   km: 120, edital: `CE ${String(n).padStart(3, "0")}/2026`, modalidade: "Concorrência", objeto: "Pavimentação asfáltica e drenagem de vias urbanas",
   tipo_obra: "Pavimentação", valor_centavos: 1234567890, valor_rotulo: "", situacao: "Divulgada no PNCP", data_publicacao: licDia(-14),
   data_sessao: licDia(16), hora_sessao: "09:00", primeira_vez: licDia(-13), link: `https://exemplo.com.br/editais/${n}`, portal: "Site do órgão",
   fontes: ["PNCP"], recomendada: null, dias_uteis: 12, prazo: "breve", encerrada: false, favorita: null, ...extra });
+// `sessao_hoje` e' do servidor, pela data: aqui, a sessao no dia da prova
+const comSessaoHoje = l => ({ ...l, sessao_hoje: l.data_sessao === licDia(0) });
 const SEOBRAS = { orgao: "Secretaria de Obras de Exemplo", sigla_orgao: "SEOBRAS-EX", grupo_orgao: "SEOBRAS-EX", orgao_de_interesse: true, esfera: "Estadual" };
 const DER = { orgao: "Departamento de Estradas de Exemplo", sigla_orgao: "DER-EX", grupo_orgao: "DER-EX", orgao_de_interesse: true, esfera: "Estadual" };
 

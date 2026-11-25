@@ -4,6 +4,8 @@ import type { Favorita, LeituraDoRadar, LinhaLicitacao, MudancaDaFavorita, Prazo
 // existem; o CNPJ da chave e' o ficticio de digito valido. Os testes fixam o dia em 24/11/2026, 11h de Cuiaba.
 
 export const HOJE_DO_TESTE = new Date("2026-11-24T15:00:00Z");
+/** O dia que o servidor chamaria de hoje: `hoje` do prazo e `sessao_hoje` da linha saem dele, como o servidor os manda. */
+const DIA_DO_TESTE = "2026-11-24";
 
 /** A leitura do radar de 24/11/2026 às 09:05 de Cuiaba, em dia e sem fonte com problema. */
 export const leitura = (extra: Partial<LeituraDoRadar> = {}): LeituraDoRadar => ({
@@ -11,7 +13,8 @@ export const leitura = (extra: Partial<LeituraDoRadar> = {}): LeituraDoRadar => 
 
 export const prazo = (rotulo: string, data: string, dias_uteis: number, situacao: PrazoDaFavorita["situacao"],
     extra: Partial<PrazoDaFavorita> = {}): PrazoDaFavorita => ({
-  codigo: rotulo.toLowerCase(), rotulo, data, hora: null, aviso: "", dias_uteis, passado: false, situacao, ...extra });
+  codigo: rotulo.toLowerCase(), rotulo, data, hora: null, aviso: "", dias_uteis, passado: false, hoje: data === DIA_DO_TESTE,
+  situacao, ...extra });
 
 export const mudanca = (data: string, rotulo: string): MudancaDaFavorita => ({ data, rotulo, texto: "texto que o radar leu" });
 
@@ -26,6 +29,7 @@ export const recomendada = (nota: number, extra: Partial<Recomendada> = {}): Rec
   km: 120, cidade: "Exemplo", ...extra });
 
 export const linha = (n: number, extra: Partial<LinhaLicitacao> = {}): LinhaLicitacao => ({
+  sessao_hoje: ("data_sessao" in extra ? extra.data_sessao : "2026-12-10") === DIA_DO_TESTE,
   chave: `11444777000161-1-${String(n).padStart(6, "0")}/2026`, orgao: "Prefeitura Municipal de Exemplo", sigla_orgao: "PME",
   grupo_orgao: "Outros órgãos", orgao_de_interesse: false, esfera: "Municipal", municipio: "Exemplo", uf: "MT", cidade: "Exemplo", km: 120,
   edital: `CE ${String(n).padStart(3, "0")}/2026`, modalidade: "Concorrência", objeto: `Objeto inventado ${n}`, tipo_obra: "Urbanização",

@@ -40,7 +40,7 @@ function Tabela({ linhas, legenda, encerradas = false }: { linhas: LinhaLicitaca
                 <td data-rotulo="Prazos">
                   {f.prazos.length === 0 ? <Traco /> : (
                     <ul className="lic-prazos">
-                      {f.prazos.map(p => <li key={`${p.codigo}-${p.data}`} className="lic-prazo"><Prazo p={p} corre={!encerradas} /></li>)}
+                      {f.prazos.map((p, i) => <li key={`${i}-${p.codigo}-${p.data}`} className="lic-prazo"><Prazo p={p} corre={!encerradas} /></li>)}
                     </ul>
                   )}
                 </td>

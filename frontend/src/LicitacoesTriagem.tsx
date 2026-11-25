@@ -113,7 +113,7 @@ function RecomendadasADecidir({ linhas }: { linhas: LinhaLicitacao[] }) {
                     <td className="col-num lic-c-valor" data-rotulo="Valor"><Valor l={l} /></td>
                     <td data-rotulo="Sessão">
                       {l.data_sessao
-                        ? <span className="lic-prazo"><Prazo p={{ data: l.data_sessao, hora: l.hora_sessao, dias_uteis: l.dias_uteis, passado: l.encerrada, situacao: l.prazo }} /></span>
+                        ? <span className="lic-prazo"><Prazo p={{ data: l.data_sessao, hora: l.hora_sessao, dias_uteis: l.dias_uteis, passado: l.encerrada, hoje: l.sessao_hoje, situacao: l.prazo }} /></span>
                         : <Traco />}
                     </td>
                   </tr>
@@ -146,7 +146,7 @@ export default function LicitacoesTriagem() {
           {c.novas.toLocaleString("pt-BR")}
         </Numero>
         {dados.leitura.fontes_com_problema > 0 && (
-          <Numero rotulo="Fontes com problema" situacao="critico">{dados.leitura.fontes_com_problema.toLocaleString("pt-BR")}</Numero>
+          <Numero rotulo="Fontes com problema" situacao="breve">{dados.leitura.fontes_com_problema.toLocaleString("pt-BR")}</Numero>
         )}
       </dl>
       {c.por_orgao.length > 0 && (

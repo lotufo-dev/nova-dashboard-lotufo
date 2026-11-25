@@ -45,9 +45,10 @@ describe("LicitacoesTriagem", () => {
     expect(api).toHaveBeenCalledWith("/api/licitacoes/triagem");
     expect(numeros()).toEqual([
       ["Recomendadas a decidir", "3", null], ["Favoritas", "8", null], ["Novas", "1.506", "+12 desde 23/11"], ["Fontes com problema", "2", null]]);
-    // as fontes com problema são críticas: o símbolo ao lado do rótulo; os outros números ficam em tinta, sem símbolo
+    // as fontes com problema pedem atenção e não travam nada (como os não lidos do SIGA): o símbolo ao lado do rótulo;
+    // os outros números ficam em tinta, sem símbolo
     const glifos = [...screen.getByLabelText("Licitações na triagem").querySelectorAll(".lic-numero")].map(n => n.querySelector("dt .glifo")?.className ?? null);
-    expect(glifos).toEqual([null, null, null, "glifo glifo--critico"]);
+    expect(glifos).toEqual([null, null, null, "glifo glifo--breve"]);
   });
 
   it("o número de favoritas é a porta para a página delas, com cara de número", async () => {

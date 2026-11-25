@@ -53,8 +53,10 @@
   font-size: var(--texto-mini); font-weight: var(--peso-normal); white-space: normal; text-wrap: pretty;
 }
 .lic-sub + .lic-sub { margin-top: var(--espaco-traco); }
-/* o edital abre o endereco dele em outra aba: o icone ao lado do numero, sem quebrar entre os dois */
-.lic-edital { display: inline-flex; align-items: center; gap: var(--espaco-mini); white-space: nowrap; }
+/* o edital abre o endereco dele em outra aba, com o icone ao lado. O numero vem do radar e pode ser longo: quebra
+   entre as palavras, em vez de alargar a tabela; o icone fica na linha da ultima palavra */
+.lic-edital__fim { white-space: nowrap; }
+.lic-edital .icone { margin-left: var(--espaco-mini); vertical-align: middle; }
 .lic-etapa { display: inline-flex; flex-wrap: wrap; gap: var(--espaco-mini); max-width: 100%; }
 /* o selo do dossie ("Diretoria: interesse") quebra em duas linhas na coluna estreita, em vez de alargar a tabela */
 .lic-etapa .selo, .lic-etapa .selo__texto { white-space: normal; overflow: visible; }
@@ -63,7 +65,7 @@
 .lic-fraco { color: var(--cor-texto-secundario); }
 .lic-traco { color: var(--cor-texto-terciario); }
 /* sem valor, o que o radar diz no lugar ("sigiloso"): texto, e nao numero */
-.lic-sem-valor { color: var(--cor-texto-secundario); font-family: var(--fonte-texto); font-stretch: var(--largura-texto); }
+.lic-sem-valor { color: var(--cor-texto-secundario); font-family: var(--fonte-texto); font-stretch: var(--largura-texto); white-space: normal; }
 
 /* um prazo: o nome, a data e os dias uteis no selo da situacao (sem situacao, so' o texto); o que nao cabe desce */
 .lic-prazos { display: grid; gap: var(--espaco-pp); margin: 0; padding: 0; list-style: none; }

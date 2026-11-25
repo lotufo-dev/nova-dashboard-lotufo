@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { api, mensagemDeErro } from "./api";
 import type { Situacao } from "./situacao";
-import { fmtData, fmtDataPura, fmtDiaNoAno, fmtHora, hojeLocal } from "./tempo";
+import { fmtData, fmtDataPura, fmtDiaNoAno, fmtHora } from "./tempo";
 
 /** A situacao de um prazo, como o servidor a leu: critico, vence em breve ou nenhuma. */
 export type SituacaoDoPrazo = Extract<Situacao, "critico" | "breve"> | null;
@@ -14,11 +14,12 @@ export type SituacaoDoPrazo = Extract<Situacao, "critico" | "breve"> | null;
 /** A ultima leitura do radar (o programa de fora que le as fontes). `atrasada`: e' de antes do dia esperado. */
 export type LeituraDoRadar = { lido_em: string | null; atrasada: boolean; fontes_com_problema: number };
 
-/** Um prazo da favorita. `passado` e' do servidor, pela data: de sexta para sabado nao ha' dia util, e o prazo que ja'
- *  passou pode vir com `dias_uteis: 0`. A tela nunca le "passou" no sinal dos dias. */
+/** Um prazo da favorita. `passado` e `hoje` sao do servidor, pela data (na hora de Cuiaba): de sexta para sabado nao
+ *  ha' dia util, e tanto o prazo que ja' passou quanto o de sabado podem vir com `dias_uteis: 0`. A tela nunca le
+ *  "passou" nem "hoje" no numero de dias, nem compara a data com o relogio do computador. */
 export type PrazoDaFavorita = {
   codigo: string; rotulo: string; data: string; hora: string | null; aviso: string; dias_uteis: number; passado: boolean;
-  situacao: SituacaoDoPrazo;
+  hoje: boolean; situacao: SituacaoDoPrazo;
 };
 export type MudancaDaFavorita = { data: string; texto: string; rotulo: string };
 
@@ -47,6 +48,8 @@ export type LinhaLicitacao = {
   recomendada: Recomendada | null;
   /** dias uteis ate' a sessao; nulo e' sem data. Sessao passada e' `encerrada`, nunca o sinal dos dias */
   dias_uteis: number | null;
+  /** a sessao e' hoje, pelo servidor */
+  sessao_hoje: boolean;
   prazo: SituacaoDoPrazo; encerrada: boolean; favorita: Favorita | null;
 };
 
@@ -91,12 +94,12 @@ export function avisoDaLeitura(leitura: LeituraDoRadar): string {
 }
 
 /** Os dias uteis que o servidor contou ate' um prazo que ainda nao passou, por extenso: "em 1 dia útil", "em 12 dias
- *  úteis". No dia do prazo, "hoje". Sem dia util ate' la' e noutro dia (o prazo de sabado visto na sexta), "antes do
- *  próximo dia útil": zero dias uteis nao quer dizer hoje. Sem a contagem, nada. Se o prazo passou quem diz e' o
- *  servidor (`passado`, `encerrada`), e ai' esta funcao nem e' chamada. `hoje` ("AAAA-MM-DD") e' para o teste. */
-export function emDiasUteis(dias: number | null, data: string, hoje: string = hojeLocal()): string | null {
+ *  úteis". No dia do prazo (`hoje`, que o servidor manda), "hoje". Sem dia util ate' la' e noutro dia (o prazo de sabado
+ *  visto na sexta), "antes do próximo dia útil": zero dias uteis nao quer dizer hoje. Sem a contagem, nada. Se o prazo
+ *  passou quem diz e' o servidor (`passado`, `encerrada`), e ai' esta funcao nem e' chamada. */
+export function emDiasUteis(dias: number | null, hoje: boolean): string | null {
   if (dias === null) return null;
-  if (data === hoje) return "hoje";
+  if (hoje) return "hoje";
   return dias <= 0 ? "antes do próximo dia útil" : dias === 1 ? "em 1 dia útil" : `em ${dias.toLocaleString("pt-BR")} dias úteis`;
 }
 

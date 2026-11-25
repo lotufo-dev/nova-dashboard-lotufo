@@ -23,6 +23,12 @@ def _entrar(client, perfil):
     return client.get("/api/auth/eu").json()
 
 
+def _todas(client):
+    """As linhas da Triagem, favoritas e recomendadas juntas."""
+    t = client.get("/api/licitacoes/triagem").json()
+    return t["favoritas"] + t["recomendadas"]
+
+
 def _agora(monkeypatch, ano, mes, dia, hora_cuiaba):
     monkeypatch.setattr(tempo, "agora_utc", lambda: datetime.datetime(ano, mes, dia, hora_cuiaba + 4, 0, tzinfo=UTC))
 
@@ -202,6 +208,24 @@ def test_favorita_longe_do_prazo_entra_na_triagem_so_com_mudanca_recente(client,
 
 
 # --- achados da segunda revisao -----------------------------------------------------------------------------------
+
+def test_quem_diz_hoje_e_o_servidor_e_zero_dias_uteis_nao_e_hoje(client, com_token, monkeypatch):
+    """Sexta, 27/11: a sessao de hoje e a de sabado saem as duas com zero dias uteis; so' a de hoje vem marcada."""
+    prazos = [{"codigo": "impugnacao", "rotulo": "Impugnação", "data": "2026-11-27", "hora": None, "aviso": ""},
+              {"codigo": "visita", "rotulo": "Visita técnica", "data": "2026-11-28", "hora": None, "aviso": ""}]
+    mandar(client, certame(data_sessao="2026-11-27"), certame(CHAVE_B, "b" * 16, data_sessao="2026-11-28"),
+           certame(CHAVE_C, "c" * 16, data_sessao="2026-12-10", dossie=dict(DOSSIE, prazos=prazos)))
+    fechar(client, [CHAVE_A, CHAVE_B, CHAVE_C], decisoes={"favoritas": [{"chave": CHAVE_C, "desde": "2026-11-12"}]})
+    _agora(monkeypatch, 2026, 11, 27, 11)
+    _entrar(client, "admin")
+    linhas = {l["chave"]: l for l in client.get("/api/licitacoes/favoritas").json()["favoritas"]}
+    por_chave = {l["chave"]: l for l in _todas(client)}
+    assert (por_chave[CHAVE_A]["dias_uteis"], por_chave[CHAVE_A]["sessao_hoje"]) == (0, True)
+    assert (por_chave[CHAVE_B]["dias_uteis"], por_chave[CHAVE_B]["sessao_hoje"]) == (0, False)
+    assert [(p["codigo"], p["dias_uteis"], p["hoje"]) for p in linhas[CHAVE_C]["favorita"]["prazos"]] == [
+        ("impugnacao", 0, True), ("visita", 0, False), ("sessao", 9, False)]
+    assert linhas[CHAVE_C]["sessao_hoje"] is False
+
 
 @pytest.mark.parametrize("agora", [(2026, 11, 28, 11), (2026, 11, 29, 11)])          # sabado e domingo
 def test_sessao_de_sexta_vista_no_fim_de_semana_e_passada(client, com_token, monkeypatch, agora):

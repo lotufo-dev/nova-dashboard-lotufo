@@ -5,9 +5,10 @@ import App from "./App";
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
 
-// as permissoes que /api/auth/eu informa para cada perfil (backend/app/permissoes.py); desde a #829 os tres tem `ver_siga`
+// as permissoes que /api/auth/eu informa para cada perfil (backend/app/permissoes.py); desde a #829 os tres tem
+// `ver_siga`; desde a #908 so' o administrador tem `ver_licitacoes`
 const PERMISSOES: Record<string, string[]> = {
-  admin: ["administrar", "editar_cadastros", "editar_config_fiscal", "ver_paineis", "ver_siga"],
+  admin: ["administrar", "editar_cadastros", "editar_config_fiscal", "ver_licitacoes", "ver_paineis", "ver_siga"],
   engenharia: ["editar_cadastros", "ver_paineis", "ver_siga"],
   diretoria: ["ver_paineis", "ver_siga"],
 };
@@ -162,8 +163,8 @@ describe("App: a área Licitações (#908)", () => {
   const caminho = () => screen.getByRole("navigation", { name: "Você está em" });
   const trechos = () => [...caminho().querySelectorAll("li")].map(li => li.textContent);
 
-  it.each([["admin"]])("%s, com a permissão, vê a área depois de Órgãos e antes de Documentos, e /licitacoes abre a Triagem", async (perfil) => {
-    entrar(perfil, [...permissoesDe(perfil), "ver_licitacoes"]);
+  it("o administrador vê a área depois de Órgãos e antes de Documentos, e /licitacoes abre a Triagem", async () => {
+    entrar("admin", permissoesDe("admin"));
     window.history.replaceState(null, "", "/licitacoes");
     render(<App />);
     expect(await screen.findByText("Nenhuma recomendada a decidir.")).toBeTruthy();
@@ -182,7 +183,7 @@ describe("App: a área Licitações (#908)", () => {
   });
 
   it("/licitacoes/favoritas abre as Favoritas; o número da Triagem e a área do caminho levam de uma à outra", async () => {
-    entrar("admin", [...permissoesDe("admin"), "ver_licitacoes"]);
+    entrar("admin", permissoesDe("admin"));
     window.history.replaceState(null, "", "/licitacoes/favoritas");
     render(<App />);
     expect(await screen.findByText("Nenhuma favorita.")).toBeTruthy();
@@ -203,7 +204,7 @@ describe("App: a área Licitações (#908)", () => {
   });
 
   it("a página padrão por extenso (/licitacoes/triagem) abre a Triagem no endereço canônico", async () => {
-    entrar("admin", [...permissoesDe("admin"), "ver_licitacoes"]);
+    entrar("admin", permissoesDe("admin"));
     window.history.replaceState(null, "", "/licitacoes/triagem");
     render(<App />);
     expect(await screen.findByText("Nenhuma recomendada a decidir.")).toBeTruthy();
@@ -321,10 +322,11 @@ describe("App: o menu lateral largo", () => {
     const nav = await screen.findByRole("navigation", { name: "Navegação principal" });
     expect(nav.getAttribute("data-estado")).toBe("largo");
     const links = within(nav).getAllByRole("link");
-    // #814: as páginas na ordem das áreas (Painel, Medições, Obras, Financeiro, Prazos e avisos, Órgãos, Documentos, Sistema)
+    // #814: as páginas na ordem das áreas (Painel, Medições, Obras, Financeiro, Prazos e avisos, Órgãos, Licitações,
+    // Documentos, Sistema); as Licitações (#908) são do administrador
     expect(links.map(l => l.textContent)).toEqual(
-      ["Início", "Medições", "Resumo das medições", "Obras", "Fechamento", "Em aberto", "Avisos", "SIGA", "Certidões", "Regularidade mensal",
-        "Garantias", "Âncoras DocuSign", "Administração", "Minha conta"]);
+      ["Início", "Medições", "Resumo das medições", "Obras", "Fechamento", "Em aberto", "Avisos", "SIGA", "Triagem", "Favoritas",
+        "Certidões", "Regularidade mensal", "Garantias", "Âncoras DocuSign", "Administração", "Minha conta"]);
     for (const l of links) expect(l.querySelector("svg")).not.toBeNull();
     expect(within(nav).getByRole("link", { name: "SIGA" }).getAttribute("aria-current")).toBe("page");
     expect(links.filter(l => l.getAttribute("aria-current") === "page")).toHaveLength(1);
