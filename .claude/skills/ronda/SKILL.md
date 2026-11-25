@@ -77,6 +77,7 @@ O que vale como prova, por ato:
 | Boletim, valor aprovado | Documento do órgão (boletim, caderno, atesto). Sem ele, ver "Aprovado sem documento do órgão" abaixo (`docs/adr/0013`) |
 | Nota emitida | O PDF da nota, com a medição ou o contrato no texto. Nunca casar nota com medição pelo valor (`docs/adr/0005`) |
 | Protocolo | Número e data em documento ou e-mail do órgão, ou o recibo do sistema dele |
+| Processo acompanhado na tela SIGA | O e-mail de protocolo do órgão com o código de acompanhamento, no corpo ou no PDF anexo. Só o número do processo, sem código: não cadastrar |
 | Recebimento | Não se lança: vem da baixa do RM (`docs/adr/0006`) |
 | Aditivo, apostilamento, ordem, endosso | O termo assinado ou publicado. Pedido sem resposta entra como pleito, se o tipo existir |
 
@@ -134,6 +135,13 @@ Quando o documento do órgão chegar com outro valor, ele entra como boletim pel
   Nos dois caminhos a nota antiga continua na medição: a tela não tira PDF de nota, e ele segue no pacote do envio ao
   órgão e na lista de números da carta (issue #873, nota substituída continua no envio). Até o conserto, o relato diz
   isso em destaque, com a medição, para ela não ser enviada pela dashboard sem conferir o pacote.
+- **Processo do SIGA**: todo protocolo da janela que traz código e ainda não está na tela SIGA entra por
+  "Acompanhar processo", seja de medição, de aditivo ou de outra carta. No e-mail do órgão, "Número do Protocolo" é
+  o código e "Número do Documento" é o número do processo. Categoria pelo assunto da carta (na de medição, com a
+  medição ligada); obra, a que o documento escreve; complemento no padrão dos que já estão na tela, com o número da
+  carta. Documento que não diz a obra: cadastrar sem obra e dizer no relato. Processo sem código fica no relato,
+  em "não gravado": pelo número o robô só lê com captcha, e isso é decisão do dono. Motivo: em 25/11/2026 a tela
+  estava sem dois aditivos protocolados no mesmo dia, um dia depois de uma varredura feita à mão nas caixas.
 - **Nunca acionar envio de e-mail** pela dashboard, nem botão que mande algo para fora.
 - **O que a tela não faz** (ligar nota a medição, uma nota em mais de uma medição, desfazer): arquivo de correção
   em `lotufo-cadastro/correcoes/`, pelo rito do `docs/runbook.md`, seção "Gravação de dado na produção": ensaio com o
