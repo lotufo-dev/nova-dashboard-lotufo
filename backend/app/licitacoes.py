@@ -244,11 +244,18 @@ def _pede_atencao(linha: dict, hoje: datetime.date) -> bool:
 def _novas_desde(conn, novas: list[dict]) -> dict | None:
     """Quantas das novas apareceram depois do ultimo dia de leitura anterior ao da ultima (o radar le mais de uma
     vez por dia: a rodada da tarde nao pode zerar a conta da manha); sem leitura em dia anterior, nada."""
-    dias = [tempo.para_local(datetime.datetime.fromisoformat(r["lido_em"])).date().isoformat()
-            for r in conn.execute("SELECT lido_em FROM lic_leituras ORDER BY lido_em DESC LIMIT 30")]
-    desde = next((d for d in dias if d < dias[0]), None) if dias else None
-    if desde is None:
+    def dia(lido_em: str) -> str:
+        return tempo.para_local(datetime.datetime.fromisoformat(lido_em)).date().isoformat()
+    ultima = conn.execute("SELECT MAX(lido_em) FROM lic_leituras").fetchone()[0]
+    if ultima is None:
         return None
+    # a ultima leitura de antes da meia-noite (de Cuiaba) do dia da ultima: por consulta, e nao pelas N ultimas
+    # linhas, que num dia de muitas rodadas sao todas do mesmo dia
+    anterior = conn.execute("SELECT MAX(lido_em) FROM lic_leituras WHERE lido_em < ?",
+                            (tempo.inicio_do_dia_utc(dia(ultima)),)).fetchone()[0]
+    if anterior is None:
+        return None
+    desde = dia(anterior)
     return {"desde": desde, "quantas": sum(1 for l in novas if (l["primeira_vez"] or "") > desde)}
 
 

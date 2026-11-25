@@ -277,6 +277,18 @@ def test_o_dia_e_o_autor_da_favorita_acompanham_o_radar(client, com_token):
         {"desde": "2026-11-20", "autor_radar": "b", "removida_em": None}]
 
 
+def test_decisoes_sem_a_lista_de_favoritas_e_recusada_e_nao_tira_nenhuma(client, com_token):
+    mandar(client, certame())
+    fechar(client, [CHAVE_A], decisoes={"favoritas": [{"chave": CHAVE_A, "desde": "2026-11-01"}]})
+    r = fechar(client, [CHAVE_A], lido_em="2026-11-24T10:00:00-04:00", decisoes={})
+    assert r.status_code == 422
+    assert _linhas("SELECT removida_em FROM lic_favoritas") == [{"removida_em": None}]
+    assert len(_linhas("SELECT 1 FROM lic_leituras")) == 1                               # a rodada recusada nao fecha
+    # a lista vazia, escrita, continua valendo: tira todas
+    assert fechar(client, [CHAVE_A], lido_em="2026-11-24T10:00:00-04:00", decisoes={"favoritas": []}).status_code == 200
+    assert _linhas("SELECT removida_em IS NOT NULL AS tirada FROM lic_favoritas") == [{"tirada": 1}]
+
+
 def test_leitura_no_limite_da_folga_de_dez_minutos(client, com_token):
     assert fechar(client, [], lido_em="2026-11-24T11:10:00-04:00").status_code == 200       # agora + 10 min: vale
     assert fechar(client, [], lido_em="2026-11-24T11:10:01-04:00").status_code == 422

@@ -169,7 +169,9 @@ class FavoritaIn(BaseModel):
 
 
 class DecisoesIn(BaseModel):
-    favoritas: list[FavoritaIn] = Field(default_factory=list, max_length=2000)
+    # obrigatoria: `decisoes: {}` nao vale por lista vazia (que tira todas as favoritas). Quem nao leu as proprias
+    # favoritas omite `decisoes`, e ai' nada mexe
+    favoritas: list[FavoritaIn] = Field(max_length=2000)
 
 
 class LeituraIn(BaseModel):

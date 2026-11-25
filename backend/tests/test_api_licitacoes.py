@@ -251,6 +251,10 @@ def test_novas_desde_conta_do_ultimo_dia_anterior_mesmo_com_duas_rodadas_no_dia(
     assert client.get("/api/licitacoes/triagem").json()["contagens"]["novas_desde"] == esperado
     fechar(client, [CHAVE_A, CHAVE_B], lido_em="2026-11-24T10:30:00-04:00")                         # a rodada da tarde
     assert client.get("/api/licitacoes/triagem").json()["contagens"]["novas_desde"] == esperado
+    # nem com dezenas de rodadas no mesmo dia: o dia anterior nao some da conta
+    for segundo in range(35):
+        assert fechar(client, [CHAVE_A, CHAVE_B], lido_em=f"2026-11-24T10:31:{segundo:02d}-04:00").status_code == 200
+    assert client.get("/api/licitacoes/triagem").json()["contagens"]["novas_desde"] == esperado
 
 
 def test_o_que_a_tela_mostra_acompanha_o_que_o_radar_manda(client, com_token):

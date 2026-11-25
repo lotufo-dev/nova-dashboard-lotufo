@@ -1159,7 +1159,7 @@ rodada: a hora da leitura, as chaves que o radar lista hoje, a situação das fo
 tem o teto geral de 2 MB: o radar divide os certames em pedidos de até 1 MB. Nada se apaga: o certame que sai da
 lista do radar fica gravado com a data em que saiu, e a favorita que o radar deixa de mandar fica gravada como
 tirada. As telas leem `GET /api/licitacoes/triagem` e `GET /api/licitacoes/favoritas` (sessão e `ver_licitacoes`:
-administrador e diretoria).
+só o administrador).
 
 1. **Token em arquivo**: `C:\DashboardLotufo\segredos\radar-token.txt` (uma linha, UTF-8, ao menos 32 caracteres
    aleatórios), gerado e gravado sem BOM como o do SIGA (seção "Monitor do SIGA", item 1, trocando o nome do
