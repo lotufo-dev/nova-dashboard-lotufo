@@ -231,3 +231,17 @@ export function IconePessoa(p: Props) {
     <circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" />
   </Svg>;
 }
+
+/* Licitacoes (#908). Triagem: o funil, a fila do que pede decisao. */
+export function IconeFunil(p: Props) {
+  return <Svg {...p}>
+    <path d="M3.5 5h17l-6.5 8v6l-4-2v-4z" />
+  </Svg>;
+}
+
+/* Favoritas: a estrela, a licitacao que se decidiu acompanhar. */
+export function IconeEstrela(p: Props) {
+  return <Svg {...p}>
+    <path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.8z" />
+  </Svg>;
+}

@@ -1,0 +1,136 @@
+/* Licitacoes (#908): a Triagem (LicitacoesTriagem.tsx) e as Favoritas (LicitacoesFavoritas.tsx), com as pecas que as
+   duas dividem (LicitacoesPecas.tsx). A moldura do painel (.cartao), a tabela (.tabela em .tabela-wrap), o selo, o
+   glifo, o contador, a linha de vazio e a caixa de aviso sao pecas de base de tokens.css. Cor, familia, tamanho, espaco
+   e borda so' por variavel; tudo debaixo de `.lic` e `.lic-*`. */
+
+/* A pagina mede a propria largura (o menu aberto ou recolhido muda o que sobra): a tabela vira um bloco por linha pela
+   largura que sobra para o conteudo, e nao pela largura da janela. */
+.lic { container: lic-pagina / inline-size; }
+
+/* ---------------------------------------------------------------- alto da pagina */
+/* a faixa de numeros da Triagem: rotulo e numero sob a regua de grupo, sem moldura (como os do SIGA e dos Avisos). A
+   situacao vai no simbolo ao lado do rotulo; o numero fica em tinta. */
+.lic-numeros {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--espaco-m) var(--espaco-g);
+  margin: 0; border-top: var(--regua-grupo); padding-top: var(--regua-grupo-respiro);
+}
+/* rotulo, numero e apoio em tres linhas divididas pelos numeros: o apoio de um nao tira o numero do outro do lugar */
+.lic-numero { display: grid; grid-row: span 3; grid-template-rows: subgrid; gap: 0; min-width: 0; }
+.lic-numero dt { display: flex; align-items: center; align-self: end; gap: var(--espaco-mini); color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+.lic-numero dt .glifo { flex: none; }
+.lic-numero dd { margin: 0; }
+.lic-numero__valor {
+  font-family: var(--fonte-numero); font-stretch: var(--largura-numero); font-weight: var(--peso-numero);
+  font-variant-numeric: tabular-nums lining-nums; font-size: var(--texto-valor); line-height: var(--entrelinha-numero);
+}
+.lic-numero__apoio { color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+/* o numero que e' porta para a pagina das favoritas continua com cara de numero: o sublinhado so' aparece ao passar o
+   mouse ou ao receber o foco */
+.lic-porta { text-decoration: none; }
+.lic-porta:hover, .lic-porta:focus-visible { text-decoration: underline; }
+
+/* as novas por orgao de interesse: o nome e a quantidade, numa linha que quebra */
+.lic-orgaos { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-m); font-size: var(--texto-meta); }
+.lic-orgaos__rotulo { color: var(--cor-texto-secundario); }
+.lic-orgaos ul { display: flex; flex-wrap: wrap; gap: var(--espaco-mini) var(--espaco-m); margin: 0; padding: 0; list-style: none; }
+.lic-orgaos li { display: inline-flex; align-items: center; gap: var(--espaco-mini); }
+
+/* quando o radar leu; com a leitura atrasada, o aviso no lugar, do tamanho do texto */
+.lic-leitura { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-p); }
+.lic-leitura:empty { display: none; }
+.lic-lido { margin: 0; color: var(--cor-texto-secundario); font-size: var(--texto-meta); }
+
+/* ---------------------------------------------------------------- painel e tabela */
+.lic-bloco { min-width: 0; padding: var(--espaco-mini) 0; }
+
+/* a linha tem celulas de varias alturas (o objeto, a lista de prazos): tudo encosta no alto */
+.lic .lic-tabela.tabela tbody :is(th, td) { vertical-align: top; }
+.lic .lic-tabela.tabela td.lic-c-nota { font-weight: var(--peso-numero); }
+/* o orgao com o edital, forte; embaixo, o objeto (e, na recomendada, o motivo) na letra de apoio */
+.lic-nome { display: block; color: var(--cor-tinta); font-weight: var(--peso-forte); overflow-wrap: anywhere; }
+.lic-sub {
+  display: block; color: var(--cor-texto-secundario); font-family: var(--fonte-texto); font-stretch: var(--largura-texto);
+  font-size: var(--texto-mini); font-weight: var(--peso-normal); white-space: normal; text-wrap: pretty;
+}
+.lic-sub + .lic-sub { margin-top: var(--espaco-traco); }
+/* o edital abre o endereco dele em outra aba: o icone ao lado do numero, sem quebrar entre os dois */
+.lic-edital { display: inline-flex; align-items: center; gap: var(--espaco-mini); white-space: nowrap; }
+.lic-etapa { display: inline-flex; flex-wrap: wrap; gap: var(--espaco-mini); max-width: 100%; }
+/* o selo do dossie ("Diretoria: interesse") quebra em duas linhas na coluna estreita, em vez de alargar a tabela */
+.lic-etapa .selo, .lic-etapa .selo__texto { white-space: normal; overflow: visible; }
+/* o local da obra: a cidade e, embaixo, a distancia */
+.lic-km { display: block; color: var(--cor-texto-secundario); white-space: nowrap; }
+.lic-fraco { color: var(--cor-texto-secundario); }
+.lic-traco { color: var(--cor-texto-terciario); }
+/* sem valor, o que o radar diz no lugar ("sigiloso"): texto, e nao numero */
+.lic-sem-valor { color: var(--cor-texto-secundario); font-family: var(--fonte-texto); font-stretch: var(--largura-texto); }
+
+/* um prazo: o nome, a data e os dias uteis no selo da situacao (sem situacao, so' o texto); o que nao cabe desce */
+.lic-prazos { display: grid; gap: var(--espaco-pp); margin: 0; padding: 0; list-style: none; }
+.lic-prazo { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-traco) var(--espaco-pp); }
+.lic-prazo__rotulo { font-weight: var(--peso-medio); }
+.lic-prazo__data, .lic-prazo__dias { white-space: nowrap; }
+.lic-prazo__dias { color: var(--cor-texto-secundario); }
+.lic-prazo .selo { flex: none; }
+.lic-prazo__aviso { flex-basis: 100%; display: flex; align-items: center; gap: var(--espaco-mini); font-size: var(--texto-mini); }
+/* o selo dos dias e' uma frase de tempo ("em 3 dias úteis"), nao um rotulo de estado: fica como esta' escrita */
+.lic-dias .selo__texto::first-letter { text-transform: none; }
+
+.lic-mudancas { display: grid; gap: var(--espaco-traco); margin: 0; padding: 0; list-style: none; }
+
+/* ---------------------------------------------------------------- encerradas: recolhidas no fim, sem situacao */
+.lic-encerradas > summary {
+  display: flex; align-items: center; gap: var(--espaco-pp); width: fit-content; padding: var(--espaco-pp) 0; cursor: pointer; color: var(--cor-tinta);
+  font-family: var(--fonte-titulo); font-stretch: var(--largura-titulo); font-weight: var(--peso-titulo);
+  font-size: var(--texto-titulo-sub); text-transform: var(--caixa-titulo); letter-spacing: var(--espacamento-titulo);
+}
+.lic-encerradas > summary::before {
+  content: ""; flex: none; width: 0; height: 0; border-top: var(--espaco-mini) solid transparent; border-bottom: var(--espaco-mini) solid transparent;
+  border-left: calc(var(--espaco-mini) * 1.5) solid var(--cor-tinta);
+}
+.lic-encerradas[open] > summary::before { transform: rotate(90deg); }
+.lic-encerradas > summary::-webkit-details-marker { display: none; }
+.lic-encerradas > summary:focus-visible { outline: var(--largura-foco) solid var(--cor-foco); outline-offset: var(--afastamento-foco); }
+.lic-encerradas[open] > summary { margin-bottom: var(--espaco-pp); }
+
+/* ---------------------------------------------------------------- tabela (acima de 640 px de pagina) */
+@container lic-pagina (min-width: 641px) {
+  /* a licitacao fica com o que sobra, e nunca mais estreita que o numero de um edital com o orgao */
+  .lic .lic-tabela.tabela tbody th.lic-c-licitacao { min-width: calc(var(--alvo-minimo) * 4.5); }
+}
+
+/* pagina de tamanho medio (1024 px com o menu aberto: o painel tem ~788 px): o respiro entre as colunas encolhe, para
+   as colunas caberem sem a tabela rolar de lado */
+@container lic-pagina (min-width: 641px) and (max-width: 900px) {
+  .lic .lic-tabela.tabela :is(th, td) { padding-left: var(--espaco-pp); padding-right: var(--espaco-pp); }
+  .lic .lic-tabela.tabela :is(th, td):first-child { padding-left: var(--espaco-m); }
+  .lic .lic-tabela.tabela :is(th, td):last-child { padding-right: var(--espaco-m); }
+}
+
+/* ---------------------------------------------------------------- pagina estreita (o celular) */
+@container lic-pagina (max-width: 640px) {
+  .lic-numeros { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  /* a tabela vira um bloco por licitacao: o orgao, o edital e o objeto em cima; embaixo, cada dado com o nome da coluna
+     escrito antes. Na recomendada, a nota fica ao lado do nome. */
+  .lic .lic-tabela, .lic .lic-tabela tbody { display: block; width: 100%; }
+  .lic .lic-tabela thead { position: absolute; width: var(--espaco-fio); height: var(--espaco-fio); overflow: hidden; clip: rect(0 0 0 0); }
+  .lic .lic-tabela tbody tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--espaco-mini) var(--espaco-p); align-items: start;
+    padding: var(--espaco-p) var(--espaco-m); border-bottom: var(--borda-linha);
+  }
+  .lic .lic-tabela tbody tr:last-child { border-bottom: 0; }
+  .lic .lic-tabela.tabela tbody tr > :is(th, td) {
+    display: block; grid-column: 1 / -1; min-width: 0; padding: 0; border: 0; text-align: left; white-space: normal;
+  }
+  .lic .lic-tabela--nota.tabela tbody tr > .lic-c-licitacao { grid-row: 1; grid-column: 1; }
+  .lic .lic-tabela--nota.tabela tbody tr > .lic-c-nota { grid-row: 1; grid-column: 2; white-space: nowrap; }
+  .lic .lic-tabela [data-rotulo]::before {
+    content: attr(data-rotulo) " "; margin-right: var(--espaco-mini); color: var(--cor-texto-secundario);
+    font-family: var(--fonte-texto); font-stretch: var(--largura-texto); font-size: var(--texto-mini); font-weight: var(--peso-normal);
+  }
+  /* no bloco, a distancia segue a cidade na mesma linha */
+  .lic-cidade + .lic-km { display: inline; }
+  .lic-cidade + .lic-km::before { content: " · "; }
+  .lic-bloco .cartao__cabeca, .lic-bloco .vazio { padding-left: var(--espaco-m); padding-right: var(--espaco-m); }
+}

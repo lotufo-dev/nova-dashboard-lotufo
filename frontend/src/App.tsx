@@ -24,6 +24,8 @@ import { entradaDe, itemDe, ROTULO, tituloDe, vistaDe } from "./navegacao";
 import { useVistaPublicada } from "./nomesDoCaminho";
 import { pode } from "./permissoes";
 import SigaPagina from "./SigaPagina";
+import LicitacoesFavoritas from "./LicitacoesFavoritas";
+import LicitacoesTriagem from "./LicitacoesTriagem";
 import AncorasDocusign from "./AncorasDocusign";
 import AvisoRespostas from "./AvisoRespostas";
 import AvisosPagina from "./AvisosPagina";
@@ -77,6 +79,8 @@ export default function App() {
     // O SIGA (tela e aba do contratante) e' de quem tem `ver_siga`, a permissao que o servidor informa (#829)
     if (rota.tela === "raiz" || (rota.tela === "admin" && usuario.perfil !== "admin")
       || (rota.tela === "siga" && !pode(usuario, "ver_siga"))
+      // as Licitacoes (#908) seguem o SIGA: quem nao tem `ver_licitacoes` cai na entrada do perfil
+      || ((rota.tela === "licitacoes" || rota.tela === "licitacoes-favoritas") && !pode(usuario, "ver_licitacoes"))
       || (rota.tela === "ancoras-docusign" && usuario.perfil === "diretoria")) {
       substituir(entradaDe(usuario.perfil));
     } else if (rota.tela === "contratante" && rota.aba
@@ -150,6 +154,9 @@ export default function App() {
           {rota.tela === "medicoes" && <MedicoesPagina usuario={usuario} aba={rota.aba} busca={busca} />}
           {/* a diretoria le o SIGA sem botao de escrita: o servidor nega a ela toda rota que grava (#829) */}
           {rota.tela === "siga" && pode(usuario, "ver_siga") && <SigaPagina busca={busca} podeEditar={pode(usuario, "editar_cadastros")} />}
+          {/* Licitacoes (#908): duas paginas so' de leitura, de quem tem `ver_licitacoes` */}
+          {rota.tela === "licitacoes" && pode(usuario, "ver_licitacoes") && <LicitacoesTriagem />}
+          {rota.tela === "licitacoes-favoritas" && pode(usuario, "ver_licitacoes") && <LicitacoesFavoritas />}
           {rota.tela === "ancoras-docusign" && usuario.perfil !== "diretoria" && <div className="pagina"><AncorasDocusign /></div>}
           {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}
           {rota.tela === "fechamento" && <div className="pagina"><Fechamento ir={ir} /></div>}

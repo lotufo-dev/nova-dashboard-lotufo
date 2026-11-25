@@ -2,8 +2,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { api } from "./api";
 import Busca from "./Busca";
 import Caminho from "./Caminho";
-import { IconeAjustes, IconeAReceber, IconeArquivo, IconeCifrao, IconeDocumento, IconeDocumentoVisto, IconeEscudo, IconeGrade, IconeInicio,
-  IconeMedicoes, IconeObras, IconePessoa, IconeSiga, IconeSeta, IconeSino, IconeVoltar } from "./icones";
+import { IconeAjustes, IconeAReceber, IconeArquivo, IconeCifrao, IconeDocumento, IconeDocumentoVisto, IconeEscudo, IconeEstrela, IconeFunil,
+  IconeGrade, IconeInicio, IconeMedicoes, IconeObras, IconePessoa, IconeSiga, IconeSeta, IconeSino, IconeVoltar } from "./icones";
 import type { Usuario } from "./Login";
 import { areaEhAPagina, menuDe, ROTULO, rotaDoItem, type ItemMenu } from "./navegacao";
 // `Busca` aqui e' a peca da busca unica; os filtros do endereco (o tipo `Busca` do roteador) entram como `Filtros`
@@ -45,11 +45,13 @@ function estadoInicial(): "largo" | "recolhido" {
 
 const ICONES: Record<ItemMenu, (p: { className?: string }) => React.ReactElement> = {
   inicio: IconeInicio, medicoes: IconeMedicoes, "resumo-medicoes": IconeGrade, obras: IconeObras, fechamento: IconeCifrao,
-  "a-receber": IconeAReceber, avisos: IconeSino, siga: IconeSiga, certidoes: IconeDocumento, regularidade: IconeDocumentoVisto,
+  "a-receber": IconeAReceber, avisos: IconeSino, siga: IconeSiga, licitacoes: IconeFunil, "licitacoes-favoritas": IconeEstrela,
+  certidoes: IconeDocumento, regularidade: IconeDocumentoVisto,
   garantias: IconeEscudo, "ancoras-docusign": IconeArquivo, admin: IconeAjustes, conta: IconePessoa,
 };
 
-// `permissoes`: as que o servidor informou em /api/auth/eu; o item SIGA e' de quem tem `ver_siga` (#829)
+// `permissoes`: as que o servidor informou em /api/auth/eu; o item SIGA e' de quem tem `ver_siga` (#829) e a area
+// Licitacoes, de quem tem `ver_licitacoes` (#908)
 export function Trilho({ perfil, permissoes, marcado, ir }: {
   perfil: string; permissoes?: readonly string[]; marcado: ItemMenu | null; ir: Ir;
 }) {

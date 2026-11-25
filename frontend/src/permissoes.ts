@@ -2,8 +2,9 @@
 // decide por elas, e nao pelo nome do perfil, onde a regra e' uma permissao do servidor (issue #829: o SIGA).
 
 /** As permissoes que a tela le. `ver_siga`: abrir o SIGA (menu, rota, aba do contratante); `editar_cadastros`: os
- *  botoes que gravam no SIGA (colar link, corrigir a categoria, pedir leitura ao robo). */
-export type Permissao = "ver_siga" | "editar_cadastros";
+ *  botoes que gravam no SIGA (colar link, corrigir a categoria, pedir leitura ao robo); `ver_licitacoes`: abrir a
+ *  area Licitacoes (o menu e as rotas da Triagem e das Favoritas, #908). */
+export type Permissao = "ver_siga" | "editar_cadastros" | "ver_licitacoes";
 
 /** Quem tem a permissao? Sem a lista (usuario nenhum, resposta antiga), ninguem tem. */
 export function pode(usuario: { permissoes?: readonly string[] } | null | undefined, p: Permissao): boolean {

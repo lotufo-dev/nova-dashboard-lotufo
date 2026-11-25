@@ -144,6 +144,95 @@ describe("App: a tela SIGA", () => {
   });
 });
 
+// Issue #908: a área Licitações, com a Triagem e as Favoritas, é de quem tem `ver_licitacoes` (o servidor a dá só ao
+// administrador, decisão do dono de 24/11/2026); a regra vem da permissão que o servidor informa, como no SIGA.
+describe("App: a área Licitações (#908)", () => {
+  const LEITURA = { lido_em: null, atrasada: true, fontes_com_problema: 0 };
+  const entrar = (perfil: string, permissoes: string[]) => api.mockImplementation(async (caminho: string) => {
+    if (caminho === "/api/auth/eu") return { id: 1, nome: "Usuário Exemplo", email: "u@lotufo.com", perfil, permissoes, csrf: "x" };
+    if (caminho === "/api/licitacoes/triagem") return { leitura: LEITURA, favoritas: [], recomendadas: [],
+      contagens: { recomendadas: 0, favoritas: 0, novas: 0, novas_desde: null, por_orgao: [] } };
+    if (caminho === "/api/licitacoes/favoritas") return { leitura: LEITURA, favoritas: [] };
+    if (caminho === "/api/inicio/painel") return PAINEL_MINIMO;
+    return [];
+  });
+  afterEach(() => { cleanup(); api.mockReset(); window.history.replaceState(null, "", "/"); });
+
+  const trilho = () => within(screen.getByRole("navigation", { name: "Navegação principal" }));
+  const caminho = () => screen.getByRole("navigation", { name: "Você está em" });
+  const trechos = () => [...caminho().querySelectorAll("li")].map(li => li.textContent);
+
+  it.each([["admin"]])("%s, com a permissão, vê a área depois de Órgãos e antes de Documentos, e /licitacoes abre a Triagem", async (perfil) => {
+    entrar(perfil, [...permissoesDe(perfil), "ver_licitacoes"]);
+    window.history.replaceState(null, "", "/licitacoes");
+    render(<App />);
+    expect(await screen.findByText("Nenhuma recomendada a decidir.")).toBeTruthy();
+    expect(api).toHaveBeenCalledWith("/api/licitacoes/triagem");
+    expect(within(trilho().getByRole("list", { name: "Licitações" })).getAllByRole("link").map(l => l.textContent)).toEqual(["Triagem", "Favoritas"]);
+    const nomes = trilho().getAllByRole("link").map(l => l.textContent);
+    expect(nomes[nomes.indexOf("SIGA") + 1]).toBe("Triagem");
+    expect(nomes[nomes.indexOf("Favoritas") + 1]).toBe("Certidões");
+    expect(trilho().getByRole("link", { name: "Triagem" }).getAttribute("aria-current")).toBe("page");
+    // o caminho é da casca: a área (texto, porque a Triagem é a primeira página dela) e a página, que é o h1
+    expect(trechos()).toEqual(["Licitações", "Triagem"]);
+    expect(within(caminho()).queryByRole("link", { name: "Licitações" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Triagem" })).toBeTruthy();
+    expect(document.title).toBe("Triagem · grupolotufo");
+    expect(window.location.pathname).toBe("/licitacoes");
+  });
+
+  it("/licitacoes/favoritas abre as Favoritas; o número da Triagem e a área do caminho levam de uma à outra", async () => {
+    entrar("admin", [...permissoesDe("admin"), "ver_licitacoes"]);
+    window.history.replaceState(null, "", "/licitacoes/favoritas");
+    render(<App />);
+    expect(await screen.findByText("Nenhuma favorita.")).toBeTruthy();
+    expect(api).toHaveBeenCalledWith("/api/licitacoes/favoritas");
+    expect(trilho().getByRole("link", { name: "Favoritas" }).getAttribute("aria-current")).toBe("page");
+    expect(trilho().getByRole("link", { name: "Triagem" }).getAttribute("aria-current")).toBeNull();
+    expect(trechos()).toEqual(["Licitações", "Favoritas"]);
+    expect(screen.getByRole("heading", { level: 1, name: "Favoritas" })).toBeTruthy();
+    expect(document.title).toBe("Favoritas · grupolotufo");
+    // a área do caminho leva à Triagem, a primeira página dela
+    await act(async () => { fireEvent.click(within(caminho()).getByRole("link", { name: "Licitações" })); });
+    expect(window.location.pathname).toBe("/licitacoes");
+    expect(await screen.findByText("Nenhuma recomendada a decidir.")).toBeTruthy();
+    // e o número de favoritas da Triagem é a porta de volta
+    await act(async () => { fireEvent.click(within(screen.getByLabelText("Licitações na triagem")).getByRole("link", { name: "0" })); });
+    expect(window.location.pathname).toBe("/licitacoes/favoritas");
+    expect(await screen.findByText("Nenhuma favorita.")).toBeTruthy();
+  });
+
+  it("a página padrão por extenso (/licitacoes/triagem) abre a Triagem no endereço canônico", async () => {
+    entrar("admin", [...permissoesDe("admin"), "ver_licitacoes"]);
+    window.history.replaceState(null, "", "/licitacoes/triagem");
+    render(<App />);
+    expect(await screen.findByText("Nenhuma recomendada a decidir.")).toBeTruthy();
+    expect(window.location.pathname).toBe("/licitacoes");
+  });
+
+  it.each([["/licitacoes"], ["/licitacoes/favoritas"]])(
+    "quem não tem `ver_licitacoes` (a engenharia) não tem a área, e %s aberto à mão cai na entrada do perfil", async (url) => {
+    entrar("engenharia", permissoesDe("engenharia"));
+    window.history.replaceState(null, "", url);
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: /^(Bom dia|Boa tarde|Boa noite)/ });      // o Início carregou
+    expect(window.location.pathname).toBe("/inicio");
+    expect(trilho().queryByRole("link", { name: "Triagem" })).toBeNull();
+    expect(trilho().queryByRole("link", { name: "Favoritas" })).toBeNull();
+    expect(trilho().queryByRole("list", { name: "Licitações" })).toBeNull();
+    expect(api.mock.calls.some(c => String(c[0]).startsWith("/api/licitacoes"))).toBe(false);
+  });
+
+  it("a diretoria, que também não tem a permissão, cai na entrada", async () => {
+    entrar("diretoria", permissoesDe("diretoria"));
+    window.history.replaceState(null, "", "/licitacoes");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: /^(Bom dia|Boa tarde|Boa noite)/ });
+    expect(window.location.pathname).toBe("/inicio");
+    expect(api.mock.calls.some(c => String(c[0]).startsWith("/api/licitacoes"))).toBe(false);
+  });
+});
+
 // Issue #417: fora do servidor oficial a dashboard sobe em modo copia; o health diz isso e toda tela mostra a faixa.
 describe("App: instalação não autorizada", () => {
   const FAIXA = "Instalação não autorizada da Dashboard Lotufo. Envio de e-mail e sincronização com o RM estão desligados.";
