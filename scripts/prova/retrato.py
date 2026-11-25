@@ -92,6 +92,7 @@ ROTAS = (
     "/api/licitacoes/triagem",          # 25/11/2026 (#908): as duas leituras das Licitacoes, do administrador
     "/api/licitacoes/favoritas",
     "/api/licitacoes/calendario",       # fatia 2 da #906: o mes das favoritas
+    "/api/licitacoes/resumo",           # idem: a linha das licitacoes na Inicio
     "/api/admin/pendencias-cadastro",
     "/api/admin/usuarios",
 )

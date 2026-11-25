@@ -78,6 +78,7 @@ def _linhas(sql, *args):
     ("get", "/api/radar/estado", None),
     ("post", "/api/radar/certames", {"certames": []}),
     ("post", "/api/radar/leituras", {"lido_em": LIDO, "chaves": []}),
+    ("get", "/api/radar/decisoes", None),
 ])
 def test_sem_variavel_503_sem_token_401_com_token_200(client, tmp_path, monkeypatch, metodo, rota, corpo):
     pedir = lambda **kw: getattr(client, metodo)(rota, **({"json": corpo} if corpo is not None else {}), **kw)  # noqa: E731

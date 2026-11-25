@@ -173,6 +173,7 @@ class DescartadaIn(BaseModel):
     chave: Chave
     motivo: Literal["tipo de obra", "local", "valor", "órgão", "outro"]
     autor: str | None = Field(default=None, max_length=120)
+    quando: AwareDatetime | None = None                   # quando foi descartada no radar; sem ela, a hora do espelho
 
 
 class DecisoesIn(BaseModel):

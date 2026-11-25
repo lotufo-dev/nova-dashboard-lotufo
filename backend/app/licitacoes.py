@@ -7,6 +7,7 @@ depende do dia (dias uteis ate' a sessao, sessao passada) e das decisoes (favori
 depois do corte sao gravadas por `licitacoes_decisoes.py`. Nada se apaga.
 """
 import datetime
+import hashlib
 import json
 
 from app import db, feriados, tempo
@@ -126,17 +127,22 @@ def fechar_leitura(conn, lido_em: datetime.datetime, chaves: list[str], fontes: 
 
 
 def _espelhar_descartes(conn, descartadas: dict[str, dict], lido: str) -> int:
-    """Ate' o corte as descartadas tambem sao espelho do radar: entra a que falta, o motivo acompanha, e a que ele
-    nao manda mais e' desfeita, com a data."""
+    """Ate' o corte as descartadas tambem sao espelho do radar: entra a que falta, com a data que tinha no radar
+    (`quando`; sem ela, a hora deste espelho), o motivo e a data acompanham, e a que ele nao manda mais e' desfeita,
+    com a data."""
     ativos = {r["chave"]: r for r in conn.execute(
-        "SELECT id, chave, motivo FROM lic_descartes WHERE desfeito_em IS NULL AND origem='radar'")}
+        "SELECT id, chave, motivo, criado_em FROM lic_descartes WHERE desfeito_em IS NULL AND origem='radar'")}
     for chave, d in descartadas.items():
         atual = ativos.get(chave)
+        quando = _utc(datetime.datetime.fromisoformat(d["quando"])) if d.get("quando") else None
         if atual is None:
-            conn.execute("INSERT INTO lic_descartes (chave, motivo, origem, autor_radar) VALUES (?,?,'radar',?)",
-                         (chave, d["motivo"], d.get("autor")))
-        elif atual["motivo"] != d["motivo"]:
+            conn.execute("INSERT INTO lic_descartes (chave, motivo, origem, autor_radar, criado_em) "
+                         "VALUES (?,?,'radar',?,COALESCE(?, datetime('now')))", (chave, d["motivo"], d.get("autor"), quando))
+            continue
+        if atual["motivo"] != d["motivo"]:
             conn.execute("UPDATE lic_descartes SET motivo=? WHERE id=?", (d["motivo"], atual["id"]))
+        if quando is not None and atual["criado_em"] != quando:
+            conn.execute("UPDATE lic_descartes SET criado_em=? WHERE id=?", (quando, atual["id"]))
     conn.executemany("UPDATE lic_descartes SET desfeito_em=? WHERE id=?",
                      [(lido, r["id"]) for chave, r in ativos.items() if chave not in descartadas])
     return len(descartadas)
@@ -230,12 +236,23 @@ def _prazos(dados: dict, hoje: datetime.date) -> list[dict]:
     return prazos
 
 
+def chave_da_mudanca(h: dict) -> str:
+    """A identidade de uma mudanca: resumo curto e estavel da data, do rotulo e do texto. O que foi visto se marca por
+    ela, e nao pela data: a mudanca que o radar traz depois com a data de outra ja' vista (ele le mais de uma vez por
+    dia) nasce nao vista."""
+    return hashlib.sha256("\n".join((h["data"], h["rotulo"], h.get("texto") or "")).encode()).hexdigest()[:16]
+
+
 def mudancas(dados: dict, fav) -> list[dict]:
-    """As mudancas do certame desde o dia em que foi favoritado, da mais recente para a mais antiga. `vista`: a
-    data dela nao passa do dia ate' onde alguem marcou as mudancas como vistas."""
-    vistas_ate = fav["mudancas_vistas_ate"] or ""
-    lista = [{"data": h["data"], "texto": h["texto"], "rotulo": h["rotulo"], "vista": h["data"] <= vistas_ate}
-             for h in dados.get("historico") or [] if h.get("rotulo") and h["data"] >= fav["desde"]]
+    """As mudancas do certame desde o dia em que foi favoritado, da mais recente para a mais antiga, cada uma com a
+    `chave` dela. `vista`: a chave esta' na lista das que alguem ja' marcou como vistas."""
+    vistas = set(json.loads(fav["mudancas_vistas"] or "[]"))
+    lista = []
+    for h in dados.get("historico") or []:
+        if h.get("rotulo") and h["data"] >= fav["desde"]:
+            chave = chave_da_mudanca(h)
+            lista.append({"chave": chave, "data": h["data"], "texto": h["texto"], "rotulo": h["rotulo"],
+                          "vista": chave in vistas})
     lista.sort(key=lambda m: m["data"], reverse=True)
     return lista
 
@@ -277,7 +294,7 @@ def _linhas_das_favoritas(conn, hoje: datetime.date) -> list[dict]:
     """As favoritas ativas: as em aberto primeiro, pela sessao mais proxima (a em aberto com a sessao ja' passada, pelo
     proximo prazo do dossie); as encerradas depois."""
     linhas = [_linha(r, hoje, r) for r in conn.execute(
-        "SELECT c.id, c.chave, c.dados, f.desde, f.etapa, f.mudancas_vistas_ate FROM lic_favoritas f "
+        "SELECT c.id, c.chave, c.dados, f.desde, f.etapa, f.mudancas_vistas FROM lic_favoritas f "
         "JOIN lic_certames c ON c.chave=f.chave WHERE f.removida_em IS NULL")]
 
     def dias(l: dict) -> int:

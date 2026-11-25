@@ -5,6 +5,7 @@ marcar as mudancas como vistas): sessao, CSRF e `editar_licitacoes`; antes do co
 espelho do radar). O certame e' enderecado pelo `id` que as linhas trazem.
 """
 import sqlite3
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -44,6 +45,13 @@ def calendario(mes: str | None = Query(None, pattern=r"^2[0-9]{3}-(0[1-9]|1[0-2]
     return _com_poder(licitacoes.calendario(conn, mes), usuario)
 
 
+@router.get("/api/licitacoes/resumo")
+def resumo(conn: sqlite3.Connection = Depends(conexao), _=Depends(exigir(VER_LICITACOES, com_csrf=False))):
+    """A linha das licitacoes na Inicio: os numeros da Triagem, pela mesma funcao. Rota propria: `/api/inicio` e'
+    pedida por paginas que so' querem os avisos, e por quem nao ve as licitacoes."""
+    return licitacoes.resumo(conn)
+
+
 # --- decisoes -------------------------------------------------------------------------------------------------
 
 class EtapaIn(BaseModel):
@@ -54,18 +62,24 @@ class DescarteIn(BaseModel):
     motivo: str = Field(max_length=30)                    # idem
 
 
+class VistasIn(BaseModel):
+    # as chaves das mudancas que a tela mostrou (`chave` de cada mudanca nas rotas de leitura)
+    chaves: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(min_length=1, max_length=200)
+
+
 def _decidir(funcao, conn, usuario: dict, certame_id: int, *args):
     try:
         return funcao(conn, usuario["id"], certame_id, *args)
-    except LookupError as e:
+    except licitacoes_decisoes.NaoEncontrada as e:
         raise HTTPException(404, str(e)) from None
     except licitacoes_decisoes.Recusa as e:
         raise HTTPException(409, str(e)) from None
     except sqlite3.IntegrityError:
         # dois pedidos ao mesmo tempo: o indice de uma favorita (ou um descarte) ativa por chave recusa o segundo
         raise HTTPException(409, licitacoes_decisoes.JA_DECIDIDA) from None
-    except ValueError as e:
+    except licitacoes_decisoes.ForaDaLista as e:
         raise HTTPException(422, str(e)) from None
+    # qualquer outra excecao e' defeito, e sobe: nao vira 404 nem 422
 
 
 @router.post("/api/licitacoes/{certame_id}/favorita")
@@ -110,7 +124,7 @@ def analisar(certame_id: ID, usuario: dict = Depends(exigir(EDITAR_LICITACOES)),
 
 
 @router.post("/api/licitacoes/{certame_id}/mudancas-vistas")
-def marcar_mudancas_vistas(certame_id: ID, usuario: dict = Depends(exigir(EDITAR_LICITACOES)),
+def marcar_mudancas_vistas(certame_id: ID, dados: VistasIn, usuario: dict = Depends(exigir(EDITAR_LICITACOES)),
                            conn: sqlite3.Connection = Depends(conexao)):
-    _decidir(licitacoes_decisoes.marcar_mudancas_vistas, conn, usuario, certame_id)
+    _decidir(licitacoes_decisoes.marcar_mudancas_vistas, conn, usuario, certame_id, dados.chaves)
     return {"id": certame_id}

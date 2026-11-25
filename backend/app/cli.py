@@ -47,15 +47,22 @@ def _legado(args) -> int:
 def _licitacoes(args) -> int:
     """`licitacoes corte [--ensaio]`: passa as decisoes das licitacoes (favorita, etapa, descarte) do radar para a
     dashboard (docs/adr/0018). Um ato so': rodar de novo diz quando foi feito e nao muda nada."""
-    from app import licitacoes_decisoes, tempo
+    from app import licitacoes_decisoes, permissoes, tempo
     conn = db.get_conn()
     try:
         db.migrate(conn)
-        u = conn.execute("SELECT id FROM usuarios WHERE email=? AND ativo=1", (args.usuario,)).fetchone()
+        u = conn.execute("SELECT id, perfil FROM usuarios WHERE email=? AND ativo=1", (args.usuario,)).fetchone()
         if u is None:
             print(f"Usuário não encontrado ou inativo: {args.usuario}")
             return 1
-        rel = licitacoes_decisoes.corte(conn, u["id"], ensaio=args.ensaio)
+        if not permissoes.tem(u["perfil"], permissoes.EDITAR_LICITACOES):
+            print(f"O corte é de quem decide as licitações, e {args.usuario} não tem essa permissão: nada foi gravado.")
+            return 1
+        try:
+            rel = licitacoes_decisoes.corte(conn, u["id"], ensaio=args.ensaio)
+        except ValueError as e:
+            print(str(e))
+            return 1
     finally:
         conn.close()
     if rel["ja_feito_em"]:
@@ -64,6 +71,7 @@ def _licitacoes(args) -> int:
         print("ENSAIO (nada foi gravado)" if rel["ensaio"] else "CORTE FEITO: as decisões passam a ser da dashboard")
     print(f"  favoritas em vigor: {rel['favoritas']}")
     print(f"  descartadas em vigor: {rel['descartadas']}")
+    print(f"  favoritas pedindo atenção depois do corte: {rel['pedem_atencao']}")
     return 0
 
 

@@ -24,5 +24,6 @@ CREATE TABLE IF NOT EXISTS lic_descartes (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS lic_descartes_ativo ON lic_descartes(chave) WHERE desfeito_em IS NULL;
 
--- Ate' que dia (AAAA-MM-DD) as mudancas da favorita foram vistas: as posteriores a poem de volta na Triagem.
-ALTER TABLE lic_favoritas ADD COLUMN mudancas_vistas_ate TEXT;
+-- As mudancas da favorita que alguem ja' viu: lista JSON das chaves delas (`licitacoes.chave_da_mudanca`). A que nao
+-- esta' na lista poe a favorita na Triagem.
+ALTER TABLE lic_favoritas ADD COLUMN mudancas_vistas TEXT NOT NULL DEFAULT '[]';

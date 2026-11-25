@@ -13,7 +13,8 @@ DOSSIE = {"pasta": "2026-CE-001-exemplo-pavimentacao", "etapa": "em_analise", "s
     {"codigo": "sessao", "rotulo": "Sessão", "data": "2026-12-10", "hora": "09:00", "aviso": ""}]}
 
 
-ROTAS_DE_LEITURA = ("/api/licitacoes/triagem", "/api/licitacoes/favoritas", "/api/licitacoes/calendario")
+ROTAS_DE_LEITURA = ("/api/licitacoes/triagem", "/api/licitacoes/favoritas", "/api/licitacoes/calendario",
+                    "/api/licitacoes/resumo")
 
 
 def _entrar(client, perfil):
@@ -194,8 +195,12 @@ def test_favorita_com_dossie_tem_a_etapa_os_prazos_e_as_mudancas(client, com_tok
         ("esclarecimento", 3, "critico"), ("sessao", 12, "breve")]
     assert fa["selos"] == ["Diretoria: interesse"]
     assert fa["proximo_prazo"]["codigo"] == "esclarecimento"
-    assert fa["mudancas"] == [{"data": "2026-11-20", "texto": "publicou adiamento", "rotulo": "Sessão adiada",
-                               "vista": False}]
+    # cada mudanca tem a chave dela (resumo da data, do rotulo e do texto): e' por ela que se marca o que foi visto
+    chave = licitacoes.chave_da_mudanca({"data": "2026-11-20", "rotulo": "Sessão adiada", "texto": "publicou adiamento"})
+    assert len(chave) == 16 and chave != licitacoes.chave_da_mudanca(
+        {"data": "2026-11-20", "rotulo": "Sessão adiada", "texto": "publicou outro adiamento"})
+    assert fa["mudancas"] == [{"chave": chave, "data": "2026-11-20", "texto": "publicou adiamento",
+                               "rotulo": "Sessão adiada", "vista": False}]
     assert fa["mudancas_novas"] == 1
 
     fb = b["favorita"]

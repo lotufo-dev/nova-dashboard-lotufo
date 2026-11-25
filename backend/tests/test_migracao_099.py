@@ -36,9 +36,16 @@ def test_099_um_descarte_ativo_por_chave_e_motivo_da_lista(conn):
     assert conn.execute("SELECT COUNT(*) FROM lic_descartes").fetchone()[0] == 2
 
 
+def test_099_a_favorita_nasce_sem_mudanca_vista(conn):
+    conn.execute("INSERT INTO lic_favoritas (chave, desde) VALUES (?, '2026-11-12')", (CHAVE,))
+    assert conn.execute("SELECT mudancas_vistas FROM lic_favoritas").fetchone()[0] == "[]"
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE lic_favoritas SET mudancas_vistas=NULL")
+
+
 def test_099_roda_duas_vezes_sem_mexer_no_que_existe(conn):
-    conn.execute("INSERT INTO lic_favoritas (chave, desde, mudancas_vistas_ate) VALUES (?, '2026-11-12', '2026-11-20')",
-                 (CHAVE,))
+    conn.execute("INSERT INTO lic_favoritas (chave, desde, mudancas_vistas) VALUES (?, '2026-11-12', ?)",
+                 (CHAVE, '["0123456789abcdef"]'))
     conn.execute("UPDATE lic_estado SET corte_em='2026-11-24 15:00:00'")
     conn.execute("INSERT INTO lic_descartes (chave, motivo) VALUES (?, 'local')", (CHAVE,))
     conn.commit()
