@@ -130,6 +130,12 @@
 .fila__c-valor { width: calc(var(--alvo-minimo) * 3.5); }
 .fila__c-aprovado { width: calc(var(--alvo-minimo) * 4.75); }
 .fila__c-acao { width: calc(var(--alvo-minimo) * 4.5); }
+/* #914: com largura de sobra (1440 px com o menu aberto), a coluna "Parada há" leva a linha da medicao reapresentada
+   como o dono aprovou: o selo "Rev. N" ao lado do selo dos dias, o prazo do orgao numa linha e as duas datas numa
+   linha (205 px cada, mais o recuo da celula). Abaixo disso a obra precisa da largura, e o selo da revisao desce */
+@container medicoes-pagina (min-width: 1100px) {
+  .fila__c-parada { width: calc(var(--alvo-minimo) * 6.25); }
+}
 .medicoes .fila__tabela tbody th.fila__obra {
   padding-top: var(--espaco-p); padding-bottom: var(--espaco-p); border-bottom: var(--borda-linha);
   text-align: left; font-weight: var(--peso-normal); vertical-align: middle;
