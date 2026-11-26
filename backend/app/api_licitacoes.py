@@ -62,6 +62,18 @@ def todas(vista: Literal["novas", "grande-vulto"] = "novas", ordem: Literal["pad
     return _com_poder(licitacoes.todas(conn, vista, filtros, ordem), usuario)
 
 
+@router.get("/api/licitacoes/fontes")
+def fontes(conn: sqlite3.Connection = Depends(conexao), usuario: dict = Depends(exigir(VER_LICITACOES, com_csrf=False))):
+    """Fontes (fatia 4 da #906): a situacao de cada fonte, os alertas do dia e a conferencia."""
+    return _com_poder(licitacoes.fontes(conn), usuario)
+
+
+@router.get("/api/licitacoes/resultados")
+def resultados(conn: sqlite3.Connection = Depends(conexao), _=Depends(exigir(VER_LICITACOES, com_csrf=False))):
+    """Resultados (fatia 4 da #906): o ultimo quadro que o radar mandou."""
+    return licitacoes.resultados(conn)
+
+
 @router.get("/api/licitacoes/resumo")
 def resumo(conn: sqlite3.Connection = Depends(conexao), _=Depends(exigir(VER_LICITACOES, com_csrf=False))):
     """A linha das licitacoes na Inicio: os numeros da Triagem, pela mesma funcao. Rota propria: `/api/inicio` e'
@@ -138,6 +150,24 @@ def desfazer_descarte(certame_id: ID, usuario: dict = Depends(exigir(EDITAR_LICI
 def analisar(certame_id: ID, usuario: dict = Depends(exigir(EDITAR_LICITACOES)),
              conn: sqlite3.Connection = Depends(conexao)):
     return {"id": certame_id, **_decidir(licitacoes_decisoes.analisar, conn, usuario, certame_id)}
+
+
+class ConferenciaIn(BaseModel):
+    resposta: str = Field(max_length=10)                  # licitacoes_decisoes confere a lista
+
+
+@router.post("/api/licitacoes/pares/{par_id}/conferencia")
+def conferir(par_id: ID, dados: ConferenciaIn, usuario: dict = Depends(exigir(EDITAR_LICITACOES)),
+             conn: sqlite3.Connection = Depends(conexao)):
+    _decidir(licitacoes_decisoes.conferir, conn, usuario, par_id, dados.resposta)
+    return {"id": par_id}
+
+
+@router.post("/api/licitacoes/pares/{par_id}/conferencia/desfazer")
+def desfazer_conferencia(par_id: ID, usuario: dict = Depends(exigir(EDITAR_LICITACOES)),
+                         conn: sqlite3.Connection = Depends(conexao)):
+    _decidir(licitacoes_decisoes.desfazer_conferencia, conn, usuario, par_id)
+    return {"id": par_id}
 
 
 @router.post("/api/licitacoes/{certame_id}/mudancas-vistas")

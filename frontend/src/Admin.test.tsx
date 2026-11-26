@@ -539,11 +539,14 @@ const RODADA_RUIM = { id: 3, disparo: "manual", estado: "failed", iniciado_em: "
 
 const SIGA_SEM_LEITURA = { ultima_leitura: null, atrasado: false, processos: 0 };
 
-function saudeComRm(status: object, backup: object = BACKUP_EM_DIA, siga: object = SIGA_SEM_LEITURA, seguranca: object[] = []) {
+const RADAR_SEM_LEITURA = { lido_em: null, atrasada: true, fontes_com_problema: 0, situacao: null };
+
+function saudeComRm(status: object, backup: object = BACKUP_EM_DIA, siga: object = SIGA_SEM_LEITURA, seguranca: object[] = [],
+    radar: object = RADAR_SEM_LEITURA) {
   api.mockImplementation(async (url: string) => {
     if (url === "/api/rm/status") return status;
     if (url === "/api/admin/backup") return backup;
-    if (url === "/api/admin/saude") return { siga, seguranca };
+    if (url === "/api/admin/saude") return { siga, seguranca, radar };
     if (url === "/api/rm/reconciliacao") return {
       nfs_sem_medicao: [], medicoes_sem_nf: [], divergencias: [], alocacoes_desfeitas: [], recebidas_sem_baixa: [],
       totais: { nfs_sem_medicao: 15, alocacoes_desfeitas: 0 }, ha_mais: { nfs_sem_medicao: false, alocacoes_desfeitas: false } };
@@ -636,6 +639,29 @@ test("Saúde: cartão Monitor do SIGA com a hora da última leitura e os process
   await screen.findByRole("heading", { name: "Monitor do SIGA" });
   expect(cartaoDe("Monitor do SIGA").textContent).toBe("Monitor do SIGA—");
   expect(cartaoDe("Monitor do SIGA").className).toMatch(/situacao--neutra/);
+});
+
+// Fatia 4 da #906: o radar de licitacoes ao lado do monitor do SIGA, com a mesma leitura das paginas dele
+test("Saúde: cartão do radar de licitações com a última leitura e as fontes com problema, no tom do servidor", async () => {
+  const rm = { configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] };
+  saudeComRm(rm, BACKUP_EM_DIA, SIGA_SEM_LEITURA, [], { lido_em: "2026-11-24T13:05:00+00:00", atrasada: false, fontes_com_problema: 0, situacao: "feito" });
+  await screen.findByRole("heading", { name: "Radar de licitações" });
+  expect(cartaoDe("Radar de licitações").textContent).toMatch(/24\/11\/2026 às 09:05/);
+  expect(cartaoDe("Radar de licitações").className).toMatch(/situacao--feito/);
+  cleanup(); api.mockReset();
+  saudeComRm(rm, BACKUP_EM_DIA, SIGA_SEM_LEITURA, [], { lido_em: "2026-11-24T13:05:00+00:00", atrasada: false, fontes_com_problema: 2, situacao: "critico" });
+  await screen.findByRole("heading", { name: "Radar de licitações" });
+  expect(cartaoDe("Radar de licitações").textContent).toMatch(/2 fontes com problema/);
+  expect(cartaoDe("Radar de licitações").className).toMatch(/situacao--critico/);
+  cleanup(); api.mockReset();
+  saudeComRm(rm, BACKUP_EM_DIA, SIGA_SEM_LEITURA, [], { lido_em: "2026-11-20T13:05:00+00:00", atrasada: true, fontes_com_problema: 1, situacao: "critico" });
+  await screen.findByRole("heading", { name: "Radar de licitações" });
+  expect(cartaoDe("Radar de licitações").textContent).toMatch(/sem leitura recente, 1 fonte com problema/);
+  expect(cartaoDe("Radar de licitações").className).toMatch(/situacao--critico/);
+  cleanup(); api.mockReset();
+  saudeComRm(rm);
+  await screen.findByRole("heading", { name: "Radar de licitações" });
+  expect(cartaoDe("Radar de licitações").textContent).toBe("Radar de licitações—");
 });
 
 test("Saúde: última rodada com falha vira cartão vermelho, caixa com o erro e a última boa, sem nome de máquina na tela", async () => {

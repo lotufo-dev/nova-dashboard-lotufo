@@ -17,13 +17,13 @@ export type Perfil = "engenharia" | "diretoria" | "admin";
 
 /** As paginas do menu. */
 export type ItemMenu = "inicio" | "medicoes" | "resumo-medicoes" | "obras" | "fechamento" | "a-receber" | "avisos" | "siga"
-  | "licitacoes" | "licitacoes-favoritas" | "licitacoes-todas" | "certidoes" | "regularidade" | "garantias" | "ancoras-docusign" | "admin" | "conta";
+  | "licitacoes" | "licitacoes-favoritas" | "licitacoes-todas" | "licitacoes-resultados" | "licitacoes-fontes" | "certidoes" | "regularidade" | "garantias" | "ancoras-docusign" | "admin" | "conta";
 export type IdArea = "painel" | "medicoes" | "obras" | "financeiro" | "prazos" | "orgaos" | "licitacoes" | "documentos" | "sistema";
 
 export const ROTULO: Record<ItemMenu, string> = {
   inicio: "Início", medicoes: "Medições", "resumo-medicoes": "Resumo das medições", obras: "Obras", fechamento: "Fechamento",
   "a-receber": "Em aberto", avisos: "Avisos", siga: "SIGA", licitacoes: "Triagem", "licitacoes-favoritas": "Favoritas",
-  "licitacoes-todas": "Todas",
+  "licitacoes-todas": "Todas", "licitacoes-resultados": "Resultados", "licitacoes-fontes": "Fontes",
   certidoes: "Certidões", regularidade: "Regularidade mensal",
   garantias: "Garantias", "ancoras-docusign": "Âncoras DocuSign", admin: "Administração", conta: "Minha conta",
 };
@@ -39,7 +39,7 @@ export const AREAS: readonly Area[] = [
   { id: "prazos", rotulo: "Prazos e avisos", paginas: ["avisos"] },
   { id: "orgaos", rotulo: "Órgãos", paginas: ["siga"] },
   // Licitacoes (#908): depois de Orgaos e antes de Documentos; a Triagem e' a pagina padrao da area ("/licitacoes")
-  { id: "licitacoes", rotulo: "Licitações", paginas: ["licitacoes", "licitacoes-favoritas", "licitacoes-todas"] },
+  { id: "licitacoes", rotulo: "Licitações", paginas: ["licitacoes", "licitacoes-favoritas", "licitacoes-todas", "licitacoes-resultados", "licitacoes-fontes"] },
   { id: "documentos", rotulo: "Documentos", paginas: ["certidoes", "regularidade", "garantias"] },
   { id: "sistema", rotulo: "Sistema", paginas: ["ancoras-docusign", "admin", "conta"] },
 ];
@@ -68,7 +68,7 @@ const DO_PERFIL: Record<Perfil, readonly Recorte[]> = {
 const RECORTE_DA_PAGINA: Record<ItemMenu, Recorte | null> = {
   inicio: "inicio", medicoes: "medicoes", "resumo-medicoes": "resumo-medicoes", obras: "obras", fechamento: "fechamento",
   "a-receber": "fechamento", avisos: "avisos", siga: "siga", licitacoes: "licitacoes", "licitacoes-favoritas": "licitacoes",
-  "licitacoes-todas": "licitacoes",
+  "licitacoes-todas": "licitacoes", "licitacoes-resultados": "licitacoes", "licitacoes-fontes": "licitacoes",
   certidoes: "documentos", regularidade: "documentos",
   garantias: "documentos", "ancoras-docusign": "ancoras-docusign", admin: "admin", conta: null,
 };

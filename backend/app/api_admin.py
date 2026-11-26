@@ -2,7 +2,7 @@ import datetime
 import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app import (alertas_seguranca, auditoria, avisos, backup, copia_dono, copia_dono_envio, correio, envio_reserva,
-                 graph, instalacao, seguranca, sentinela, siga, tempo)
+                 graph, instalacao, licitacoes, seguranca, sentinela, siga, tempo)
 from app.api_auth import conexao
 from app.permissoes import exigir
 
@@ -92,7 +92,8 @@ def saude(usuario: dict = Depends(exigir("administrar", com_csrf=False)),
     `seguranca.ITENS_NA_TELA` itens; `seguranca_fora` diz quantos ficaram de fora. Issue #424: `alertas_seguranca`
     traz `erro` (por que os alertas por e-mail nao saem; None quando saem) e `conectar` (falta conectar a conta)."""
     itens, fora = seguranca.bloco(conn)
-    return {"siga": siga.saude(conn), "seguranca": itens, "seguranca_fora": fora, "sentinela": sentinela.situacao(),
+    # o radar de licitacoes (fatia 4 da #906): a mesma leitura de "O radar nao le desde..." das paginas dele
+    return {"siga": siga.saude(conn), "radar": licitacoes.saude(conn), "seguranca": itens, "seguranca_fora": fora, "sentinela": sentinela.situacao(),
             "alertas_seguranca": alertas_seguranca.situacao(conn)}
 
 

@@ -63,6 +63,9 @@ export type Rota =
   | { tela: "licitacoes" }
   | { tela: "licitacoes-favoritas"; vista?: VistaFavoritas }
   | { tela: "licitacoes-todas"; vista?: VistaTodas }
+  // Resultados e Fontes (fatia 4 da #906): "/licitacoes/resultados" e "/licitacoes/fontes"
+  | { tela: "licitacoes-resultados" }
+  | { tela: "licitacoes-fontes" }
   | { tela: "documentos"; pagina?: PaginaDocumentos }
   | { tela: "documentos-empresa"; id: number; aba?: AbaDocumentos }
   | { tela: "obras"; aba?: AbaObras }
@@ -178,6 +181,8 @@ export function parseRota(pathname: string): Rota {
   // Todas e Grande vulto (fatia 3 da #906): "/licitacoes/todas" e "/licitacoes/grande-vulto"; "/licitacoes/todas/novas"
   // e "/licitacoes/todas/grande-vulto" tambem abrem, e o App troca a URL pela canonica
   if (a === "licitacoes" && partes.length === 2 && b === "todas") return { tela: "licitacoes-todas" };
+  if (a === "licitacoes" && partes.length === 2 && b === "resultados") return { tela: "licitacoes-resultados" };
+  if (a === "licitacoes" && partes.length === 2 && b === "fontes") return { tela: "licitacoes-fontes" };
   if (a === "licitacoes" && partes.length === 2 && b === "grande-vulto") return { tela: "licitacoes-todas", vista: "grande-vulto" };
   if (a === "licitacoes" && partes.length === 3 && b === "todas" && (c === "novas" || c === "grande-vulto")) {
     return c === "novas" ? { tela: "licitacoes-todas" } : { tela: "licitacoes-todas", vista: c };
@@ -263,6 +268,8 @@ export function caminhoDe(r: Rota): string {
     case "fechamento": return r.aba && r.aba !== "meses" ? `/fechamento/${r.aba}` : "/fechamento";
     case "licitacoes-favoritas": return r.vista && r.vista !== "lista" ? `/licitacoes/favoritas/${r.vista}` : "/licitacoes/favoritas";
     case "licitacoes-todas": return r.vista === "grande-vulto" ? "/licitacoes/grande-vulto" : "/licitacoes/todas";
+    case "licitacoes-resultados": return "/licitacoes/resultados";
+    case "licitacoes-fontes": return "/licitacoes/fontes";
     default: return `/${r.tela}`;
   }
 }

@@ -287,3 +287,28 @@
 .lic-achadas { flex-wrap: wrap; gap: var(--espaco-mini) var(--espaco-m); }
 .lic-achadas__n { margin: 0; font-weight: var(--peso-medio); }
 .lic-limpar { font-size: var(--texto-meta); }
+
+/* ================================================================ fatia 4 da #906: Fontes e Resultados */
+
+/* o cabecalho de grupo forte dos alertas: a faixa de tinta, o nome da regra a' esquerda e a contagem a' direita */
+.lic .lic-tabela tbody tr.lic-grupo > th {
+  padding: var(--espaco-pp) var(--espaco-m); background: var(--cor-tinta); color: var(--cor-papel); text-align: left;
+}
+.lic-grupo__faixa { display: flex; align-items: center; justify-content: space-between; gap: var(--espaco-p); }
+.lic-grupo__nome { font-weight: var(--peso-forte); }
+
+/* um lado do par da conferencia: a licitacao e, embaixo, o valor e a sessao */
+.lic-lado__dados { display: flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-mini) var(--espaco-p); margin-top: var(--espaco-mini); }
+.lic .lic-tabela.tabela td.lic-lado { min-width: 0; white-space: normal; }
+.lic .lic-tabela.tabela th.lic-c-motivo { font-weight: var(--peso-normal); white-space: normal; max-width: calc(var(--alvo-minimo) * 5); }
+.lic-conferidos { margin-top: var(--espaco-p); padding: 0 var(--espaco-m); }
+
+/* Resultados: o funil numa fileira e os dois quadros de grupos lado a lado quando cabem */
+.lic-funil { grid-template-columns: repeat(auto-fit, minmax(calc(var(--alvo-minimo) * 3), 1fr)); }
+.lic-lado-a-lado { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--alvo-minimo) * 9)), 1fr)); gap: var(--espaco-m); }
+
+/* a pagina estreita: o grupo dos alertas continua faixa, sem o nome da coluna */
+@container lic-pagina (max-width: 640px) {
+  .lic .lic-tabela tbody tr.lic-grupo { padding: 0; }
+  .lic .lic-tabela.tabela tbody tr.lic-grupo > th { padding: var(--espaco-pp) var(--espaco-m); background: var(--cor-tinta); color: var(--cor-papel); }
+}

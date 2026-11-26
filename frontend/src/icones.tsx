@@ -252,3 +252,19 @@ export function IconeLupa(p: Props) {
     <circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4.4-4.4" />
   </Svg>;
 }
+
+/* Resultados (fatia 4 da #906): a taca, como fomos nas que participamos. */
+export function IconeTrofeu(p: Props) {
+  return <Svg {...p}>
+    <path d="M7 4h10v5a5 5 0 0 1-10 0z" /><path d="M7 6H4.5a2.5 2.5 0 0 0 2.5 4M17 6h2.5a2.5 2.5 0 0 1-2.5 4" />
+    <path d="M12 14v4M8.5 20h7" />
+  </Svg>;
+}
+
+/* Fontes: a antena, o radar lendo cada fonte. */
+export function IconeAntena(p: Props) {
+  return <Svg {...p}>
+    <circle cx="12" cy="11" r="1.5" /><path d="M8.5 7.5a5 5 0 0 0 0 7M15.5 7.5a5 5 0 0 1 0 7" />
+    <path d="M5.5 4.5a9 9 0 0 0 0 13M18.5 4.5a9 9 0 0 1 0 13M12 12.5V21" />
+  </Svg>;
+}

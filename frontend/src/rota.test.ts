@@ -189,6 +189,14 @@ describe("rota: as páginas de Licitações (#908)", () => {
     expect(parseRota("/licitacoes/grande-vulto/x")).toEqual({ tela: "raiz" });
   });
 
+  it("Resultados e Fontes (fatia 4 da #906): um endereço cada", () => {
+    for (const [tela, caminho] of [["licitacoes-resultados", "/licitacoes/resultados"], ["licitacoes-fontes", "/licitacoes/fontes"]] as const) {
+      expect(caminhoDe({ tela })).toBe(caminho);
+      expect(parseRota(caminho)).toEqual({ tela });
+    }
+    expect(parseRota("/licitacoes/fontes/x")).toEqual({ tela: "raiz" });
+  });
+
   it("a página padrão por extenso (/licitacoes/triagem) abre a Triagem, e a URL vira a canônica", () => {
     expect(parseRota("/licitacoes/triagem")).toEqual({ tela: "licitacoes" });
     expect(caminhoDe(parseRota("/licitacoes/triagem"))).toBe("/licitacoes");

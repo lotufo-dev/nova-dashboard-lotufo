@@ -1158,11 +1158,16 @@ O radar de licitações (fora deste repositório; o porquê está no `docs/adr/0
 entrega a leitura à dashboard, que só guarda e mostra. Uma rodada são três pedidos, todos com
 `Authorization: Bearer <token>`: `GET /api/radar/estado` (o resumo de cada certame que a dashboard já tem),
 `POST /api/radar/certames` (só os certames novos ou de resumo diferente) e `POST /api/radar/leituras` (fecha a
-rodada: a hora da leitura, as chaves que o radar lista hoje, a situação das fontes e as favoritas dele). Cada pedido
+rodada: a hora da leitura, as chaves que o radar lista hoje, a situação das fontes, os alertas do dia por regra, os pares
+que ele não conseguiu provar iguais, o quadro de resultados e, até o corte, as favoritas, as descartadas e as
+conferências dele; #919). Cada pedido
 tem o teto geral de 2 MB: o radar divide os certames em pedidos de até 1 MB. Nada se apaga: o certame que sai da
 lista do radar fica gravado com a data em que saiu, e a favorita que o radar deixa de mandar fica gravada como
-tirada. As telas leem `GET /api/licitacoes/triagem` e `GET /api/licitacoes/favoritas` (sessão e `ver_licitacoes`:
-só o administrador).
+tirada; o par que ele deixa de listar fica gravado com a data, e o quadro de resultados que não vem numa rodada
+continua o último que veio. As telas (Triagem, Favoritas, Todas, Resultados e Fontes) leem as rotas
+`/api/licitacoes/...` (sessão e `ver_licitacoes`: só o administrador); a Administração › Saúde mostra a última leitura
+do radar ao lado da do monitor do SIGA. Depois do corte, `GET /api/radar/decisoes` devolve as favoritas, as
+descartadas e as conferências ("é o mesmo / é outro") em vigor.
 
 1. **Token em arquivo**: `C:\DashboardLotufo\segredos\radar-token.txt` (uma linha, UTF-8, ao menos 32 caracteres
    aleatórios), gerado e gravado sem BOM como o do SIGA (seção "Monitor do SIGA", item 1, trocando o nome do
@@ -1184,7 +1189,8 @@ só o administrador).
    As favoritas são espelho: a lista que o radar manda em `decisoes.favoritas` substitui a anterior, e a lista vazia
    tira todas (as linhas ficam, com a data). O radar que não conseguiu ler as próprias favoritas manda o fechamento
    **sem** `decisoes`, e nada muda.
-5. **Conferir pela tela**: Licitações › Triagem mostra a hora da última leitura. "O radar não lê desde …" aparece
+5. **Conferir pela tela**: Licitações › Triagem mostra a hora da última leitura, e Licitações › Fontes a situação de
+   cada fonte nela (com problema, aguardando ou lida). "O radar não lê desde …" aparece
    quando a última leitura é de antes do dia esperado: hoje, se hoje é dia útil e já passou das 10h; senão, o dia
    útil anterior. O radar depende de sessão aberta na máquina em que roda: dia sem sessão é dia sem leitura, e a
    dashboard não lê no lugar dele.
