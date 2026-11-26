@@ -13,6 +13,7 @@ import { VISTAS_DE_TODAS } from "./navegacao";
 import Rolagem from "./Rolagem";
 import { trocarBusca, type Busca, type VistaTodas } from "./rota";
 import Selo from "./Selo";
+import { fmtData } from "./tempo";
 import { Abas } from "./Topo";
 
 // TODAS (fatia 3 da #906, docs/adr/0018): "/licitacoes/todas" e "/licitacoes/grande-vulto". Responde "existe a
@@ -33,6 +34,7 @@ import { Abas } from "./Topo";
 // outras (as opcoes de tipo, orgao e portal saem de cada uma).
 
 const BUSCA_ESPERA = 300;
+const ORDEM_VALIDA: readonly string[] = ["padrao", "prazo", "publicacao", "valor"];
 const VISTAS: readonly VistaTodas[] = ["novas", "grande-vulto"];
 
 /** O que as linhas precisam para decidir; nulo quando a pagina e' so' de leitura. */
@@ -62,14 +64,18 @@ function CampoDeBusca({ valor }: { valor: string }) {
   );
 }
 
-/** Um filtro de escolha: "Todos" e as opcoes que o servidor manda, cada uma com a quantidade. */
-function Escolha({ f }: { f: FiltroDeTodas }) {
+/** Um filtro de escolha: "Todos" e as opcoes que o servidor manda, cada uma com a quantidade. O valor e' o do endereco,
+ *  e nao o da resposta: entre a escolha e a leitura nova o controle nao volta para tras (pelo teclado, no Windows, a
+ *  seta troca a opcao a cada toque). */
+function Escolha({ f, valor }: { f: FiltroDeTodas; valor: string }) {
   const id = useId();
   return (
     <div className="campo lic-filtro">
       <label className="campo__rotulo" htmlFor={id}>{f.rotulo}</label>
-      <select id={id} value={f.escolhido ?? ""} onChange={ev => trocarBusca({ [f.filtro]: ev.target.value || null })}>
+      <select id={id} value={valor} onChange={ev => trocarBusca({ [f.filtro]: ev.target.value || null })}>
         <option value="">Todos</option>
+        {/* o valor do endereco que a resposta ainda nao trouxe (a leitura nova esta' a caminho) */}
+        {valor && !f.opcoes.some(o => o.valor === valor) && <option value={valor}>{valor}</option>}
         {f.opcoes.map(o => <option key={o.valor} value={o.valor}>{o.rotulo} ({o.n.toLocaleString("pt-BR")})</option>)}
       </select>
     </div>
@@ -80,7 +86,7 @@ function Filtros({ dados, busca }: { dados: RespostaTodas; busca: Busca }) {
   return (
     <form className="lic-filtros" role="search" aria-label="Buscar e filtrar as licitações" onSubmit={ev => ev.preventDefault()}>
       <CampoDeBusca valor={busca.q ?? ""} />
-      {dados.filtros.map(f => <Escolha key={f.filtro} f={f} />)}
+      {dados.filtros.map(f => <Escolha key={f.filtro} f={f} valor={busca[f.filtro] ?? ""} />)}
       <div className="campo lic-filtro">
         <label className="campo__rotulo" htmlFor="lic-sessao-de">Sessão de</label>
         <input id="lic-sessao-de" type="date" value={busca.sessao_de ?? ""} onChange={ev => trocarBusca({ sessao_de: ev.target.value || null })} />
@@ -91,7 +97,7 @@ function Filtros({ dados, busca }: { dados: RespostaTodas; busca: Busca }) {
       </div>
       <div className="campo lic-filtro">
         <label className="campo__rotulo" htmlFor="lic-ordem">Ordem</label>
-        <select id="lic-ordem" value={dados.ordem} onChange={ev => trocarBusca({ ordem: ev.target.value === "padrao" ? null : ev.target.value })}>
+        <select id="lic-ordem" value={ORDEM_VALIDA.includes(busca.ordem ?? "") ? busca.ordem : "padrao"} onChange={ev => trocarBusca({ ordem: ev.target.value === "padrao" ? null : ev.target.value })}>
           {dados.ordens.map(o => <option key={o.ordem} value={o.ordem}>{o.rotulo}</option>)}
         </select>
       </div>
@@ -105,7 +111,7 @@ function CelulaDaDecisao({ l, decisoes }: { l: LinhaDeTodas; decisoes: Decisoes 
   return (
     <td className="lic-c-decisao" data-rotulo="Decisão">
       {l.favorita ? <><Selo>Favorita</Selo><span className="lic-sub">{l.favorita.etapa_rotulo}</span></>
-        : l.descarte ? <><Selo>Descartada</Selo><span className="lic-sub">{l.descarte.rotulo}</span></>
+        : l.descarte ? <><Selo>Descartada</Selo><span className="lic-sub">{l.descarte.rotulo} · <span className="num">{fmtData(l.descarte.quando)}</span></span></>
         : !decisoes || l.encerrada ? <Traco /> : null}
       {decisoes && !l.favorita && (l.descarte || !l.encerrada) && (
         <div className="lic-acoes">

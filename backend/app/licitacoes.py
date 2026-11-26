@@ -352,9 +352,10 @@ def calendario(conn, mes: str | None = None) -> dict:
         do_mes = primeiro.isoformat()[:7]
         por_dia: dict[str, list[dict]] = {}
         for l in _linhas_das_favoritas(conn, hoje):
-            if l["favorita"]["etapa"] in ETAPAS_FINAIS:          # a etapa final encerrou a favorita: nada mais vence
-                continue
+            final = l["favorita"]["etapa"] in ETAPAS_FINAIS
             for p in l["favorita"]["prazos"]:
+                if final and not p["passado"]:              # a etapa final encerrou a favorita: o que vencia nao vence mais
+                    continue
                 if p["data"][:7] == do_mes:
                     por_dia.setdefault(p["data"], []).append(
                         {**p, "licitacao": {k: l[k] for k in _DO_PRAZO_NO_CALENDARIO}})
@@ -417,8 +418,11 @@ def triagem(conn) -> dict:
         favs = _linhas_das_favoritas(conn, hoje)
         decididas = {l["chave"] for l in favs} | {r["chave"] for r in conn.execute(
             "SELECT chave FROM lic_descartes WHERE desfeito_em IS NULL")}
-        listadas = [(r["nova"], _linha(r, hoje)) for r in conn.execute(
-            "SELECT id, chave, dados, nova FROM lic_certames WHERE fora_desde IS NULL AND (nova=1 OR nota IS NOT NULL)")]
+        # com a favorita, para "encerrada" ser a mesma de Todas e das Favoritas (a etapa final, o prazo do dossie)
+        listadas = [(r["nova"], _linha(r, hoje, r if r["desde"] is not None else None)) for r in conn.execute(
+            "SELECT c.id, c.chave, c.dados, c.nova, f.desde, f.etapa, f.mudancas_vistas FROM lic_certames c "
+            "LEFT JOIN lic_favoritas f ON f.chave=c.chave AND f.removida_em IS NULL "
+            "WHERE c.fora_desde IS NULL AND (c.nova=1 OR c.nota IS NOT NULL)")]
         abertas = [(nova, l) for nova, l in listadas if not l["encerrada"]]
         recomendadas = [l for _, l in abertas if l["recomendada"] and l["chave"] not in decididas]
         recomendadas.sort(key=lambda l: (-l["recomendada"]["nota"], -(l["valor_centavos"] or 0),
@@ -461,7 +465,13 @@ _BUSCAVEL = ("orgao", "unidade", "sigla_orgao", "edital", "processo", "objeto", 
 
 
 def _sem_acento(texto: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c)).casefold()
+    # pelo ASCII, e nao caractere por caractere: o objeto completo tem ate' 8 mil caracteres, e sao ~1.200 certames
+    return unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii").casefold()
+
+
+def rotulo_do_motivo(motivo: str) -> str:
+    """O motivo do descarte como a tela o escreve: "tipo de obra" vira "Tipo de obra"."""
+    return motivo[0].upper() + motivo[1:]
 
 
 def _faixa_valor(centavos: int | None) -> str:
@@ -528,7 +538,7 @@ def todas(conn, vista: str, filtros: dict, ordem: str = "padrao") -> dict:
                 f"WHERE c.fora_desde IS NULL AND c.{coluna}=1"):
             linha = _linha(r, hoje, r if r["desde"] is not None else None)
             linha["descarte"] = (None if r["motivo"] is None else
-                                 {"motivo": r["motivo"], "rotulo": r["motivo"][0].upper() + r["motivo"][1:],
+                                 {"motivo": r["motivo"], "rotulo": rotulo_do_motivo(r["motivo"]),
                                   "quando": tempo.iso_utc(r["criado_em"])})
             dados = json.loads(r["dados"])
             linha["_busca"] = _sem_acento(" ".join([r["chave"], *(str(dados.get(k) or "") for k in _BUSCAVEL)]))
@@ -546,15 +556,15 @@ def todas(conn, vista: str, filtros: dict, ordem: str = "padrao") -> dict:
             return not ((de and l["data_sessao"] < de.isoformat()) or (ate and l["data_sessao"] > ate.isoformat()))
 
         escolhidos = {nome: filtros.get(nome) or "" for nome, *_ in _FILTROS}
+        com_busca = [l for l in linhas if passa_fixos(l)]           # a busca e as datas valem para toda contagem
 
         def passa(l: dict, menos: str | None = None) -> bool:
-            return passa_fixos(l) and all(not v or nome == menos or valor(l) == v
-                                          for (nome, _, valor, _), v in zip(_FILTROS, escolhidos.values()))
+            return all(not v or nome == menos or valor(l) == v for (nome, _, valor, _), v in zip(_FILTROS, escolhidos.values()))
 
         opcoes_dos_filtros = []
         for nome, rotulo, valor, fixas in _FILTROS:
             contagem: dict[str, int] = {}
-            for l in linhas:
+            for l in com_busca:
                 if passa(l, menos=nome):
                     contagem[valor(l)] = contagem.get(valor(l), 0) + 1
             opcoes = fixas if fixas is not None else [(v, v) for v in sorted({valor(l) for l in linhas} - {""})]
@@ -564,7 +574,7 @@ def todas(conn, vista: str, filtros: dict, ordem: str = "padrao") -> dict:
             opcoes_dos_filtros.append({"filtro": nome, "rotulo": rotulo, "escolhido": escolhido or None,
                                        "opcoes": [{"valor": v, "rotulo": r, "n": contagem.get(v, 0)} for v, r in opcoes]})
 
-        achadas = [l for l in linhas if passa(l)]
+        achadas = [l for l in com_busca if passa(l)]
         _ordenar(achadas, ordem)
         for l in achadas:
             del l["_busca"]

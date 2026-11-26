@@ -45,6 +45,9 @@ describe("Todas e Grande vulto", () => {
       .toBe("/api/licitacoes/todas?vista=grande-vulto&q=ponte&tipo=Rodovia&sessao_de=2026-12-01&ordem=valor");
     // data fora do formato e ordem desconhecida: o link estragado abre a lista
     expect(pedidoDeTodas("novas", { sessao_ate: "01/12/2026", ordem: "nota" })).toBe("/api/licitacoes/todas?vista=novas");
+    // data que nao existe no calendario, ou que o servidor recusaria
+    expect(pedidoDeTodas("novas", { sessao_de: "2026-02-31", sessao_ate: "0000-01-01" })).toBe("/api/licitacoes/todas?vista=novas");
+    expect(pedidoDeTodas("novas", { sessao_de: "2028-02-29" })).toBe("/api/licitacoes/todas?vista=novas&sessao_de=2028-02-29");
     expect(pedidoDeTodas("novas", { q: "x".repeat(300) })).toBe(`/api/licitacoes/todas?vista=novas&q=${"x".repeat(200)}`);
     expect([temFiltro({}), temFiltro({ ordem: "padrao" }), temFiltro({ ordem: "prazo" }), temFiltro({ km: "ate-100" })])
       .toEqual([false, false, true, true]);
@@ -67,7 +70,7 @@ describe("Todas e Grande vulto", () => {
     expect(within(fav).getByText("Favorita")).toBeTruthy();
     expect(within(fav).getByText("Em análise")).toBeTruthy();
     expect(within(desc).getByText("Descartada")).toBeTruthy();
-    expect(within(desc).getByText("Local")).toBeTruthy();
+    expect(within(desc).getByText(/^Local ·/).textContent).toBe("Local · 23/11/2026");
     expect([nova, fav, desc, enc].map(botoes)).toEqual([[], [], [], []]);
     expect(within(nova).getAllByRole("cell")[0].textContent).toBe("8");
     // nada filtrado: sem o link de limpar
@@ -86,6 +89,27 @@ describe("Todas e Grande vulto", () => {
     fireEvent.change(screen.getByLabelText("Ordem"), { target: { value: "padrao" } });
     fireEvent.change(screen.getByLabelText("Tipo de obra"), { target: { value: "" } });
     expect(window.location.search).toBe("?sessao_de=2026-12-01");
+  });
+
+  it("o controle mostra o que está no endereço, mesmo antes de a leitura nova chegar", async () => {
+    servidor([resposta({ linhas: QUATRO })]);
+    const { rerender } = render(<LicitacoesTodas vista="novas" busca={{}} />);
+    await screen.findByRole("region", { name: "Licitações novas" });
+    // o endereco mudou (escolha, Voltar): a resposta ainda e' a antiga, sem o valor escolhido
+    rerender(<LicitacoesTodas vista="novas" busca={{ tipo: "Ponte", ordem: "valor" }} />);
+    expect((screen.getByLabelText("Tipo de obra") as HTMLSelectElement).value).toBe("Ponte");
+    expect((screen.getByLabelText("Ordem") as HTMLSelectElement).value).toBe("valor");
+    rerender(<LicitacoesTodas vista="novas" busca={{ ordem: "outra" }} />);
+    expect((screen.getByLabelText("Ordem") as HTMLSelectElement).value).toBe("padrao");
+  });
+
+  it("o campo de busca acompanha o endereço que muda por fora (Limpar os filtros, Voltar)", async () => {
+    servidor([resposta({ linhas: QUATRO })]);
+    const { rerender } = render(<LicitacoesTodas vista="novas" busca={{ q: "ponte" }} />);
+    await screen.findByRole("region", { name: "Licitações novas" });
+    expect((screen.getByLabelText("Buscar") as HTMLInputElement).value).toBe("ponte");
+    rerender(<LicitacoesTodas vista="novas" busca={{}} />);
+    expect((screen.getByLabelText("Buscar") as HTMLInputElement).value).toBe("");
   });
 
   it("a busca vai para o endereço quando a pessoa para de digitar", async () => {

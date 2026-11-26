@@ -240,6 +240,8 @@ export const FILTROS_DE_TODAS = ["q", "tipo", "modalidade", "orgao", "esfera", "
   "sessao_de", "sessao_ate"] as const;
 const ORDENS: readonly string[] = ["padrao", "prazo", "publicacao", "valor"];
 const DATA = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+/** Data que existe no calendario (31/02 nao) e que o servidor aceita (o ano 0 nao). */
+const dataValida = (v: string) => DATA.test(v) && v >= "0001" && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 
 /** O pedido de Todas a partir da busca do endereco. O que nao cabe no que o servidor aceita fica de fora (data fora do
  *  formato, ordem desconhecida), para um link estragado abrir a lista em vez de uma falha; o texto vai cortado no
@@ -249,7 +251,7 @@ export function pedidoDeTodas(vista: "novas" | "grande-vulto", busca: Record<str
   for (const f of FILTROS_DE_TODAS) {
     const v = (busca[f] ?? "").trim();
     if (!v) continue;
-    if (f === "sessao_de" || f === "sessao_ate") { if (DATA.test(v)) q.set(f, v); continue; }
+    if (f === "sessao_de" || f === "sessao_ate") { if (dataValida(v)) q.set(f, v); continue; }
     q.set(f, v.slice(0, f === "q" ? 200 : 120));
   }
   if (ORDENS.includes(busca.ordem ?? "") && busca.ordem !== "padrao") q.set("ordem", busca.ordem);

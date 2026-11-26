@@ -128,6 +128,10 @@ def test_cada_filtro_recorta_e_conta_com_os_outros_aplicados(admin):
     assert _chaves(_todas(admin, valor="sem-valor")) == [_chave(3)]
     assert _chaves(_todas(admin, km="acima-600")) == [_chave(4)]
     assert _chaves(_todas(admin, portal="Site do órgão")) == [_chave(2)]
+    # as opcoes que saem do dado tambem contam com os outros filtros
+    r = _todas(admin, esfera="Municipal")
+    assert _opcoes(r, "portal") == {"PNCP": 0, "Site do órgão": 1}
+    assert _opcoes(r, "esfera") == {"Estadual": 3, "Municipal": 1}
 
 
 def test_valor_do_endereco_que_nao_existe_nao_acha_nada_e_continua_na_lista(admin):
@@ -164,6 +168,11 @@ def test_as_quatro_ordens_e_as_encerradas_no_fim(admin):
     assert ordem("valor") == [3, 1, 4, 2, 5]
 
 
+def test_na_ordem_do_prazo_a_mesma_data_vai_pela_hora(admin):
+    _receber(admin, _c(1, hora_sessao="14:00"), _c(2, hora_sessao="09:00"), _c(3, hora_sessao=None))
+    assert _chaves(_todas(admin, ordem="prazo")) == [_chave(2), _chave(1), _chave(3)]
+
+
 # --- decisoes -------------------------------------------------------------------------------------------------
 
 def test_a_descartada_aparece_com_o_motivo_e_desfazer_a_devolve_a_triagem(admin):
@@ -177,6 +186,7 @@ def test_a_descartada_aparece_com_o_motivo_e_desfazer_a_devolve_a_triagem(admin)
     assert _opcoes(t, "decisao") == {"favorita": 1, "descartada": 1, "sem-decisao": 1}
     assert _chaves(_todas(admin, decisao="favorita")) == [_chave(3)]
     assert _chaves(_todas(admin, decisao="descartada")) == [_chave(1)]
+    assert _chaves(_todas(admin, decisao="sem-decisao")) == [_chave(2)]
 
     _cortar()
     assert _todas(admin)["pode_decidir"] is True
@@ -211,8 +221,19 @@ def test_etapa_final_encerra_a_favorita_mesmo_com_prazo_por_vir(admin):
     assert (perdida["prazo"], perdida["favorita"]["etapa"], [m["rotulo"] for m in perdida["favorita"]["mudancas"]]) == (
         None, "perdida", ["Resultado"])
     assert all(p["situacao"] is None for p in perdida["favorita"]["prazos"])
-    # e em Todas, encerradas
+    # e em Todas, encerradas; e a conta das novas da Triagem e' a das em aberto de Todas
     assert sorted(_chaves(_todas(admin, situacao="encerrada"))) == [_chave(1), _chave(2)]
+    assert _triagem(admin)["contagens"]["novas"] == _opcoes(_todas(admin), "situacao")["em-aberto"] == 1
+
+
+def test_no_calendario_a_etapa_final_tira_o_que_vence_e_deixa_o_que_passou(admin):
+    dossie = {"pasta": "2026-CE-002-exemplo", "etapa": "perdida", "selos": [], "prazos": [
+        {"codigo": "visita", "rotulo": "Visita técnica", "data": "2026-11-10", "hora": None, "aviso": ""},
+        {"codigo": "recurso", "rotulo": "Recurso", "data": "2026-11-27", "hora": None, "aviso": ""}]}
+    _receber(admin, _c(1, dossie=dossie, data_sessao="2026-11-20"), favoritas=[{"chave": _chave(1), "desde": "2026-11-02"}])
+    cal = admin.get("/api/licitacoes/calendario", params={"mes": "2026-11"}).json()
+    assert sorted((p["data"], p["codigo"]) for s in cal["semanas"] for d in s for p in d["prazos"]) == [
+        ("2026-11-10", "visita"), ("2026-11-20", "sessao")]
 
 
 def test_vencida_e_proposta_enviada_nao_encerram(admin):
