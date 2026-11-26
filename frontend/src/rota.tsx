@@ -45,6 +45,9 @@ export type AbaContratante = "obras" | "medicoes" | "a-receber" | "siga" | "avis
 export type AbaFechamento = "meses" | "comparacao" | "contratantes";
 // Vistas das Favoritas das Licitacoes (fatia 2 da #906). A lista e' a padrao e nao entra na URL.
 export type VistaFavoritas = "lista" | "quadro" | "calendario";
+// As duas vistas de Todas (fatia 3 da #906): as novas ("/licitacoes/todas", a padrao) e as de grande vulto
+// ("/licitacoes/grande-vulto"). A busca e os filtros vao na busca do endereco (?q=ponte&tipo=Rodovia&ordem=valor).
+export type VistaTodas = "novas" | "grande-vulto";
 
 export type Rota =
   | { tela: "raiz" }
@@ -59,6 +62,7 @@ export type Rota =
   // e "/licitacoes/favoritas/calendario", com o mes na busca (?mes=2026-12)
   | { tela: "licitacoes" }
   | { tela: "licitacoes-favoritas"; vista?: VistaFavoritas }
+  | { tela: "licitacoes-todas"; vista?: VistaTodas }
   | { tela: "documentos"; pagina?: PaginaDocumentos }
   | { tela: "documentos-empresa"; id: number; aba?: AbaDocumentos }
   | { tela: "obras"; aba?: AbaObras }
@@ -171,6 +175,13 @@ export function parseRota(pathname: string): Rota {
     return { tela: "licitacoes-favoritas", vista: c };
   }
   if (a === "licitacoes" && partes.length === 3 && b === "favoritas" && c === "lista") return { tela: "licitacoes-favoritas" };
+  // Todas e Grande vulto (fatia 3 da #906): "/licitacoes/todas" e "/licitacoes/grande-vulto"; "/licitacoes/todas/novas"
+  // e "/licitacoes/todas/grande-vulto" tambem abrem, e o App troca a URL pela canonica
+  if (a === "licitacoes" && partes.length === 2 && b === "todas") return { tela: "licitacoes-todas" };
+  if (a === "licitacoes" && partes.length === 2 && b === "grande-vulto") return { tela: "licitacoes-todas", vista: "grande-vulto" };
+  if (a === "licitacoes" && partes.length === 3 && b === "todas" && (c === "novas" || c === "grande-vulto")) {
+    return c === "novas" ? { tela: "licitacoes-todas" } : { tela: "licitacoes-todas", vista: c };
+  }
   // As vistas de Obras (#805): "/obras/todas", "/obras/andamento", "/obras/qdop"; "Por contratante" e' "/obras". Os
   // enderecos de antes ("/obras/posicao", "/obras/resumo") abrem a vista que ficou no lugar.
   if (a === "obras" && partes.length === 2) {
@@ -251,6 +262,7 @@ export function caminhoDe(r: Rota): string {
     case "notas-envio": return `/notas/envio/${r.id}`;
     case "fechamento": return r.aba && r.aba !== "meses" ? `/fechamento/${r.aba}` : "/fechamento";
     case "licitacoes-favoritas": return r.vista && r.vista !== "lista" ? `/licitacoes/favoritas/${r.vista}` : "/licitacoes/favoritas";
+    case "licitacoes-todas": return r.vista === "grande-vulto" ? "/licitacoes/grande-vulto" : "/licitacoes/todas";
     default: return `/${r.tela}`;
   }
 }

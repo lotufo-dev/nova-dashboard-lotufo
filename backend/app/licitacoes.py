@@ -9,6 +9,7 @@ depois do corte sao gravadas por `licitacoes_decisoes.py`. Nada se apaga.
 import datetime
 import hashlib
 import json
+import unicodedata
 
 from app import db, feriados, tempo
 
@@ -16,6 +17,9 @@ ETAPAS = (("acompanhando", "Acompanhando"), ("em_analise", "Em análise"), ("pro
           ("vencida", "Vencida"), ("perdida", "Perdida"), ("desistida", "Desistida"), ("encerrada", "Encerrada"))
 ROTULO_ETAPA = dict(ETAPAS)
 ETAPA_PADRAO = "acompanhando"
+# a etapa final encerra a favorita (decisao do dono de 26/11/2026, #906): sai da Triagem e do calendario e fica entre as
+# encerradas das Favoritas, onde o resultado publicado depois continua aparecendo
+ETAPAS_FINAIS = ("perdida", "desistida")
 
 PRAZO_CRITICO = 5                 # dias uteis ate' o prazo: critico ate' aqui
 PRAZO_BREVE = 15                  # vence em breve ate' aqui; e' tambem o corte da Triagem
@@ -263,9 +267,14 @@ def mudancas(dados: dict, fav) -> list[dict]:
     return sorted(lista.values(), key=lambda m: m["data"], reverse=True)
 
 
+def _etapa(dossie: dict, fav) -> str:
+    """A etapa da favorita: a do dossie, quando ha'; senao a escolhida (no radar ou na tela); senao a padrao."""
+    return dossie.get("etapa") or fav["etapa"] or ETAPA_PADRAO
+
+
 def _favorita(fav, dados: dict, hoje: datetime.date, encerrada: bool) -> dict:
     dossie = dados.get("dossie")
-    etapa = (dossie or {}).get("etapa") or fav["etapa"] or ETAPA_PADRAO
+    etapa = _etapa(dossie or {}, fav)
     prazos = _prazos(dados, hoje)
     if encerrada:                                       # licitacao encerrada nao tem prazo correndo
         prazos = [{**p, "situacao": None} for p in prazos]
@@ -285,9 +294,11 @@ def _linha(row, hoje: datetime.date, fav=None) -> dict:
     du = dias_uteis_ate(hoje, sessao) if sessao else None
     passou = sessao is not None and sessao < hoje                        # pela data: ver situacao_do_prazo
     # a favorita com prazo do dossie que ainda nao passou (recurso, assinatura, depois da sessao) continua em aberto:
-    # a proposta enviada tem prazo correndo. O que o radar diz encerrado continua encerrado.
-    corre = fav is not None and any(p["data"] >= hoje.isoformat() for p in (dados.get("dossie") or {}).get("prazos") or [])
-    encerrada = bool(dados["encerrada"]) or (passou and not corre)
+    # a proposta enviada tem prazo correndo. O que o radar diz encerrado continua encerrado, e a favorita na etapa
+    # final (perdida, desistida) tambem, com prazo por vir ou nao.
+    dossie = dados.get("dossie") or {}
+    corre = fav is not None and any(p["data"] >= hoje.isoformat() for p in dossie.get("prazos") or [])
+    encerrada = bool(dados["encerrada"]) or (passou and not corre) or (fav is not None and _etapa(dossie, fav) in ETAPAS_FINAIS)
     linha = {"id": row["id"], "chave": row["chave"], **{k: dados.get(k) for k in _DA_LINHA}, "dias_uteis": du,
              "sessao_hoje": sessao == hoje,
              "prazo": None if encerrada else situacao_do_prazo(du, passou), "encerrada": encerrada, "favorita": None}
@@ -341,6 +352,8 @@ def calendario(conn, mes: str | None = None) -> dict:
         do_mes = primeiro.isoformat()[:7]
         por_dia: dict[str, list[dict]] = {}
         for l in _linhas_das_favoritas(conn, hoje):
+            if l["favorita"]["etapa"] in ETAPAS_FINAIS:          # a etapa final encerrou a favorita: nada mais vence
+                continue
             for p in l["favorita"]["prazos"]:
                 if p["data"][:7] == do_mes:
                     por_dia.setdefault(p["data"], []).append(
@@ -429,3 +442,132 @@ def resumo(conn) -> dict:
     """A linha das licitacoes na Inicio: os numeros sao os da Triagem, pela mesma funcao."""
     t = triagem(conn)
     return {"leitura": t["leitura"], "recomendadas": t["contagens"]["recomendadas"], "favoritas": len(t["favoritas"])}
+
+
+# --- Todas e Grande vulto (fatia 3 da #906) -----------------------------------------------------------------------
+
+VISTAS_TODAS = {"novas": "nova", "grande-vulto": "grande_vulto"}       # a vista e a coluna que a recorta
+ORDENS = (("padrao", "Padrão"), ("prazo", "Prazo"), ("publicacao", "Publicação"), ("valor", "Valor"))
+_MI = 100_000_000                                                       # R$ 1 milhao, em centavos
+# as faixas: o codigo, o rotulo e o teto (o valor abaixo do teto; a distancia ate' o teto, inclusive)
+FAIXAS_VALOR = (("ate-1mi", "Até R$ 1 mi", _MI), ("1-10mi", "De R$ 1 a 10 mi", 10 * _MI),
+                ("10-50mi", "De R$ 10 a 50 mi", 50 * _MI), ("50-150mi", "De R$ 50 a 150 mi", 150 * _MI),
+                ("150mi", "R$ 150 mi ou mais", None), ("sem-valor", "Sem valor", None))
+FAIXAS_KM = (("ate-100", "Até 100 km", 100), ("100-300", "De 100 a 300 km", 300), ("300-600", "De 300 a 600 km", 600),
+             ("acima-600", "Acima de 600 km", None), ("sem-km", "Sem distância", None))
+SITUACOES = (("em-aberto", "Em aberto"), ("encerrada", "Encerrada"))
+DECISOES = (("favorita", "Favorita"), ("descartada", "Descartada"), ("sem-decisao", "Sem decisão"))
+_BUSCAVEL = ("orgao", "unidade", "sigla_orgao", "edital", "processo", "objeto", "objeto_completo", "municipio", "cidade")
+
+
+def _sem_acento(texto: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c)).casefold()
+
+
+def _faixa_valor(centavos: int | None) -> str:
+    if centavos is None:
+        return "sem-valor"
+    return next(codigo for codigo, _, teto in FAIXAS_VALOR if teto is None or centavos < teto)
+
+
+def _faixa_km(km: int | None) -> str:
+    if km is None:
+        return "sem-km"
+    return next(codigo for codigo, _, teto in FAIXAS_KM if teto is None or km <= teto)
+
+
+def _da_linha(chave: str):
+    return lambda l: l[chave] or ""
+
+
+# os filtros de escolha, na ordem da tela: o nome no endereco, o rotulo, o valor de cada linha e as opcoes fixas (sem
+# elas, as opcoes saem dos valores das linhas da vista, em ordem alfabetica)
+_FILTROS = (
+    ("tipo", "Tipo de obra", _da_linha("tipo_obra"), None),
+    ("modalidade", "Modalidade", _da_linha("modalidade"), None),
+    ("orgao", "Órgão", _da_linha("grupo_orgao"), None),
+    ("esfera", "Esfera", _da_linha("esfera"), None),
+    ("valor", "Valor", lambda l: _faixa_valor(l["valor_centavos"]), [(c, r) for c, r, _ in FAIXAS_VALOR]),
+    ("km", "Distância", lambda l: _faixa_km(l["km"]), [(c, r) for c, r, _ in FAIXAS_KM]),
+    ("situacao", "Situação", lambda l: "encerrada" if l["encerrada"] else "em-aberto", list(SITUACOES)),
+    ("decisao", "Decisão", lambda l: "favorita" if l["favorita"] else "descartada" if l["descarte"] else "sem-decisao",
+     list(DECISOES)),
+    ("portal", "Portal", _da_linha("portal"), None),
+)
+
+
+def _ordenar(linhas: list[dict], ordem: str) -> None:
+    """As quatro ordens; em todas, as encerradas depois das em aberto e, no empate, a chave."""
+    def dia(texto: str | None) -> int:
+        return datetime.date.fromisoformat(texto).toordinal() if texto else 0
+    chaves = {
+        "padrao": lambda l: (l["recomendada"] is None, -(l["recomendada"] or {}).get("nota", 0),
+                             l["dias_uteis"] if l["dias_uteis"] is not None else 9999),
+        "prazo": lambda l: (l["data_sessao"] is None, l["data_sessao"] or "", l["hora_sessao"] or "99:99"),
+        "publicacao": lambda l: (l["data_publicacao"] is None, -dia(l["data_publicacao"])),
+        "valor": lambda l: (l["valor_centavos"] is None, -(l["valor_centavos"] or 0)),
+    }
+    linhas.sort(key=lambda l: (l["encerrada"], *chaves[ordem](l), l["chave"]))
+
+
+def todas(conn, vista: str, filtros: dict, ordem: str = "padrao") -> dict:
+    """A lista inteira de uma vista (as novas, ou as de grande vulto) que o radar mostra hoje, com a busca, os filtros
+    e a ordem. Cada linha e' a mesma da Triagem e das Favoritas (`_linha`), com a decisao em vigor. Cada filtro de
+    escolha vem com as opcoes e a quantidade de cada uma, contada com os outros filtros aplicados: e' quantas linhas a
+    lista teria escolhendo-a. `filtros`: q, tipo, modalidade, orgao, esfera, valor, km, situacao, decisao, portal
+    (texto; vazio e' sem filtro) e sessao_de, sessao_ate (data ou None)."""
+    coluna = VISTAS_TODAS[vista]
+    with db.leitura(conn):
+        hoje = tempo.hoje_local()
+        linhas = []
+        for r in conn.execute(
+                "SELECT c.id, c.chave, c.dados, f.desde, f.etapa, f.mudancas_vistas, d.motivo, d.criado_em "
+                "FROM lic_certames c "
+                "LEFT JOIN lic_favoritas f ON f.chave=c.chave AND f.removida_em IS NULL "
+                "LEFT JOIN lic_descartes d ON d.chave=c.chave AND d.desfeito_em IS NULL "
+                f"WHERE c.fora_desde IS NULL AND c.{coluna}=1"):
+            linha = _linha(r, hoje, r if r["desde"] is not None else None)
+            linha["descarte"] = (None if r["motivo"] is None else
+                                 {"motivo": r["motivo"], "rotulo": r["motivo"][0].upper() + r["motivo"][1:],
+                                  "quando": tempo.iso_utc(r["criado_em"])})
+            dados = json.loads(r["dados"])
+            linha["_busca"] = _sem_acento(" ".join([r["chave"], *(str(dados.get(k) or "") for k in _BUSCAVEL)]))
+            linhas.append(linha)
+
+        palavras = _sem_acento(filtros.get("q") or "").split()
+        de, ate = filtros.get("sessao_de"), filtros.get("sessao_ate")
+
+        def passa_fixos(l: dict) -> bool:
+            """A busca e as datas da sessao, que nao tem opcoes para contar."""
+            if any(p not in l["_busca"] for p in palavras):
+                return False
+            if (de or ate) and l["data_sessao"] is None:
+                return False
+            return not ((de and l["data_sessao"] < de.isoformat()) or (ate and l["data_sessao"] > ate.isoformat()))
+
+        escolhidos = {nome: filtros.get(nome) or "" for nome, *_ in _FILTROS}
+
+        def passa(l: dict, menos: str | None = None) -> bool:
+            return passa_fixos(l) and all(not v or nome == menos or valor(l) == v
+                                          for (nome, _, valor, _), v in zip(_FILTROS, escolhidos.values()))
+
+        opcoes_dos_filtros = []
+        for nome, rotulo, valor, fixas in _FILTROS:
+            contagem: dict[str, int] = {}
+            for l in linhas:
+                if passa(l, menos=nome):
+                    contagem[valor(l)] = contagem.get(valor(l), 0) + 1
+            opcoes = fixas if fixas is not None else [(v, v) for v in sorted({valor(l) for l in linhas} - {""})]
+            escolhido = escolhidos[nome]
+            if escolhido and escolhido not in {v for v, _ in opcoes}:
+                opcoes = [*opcoes, (escolhido, escolhido)]          # o valor do endereco que nao existe: com zero
+            opcoes_dos_filtros.append({"filtro": nome, "rotulo": rotulo, "escolhido": escolhido or None,
+                                       "opcoes": [{"valor": v, "rotulo": r, "n": contagem.get(v, 0)} for v, r in opcoes]})
+
+        achadas = [l for l in linhas if passa(l)]
+        _ordenar(achadas, ordem)
+        for l in achadas:
+            del l["_busca"]
+        return {"leitura": leitura(conn), "decisoes": _lado_das_decisoes(conn), "vista": vista, "total": len(linhas),
+                "ordem": ordem, "ordens": [{"ordem": o, "rotulo": r} for o, r in ORDENS],
+                "filtros": opcoes_dos_filtros, "linhas": achadas}

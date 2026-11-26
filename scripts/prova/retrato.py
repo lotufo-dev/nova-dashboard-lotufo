@@ -93,6 +93,7 @@ ROTAS = (
     "/api/licitacoes/favoritas",
     "/api/licitacoes/calendario",       # fatia 2 da #906: o mes das favoritas
     "/api/licitacoes/resumo",           # idem: a linha das licitacoes na Inicio
+    "/api/licitacoes/todas",            # fatia 3 da #906: Todas e Grande vulto
     "/api/admin/pendencias-cadastro",
     "/api/admin/usuarios",
 )

@@ -665,6 +665,30 @@ export const TELAS = [
     espera: "#conteudo [role=alert]", erro: true, simular: falha(/^\/api\/licitacoes\/calendario$/) },
   { rota: "licitacoes-favoritas", id: "licitacoes-calendario-sem-permissao", caminho: "/licitacoes/favoritas/calendario", destino: "/inicio",
     perfis: SEM_LICITACOES, espera: ".ini" },
+  // ---- Licitacoes, fatia 3 da #906: Todas e Grande vulto. Com o servidor de verdade, a lista vazia (o banco da prova
+  // nunca recebeu leitura do radar). Simulados: com dados (antes e depois do corte), filtrada, sem resultado para o filtro,
+  // vazia com a leitura atrasada e a falha de leitura; a vista de grande vulto com dados e vazia.
+  { rota: "licitacoes-todas", id: "licitacoes-todas", caminho: "/licitacoes/todas", perfis: VE_LICITACOES, espera: ".lic .lic-filtros" },
+  { rota: "licitacoes-todas", id: "licitacoes-todas-dados", caminho: "/licitacoes/todas", perfis: VE_LICITACOES,
+    espera: ".lic .lic-tabela--nota tbody tr", simular: comTodas() },
+  { rota: "licitacoes-todas", id: "licitacoes-todas-decidir", caminho: "/licitacoes/todas", perfis: VE_LICITACOES,
+    espera: ".lic .lic-tabela--decide .lic-acoes .btn", simular: comTodas({ decide: true }) },
+  { rota: "licitacoes-todas", id: "licitacoes-todas-filtrada", caminho: "/licitacoes/todas?tipo=Edifica%C3%A7%C3%A3o", perfis: VE_LICITACOES,
+    espera: ".lic .lic-limpar", simular: comTodas({ filtrado: true }) },
+  { rota: "licitacoes-todas", id: "licitacoes-todas-nada", caminho: "/licitacoes/todas?tipo=Ferrovia", perfis: VE_LICITACOES,
+    espera: ".lic .lic-bloco .vazio", simular: comTodas({ nada: true }) },
+  { rota: "licitacoes-todas", id: "licitacoes-todas-atrasada", caminho: "/licitacoes/todas", perfis: VE_LICITACOES,
+    espera: ".lic .lic-leitura .aviso", simular: comTodas({ vazia: true, atrasada: true }) },
+  { rota: "licitacoes-todas", id: "licitacoes-todas-erro", caminho: "/licitacoes/todas", perfis: VE_LICITACOES,
+    espera: "#conteudo [role=alert]", erro: true, simular: falha(/^\/api\/licitacoes\/todas$/) },
+  { rota: "licitacoes-todas", id: "licitacoes-grande-vulto", caminho: "/licitacoes/grande-vulto", perfis: VE_LICITACOES,
+    espera: ".lic .lic-tabela--nota tbody tr", simular: comTodas({ vista: "grande-vulto" }) },
+  { rota: "licitacoes-todas", id: "licitacoes-grande-vulto-vazia", caminho: "/licitacoes/grande-vulto", perfis: VE_LICITACOES,
+    espera: ".lic .lic-bloco .vazio", simular: comTodas({ vista: "grande-vulto", vazia: true }) },
+  { rota: "licitacoes-todas", id: "licitacoes-todas-sem-permissao", caminho: "/licitacoes/todas", destino: "/inicio",
+    perfis: SEM_LICITACOES, espera: ".ini" },
+  { rota: "licitacoes-todas", id: "licitacoes-grande-vulto-sem-permissao", caminho: "/licitacoes/grande-vulto", destino: "/inicio",
+    perfis: SEM_LICITACOES, espera: ".ini" },
   { rota: "inicio", id: "inicio-licitacoes", caminho: "/inicio", perfis: VE_LICITACOES, espera: ".ini-licitacoes .ini-aviso",
     simular: [{ caminho: /^\/api\/licitacoes\/resumo$/, corpo: resumoDasLicitacoes() }] },
   { rota: "inicio", id: "inicio-licitacoes-atrasada", caminho: "/inicio", perfis: VE_LICITACOES, espera: ".ini-licitacoes .aviso",
@@ -725,7 +749,11 @@ import { ABAS_DA_CARTEIRA, aReceberDoContratante, medicoesDoContratante, SIGA_DO
 import { medicaoComProtocoloNovo, SIGA_ENCERRAMENTO } from "./simulados.mjs";
 
 // ---- Licitacoes (#908 e fatia 2 da #906): quem tem `ver_licitacoes` e as respostas simuladas das paginas (ver simulados.mjs)
-import { licitacaoAnalisada, licitacoesCalendario, licitacoesFavoritas, licitacoesTriagem, resumoDasLicitacoes } from "./simulados.mjs";
+import { licitacaoAnalisada, licitacoesCalendario, licitacoesFavoritas, licitacoesTodas, licitacoesTriagem, resumoDasLicitacoes } from "./simulados.mjs";
+
+function comTodas(opcoes) {
+  return [{ caminho: /^\/api\/licitacoes\/todas$/, corpo: licitacoesTodas(opcoes) }];
+}
 
 function comTriagem(opcoes) {
   return [{ caminho: /^\/api\/licitacoes\/triagem$/, corpo: licitacoesTriagem(opcoes) }];

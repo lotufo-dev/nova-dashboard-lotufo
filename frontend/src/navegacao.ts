@@ -1,5 +1,5 @@
 import { pode } from "./permissoes";
-import type { AbaContratante, AbaDocumentos, AbaFechamento, Busca, PaginaDocumentos, Rota, VistaFavoritas } from "./rota";
+import type { AbaContratante, AbaDocumentos, AbaFechamento, Busca, PaginaDocumentos, Rota, VistaFavoritas, VistaTodas } from "./rota";
 
 // Menu, entrada e caminho por perfil. Funcoes puras: a casca (Casca.tsx, Caminho.tsx) so' desenha o que sai daqui.
 //
@@ -17,12 +17,13 @@ export type Perfil = "engenharia" | "diretoria" | "admin";
 
 /** As paginas do menu. */
 export type ItemMenu = "inicio" | "medicoes" | "resumo-medicoes" | "obras" | "fechamento" | "a-receber" | "avisos" | "siga"
-  | "licitacoes" | "licitacoes-favoritas" | "certidoes" | "regularidade" | "garantias" | "ancoras-docusign" | "admin" | "conta";
+  | "licitacoes" | "licitacoes-favoritas" | "licitacoes-todas" | "certidoes" | "regularidade" | "garantias" | "ancoras-docusign" | "admin" | "conta";
 export type IdArea = "painel" | "medicoes" | "obras" | "financeiro" | "prazos" | "orgaos" | "licitacoes" | "documentos" | "sistema";
 
 export const ROTULO: Record<ItemMenu, string> = {
   inicio: "Início", medicoes: "Medições", "resumo-medicoes": "Resumo das medições", obras: "Obras", fechamento: "Fechamento",
   "a-receber": "Em aberto", avisos: "Avisos", siga: "SIGA", licitacoes: "Triagem", "licitacoes-favoritas": "Favoritas",
+  "licitacoes-todas": "Todas",
   certidoes: "Certidões", regularidade: "Regularidade mensal",
   garantias: "Garantias", "ancoras-docusign": "Âncoras DocuSign", admin: "Administração", conta: "Minha conta",
 };
@@ -38,7 +39,7 @@ export const AREAS: readonly Area[] = [
   { id: "prazos", rotulo: "Prazos e avisos", paginas: ["avisos"] },
   { id: "orgaos", rotulo: "Órgãos", paginas: ["siga"] },
   // Licitacoes (#908): depois de Orgaos e antes de Documentos; a Triagem e' a pagina padrao da area ("/licitacoes")
-  { id: "licitacoes", rotulo: "Licitações", paginas: ["licitacoes", "licitacoes-favoritas"] },
+  { id: "licitacoes", rotulo: "Licitações", paginas: ["licitacoes", "licitacoes-favoritas", "licitacoes-todas"] },
   { id: "documentos", rotulo: "Documentos", paginas: ["certidoes", "regularidade", "garantias"] },
   { id: "sistema", rotulo: "Sistema", paginas: ["ancoras-docusign", "admin", "conta"] },
 ];
@@ -67,6 +68,7 @@ const DO_PERFIL: Record<Perfil, readonly Recorte[]> = {
 const RECORTE_DA_PAGINA: Record<ItemMenu, Recorte | null> = {
   inicio: "inicio", medicoes: "medicoes", "resumo-medicoes": "resumo-medicoes", obras: "obras", fechamento: "fechamento",
   "a-receber": "fechamento", avisos: "avisos", siga: "siga", licitacoes: "licitacoes", "licitacoes-favoritas": "licitacoes",
+  "licitacoes-todas": "licitacoes",
   certidoes: "documentos", regularidade: "documentos",
   garantias: "documentos", "ancoras-docusign": "ancoras-docusign", admin: "admin", conta: null,
 };
@@ -188,6 +190,8 @@ const ABAS_DA_ADMINISTRACAO: Record<string, string> = {
 const VISTAS_DO_FECHAMENTO: Record<Exclude<AbaFechamento, "meses">, string> = { comparacao: "Comparação", contratantes: "Por contratante" };
 // As vistas das Favoritas das Licitacoes (fatia 2 da #906); a lista e' a padrao
 export const VISTAS_DAS_FAVORITAS: Record<VistaFavoritas, string> = { lista: "Lista", quadro: "Quadro", calendario: "Calendário" };
+// As vistas de Todas (fatia 3 da #906); as novas sao a padrao
+export const VISTAS_DE_TODAS: Record<VistaTodas, string> = { novas: "Todas", "grande-vulto": "Grande vulto" };
 
 /** O nome da vista da rota, quando ela nao e' a padrao: e' o ultimo trecho do caminho e entra no titulo da aba do
  *  navegador ("Obras · QDOP"). `nomes.vista`: o nome que a pagina publicou, para a vista que se chama pelo dado. */
@@ -202,6 +206,7 @@ export function vistaDe(r: Rota, nomes: NomesDoCaminho = {}): string | undefined
       if (r.aba === "comparacao") return nomes.vista || VISTAS_DO_FECHAMENTO.comparacao;
       return r.aba === "contratantes" ? VISTAS_DO_FECHAMENTO.contratantes : undefined;
     case "licitacoes-favoritas": return r.vista && r.vista !== "lista" ? VISTAS_DAS_FAVORITAS[r.vista] : undefined;
+    case "licitacoes-todas": return r.vista === "grande-vulto" ? VISTAS_DE_TODAS["grande-vulto"] : undefined;
     default: return undefined;
   }
 }

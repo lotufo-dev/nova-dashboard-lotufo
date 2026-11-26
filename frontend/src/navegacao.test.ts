@@ -28,7 +28,7 @@ describe("navegação por perfil", () => {
       ["Financeiro", ["Fechamento", "Em aberto"]],
       ["Prazos e avisos", ["Avisos"]],
       ["Órgãos", ["SIGA"]],
-      ["Licitações", ["Triagem", "Favoritas"]],
+      ["Licitações", ["Triagem", "Favoritas", "Todas"]],
       ["Documentos", ["Certidões", "Regularidade mensal", "Garantias"]],
       ["Sistema", ["Âncoras DocuSign", "Administração", "Minha conta"]],
     ]);
@@ -45,7 +45,7 @@ describe("navegação por perfil", () => {
     expect(menu("admin")).toEqual([
       ["Painel", ["inicio"]], ["Medições", ["medicoes", "resumo-medicoes"]], ["Obras", ["obras"]],
       ["Financeiro", ["fechamento", "a-receber"]], ["Prazos e avisos", ["avisos"]], ["Órgãos", ["siga"]],
-      ["Licitações", ["licitacoes", "licitacoes-favoritas"]],
+      ["Licitações", ["licitacoes", "licitacoes-favoritas", "licitacoes-todas"]],
       ["Documentos", ["certidoes", "regularidade", "garantias"]], ["Sistema", ["ancoras-docusign", "admin", "conta"]],
     ]);
     // a engenharia não tem a área Licitações (#908): só o administrador
@@ -69,11 +69,12 @@ describe("navegação por perfil", () => {
       // com a permissão, a área entra depois de Órgãos e antes de Documentos, com a Triagem e as Favoritas
       const areas = menuDe(perfil, com).map(a => a.id);
       expect(areas.slice(areas.indexOf("orgaos"), areas.indexOf("documentos") + 1)).toEqual(["orgaos", "licitacoes", "documentos"]);
-      expect(menuDe(perfil, com).find(a => a.id === "licitacoes")!.paginas).toEqual(["licitacoes", "licitacoes-favoritas"]);
+      expect(menuDe(perfil, com).find(a => a.id === "licitacoes")!.paginas).toEqual(["licitacoes", "licitacoes-favoritas", "licitacoes-todas"]);
       // sem a permissão (ou sem a lista), nenhum perfil tem as páginas, e a área some
       const sem = PERMISSOES[perfil].filter(p => p !== "ver_licitacoes");
       expect(paginasDe(perfil, sem)).not.toContain("licitacoes");
       expect(paginasDe(perfil, sem)).not.toContain("licitacoes-favoritas");
+      expect(paginasDe(perfil, sem)).not.toContain("licitacoes-todas");
       expect(menuDe(perfil, sem).map(a => a.id)).not.toContain("licitacoes");
       expect(menuDe(perfil).map(a => a.id)).not.toContain("licitacoes");
     }
@@ -109,7 +110,7 @@ describe("navegação por perfil", () => {
     // a Triagem (a mesma permissão)
     const VEM_DE: Partial<Record<ItemMenu, string | null>> = {
       "a-receber": "fechamento", certidoes: "documentos", regularidade: "documentos", garantias: "documentos", conta: null,
-      "licitacoes-favoritas": "licitacoes" };
+      "licitacoes-favoritas": "licitacoes", "licitacoes-todas": "licitacoes" };
     for (const perfil of ["engenharia", "diretoria", "admin"]) {
       const exigidas = paginasDe(perfil, PERMISSOES[perfil]).map(i => (i in VEM_DE ? VEM_DE[i] : i)).filter(x => x !== null);
       for (const tela of exigidas) expect(ANTES[perfil], `${perfil} não via ${tela}`).toContain(tela);
@@ -124,7 +125,7 @@ describe("navegação por perfil", () => {
   it("cada página do menu tem o próprio endereço", () => {
     const enderecosDoMenu = paginasDe("admin", PERMISSOES.admin).map(i => caminhoDe(rotaDoItem(i)));
     expect(enderecosDoMenu).toEqual(["/inicio", "/medicoes", "/resumo-medicoes", "/obras", "/fechamento", "/a-receber", "/avisos", "/siga",
-      "/licitacoes", "/licitacoes/favoritas",
+      "/licitacoes", "/licitacoes/favoritas", "/licitacoes/todas",
       "/documentos", "/documentos/regularidade", "/documentos/garantias", "/ancoras-docusign", "/admin", "/conta"]);
     expect(new Set(enderecosDoMenu).size).toBe(enderecosDoMenu.length);
     // e o endereço acende a própria página
@@ -262,6 +263,18 @@ describe("o caminho de cada rota (#814)", () => {
     }
   });
 
+  it("Todas e Grande vulto (fatia 3 da #906): a página Todas no menu; Grande vulto é o último trecho e acende Todas", () => {
+    const com = (r: Rota) => trechosDe(r, { perfil: "admin", permissoes: PERMISSOES.admin });
+    const gv: Rota = { tela: "licitacoes-todas", vista: "grande-vulto" };
+    expect(rotulos(com({ tela: "licitacoes-todas" }))).toEqual(["Licitações", "Todas"]);
+    expect(enderecos(com({ tela: "licitacoes-todas" }))).toEqual(["/licitacoes", "/licitacoes/todas"]);
+    expect(rotulos(com(gv))).toEqual(["Licitações", "Todas", "Grande vulto"]);
+    expect(enderecos(com(gv))).toEqual(["/licitacoes", "/licitacoes/todas", "/licitacoes/grande-vulto"]);
+    expect([vistaDe(gv), vistaDe({ tela: "licitacoes-todas" }), vistaDe({ tela: "licitacoes-todas", vista: "novas" })])
+      .toEqual(["Grande vulto", undefined, undefined]);
+    expect([itemDe(gv), areaDe(gv), tituloDe("licitacoes-todas")]).toEqual(["licitacoes-todas", "licitacoes", "Todas"]);
+  });
+
   it("tela sem área no menu não derruba o topo: sai só o nome dela", () => {
     const semArea = { tela: "tela-que-ainda-nao-existe" } as unknown as Rota;
     expect(() => de(semArea)).not.toThrow();
@@ -371,7 +384,8 @@ describe("o caminho de cada rota (#814)", () => {
   it("toda rota tem caminho, com um título só, e o último trecho é o endereço dela", () => {
     const rotas: Rota[] = [
       { tela: "inicio" }, { tela: "medicoes" }, { tela: "medicoes", aba: "quadro" }, { tela: "resumo-medicoes" }, { tela: "avisos" },
-      { tela: "siga" }, { tela: "licitacoes" }, { tela: "licitacoes-favoritas" },
+      { tela: "siga" }, { tela: "licitacoes" }, { tela: "licitacoes-favoritas" }, { tela: "licitacoes-todas" },
+      { tela: "licitacoes-todas", vista: "grande-vulto" },
       { tela: "documentos" }, { tela: "documentos", pagina: "regularidade" }, { tela: "documentos-empresa", id: 3 },
       { tela: "obras" }, { tela: "obras", aba: "todas" }, { tela: "contratante", chave: "sinfra" },
       { tela: "contratante", chave: "sinfra", aba: "medicoes" }, { tela: "a-receber" }, { tela: "fechamento" }, { tela: "notas-envio", id: 5 },

@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { api } from "./api";
 import Busca from "./Busca";
 import Caminho from "./Caminho";
-import { IconeAjustes, IconeAReceber, IconeArquivo, IconeCifrao, IconeDocumento, IconeDocumentoVisto, IconeEscudo, IconeEstrela, IconeFunil,
+import { IconeAjustes, IconeAReceber, IconeArquivo, IconeCifrao, IconeDocumento, IconeDocumentoVisto, IconeEscudo, IconeEstrela, IconeFunil, IconeLupa,
   IconeGrade, IconeInicio, IconeMedicoes, IconeObras, IconePessoa, IconeSiga, IconeSeta, IconeSino, IconeVoltar } from "./icones";
 import type { Usuario } from "./Login";
 import { areaEhAPagina, menuDe, ROTULO, rotaDoItem, type ItemMenu } from "./navegacao";
@@ -45,7 +45,7 @@ function estadoInicial(): "largo" | "recolhido" {
 
 const ICONES: Record<ItemMenu, (p: { className?: string }) => React.ReactElement> = {
   inicio: IconeInicio, medicoes: IconeMedicoes, "resumo-medicoes": IconeGrade, obras: IconeObras, fechamento: IconeCifrao,
-  "a-receber": IconeAReceber, avisos: IconeSino, siga: IconeSiga, licitacoes: IconeFunil, "licitacoes-favoritas": IconeEstrela,
+  "a-receber": IconeAReceber, avisos: IconeSino, siga: IconeSiga, licitacoes: IconeFunil, "licitacoes-favoritas": IconeEstrela, "licitacoes-todas": IconeLupa,
   certidoes: IconeDocumento, regularidade: IconeDocumentoVisto,
   garantias: IconeEscudo, "ancoras-docusign": IconeArquivo, admin: IconeAjustes, conta: IconePessoa,
 };

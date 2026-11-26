@@ -1159,6 +1159,7 @@ const licLeitura = ({ atrasada = false, problemas = 2 } = {}) => ({
 const licPoder = decide => ({ decisoes: decide ? "dashboard" : "radar", pode_decidir: decide });
 const LIC_ETAPAS = [["acompanhando", "Acompanhando"], ["em_analise", "Em análise"], ["proposta_enviada", "Proposta enviada"],
   ["vencida", "Vencida"], ["perdida", "Perdida"], ["desistida", "Desistida"], ["encerrada", "Encerrada"]].map(([etapa, rotulo]) => ({ etapa, rotulo }));
+const LIC_ETAPAS_FINAIS = ["perdida", "desistida"];
 const LIC_MOTIVOS = [["tipo de obra", "Tipo de obra"], ["local", "Local"], ["valor", "Valor"], ["órgão", "Órgão"], ["outro", "Outro"]]
   .map(([motivo, rotulo]) => ({ motivo, rotulo }));
 
@@ -1188,7 +1189,8 @@ export const licitacoesCalendario = ({ vazio = false } = {}) => () => {
   const hoje = dataEm(hojeDaProva()), mes = hoje.slice(0, 7);
   const outroMes = n => new Date(Date.UTC(Number(mes.slice(0, 4)), Number(mes.slice(5, 7)) - 1 + n, 1)).toISOString().slice(0, 7);
   const porDia = {};
-  for (const l of vazio ? [] : licFavoritas()) {
+  // a favorita na etapa final (perdida, desistida) nao tem mais prazo correndo: fica fora do calendario (fatia 3 da #906)
+  for (const l of vazio ? [] : licFavoritas().filter(l => !LIC_ETAPAS_FINAIS.includes(l.favorita.etapa))) {
     for (const p of l.favorita.prazos.filter(p => p.data.startsWith(mes))) {
       (porDia[p.data] ??= []).push({ ...p, licitacao: { id: l.id, chave: l.chave, orgao: l.orgao, sigla_orgao: l.sigla_orgao, edital: l.edital,
         modalidade: l.modalidade, objeto: l.objeto, link: l.link, encerrada: l.encerrada } });
@@ -1217,3 +1219,59 @@ export const licitacaoAnalisada = ({ semLink = false } = {}) => ({
  *  nao le ha' dias. */
 export const resumoDasLicitacoes = ({ atrasada = false } = {}) => () => ({
   leitura: licLeitura({ atrasada }), recomendadas: licRecomendadas().length, favoritas: 3 });
+
+// ---- Todas e Grande vulto (fatia 3 da #906): a lista inteira, com busca, filtros e ordem. As linhas sao as mesmas da
+// Triagem e das Favoritas, com a decisao em vigor (favorita, descartada ou nenhuma); duas descartadas, para a pagina
+// mostrar o motivo e o "Desfazer o descarte". Os filtros vem com as opcoes e as quantidades, como o servidor conta.
+// as opcoes saem das linhas da vista; a quantidade, das linhas contadas (as que os outros filtros deixam)
+const licOpcoes = (daVista, contadas, valor, fixas) => {
+  const conta = {};
+  for (const l of contadas) conta[valor(l)] = (conta[valor(l)] ?? 0) + 1;
+  const opcoes = fixas ?? [...new Set(daVista.map(valor).filter(Boolean))].sort().map(v => [v, v]);
+  return opcoes.map(([v, rotulo]) => ({ valor: v, rotulo, n: conta[v] ?? 0 }));
+};
+const licFiltros = (daVista, contadas, escolhidos = {}) => [
+  ["tipo", "Tipo de obra", l => l.tipo_obra], ["modalidade", "Modalidade", l => l.modalidade], ["orgao", "Órgão", l => l.grupo_orgao],
+  ["esfera", "Esfera", l => l.esfera ?? ""],
+  ["valor", "Valor", l => l.valor_centavos === null ? "sem-valor" : l.valor_centavos < 1e8 ? "ate-1mi" : l.valor_centavos < 1e9 ? "1-10mi"
+    : l.valor_centavos < 5e9 ? "10-50mi" : l.valor_centavos < 1.5e10 ? "50-150mi" : "150mi",
+    [["ate-1mi", "Até R$ 1 mi"], ["1-10mi", "De R$ 1 a 10 mi"], ["10-50mi", "De R$ 10 a 50 mi"], ["50-150mi", "De R$ 50 a 150 mi"],
+      ["150mi", "R$ 150 mi ou mais"], ["sem-valor", "Sem valor"]]],
+  ["km", "Distância", l => l.km === null ? "sem-km" : l.km <= 100 ? "ate-100" : l.km <= 300 ? "100-300" : l.km <= 600 ? "300-600" : "acima-600",
+    [["ate-100", "Até 100 km"], ["100-300", "De 100 a 300 km"], ["300-600", "De 300 a 600 km"], ["acima-600", "Acima de 600 km"], ["sem-km", "Sem distância"]]],
+  ["situacao", "Situação", l => l.encerrada ? "encerrada" : "em-aberto", [["em-aberto", "Em aberto"], ["encerrada", "Encerrada"]]],
+  ["decisao", "Decisão", l => l.favorita ? "favorita" : l.descarte ? "descartada" : "sem-decisao",
+    [["favorita", "Favorita"], ["descartada", "Descartada"], ["sem-decisao", "Sem decisão"]]],
+  ["portal", "Portal", l => l.portal],
+].map(([filtro, rotulo, valor, fixas]) => ({ filtro, rotulo, escolhido: escolhidos[filtro] ?? null,
+  // o tipo escolhido conta com os outros filtros (nenhum): todas as linhas da vista
+  opcoes: licOpcoes(daVista, filtro === "tipo" ? daVista : contadas, valor, fixas) }));
+const LIC_ORDENS = [["padrao", "Padrão"], ["prazo", "Prazo"], ["publicacao", "Publicação"], ["valor", "Valor"]].map(([ordem, rotulo]) => ({ ordem, rotulo }));
+const licDescartada = (n, motivo, rotulo, extra = {}) => ({ ...licitacao(n, extra), descarte: { motivo, rotulo, quando: `${licDia(-3)}T14:00:00+00:00` } });
+const licTodas = () => [
+  ...licRecomendadas(), ...licFavoritas().filter(l => !l.encerrada),
+  licDescartada(41, "local", "Local", { objeto: "Construção de creche no distrito de Serra Beta", tipo_obra: "Edificação", km: 640, cidade: "Serra Beta",
+    municipio: "Serra Beta", portal: "PNCP" }),
+  licDescartada(42, "valor", "Valor", { ...DER, objeto: "Conservação rotineira de rodovias", tipo_obra: "Rodovia", valor_centavos: 45000000 }),
+  licitacao(43, { objeto: "Reforma de unidade básica de saúde", tipo_obra: "Edificação", valor_centavos: 89000000, km: 35, cidade: "Porto Modelo",
+    municipio: "Porto Modelo", data_publicacao: licDia(-2), portal: "PNCP" }),
+  ...licFavoritas().filter(l => l.encerrada),
+].map(l => ({ descarte: null, ...l }));
+const licGrandeVulto = () => [
+  licitacao(51, { ...SEOBRAS, objeto: "Implantação de ferrovia estadual, trecho norte, com pátios e obras de arte especiais", tipo_obra: "Ferrovia",
+    valor_centavos: 184000000000, uf: "MT", data_sessao: licDia(30), dias_uteis: 21, prazo: null, km: 410 }),
+  licitacao(52, { orgao: "Departamento Nacional de Exemplo", sigla_orgao: "DN-EX", grupo_orgao: "Outros órgãos", esfera: "Federal",
+    objeto: "Duplicação de rodovia federal, lotes 1 a 4", tipo_obra: "Rodovia", valor_centavos: 312000000000, uf: "GO", cidade: "Cidade Modelo",
+    municipio: "Cidade Modelo", km: 980, data_sessao: licDia(9), dias_uteis: 7, prazo: "breve" }),
+].map(l => ({ descarte: null, ...l }));
+
+/** GET /api/licitacoes/todas. `vista`: "novas" ou "grande-vulto"; `vazia`: a vista sem nenhuma licitacao; `filtrado`:
+ *  o tipo de obra "Edificação" escolhido; `nada`: um recorte que nao acha nada; `decide`: depois do corte, com os botoes;
+ *  `atrasada`: o radar nao le ha' dias. */
+export const licitacoesTodas = ({ vista = "novas", vazia = false, filtrado = false, nada = false, decide = false, atrasada = false } = {}) => () => {
+  const todas = vazia ? [] : vista === "novas" ? licTodas() : licGrandeVulto();
+  const escolhidos = filtrado || nada ? { tipo: nada ? "Ferrovia" : "Edificação" } : {};
+  const linhas = nada ? [] : filtrado ? todas.filter(l => l.tipo_obra === "Edificação") : todas;
+  return { leitura: licLeitura({ atrasada, problemas: 0 }), ...licPoder(decide), vista, total: todas.length, ordem: "padrao", ordens: LIC_ORDENS,
+    filtros: licFiltros(todas, linhas, escolhidos), linhas };
+};

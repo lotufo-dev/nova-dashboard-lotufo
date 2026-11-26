@@ -216,3 +216,47 @@ export function orgaoDaLinha(l: Pick<LinhaLicitacao, "orgao" | "sigla_orgao">): 
 export function fmtKm(km: number | null): string | null {
   return km === null ? null : `${km.toLocaleString("pt-BR")}\u00a0km`;
 }
+
+/* ------------------------------------------------------------------ Todas e Grande vulto (fatia 3 da #906) */
+
+/** Uma opcao de filtro: o valor que vai no endereco, o rotulo e quantas licitacoes a lista teria escolhendo-a (com os
+ *  outros filtros como estao). A conta e' do servidor. */
+export type OpcaoDoFiltro = { valor: string; rotulo: string; n: number };
+/** Um filtro de escolha, com as opcoes na ordem do servidor. `escolhido`: o valor do endereco, mesmo que nao ache nada. */
+export type FiltroDeTodas = { filtro: string; rotulo: string; escolhido: string | null; opcoes: OpcaoDoFiltro[] };
+/** O descarte em vigor de uma licitacao: o motivo, com o rotulo, e quando. */
+export type DescarteEmVigor = { motivo: string; rotulo: string; quando: string };
+export type LinhaDeTodas = LinhaLicitacao & { descarte: DescarteEmVigor | null };
+export type OrdemDeTodas = "padrao" | "prazo" | "publicacao" | "valor";
+/** O que GET /api/licitacoes/todas devolve: as linhas ja' filtradas e na ordem, `total` (quantas a vista tem sem
+ *  filtro), os filtros com as opcoes e as ordens. */
+export type RespostaTodas = Poder & {
+  leitura: LeituraDoRadar; vista: "novas" | "grande-vulto"; total: number; ordem: OrdemDeTodas;
+  ordens: { ordem: OrdemDeTodas; rotulo: string }[]; filtros: FiltroDeTodas[]; linhas: LinhaDeTodas[];
+};
+
+/** Os filtros de Todas que vivem na busca do endereco, alem da ordem. */
+export const FILTROS_DE_TODAS = ["q", "tipo", "modalidade", "orgao", "esfera", "valor", "km", "situacao", "decisao", "portal",
+  "sessao_de", "sessao_ate"] as const;
+const ORDENS: readonly string[] = ["padrao", "prazo", "publicacao", "valor"];
+const DATA = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+/** O pedido de Todas a partir da busca do endereco. O que nao cabe no que o servidor aceita fica de fora (data fora do
+ *  formato, ordem desconhecida), para um link estragado abrir a lista em vez de uma falha; o texto vai cortado no
+ *  tamanho que o servidor aceita. */
+export function pedidoDeTodas(vista: "novas" | "grande-vulto", busca: Record<string, string>): string {
+  const q = new URLSearchParams({ vista });
+  for (const f of FILTROS_DE_TODAS) {
+    const v = (busca[f] ?? "").trim();
+    if (!v) continue;
+    if (f === "sessao_de" || f === "sessao_ate") { if (DATA.test(v)) q.set(f, v); continue; }
+    q.set(f, v.slice(0, f === "q" ? 200 : 120));
+  }
+  if (ORDENS.includes(busca.ordem ?? "") && busca.ordem !== "padrao") q.set("ordem", busca.ordem);
+  return `/api/licitacoes/todas?${q.toString()}`;
+}
+
+/** Ha' algum filtro (ou busca, ou ordem que nao e' a padrao) no endereco? */
+export function temFiltro(busca: Record<string, string>): boolean {
+  return FILTROS_DE_TODAS.some(f => (busca[f] ?? "").trim() !== "") || ((busca.ordem ?? "") !== "" && busca.ordem !== "padrao");
+}
