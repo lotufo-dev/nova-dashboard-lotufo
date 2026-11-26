@@ -79,6 +79,10 @@ describe("TempoParado (#805)", () => {
     cleanup();
     expect(render(<TempoParado parada={parada({ prazo_orgao_dias: 45, esperada: "2026-12-18" })} />)
       .container.querySelector(".tempo-parado__revisao")).toBeNull();
+    cleanup();
+    // onde a linha ja' tem a data do protocolo (pagina Em aberto), sem o "1º protocolo em"
+    expect([...render(<TempoParado comPrimeiro={false} parada={parada({ revisao })} />).container
+      .querySelectorAll(".tempo-parado__revisao > span")].map(e => e.textContent)).toEqual(["reapresentada 2 vezes", "último envio em 17/11"]);
   });
 
   it("fora do Pagamento não há prazo escrito; sem a data do evento, só o traço", () => {

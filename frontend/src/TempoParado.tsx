@@ -12,8 +12,9 @@ import "./barraDePassos.css";
  *  Na medicao reapresentada (#914), a revisao embaixo: o primeiro protocolo (de onde os dias contam), quantas vezes
  *  foi reapresentada e o ultimo envio; a de protocolo unico nao ganha nada. Sem a data do evento, "—". `frase`: o
  *  tempo dito em frase ("há 4 dias úteis", "desde hoje"), para o cartao de medicao do Resumo das medicoes, que nao tem
- *  a coluna "Parada há" por cima; ali, sem a data do evento, nada aparece. */
-export default function TempoParado({ parada, frase = false }: { parada: Parada; frase?: boolean }) {
+ *  a coluna "Parada há" por cima; ali, sem a data do evento, nada aparece. `comPrimeiro={false}`: a revisao sem o
+ *  "1º protocolo em", onde a linha ja' tem a coluna da data do protocolo (a pagina Em aberto). */
+export default function TempoParado({ parada, frase = false, comPrimeiro = true }: { parada: Parada; frase?: boolean; comPrimeiro?: boolean }) {
   if (parada.dias_uteis === null) return frase ? null : <span className="tempo-parado tempo-parado--sem">—</span>;
   const dia = fmtDiaNoAno(parada.esperada);
   return (
@@ -22,7 +23,7 @@ export default function TempoParado({ parada, frase = false }: { parada: Parada;
       {dia && <span className="tempo-parado__prazo">{parada.alem_do_prazo ? `prazo do órgão venceu em ${dia}` : `prazo do órgão: ${dia}`}</span>}
       {parada.revisao && (
         <span className="tempo-parado__revisao">
-          {partesDaRevisao(parada.revisao, d => fmtDiaNoAno(d)).map((p, i) => <span key={i}>{p}</span>)}
+          {partesDaRevisao(parada.revisao, d => fmtDiaNoAno(d)).slice(comPrimeiro ? 0 : 1).map(p => <span key={p}>{p}</span>)}
         </span>
       )}
     </span>

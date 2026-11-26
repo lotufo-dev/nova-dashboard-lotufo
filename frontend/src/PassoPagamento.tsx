@@ -6,6 +6,7 @@ import { Link } from "./Link";
 import type { Usuario } from "./Login";
 import { PROXIMOS, tituloMedicao } from "./medicao";
 import type { Medicao } from "./Medicoes";
+import { partesDaRevisao } from "./parada";
 import { processoDa } from "./PassoAnalise";
 import { diaMes } from "./Passos";
 import type { Rota } from "./rota";
@@ -79,7 +80,9 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
   const recebida = grupo.length > 0 && grupo.every(x => x.estado === "recebida");
   // o par so' esta' recebido quando a ultima metade entra: a data e' a maior (gate Sol, rodada 5)
   const recebidaEm = grupo.map(x => x.recebida_em).filter((d): d is string => !!d).sort().at(-1) ?? null;
-  const enviada = grupo.flatMap(x => x.protocolos.map(p => p.data)).sort().at(-1) ?? null;
+  // #914: a espera conta do PRIMEIRO protocolo da nota, como em todas as telas; a reapresentada diz a revisao embaixo
+  const enviada = grupo.flatMap(x => x.protocolos.map(p => p.data)).sort().at(0) ?? null;
+  const revisao = grupo.map(x => x.revisao).find(r => !!r) ?? null;
   // #743: na obra sem o passo "Envio da nota" nao ha' protocolo; a espera conta da emissao da nota (a mais recente)
   const emitida = !enviada && grupo.some(x => x.recebe_sem_protocolo)
     ? grupo.map(x => x.nota_emitida_em).filter((d): d is string => !!d).sort().at(-1) ?? null : null;
@@ -120,7 +123,8 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
             <>
               <p className="pag-numeros__rotulo">Aguardando há</p>
               <p className="pag-numeros__valor num">{dias === null ? "—" : fmtDias(dias)}</p>
-              {enviada && <p className="pag-numeros__nota">nota enviada em {fmtDataPura(enviada)}</p>}
+              {enviada && !revisao && <p className="pag-numeros__nota">nota enviada em {fmtDataPura(enviada)}</p>}
+              {revisao && partesDaRevisao(revisao, fmtDataPura).map(t => <p key={t} className="pag-numeros__nota">{t}</p>)}
               {emitida && <p className="pag-numeros__nota">nota emitida em {fmtDataPura(emitida.slice(0, 10))}</p>}
             </>
           )}

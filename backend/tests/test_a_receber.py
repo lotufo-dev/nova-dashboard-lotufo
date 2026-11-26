@@ -218,6 +218,9 @@ def test_reapresentada_e_par_em_datas_diferentes_tem_os_mesmos_dias_em_todas_as_
     assert p["dias_uteis"] == feriados.dias_uteis_entre(datetime.date(2026, 10, 1), HOJE)
     assert p["revisao"] == {"primeiro_protocolo_em": "2026-10-01", "reapresentacoes": 1, "ultimo_envio_em": "2026-10-20"}
     assert em_aberto[unico]["revisao"] is None and em_aberto[execucao]["revisao"] is None
+    # a pagina da medicao le a mesma revisao
+    from app import medicoes
+    assert medicoes.detalhe(c, reapresentada)["revisao"] == p["revisao"] and medicoes.detalhe(c, unico)["revisao"] is None
     # o par: a execucao passou da data esperada (05/10 + 40 = 14/11), o reajuste ainda nao (15/10 + 40 = 24/11)
     assert (em_aberto[execucao]["esperada"], em_aberto[execucao]["situacao"]) == ("2026-11-14", "critico")
     assert (em_aberto[reajuste]["esperada"], em_aberto[reajuste]["situacao"]) == ("2026-11-24", "andamento")

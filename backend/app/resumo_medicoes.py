@@ -390,8 +390,7 @@ def _resumo(conn, hoje: datetime.date | None, mes: str | None, contratante: str 
     passos_de = medicoes.passos_das_medicoes(conn)
     marcas = ",".join("?" * len(_FORA))
     # a data do protocolo e' a do PRIMEIRO protocolo da nota (a que comeca a contar o prazo do orgao), como no Inicio
-    sql = ("SELECT m.*, c.percentual_direito_bp AS pct, (SELECT MIN(p.data) FROM medicao_protocolos p "
-           "WHERE p.medicao_id=m.id AND p.etapa='nota' AND p.desfeita_em IS NULL) AS protocolado_em FROM medicoes m "
+    sql = (f"SELECT m.*, c.percentual_direito_bp AS pct, {medicoes.SQL_PRIMEIRO_PROTOCOLO} AS protocolado_em FROM medicoes m "
            f"JOIN contratos c ON c.id=m.contrato_id WHERE m.estado NOT IN ({marcas}) ")
     # a competencia, as abertas de antes dela (so' de `ANO_INICIAL` em diante) e a competencia anterior inteira (as
     # recebidas tambem: e' a referencia da "mesma altura")

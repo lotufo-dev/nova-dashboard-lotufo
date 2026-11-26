@@ -176,6 +176,8 @@ def _detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     # espelho, 1 enquanto nao houver nota). A cota so' se soma com todas casadas. Import local: notas importa este modulo.
     from app import notas as _notas
     d["notas_faltam"] = _notas.faltam(conn, medicao_id)
+    # issue #914: em que revisao a cobranca esta' (nula na de protocolo unico), a mesma leitura das outras telas
+    d["revisao"] = revisoes_do_protocolo(conn, medicao_id).get(medicao_id)
     # o resumo do passo Pagamento (a cota da Lotufo na medicao + a irma valida do par), pronto: a tela nao soma
     d["pagamento_cota"] = sincronizacao_rm.pagamento_cota(conn, medicao_id)
     # Documentos de faturamento do consorcio (NF/NFS-e/FATURA do SharePoint, migracao 017):
@@ -1358,7 +1360,7 @@ SQL_PRIMEIRO_PROTOCOLO = ("(SELECT MIN(p.data) FROM medicao_protocolos p WHERE p
                           "AND p.desfeita_em IS NULL)")
 
 
-def revisoes_do_protocolo(conn) -> dict[int, dict]:
+def revisoes_do_protocolo(conn, medicao_id: int | None = None) -> dict[int, dict]:
     """Medicao reapresentada -> em que revisao a cobranca esta' (issue #914): a data do primeiro protocolo da nota,
     quantas vezes foi reapresentada e a data do ultimo envio. A UNICA leitura da revisao: a fila de Medicoes, o Resumo
     das medicoes e a pagina Em aberto a mostram no tempo parado (`fila_medicoes._parada`).
@@ -1366,13 +1368,15 @@ def revisoes_do_protocolo(conn) -> dict[int, dict]:
     Reapresentar e' protocolar a nota de novo, noutro dia (o novo oficio, `ESTADOS_DE_NOVO_PROTOCOLO`): conta cada dia
     de protocolo depois do primeiro. Duas linhas de protocolo no mesmo dia sao o mesmo envio registrado duas vezes (o
     do sistema e o da carga do cadastro), nao uma reapresentacao. O protocolo desfeito (docs/adr/0006) nao conta. A
-    medicao com um dia de protocolo so' fica fora do dicionario: a linha dela nao ganha nada."""
+    medicao com um dia de protocolo so' fica fora do dicionario: a linha dela nao ganha nada. Com `medicao_id`, so'
+    ela (a pagina da medicao)."""
     return {r["medicao_id"]: {"primeiro_protocolo_em": r["primeiro"], "reapresentacoes": r["dias"] - 1,
                               "ultimo_envio_em": r["ultimo"]}
             for r in conn.execute(
                 "SELECT medicao_id, MIN(data) AS primeiro, MAX(data) AS ultimo, COUNT(DISTINCT data) AS dias "
                 "FROM medicao_protocolos WHERE etapa='nota' AND desfeita_em IS NULL AND data IS NOT NULL "
-                "GROUP BY medicao_id HAVING COUNT(DISTINCT data) > 1")}
+                "AND (? IS NULL OR medicao_id=?) GROUP BY medicao_id HAVING COUNT(DISTINCT data) > 1",
+                (medicao_id, medicao_id))}
 
 
 def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None) -> list[dict]:

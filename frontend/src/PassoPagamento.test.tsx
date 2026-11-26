@@ -37,6 +37,17 @@ describe("Passo Pagamento (#514)", () => {
   beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-22T15:00:00Z")); api.mockResolvedValue({ processos: [] }); });
   afterEach(() => { cleanup(); api.mockReset(); vi.useRealTimers(); });
 
+  it("reapresentada: aguardando conta do primeiro protocolo e a revisão do servidor vai embaixo (#914)", () => {
+    const protocolos = [{ id: 9, data: "2026-11-02", numero_oficio: null, numero_processo: "PROC-0001", origem: "manual", protocolo_id: null },
+                        { id: 10, data: "2026-11-14", numero_oficio: null, numero_processo: "PROC-0001", origem: "manual", protocolo_id: null }];
+    montar({ grupo: [com({ protocolos, revisao: { primeiro_protocolo_em: "2026-11-02", reapresentacoes: 1, ultimo_envio_em: "2026-11-14" } })] });
+    expect(screen.getByText(/^20\sdias$/)).toBeTruthy();
+    expect(screen.queryByText(/nota enviada em/)).toBeNull();
+    expect(screen.getByText("1º protocolo em 02/11/2026")).toBeTruthy();
+    expect(screen.getByText("reapresentada 1 vez")).toBeTruthy();
+    expect(screen.getByText("último envio em 14/11/2026")).toBeTruthy();
+  });
+
   it("em consórcio: exibe o resumo do servidor (a receber, recebido de, barra) ao lado do total cheio e dos dias aguardando", () => {
     montar();
     expect(screen.getByText("A receber · cota da Lotufo")).toBeTruthy();

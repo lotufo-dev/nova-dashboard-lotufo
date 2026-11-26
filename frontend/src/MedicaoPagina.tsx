@@ -569,7 +569,8 @@ export default function MedicaoPagina({ contratoId, medicaoId, usuario, origem }
     // #798: sem e-mail do sistema, o dia do envio por fora registrado na versao vigente (a mesma definicao de
     // `medicoes._datas_dos_passos`, que o Resumo das medicoes usa)
     3: diaMes(espVigente?.envio?.enviado_em ?? espVigente?.envio_externo?.enviado_em), 4: diaMes(m.nota_emitida_em),
-    5: diaMes(m.protocolos.map(p => p.data).sort().at(-1)), 6: diaMes(m.recebida_em),
+    // #914: o dia do PRIMEIRO protocolo, o mesmo do quadro do mes e do Resumo das medicoes
+    5: diaMes(m.protocolos.map(p => p.data).sort().at(0)), 6: diaMes(m.recebida_em),
   };
   // #712: a caixa da nota maior que a medicao so' sai do alto quando o passo Envio da nota esta' aberto com a
   // `ConferenciaNotas` (EtapaEnvio) e os envios CARREGADOS trazem o aviso daquela medicao: a obra sem orgao, a falha da
