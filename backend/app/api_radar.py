@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
 from app import licitacoes, licitacoes_decisoes
 from app.api_auth import conexao
@@ -176,11 +176,89 @@ class DescartadaIn(BaseModel):
     quando: AwareDatetime | None = None                   # quando foi descartada no radar; sem ela, a hora do espelho
 
 
+class ConferenciaIn(BaseModel):
+    """A resposta que o radar ja' tem para um par (fatia 4): espelho ate' o corte. As chaves nao precisam ser de
+    certames que a dashboard recebeu: a conferencia antiga pode ser de certame que nenhuma tela mostra."""
+    par: Chave
+    a: Chave
+    b: Chave
+    resposta: Literal["mesmo", "outro"]
+    autor: str | None = Field(default=None, max_length=120)
+    quando: AwareDatetime | None = None
+
+
 class DecisoesIn(BaseModel):
     # obrigatoria: `decisoes: {}` nao vale por lista vazia (que tira todas as favoritas). Quem nao leu as proprias
     # favoritas omite `decisoes`, e ai' nada mexe
     favoritas: list[FavoritaIn] = Field(max_length=2000)
     descartadas: list[DescartadaIn] | None = Field(default=None, max_length=5000)   # ausente: nao mexe nas que existem
+    conferencias: list[ConferenciaIn] | None = Field(default=None, max_length=5000)  # idem
+
+
+# --- fatia 4 da #906: alertas do dia, pares para conferir e o quadro de resultados ---------------------------------
+
+class AlertaIn(BaseModel):
+    regra: str = Field(min_length=1, max_length=60)
+    nome: str = Field(min_length=1, max_length=200)
+    chaves: list[Chave] = Field(max_length=2000)
+
+
+class ParIn(BaseModel):
+    """Dois certames que o radar achou parecidos e nao conseguiu provar iguais. `par`: a identidade que ele da'."""
+    par: Chave
+    a: Chave
+    b: Chave
+    motivo: str = Field(default="", max_length=400)
+
+    @model_validator(mode="after")
+    def _dois_certames(self):
+        if self.a == self.b:
+            raise ValueError("o par precisa de dois certames diferentes")
+        return self
+
+
+class PassoDoFunilIn(BaseModel):
+    rotulo: str = Field(min_length=1, max_length=60)
+    n: int = Field(ge=0, le=100_000)
+
+
+class GrupoIn(BaseModel):
+    grupo: str = Field(min_length=1, max_length=120)
+    participadas: int = Field(ge=0, le=100_000)
+    vencidas: int = Field(ge=0, le=100_000)
+
+    @model_validator(mode="after")
+    def _vencidas_cabem(self):
+        if self.vencidas > self.participadas:
+            raise ValueError("vencidas acima das participadas")
+        return self
+
+
+class PerdaIn(BaseModel):
+    licitacao: str = Field(min_length=1, max_length=300)
+    motivo: str = Field(default="", max_length=400)
+    data: Data | None = None
+
+
+# desconto em centesimos de ponto percentual: 1234 e' 12,34%
+Desconto = Annotated[int, Field(ge=-10_000, le=10_000)]
+
+
+class DescontoIn(BaseModel):
+    licitacao: str = Field(min_length=1, max_length=300)
+    empresa: Desconto
+    vencedor: Desconto | None = None
+    vencemos: bool = False
+
+
+class ResultadosIn(BaseModel):
+    """O quadro que o radar calcula dos dossies: o funil, participadas e vencidas por tipo de obra e por modalidade,
+    as perdas com o motivo e os descontos. A dashboard guarda o ultimo e mostra."""
+    funil: list[PassoDoFunilIn] = Field(default_factory=list, max_length=12)
+    por_tipo: list[GrupoIn] = Field(default_factory=list, max_length=60)
+    por_modalidade: list[GrupoIn] = Field(default_factory=list, max_length=60)
+    perdas: list[PerdaIn] = Field(default_factory=list, max_length=500)
+    descontos: list[DescontoIn] = Field(default_factory=list, max_length=500)
 
 
 class LeituraIn(BaseModel):
@@ -188,6 +266,9 @@ class LeituraIn(BaseModel):
     chaves: list[Chave] = Field(max_length=20000)
     fontes: list[FonteIn] = Field(default_factory=list, max_length=60)
     decisoes: DecisoesIn | None = None
+    alertas: list[AlertaIn] = Field(default_factory=list, max_length=60)
+    pares: list[ParIn] | None = Field(default=None, max_length=5000)     # ausente: nao mexe nos pares gravados
+    resultados: ResultadosIn | None = None                               # ausente: vale o ultimo que veio
 
 
 @router.get("/api/radar/estado", dependencies=[Depends(exigir_radar)], include_in_schema=False)
@@ -204,8 +285,11 @@ def receber_certames(dados: CertamesIn, conn: sqlite3.Connection = Depends(conex
 def fechar_leitura(dados: LeituraIn, conn: sqlite3.Connection = Depends(conexao)):
     decisoes = dados.decisoes.model_dump(mode="json") if dados.decisoes is not None else None
     try:
-        return licitacoes.fechar_leitura(conn, dados.lido_em, dados.chaves,
-                                         [f.model_dump(mode="json") for f in dados.fontes], decisoes)
+        return licitacoes.fechar_leitura(
+            conn, dados.lido_em, dados.chaves, [f.model_dump(mode="json") for f in dados.fontes], decisoes,
+            alertas=[a.model_dump(mode="json") for a in dados.alertas],
+            pares=None if dados.pares is None else [p.model_dump(mode="json") for p in dados.pares],
+            resultados=None if dados.resultados is None else dados.resultados.model_dump(mode="json"))
     except licitacoes.DecisoesNaDashboard as e:
         raise HTTPException(409, str(e)) from None
     except ValueError as e:

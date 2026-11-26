@@ -153,11 +153,15 @@ function situacaoDoBackup(b: Backup): [nota: string, situacao: Situacao, palavra
   return ["", "feito"];
 }
 
-function Situacoes({ status, erroCarga, rodando, b, siga }: {
+/** O radar de licitacoes (fatia 4 da #906): a mesma leitura de "O radar nao le desde..." das paginas dele. */
+type SaudeRadar = { lido_em: string | null; atrasada: boolean; fontes_com_problema: number };
+
+function Situacoes({ status, erroCarga, rodando, b, siga, radar }: {
   status: StatusRm | null; erroCarga: string; rodando: boolean; b: Backup | null | undefined; siga: SaudeSiga | null | undefined;
+  radar: SaudeRadar | null | undefined;
 }) {
   const neutro = (t: string, v: string, n: string): Cartao => [t, v, n, "neutra"];
-  const T_BACKUP = "Último backup", T_EXTERNA = "Última cópia externa dos arquivos", T_RM = "Sincronização com o RM", T_SIGA = "Monitor do SIGA";
+  const T_BACKUP = "Último backup", T_EXTERNA = "Última cópia externa dos arquivos", T_RM = "Sincronização com o RM", T_SIGA = "Monitor do SIGA", T_RADAR = "Radar de licitações";
   const NAO_LEU = "recarregue a página para tentar de novo";
   // 1. ultimo backup
   const backup: Cartao = b === undefined ? neutro(T_BACKUP, "carregando…", "")
@@ -192,9 +196,18 @@ function Situacoes({ status, erroCarga, rodando, b, siga }: {
     : [T_SIGA, fmtDataHora(siga.ultima_leitura),
       `${siga.processos} ${siga.processos === 1 ? "processo" : "processos"}${siga.atrasado ? ", sem leitura recente" : ""}`,
       siga.atrasado ? "critico" : "feito", siga.atrasado ? "Atrasado" : undefined];
+  // 5. radar de licitacoes: a hora da ultima leitura e as fontes com problema nela; atrasado e' critico
+  const problemas = radar?.fontes_com_problema ?? 0;
+  const radarCartao: Cartao = radar === undefined ? neutro(T_RADAR, "carregando…", "")
+    : radar === null ? neutro(T_RADAR, "não foi possível ler", NAO_LEU)
+    : radar.lido_em === null ? neutro(T_RADAR, "—", "")
+    : [T_RADAR, fmtDataHora(radar.lido_em),
+      [radar.atrasada ? "sem leitura recente" : "", problemas ? `${problemas} ${problemas === 1 ? "fonte" : "fontes"} com problema` : ""]
+        .filter(Boolean).join(", "),
+      radar.atrasada ? "critico" : problemas ? "breve" : "feito", radar.atrasada ? "Atrasado" : undefined];
   return (
     <ul className="situacoes" aria-label="Situação do servidor">
-      {[backup, externa, rm, monitor].map(([titulo, valor, nota, situacao, palavra]) => (
+      {[backup, externa, rm, monitor, radarCartao].map(([titulo, valor, nota, situacao, palavra]) => (
         <CartaoSituacao key={titulo} titulo={titulo} valor={valor} nota={nota} situacao={situacao} palavra={palavra} />
       ))}
     </ul>
@@ -484,6 +497,7 @@ function Saude() {
   // undefined = carregando; null = nao deu para ler
   const [b, setB] = useState<Backup | null | undefined>(undefined);
   const [siga, setSiga] = useState<SaudeSiga | null | undefined>(undefined);
+  const [radar, setRadar] = useState<SaudeRadar | null | undefined>(undefined);
   const [seguranca, setSeguranca] = useState<ItemSeguranca[] | null | undefined>(undefined);
   const [segurancaFora, setSegurancaFora] = useState(0);
   const [avisoSentinela, setAvisoSentinela] = useState<string | null>(null);
@@ -496,10 +510,10 @@ function Saude() {
   useEffect(() => {
     carregar();
     carregarBackup();
-    api<{ siga: SaudeSiga; seguranca?: ItemSeguranca[]; seguranca_fora?: number; sentinela?: { roda: boolean; mensagem: string | null }; alertas_seguranca?: AlertasEmail }>("/api/admin/saude")
+    api<{ siga: SaudeSiga; radar?: SaudeRadar; seguranca?: ItemSeguranca[]; seguranca_fora?: number; sentinela?: { roda: boolean; mensagem: string | null }; alertas_seguranca?: AlertasEmail }>("/api/admin/saude")
       // sem o campo nao ha' o que afirmar: "nao foi possivel ler", nunca o selo de quem conferiu e nao achou nada
-      .then(r => { setSiga(r.siga); setSeguranca(r.seguranca ?? null); setSegurancaFora(r.seguranca_fora ?? 0); setAvisoSentinela(r.sentinela?.mensagem ?? null); setAlertas(r.alertas_seguranca ?? null); })
-      .catch(() => { setSiga(null); setSeguranca(null); });
+      .then(r => { setSiga(r.siga); setRadar(r.radar ?? null); setSeguranca(r.seguranca ?? null); setSegurancaFora(r.seguranca_fora ?? 0); setAvisoSentinela(r.sentinela?.mensagem ?? null); setAlertas(r.alertas_seguranca ?? null); })
+      .catch(() => { setSiga(null); setRadar(null); setSeguranca(null); });
   }, []);
 
   async function sincronizar() {
@@ -522,7 +536,7 @@ function Saude() {
   const quandoBoa = ultimaBoa ? ultimaBoa.terminado_em ?? ultimaBoa.iniciado_em : status?.ultima_sincronizacao ?? null;
   return (
     <div className="saude pilha">
-      <Situacoes status={status} erroCarga={erroCarga} rodando={rodando} b={b} siga={siga} />
+      <Situacoes status={status} erroCarga={erroCarga} rodando={rodando} b={b} siga={siga} radar={radar} />
 
       {status?.configurado && ultima?.estado === "failed" && !rodando && !erro && (
         <CaixaAviso nivel="critico">

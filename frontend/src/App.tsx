@@ -25,6 +25,8 @@ import { useVistaPublicada } from "./nomesDoCaminho";
 import { pode } from "./permissoes";
 import SigaPagina from "./SigaPagina";
 import LicitacoesFavoritas from "./LicitacoesFavoritas";
+import LicitacoesFontes from "./LicitacoesFontes";
+import LicitacoesResultados from "./LicitacoesResultados";
 import LicitacoesTodas from "./LicitacoesTodas";
 import LicitacoesTriagem from "./LicitacoesTriagem";
 import AncorasDocusign from "./AncorasDocusign";
@@ -81,7 +83,8 @@ export default function App() {
     if (rota.tela === "raiz" || (rota.tela === "admin" && usuario.perfil !== "admin")
       || (rota.tela === "siga" && !pode(usuario, "ver_siga"))
       // as Licitacoes (#908) seguem o SIGA: quem nao tem `ver_licitacoes` cai na entrada do perfil
-      || ((rota.tela === "licitacoes" || rota.tela === "licitacoes-favoritas" || rota.tela === "licitacoes-todas")
+      || ((rota.tela === "licitacoes" || rota.tela === "licitacoes-favoritas" || rota.tela === "licitacoes-todas"
+        || rota.tela === "licitacoes-resultados" || rota.tela === "licitacoes-fontes")
         && !pode(usuario, "ver_licitacoes"))
       || (rota.tela === "ancoras-docusign" && usuario.perfil === "diretoria")) {
       substituir(entradaDe(usuario.perfil));
@@ -161,6 +164,9 @@ export default function App() {
           {rota.tela === "licitacoes-favoritas" && pode(usuario, "ver_licitacoes") && <LicitacoesFavoritas vista={rota.vista} busca={busca} />}
           {/* Todas e Grande vulto (fatia 3 da #906): a busca e os filtros vem do endereco */}
           {rota.tela === "licitacoes-todas" && pode(usuario, "ver_licitacoes") && <LicitacoesTodas vista={rota.vista ?? "novas"} busca={busca} />}
+          {/* Resultados e Fontes (fatia 4 da #906) */}
+          {rota.tela === "licitacoes-resultados" && pode(usuario, "ver_licitacoes") && <LicitacoesResultados />}
+          {rota.tela === "licitacoes-fontes" && pode(usuario, "ver_licitacoes") && <LicitacoesFontes />}
           {rota.tela === "ancoras-docusign" && usuario.perfil !== "diretoria" && <div className="pagina"><AncorasDocusign /></div>}
           {rota.tela === "notas-envio" && <AbrirEnvio key={rota.id} protocoloId={rota.id} />}
           {rota.tela === "fechamento" && <div className="pagina"><Fechamento ir={ir} /></div>}

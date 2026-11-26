@@ -34,6 +34,11 @@ SEM_MUDANCA_NOVA = "Esta favorita não tem mudança nova"
 SEM_LINK = "Esta licitação não tem link de edital: baixe o edital e passe o arquivo ao comando"
 LINK_FORA_DO_COMANDO = ("O link do edital tem caractere que não vai no comando: baixe o edital pelo link da licitação e "
                         "passe o arquivo ao comando")
+PAR_INEXISTENTE = "Par não encontrado"
+PAR_FORA = "O radar já resolveu este par: atualize a página"
+JA_CONFERIDO = "Este par já foi conferido"
+NAO_CONFERIDO = "Este par não foi conferido"
+RESPOSTA_INVALIDA = "Escolha a resposta: é o mesmo ou é outro"
 CORTE_SEM_ESTADO = "O corte não foi gravado: falta a linha de estado das licitações (rode as migrações)"
 
 
@@ -88,7 +93,9 @@ def corte(conn, usuario_id: int, ensaio: bool = False) -> dict:
             feito_em = licitacoes.corte_em(conn)
             passam = {
                 "favoritas": conn.execute("SELECT COUNT(*) FROM lic_favoritas WHERE removida_em IS NULL").fetchone()[0],
-                "descartadas": conn.execute("SELECT COUNT(*) FROM lic_descartes WHERE desfeito_em IS NULL").fetchone()[0]}
+                "descartadas": conn.execute("SELECT COUNT(*) FROM lic_descartes WHERE desfeito_em IS NULL").fetchone()[0],
+                "conferencias": conn.execute(
+                    "SELECT COUNT(*) FROM lic_conferencias WHERE desfeita_em IS NULL").fetchone()[0]}
             if feito_em is None:
                 _ver_as_mudancas_antigas(conn)
                 cur = conn.execute("UPDATE lic_estado SET corte_em=?, corte_por=? WHERE id=1 AND corte_em IS NULL",
@@ -265,6 +272,50 @@ def marcar_mudancas_vistas(conn, usuario_id: int, certame_id: int, chaves: list[
                             {"vistas": antes}, {"vistas": depois})
 
 
+# --- a conferencia "e' o mesmo / e' outro" (fatia 4 da #906) --------------------------------------------------------
+
+def _par(conn, par_id: int):
+    p = conn.execute("SELECT id, par, chave_a, chave_b, fora_desde FROM lic_pares WHERE id=?", (par_id,)).fetchone()
+    if p is None:
+        raise NaoEncontrada(PAR_INEXISTENTE)
+    return p
+
+
+def _conferencia(conn, par: str):
+    return conn.execute("SELECT id, resposta FROM lic_conferencias WHERE par=? AND desfeita_em IS NULL", (par,)).fetchone()
+
+
+def conferir(conn, usuario_id: int, par_id: int, resposta: str) -> None:
+    """A resposta de uma pessoa a um par que o radar lista: e' o mesmo certame, ou e' outro. O radar a busca na rodada
+    seguinte e junta (ou separa) os dois."""
+    with db.mutacao(conn):
+        _exigir_corte(conn)
+        if resposta not in licitacoes.ROTULO_RESPOSTA:
+            raise ForaDaLista(RESPOSTA_INVALIDA)
+        p = _par(conn, par_id)
+        if p["fora_desde"] is not None:
+            raise Recusa(PAR_FORA)
+        if _conferencia(conn, p["par"]) is not None:
+            raise Recusa(JA_CONFERIDO)
+        conn.execute("INSERT INTO lic_conferencias (par, chave_a, chave_b, resposta, origem, criada_por, criada_em) "
+                     "VALUES (?,?,?,?,'dashboard',?,?)", (p["par"], p["chave_a"], p["chave_b"], resposta, usuario_id, _agora()))
+        auditoria.registrar(conn, usuario_id, "licitacoes.conferencia", "licitacao_par", p["id"], None,
+                            {"par": p["par"], "resposta": resposta})
+
+
+def desfazer_conferencia(conn, usuario_id: int, par_id: int) -> None:
+    """Refazer: a resposta em vigor fica, com a data e quem desfez, e o par volta aos pendentes."""
+    with db.mutacao(conn):
+        _exigir_corte(conn)
+        p = _par(conn, par_id)
+        c = _conferencia(conn, p["par"])
+        if c is None:
+            raise Recusa(NAO_CONFERIDO)
+        conn.execute("UPDATE lic_conferencias SET desfeita_em=?, desfeita_por=? WHERE id=?", (_agora(), usuario_id, c["id"]))
+        auditoria.registrar(conn, usuario_id, "licitacoes.conferencia.desfazer", "licitacao_par", p["id"],
+                            {"par": p["par"], "resposta": c["resposta"]}, None)
+
+
 # --- o que o radar busca depois do corte ---------------------------------------------------------------------------
 
 def para_o_radar(conn) -> dict:
@@ -280,6 +331,12 @@ def para_o_radar(conn) -> dict:
                        for r in conn.execute(
                            "SELECT d.chave, d.motivo, d.criado_em, d.autor_radar, u.nome FROM lic_descartes d "
                            "LEFT JOIN usuarios u ON u.id=d.criado_por WHERE d.desfeito_em IS NULL ORDER BY d.id")]
+        conferencias = [{"par": r["par"], "a": r["chave_a"], "b": r["chave_b"], "resposta": r["resposta"],
+                         "quando": tempo.iso_utc(r["criada_em"]), "autor": r["nome"] or r["autor_radar"]}
+                        for r in conn.execute(
+                            "SELECT c.par, c.chave_a, c.chave_b, c.resposta, c.criada_em, c.autor_radar, u.nome "
+                            "FROM lic_conferencias c LEFT JOIN usuarios u ON u.id=c.criada_por "
+                            "WHERE c.desfeita_em IS NULL ORDER BY c.id")]
         cortado = licitacoes.corte_em(conn)
         return {"corte_em": tempo.iso_utc(cortado) if cortado else None,
-                "favoritas": favoritas, "descartadas": descartadas}
+                "favoritas": favoritas, "descartadas": descartadas, "conferencias": conferencias}

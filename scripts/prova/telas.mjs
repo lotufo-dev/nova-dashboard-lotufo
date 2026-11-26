@@ -689,6 +689,29 @@ export const TELAS = [
     perfis: SEM_LICITACOES, espera: ".ini" },
   { rota: "licitacoes-todas", id: "licitacoes-grande-vulto-sem-permissao", caminho: "/licitacoes/grande-vulto", destino: "/inicio",
     perfis: SEM_LICITACOES, espera: ".ini" },
+  // ---- Licitacoes, fatia 4 da #906: Fontes e Resultados. Com o servidor de verdade, sem leitura do radar: as tres
+  // linhas curtas e o "ainda não mandou resultados". Simulados: com dados (antes e depois do corte, com os respondidos
+  // abertos), vazia, falha de leitura; os resultados com o quadro.
+  { rota: "licitacoes-fontes", id: "licitacoes-fontes", caminho: "/licitacoes/fontes", perfis: VE_LICITACOES, espera: ".lic .lic-bloco .vazio" },
+  { rota: "licitacoes-fontes", id: "licitacoes-fontes-dados", caminho: "/licitacoes/fontes", perfis: VE_LICITACOES,
+    espera: ".lic .lic-tabela--pares tbody tr", simular: comFontes() },
+  { rota: "licitacoes-fontes", id: "licitacoes-fontes-decidir", caminho: "/licitacoes/fontes", perfis: VE_LICITACOES,
+    antes: ".lic .lic-tabela--pares", espera: ".lic-conferidos[open] table", simular: comFontes({ decide: true }),
+    passos: [{ clicar: ".lic-conferidos > summary" }] },
+  { rota: "licitacoes-fontes", id: "licitacoes-fontes-vazia", caminho: "/licitacoes/fontes", perfis: VE_LICITACOES,
+    espera: ".lic .lic-bloco .vazio", simular: comFontes({ vazia: true }) },
+  { rota: "licitacoes-fontes", id: "licitacoes-fontes-erro", caminho: "/licitacoes/fontes", perfis: VE_LICITACOES,
+    espera: "#conteudo [role=alert]", erro: true, simular: falha(/^\/api\/licitacoes\/fontes$/) },
+  { rota: "licitacoes-fontes", id: "licitacoes-fontes-sem-permissao", caminho: "/licitacoes/fontes", destino: "/inicio",
+    perfis: SEM_LICITACOES, espera: ".ini" },
+  { rota: "licitacoes-resultados", id: "licitacoes-resultados", caminho: "/licitacoes/resultados", perfis: VE_LICITACOES,
+    espera: ".lic .lic-bloco .vazio" },
+  { rota: "licitacoes-resultados", id: "licitacoes-resultados-dados", caminho: "/licitacoes/resultados", perfis: VE_LICITACOES,
+    espera: ".lic .lic-funil", simular: comResultados() },
+  { rota: "licitacoes-resultados", id: "licitacoes-resultados-erro", caminho: "/licitacoes/resultados", perfis: VE_LICITACOES,
+    espera: "#conteudo [role=alert]", erro: true, simular: falha(/^\/api\/licitacoes\/resultados$/) },
+  { rota: "licitacoes-resultados", id: "licitacoes-resultados-sem-permissao", caminho: "/licitacoes/resultados", destino: "/inicio",
+    perfis: SEM_LICITACOES, espera: ".ini" },
   { rota: "inicio", id: "inicio-licitacoes", caminho: "/inicio", perfis: VE_LICITACOES, espera: ".ini-licitacoes .ini-aviso",
     simular: [{ caminho: /^\/api\/licitacoes\/resumo$/, corpo: resumoDasLicitacoes() }] },
   { rota: "inicio", id: "inicio-licitacoes-atrasada", caminho: "/inicio", perfis: VE_LICITACOES, espera: ".ini-licitacoes .aviso",
@@ -749,7 +772,17 @@ import { ABAS_DA_CARTEIRA, aReceberDoContratante, medicoesDoContratante, SIGA_DO
 import { medicaoComProtocoloNovo, SIGA_ENCERRAMENTO } from "./simulados.mjs";
 
 // ---- Licitacoes (#908 e fatia 2 da #906): quem tem `ver_licitacoes` e as respostas simuladas das paginas (ver simulados.mjs)
-import { licitacaoAnalisada, licitacoesCalendario, licitacoesFavoritas, licitacoesTodas, licitacoesTriagem, resumoDasLicitacoes } from "./simulados.mjs";
+import {
+  licitacaoAnalisada, licitacoesCalendario, licitacoesFavoritas, licitacoesFontes, licitacoesResultados, licitacoesTodas, licitacoesTriagem,
+  resumoDasLicitacoes,
+} from "./simulados.mjs";
+
+function comFontes(opcoes) {
+  return [{ caminho: /^\/api\/licitacoes\/fontes$/, corpo: licitacoesFontes(opcoes) }];
+}
+function comResultados(opcoes) {
+  return [{ caminho: /^\/api\/licitacoes\/resultados$/, corpo: licitacoesResultados(opcoes) }];
+}
 
 function comTodas(opcoes) {
   return [{ caminho: /^\/api\/licitacoes\/todas$/, corpo: licitacoesTodas(opcoes) }];

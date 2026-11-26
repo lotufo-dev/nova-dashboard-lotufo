@@ -131,13 +131,15 @@ export function useDecisoes(recarregar: () => Promise<void>) {
   const decidir = async <R = unknown>(
     l: Pick<LinhaLicitacao, "id" | "orgao" | "sigla_orgao" | "edital" | "modalidade">, decisao: string,
     corpo: Record<string, string | string[]> = {},
+    /** "pares": a decisao e' sobre um par da conferencia (POST /api/licitacoes/pares/{id}/...), e nao sobre a licitacao */
+    colecao?: "pares",
   ): Promise<R | null> => {
     if (emCurso.current) return null;
     emCurso.current = true;
     setOcupada(true);
     setFalha(null);
     try {
-      const resposta = await api<R>(`/api/licitacoes/${l.id}/${decisao}`, { method: "POST", body: JSON.stringify(corpo) });
+      const resposta = await api<R>(`/api/licitacoes/${colecao ? `${colecao}/` : ""}${l.id}/${decisao}`, { method: "POST", body: JSON.stringify(corpo) });
       await recarregar();
       return resposta;
     } catch (e) {
@@ -261,4 +263,46 @@ export function pedidoDeTodas(vista: "novas" | "grande-vulto", busca: Record<str
 /** Ha' algum filtro (ou busca, ou ordem que nao e' a padrao) no endereco? */
 export function temFiltro(busca: Record<string, string>): boolean {
   return FILTROS_DE_TODAS.some(f => (busca[f] ?? "").trim() !== "") || ((busca.ordem ?? "") !== "" && busca.ordem !== "padrao");
+}
+
+/* ------------------------------------------------------------------ Fontes e Resultados (fatia 4 da #906) */
+
+/** Uma fonte do radar na ultima leitura, como ele mandou, com a situacao lida pelo servidor: problema e' critico,
+ *  aguardando e' vence em breve, o resto e' feito. */
+export type FonteDoRadar = {
+  fonte: string; nome: string; estado: string | null; lidos: number | null; hora: string | null; problema: string | null;
+  aguardando: string | null; situacao: Extract<Situacao, "feito" | "breve" | "critico">;
+};
+/** Um alerta do dia: a regra do radar e as licitacoes que ela pegou (as mesmas linhas das outras paginas). */
+export type AlertaDoDia = { regra: string; nome: string; linhas: LinhaLicitacao[] };
+export type RespostaDeConferencia = "mesmo" | "outro";
+/** Um par que o radar achou parecido e nao conseguiu provar igual: os dois lados e o motivo da suspeita. */
+export type ParParaConferir = { id: number; par: string; motivo: string; a: LinhaLicitacao; b: LinhaLicitacao };
+/** Um par ja' respondido que o radar ainda lista (a resposta chega a ele na rodada seguinte). */
+export type ParConferido = ParParaConferir & { resposta: RespostaDeConferencia; resposta_rotulo: string; quem: string | null; quando: string };
+export type RespostaFontes = Poder & {
+  leitura: LeituraDoRadar; fontes: FonteDoRadar[]; alertas: AlertaDoDia[];
+  respostas: { resposta: RespostaDeConferencia; rotulo: string }[]; pares: ParParaConferir[]; conferidos: ParConferido[];
+};
+
+/** Participadas e vencidas de um grupo (tipo de obra, modalidade); `taxa` em milesimos, do servidor (nula sem
+ *  participada). */
+export type GrupoDeResultado = { grupo: string; participadas: number; vencidas: number; taxa: number | null };
+/** Os descontos em centesimos de ponto percentual: 1234 e' 12,34%. */
+export type DescontoDeResultado = { licitacao: string; empresa: number; vencedor: number | null; vencemos: boolean };
+export type QuadroDeResultados = {
+  funil: { rotulo: string; n: number }[]; por_tipo: GrupoDeResultado[]; por_modalidade: GrupoDeResultado[];
+  perdas: { licitacao: string; motivo: string; data: string | null }[]; descontos: DescontoDeResultado[];
+};
+/** O que GET /api/licitacoes/resultados devolve: o ultimo quadro que o radar mandou e quando; sem quadro, nulo. */
+export type RespostaResultados = { leitura: LeituraDoRadar; lido_em: string | null; resultados: QuadroDeResultados | null };
+
+/** Milesimos em percentual com uma casa: 286 e' "28,6%". */
+export function fmtMilesimos(m: number): string {
+  return `${(m / 10).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+}
+
+/** Centesimos de ponto em percentual com duas casas: 812 e' "8,12%". */
+export function fmtCentesimos(c: number): string {
+  return `${(c / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
 }

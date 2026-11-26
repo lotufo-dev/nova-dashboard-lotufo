@@ -1275,3 +1275,55 @@ export const licitacoesTodas = ({ vista = "novas", vazia = false, filtrado = fal
   return { leitura: licLeitura({ atrasada, problemas: 0 }), ...licPoder(decide), vista, total: todas.length, ordem: "padrao", ordens: LIC_ORDENS,
     filtros: licFiltros(todas, linhas, escolhidos), linhas };
 };
+
+// ---- Fontes e Resultados (fatia 4 da #906): a situacao de cada fonte (lida, com problema e aguardando), os alertas do
+// dia por regra (um vazio), a conferencia com dois pares e um respondido, e o quadro de resultados. Fontes, regras,
+// licitacoes e numeros inventados.
+const LIC_FONTES = [
+  { fonte: "pncp", nome: "PNCP", estado: "ok", lidos: 412, hora: "09:01", problema: null, aguardando: null, situacao: "feito" },
+  { fonte: "diario-ex", nome: "Diário Oficial de Exemplo", estado: "erro", lidos: 0, hora: "09:02",
+    problema: "a página não respondeu depois de três tentativas", aguardando: null, situacao: "critico" },
+  { fonte: "agregador", nome: "Agregador de editais", estado: null, lidos: null, hora: null, problema: null,
+    aguardando: "a próxima janela do robô, às 14h", situacao: "breve" },
+  { fonte: "seobras-ex", nome: "Portal da Secretaria de Obras de Exemplo", estado: "ok", lidos: 37, hora: "09:04", problema: null,
+    aguardando: null, situacao: "feito" },
+];
+const licPar = (id, a, b, motivo) => ({ id, par: `p-${a.id}-${b.id}`, motivo, a, b });
+
+/** GET /api/licitacoes/fontes. `vazia`: a leitura chegou sem fonte, alerta nem par; `decide`: depois do corte. */
+export const licitacoesFontes = ({ vazia = false, decide = false } = {}) => () => {
+  if (vazia) return { leitura: licLeitura({ problemas: 0 }), ...licPoder(decide), fontes: [], alertas: [], pares: [], conferidos: [],
+    respostas: [{ resposta: "mesmo", rotulo: "É o mesmo" }, { resposta: "outro", rotulo: "É outro" }] };
+  const [r31, r32, r33] = licRecomendadas();
+  const gv = licGrandeVulto();
+  return {
+    leitura: licLeitura({ problemas: 1 }), ...licPoder(decide),
+    fontes: LIC_FONTES,
+    alertas: [{ regra: "interesse", nome: "Órgãos de interesse", linhas: [r31, r33] }, { regra: "grande-vulto", nome: "Grande vulto", linhas: gv },
+      { regra: "hospital", nome: "Hospitais", linhas: [] }],
+    respostas: [{ resposta: "mesmo", rotulo: "É o mesmo" }, { resposta: "outro", rotulo: "É outro" }],
+    pares: [licPar(1, r31, licitacao(61, { ...SEOBRAS, edital: "Concorrência 31/2026", objeto: "Pavimentação de rodovia estadual com obras de arte correntes",
+      tipo_obra: "Rodovia", valor_centavos: 12340000000, data_sessao: licDia(4), dias_uteis: 3, prazo: "critico", fontes: ["Agregador"] }),
+      "mesmo objeto, mesmo valor e mesma data de sessão, números de edital diferentes"),
+      licPar(2, r32, licitacao(62, { objeto: "Construção de hospital municipal", valor_centavos: 8700000000 }), "mesmo órgão e objeto parecido")],
+    conferidos: [{ ...licPar(3, r33, licitacao(63, { ...DER, objeto: "Recuperação de pontes de madeira, lote 2", valor_centavos: null,
+      valor_rotulo: "sigiloso" }), "mesmo órgão e mesmo objeto"), resposta: "outro", resposta_rotulo: "É outro", quem: "Administração de prova",
+      quando: `${licDia(0)}T12:30:00+00:00` }],
+  };
+};
+
+/** GET /api/licitacoes/resultados. `vazio`: o radar ainda nao mandou o quadro. */
+export const licitacoesResultados = ({ vazio = false } = {}) => () => (vazio
+  ? { leitura: licLeitura({ problemas: 0 }), lido_em: null, resultados: null }
+  : { leitura: licLeitura({ problemas: 0 }), lido_em: `${licDia(0)}T13:05:00+00:00`, resultados: {
+    funil: [{ rotulo: "Analisadas", n: 38 }, { rotulo: "Propostas enviadas", n: 14 }, { rotulo: "Vencidas", n: 4 }, { rotulo: "Perdidas", n: 8 }],
+    por_tipo: [{ grupo: "Rodovia", participadas: 7, vencidas: 2, taxa: 286 }, { grupo: "Edificação", participadas: 4, vencidas: 1, taxa: 250 },
+      { grupo: "Obra de arte especial", participadas: 3, vencidas: 1, taxa: 333 }, { grupo: "Saneamento", participadas: 0, vencidas: 0, taxa: null }],
+    por_modalidade: [{ grupo: "Concorrência", participadas: 12, vencidas: 4, taxa: 333 }, { grupo: "Tomada de preços", participadas: 2, vencidas: 0, taxa: 0 }],
+    perdas: [{ licitacao: "SEOBRAS-EX · CE 021/2026", motivo: "preço: a quarta colocada", data: licDia(-40) },
+      { licitacao: "Prefeitura Municipal de Vila Exemplo · Concorrência 08/2026", motivo: "inabilitada: atestado de capacidade técnica recusado", data: licDia(-25) },
+      { licitacao: "DER-EX · CE 005/2026", motivo: "", data: null }],
+    descontos: [{ licitacao: "SEOBRAS-EX · CE 021/2026", empresa: 812, vencedor: 1530, vencemos: false },
+      { licitacao: "DER-EX · CE 002/2026", empresa: 1105, vencedor: null, vencemos: true },
+      { licitacao: "Prefeitura Municipal de Vila Exemplo · Concorrência 08/2026", empresa: 450, vencedor: 690, vencemos: false }],
+  } });

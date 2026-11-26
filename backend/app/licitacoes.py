@@ -31,6 +31,7 @@ LEITURA_NO_FUTURO = "Data da leitura no futuro: confira o relógio da máquina d
 LEITURA_ANTIGA = "Leitura mais antiga que a última gravada"
 LEITURA_FORA_DA_FAIXA = "Data da leitura fora da faixa aceita"
 DESCARTE_FORA_DA_FAIXA = "Data do descarte fora da faixa aceita: "
+CONFERENCIA_FORA_DA_FAIXA = "Data da conferência fora da faixa aceita: "
 ANO_MINIMO_DA_LEITURA = 2020
 CHAVE_DESCONHECIDA = "Licitação que a dashboard ainda não recebeu: "
 DECISOES_NA_DASHBOARD = "As decisões das licitações estão na dashboard desde "
@@ -93,26 +94,34 @@ def _utc(dt: datetime.datetime) -> str:
 
 
 def fechar_leitura(conn, lido_em: datetime.datetime, chaves: list[str], fontes: list[dict],
-                   decisoes: dict | None) -> dict:
-    """Fecha a rodada do radar: o que ele lista hoje, a situacao das fontes e, ate' o corte, as favoritas e as
-    descartadas dele. Confere tudo antes de gravar: chave que a dashboard nao recebeu recusa o fechamento inteiro, e
-    decisao mandada depois do corte tambem."""
+                   decisoes: dict | None, alertas: list[dict] | None = None, pares: list[dict] | None = None,
+                   resultados: dict | None = None) -> dict:
+    """Fecha a rodada do radar: o que ele lista hoje, a situacao das fontes, os alertas do dia, os pares que ele nao
+    conseguiu provar iguais (`pares`; None nao mexe nos gravados), o quadro de resultados (None: vale o ultimo) e, ate'
+    o corte, as favoritas, as descartadas e as conferencias dele. Confere tudo antes de gravar: chave que a dashboard
+    nao recebeu (numa lista, num alerta, num par) recusa o fechamento inteiro, e decisao mandada depois do corte
+    tambem."""
     if lido_em.year < ANO_MINIMO_DA_LEITURA:            # antes de qualquer conta com fuso, que estouraria no ano 1
         raise ValueError(LEITURA_FORA_DA_FAIXA)
     if lido_em > tempo.agora_utc() + FOLGA_FUTURO:
         raise ValueError(LEITURA_NO_FUTURO)
     agora = tempo.agora_utc()
-    for d in (decisoes or {}).get("descartadas") or []:
+    for d in [*((decisoes or {}).get("descartadas") or []), *((decisoes or {}).get("conferencias") or [])]:
         quando = datetime.datetime.fromisoformat(d["quando"]) if d.get("quando") else None
         # o ano primeiro, sem conta com fuso (que estouraria no ano 1 e no 9999); depois, nada no futuro
         if quando and (not ANO_MINIMO_DA_LEITURA <= quando.year <= agora.year or quando > agora + FOLGA_FUTURO):
-            raise ValueError(DESCARTE_FORA_DA_FAIXA + d["chave"])
+            raise ValueError((DESCARTE_FORA_DA_FAIXA if "chave" in d else CONFERENCIA_FORA_DA_FAIXA) + d.get("chave", d.get("par")))
     lido = _utc(lido_em)
     listadas = set(chaves)
     favoritas = None if decisoes is None else {f["chave"]: f for f in decisoes.get("favoritas") or []}
     # `descartadas` ausente (radar que ainda nao as manda) nao e' lista vazia: nao mexe nas que existem
     descartadas = (None if decisoes is None or decisoes.get("descartadas") is None
                    else {d["chave"]: d for d in decisoes["descartadas"]})
+    conferencias = (None if decisoes is None or decisoes.get("conferencias") is None
+                    else {c["par"]: c for c in decisoes["conferencias"]})
+    alertas = alertas or []
+    nos_alertas = {k for a in alertas for k in a["chaves"]}
+    nos_pares = {k for p in pares or [] for k in (p["a"], p["b"])}
     with db.mutacao(conn):
         corte = corte_em(conn)
         if decisoes is not None and corte:
@@ -122,19 +131,64 @@ def fechar_leitura(conn, lido_em: datetime.datetime, chaves: list[str], fontes: 
         if ultima and lido < ultima:
             raise ValueError(LEITURA_ANTIGA)
         gravados = {r["chave"]: r["fora_desde"] for r in conn.execute("SELECT chave, fora_desde FROM lic_certames")}
-        for chave in sorted((listadas | set(favoritas or ()) | set(descartadas or ())) - set(gravados)):
+        for chave in sorted((listadas | set(favoritas or ()) | set(descartadas or ()) | nos_alertas | nos_pares) - set(gravados)):
             raise ValueError(CHAVE_DESCONHECIDA + chave)
         saiu = [(lido, k) for k, fora in gravados.items() if fora is None and k not in listadas]
         voltou = [(k,) for k, fora in gravados.items() if fora is not None and k in listadas]
         conn.executemany("UPDATE lic_certames SET fora_desde=? WHERE chave=?", saiu)
         conn.executemany("UPDATE lic_certames SET fora_desde=NULL WHERE chave=?", voltou)
         # a mesma rodada mandada de novo nao cria linha, mas vale o que ela diz agora
-        conn.execute("INSERT INTO lic_leituras (lido_em, certames, fontes) VALUES (?,?,?) "
-                     "ON CONFLICT(lido_em) DO UPDATE SET certames=excluded.certames, fontes=excluded.fontes",
-                     (lido, len(listadas), json.dumps(fontes, ensure_ascii=False)))
+        conn.execute("INSERT INTO lic_leituras (lido_em, certames, fontes, alertas, resultados) VALUES (?,?,?,?,?) "
+                     "ON CONFLICT(lido_em) DO UPDATE SET certames=excluded.certames, fontes=excluded.fontes, "
+                     "alertas=excluded.alertas, resultados=excluded.resultados",
+                     (lido, len(listadas), json.dumps(fontes, ensure_ascii=False), json.dumps(alertas, ensure_ascii=False),
+                      None if resultados is None else json.dumps(resultados, ensure_ascii=False)))
         espelhadas = _espelhar_favoritas(conn, favoritas, lido) if favoritas is not None else None
         descartes = _espelhar_descartes(conn, descartadas, lido) if descartadas is not None else None
-    return {"listados": len(listadas), "fora": len(saiu), "favoritas": espelhadas, "descartadas": descartes}
+        conferidas = _espelhar_conferencias(conn, conferencias, lido) if conferencias is not None else None
+        pendentes = _gravar_pares(conn, pares, lido) if pares is not None else None
+    return {"listados": len(listadas), "fora": len(saiu), "favoritas": espelhadas, "descartadas": descartes,
+            "conferencias": conferidas, "pares": pendentes}
+
+
+def _gravar_pares(conn, pares: list[dict], lido: str) -> int:
+    """Os pares que o radar lista hoje: entra o que falta, o que mudou de chave ou de motivo acompanha, o que voltou
+    perde `fora_desde`, e o que ele nao lista mais (resolveu sozinho, com prova forte) ganha a data. Nada se apaga."""
+    gravados = {r["par"]: r for r in conn.execute("SELECT id, par, chave_a, chave_b, motivo, fora_desde FROM lic_pares")}
+    vieram = set()
+    for p in pares:
+        vieram.add(p["par"])
+        atual = gravados.get(p["par"])
+        if atual is None:
+            conn.execute("INSERT INTO lic_pares (par, chave_a, chave_b, motivo) VALUES (?,?,?,?)",
+                         (p["par"], p["a"], p["b"], p["motivo"]))
+        elif (atual["chave_a"], atual["chave_b"], atual["motivo"], atual["fora_desde"]) != (p["a"], p["b"], p["motivo"], None):
+            conn.execute("UPDATE lic_pares SET chave_a=?, chave_b=?, motivo=?, fora_desde=NULL WHERE id=?",
+                         (p["a"], p["b"], p["motivo"], atual["id"]))
+    conn.executemany("UPDATE lic_pares SET fora_desde=? WHERE id=?",
+                     [(lido, r["id"]) for par, r in gravados.items() if r["fora_desde"] is None and par not in vieram])
+    return len(vieram)
+
+
+def _espelhar_conferencias(conn, conferencias: dict[str, dict], lido: str) -> int:
+    """Ate' o corte as conferencias sao espelho do radar: entra a que falta, com a data que tinha la' (`quando`; sem
+    ela, a hora deste espelho); a que mudou de resposta e' refeita (a antiga fica, com a data); a que ele nao manda
+    mais e' desfeita."""
+    ativas = {r["par"]: r for r in conn.execute(
+        "SELECT id, par, resposta FROM lic_conferencias WHERE desfeita_em IS NULL AND origem='radar'")}
+    for par, c in conferencias.items():
+        atual = ativas.get(par)
+        if atual is not None and atual["resposta"] == c["resposta"]:
+            continue
+        if atual is not None:
+            conn.execute("UPDATE lic_conferencias SET desfeita_em=? WHERE id=?", (lido, atual["id"]))
+        quando = _utc(datetime.datetime.fromisoformat(c["quando"])) if c.get("quando") else None
+        conn.execute("INSERT INTO lic_conferencias (par, chave_a, chave_b, resposta, origem, autor_radar, criada_em) "
+                     "VALUES (?,?,?,?,'radar',?,COALESCE(?, datetime('now')))",
+                     (par, c["a"], c["b"], c["resposta"], c.get("autor"), quando))
+    conn.executemany("UPDATE lic_conferencias SET desfeita_em=? WHERE id=?",
+                     [(lido, r["id"]) for par, r in ativas.items() if par not in conferencias])
+    return len(conferencias)
 
 
 def _espelhar_descartes(conn, descartadas: dict[str, dict], lido: str) -> int:
@@ -581,3 +635,83 @@ def todas(conn, vista: str, filtros: dict, ordem: str = "padrao") -> dict:
         return {"leitura": leitura(conn), "decisoes": _lado_das_decisoes(conn), "vista": vista, "total": len(linhas),
                 "ordem": ordem, "ordens": [{"ordem": o, "rotulo": r} for o, r in ORDENS],
                 "filtros": opcoes_dos_filtros, "linhas": achadas}
+
+
+# --- Fontes, Resultados e a Saude (fatia 4 da #906) ---------------------------------------------------------------
+
+RESPOSTAS = (("mesmo", "É o mesmo"), ("outro", "É outro"))
+ROTULO_RESPOSTA = dict(RESPOSTAS)
+
+
+def _situacao_da_fonte(f: dict) -> str:
+    """Problema e' critico; aguardando (o robo esperando a proxima janela, a pagina fora do ar de proposito) vence em
+    breve; o resto, lido."""
+    return "critico" if f.get("problema") else "breve" if f.get("aguardando") else "feito"
+
+
+def _linhas_por_chave(conn, hoje: datetime.date, chaves) -> dict[str, dict]:
+    """As linhas das telas (`_linha`, com a favorita) dos certames pedidos, por chave."""
+    return {r["chave"]: _linha(r, hoje, r if r["desde"] is not None else None) for r in conn.execute(
+        "SELECT c.id, c.chave, c.dados, f.desde, f.etapa, f.mudancas_vistas FROM lic_certames c "
+        "LEFT JOIN lic_favoritas f ON f.chave=c.chave AND f.removida_em IS NULL "
+        "WHERE c.chave IN (SELECT value FROM json_each(?))", (json.dumps(sorted(set(chaves))),))}
+
+
+def fontes(conn) -> dict:
+    """O radar leu tudo hoje? A situacao de cada fonte na ultima leitura, os alertas do dia por regra (com as linhas
+    das licitacoes) e a conferencia: os pares pendentes no radar sem resposta e os ja' respondidos que ele ainda lista
+    (a resposta chega a ele na rodada seguinte)."""
+    with db.leitura(conn):
+        hoje = tempo.hoje_local()
+        r = conn.execute("SELECT fontes, alertas FROM lic_leituras ORDER BY lido_em DESC LIMIT 1").fetchone()
+        lidas = json.loads(r["fontes"]) if r else []
+        alertas = json.loads(r["alertas"]) if r else []
+        pares = conn.execute(
+            "SELECT p.id, p.par, p.chave_a, p.chave_b, p.motivo, c.resposta, c.criada_em, c.autor_radar, u.nome "
+            "FROM lic_pares p LEFT JOIN lic_conferencias c ON c.par=p.par AND c.desfeita_em IS NULL "
+            "LEFT JOIN usuarios u ON u.id=c.criada_por WHERE p.fora_desde IS NULL ORDER BY p.id").fetchall()
+        linhas = _linhas_por_chave(conn, hoje, [k for a in alertas for k in a["chaves"]]
+                                   + [k for p in pares for k in (p["chave_a"], p["chave_b"])])
+        pendentes, conferidos = [], []
+        for p in pares:
+            a, b = linhas.get(p["chave_a"]), linhas.get(p["chave_b"])
+            if a is None or b is None:                       # so' por edicao manual do banco: o radar manda os dois lados
+                continue
+            item = {"id": p["id"], "par": p["par"], "motivo": p["motivo"], "a": a, "b": b}
+            if p["resposta"] is None:
+                pendentes.append(item)
+            else:
+                conferidos.append({**item, "resposta": p["resposta"], "resposta_rotulo": ROTULO_RESPOSTA[p["resposta"]],
+                                   "quem": p["nome"] or p["autor_radar"], "quando": tempo.iso_utc(p["criada_em"])})
+        return {"leitura": leitura(conn), "decisoes": _lado_das_decisoes(conn),
+                "fontes": [{**f, "situacao": _situacao_da_fonte(f)} for f in lidas],
+                "alertas": [{"regra": a["regra"], "nome": a["nome"],
+                             "linhas": [linhas[k] for k in a["chaves"] if k in linhas]} for a in alertas],
+                "respostas": [{"resposta": c, "rotulo": r} for c, r in RESPOSTAS],
+                "pares": pendentes, "conferidos": conferidos}
+
+
+def _taxa(vencidas: int, participadas: int) -> int | None:
+    """Vencidas sobre participadas, em milesimos, arredondado (metade para cima); sem participada, nenhuma."""
+    return None if participadas == 0 else (vencidas * 2000 + participadas) // (2 * participadas)
+
+
+def resultados(conn) -> dict:
+    """Como fomos nas que participamos: o ultimo quadro que o radar mandou (ele calcula dos dossies), com a data da
+    leitura que o trouxe e a taxa de cada grupo. Sem quadro, `resultados` nulo."""
+    with db.leitura(conn):
+        r = conn.execute("SELECT lido_em, resultados FROM lic_leituras WHERE resultados IS NOT NULL "
+                         "ORDER BY lido_em DESC LIMIT 1").fetchone()
+        quadro = None
+        if r is not None:
+            quadro = json.loads(r["resultados"])
+            for grupo in ("por_tipo", "por_modalidade"):
+                quadro[grupo] = [{**g, "taxa": _taxa(g["vencidas"], g["participadas"])} for g in quadro[grupo]]
+        return {"leitura": leitura(conn), "lido_em": tempo.iso_utc(r["lido_em"]) if r else None, "resultados": quadro}
+
+
+def saude(conn) -> dict:
+    """Administracao > Saude: a ultima leitura do radar, se esta' atrasada (a mesma conta de "O radar nao le desde") e
+    quantas fontes tiveram problema nela."""
+    with db.leitura(conn):
+        return leitura(conn)
