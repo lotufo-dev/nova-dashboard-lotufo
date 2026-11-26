@@ -37,15 +37,18 @@ describe("Passo Pagamento (#514)", () => {
   beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-22T15:00:00Z")); api.mockResolvedValue({ processos: [] }); });
   afterEach(() => { cleanup(); api.mockReset(); vi.useRealTimers(); });
 
-  it("reapresentada: aguardando conta do primeiro protocolo e a revisão do servidor vai embaixo (#914)", () => {
+  it("reapresentada: aguardando conta do primeiro protocolo, com o selo Rev. 1 e as duas datas embaixo (#914)", () => {
     const protocolos = [{ id: 9, data: "2026-11-02", numero_oficio: null, numero_processo: "PROC-0001", origem: "manual", protocolo_id: null },
                         { id: 10, data: "2026-11-14", numero_oficio: null, numero_processo: "PROC-0001", origem: "manual", protocolo_id: null }];
     montar({ grupo: [com({ protocolos, revisao: { primeiro_protocolo_em: "2026-11-02", reapresentacoes: 1, ultimo_envio_em: "2026-11-14" } })] });
-    expect(screen.getByText(/^20\sdias$/)).toBeTruthy();
+    const valor = document.querySelectorAll(".pag-numeros__valor")[2];
+    expect(valor.textContent).toMatch(/^20\sdias Rev\. 1revisão 1, reapresentada uma vez$/);
+    expect(valor.querySelector(".selo--revisao .glifo")).toBeNull();
     expect(screen.queryByText(/nota enviada em/)).toBeNull();
-    expect(screen.getByText("1º protocolo em 02/11/2026")).toBeTruthy();
-    expect(screen.getByText("reapresentada 1 vez")).toBeTruthy();
-    expect(screen.getByText("último envio em 14/11/2026")).toBeTruthy();
+    const notas = [...document.querySelectorAll(".pag-numeros__nota")].map(n => n.textContent);
+    expect(notas).toContain("1º protocolo 02/11/2026 · último envio 14/11/2026");
+    // cada data inteira: a linha so' quebra no " · "
+    expect([...document.querySelectorAll(".revisao-datas__parte")].map(n => n.textContent)).toEqual(["1º protocolo 02/11/2026", "último envio 14/11/2026"]);
   });
 
   it("par em dias diferentes: a revisão de uma metade só não aparece com a espera da outra (#914)", () => {
@@ -54,7 +57,7 @@ describe("Passo Pagamento (#514)", () => {
       com({ id: 6, tipo: "reajuste", protocolos: [p(10, "2026-11-10"), p(11, "2026-11-14")],
             revisao: { primeiro_protocolo_em: "2026-11-10", reapresentacoes: 1, ultimo_envio_em: "2026-11-14" } })], junta: true });
     expect(screen.getByText("nota enviada em 02/11/2026")).toBeTruthy();
-    expect(screen.queryByText(/reapresentada/)).toBeNull();
+    expect(document.querySelector(".selo--revisao")).toBeNull();
   });
 
   it("em consórcio: exibe o resumo do servidor (a receber, recebido de, barra) ao lado do total cheio e dos dias aguardando", () => {

@@ -162,6 +162,18 @@ describe("Em aberto: o em aberto nota a nota (#816)", () => {
     expect(screen.queryByRole("region", { name: /À parte/ })).toBeNull();     // a SINFRA não tem nada à parte
   });
 
+  it("a reapresentada leva o selo Rev. N e o último envio; o primeiro protocolo fica só na coluna Protocolo (#914)", async () => {
+    const revisao = { primeiro_protocolo_em: "2026-09-01", reapresentacoes: 1, ultimo_envio_em: "2026-10-14" };
+    const [alfa, ...resto] = SINFRA.linhas;
+    await abrir({ ...RESPOSTA, contratantes: [{ ...SINFRA, linhas: [{ ...alfa, parada: { ...alfa.parada!, revisao } }, ...resto] }, PREFEITURA, SES] },
+      { contratante: "sinfra" });
+    const [linhaAlfa] = linhas();
+    expect(texto(linhaAlfa.querySelector(".arc-a-data"))).toBe("01/09/2026");
+    expect(linhaAlfa.querySelector(".arc-a-parada .selo--revisao .sr-only")?.textContent).toBe("revisão 1, reapresentada uma vez");
+    expect(texto(linhaAlfa.querySelector(".arc-a-parada .tempo-parado__revisao"))).toBe("último envio 14/10");
+    expect(linhaAlfa.querySelector(".arc-a-parada")?.textContent).not.toContain("1º protocolo");
+  });
+
   it("a data prevista e a do pagamento do órgão de outro ano levam o ano: a do ano que vem não se lê como passada", async () => {
     const [alfa, beta, reajuste] = SINFRA.linhas;
     const sinfra = { ...SINFRA, linhas: [alfa, { ...beta, orgao_pagou_em: "2025-12-12" },

@@ -18,12 +18,21 @@ export type Parada = {
   prazo_orgao_dias: number | null; esperada: string | null; alem_do_prazo: boolean; revisao: Revisao | null;
 };
 
-/** As tres partes da revisao (#914), na ordem em que a tela as escreve: "1º protocolo em 03/11", "reapresentada 2
- *  vezes", "último envio em 18/11". `dia` formata a data (o `fmtDiaNoAno` da tela: sem o ano no ano de hoje). */
-export function partesDaRevisao(r: Revisao, dia: (iso: string) => string | null): string[] {
-  const vezes = r.reapresentacoes === 1 ? "1 vez" : `${r.reapresentacoes.toLocaleString("pt-BR")} vezes`;
-  return [`1º protocolo em ${dia(r.primeiro_protocolo_em) ?? "—"}`, `reapresentada ${vezes}`,
-          `último envio em ${dia(r.ultimo_envio_em) ?? "—"}`];
+/** A revisao da cobranca (#914, decisao do dono de 26/11/2026): o envio original e' a Rev. 0, que nao ganha selo; cada
+ *  reapresentacao soma um. O selo diz "Rev. N" e, por extenso para o leitor de tela, "revisão N, reapresentada uma
+ *  vez" ("2 vezes", ...). */
+export function seloDaRevisao(r: Revisao): { curto: string; extenso: string } {
+  const n = r.reapresentacoes;
+  return { curto: `Rev. ${n}`, extenso: `revisão ${n}, reapresentada ${n === 1 ? "uma vez" : `${n.toLocaleString("pt-BR")} vezes`}` };
+}
+
+/** As duas datas da revisao, que a tela escreve numa linha separadas por " · ": ["1º protocolo 30/09", "último envio
+ *  14/11"]. Cada parte vai inteira (sem quebra dentro dela): em coluna estreita a linha quebra so' no " · ", e o rotulo
+ *  nao fica longe da data. `comPrimeiro=false` onde a linha ja' mostra a data do primeiro protocolo em coluna propria
+ *  (a pagina Em aberto): so' o ultimo envio. `dia` formata a data (o `fmtDiaNoAno` da tela: sem o ano no ano de hoje). */
+export function datasDaRevisao(r: Revisao, dia: (iso: string) => string | null, comPrimeiro = true): string[] {
+  const ultimo = `último envio ${dia(r.ultimo_envio_em) ?? "—"}`;
+  return comPrimeiro ? [`1º protocolo ${dia(r.primeiro_protocolo_em) ?? "—"}`, ultimo] : [ultimo];
 }
 
 /** "hoje", "menos de 1 dia útil" (o evento foi no fim de semana ou no feriado), "1 dia útil", "12 dias úteis"; sem a
