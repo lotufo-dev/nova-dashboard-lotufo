@@ -22,10 +22,19 @@ export default function TempoParado({ parada, frase = false, comPrimeiro = true 
     <span className="tempo-parado">
       <span className="tempo-parado__selos">
         <Selo situacao={parada.situacao ?? undefined}>{frase ? fraseDoTempo(parada) : textoDoTempo(parada)}</Selo>
-        {parada.revisao && <SeloRevisao revisao={parada.revisao} />}
+        {parada.revisao && <>{" "}<SeloRevisao revisao={parada.revisao} /></>}
       </span>
       {dia && <span className="tempo-parado__prazo">{parada.alem_do_prazo ? `prazo do órgão venceu em ${dia}` : `prazo do órgão: ${dia}`}</span>}
-      {parada.revisao && <span className="tempo-parado__revisao">{datasDaRevisao(parada.revisao, d => fmtDiaNoAno(d), comPrimeiro)}</span>}
+      {parada.revisao && <DatasDaRevisao partes={datasDaRevisao(parada.revisao, d => fmtDiaNoAno(d), comPrimeiro)} className="tempo-parado__revisao" />}
+    </span>
+  );
+}
+
+/** As datas da revisao (#914) numa linha, cada parte inteira (`.revisao-datas__parte`): quebra so' no " · ". */
+export function DatasDaRevisao({ partes, className }: { partes: string[]; className?: string }) {
+  return (
+    <span className={className}>
+      {partes.map((p, i) => <span key={p}>{i > 0 && " · "}<span className="revisao-datas__parte">{p}</span></span>)}
     </span>
   );
 }

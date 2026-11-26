@@ -45,7 +45,10 @@ describe("Passo Pagamento (#514)", () => {
     expect(valor.textContent).toMatch(/^20\sdias Rev\. 1revisão 1, reapresentada uma vez$/);
     expect(valor.querySelector(".selo--revisao .glifo")).toBeNull();
     expect(screen.queryByText(/nota enviada em/)).toBeNull();
-    expect(screen.getByText("1º protocolo 02/11/2026 · último envio 14/11/2026")).toBeTruthy();
+    const notas = [...document.querySelectorAll(".pag-numeros__nota")].map(n => n.textContent);
+    expect(notas).toContain("1º protocolo 02/11/2026 · último envio 14/11/2026");
+    // cada data inteira: a linha so' quebra no " · "
+    expect([...document.querySelectorAll(".revisao-datas__parte")].map(n => n.textContent)).toEqual(["1º protocolo 02/11/2026", "último envio 14/11/2026"]);
   });
 
   it("par em dias diferentes: a revisão de uma metade só não aparece com a espera da outra (#914)", () => {

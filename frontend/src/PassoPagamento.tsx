@@ -11,7 +11,7 @@ import { processoDa } from "./PassoAnalise";
 import { diaMes } from "./Passos";
 import type { Rota } from "./rota";
 import Selo from "./Selo";
-import { SeloRevisao } from "./TempoParado";
+import { DatasDaRevisao, SeloRevisao } from "./TempoParado";
 import type { PainelSiga } from "./siga";
 import { fmtDataPura, hojeLocal } from "./tempo";
 
@@ -127,7 +127,7 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
               <p className="pag-numeros__rotulo">Aguardando há</p>
               <p className="pag-numeros__valor num">{dias === null ? "—" : fmtDias(dias)}{revisao && <> <SeloRevisao revisao={revisao} /></>}</p>
               {enviada && !revisao && <p className="pag-numeros__nota">nota enviada em {fmtDataPura(enviada)}</p>}
-              {revisao && <p className="pag-numeros__nota">{datasDaRevisao(revisao, fmtDataPura)}</p>}
+              {revisao && <p className="pag-numeros__nota"><DatasDaRevisao partes={datasDaRevisao(revisao, fmtDataPura)} /></p>}
               {emitida && <p className="pag-numeros__nota">nota emitida em {fmtDataPura(emitida.slice(0, 10))}</p>}
             </>
           )}

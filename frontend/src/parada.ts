@@ -26,12 +26,13 @@ export function seloDaRevisao(r: Revisao): { curto: string; extenso: string } {
   return { curto: `Rev. ${n}`, extenso: `revisão ${n}, reapresentada ${n === 1 ? "uma vez" : `${n.toLocaleString("pt-BR")} vezes`}` };
 }
 
-/** As duas datas da revisao numa linha: "1º protocolo 30/09 · último envio 14/11". `comPrimeiro=false` onde a linha
- *  ja' mostra a data do primeiro protocolo em coluna propria (a pagina Em aberto): so' "último envio 14/11". `dia`
- *  formata a data (o `fmtDiaNoAno` da tela: sem o ano no ano de hoje). */
-export function datasDaRevisao(r: Revisao, dia: (iso: string) => string | null, comPrimeiro = true): string {
+/** As duas datas da revisao, que a tela escreve numa linha separadas por " · ": ["1º protocolo 30/09", "último envio
+ *  14/11"]. Cada parte vai inteira (sem quebra dentro dela): em coluna estreita a linha quebra so' no " · ", e o rotulo
+ *  nao fica longe da data. `comPrimeiro=false` onde a linha ja' mostra a data do primeiro protocolo em coluna propria
+ *  (a pagina Em aberto): so' o ultimo envio. `dia` formata a data (o `fmtDiaNoAno` da tela: sem o ano no ano de hoje). */
+export function datasDaRevisao(r: Revisao, dia: (iso: string) => string | null, comPrimeiro = true): string[] {
   const ultimo = `último envio ${dia(r.ultimo_envio_em) ?? "—"}`;
-  return comPrimeiro ? `1º protocolo ${dia(r.primeiro_protocolo_em) ?? "—"} · ${ultimo}` : ultimo;
+  return comPrimeiro ? [`1º protocolo ${dia(r.primeiro_protocolo_em) ?? "—"}`, ultimo] : [ultimo];
 }
 
 /** "hoje", "menos de 1 dia útil" (o evento foi no fim de semana ou no feriado), "1 dia útil", "12 dias úteis"; sem a

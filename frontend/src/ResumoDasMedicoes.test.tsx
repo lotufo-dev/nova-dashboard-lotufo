@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ResumoDasMedicoes, { type RespostaResumo } from "./ResumoDasMedicoes";
+import { CartaoDaMedicao } from "./ResumoQuadro";
 import { ir, useRota } from "./rota";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
@@ -266,6 +267,21 @@ describe("Resumo das medições em quadro por etapa (#749, #805)", () => {
     expect(recebida.querySelector(".selo")?.className).toBe("selo selo--feito");
     expect(texto(recebida.querySelector(".rdm-cartao__tempo"))).toBe("recebida em 12/11/268 dias após a nota");
     expect(recebida.querySelector(".diferenca")).toBeNull();
+  });
+
+  it("o cartão da reapresentada leva o selo Rev. N e as duas datas, sem o desde, que o 1º protocolo já diz (#914)", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-18T15:00:00Z"));
+    const revisao = { primeiro_protocolo_em: "2026-09-30", reapresentacoes: 1, ultimo_envio_em: "2026-11-14" };
+    const l = linha({ contrato_id: 7, obra: "Obra Própria", medicao_id: 71, titulo: "12ª Medição", etapa: "protocolado", etapas: [],
+      parada: parada("2026-09-30", 34, "critico", { prazo_orgao_dias: 45, esperada: "2026-11-14", alem_do_prazo: true, revisao }) });
+    const { container } = render(<ul><CartaoDaMedicao l={l} limitePorMil={5} ir={vi.fn()} /></ul>);
+    const tempo = container.querySelector(".rdm-cartao__tempo");
+    expect([...(tempo?.querySelectorAll(".tempo-parado__selos > .selo") ?? [])].map(s => s.className)).toEqual(
+      ["selo selo--critico", "selo selo--revisao"]);
+    expect(texto(tempo?.querySelector(".tempo-parado__revisao") ?? null)).toBe("1º protocolo 30/09 · último envio 14/11");
+    expect(tempo?.querySelector(".rdm-cartao__desde")).toBeNull();
+    vi.useRealTimers();
   });
 
   it("as obras sem medição no mês saem num bloco curto, com o mês da última medição de cada uma", async () => {
