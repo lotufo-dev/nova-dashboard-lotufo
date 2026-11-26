@@ -56,7 +56,7 @@ const PAINEL = {
 // processos e valores inventados.
 const parada = (dias: number | null, situacao: Parada["situacao"], extra: Partial<Parada> = {}): Parada => ({
   desde: dias === null ? null : "2026-11-02", dias_uteis: dias, hoje: dias === 0, situacao, prazo_orgao_dias: null, esperada: null,
-  alem_do_prazo: false, ...extra });
+  alem_do_prazo: false, revisao: null, ...extra });
 const PASSOS = ["Planilha e carta", "Análise do órgão", "Espelhos", "Notas", "Envio da nota", "Pagamento"];
 const naFila = (contrato_id: number, obra_: string, atual: number, com_quem: LinhaFila["com_quem"], extra: Partial<LinhaFila> = {}): LinhaFila => ({
   contrato_id, obra: obra_, contratante: "SINFRA", orgao_sub: "SUEF II", medicao_id: contrato_id * 100, medicao_ids: [contrato_id * 100],

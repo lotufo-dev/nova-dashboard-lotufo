@@ -560,6 +560,8 @@ def avisos(conn, hoje: datetime.date | None = None) -> list[dict]:
                     "contrato_id": x["contrato_id"], "dias": None,
                     "mensagem": f"recebida à mão com notas de {dinheiro.format_brl(x['notas_centavos'])}, que não cobrem "
                                 f"a medição ({dinheiro.format_brl(x['valor_centavos'])}): a nota que falta não liga sozinha"})
+    # issue #914 (segunda revisao): este aviso e' da NOTA, nao o tempo parado da medicao, e conta do ULTIMO envio: na
+    # reapresentacao a nota pode ter sido trocada, e a nova so' foi ao orgao no ultimo protocolo
     for r in conn.execute("""
         SELECT n.id AS nota_id, n.numero_int AS numero, a.medicao_id, m.contrato_id,
                (SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota' AND p.desfeita_em IS NULL) AS protocolado_em

@@ -158,7 +158,7 @@ def test_parada_no_pagamento_so_e_critica_alem_do_prazo_do_orgao():
     assert fila_medicoes._parada(protocolo, HOJE, 6, None, None)["situacao"] == "andamento"
     assert fila_medicoes._parada(None, HOJE, 3, None, None) == {
         "desde": None, "dias_uteis": None, "hoje": False, "situacao": None, "prazo_orgao_dias": None, "esperada": None,
-        "alem_do_prazo": False}
+        "alem_do_prazo": False, "revisao": None}
 
 
 def test_fila_agrupa_por_quem_age_da_mais_parada_para_a_menos(conn, cenario):
@@ -190,7 +190,7 @@ def test_linha_traz_passos_da_obra_tempo_parado_e_o_proximo_ato(conn, cenario):
     assert p["passo"] == {"numero": 6, "nome": "Pagamento", "posicao": 3, "total": 3}
     assert p["com_quem"] == "orgao" and p["acao"] is None
     assert p["parada"] == {"desde": "2026-11-12", "dias_uteis": 4, "hoje": False, "situacao": "andamento",
-                           "prazo_orgao_dias": 30, "esperada": None, "alem_do_prazo": False}
+                           "prazo_orgao_dias": 30, "esperada": None, "alem_do_prazo": False, "revisao": None}
     # a MT-PAR comeca no passo do boletim, que e' da Lotufo enquanto nada foi ao orgao; sem marco, sem dias
     m = linhas[ids["m8"]]
     assert m["passo"] == {"numero": 2, "nome": "Análise do órgão", "posicao": 1, "total": 5}
@@ -280,6 +280,50 @@ def test_grupo_vazio_nao_aparece(conn, cenario):
     f = fila_medicoes.fila(conn, HOJE, MES)
     assert [g["com_quem"] for g in f["grupos"]] == ["lotufo", "orgao"]
     assert f["numeros"]["com"]["faturamento"]["quantidade"] == 0
+
+
+def test_reapresentada_conta_do_primeiro_protocolo_e_leva_a_revisao(conn, cenario):
+    """#914: a nota da H reapresentada em 16/11 (o primeiro protocolo foi em 10/11): a linha conta do primeiro, com a
+    data esperada dele, e leva a revisao; o quadro do mes mostra o dia do primeiro protocolo no passo "Envio da nota",
+    o mesmo do Resumo das medicoes. A de protocolo unico nao ganha revisao."""
+    ids = cenario
+    conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) VALUES (?, '2026-11-16', 'manual')", (ids["h4"],))
+    conn.commit()
+    f = fila_medicoes.fila(conn, HOJE, MES)
+    h = _linhas(f)[ids["h4"]]["parada"]
+    assert (h["desde"], h["dias_uteis"], h["esperada"], h["situacao"]) == ("2026-11-10", 6, "2026-12-10", "andamento")
+    assert h["revisao"] == {"primeiro_protocolo_em": "2026-11-10", "reapresentacoes": 1, "ultimo_envio_em": "2026-11-16"}
+    assert _linhas(f)[ids["g9"]]["parada"]["revisao"] is None
+    # fora do Pagamento nao ha' revisao
+    assert _linhas(f)[ids["c3"]]["parada"]["revisao"] is None
+    obra_h = next(x for g in f["quadro"] for x in g["linhas"] if x["obra"] == "Obra H")
+    envio = next(p for p in obra_h["passos"] if p["numero"] == 5)
+    assert (envio["situacao"], envio["data"]) == ("feito", "2026-11-10")
+    assert next(p for p in obra_h["passos"] if p["situacao"] == "atual")["parada"] == h
+    assert fila_medicoes.paradas(conn, HOJE)[ids["h4"]] == h
+
+
+@pytest.mark.parametrize("protocolo_do_reajuste,linhas", [("2026-11-10", 1), ("2026-11-12", 2)])
+def test_par_medicao_e_reajuste_no_pagamento_so_e_uma_linha_com_o_mesmo_protocolo(conn, cenario, protocolo_do_reajuste, linhas):
+    """#914: o reajuste da H protocolado no mesmo dia da execucao fica na linha dela; em outro dia, cada um na sua
+    linha, com os proprios dias e a propria data esperada (como na pagina Em aberto, nota a nota)."""
+    ids = cenario
+    r = _medicao(conn, ids["h"], 4, "protocolada", tipo="reajuste", pedido=1001, aprovado=1001, protocolo=protocolo_do_reajuste)
+    conn.commit()
+    f = _linhas(fila_medicoes.fila(conn, HOJE, MES))
+    if linhas == 1:
+        assert f[ids["h4"]]["medicao_ids"] == [ids["h4"], r] and r not in f
+        return
+    assert f[ids["h4"]]["medicao_ids"] == [ids["h4"]] and f[r]["medicao_ids"] == [r]
+    assert (f[ids["h4"]]["parada"]["desde"], f[ids["h4"]]["parada"]["esperada"]) == ("2026-11-10", "2026-12-10")
+    assert (f[r]["parada"]["desde"], f[r]["parada"]["esperada"]) == ("2026-11-12", "2026-12-12")
+    # o reajuste reapresentado e a execucao nao, mesmo com o primeiro protocolo no mesmo dia: duas linhas
+    conn.execute("UPDATE medicao_protocolos SET data='2026-11-10' WHERE medicao_id=?", (r,))
+    conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) VALUES (?, '2026-11-17', 'manual')", (r,))
+    conn.commit()
+    f = _linhas(fila_medicoes.fila(conn, HOJE, MES))
+    assert f[r]["medicao_ids"] == [r] and f[r]["parada"]["revisao"]["reapresentacoes"] == 1
+    assert f[ids["h4"]]["parada"]["revisao"] is None
 
 
 def test_quadro_por_contratante_com_os_dias_no_passo_da_vez_e_a_diferenca(conn, cenario):

@@ -8,7 +8,7 @@ vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api"
 // Dados ficticios, valores inventados. Os numeros vem prontos do servidor (subtotal, total, o de cada ano, o tempo
 // parado e a data prevista); a tela so' mostra.
 const parada = (desde: string, dias: number, situacao: "andamento" | "critico", esperada: string | null, prazo: number | null) => ({
-  desde, dias_uteis: dias, hoje: false, situacao, prazo_orgao_dias: prazo, esperada, alem_do_prazo: situacao === "critico",
+  desde, dias_uteis: dias, hoje: false, situacao, prazo_orgao_dias: prazo, esperada, alem_do_prazo: situacao === "critico", revisao: null,
 });
 const linha = (x: Partial<LinhaAReceber> & Pick<LinhaAReceber, "medicao_id" | "obra" | "valor_centavos">): LinhaAReceber => ({
   tipo_aberto: "nota", nota_id: x.medicao_id + 1000, numero: String(x.medicao_id + 1000), paga_em_parte: false, contrato_id: 7,

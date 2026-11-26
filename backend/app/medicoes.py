@@ -176,6 +176,8 @@ def _detalhe(conn: sqlite3.Connection, medicao_id: int) -> dict | None:
     # espelho, 1 enquanto nao houver nota). A cota so' se soma com todas casadas. Import local: notas importa este modulo.
     from app import notas as _notas
     d["notas_faltam"] = _notas.faltam(conn, medicao_id)
+    # issue #914: em que revisao a cobranca esta' (nula na de protocolo unico), a mesma leitura das outras telas
+    d["revisao"] = revisoes_do_protocolo(conn, medicao_id).get(medicao_id)
     # o resumo do passo Pagamento (a cota da Lotufo na medicao + a irma valida do par), pronto: a tela nao soma
     d["pagamento_cota"] = sincronizacao_rm.pagamento_cota(conn, medicao_id)
     # Documentos de faturamento do consorcio (NF/NFS-e/FATURA do SharePoint, migracao 017):
@@ -1113,6 +1115,9 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
 
 # Estado -> coluna que guarda a DATA do marco (spec §6: Emitido = emissao da NF,
 # Recebido = baixa). Os encerramentos por excecao nao tem eixo de indicador.
+# o registro do recebimento a' mao (a rota de estado e o `registrar_recebimento` da correcao de cadastro): o motivo
+# minimo, que a tela acompanha (MIN_MOTIVO_RECEBIMENTO em MedicaoAtos.tsx)
+MOTIVO_RECEBIMENTO_MINIMO = 10
 COLUNA_DATA = {"nota_emitida": "nota_emitida_em", "nf_emitida": "nf_emitida_em", "recebida": "recebida_em"}
 
 
@@ -1351,10 +1356,36 @@ PROXIMO_PASSO = {"planilha_gerada": "Planilha e carta", "planilha_enviada": "An�
                  "nota_emitida": "Envio da nota", "protocolada": "Pagamento", "nf_emitida": "Pagamento"}
 
 
+# Issue #914 (decisao do dono de 26/11/2026): a medicao com a nota protocolada mais de uma vez (reapresentada) conta o
+# tempo parado, o atraso e a data esperada do PRIMEIRO protocolo da nota, em todas as telas, como o prazo do orgao
+# (docs/adr/0007). O ultimo envio e' informacao da linha, nunca ponto de partida de conta.
+SQL_PRIMEIRO_PROTOCOLO = ("(SELECT MIN(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota' "
+                          "AND p.desfeita_em IS NULL)")
+
+
+def revisoes_do_protocolo(conn, medicao_id: int | None = None) -> dict[int, dict]:
+    """Medicao reapresentada -> em que revisao a cobranca esta' (issue #914): a data do primeiro protocolo da nota,
+    quantas vezes foi reapresentada e a data do ultimo envio. A UNICA leitura da revisao: a fila de Medicoes, o Resumo
+    das medicoes e a pagina Em aberto a mostram no tempo parado (`fila_medicoes._parada`).
+
+    Reapresentar e' protocolar a nota de novo, noutro dia (o novo oficio, `ESTADOS_DE_NOVO_PROTOCOLO`): conta cada dia
+    de protocolo depois do primeiro. Duas linhas de protocolo no mesmo dia sao o mesmo envio registrado duas vezes (o
+    do sistema e o da carga do cadastro), nao uma reapresentacao. O protocolo desfeito (docs/adr/0006) nao conta. A
+    medicao com um dia de protocolo so' fica fora do dicionario: a linha dela nao ganha nada. Com `medicao_id`, so'
+    ela (a pagina da medicao)."""
+    return {r["medicao_id"]: {"primeiro_protocolo_em": r["primeiro"], "reapresentacoes": r["dias"] - 1,
+                              "ultimo_envio_em": r["ultimo"]}
+            for r in conn.execute(
+                "SELECT medicao_id, MIN(data) AS primeiro, MAX(data) AS ultimo, COUNT(DISTINCT data) AS dias "
+                "FROM medicao_protocolos WHERE etapa='nota' AND desfeita_em IS NULL AND data IS NOT NULL "
+                "AND (? IS NULL OR medicao_id=?) GROUP BY medicao_id HAVING COUNT(DISTINCT data) > 1",
+                (medicao_id, medicao_id))}
+
+
 def em_andamento(conn, contrato_id: int | None = None, estado: str | None = None) -> list[dict]:
-    """Medicoes entre o espelho e o pagamento, com o proximo passo e a data do ultimo marco."""
-    sql = ("SELECT m.*, c.nome_curto, c.numero_instrumento, o.familia, "
-           "(SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota' AND p.desfeita_em IS NULL) AS protocolado_em "
+    """Medicoes entre o espelho e o pagamento, com o proximo passo e a data do ultimo marco. O marco do protocolo e' o
+    PRIMEIRO protocolo da nota (issue #914, `SQL_PRIMEIRO_PROTOCOLO`)."""
+    sql = (f"SELECT m.*, c.nome_curto, c.numero_instrumento, o.familia, {SQL_PRIMEIRO_PROTOCOLO} AS protocolado_em "
            "FROM medicoes m JOIN contratos c ON c.id=m.contrato_id LEFT JOIN orgaos o ON o.id=c.orgao_id "
            f"WHERE m.estado IN ({','.join('?' * len(PROXIMO_PASSO))})")
     args: list = list(PROXIMO_PASSO)
@@ -1458,12 +1489,16 @@ def linhas_em_andamento(conn, hoje: datetime.date | None = None, obras: dict[int
 
     "Parada ha'" conta do marco da SITUACAO ATUAL, nunca do criado_em (lancar a medicao nao e' marco de nada):
     enviar ao faturamento = o espelho vigente gerado; aguardando nota = o e-mail ao faturamento; enviar nota = a
-    emissao da nota; aguardando pagamento = o envio ao orgao (o protocolo) ou, na obra sem o passo "Envio da nota"
-    (#743), a emissao da nota. Sem marco, `dias` nulo ("—").
+    emissao da nota; aguardando pagamento = o PRIMEIRO envio ao orgao (o primeiro protocolo da nota, issue #914) ou,
+    na obra sem o passo "Envio da nota" (#743), a emissao da nota. Sem marco, `dias` nulo ("—"). `revisao` e' a de
+    `revisoes_do_protocolo` (nula na medicao que nao foi reapresentada).
 
     Medicao e reajuste da mesma obra, numero e competencia, na mesma situacao, viram UMA linha ("24ª Medição +
     Reajuste") com o valor somado e o marco mais antigo dos dois; o resto (projeto, reajuste em outra situacao)
-    fica em linha propria, com o titulo de sempre."""
+    fica em linha propria, com o titulo de sempre. Aguardando o pagamento, o par so' vira uma linha quando os dois
+    tem o mesmo marco e a mesma revisao (issue #914): protocolados em dias diferentes, ou um reapresentado e o outro
+    nao, cada um conta os proprios dias e tem a propria data esperada, e a linha unica mostraria de um o que e' do
+    outro (a pagina Em aberto, que lista nota a nota, os mostraria diferentes)."""
     hoje = hoje or tempo.hoje_local()
     obras = _obras_com_contratante(conn) if obras is None else obras
     andamento = em_andamento(conn) if andamento is None else andamento
@@ -1480,6 +1515,7 @@ def linhas_em_andamento(conn, hoje: datetime.date | None = None, obras: dict[int
         "WHERE e.situacao='vigente' AND e.envio_externo_em IS NOT NULL GROUP BY em.medicao_id").fetchall())
 
     planilha_de = dict(conn.execute("SELECT medicao_id, MIN(criado_em) FROM medicao_planilhas GROUP BY medicao_id").fetchall())
+    revisoes = revisoes_do_protocolo(conn)
 
     def marco(m: dict) -> datetime.date | None:
         # os tres estados do motor (spec motores §2.1): o marco e' o do proprio estado
@@ -1510,6 +1546,10 @@ def linhas_em_andamento(conn, hoje: datetime.date | None = None, obras: dict[int
         tipos = {m["tipo"]: m for m in ms}
         # (contrato, numero, tipo) e' UNIQUE: no grupo ha' no maximo uma de cada tipo
         par = [tipos["execucao"], tipos["reajuste"]] if {"execucao", "reajuste"} <= set(tipos) else []
+        # #914: aguardando o pagamento, so' o par com o mesmo marco e a mesma revisao (ver o texto da funcao)
+        if par and situacao == "aguardando-pagamento" and (
+                marco(par[0]) != marco(par[1]) or revisoes.get(par[0]["id"]) != revisoes.get(par[1]["id"])):
+            par = []
         partes = ([par] if par else []) + [[m] for m in ms if m not in par]
         for p in partes:
             principal = p[0]
@@ -1528,7 +1568,9 @@ def linhas_em_andamento(conn, hoje: datetime.date | None = None, obras: dict[int
                 "passo": min((m["passo"] for m in p), key=lambda x: x["numero"]),
                 "com_quem": "Órgão" if situacao in SITUACOES_COM_O_ORGAO else "Lotufo",
                 "valor_centavos": sum(valores) if valores else None,
-                "marco": d.isoformat() if d else None, "dias": (hoje - d).days if d else None})
+                "marco": d.isoformat() if d else None, "dias": (hoje - d).days if d else None,
+                # #914: a revisao so' acompanha a linha que espera o pagamento (o par, so' com a mesma, acima)
+                "revisao": revisoes.get(principal["id"]) if situacao == "aguardando-pagamento" else None})
     linhas.sort(key=lambda x: (ORDEM_SITUACAO.index(x["situacao"]), _chave_nome(x["obra"]), x["contrato_id"],
                                -x["numero"], x["titulo"]))
     return linhas
@@ -1733,7 +1775,9 @@ def passos_da_obra(conn, contrato_id: int) -> tuple[int, ...]:
 
 def _datas_dos_passos(conn, m: dict) -> dict[int, datetime.date | None]:
     """O dia (Cuiaba) em que cada passo da medicao foi feito: o ultimo envio da planilha/carta, o boletim vigente, o
-    e-mail do espelho vigente ao faturamento, a emissao da nota, o ultimo protocolo da nota e o recebimento."""
+    e-mail do espelho vigente ao faturamento, a emissao da nota, o PRIMEIRO protocolo da nota (`protocolado_em` de quem
+    chama, `SQL_PRIMEIRO_PROTOCOLO`, issue #914: o mesmo dia no quadro do mes e no Resumo das medicoes) e o
+    recebimento."""
     from app import planilha_envio      # import local: planilha_envio importa este modulo
     envio = None
     if m["planilha_enviada_em"]:
@@ -1768,8 +1812,7 @@ def _quadro_do_mes(conn, mes: str, obras: dict[int, dict], sem_fluxo_medicao: se
     passos_de = passos_das_medicoes(conn)
     do_mes: dict[int, list[dict]] = {}
     for r in conn.execute(
-            "SELECT m.*, (SELECT MAX(p.data) FROM medicao_protocolos p WHERE p.medicao_id=m.id AND p.etapa='nota' AND p.desfeita_em IS NULL) "
-            "AS protocolado_em FROM medicoes m WHERE m.competencia=? "
+            f"SELECT m.*, {SQL_PRIMEIRO_PROTOCOLO} AS protocolado_em FROM medicoes m WHERE m.competencia=? "
             "AND m.estado NOT IN ('prevista','cancelada','desistida')", (mes,)):
         do_mes.setdefault(r["contrato_id"], []).append(dict(r))
     passo_de = {}       # medicao -> (passos que ela tem, passo da vez)

@@ -98,6 +98,12 @@ Na obra sem o passo "Envio da nota", a medição com nota emitida conta como pro
 aberto, a receber), com a data da emissão da nota (`docs/adr/0006`).
 _Avoid_: protocolada para a planilha enviada (isso é "em análise")
 
+**Reapresentada**:
+Medição cuja nota foi protocolada de novo, em outro dia (novo ofício). O tempo parado, o atraso e a data esperada
+continuam contando do primeiro protocolo; a linha mostra a revisão: o primeiro protocolo, quantas vezes foi
+reapresentada e o último envio, que é só informação (#914). Dois registros de protocolo no mesmo dia são um envio só.
+_Avoid_: revisão para o pedido corrigido antes do protocolo (isso é a revisão da planilha/carta)
+
 **Recebido**:
 O órgão pagou: há baixa no RM, ou registro do administrador com motivo. Parte do protocolado; na obra sem o passo
 "Envio da nota", parte da nota emitida, sem protocolo, e a espera conta da emissão da nota.

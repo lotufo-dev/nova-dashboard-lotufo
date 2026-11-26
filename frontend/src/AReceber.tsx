@@ -117,7 +117,8 @@ function ParadaDaLinha({ l }: { l: LinhaAReceber }) {
     const dia = fmtDiaNoAno(l.orgao_pagou_em);
     return <Selo situacao="feito">{dia ? <>órgão pagou em <span className="num">{dia}</span></> : "órgão pagou"}</Selo>;
   }
-  return l.parada ? <TempoParado parada={l.parada} /> : <span className="tempo-parado tempo-parado--sem">—</span>;
+  // #914: a coluna "Protocolo" ja' mostra o primeiro protocolo; a revisao so' diz quantas vezes e o ultimo envio
+  return l.parada ? <TempoParado parada={l.parada} comPrimeiro={false} /> : <span className="tempo-parado tempo-parado--sem">—</span>;
 }
 
 function Linha({ l, ir }: { l: LinhaAReceber; ir: Ir }) {

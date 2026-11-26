@@ -12,6 +12,7 @@ import { fmtCompetencia as competenciaBR, fmtDataPura as dataBR } from "./tempo"
 import Rolagem from "./Rolagem";
 import Selo from "./Selo";
 import Falha from "./Falha";
+import type { Revisao } from "./parada";
 
 // As medicoes da obra (NAVEGACAO.md › Obra › aba Medicoes): "Em andamento", com o proximo passo e o link para
 // a secao dele na pagina da medicao, e "Anteriores" (recebidas, canceladas e desistidas), as 6 mais recentes
@@ -90,6 +91,8 @@ export type Medicao = {
   passos?: number[];
   /** #743: nota emitida na obra sem o passo "Envio da nota": recebida sem protocolo (pela baixa ou pelo admin) */
   recebe_sem_protocolo?: boolean;
+  /** #914: em que revisao a cobranca esta' na medicao reapresentada (nula na de protocolo unico), a mesma do tempo parado */
+  revisao?: Revisao | null;
   // #288: a diferenca do boletim VIGENTE aceita com justificativa (tira o aviso "aprovado abaixo do pedido")
   diferenca_aceita?: { atesto_id: number; justificativa: string; usuario: string | null; criado_em: string;
     diferenca_centavos: number } | null;
