@@ -1115,6 +1115,9 @@ def registrar_protocolo(conn, usuario_id: int, medicao_id: int, data: str,
 
 # Estado -> coluna que guarda a DATA do marco (spec §6: Emitido = emissao da NF,
 # Recebido = baixa). Os encerramentos por excecao nao tem eixo de indicador.
+# o registro do recebimento a' mao (a rota de estado e o `registrar_recebimento` da correcao de cadastro): o motivo
+# minimo, que a tela acompanha (MIN_MOTIVO_RECEBIMENTO em MedicaoAtos.tsx)
+MOTIVO_RECEBIMENTO_MINIMO = 10
 COLUNA_DATA = {"nota_emitida": "nota_emitida_em", "nf_emitida": "nf_emitida_em", "recebida": "recebida_em"}
 
 

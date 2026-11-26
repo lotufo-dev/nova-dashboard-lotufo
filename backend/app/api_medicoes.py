@@ -300,7 +300,7 @@ def protocolo(medicao_id: ID, dados: ProtocoloIn,
     return {"id": pid, "ressalva": ressalva}
 
 
-MOTIVO_RECEBIMENTO_MINIMO = 10  # a tela acompanha (MIN_MOTIVO_RECEBIMENTO em MedicaoAtos.tsx)
+MOTIVO_RECEBIMENTO_MINIMO = medicoes.MOTIVO_RECEBIMENTO_MINIMO  # a tela acompanha (MIN_MOTIVO_RECEBIMENTO em MedicaoAtos.tsx)
 
 
 @router.post("/api/medicoes/{medicao_id}/estado")

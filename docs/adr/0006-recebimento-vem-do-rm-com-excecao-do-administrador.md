@@ -339,3 +339,12 @@ ensaio, motivo e fonte, gravam a auditoria e não apagam nada.
   responde por ela, e não há caminho que o desfaça (nem na tela, nem aqui). Recusa também a medição com nota que tem
   baixa no RM, mesmo parcial: o pagamento está provado, e o que falta do título já segue a receber pela nota;
   desfazer faria a medição contar inteira.
+- **Registrar o recebimento provado fora do RM (`registrar_recebimento`, #34, 26/11/2026).** O pagamento que o órgão
+  fez e o RM não baixou (a baixa lançada em outra nota, ou não lançada) só se registrava pela tela. A correção de
+  cadastro ganhou o mesmo registro, para o caso conferido numa cópia da produção ser aplicado pelo rito da gravação:
+  só o administrador, com motivo, com a data do pagamento (não depois de hoje nem antes da emissão de nota ligada) e
+  com o documento do pagamento na fonte. Grava a origem "manual" e vale como o registro da tela em toda leitura: a
+  nota ligada sai do a receber e o título aberto vai para a reconciliação. O `estado` recebida da correção continua
+  o recebimento em lote, que não afirma pagamento. Prova de pagamento é documento com valor e data: a ordem
+  bancária do órgão no portal da transparência serve; a carta de cobrança que não cita a parcela não serve (decisão do
+  dono de 26/11/2026).
