@@ -383,15 +383,16 @@ def test_recebida_tem_todas_as_etapas_feitas(conn, cenario):
 
 def test_execucao_e_reajuste_na_mesma_etapa_sao_uma_linha_e_em_etapas_diferentes_sao_duas(conn, cenario):
     c, ids = conn, cenario
+    # protocolado com a execucao (os mesmos dois envios, 10/11 e 13/11): a fila tambem os junta (#914)
     r12 = _medicao(c, ids["propria"], 12, "protocolada", 1_001, tipo="reajuste", atestado_em="2026-11-06",
-                   valor_atestado_centavos=1_001, nota_emitida_em="2026-11-11", protocolo=("2026-11-12",))
+                   valor_atestado_centavos=1_001, nota_emitida_em="2026-11-11", protocolo=("2026-11-10", "2026-11-13"))
     c.commit()
     r = resumo_medicoes.resumo(conn, HOJE, mes=MES)
     p = _linha(r, "Obra Própria")
     assert p["titulo"] == "12ª Medição + Reajuste" and p["medicao_ids"] == [ids["p12"], r12]
     assert p["valor_centavos"] == 99_999 + 1_001
-    # a data de cada etapa e' a da ultima das duas a chegar nela
-    assert _etapas(p)[2:4] == [("nota", "feito", "2026-11-11"), ("protocolado", "atual", "2026-11-12")]
+    # a data de cada etapa e' a da ultima das duas a chegar nela (no protocolado, o primeiro protocolo de cada)
+    assert _etapas(p)[2:4] == [("nota", "feito", "2026-11-11"), ("protocolado", "atual", "2026-11-10")]
     assert next(e for e in r["etapas"] if e["etapa"] == "protocolado")["medicoes"] == 2
     c.execute("UPDATE medicoes SET estado='nota_emitida' WHERE id=?", (r12,))
     c.commit()
@@ -759,11 +760,13 @@ def test_parada_e_a_da_fila_de_trabalho_medicao_a_medicao(conn, cenario):
     da_fila = {i: x["parada"] for g in fila_medicoes.fila(conn, HOJE, mes=MES)["grupos"] for x in g["linhas"]
                for i in x["medicao_ids"]}
     assert len(linhas) == 5 and all(x["parada"] == da_fila[x["medicao_id"]] for x in linhas)
-    # no Pagamento conta do ULTIMO protocolo (13/11, sexta; hoje e' segunda, 16/11) e o tom sai do prazo do orgao: o
-    # primeiro protocolo (10/11) + 30 dias ainda nao passou. A data da etapa continua a do primeiro
+    # #914: no Pagamento conta do PRIMEIRO protocolo (10/11, terca; hoje e' segunda, 16/11: 4 dias uteis), o mesmo da
+    # data da etapa e da data esperada (10/11 + 30 dias); a nota reapresentada em 13/11 leva a revisao
     p = _linha(r, "Obra Própria")
-    assert p["parada"] == {"desde": "2026-11-13", "dias_uteis": 1, "hoje": False, "situacao": "andamento",
-                           "prazo_orgao_dias": 30, "esperada": "2026-12-10", "alem_do_prazo": False}
+    assert p["parada"] == {"desde": "2026-11-10", "dias_uteis": 4, "hoje": False, "situacao": "andamento",
+                           "prazo_orgao_dias": 30, "esperada": "2026-12-10", "alem_do_prazo": False,
+                           "revisao": {"primeiro_protocolo_em": "2026-11-10", "reapresentacoes": 1,
+                                       "ultimo_envio_em": "2026-11-13"}}
     assert _etapas(p)[3] == ("protocolado", "atual", "2026-11-10")
     assert (p["recebida_em"], p["dias_da_nota_ao_recebimento"]) == (None, None)
     # alem do prazo do orgao: critico, com a data esperada

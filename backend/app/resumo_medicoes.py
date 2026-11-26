@@ -90,8 +90,11 @@ O QUE A #805 ACRESCENTOU (todo numero na cota, em centavos inteiros):
   que abriu a situacao atual da medicao, com os limites do SIGA; no passo Pagamento, critico so' depois da data
   esperada do recebimento pelo prazo do orgao (docs/adr/0007). A mesma medicao tem o mesmo tom nas duas telas. O
   evento e' o da situacao, que pode ser mais novo que o da etapa: na etapa do boletim, o espelho gerado ou o e-mail
-  ao faturamento; no protocolado, o ultimo protocolo. A data de cada etapa continua em `etapas`. Na linha que junta
-  execucao e reajuste e a fila nao junta, vale o `parada` da mais parada das duas. Nulo na recebida, que nao esta'
+  ao faturamento. No protocolado e' o PRIMEIRO protocolo, o mesmo dia da etapa (issue #914: a medicao reapresentada
+  conta do primeiro protocolo em todas as telas, e o `parada` leva a revisao). A data de cada etapa continua em
+  `etapas`. Na linha que junta execucao e reajuste e a fila nao junta, vale o `parada` da mais parada das duas; menos
+  quando as duas esperam o pagamento (`_ETAPAS_DO_PAGAMENTO`): ali a fila so' as separa porque contam de dias ou de
+  revisoes diferentes, e a pagina tambem as separa (#914). Nulo na recebida, que nao esta'
   parada: ela leva `recebida_em` e, com a emissao da nota registrada, os dias corridos da nota ao recebimento
   (`dias_da_nota_ao_recebimento`).
 - DIFERENCA ENTRE O APROVADO E O PEDIDO (`pedido_do_aprovado_centavos`, `abaixo_do_pedido_centavos`,
@@ -121,6 +124,9 @@ _ETAPA_DO_ESTADO = {"planilha_gerada": "antes", "planilha_enviada": "em_analise"
 # o passo da barra da medicao (`medicoes.PASSOS`) cujo dia e' o evento que poe a medicao na etapa
 _PASSO_DA_DATA = {"em_analise": 1, "boletim": 2, "nota": 4, "protocolado": 5, "recebido": 6}
 _FORA = ("prevista", "cancelada", "desistida")
+# as etapas em que a medicao pode estar esperando o pagamento: o protocolado e, na obra sem o passo "Envio da nota"
+# (#743), a nota emitida. Nelas o par medicao + reajuste so' vira uma linha com o mesmo `parada` (issue #914)
+_ETAPAS_DO_PAGAMENTO = ("nota", "protocolado")
 _ORDEM_TIPO = ("execucao", "projeto", "reajuste")
 
 
@@ -234,6 +240,9 @@ def _linhas(partes: list[dict], obras: dict[int, dict], paradas: dict[int, dict]
         if par:
             situacoes = [{x["etapa"]: x["situacao"] for x in p["etapas"]} for p in par]
             if any(situacoes[0][e] != situacoes[1][e] for e in situacoes[0].keys() & situacoes[1].keys()):
+                par = []
+            # #914: esperando o pagamento, so' com o mesmo tempo parado (o mesmo primeiro protocolo e a mesma revisao)
+            elif par[0]["etapa"] in _ETAPAS_DO_PAGAMENTO and paradas.get(par[0]["id"]) != paradas.get(par[1]["id"]):
                 par = []
         for juntas in ([par] if par else []) + [[p] for p in ps if p not in par]:
             principal = juntas[0]

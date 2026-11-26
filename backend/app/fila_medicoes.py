@@ -18,13 +18,19 @@ colhe a assinatura do fiscal) nada foi ao orgao ainda, e a medicao esta' com a L
 
 PARADA HA' (`_parada`): conta do dia do EVENTO que abriu a situacao da medicao (o `marco` de `linhas_em_andamento`:
 a planilha gerada, o envio da planilha/carta, o boletim, o espelho vigente, o e-mail ao faturamento, a emissao da
-nota, o protocolo), nunca da competencia nem do lancamento. Em DIAS UTEIS, pela conta que o sistema ja' tem
+nota, o PRIMEIRO protocolo), nunca da competencia nem do lancamento. Em DIAS UTEIS, pela conta que o sistema ja' tem
 (`feriados.dias_uteis_entre`: o dia do evento conta, hoje nao). A situacao e' a da familia "tempo parado"
 (docs/identidade-visual.md), com os limites do SIGA (`siga.DIAS_ATENCAO` e `siga.DIAS_ACAO`): o evento de hoje e'
 feito; ate' 4 dias uteis, em andamento; de 5 a 9, vence em breve; 10 ou mais, critico. No Pagamento a regua e' outra,
 porque esperar o orgao dentro do prazo dele nao e' alerta: critico so' depois da data esperada do recebimento
 (`diretoria.esperada`: o primeiro protocolo + o prazo do orgao, docs/adr/0007, o mesmo "Atrasado" do Inicio); antes
 dela, ou sem prazo do orgao, em andamento. Sem marco, nao ha' dias nem situacao.
+
+MEDICAO REAPRESENTADA (issue #914, decisao do dono de 26/11/2026): a nota protocolada mais de uma vez conta os dias, o
+atraso e a data esperada do PRIMEIRO protocolo, como a pagina Em aberto, o Inicio e o Fechamento. No Pagamento o
+`parada` leva a `revisao` (`medicoes.revisoes_do_protocolo`: o primeiro protocolo, quantas vezes foi reapresentada e o
+ultimo envio), nula na de protocolo unico; o ultimo envio e' informacao, nao conta. Toda tela que mostra o tempo
+parado (esta fila, o Resumo das medicoes e a pagina Em aberto) mostra a revisao com ele.
 
 DIFERENCA aprovado x pedido: a conta e' a do Fechamento (`fechamento.aprovado_contra_o_pedido`: so' a medicao com os
 dois valores gravados, a partir do boletim; o corte soma so' o aprovado abaixo do pedido; ate' R$ 0,05 e' igual) e o
@@ -64,8 +70,9 @@ def acao(passo: int, estado: str) -> str | None:
 
 
 def _parada(desde: datetime.date | None, hoje: datetime.date, passo: int, esperada: datetime.date | None,
-            prazo_dias: int | None) -> dict:
-    """Ha' quanto tempo a medicao esta' na situacao atual e a leitura disso (ver o cabecalho, "PARADA HA'")."""
+            prazo_dias: int | None, revisao: dict | None = None) -> dict:
+    """Ha' quanto tempo a medicao esta' na situacao atual e a leitura disso (ver o cabecalho, "PARADA HA'"). `revisao`
+    (a de `medicoes.revisoes_do_protocolo`) so' sai no Pagamento ("MEDICAO REAPRESENTADA")."""
     alem = passo == PASSO_PAGAMENTO and esperada is not None and esperada < hoje
     dias = feriados.dias_uteis_entre(desde, hoje) if desde else None
     if desde is None:
@@ -79,17 +86,19 @@ def _parada(desde: datetime.date | None, hoje: datetime.date, passo: int, espera
     no_pagamento = passo == PASSO_PAGAMENTO
     return {"desde": desde.isoformat() if desde else None, "dias_uteis": dias, "hoje": bool(desde and desde >= hoje),
             "situacao": situacao, "prazo_orgao_dias": prazo_dias if no_pagamento else None,
-            "esperada": esperada.isoformat() if no_pagamento and esperada else None, "alem_do_prazo": alem}
+            "esperada": esperada.isoformat() if no_pagamento and esperada else None, "alem_do_prazo": alem,
+            "revisao": revisao if no_pagamento else None}
 
 
 def _parada_da_linha(x: dict, ms: list[dict], hoje: datetime.date, prazos: dict) -> dict:
     """O `parada` de uma linha de `medicoes.linhas_em_andamento` (`x`), com as medicoes dela (`ms`, as de
-    `diretoria._medicoes`) e os prazos de `diretoria.prazos_do_orgao`: o marco e o passo sao os da linha; a data
-    esperada do recebimento (docs/adr/0007) e' a mais proxima entre as medicoes dela."""
+    `diretoria._medicoes`) e os prazos de `diretoria.prazos_do_orgao`: o marco, o passo e a revisao sao os da linha; a
+    data esperada do recebimento (docs/adr/0007) e' a mais proxima entre as medicoes dela (no Pagamento o par so' esta'
+    junto com o mesmo primeiro protocolo, issue #914, entao e' a de cada uma)."""
     esperadas = [e for e in (diretoria.esperada(i, prazos) for i in ms) if e]
     marco = datetime.date.fromisoformat(x["marco"]) if x["marco"] else None
     return _parada(marco, hoje, x["passo"]["numero"], min(esperadas) if esperadas else None,
-                   prazos.get(diretoria._contratante(ms[0])))
+                   prazos.get(diretoria._contratante(ms[0])), x.get("revisao"))
 
 
 def paradas(conn, hoje: datetime.date, obras: dict[int, dict] | None = None) -> dict[int, dict]:

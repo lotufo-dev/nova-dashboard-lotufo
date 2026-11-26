@@ -172,7 +172,7 @@ def test_tempo_parado_desde_o_protocolo_com_o_prazo_do_orgao_como_limite(contrat
     p = {e["medicao_id"]: e["parada"] for e in _linhas(r)}
     assert p[atrasada] == {"desde": "2026-09-01", "dias_uteis": feriados.dias_uteis_entre(datetime.date(2026, 9, 1), HOJE),
                            "hoje": False, "situacao": "critico", "prazo_orgao_dias": 40, "esperada": "2026-10-11",
-                           "alem_do_prazo": True}
+                           "alem_do_prazo": True, "revisao": None}
     assert (p[no_prazo]["situacao"], p[no_prazo]["esperada"], p[no_prazo]["alem_do_prazo"]) == ("andamento", "2026-12-20", False)
     assert (p[hoje]["situacao"], p[hoje]["hoje"], p[hoje]["dias_uteis"]) == ("feito", True, 0)
     assert (p[sem_prazo]["situacao"], p[sem_prazo]["esperada"], p[sem_prazo]["prazo_orgao_dias"]) == ("andamento", None, None)
@@ -183,6 +183,62 @@ def test_tempo_parado_desde_o_protocolo_com_o_prazo_do_orgao_como_limite(contrat
     assert all(p[mid] == da_fila[mid] for mid in (atrasada, no_prazo, hoje, sem_prazo))
     # a Secretaria X: a do protocolo mais antigo primeiro
     assert [e["medicao_id"] for e in secretaria["linhas"]] == [atrasada, no_prazo, hoje]
+
+
+def _protocolar_de_novo(c, mid, dia, desfeito=False):
+    c.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem, desfeita_em) VALUES (?, ?, 'manual', ?)",
+              (mid, dia, "2026-11-01 10:00:00" if desfeito else None))
+    c.commit()
+
+
+def test_reapresentada_e_par_em_datas_diferentes_tem_os_mesmos_dias_em_todas_as_telas(contratantes):
+    """Issue #914 (decisao do dono de 26/11/2026): a medicao com a nota protocolada mais de uma vez conta os dias, o
+    atraso e a data esperada do PRIMEIRO protocolo na pagina Em aberto, na fila de Medicoes e no Resumo das medicoes,
+    e leva a revisao (o primeiro protocolo, quantas vezes foi reapresentada, o ultimo envio). O par medicao +
+    reajuste protocolado em dias diferentes vira duas linhas na fila e no Resumo, cada uma com os proprios dias e a
+    propria data esperada, como na Em aberto. O total da Em aberto continua o do Fechamento."""
+    from app import inicio, resumo_medicoes
+    c, ids = contratantes
+    _recebidas(c, ids["Escola"], 50, [10, 20, 30, 40, 50])            # Secretaria X: prazo de 40 dias
+    reapresentada = medir(c, ids["Escola"], 2, "2026-10", "protocolada", 300_001, aprovado=300_001, protocolo="2026-10-01")
+    _protocolar_de_novo(c, reapresentada, "2026-10-20")              # reapresentada uma vez
+    _protocolar_de_novo(c, reapresentada, "2026-10-20")              # o mesmo envio registrado duas vezes: nao conta
+    _protocolar_de_novo(c, reapresentada, "2026-11-05", desfeito=True)   # protocolo desfeito: nao conta
+    execucao = medir(c, ids["Escola"], 3, "2026-10", "protocolada", 200_003, aprovado=200_003, protocolo="2026-10-05")
+    reajuste = medir(c, ids["Escola"], 3, "2026-10", "protocolada", 1_001, aprovado=1_001, tipo="reajuste",
+                     protocolo="2026-10-15")
+    unico = medir(c, ids["Escola"], 4, "2026-10", "protocolada", 70_001, protocolo="2026-10-20")
+    _protocolar_de_novo(c, unico, "2026-10-20")                       # duas linhas no mesmo dia: protocolo unico
+
+    r = a_receber.a_receber(c, HOJE)
+    _confere_com_o_fechamento(r, fechamento.fechamento(c, HOJE))
+    em_aberto = {e["medicao_id"]: e["parada"] for e in _linhas(r)}
+    p = em_aberto[reapresentada]
+    assert (p["desde"], p["esperada"], p["situacao"], p["alem_do_prazo"]) == ("2026-10-01", "2026-11-10", "critico", True)
+    assert p["dias_uteis"] == feriados.dias_uteis_entre(datetime.date(2026, 10, 1), HOJE)
+    assert p["revisao"] == {"primeiro_protocolo_em": "2026-10-01", "reapresentacoes": 1, "ultimo_envio_em": "2026-10-20"}
+    assert em_aberto[unico]["revisao"] is None and em_aberto[execucao]["revisao"] is None
+    # o par: a execucao passou da data esperada (05/10 + 40 = 14/11), o reajuste ainda nao (15/10 + 40 = 24/11)
+    assert (em_aberto[execucao]["esperada"], em_aberto[execucao]["situacao"]) == ("2026-11-14", "critico")
+    assert (em_aberto[reajuste]["esperada"], em_aberto[reajuste]["situacao"]) == ("2026-11-24", "andamento")
+
+    # a fila de Medicoes: a mesma leitura, medicao a medicao, e o par em duas linhas
+    assert all(fila_medicoes.paradas(c, HOJE)[mid] == em_aberto[mid] for mid in em_aberto)
+    fila = [x for g in fila_medicoes.fila(c, HOJE, "2026-10")["grupos"] for x in g["linhas"]]
+    assert {tuple(x["medicao_ids"]) for x in fila} >= {(reapresentada,), (execucao,), (reajuste,), (unico,)}
+    assert all(x["parada"] == em_aberto[i] for x in fila for i in x["medicao_ids"] if i in em_aberto)
+    # o Resumo das medicoes: o mesmo `parada` no cartao e a data do primeiro protocolo na etapa; o par em dois cartoes
+    rdm = [x for g in resumo_medicoes.resumo(c, HOJE, "2026-10")["grupos"] for x in g["linhas"]]
+    da_reapresentada = next(x for x in rdm if x["medicao_ids"] == [reapresentada])
+    assert da_reapresentada["parada"] == p
+    assert next(e for e in da_reapresentada["etapas"] if e["etapa"] == "protocolado")["data"] == "2026-10-01"
+    assert [x["medicao_ids"] for x in rdm if execucao in x["medicao_ids"] or reajuste in x["medicao_ids"]] == [[execucao], [reajuste]]
+    assert all(x["parada"] == em_aberto[x["medicao_id"]] for x in rdm if x["medicao_id"] in em_aberto)
+    # a Inicio: atrasada e' a mesma medicao que passou da data esperada nas outras telas (a reapresentada e a execucao)
+    previsao = inicio._previsao(c, HOJE)
+    da_escola = [m for m in (reapresentada, execucao, reajuste, unico) if em_aberto[m]["alem_do_prazo"]]
+    assert da_escola == [reapresentada, execucao]
+    assert previsao["atrasado"]["quantidade"] == len([e for e in _linhas(r) if e["parada"] and e["parada"]["alem_do_prazo"]])
 
 
 def test_obra_sem_o_passo_envio_da_nota_conta_da_emissao_da_nota_sem_data_prevista(exemplo):

@@ -33,7 +33,7 @@ const obra = (extra: Partial<ObraResumo>): ObraResumo => ({
 const NOMES = ["Planilha e carta", "Análise do órgão", "Espelhos", "Notas", "Envio da nota", "Pagamento"];
 const parada = (dias: number | null, situacao: Parada["situacao"], extra: Partial<Parada> = {}): Parada => ({
   desde: dias === null ? null : "2026-11-01", dias_uteis: dias, hoje: dias === 0, situacao, prazo_orgao_dias: null, esperada: null,
-  alem_do_prazo: false, ...extra });
+  alem_do_prazo: false, revisao: null, ...extra });
 const valores = (pedido: number | null, aprovado: number | null): ComparadosDaLinha => {
   const ha = pedido !== null && aprovado !== null;
   return { pedido_centavos: pedido, aprovado_centavos: aprovado, aprovado_com_pedido_centavos: ha ? aprovado : null,

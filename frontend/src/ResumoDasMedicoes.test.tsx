@@ -18,7 +18,7 @@ const linha = (x: Partial<Linha> & Pick<Linha, "contrato_id" | "obra" | "medicao
 });
 type Parada = NonNullable<Linha["parada"]>;
 const parada = (desde: string | null, dias_uteis: number | null, situacao: Parada["situacao"], extra: Partial<Parada> = {}): Parada => ({
-  desde, dias_uteis, hoje: false, situacao, prazo_orgao_dias: null, esperada: null, alem_do_prazo: false, ...extra });
+  desde, dias_uteis, hoje: false, situacao, prazo_orgao_dias: null, esperada: null, alem_do_prazo: false, revisao: null, ...extra });
 const FUTURAS = [e("boletim", "futuro"), e("nota", "futuro"), e("protocolado", "futuro"), e("recebido", "futuro")];
 
 // protocolada ha' 4 dias uteis, dentro do prazo do orgao, com o aprovado 1,9% abaixo do pedido (acima do limite de
