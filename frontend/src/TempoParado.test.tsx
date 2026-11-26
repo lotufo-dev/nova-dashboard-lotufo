@@ -66,23 +66,33 @@ describe("TempoParado (#805)", () => {
     expect(render(<TempoParado frase parada={parada({ desde: null, dias_uteis: null, situacao: null })} />).container.textContent).toBe("");
   });
 
-  it("a medição reapresentada leva a revisão embaixo: 1º protocolo, quantas vezes e o último envio; a de protocolo único, nada (#914)", () => {
+  it("a medição reapresentada leva o selo Rev. N, neutro, e as duas datas numa linha embaixo do prazo; a de protocolo único, nada (#914)", () => {
     const revisao = { primeiro_protocolo_em: "2026-11-03", reapresentacoes: 2, ultimo_envio_em: "2026-11-17" };
     const r = render(<TempoParado parada={parada({ dias_uteis: 11, situacao: "andamento", prazo_orgao_dias: 45, esperada: "2026-12-18", revisao })} />);
-    expect([...r.container.querySelectorAll(".tempo-parado__revisao > span")].map(e => e.textContent)).toEqual([
-      "1º protocolo em 03/11", "reapresentada 2 vezes", "último envio em 17/11"]);
-    expect(r.container.querySelector(".tempo-parado__prazo")?.textContent).toBe("prazo do órgão: 18/12");
+    const selos = r.container.querySelectorAll(".tempo-parado__selos > .selo");
+    expect(selos).toHaveLength(2);
+    // o da revisao e' informacao: sem situacao, sem glifo; "Rev. 2" na tela e por extenso para o leitor de tela
+    const rev = selos[1];
+    expect(rev.className).toBe("selo selo--revisao");
+    expect(rev.querySelector(".glifo")).toBeNull();
+    expect(rev.querySelector("[aria-hidden=true]")?.textContent).toBe("Rev. 2");
+    expect(rev.querySelector(".sr-only")?.textContent).toBe("revisão 2, reapresentada 2 vezes");
+    // o prazo continua acima das datas
+    const linhas = [...r.container.querySelectorAll(".tempo-parado > span:not(.tempo-parado__selos)")].map(e => e.textContent);
+    expect(linhas).toEqual(["prazo do órgão: 18/12", "1º protocolo 03/11 · último envio 17/11"]);
     cleanup();
     const uma = render(<TempoParado frase parada={parada({ revisao: { ...revisao, reapresentacoes: 1, primeiro_protocolo_em: "2025-12-29" } })} />);
-    expect(uma.container.querySelector(".tempo-parado__revisao")?.textContent).toBe(
-      "1º protocolo em 29/12/2025reapresentada 1 vezúltimo envio em 17/11");
+    expect(uma.container.querySelector(".selo--revisao .sr-only")?.textContent).toBe("revisão 1, reapresentada uma vez");
+    expect(uma.container.querySelector(".tempo-parado__revisao")?.textContent).toBe("1º protocolo 29/12/2025 · último envio 17/11");
     cleanup();
-    expect(render(<TempoParado parada={parada({ prazo_orgao_dias: 45, esperada: "2026-12-18" })} />)
-      .container.querySelector(".tempo-parado__revisao")).toBeNull();
+    const unico = render(<TempoParado parada={parada({ prazo_orgao_dias: 45, esperada: "2026-12-18" })} />);
+    expect(unico.container.querySelector(".selo--revisao")).toBeNull();
+    expect(unico.container.querySelector(".tempo-parado__revisao")).toBeNull();
     cleanup();
-    // onde a linha ja' tem a data do protocolo (pagina Em aberto), sem o "1º protocolo em"
-    expect([...render(<TempoParado comPrimeiro={false} parada={parada({ revisao })} />).container
-      .querySelectorAll(".tempo-parado__revisao > span")].map(e => e.textContent)).toEqual(["reapresentada 2 vezes", "último envio em 17/11"]);
+    // onde a linha ja' tem a data do protocolo (pagina Em aberto), o selo e so' o ultimo envio
+    const sem = render(<TempoParado comPrimeiro={false} parada={parada({ revisao })} />);
+    expect(sem.container.querySelector(".selo--revisao")).not.toBeNull();
+    expect(sem.container.querySelector(".tempo-parado__revisao")?.textContent).toBe("último envio 17/11");
   });
 
   it("fora do Pagamento não há prazo escrito; sem a data do evento, só o traço", () => {

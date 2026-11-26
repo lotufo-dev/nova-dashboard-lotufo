@@ -100,8 +100,10 @@ _Avoid_: protocolada para a planilha enviada (isso é "em análise")
 
 **Reapresentada**:
 Medição cuja nota foi protocolada de novo, em outro dia (novo ofício). O tempo parado, o atraso e a data esperada
-continuam contando do primeiro protocolo; a linha mostra a revisão: o primeiro protocolo, quantas vezes foi
-reapresentada e o último envio, que é só informação (#914). Dois registros de protocolo no mesmo dia são um envio só.
+continuam contando do primeiro protocolo; o último envio é só informação (#914). A revisão é numerada pelas
+reapresentações: o envio original é a Rev. 0, que não aparece; a primeira reapresentação é a Rev. 1, e assim por
+diante. A linha mostra o selo "Rev. N" ao lado dos dias e, embaixo, "1º protocolo dd/mm · último envio dd/mm". Dois
+registros de protocolo no mesmo dia são um envio só.
 _Avoid_: revisão para o pedido corrigido antes do protocolo (isso é a revisão da planilha/carta)
 
 **Recebido**:

@@ -15,7 +15,8 @@
 .tempo-parado { display: inline-grid; justify-items: start; gap: var(--espaco-traco); min-width: 0; }
 .tempo-parado--sem { color: var(--cor-texto-terciario); }
 .tempo-parado__prazo { color: var(--cor-texto-secundario); font-size: var(--texto-mini); line-height: var(--entrelinha-titulo); }
-/* #914: a revisao da medicao reapresentada, embaixo do prazo, uma parte por linha (cabe na coluna "Parada há" a
-   1440 px e no cartao a 390 px sem cortar a data) */
-.tempo-parado__revisao { display: grid; color: var(--cor-texto-secundario); font-size: var(--texto-mini);
-  line-height: var(--entrelinha-titulo); }
+/* #914: o selo dos dias e, na medicao reapresentada, o "Rev. N" ao lado (neutro: informacao, nao situacao); se a
+   coluna for estreita, o da revisao desce para a linha de baixo, sem cortar */
+.tempo-parado__selos { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--espaco-traco); max-width: 100%; }
+/* #914: as duas datas da revisao numa linha, embaixo do prazo do orgao */
+.tempo-parado__revisao { color: var(--cor-texto-secundario); font-size: var(--texto-mini); line-height: var(--entrelinha-titulo); }

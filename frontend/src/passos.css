@@ -485,6 +485,8 @@
   font-size: clamp(var(--texto-valor-menor), 3.9cqi, var(--texto-numero)); line-height: var(--entrelinha-numero); white-space: nowrap; }
 .pag-numeros__valor--acento { color: var(--cor-tinta); }
 .pag-numeros__nota { color: var(--cor-texto-terciario); font-size: var(--texto-meta); }
+/* #914: o selo "Rev. N" ao lado dos dias, na altura do meio do numero grande */
+.pag-numeros__valor .selo { vertical-align: middle; }
 .pag-par { min-width: 0; }
 /* #755: o selo do titulo excluido no RM leva o valor e nao cabe numa linha da coluna "No financeiro": quebra em vez de
    cortar (o corte do `.selo` e' para rotulo curto em coluna fixa) */
