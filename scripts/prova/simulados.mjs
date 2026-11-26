@@ -447,7 +447,7 @@ export const resumoEmQuadro = ({ contratante = null, vazio = false } = {}) => re
     const situacao = dias === null ? null : alem ? "critico" : dias === 0 ? "feito"
       : etapa === "protocolado" || uteis < 5 ? "andamento" : uteis < 10 ? "breve" : "critico";
     const parada = recebida ? null : { desde: dias === null ? null : dataEm(hoje, -dias), dias_uteis: dias === null ? null : uteis,
-      hoje: dias === 0, situacao, prazo_orgao_dias: prazo ? prazo[0] : null, esperada: prazo ? dataEm(hoje, prazo[1]) : null, alem_do_prazo: alem };
+      hoje: dias === 0, situacao, prazo_orgao_dias: prazo ? prazo[0] : null, esperada: prazo ? dataEm(hoje, prazo[1]) : null, alem_do_prazo: alem, revisao: null };
     return { contrato_id, obra, contratante: quem, medicao_id: id, medicao_ids: [id], titulo, numero: parseInt(titulo, 10) || 1, tipo: "execucao",
       competencia: mes, etapa, etapas, valor_centavos: valor * REAIS, parada, recebida_em: recebida ? dataEm(hoje, -dias) : null,
       dias_da_nota_ao_recebimento: null,
@@ -465,7 +465,8 @@ export const resumoEmQuadro = ({ contratante = null, vazio = false } = {}) => re
     linha(9008, "Anel Teta", "MTPAR", "8ª Medição", "protocolado", 600_000, 11, 8),
     // protocoladas com o prazo do orgao: dentro dele (a data esperada vai escrita) e alem dele (critico). O prazo curto
     // da segunda e' para o estado caber no mes da prova
-    linha(9004, "Quartel Delta", "SINFRA", "14ª Medição", "protocolado", 200_000, 12, 8, { prazo: [45, 35] }),
+    // #914: reapresentada duas vezes; os dias e a data esperada contam do primeiro protocolo, a revisao vai embaixo
+    reapresentada(linha(9004, "Quartel Delta", "SINFRA", "14ª Medição", "protocolado", 200_000, 12, 8, { prazo: [45, 35] }), 2, dataEm(hoje, -3)),
     linha(9015, "Viaduto Ômicron", "SES-MT", "3ª Medição", "protocolado", 250_000, 16, 11, { prazo: [14, -2] }),
     linha(9003, "Estações Gama", "SINFRA", "8ª Medição", "recebido", 15_000_000, 5, null, { ...comPedido(15_000_000), dias_da_nota_ao_recebimento: 4 }),
     linha(9001, "Avenida Alfa", "SINFRA", "Reajuste da 28ª Medição", "recebido", 2_000_000, 9, null,
@@ -779,10 +780,14 @@ export const RESPOSTA_QUE_QUEBRA = { medido: null };
 // com o reajuste, concluida e obra sem medicao; nos meses anteriores, o que pede acao e o que so' espera pagamento.
 // Obras, medicoes e valores inventados (os links das linhas nao abrem nada no banco da prova). As obras sem medicao e a
 // lista de obras da janela "Iniciar" sao as verdadeiras, com mais tres inventadas.
+// #914: a medicao reapresentada, com a revisao no `parada` (o primeiro protocolo e' o `desde` dele)
+const reapresentada = (l, vezes, ultimo) => ({ ...l, parada: { ...l.parada,
+  revisao: { primeiro_protocolo_em: l.parada.desde, reapresentacoes: vezes, ultimo_envio_em: ultimo } } });
 const NOMES_DOS_PASSOS = ["Planilha e carta", "Análise do órgão", "Espelhos", "Notas", "Envio da nota", "Pagamento"];
 const paradaDaFila = (dias, situacao, x = {}) => ({
   desde: dias === null ? null : dataEm(hojeDaProva(), -Math.round(dias * 1.4)), dias_uteis: dias, hoje: dias === 0, situacao,
   prazo_orgao_dias: x.prazo ?? null, esperada: x.esperada === undefined ? null : dataEm(hojeDaProva(), x.esperada), alem_do_prazo: (x.esperada ?? 1) < 0,
+  revisao: null,
 });
 const comparadosDaFila = (pedido, aprovado) => {
   const p = pedido === null ? null : pedido * REAIS, a = aprovado === null ? null : aprovado * REAIS, ha = p !== null && a !== null;
@@ -818,7 +823,8 @@ export const filaSimulada = (resposta, reg) => {
     linhaDaFila(reg, 7, "Anel Teta", "11ª Medição", "faturamento", CINCO, 4, paradaDaFila(1, "andamento"), 2_000_000, 2_000_000, mtpar),
   ];
   const orgao = [
-    linhaDaFila(reg, 8, "Bairros Épsilon", "14ª Medição", "orgao", SEIS, 6, paradaDaFila(41, "critico", { prazo: 45, esperada: -9 }), 200_000, 200_000, { sub: "SUPU" }),
+    // #914: reapresentada uma vez, alem do prazo contado do primeiro protocolo
+    { ...reapresentada(linhaDaFila(reg, 8, "Bairros Épsilon", "14ª Medição", "orgao", SEIS, 6, paradaDaFila(41, "critico", { prazo: 45, esperada: -9 }), 200_000, 200_000, { sub: "SUPU" }), 1, dataEm(hojeDaProva(), -12)) },
     linhaDaFila(reg, 9, "Rodovia Capa", "29ª Medição", "orgao", SEIS, 2, paradaDaFila(11, "critico"), 800_000, null),
     linhaDaFila(reg, 10, "Avenida Alfa", "11ª Medição", "orgao", SEIS, 2, paradaDaFila(5, "breve"), 4_000_000, null),
     linhaDaFila(reg, 11, "Complexo Lambda", "10ª Medição + Reajuste", "orgao", CINCO, 6, paradaDaFila(4, "andamento", { prazo: 45, esperada: 39 }), 2_000_000, 2_000_000, mtpar),
@@ -887,8 +893,8 @@ export const LOGIN_NO_LIMITE = { detail: "Muitas tentativas de entrar a partir d
 // para a tela receber numeros que fecham. `vazio`: nada em aberto (a fileira so' com zeros); `trava`: o total a
 // receber nao liberado. Tudo inventado.
 const AR_ANOS = ["2025", "2026"];
-const arParada = (desde, dias, situacao, esperada = null, prazo = null) => ({
-  desde, dias_uteis: dias, hoje: dias === 0, situacao, prazo_orgao_dias: prazo, esperada, alem_do_prazo: situacao === "critico" });
+const arParada = (desde, dias, situacao, esperada = null, prazo = null, revisao = null) => ({
+  desde, dias_uteis: dias, hoje: dias === 0, situacao, prazo_orgao_dias: prazo, esperada, alem_do_prazo: situacao === "critico", revisao });
 const arGrupo = (contratante, chave, prazo, linhas = [], extra = {}) => {
   const por_ano = Object.fromEntries(AR_ANOS.map(a => [a, linhas.filter(l => l.competencia.startsWith(a)).reduce((t, l) => t + l.valor_centavos, 0)]));
   const soltas = extra.notas_sem_medicao ?? [];
@@ -909,7 +915,9 @@ export const aReceberComNotas = ({ vazio = false, trava = false } = {}) => reg =
   const grupos = vazio ? [arGrupo("SINFRA", "sinfra", 52), arGrupo("SES-MT", "ses-mt", null)] : [
     arGrupo("SINFRA", "sinfra", 52, [
       l("Rodovia Alfa", "2026-05", "2026-06-10", 412_345_678_90, arParada("2026-06-10", 112, "critico", "2026-08-01", 52)),
-      l("Avenida Beta", "2026-07", "2026-08-04", 98_765_432_10, arParada("2026-08-04", 74, "critico", "2026-09-25", 52), { paga_em_parte: true }),
+      // #914: reapresentada duas vezes: a data na linha e os dias sao do primeiro protocolo
+      l("Avenida Beta", "2026-07", "2026-08-04", 98_765_432_10, arParada("2026-08-04", 74, "critico", "2026-09-25", 52,
+        { primeiro_protocolo_em: "2026-08-04", reapresentacoes: 2, ultimo_envio_em: "2026-10-14" }), { paga_em_parte: true }),
       l("Rodovia Alfa", "2026-08", "2026-09-15", 205_000_000_00, arParada("2026-09-15", 46, "andamento", "2026-11-06", 52), { tipo: "reajuste" }),
       l("Ponte Gama", "2026-09", "2026-10-06", 31_250_000_01, arParada("2026-10-06", 31, "andamento", "2026-11-27", 52)),
       l("Corredor Delta", "2026-09", "2026-10-20", 7_000_000_03, arParada("2026-10-20", 21, "andamento", "2026-12-11", 52),

@@ -41,7 +41,8 @@ export function CartaoDaMedicao({ l, limitePorMil, ir }: { l: Linha; limitePorMi
       {!recebida && l.parada && l.parada.desde && l.parada.dias_uteis !== null && (
         <span className="rdm-cartao__tempo">
           <TempoParado parada={l.parada} frase />
-          {!l.parada.hoje && <span className="rdm-cartao__desde">desde {fmtDataCurta(l.parada.desde)}</span>}
+          {/* #914: na reapresentada o "1º protocolo em" da revisao ja' diz desde quando */}
+          {!l.parada.hoje && !l.parada.revisao && <span className="rdm-cartao__desde">desde {fmtDataCurta(l.parada.desde)}</span>}
         </span>
       )}
       {temDiferenca(l) && (

@@ -453,6 +453,10 @@ def test_avisos_divergente_ausente_do_rm_e_cancelada(conn, usuario, integra, _te
     av = notas.avisos(conn, datetime.date(2026, 9, 22))
     assert [a["tipo"] for a in av] == ["nota_ausente_rm"] and av[0]["dias"] == 12
     assert notas.avisos(conn, datetime.date(2026, 9, 14)) == []       # 4 dias: ainda nao
+    # #914: o aviso e' da nota e conta do ultimo envio (a nota pode ter sido trocada na reapresentacao de 20/09)
+    conn.execute("INSERT INTO medicao_protocolos (medicao_id, data, origem) VALUES (?, '2026-09-20', 'manual')", (mid,)); conn.commit()
+    assert notas.avisos(conn, datetime.date(2026, 9, 22)) == []
+    assert [a["dias"] for a in notas.avisos(conn, datetime.date(2026, 10, 2))] == [12]
     # nota cancelada no RM sem substituta: aviso proprio
     conn.execute("UPDATE nf_alocacoes SET desfeita_em=datetime('now', '+1 second'), motivo_desfazer=? "
                  "WHERE medicao_id=? AND desfeita_em IS NULL", (notas.MOTIVO_CANCELADA_RM, mid)); conn.commit()

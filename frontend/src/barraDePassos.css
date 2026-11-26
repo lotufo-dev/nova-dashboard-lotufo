@@ -15,3 +15,7 @@
 .tempo-parado { display: inline-grid; justify-items: start; gap: var(--espaco-traco); min-width: 0; }
 .tempo-parado--sem { color: var(--cor-texto-terciario); }
 .tempo-parado__prazo { color: var(--cor-texto-secundario); font-size: var(--texto-mini); line-height: var(--entrelinha-titulo); }
+/* #914: a revisao da medicao reapresentada, embaixo do prazo, uma parte por linha (cabe na coluna "Parada há" a
+   1440 px e no cartao a 390 px sem cortar a data) */
+.tempo-parado__revisao { display: grid; color: var(--cor-texto-secundario); font-size: var(--texto-mini);
+  line-height: var(--entrelinha-titulo); }

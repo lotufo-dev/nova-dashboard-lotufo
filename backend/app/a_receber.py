@@ -38,10 +38,9 @@ O que a tela mostra nasce aqui, pronto:
   data esperada do recebimento (`diretoria.esperada`: o primeiro protocolo + o prazo do orgao, o mesmo "Atrasado" do
   Inicio); antes dela, ou sem prazo do orgao, em andamento; o protocolo de hoje e' feito. `esperada` e' a data
   prevista, so' quando o prazo do orgao e' conhecido. Conta do PRIMEIRO protocolo, o mesmo da data na linha e da data
-  esperada, com a data esperada de cada medicao. A fila de Medicoes conta os dias do ultimo protocolo
-  (`medicoes.linhas_em_andamento`) e usa a menor data esperada do par medicao + reajuste: a mesma medicao sai com dias
-  diferentes quando tem mais de um protocolo de nota, e a situacao pode divergir no par protocolado em datas
-  diferentes (linha de 18/11/2026 no docs/backlog.md). No repasse sem baixa o orgao ja' pagou: nao ha' tempo parado com o
+  esperada, com a data esperada de cada medicao, como a fila de Medicoes e o Resumo das medicoes (issue #914: a
+  mesma medicao, os mesmos dias e a mesma situacao nas telas). Na medicao reapresentada o `parada` leva a revisao
+  (`medicoes.revisoes_do_protocolo`), como na fila. No repasse sem baixa o orgao ja' pagou: nao ha' tempo parado com o
   orgao, e a linha leva a data do recebimento (`orgao_pagou_em`, nula quando a medicao foi recebida sem data).
 
 Com o total a receber ainda nao liberado no cadastro (`diretoria._liberado`, a trava do Fechamento, do Inicio e da
@@ -73,13 +72,15 @@ def _grupo(nome: str, chave: str | None) -> dict:
             "notas_sem_medicao": [], "notas_sem_medicao_centavos": 0, "anteriores": {"quantidade": 0, "valor_centavos": 0}}
 
 
-def _linha(e: dict, m: dict, hoje: datetime.date, prazos: dict[str, int]) -> dict:
+def _linha(e: dict, m: dict, hoje: datetime.date, prazos: dict[str, int], revisoes: dict[int, dict]) -> dict:
     """Uma linha do em aberto (`fechamento._em_aberto_da_medicao`) com o tempo parado dela; `m` e' a medicao em
-    `diretoria._medicoes` (o primeiro protocolo, o recebimento e o orgao, de onde sai o prazo)."""
+    `diretoria._medicoes` (o primeiro protocolo, o recebimento e o orgao, de onde sai o prazo); `revisoes`, o de
+    `medicoes.revisoes_do_protocolo`."""
     if e["tipo_aberto"] == "repasse":
         return {**e, "parada": None, "orgao_pagou_em": (m["recebida_em"] or "")[:10] or None}
     parada = fila_medicoes._parada(_dia(e["protocolo_em"] or e["emitida_em"]), hoje, fila_medicoes.PASSO_PAGAMENTO,
-                                   diretoria.esperada(m, prazos), prazos.get(diretoria._contratante(m)))
+                                   diretoria.esperada(m, prazos), prazos.get(diretoria._contratante(m)),
+                                   revisoes.get(m["id"]))
     return {**e, "parada": parada, "orgao_pagou_em": None}
 
 
@@ -103,6 +104,7 @@ def _a_receber(conn, hoje: datetime.date) -> dict:
     das_medicoes = diretoria._medicoes(conn)
     de = {m["id"]: m for m in das_medicoes}
     prazos = diretoria.prazos_do_orgao(das_medicoes, hoje)
+    revisoes = medicoes.revisoes_do_protocolo(conn)
     # issue #864: o grupo e' o par (nome, chave), a linha do contratante na aba "Por contratante" do Fechamento
     # (`diretoria.linha_do_contratante`), nao o nome: o contrato sem orgao no cadastro cujo texto e' igual a' sigla de
     # um contratante fica no grupo dele, sem chave, e o subtotal de cada grupo e' o da linha do mesmo par no Fechamento
@@ -128,7 +130,7 @@ def _a_receber(conn, hoje: datetime.date) -> dict:
         if g["prazo_orgao_dias"] is None:
             g["prazo_orgao_dias"] = prazos.get(diretoria._contratante(m))
         for e in abertas:
-            linha = _linha(e, m, hoje, prazos)
+            linha = _linha(e, m, hoje, prazos, revisoes)
             g["linhas"].append(linha)
             g["quantidade"] += 1
             g["em_aberto_centavos"] += e["valor_centavos"]
