@@ -274,3 +274,117 @@ def test_desfazer_recebimento_recusa_baixa_do_rm_registro_a_mao_e_nota_com_baixa
     aberta = _medicao(c, cid, 4, estado="planilha_enviada")
     erro = _rodar(c, uid, [{**DESFAZER, "medicao_id": aberta}])["itens"][0]["erro"]
     assert "só se desfaz o recebimento de medição recebida" in erro
+
+
+# ------------------------------------------------------------------ registrar o recebimento provado fora do RM (#34)
+
+REGISTRAR = {"operacao": "registrar_recebimento", "data": "2025-08-19",
+             "motivo": "a ordem bancária de exemplo pagou o título; o RM não tem a baixa",
+             "fonte": "portal da transparência de exemplo, pagamento 0001/2025 de 19/08/2025"}
+
+
+def _cobranca_com_titulo_aberto(c, cid, numero, valor, liquido):
+    mid = _medicao(c, cid, numero, valor=valor)
+    _protocolo_da_nota(c, mid, data="2025-07-02", processo=None)
+    nid = _nota(c, 600 + numero, valor=valor)                       # emitida em 01/07/2025
+    c.execute("UPDATE notas_fiscais SET codtmv='2.2.01' WHERE id=?", (nid,))       # nota de cobranca ao orgao
+    _ligar(c, mid, nid, valor=valor)
+    _titulo(c, nid, liquido)                                        # o titulo, liquido, inteiro em aberto no RM
+    return mid, nid
+
+
+def test_registrar_recebimento_vale_como_o_do_administrador_e_tira_a_nota_do_a_receber(cenario):
+    from app import conciliacao, sincronizacao_rm
+    c, cid, uid = cenario
+    _liberar(c)
+    mid, nid = _cobranca_com_titulo_aberto(c, cid, 30, 5_301_107, 4_897_223)
+    assert inicio._a_receber(c, HOJE)["valor_centavos"] == 5_301_107          # a medicao conta pelo valor dela
+    rel = _rodar(c, uid, [{**REGISTRAR, "medicao_id": mid}], ensaio=True)
+    assert rel["feitos"] == 1 and _estado(c, mid) == "protocolada"             # o ensaio nao grava
+    rel = _rodar(c, uid, [{**REGISTRAR, "medicao_id": mid}])
+    assert rel["feitos"] == 1 and rel["itens"][0]["depois"] == "recebida", rel
+    assert any("(R$ 48.972,23) sai do a receber e fica na reconciliação" in d for d in rel["itens"][0]["detalhes"])
+    m = _linha(c, mid)
+    assert (m["estado"], m["recebida_em"]) == ("recebida", "2025-08-19")
+    assert m["motivo_represamento"] == REGISTRAR["motivo"]
+    # e' o registro do administrador: a nota ligada nao volta ao a receber pelo titulo aberto (#203)
+    assert mid in conciliacao.recebidas_a_mao(c)
+    assert inicio._a_receber(c, HOJE)["valor_centavos"] == 0
+    linhas = diretoria.a_receber_na_cota(c)
+    assert all(x.get("nota_id") != nid for x in linhas) and all(x.get("id") != mid for x in linhas)
+    # o titulo aberto fica a' vista na reconciliacao, como recebimento a' mao sem baixa no RM
+    [linha] = [r for r in sincronizacao_rm._recebidas_sem_baixa(c) if r["nota_id"] == nid]
+    assert (linha["a_mao"], linha["falta_centavos"]) == (True, 4_897_223)
+    # auditoria: a mudanca de estado com a origem da tela e a correcao com a fonte
+    estado = [json.loads(r[0]) for r in c.execute("SELECT depois FROM audit_log WHERE acao='medicao.estado' "
+                                                  "AND entidade_id=?", (str(mid),))][-1]
+    assert (estado["estado"], estado["origem"], estado["recebida_em"]) == ("recebida", "manual", "2025-08-19")
+    _, depois = _correcoes(c, mid)[-1]
+    assert depois["operacao"] == "registrar_recebimento" and depois["fonte"] == REGISTRAR["fonte"]
+    # rodar de novo nao duplica; e o desfazer_recebimento continua recusando o registro a' mao
+    assert _rodar(c, uid, [{**REGISTRAR, "medicao_id": mid}])["ja_feitos"] == 1
+    assert "recebida à mão pelo administrador" in _rodar(c, uid, [{**DESFAZER, "medicao_id": mid}])["itens"][0]["erro"]
+
+
+def test_estado_recebida_da_correcao_nao_e_o_registro_a_mao(cenario):
+    """O contraste: o `estado` recebida da correcao e' o recebimento em lote, que nao afirma pagamento; a nota ligada
+    continua no a receber pelo que falta do titulo (docs/adr/0006)."""
+    c, cid, uid = cenario
+    _liberar(c)
+    mid, _ = _cobranca_com_titulo_aberto(c, cid, 31, 2_604_319, 2_406_391)
+    assert _rodar(c, uid, [{"operacao": "estado", "medicao_id": mid, "novo": "recebida", "motivo": "lote do histórico",
+                            "fonte": "planilha de exemplo"}])["feitos"] == 1
+    assert inicio._a_receber(c, HOJE)["valor_centavos"] == 2_406_391
+
+
+def test_registrar_recebimento_recusas(cenario):
+    from app import auth
+    c, cid, uid = cenario
+    mid, _ = _cobranca_com_titulo_aberto(c, cid, 32, 3_150_011, 2_910_617)
+    casos = [({"data": None}, "diga a data do pagamento"),
+             ({"data": "2099-01-01"}, "é depois de hoje"),
+             ({"data": "2025-06-30"}, "anterior à emissão"),
+             ({"motivo": "curto"}, "ao menos 10 caracteres"),
+             ({"motivo": None}, "diga o motivo")]
+    for troca, erro in casos:
+        op = {k: v for k, v in {**REGISTRAR, **troca, "medicao_id": mid}.items() if v is not None}
+        rel = _rodar(c, uid, [op])
+        assert rel["erros"] == 1 and erro in rel["itens"][0]["erro"], (troca, rel["itens"][0])
+    sem_fonte = {k: v for k, v in REGISTRAR.items() if k != "fonte"} | {"medicao_id": mid}
+    assert "falta a fonte" in _rodar(c, uid, [sem_fonte])["itens"][0]["erro"]
+    # so' o administrador
+    auth.criar_usuario(c, "Engenharia", "engenharia@exemplo.com.br", "senha-forte-456", "engenharia")
+    eng = c.execute("SELECT id FROM usuarios WHERE email='engenharia@exemplo.com.br'").fetchone()[0]
+    assert "só o administrador" in _rodar(c, eng, [{**REGISTRAR, "medicao_id": mid}])["itens"][0]["erro"]
+    assert _estado(c, mid) == "protocolada"
+    # a medicao ja' recebida por outro caminho (o corte) nao vira registro a' mao: volta antes pelo desfazer
+    medicoes.mudar_estado(c, uid, mid, "recebida", "corte de 22/09/2026: x", None, origem="corte")
+    c.commit()
+    erro = _rodar(c, uid, [{**REGISTRAR, "medicao_id": mid}])["itens"][0]["erro"]
+    assert "já está recebida" in erro and "desfazer_recebimento" in erro
+
+
+def test_registrar_recebimento_data_divergente_e_nota_partilhada(cenario):
+    c, cid, uid = cenario
+    _liberar(c)
+    # ja' recebida a' mao em outra data: o "ja' feito" nao cala a divergencia
+    mid, _ = _cobranca_com_titulo_aberto(c, cid, 33, 1_700_003, 1_570_001)
+    assert _rodar(c, uid, [{**REGISTRAR, "medicao_id": mid}])["feitos"] == 1
+    erro = _rodar(c, uid, [{**REGISTRAR, "data": "2025-08-20", "medicao_id": mid}])["itens"][0]["erro"]
+    assert "já recebida à mão pelo administrador em 2025-08-19; o arquivo diz 2025-08-20" in erro
+    # nota partilhada entre duas medicoes, registro so' numa: a parte dela sai do a receber, e o relatorio nao promete
+    # a reconciliacao, que so' mostra a nota quando todas as medicoes dela estao recebidas
+    a, b = _medicao(c, cid, 34, valor=300_001), _medicao(c, cid, 35, valor=200_001)
+    nid = _nota(c, 690, valor=500_002)
+    c.execute("UPDATE notas_fiscais SET codtmv='2.2.01' WHERE id=?", (nid,))
+    for mid_, parte in ((a, 300_001), (b, 200_001)):
+        c.execute("INSERT INTO nf_alocacoes (medicao_id, nota_id, valor_alocado_centavos, origem, regra, partilhada) "
+                  "VALUES (?,?,?,'manual','t',1)", (mid_, nid, parte))
+    _titulo(c, nid, 500_002)
+    rel = _rodar(c, uid, [{**REGISTRAR, "medicao_id": a}])
+    assert rel["feitos"] == 1, rel
+    detalhes = rel["itens"][0]["detalhes"]
+    assert any("nota partilhada; a parte desta medição sai do a receber" in d for d in detalhes), detalhes
+    assert not any("fica na reconciliação" in d for d in detalhes)
+    from app import sincronizacao_rm
+    assert all(r["nota_id"] != nid for r in sincronizacao_rm._recebidas_sem_baixa(c))

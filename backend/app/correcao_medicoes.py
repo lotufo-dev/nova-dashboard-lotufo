@@ -34,7 +34,7 @@ TIPOS = ("execucao", "projeto", "reajuste")
 # issue #638 e docs/adr/0006 (residuo): sem medicao, o alvo e' a nota
 OPERACOES_DE_NOTA = ("desconsiderar_nf", "reconsiderar_nf", "encerrar_residuo_nf", "reabrir_residuo_nf")
 OPERACOES = ("cancelar", "reabrir", "trocar_tipo", "desligar_nf", "ligar_nf", "protocolar", "estado", "devolver",
-             "desfazer_recebimento", "corrigir_pedido",
+             "desfazer_recebimento", "corrigir_pedido", "registrar_recebimento",
              *OPERACOES_DE_NOTA)
 ENCERRADAS = ("cancelada", "desistida")
 # `devolver` (docs/adr/0006, "Atos de correcao de cadastro"): os estados que o documento prova, antes da nota
@@ -42,7 +42,8 @@ DESTINOS_DEVOLVER = ("em_analise", "boletim_recebido")
 CAMPOS_DEVOLVER = {"novo", "motivo", "data", "processo", "aprovado", "data_aprovacao", "meio"}
 # Campos que cada operacao aceita, alem de `operacao`, `fonte`, `medicao_id`, `obra`, `numero` e `tipo`
 CAMPOS = {"cancelar": {"duplicata_de", "motivo"}, "reabrir": CAMPOS_DEVOLVER, "trocar_tipo": {"novo_tipo", "novo_numero"},
-          "devolver": CAMPOS_DEVOLVER, "desfazer_recebimento": {"motivo"}, "corrigir_pedido": {"pedido", "motivo", "espelho_parcial"},
+          "devolver": CAMPOS_DEVOLVER, "desfazer_recebimento": {"motivo"}, "registrar_recebimento": {"data", "motivo"},
+          "corrigir_pedido": {"pedido", "motivo", "espelho_parcial"},
           "desligar_nf": {"nf", "coligada"}, "ligar_nf": {"nfs", "coligada", "forcar_centro", "parcial"},
           "protocolar": {"data", "processo", "oficio"}, "estado": {"novo", "motivo", "data", "processo", "oficio"},
           "desconsiderar_nf": {"nf", "coligada", "motivo", "substituida_por"},
@@ -210,7 +211,7 @@ def _nfs_ativas(conn, mid: int) -> list[dict]:
     vinculo partilhado (docs/adr/0005, "Uma nota em mais de uma medicao"), o valor da parte."""
     return [{**dict(r), "valor_vinculo": r["valor_alocado_centavos"] if r["partilhada"] else r["valor_centavos"]}
             for r in conn.execute(
-        "SELECT a.id, a.nota_id, n.numero, n.coligada, n.serie, n.idmov, n.valor_centavos, a.valor_alocado_centavos, "
+        "SELECT a.id, a.nota_id, n.numero, n.coligada, n.serie, n.idmov, n.emissao, n.valor_centavos, a.valor_alocado_centavos, "
         "a.partilhada FROM nf_alocacoes a "
         "JOIN notas_fiscais n ON n.id=a.nota_id WHERE a.medicao_id=? AND a.desfeita_em IS NULL ORDER BY a.id", (mid,))]
 
@@ -747,6 +748,61 @@ def _desfazer_recebimento(conn, uid, m, op, fonte):
     if not conn.execute("SELECT 1 FROM medicao_protocolos WHERE medicao_id=? AND etapa='nota' AND desfeita_em IS NULL",
                         (m["id"],)).fetchone():
         detalhes.append("AVISO: sem protocolo da nota registrado (use a operação protocolar)")
+    return detalhes
+
+
+def _registrar_recebimento(conn, uid, m, op, fonte):
+    """docs/adr/0006 ("Atos de correcao de cadastro", issue #34): o registro do recebimento a' mao do administrador,
+    pelo arquivo, quando o pagamento esta' provado fora do RM (a ordem bancaria do orgao no portal da transparencia,
+    o extrato) e o RM nao mostra a baixa. E' o mesmo ato da tela (`api_medicoes.estado`), com as mesmas exigencias: so'
+    o administrador, motivo, a data do pagamento (nunca depois de hoje); grava a origem "manual". Por isso vale como o
+    da tela em toda leitura (`conciliacao.recebidas_a_mao`): a nota ligada sai do a receber (#203) e o titulo aberto
+    aparece na reconciliacao ("Notas de medicoes recebidas sem baixa no RM"). O `estado` desta correcao continua
+    sendo o recebimento em lote, que nao afirma pagamento. A `fonte` e' o documento do pagamento."""
+    # import local: conciliacao importa sincronizacao_rm, que importa medicoes
+    from app import conciliacao, permissoes, sincronizacao_rm
+    perfil = conn.execute("SELECT perfil FROM usuarios WHERE id=?", (uid,)).fetchone()
+    if perfil is None or not permissoes.tem(perfil[0], "administrar"):
+        raise ValueError("só o administrador registra o recebimento à mão: rode com --usuario do administrador")
+    motivo = _texto(op, "motivo")
+    if motivo is None or len(motivo) < medicoes.MOTIVO_RECEBIMENTO_MINIMO:
+        raise ValueError(f"diga o motivo do recebimento à mão (ao menos {medicoes.MOTIVO_RECEBIMENTO_MINIMO} "
+                         "caracteres; motivo: ...)")
+    data = _data(op)
+    if data is None:
+        raise ValueError("diga a data do pagamento (data: AAAA-MM-DD): sem ela a medição fica fora do recebido do mês")
+    if data > tempo.hoje_local().isoformat():
+        raise ValueError(f"a data do pagamento ({data}) é depois de hoje")
+    if m["estado"] == "recebida":
+        if m["id"] in conciliacao.recebidas_a_mao(conn):
+            gravada = (m["recebida_em"] or "")[:10]
+            if gravada != data:
+                # o "ja' feito" calaria a divergencia: quem le o ensaio entenderia que vale a data do arquivo
+                raise ValueError(f"já recebida à mão pelo administrador em {gravada or 'data nenhuma'}; o arquivo diz "
+                                 f"{data}")
+            raise _JaFeito(f"já recebida à mão pelo administrador em {data}")
+        raise ValueError("a medição já está recebida (pela baixa do RM, pelo corte ou em lote): o registro à mão é "
+                         "de medição que espera o pagamento; a recebida sem prova volta pelo desfazer_recebimento")
+    ativas = _nfs_ativas(conn, m["id"])
+    for a in ativas:
+        if a["emissao"] and data < a["emissao"]:
+            raise ValueError(f"a data do pagamento ({data}) é anterior à emissão da {_fmt_nf(a)} ({a['emissao']})")
+    medicoes.mudar_estado(conn, uid, m["id"], "recebida", motivo, data, origem="manual")
+    detalhes = [f"recebida à mão em {datetime.date.fromisoformat(data).strftime('%d/%m/%Y')}: sai do a receber"]
+    if not ativas:
+        detalhes.append("AVISO: sem NF ligada")
+    # o que o relatorio diz da nota sai da propria leitura da reconciliacao (`_recebidas_sem_baixa`), nao de uma conta
+    # paralela: ela so' pega a nota da coligada do contrato, sem outra medicao ainda nao recebida e com falta acima da
+    # tolerancia. O ensaio e' o que o rito manda ler antes de gravar na producao
+    na_reconciliacao = {r["nota_id"]: r for r in sincronizacao_rm._recebidas_sem_baixa(conn) if r["medicao_id"] == m["id"]}
+    for a in ativas:
+        r = na_reconciliacao.get(a["nota_id"])
+        if r:
+            detalhes.append(f"{_fmt_nf(a)}: o título aberto no RM ({dinheiro.format_brl(r['falta_centavos'])}) sai do "
+                            "a receber e fica na reconciliação, como recebimento à mão sem baixa no RM")
+        elif a["partilhada"]:
+            detalhes.append(f"{_fmt_nf(a)}: nota partilhada; a parte desta medição sai do a receber, e a nota só entra "
+                            "na reconciliação quando todas as medições dela estiverem recebidas")
     return detalhes
 
 
@@ -1298,7 +1354,8 @@ def _aplicar_nota(conn, uid: int, op: dict, item: dict, nome: str, fonte: str) -
 
 EXECUTORES = {"cancelar": _cancelar, "reabrir": _reabrir, "trocar_tipo": _trocar_tipo, "desligar_nf": _desligar_nf,
               "ligar_nf": _ligar_nf, "protocolar": _protocolar, "estado": _estado, "devolver": _devolver,
-              "desfazer_recebimento": _desfazer_recebimento, "corrigir_pedido": _corrigir_pedido}
+              "desfazer_recebimento": _desfazer_recebimento, "corrigir_pedido": _corrigir_pedido,
+              "registrar_recebimento": _registrar_recebimento}
 
 
 def _aplicar(conn, uid: int, op, item: dict) -> None:
