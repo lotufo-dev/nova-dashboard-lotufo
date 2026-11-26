@@ -89,10 +89,10 @@ describe("menu lateral em áreas (#814)", () => {
   it("quem tem `ver_licitacoes` vê a área Licitações entre Órgãos e Documentos, com a Triagem e as Favoritas (#908)", () => {
     const { unmount } = render(<Trilho perfil="admin" permissoes={[...COM_SIGA, "ver_licitacoes"]} marcado="licitacoes-favoritas" ir={vi.fn()} />);
     expect(areas().slice(5, 8)).toEqual([
-      ["Órgãos", ["SIGA"]], ["Licitações", ["Triagem", "Favoritas"]], ["Documentos", ["Certidões", "Regularidade mensal", "Garantias"]]]);
+      ["Órgãos", ["SIGA"]], ["Licitações", ["Triagem", "Favoritas", "Todas"]], ["Documentos", ["Certidões", "Regularidade mensal", "Garantias"]]]);
     const paginas = within(within(nav()).getByRole("list", { name: "Licitações" })).getAllByRole("link");
     expect(paginas.map(l => [l.getAttribute("href"), l.getAttribute("aria-current")])).toEqual([
-      ["/licitacoes", null], ["/licitacoes/favoritas", "page"]]);
+      ["/licitacoes", null], ["/licitacoes/favoritas", "page"], ["/licitacoes/todas", null]]);
     expect([...nav().querySelectorAll(".menu__area--acesa .menu__area-nome")].map(n => n.textContent)).toEqual(["Licitações"]);
     // cada página com o desenho dela, que não é o de nenhuma outra do menu
     const desenhos = within(nav()).getAllByRole("link").map(l => l.querySelector("svg")!.innerHTML);

@@ -171,10 +171,10 @@ describe("App: a área Licitações (#908)", () => {
     render(<App />);
     expect(await screen.findByText("Nenhuma recomendada a decidir.")).toBeTruthy();
     expect(api).toHaveBeenCalledWith("/api/licitacoes/triagem");
-    expect(within(trilho().getByRole("list", { name: "Licitações" })).getAllByRole("link").map(l => l.textContent)).toEqual(["Triagem", "Favoritas"]);
+    expect(within(trilho().getByRole("list", { name: "Licitações" })).getAllByRole("link").map(l => l.textContent)).toEqual(["Triagem", "Favoritas", "Todas"]);
     const nomes = trilho().getAllByRole("link").map(l => l.textContent);
     expect(nomes[nomes.indexOf("SIGA") + 1]).toBe("Triagem");
-    expect(nomes[nomes.indexOf("Favoritas") + 1]).toBe("Certidões");
+    expect(nomes[nomes.indexOf("Todas") + 1]).toBe("Certidões");
     expect(trilho().getByRole("link", { name: "Triagem" }).getAttribute("aria-current")).toBe("page");
     // o caminho é da casca: a área (texto, porque a Triagem é a primeira página dela) e a página, que é o h1
     expect(trechos()).toEqual(["Licitações", "Triagem"]);
@@ -370,7 +370,7 @@ describe("App: o menu lateral largo", () => {
     // #814: as páginas na ordem das áreas (Painel, Medições, Obras, Financeiro, Prazos e avisos, Órgãos, Licitações,
     // Documentos, Sistema); as Licitações (#908) são do administrador
     expect(links.map(l => l.textContent)).toEqual(
-      ["Início", "Medições", "Resumo das medições", "Obras", "Fechamento", "Em aberto", "Avisos", "SIGA", "Triagem", "Favoritas",
+      ["Início", "Medições", "Resumo das medições", "Obras", "Fechamento", "Em aberto", "Avisos", "SIGA", "Triagem", "Favoritas", "Todas",
         "Certidões", "Regularidade mensal", "Garantias", "Âncoras DocuSign", "Administração", "Minha conta"]);
     for (const l of links) expect(l.querySelector("svg")).not.toBeNull();
     expect(within(nav).getByRole("link", { name: "SIGA" }).getAttribute("aria-current")).toBe("page");

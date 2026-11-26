@@ -245,3 +245,10 @@ export function IconeEstrela(p: Props) {
     <path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.8z" />
   </Svg>;
 }
+
+/* Todas (fatia 3 da #906): a lupa, a licitacao que se procura na lista inteira. */
+export function IconeLupa(p: Props) {
+  return <Svg {...p}>
+    <circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4.4-4.4" />
+  </Svg>;
+}

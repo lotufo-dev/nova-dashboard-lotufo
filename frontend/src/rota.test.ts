@@ -177,6 +177,18 @@ describe("rota: as páginas de Licitações (#908)", () => {
     for (const r of [{ tela: "licitacoes" }, { tela: "licitacoes-favoritas" }] as Rota[]) expect(parseRota(caminhoDe(r))).toEqual(r);
   });
 
+  it("Todas e Grande vulto (fatia 3 da #906): dois endereços; as formas por extenso abrem e viram a canônica", () => {
+    expect(caminhoDe({ tela: "licitacoes-todas" })).toBe("/licitacoes/todas");
+    expect(caminhoDe({ tela: "licitacoes-todas", vista: "novas" })).toBe("/licitacoes/todas");
+    expect(caminhoDe({ tela: "licitacoes-todas", vista: "grande-vulto" })).toBe("/licitacoes/grande-vulto");
+    expect(parseRota("/licitacoes/todas")).toEqual({ tela: "licitacoes-todas" });
+    expect(parseRota("/licitacoes/grande-vulto")).toEqual({ tela: "licitacoes-todas", vista: "grande-vulto" });
+    expect(parseRota("/licitacoes/todas/grande-vulto")).toEqual({ tela: "licitacoes-todas", vista: "grande-vulto" });
+    expect(parseRota("/licitacoes/todas/novas")).toEqual({ tela: "licitacoes-todas" });
+    expect(parseRota("/licitacoes/todas/outra")).toEqual({ tela: "raiz" });
+    expect(parseRota("/licitacoes/grande-vulto/x")).toEqual({ tela: "raiz" });
+  });
+
   it("a página padrão por extenso (/licitacoes/triagem) abre a Triagem, e a URL vira a canônica", () => {
     expect(parseRota("/licitacoes/triagem")).toEqual({ tela: "licitacoes" });
     expect(caminhoDe(parseRota("/licitacoes/triagem"))).toBe("/licitacoes");

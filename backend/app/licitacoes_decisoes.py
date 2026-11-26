@@ -39,7 +39,7 @@ CORTE_SEM_ESTADO = "O corte não foi gravado: falta a linha de estado das licita
 
 def motivos_de_descarte() -> list[dict]:
     """Os motivos que a tela oferece ao descartar, na ordem, com o rotulo."""
-    return [{"motivo": m, "rotulo": m[0].upper() + m[1:]} for m in MOTIVOS_DESCARTE]
+    return [{"motivo": m, "rotulo": licitacoes.rotulo_do_motivo(m)} for m in MOTIVOS_DESCARTE]
 
 
 class Recusa(Exception):

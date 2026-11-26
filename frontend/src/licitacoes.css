@@ -265,3 +265,25 @@
   .lic-cal__grade td.lic-dia { grid-template-columns: minmax(0, 1fr); gap: var(--espaco-mini); padding: var(--espaco-p) var(--espaco-m); }
   .lic-dia__hoje { display: inline; }
 }
+
+/* ================================================================ fatia 3 da #906: Todas e Grande vulto */
+
+/* os filtros: a busca, as escolhas, as datas da sessao e a ordem, numa grade que encolhe com a pagina; a busca ocupa
+   o dobro. Cada controle enche a celula dele */
+.lic-filtros {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--alvo-minimo) * 4.25)), 1fr));
+  gap: var(--espaco-p) var(--espaco-m); margin: 0;
+}
+.lic-filtro { min-width: 0; }
+.lic-filtro :is(input, select) { width: 100%; min-width: 0; max-width: none; }
+.lic-filtro--busca { grid-column: span 2; }
+/* pagina estreita: duas colunas de filtros, para os treze nao virarem uma fila de tela e meia; a busca na linha toda */
+@container lic-pagina (max-width: 640px) {
+  .lic-filtros { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--espaco-pp) var(--espaco-p); }
+  .lic-filtro--busca { grid-column: 1 / -1; }
+}
+
+/* quantas a lista achou e o link de limpar o recorte, na cabeca do painel */
+.lic-achadas { flex-wrap: wrap; gap: var(--espaco-mini) var(--espaco-m); }
+.lic-achadas__n { margin: 0; font-weight: var(--peso-medio); }
+.lic-limpar { font-size: var(--texto-meta); }

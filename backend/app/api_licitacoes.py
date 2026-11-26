@@ -4,8 +4,9 @@ Leitura: sessao e `ver_licitacoes`. Decisao (favoritar, tirar a favorita, etapa,
 marcar as mudancas como vistas): sessao, CSRF e `editar_licitacoes`; antes do corte, 409 (as decisoes ainda sao
 espelho do radar). O certame e' enderecado pelo `id` que as linhas trazem.
 """
+import datetime
 import sqlite3
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -43,6 +44,22 @@ def calendario(mes: str | None = Query(None, pattern=r"^2[0-9]{3}-(0[1-9]|1[0-2]
                usuario: dict = Depends(exigir(VER_LICITACOES, com_csrf=False))):
     """O calendario das favoritas: o mes `mes` (AAAA-MM; padrao, o de hoje) com cada prazo no dia dele."""
     return _com_poder(licitacoes.calendario(conn, mes), usuario)
+
+
+# os filtros que vem da busca do endereco: texto curto (o valor desconhecido nao acha nada) e as datas da sessao
+_Filtro = Annotated[str, Query(max_length=120)]
+
+
+@router.get("/api/licitacoes/todas")
+def todas(vista: Literal["novas", "grande-vulto"] = "novas", ordem: Literal["padrao", "prazo", "publicacao", "valor"] = "padrao",
+          q: Annotated[str, Query(max_length=200)] = "", tipo: _Filtro = "", modalidade: _Filtro = "", orgao: _Filtro = "",
+          esfera: _Filtro = "", valor: _Filtro = "", km: _Filtro = "", situacao: _Filtro = "", decisao: _Filtro = "",
+          portal: _Filtro = "", sessao_de: datetime.date | None = None, sessao_ate: datetime.date | None = None,
+          conn: sqlite3.Connection = Depends(conexao), usuario: dict = Depends(exigir(VER_LICITACOES, com_csrf=False))):
+    """Todas e Grande vulto (fatia 3 da #906): a lista inteira da vista, com a busca, os filtros e a ordem."""
+    filtros = {"q": q, "tipo": tipo, "modalidade": modalidade, "orgao": orgao, "esfera": esfera, "valor": valor, "km": km,
+               "situacao": situacao, "decisao": decisao, "portal": portal, "sessao_de": sessao_de, "sessao_ate": sessao_ate}
+    return _com_poder(licitacoes.todas(conn, vista, filtros, ordem), usuario)
 
 
 @router.get("/api/licitacoes/resumo")
