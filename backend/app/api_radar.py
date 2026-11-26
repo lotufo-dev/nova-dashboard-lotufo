@@ -186,6 +186,12 @@ class ConferenciaIn(BaseModel):
     autor: str | None = Field(default=None, max_length=120)
     quando: AwareDatetime | None = None
 
+    @model_validator(mode="after")
+    def _dois_certames(self):
+        if self.a == self.b:
+            raise ValueError("o par precisa de dois certames diferentes")
+        return self
+
 
 class DecisoesIn(BaseModel):
     # obrigatoria: `decisoes: {}` nao vale por lista vazia (que tira todas as favoritas). Quem nao leu as proprias
@@ -298,5 +304,5 @@ def fechar_leitura(dados: LeituraIn, conn: sqlite3.Connection = Depends(conexao)
 
 @router.get("/api/radar/decisoes", dependencies=[Depends(exigir_radar)], include_in_schema=False)
 def decisoes(conn: sqlite3.Connection = Depends(conexao)):
-    """Depois do corte o radar busca aqui as favoritas e as descartadas, antes de cada leitura."""
+    """Depois do corte o radar busca aqui as favoritas, as descartadas e as conferencias em vigor, antes de cada leitura."""
     return licitacoes_decisoes.para_o_radar(conn)

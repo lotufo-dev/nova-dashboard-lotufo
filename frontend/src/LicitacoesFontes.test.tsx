@@ -1,18 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiErro } from "./api";
-import {
-  fmtCentesimos, fmtMilesimos, type FonteDoRadar, type ParConferido, type ParParaConferir, type QuadroDeResultados,
-  type RespostaFontes, type RespostaResultados,
-} from "./licitacoes";
+import { type FonteDoRadar, type ParConferido, type ParParaConferir, type RespostaFontes } from "./licitacoes";
 import LicitacoesFontes from "./LicitacoesFontes";
-import LicitacoesResultados from "./LicitacoesResultados";
 import { HOJE_DO_TESTE, leitura, linha } from "./licitacoesTeste";
 
 const { api } = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...(await original<typeof import("./api")>()), api }));
 
-// Fontes e Resultados (fatia 4 da #906). Licitações, fontes, regras e números inventados. 24/11/2026, 11h em Cuiabá.
+// Fontes (fatia 4 da #906). Licitações, fontes e regras inventadas. 24/11/2026, 11h em Cuiabá.
 
 const fonte = (nome: string, situacao: FonteDoRadar["situacao"], extra: Partial<FonteDoRadar> = {}): FonteDoRadar => ({
   fonte: nome.toLowerCase(), nome, estado: null, lidos: 10, hora: "09:01", problema: null, aguardando: null, situacao, ...extra });
@@ -57,9 +53,9 @@ describe("Fontes", () => {
     servidor([fontes()]);
     render(<LicitacoesFontes />);
     await screen.findByRole("region", { name: "Alertas do dia" });
-    const grupos = within(regiao("Alertas do dia")).getAllByRole("columnheader").filter(c => c.getAttribute("scope") === "colgroup");
+    const grupos = within(regiao("Alertas do dia")).getAllByRole("rowheader").filter(c => c.getAttribute("scope") === "rowgroup");
     expect(grupos.map(g => g.textContent)).toEqual(["Órgãos de interesse22 licitações", "Grande vulto00 licitações"]);
-    expect(within(regiao("Alertas do dia")).getAllByRole("rowheader").map(c => c.textContent?.slice(0, 14))).toEqual(
+    expect(within(regiao("Alertas do dia")).getAllByRole("rowheader").filter(c => c.getAttribute("scope") === "row").map(c => c.textContent?.slice(0, 14))).toEqual(
       ["PME · CE 005/2", "PME · CE 006/2"]);
   });
 
@@ -96,6 +92,23 @@ describe("Fontes", () => {
     expect(await within(regiao("Conferência")).findByText("Escolha a resposta: é o mesmo ou é outro")).toBeTruthy();
   });
 
+  it("a recusa do Refazer aparece junto do par respondido; a do par que saiu da página, no alto, com os dois nomes", async () => {
+    const corte = { decisoes: "dashboard" as const, pode_decidir: true };
+    servidor([fontes(corte)], new ApiErro(409, "O radar já resolveu este par: atualize a página"));
+    render(<LicitacoesFontes />);
+    await screen.findByRole("region", { name: "Conferência" });
+    fireEvent.click(screen.getByRole("button", { name: /^Refazer: PME · CE 003/ }));
+    const recusa = await within(regiao("Conferência")).findByText("O radar já resolveu este par: atualize a página");
+    expect(recusa.closest("tr")!.textContent).toMatch(/CE 004\/2026/);
+    cleanup(); api.mockReset();
+    // o par saiu na leitura nova: a recusa vai para o alto, dizendo de qual par era
+    servidor([fontes(corte), fontes({ ...corte, pares: [], conferidos: [] })], new ApiErro(409, "Este par já foi conferido"));
+    render(<LicitacoesFontes />);
+    await screen.findByRole("region", { name: "Conferência" });
+    fireEvent.click(screen.getByRole("button", { name: /^É o mesmo: PME · CE 001/ }));
+    expect(await screen.findByText("PME · CE 001/2026 e PME · CE 002/2026: Este par já foi conferido")).toBeTruthy();
+  });
+
   it("sem leitura nenhuma: o aviso e as três linhas curtas", async () => {
     servidor([fontes({ leitura: leitura({ lido_em: null, atrasada: true }), fontes: [], alertas: [], pares: [], conferidos: [] })]);
     render(<LicitacoesFontes />);
@@ -106,40 +119,3 @@ describe("Fontes", () => {
   });
 });
 
-const QUADRO: QuadroDeResultados = {
-  funil: [{ rotulo: "Analisadas", n: 30 }, { rotulo: "Propostas", n: 12 }, { rotulo: "Vencidas", n: 3 }],
-  por_tipo: [{ grupo: "Rodovia", participadas: 7, vencidas: 2, taxa: 286 }, { grupo: "Ponte", participadas: 0, vencidas: 0, taxa: null }],
-  por_modalidade: [{ grupo: "Concorrência", participadas: 12, vencidas: 3, taxa: 250 }],
-  perdas: [{ licitacao: "PME · CE 010/2026", motivo: "preço", data: "2026-10-20" }],
-  descontos: [{ licitacao: "PME · CE 010/2026", empresa: 812, vencedor: 1530, vencemos: false },
-    { licitacao: "DER-EX · CE 007/2026", empresa: 1105, vencedor: null, vencemos: true }],
-};
-
-describe("Resultados", () => {
-  afterEach(() => { cleanup(); api.mockReset(); });
-
-  it("formata a taxa em milésimos e o desconto em centésimos de ponto, como o servidor manda", () => {
-    expect([fmtMilesimos(286), fmtMilesimos(0), fmtMilesimos(1000)]).toEqual(["28,6%", "0,0%", "100,0%"]);
-    expect([fmtCentesimos(812), fmtCentesimos(1530), fmtCentesimos(-50)]).toEqual(["8,12%", "15,30%", "-0,50%"]);
-  });
-
-  it("o funil, as taxas por grupo, as perdas e os descontos do último quadro", async () => {
-    servidor([{ leitura: leitura(), lido_em: "2026-11-24T13:05:00+00:00", resultados: QUADRO } satisfies RespostaResultados]);
-    render(<LicitacoesResultados />);
-    await screen.findByRole("region", { name: "Por tipo de obra" });
-    expect(screen.getByText(/Quadro da leitura de/).textContent).toBe("Quadro da leitura de 24/11 às 09:05");
-    expect([...screen.getByLabelText("Funil das licitações").querySelectorAll(".lic-numero")].map(n => n.textContent))
-      .toEqual(["Analisadas30", "Propostas12", "Vencidas3"]);
-    const tipos = within(regiao("Por tipo de obra")).getAllByRole("row").slice(1).map(l => [...l.querySelectorAll("th, td")].map(c => c.textContent));
-    expect(tipos).toEqual([["Rodovia", "7", "2", "28,6%"], ["Ponte", "0", "0", "—"]]);
-    const descontos = within(regiao("Descontos")).getAllByRole("row").slice(1).map(l => [...l.querySelectorAll("th, td")].map(c => c.textContent));
-    expect(descontos).toEqual([["PME · CE 010/2026", "8,12%", "15,30%"], ["DER-EX · CE 007/2026Vencida", "11,05%", "—"]]);
-    expect(within(regiao("Perdas")).getByText("20/10/2026")).toBeTruthy();
-  });
-
-  it("sem quadro: a linha curta", async () => {
-    servidor([{ leitura: leitura(), lido_em: null, resultados: null } satisfies RespostaResultados]);
-    render(<LicitacoesResultados />);
-    expect(await screen.findByText("O radar ainda não mandou resultados.")).toBeTruthy();
-  });
-});

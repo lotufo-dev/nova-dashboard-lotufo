@@ -154,7 +154,8 @@ function situacaoDoBackup(b: Backup): [nota: string, situacao: Situacao, palavra
 }
 
 /** O radar de licitacoes (fatia 4 da #906): a mesma leitura de "O radar nao le desde..." das paginas dele. */
-type SaudeRadar = { lido_em: string | null; atrasada: boolean; fontes_com_problema: number };
+/** `situacao`: o tom do cartao, do servidor (`licitacoes.saude`); nula sem leitura nenhuma. */
+type SaudeRadar = { lido_em: string | null; atrasada: boolean; fontes_com_problema: number; situacao: "feito" | "critico" | null };
 
 function Situacoes({ status, erroCarga, rodando, b, siga, radar }: {
   status: StatusRm | null; erroCarga: string; rodando: boolean; b: Backup | null | undefined; siga: SaudeSiga | null | undefined;
@@ -196,15 +197,16 @@ function Situacoes({ status, erroCarga, rodando, b, siga, radar }: {
     : [T_SIGA, fmtDataHora(siga.ultima_leitura),
       `${siga.processos} ${siga.processos === 1 ? "processo" : "processos"}${siga.atrasado ? ", sem leitura recente" : ""}`,
       siga.atrasado ? "critico" : "feito", siga.atrasado ? "Atrasado" : undefined];
-  // 5. radar de licitacoes: a hora da ultima leitura e as fontes com problema nela; atrasado e' critico
+  // 5. radar de licitacoes (fatia 4 da #906): a hora da ultima leitura e as fontes com problema nela; o tom vem do
+  // servidor, o mesmo da fonte com problema na pagina Fontes
   const problemas = radar?.fontes_com_problema ?? 0;
   const radarCartao: Cartao = radar === undefined ? neutro(T_RADAR, "carregando…", "")
     : radar === null ? neutro(T_RADAR, "não foi possível ler", NAO_LEU)
-    : radar.lido_em === null ? neutro(T_RADAR, "—", "")
+    : radar.lido_em === null || radar.situacao === null ? neutro(T_RADAR, "—", "")
     : [T_RADAR, fmtDataHora(radar.lido_em),
       [radar.atrasada ? "sem leitura recente" : "", problemas ? `${problemas} ${problemas === 1 ? "fonte" : "fontes"} com problema` : ""]
         .filter(Boolean).join(", "),
-      radar.atrasada ? "critico" : problemas ? "breve" : "feito", radar.atrasada ? "Atrasado" : undefined];
+      radar.situacao, radar.atrasada ? "Atrasado" : problemas ? "Com problema" : undefined];
   return (
     <ul className="situacoes" aria-label="Situação do servidor">
       {[backup, externa, rm, monitor, radarCartao].map(([titulo, valor, nota, situacao, palavra]) => (

@@ -308,6 +308,8 @@ def desfazer_conferencia(conn, usuario_id: int, par_id: int) -> None:
     with db.mutacao(conn):
         _exigir_corte(conn)
         p = _par(conn, par_id)
+        if p["fora_desde"] is not None:                # o radar ja' aplicou a resposta: nao se desfaz daqui
+            raise Recusa(PAR_FORA)
         c = _conferencia(conn, p["par"])
         if c is None:
             raise Recusa(NAO_CONFERIDO)

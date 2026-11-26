@@ -73,7 +73,8 @@ function AlertasDoDia({ alertas }: { alertas: AlertaDoDia[] }) {
     <section className="cartao lic-bloco" aria-labelledby="lic-alertas">
       <header className="cartao__cabeca">
         <h2 className="cartao__titulo" id="lic-alertas">Alertas do dia</h2>
-        <Contador rotulo={contar(n, "licitação", "licitações")}>{n.toLocaleString("pt-BR")}</Contador>
+        {/* uma licitacao pega por duas regras conta duas vezes: sao alertas, e nao licitacoes */}
+        <Contador rotulo={contar(n, "alerta", "alertas")}>{n.toLocaleString("pt-BR")}</Contador>
       </header>
       {alertas.length === 0 ? <div className="vazio vazio--curto"><p>Nenhum alerta na última leitura.</p></div> : (
         <Rolagem rotulo="Alertas do dia">
@@ -85,7 +86,7 @@ function AlertasDoDia({ alertas }: { alertas: AlertaDoDia[] }) {
             {alertas.map(a => (
               <tbody key={a.regra}>
                 <tr className="lic-grupo">
-                  <th scope="colgroup" colSpan={3}>
+                  <th scope="rowgroup" colSpan={3}>
                     <span className="lic-grupo__faixa">
                       <span className="lic-grupo__nome">{a.nome}</span>
                       <Contador rotulo={contar(a.linhas.length, "licitação", "licitações")}>{a.linhas.length.toLocaleString("pt-BR")}</Contador>
@@ -219,8 +220,9 @@ export default function LicitacoesFontes() {
   const { ocupada, falha, decidir } = useDecisoes(tentar);
   if (!dados) return <SemLeitura erro={erro} tentar={() => void tentar()} />;
 
-  // a decisao vai ao par pelo id dele (POST /api/licitacoes/pares/{id}/conferencia); o nome, para a recusa
-  const doPar = (p: ParParaConferir) => ({ ...p.a, id: p.id });
+  // a decisao vai ao par pelo id dele (POST /api/licitacoes/pares/{id}/conferencia); o nome dos dois lados, para a
+  // recusa que aparece no alto quando o par ja' saiu da pagina
+  const doPar = (p: ParParaConferir) => ({ id: p.id, orgao: `${nomeDaLicitacao(p.a)} e ${nomeDaLicitacao(p.b)}`, sigla_orgao: "", edital: "", modalidade: "" });
   const conferir: Conferir | null = dados.pode_decidir ? {
     ocupada, falha, respostas: dados.respostas,
     responder: (p, resposta) => void decidir(doPar(p), "conferencia", { resposta }, "pares"),
@@ -232,7 +234,7 @@ export default function LicitacoesFontes() {
       <LeituraDoRadarLinha leitura={dados.leitura} />
       <FalhaAoAtualizar erro={erro} tentar={() => void tentar()} />
       {/* a recusa de um par que ja' saiu da pagina (o radar o resolveu, outra pessoa respondeu) */}
-      {falha && !nomes.some(p => p.id === falha.id) && <Falha>{falha.texto}</Falha>}
+      {falha && !nomes.some(p => p.id === falha.id) && <Falha>{falha.nome}: {falha.texto}</Falha>}
       <SituacaoDasFontes fontes={dados.fontes} />
       <AlertasDoDia alertas={dados.alertas} />
       <Conferencia pares={dados.pares} conferidos={dados.conferidos} conferir={conferir} />

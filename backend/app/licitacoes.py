@@ -32,6 +32,7 @@ LEITURA_ANTIGA = "Leitura mais antiga que a última gravada"
 LEITURA_FORA_DA_FAIXA = "Data da leitura fora da faixa aceita"
 DESCARTE_FORA_DA_FAIXA = "Data do descarte fora da faixa aceita: "
 CONFERENCIA_FORA_DA_FAIXA = "Data da conferência fora da faixa aceita: "
+PAR_REPETIDO = "Par repetido na rodada: "
 ANO_MINIMO_DA_LEITURA = 2020
 CHAVE_DESCONHECIDA = "Licitação que a dashboard ainda não recebeu: "
 DECISOES_NA_DASHBOARD = "As decisões das licitações estão na dashboard desde "
@@ -122,6 +123,11 @@ def fechar_leitura(conn, lido_em: datetime.datetime, chaves: list[str], fontes: 
     alertas = alertas or []
     nos_alertas = {k for a in alertas for k in a["chaves"]}
     nos_pares = {k for p in pares or [] for k in (p["a"], p["b"])}
+    vistos: set[str] = set()
+    for p in pares or []:
+        if p["par"] in vistos:
+            raise ValueError(PAR_REPETIDO + p["par"])
+        vistos.add(p["par"])
     with db.mutacao(conn):
         corte = corte_em(conn)
         if decisoes is not None and corte:
@@ -140,7 +146,8 @@ def fechar_leitura(conn, lido_em: datetime.datetime, chaves: list[str], fontes: 
         # a mesma rodada mandada de novo nao cria linha, mas vale o que ela diz agora
         conn.execute("INSERT INTO lic_leituras (lido_em, certames, fontes, alertas, resultados) VALUES (?,?,?,?,?) "
                      "ON CONFLICT(lido_em) DO UPDATE SET certames=excluded.certames, fontes=excluded.fontes, "
-                     "alertas=excluded.alertas, resultados=excluded.resultados",
+                     # o quadro ausente na rodada reenviada nao apaga o que ela trouxe da primeira vez
+                     "alertas=excluded.alertas, resultados=COALESCE(excluded.resultados, lic_leituras.resultados)",
                      (lido, len(listadas), json.dumps(fontes, ensure_ascii=False), json.dumps(alertas, ensure_ascii=False),
                       None if resultados is None else json.dumps(resultados, ensure_ascii=False)))
         espelhadas = _espelhar_favoritas(conn, favoritas, lido) if favoritas is not None else None
@@ -153,7 +160,9 @@ def fechar_leitura(conn, lido_em: datetime.datetime, chaves: list[str], fontes: 
 
 def _gravar_pares(conn, pares: list[dict], lido: str) -> int:
     """Os pares que o radar lista hoje: entra o que falta, o que mudou de chave ou de motivo acompanha, o que voltou
-    perde `fora_desde`, e o que ele nao lista mais (resolveu sozinho, com prova forte) ganha a data. Nada se apaga."""
+    perde `fora_desde`, e o que ele nao lista mais (resolveu sozinho, com prova forte) ganha a data. O par que passou a
+    ser de outros certames nao leva a resposta dada aos antigos: a conferencia em vigor e' desfeita, com a data, e
+    guarda as chaves a que respondeu. A ordem dos dois lados nao conta."""
     gravados = {r["par"]: r for r in conn.execute("SELECT id, par, chave_a, chave_b, motivo, fora_desde FROM lic_pares")}
     vieram = set()
     for p in pares:
@@ -162,7 +171,10 @@ def _gravar_pares(conn, pares: list[dict], lido: str) -> int:
         if atual is None:
             conn.execute("INSERT INTO lic_pares (par, chave_a, chave_b, motivo) VALUES (?,?,?,?)",
                          (p["par"], p["a"], p["b"], p["motivo"]))
-        elif (atual["chave_a"], atual["chave_b"], atual["motivo"], atual["fora_desde"]) != (p["a"], p["b"], p["motivo"], None):
+            continue
+        if {atual["chave_a"], atual["chave_b"]} != {p["a"], p["b"]}:
+            conn.execute("UPDATE lic_conferencias SET desfeita_em=? WHERE par=? AND desfeita_em IS NULL", (lido, p["par"]))
+        if (atual["chave_a"], atual["chave_b"], atual["motivo"], atual["fora_desde"]) != (p["a"], p["b"], p["motivo"], None):
             conn.execute("UPDATE lic_pares SET chave_a=?, chave_b=?, motivo=?, fora_desde=NULL WHERE id=?",
                          (p["a"], p["b"], p["motivo"], atual["id"]))
     conn.executemany("UPDATE lic_pares SET fora_desde=? WHERE id=?",
@@ -172,13 +184,13 @@ def _gravar_pares(conn, pares: list[dict], lido: str) -> int:
 
 def _espelhar_conferencias(conn, conferencias: dict[str, dict], lido: str) -> int:
     """Ate' o corte as conferencias sao espelho do radar: entra a que falta, com a data que tinha la' (`quando`; sem
-    ela, a hora deste espelho); a que mudou de resposta e' refeita (a antiga fica, com a data); a que ele nao manda
-    mais e' desfeita."""
+    ela, a hora deste espelho); a que mudou de resposta ou de certames e' refeita (a antiga fica, com a data); a que ele
+    nao manda mais e' desfeita."""
     ativas = {r["par"]: r for r in conn.execute(
-        "SELECT id, par, resposta FROM lic_conferencias WHERE desfeita_em IS NULL AND origem='radar'")}
+        "SELECT id, par, chave_a, chave_b, resposta FROM lic_conferencias WHERE desfeita_em IS NULL AND origem='radar'")}
     for par, c in conferencias.items():
         atual = ativas.get(par)
-        if atual is not None and atual["resposta"] == c["resposta"]:
+        if atual is not None and (atual["resposta"], {atual["chave_a"], atual["chave_b"]}) == (c["resposta"], {c["a"], c["b"]}):
             continue
         if atual is not None:
             conn.execute("UPDATE lic_conferencias SET desfeita_em=? WHERE id=?", (lido, atual["id"]))
@@ -711,7 +723,11 @@ def resultados(conn) -> dict:
 
 
 def saude(conn) -> dict:
-    """Administracao > Saude: a ultima leitura do radar, se esta' atrasada (a mesma conta de "O radar nao le desde") e
-    quantas fontes tiveram problema nela."""
+    """Administracao > Saude: a ultima leitura do radar, se esta' atrasada (a mesma conta de "O radar nao le desde"),
+    quantas fontes tiveram problema nela e a situacao do cartao: atrasada ou com fonte com problema e' critico, como a
+    fonte com problema na pagina Fontes (`_situacao_da_fonte`); lida e sem problema, feito; sem leitura nenhuma, nenhuma
+    (o radar ainda nao entrega, como o monitor do SIGA antes da primeira leitura)."""
     with db.leitura(conn):
-        return leitura(conn)
+        l = leitura(conn)
+        situacao = None if l["lido_em"] is None else "critico" if l["atrasada"] or l["fontes_com_problema"] else "feito"
+        return {**l, "situacao": situacao}

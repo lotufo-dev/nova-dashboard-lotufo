@@ -539,7 +539,7 @@ const RODADA_RUIM = { id: 3, disparo: "manual", estado: "failed", iniciado_em: "
 
 const SIGA_SEM_LEITURA = { ultima_leitura: null, atrasado: false, processos: 0 };
 
-const RADAR_SEM_LEITURA = { lido_em: null, atrasada: true, fontes_com_problema: 0 };
+const RADAR_SEM_LEITURA = { lido_em: null, atrasada: true, fontes_com_problema: 0, situacao: null };
 
 function saudeComRm(status: object, backup: object = BACKUP_EM_DIA, siga: object = SIGA_SEM_LEITURA, seguranca: object[] = [],
     radar: object = RADAR_SEM_LEITURA) {
@@ -642,19 +642,19 @@ test("Saúde: cartão Monitor do SIGA com a hora da última leitura e os process
 });
 
 // Fatia 4 da #906: o radar de licitacoes ao lado do monitor do SIGA, com a mesma leitura das paginas dele
-test("Saúde: cartão do radar de licitações com a última leitura e as fontes com problema; atrasado, crítico", async () => {
+test("Saúde: cartão do radar de licitações com a última leitura e as fontes com problema, no tom do servidor", async () => {
   const rm = { configurado: true, em_andamento: false, ultima_sincronizacao: null, ultimo_erro: null, rodadas: [RODADA_BOA] };
-  saudeComRm(rm, BACKUP_EM_DIA, SIGA_SEM_LEITURA, [], { lido_em: "2026-11-24T13:05:00+00:00", atrasada: false, fontes_com_problema: 0 });
+  saudeComRm(rm, BACKUP_EM_DIA, SIGA_SEM_LEITURA, [], { lido_em: "2026-11-24T13:05:00+00:00", atrasada: false, fontes_com_problema: 0, situacao: "feito" });
   await screen.findByRole("heading", { name: "Radar de licitações" });
   expect(cartaoDe("Radar de licitações").textContent).toMatch(/24\/11\/2026 às 09:05/);
   expect(cartaoDe("Radar de licitações").className).toMatch(/situacao--feito/);
   cleanup(); api.mockReset();
-  saudeComRm(rm, BACKUP_EM_DIA, SIGA_SEM_LEITURA, [], { lido_em: "2026-11-24T13:05:00+00:00", atrasada: false, fontes_com_problema: 2 });
+  saudeComRm(rm, BACKUP_EM_DIA, SIGA_SEM_LEITURA, [], { lido_em: "2026-11-24T13:05:00+00:00", atrasada: false, fontes_com_problema: 2, situacao: "critico" });
   await screen.findByRole("heading", { name: "Radar de licitações" });
   expect(cartaoDe("Radar de licitações").textContent).toMatch(/2 fontes com problema/);
-  expect(cartaoDe("Radar de licitações").className).toMatch(/situacao--breve/);
+  expect(cartaoDe("Radar de licitações").className).toMatch(/situacao--critico/);
   cleanup(); api.mockReset();
-  saudeComRm(rm, BACKUP_EM_DIA, SIGA_SEM_LEITURA, [], { lido_em: "2026-11-20T13:05:00+00:00", atrasada: true, fontes_com_problema: 1 });
+  saudeComRm(rm, BACKUP_EM_DIA, SIGA_SEM_LEITURA, [], { lido_em: "2026-11-20T13:05:00+00:00", atrasada: true, fontes_com_problema: 1, situacao: "critico" });
   await screen.findByRole("heading", { name: "Radar de licitações" });
   expect(cartaoDe("Radar de licitações").textContent).toMatch(/sem leitura recente, 1 fonte com problema/);
   expect(cartaoDe("Radar de licitações").className).toMatch(/situacao--critico/);

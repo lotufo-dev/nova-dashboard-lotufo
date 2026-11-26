@@ -150,6 +150,18 @@ def test_o_par_que_o_radar_nao_lista_mais_sai_e_volta(admin):
     assert [p["par"] for p in _fontes(admin)["pares"]] == ["p-1-3", "p-2-4"]
 
 
+def test_par_repetido_na_rodada_e_recusado(admin):
+    r = _fechar(admin, pares=[PARES[0], {**PARES[0], "motivo": "outro motivo"}])
+    assert r.status_code == 422 and "Par repetido" in r.json()["detail"]
+    assert _linhas("SELECT * FROM lic_pares") == []
+
+
+def test_a_rodada_reenviada_sem_resultados_nao_apaga_o_quadro(admin):
+    assert _fechar(admin, resultados=RESULTADOS).status_code == 200
+    assert _fechar(admin).status_code == 200                                   # a mesma lido_em, sem o quadro
+    assert admin.get("/api/licitacoes/resultados").json()["resultados"]["funil"] == RESULTADOS["funil"]
+
+
 def test_vale_o_ultimo_quadro_de_resultados_e_os_alertas_da_ultima_leitura(admin):
     assert _fechar(admin, alertas=ALERTAS, resultados=RESULTADOS).status_code == 200
     assert _fechar(admin, lido_em=LIDO_2).status_code == 200                   # sem quadro e sem alertas
@@ -205,9 +217,12 @@ def test_depois_do_corte_a_conferencia_e_da_tela_e_o_radar_a_busca(admin):
     assert antiga["resposta"] == "mesmo" and antiga["desfeita_em"] and antiga["desfeita_por"]
     assert admin.get("/api/radar/decisoes", headers=radar()).json()["conferencias"] == []
 
-    # o par que o radar resolveu sozinho nao se confere mais; o que nao existe, 404
+    # o par que o radar resolveu sozinho nao se confere mais nem se desfaz; o que nao existe, 404
+    assert _conferir(admin, "p-1-3").status_code == 200
     assert _fechar(admin, lido_em=LIDO_2, pares=PARES[1:]).status_code == 200
     assert _conferir(admin, "p-1-3").status_code == 409
+    assert admin.post(f"/api/licitacoes/pares/{pid}/conferencia/desfazer").status_code == 409
+    assert [c["par"] for c in admin.get("/api/radar/decisoes", headers=radar()).json()["conferencias"]] == ["p-1-3"]
     assert admin.post("/api/licitacoes/pares/9999/conferencia", json={"resposta": "mesmo"}).status_code == 404
     # e o corte conta as conferencias
     assert "conferencias" in _cortar()
@@ -217,8 +232,36 @@ def test_depois_do_corte_a_conferencia_e_da_tela_e_o_radar_a_busca(admin):
 
 def test_o_radar_na_saude(client_admin, com_token):
     assert client_admin.get("/api/admin/saude").json()["radar"] == {
-        "lido_em": None, "atrasada": True, "fontes_com_problema": 0}
+        "lido_em": None, "atrasada": True, "fontes_com_problema": 0, "situacao": None}
     mandar(client_admin, _c(1))
-    assert fechar(client_admin, [_chave(1)], fontes=FONTES).status_code == 200
+    assert fechar(client_admin, [_chave(1)], fontes=FONTES[:1]).status_code == 200
+    assert client_admin.get("/api/admin/saude").json()["radar"]["situacao"] == "feito"
+    # fonte com problema: critico, como a propria fonte na pagina Fontes
+    assert fechar(client_admin, [_chave(1)], lido_em=LIDO_2, fontes=FONTES).status_code == 200
     assert client_admin.get("/api/admin/saude").json()["radar"] == {
-        "lido_em": "2026-11-24T13:05:00+00:00", "atrasada": False, "fontes_com_problema": 1}
+        "lido_em": "2026-11-24T14:05:00+00:00", "atrasada": False, "fontes_com_problema": 1, "situacao": "critico"}
+
+
+def test_o_par_que_passa_a_ser_de_outros_certames_nao_leva_a_resposta(admin):
+    assert _fechar(admin, pares=PARES).status_code == 200
+    _cortar()
+    assert _conferir(admin, "p-1-3").status_code == 200
+    # a ordem dos lados nao conta: a resposta fica
+    assert _fechar(admin, lido_em=LIDO_2, pares=[{**PARES[0], "a": _chave(3), "b": _chave(1)}, PARES[1]]).status_code == 200
+    assert [c["par"] for c in _fontes(admin)["conferidos"]] == ["p-1-3"]
+    # outros certames: a resposta e' desfeita, com as chaves a que respondeu, e o par volta aos pendentes
+    assert _fechar(admin, lido_em=LIDO_3, pares=[{**PARES[0], "a": _chave(2), "b": _chave(3)}, PARES[1]]).status_code == 200
+    f = _fontes(admin)
+    assert f["conferidos"] == [] and [(p["par"], p["a"]["chave"]) for p in f["pares"]] == [("p-1-3", _chave(2)), ("p-2-4", _chave(2))]
+    assert _linhas("SELECT chave_a, chave_b, resposta, desfeita_em FROM lic_conferencias") == [
+        {"chave_a": _chave(1), "chave_b": _chave(3), "resposta": "mesmo", "desfeita_em": "2026-11-24 14:35:00"}]
+    assert admin.get("/api/radar/decisoes", headers=radar()).json()["conferencias"] == []
+
+
+def test_no_espelho_a_conferencia_de_outros_certames_e_refeita(admin):
+    conf = {"par": "p-1-3", "a": _chave(1), "b": _chave(3), "resposta": "mesmo"}
+    assert _fechar(admin, decisoes={"favoritas": [], "conferencias": [conf]}).status_code == 200
+    assert _fechar(admin, lido_em=LIDO_2, decisoes={"favoritas": [], "conferencias": [{**conf, "a": _chave(2)}]}).status_code == 200
+    assert [(r["chave_a"], r["desfeita_em"] is None) for r in _linhas("SELECT chave_a, desfeita_em FROM lic_conferencias ORDER BY id")] == [
+        (_chave(1), False), (_chave(2), True)]
+    assert _fechar(admin, lido_em=LIDO_3, decisoes={"favoritas": [], "conferencias": [{**conf, "b": _chave(1)}]}).status_code == 422

@@ -1290,14 +1290,15 @@ const LIC_FONTES = [
 ];
 const licPar = (id, a, b, motivo) => ({ id, par: `p-${a.id}-${b.id}`, motivo, a, b });
 
-/** GET /api/licitacoes/fontes. `vazia`: a leitura chegou sem fonte, alerta nem par; `decide`: depois do corte. */
-export const licitacoesFontes = ({ vazia = false, decide = false } = {}) => () => {
+/** GET /api/licitacoes/fontes. `vazia`: a leitura chegou sem fonte, alerta nem par; `decide`: depois do corte;
+ *  `atrasada`: o radar nao le ha' dias. */
+export const licitacoesFontes = ({ vazia = false, decide = false, atrasada = false } = {}) => () => {
   if (vazia) return { leitura: licLeitura({ problemas: 0 }), ...licPoder(decide), fontes: [], alertas: [], pares: [], conferidos: [],
     respostas: [{ resposta: "mesmo", rotulo: "É o mesmo" }, { resposta: "outro", rotulo: "É outro" }] };
   const [r31, r32, r33] = licRecomendadas();
   const gv = licGrandeVulto();
   return {
-    leitura: licLeitura({ problemas: 1 }), ...licPoder(decide),
+    leitura: licLeitura({ problemas: 1, atrasada }), ...licPoder(decide),
     fontes: LIC_FONTES,
     alertas: [{ regra: "interesse", nome: "Órgãos de interesse", linhas: [r31, r33] }, { regra: "grande-vulto", nome: "Grande vulto", linhas: gv },
       { regra: "hospital", nome: "Hospitais", linhas: [] }],
@@ -1312,10 +1313,11 @@ export const licitacoesFontes = ({ vazia = false, decide = false } = {}) => () =
   };
 };
 
-/** GET /api/licitacoes/resultados. `vazio`: o radar ainda nao mandou o quadro. */
-export const licitacoesResultados = ({ vazio = false } = {}) => () => (vazio
+/** GET /api/licitacoes/resultados. `vazio`: o radar ainda nao mandou o quadro; `atrasada`: o radar nao le ha' dias, e o
+ *  quadro e' o da ultima leitura que veio (de dias atras). */
+export const licitacoesResultados = ({ vazio = false, atrasada = false } = {}) => () => (vazio
   ? { leitura: licLeitura({ problemas: 0 }), lido_em: null, resultados: null }
-  : { leitura: licLeitura({ problemas: 0 }), lido_em: `${licDia(0)}T13:05:00+00:00`, resultados: {
+  : { leitura: licLeitura({ problemas: 0, atrasada }), lido_em: `${licDia(atrasada ? -4 : 0)}T13:05:00+00:00`, resultados: {
     funil: [{ rotulo: "Analisadas", n: 38 }, { rotulo: "Propostas enviadas", n: 14 }, { rotulo: "Vencidas", n: 4 }, { rotulo: "Perdidas", n: 8 }],
     por_tipo: [{ grupo: "Rodovia", participadas: 7, vencidas: 2, taxa: 286 }, { grupo: "Edificação", participadas: 4, vencidas: 1, taxa: 250 },
       { grupo: "Obra de arte especial", participadas: 3, vencidas: 1, taxa: 333 }, { grupo: "Saneamento", participadas: 0, vencidas: 0, taxa: null }],

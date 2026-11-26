@@ -118,7 +118,8 @@ export default function LicitacoesResultados() {
       <LeituraDoRadarLinha leitura={dados.leitura} />
       {dados.resultados && dados.lido_em
         ? <>
-            <p className="lic-lido">Quadro da leitura de <span className="num">{quandoLeu(dados.lido_em)}</span></p>
+            {/* so' quando o quadro veio de uma leitura anterior a' ultima: a rodada que nao manda quadro deixa o ultimo */}
+            {dados.lido_em !== dados.leitura.lido_em && <p className="lic-lido">Quadro da leitura de <span className="num">{quandoLeu(dados.lido_em)}</span></p>}
             <Quadro q={dados.resultados} />
           </>
         : <div className="cartao lic-bloco"><div className="vazio vazio--curto"><p>O radar ainda não mandou resultados.</p></div></div>}
