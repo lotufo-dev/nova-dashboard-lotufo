@@ -82,7 +82,9 @@ export default function PassoPagamento({ grupo, junta, usuario, protocolos, aqui
   const recebidaEm = grupo.map(x => x.recebida_em).filter((d): d is string => !!d).sort().at(-1) ?? null;
   // #914: a espera conta do PRIMEIRO protocolo da nota, como em todas as telas; a reapresentada diz a revisao embaixo
   const enviada = grupo.flatMap(x => x.protocolos.map(p => p.data)).sort().at(0) ?? null;
-  const revisao = grupo.map(x => x.revisao).find(r => !!r) ?? null;
+  // so' a revisao que parte do mesmo dia da espera: no par protocolado em dias diferentes, a de uma metade so' nao
+  // fala da outra (segunda revisao da #914)
+  const revisao = grupo.map(x => x.revisao).find(r => !!r && r.primeiro_protocolo_em === enviada) ?? null;
   // #743: na obra sem o passo "Envio da nota" nao ha' protocolo; a espera conta da emissao da nota (a mais recente)
   const emitida = !enviada && grupo.some(x => x.recebe_sem_protocolo)
     ? grupo.map(x => x.nota_emitida_em).filter((d): d is string => !!d).sort().at(-1) ?? null : null;

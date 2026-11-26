@@ -48,6 +48,15 @@ describe("Passo Pagamento (#514)", () => {
     expect(screen.getByText("último envio em 14/11/2026")).toBeTruthy();
   });
 
+  it("par em dias diferentes: a revisão de uma metade só não aparece com a espera da outra (#914)", () => {
+    const p = (id: number, data: string) => ({ id, data, numero_oficio: null, numero_processo: null, origem: "manual", protocolo_id: null });
+    montar({ grupo: [com({ protocolos: [p(9, "2026-11-02")] }),
+      com({ id: 6, tipo: "reajuste", protocolos: [p(10, "2026-11-10"), p(11, "2026-11-14")],
+            revisao: { primeiro_protocolo_em: "2026-11-10", reapresentacoes: 1, ultimo_envio_em: "2026-11-14" } })], junta: true });
+    expect(screen.getByText("nota enviada em 02/11/2026")).toBeTruthy();
+    expect(screen.queryByText(/reapresentada/)).toBeNull();
+  });
+
   it("em consórcio: exibe o resumo do servidor (a receber, recebido de, barra) ao lado do total cheio e dos dias aguardando", () => {
     montar();
     expect(screen.getByText("A receber · cota da Lotufo")).toBeTruthy();
